@@ -4,7 +4,7 @@ Usage:
 - Configure environment variables:
   API_KEYS_JSON='[{"key":"abc123","scopes":["nlp.query","factors.search","feedback.write"]}]'
   JWT_SECRET='supersecret'
-  JWT_AUDIENCE='threat-sifter'
+    JWT_AUDIENCE='janusec'
   JWT_ISSUER='your-company'
 
 For JWT, payload must include 'scopes' claim (list of scope strings) or a role that maps to scopes.

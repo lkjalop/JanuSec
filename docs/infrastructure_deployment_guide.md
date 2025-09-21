@@ -1,4 +1,4 @@
-# 🏗️ Infrastructure & Deployment Guide - CyberStash Integration
+# 🏗️ Infrastructure & Deployment Guide (JanuSec)
 
 ## Complete Infrastructure Requirements & Setup
 
@@ -62,22 +62,22 @@ sudo systemctl start docker
 sudo usermod -aG docker $USER
 
 # 3. Create application directories
-sudo mkdir -p /opt/threat-sifter/{config,logs,data,vault}
-sudo chown -R $USER:$USER /opt/threat-sifter
-chmod 755 /opt/threat-sifter
-chmod 700 /opt/threat-sifter/vault
+sudo mkdir -p /opt/janusec/{config,logs,data,vault}
+sudo chown -R $USER:$USER /opt/janusec
+chmod 755 /opt/janusec
+chmod 700 /opt/janusec/vault
 
 # 4. Set up log rotation
-sudo tee /etc/logrotate.d/threat-sifter << EOF
-/opt/threat-sifter/logs/*.log {
+sudo tee /etc/logrotate.d/janusec << EOF
+/opt/janusec/logs/*.log {
     daily
     rotate 30
     compress
     delaycompress
     missingok
-    create 0644 threat-sifter threat-sifter
+  create 0644 janusec janusec
     postrotate
-        docker kill -s USR1 threat-sifter-app 2>/dev/null || true
+  docker kill -s USR1 janusec-app 2>/dev/null || true
     endscript
 }
 EOF
@@ -91,9 +91,9 @@ version: '3.8'
 services:
   postgres:
     image: postgres:15-alpine
-    container_name: threat-sifter-postgres
+  container_name: janusec-postgres
     environment:
-      POSTGRES_DB: threat_sifter
+  POSTGRES_DB: janusec
       POSTGRES_USER: threat_user
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
@@ -104,14 +104,14 @@ services:
       - "5432:5432"
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U threat_user -d threat_sifter"]
+  test: ["CMD-SHELL", "pg_isready -U threat_user -d janusec"]
       interval: 10s
       timeout: 5s
       retries: 3
 
   redis:
     image: redis:7-alpine
-    container_name: threat-sifter-redis
+  container_name: janusec-redis
     command: redis-server --requirepass ${REDIS_PASSWORD} --maxmemory 4gb --maxmemory-policy allkeys-lru
     volumes:
       - redis_data:/data
@@ -187,11 +187,11 @@ GRANT SELECT, INSERT ON performance_metrics TO threat_app;
 
 ```bash
 # 1. Clone and build application
-git clone <your-repo-url> /opt/threat-sifter/app
-cd /opt/threat-sifter/app
+git clone <your-repo-url> /opt/janusec/app
+cd /opt/janusec/app
 
 # 2. Build Docker image
-docker build -t threat-sifter:latest .
+docker build -t janusec:latest .
 
 # 3. Create production configuration
 cp config/production.yaml.example config/production.yaml
@@ -236,8 +236,8 @@ CMD ["python", "-m", "src.main"]
 version: '3.8'
 services:
   app:
-    image: threat-sifter:latest
-    container_name: threat-sifter-app
+  image: janusec:latest
+  container_name: janusec-app
     depends_on:
       postgres:
         condition: service_healthy
@@ -245,7 +245,7 @@ services:
         condition: service_healthy
     environment:
       - ENVIRONMENT=production
-      - POSTGRES_URL=postgresql://threat_user:${POSTGRES_PASSWORD}@postgres:5432/threat_sifter
+  - POSTGRES_URL=postgresql://threat_user:${POSTGRES_PASSWORD}@postgres:5432/janusec
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
       - ECLIPSE_XDR_API_KEY=${ECLIPSE_XDR_API_KEY}
       - LOG_LEVEL=INFO
@@ -267,7 +267,7 @@ services:
 
   nginx:
     image: nginx:alpine
-    container_name: threat-sifter-nginx
+  container_name: janusec-nginx
     depends_on:
       - app
     volumes:
@@ -280,7 +280,7 @@ services:
 
   prometheus:
     image: prom/prometheus:latest
-    container_name: threat-sifter-prometheus
+  container_name: janusec-prometheus
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
@@ -311,9 +311,9 @@ sudo snap install --classic certbot
 sudo certbot --nginx -d your-domain.com
 
 # 3. Secure file permissions
-sudo chmod 600 /opt/threat-sifter/config/production.yaml
-sudo chmod 700 /opt/threat-sifter/vault
-sudo chown -R root:root /opt/threat-sifter/config
+sudo chmod 600 /opt/janusec/config/production.yaml
+sudo chmod 700 /opt/janusec/vault
+sudo chown -R root:root /opt/janusec/config
 
 # 4. Configure log monitoring
 sudo systemctl enable rsyslog

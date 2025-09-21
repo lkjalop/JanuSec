@@ -1,11 +1,11 @@
 # 🤖 **AI Architecture & Graceful Degradation Strategy**
-## **Threat Sifter Platform - Multi-Tier AI Implementation**
+## **JanuSec Platform - Multi-Tier AI Implementation**
 
 ---
 
 ## 📊 **AI Platform Classification**
 
-The **Threat Sifter Platform** is an **AI-Enhanced Cybersecurity Platform** with the following characteristics:
+The **JanuSec Platform** (formerly "Threat Sifter") is an **Adaptive Threat Decision Platform** with the following characteristics:
 
 ### **🧠 Hybrid AI Architecture**
 ```

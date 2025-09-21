@@ -1,22 +1,23 @@
-# Pragmatic Security Threat Sifting Platform
+# JanuSec Adaptive Threat Decision Platform
 
-A cost-effective, modular security threat sifting platform that intelligently categorizes network and endpoint events to dramatically reduce false positives while maintaining comprehensive threat coverage.
+JanuSec (formerly "Threat Sifter") is a pragmatic, modular threat decision engine that ingests security telemetry, applies progressive multi-stage analysis, and produces high-confidence outcomes with full custody, observability, adaptive feedback weighting, and graceful degradation.
 
-## 🚀 Key Features
+## 🚀 Core Value
 
-- **Progressive Enhancement Architecture**: Tiered analysis approach (baseline → regex → deep analysis)
-- **Adaptive Tuning**: Automatic drift detection and threshold optimization using lightweight ML
-- **High Performance**: <1ms baseline processing, <100ms end-to-end (p95)
-- **Modular Design**: 400-500 LOC per module for maintainability  
-- **Pragmatic ML**: Uses sklearn models instead of heavy GPU infrastructure
-- **Eclipse XDR Integration**: Native integration with Eclipse.XDR platform
-- **Chain of Custody**: Cryptographic audit trails for forensic integrity
+- Progressive pipeline: Baseline → Regex → Adaptive blend → (Optional Deep / External)
+- Deterministic + adaptive fusion: bounded factor weighting for interpretability
+- Natural language + semantic retrieval: NLP → DSL query builder + factor similarity
+- Feedback loop → learned factor weights (bounded ±0.25 influence)
+- Drift insight via Jensen–Shannon divergence across rolling factor frequency windows
+- Chain-of-custody hashing for every processing stage
+- Graceful degradation: any tier can fail without collapsing end-to-end function
+- Operational observability: Prometheus metrics, SSE live decisions, factor stats & weights
 
 ---
 
-## 🤖 **AI Models & Technologies**
+## 🤖 AI & Analysis Layers
 
-### **Core AI Stack**
+### Core AI Stack
 
 | **Component** | **Technology** | **Purpose** | **Availability** |
 |---------------|----------------|-------------|------------------|
@@ -27,7 +28,7 @@ A cost-effective, modular security threat sifting platform that intelligently ca
 | **Pattern Learning** | Statistical Algorithms | Adaptive pattern optimization | 99.9% (Local) |
 | **NLP Analysis** | Transformer Models | Log/text analysis | 90% (External) |
 
-### **Graceful Degradation Strategy**
+### Graceful Degradation Strategy
 
 ```python
 # AI Tier Fallback Logic
@@ -51,14 +52,14 @@ async def analyze_threat(event_data):
     return await analyze_with_rules(event_data)  # 100% uptime
 ```
 
-### **Caching & Performance Optimization**
+### Caching & Performance Techniques
 
 - **Multi-Layer Caching**: In-memory (Redis) + Local cache + Model cache
 - **Circuit Breakers**: Auto-failover when external AI services fail
 - **Result Caching**: 5-minute TTL, 10K result cache, LRU eviction
 - **Model Health Monitoring**: Real-time health checks and automatic recovery
 
-### **Open-Source Model Integration (Optional)**
+### Optional Open-Source Model Integration
 
 The platform supports an optional "Specialized" AI tier using open-source transformer and security-focused language models.
 
@@ -95,7 +96,7 @@ Graceful degradation: if dependencies or models unavailable, manager downgrades 
 
 ---
 
-## ⚡ **Performance Targets**
+## ⚡ Performance Targets
 
 | Metric | Target | Current Status |
 |--------|--------|----------------|
@@ -105,7 +106,43 @@ Graceful degradation: if dependencies or models unavailable, manager downgrades 
 | False Positive Reduction | ≥70% | ✅ Designed |
 | System Availability | ≥99.5% | ✅ Designed |
 
-## 🏗️ Architecture Overview
+## 🏗️ High-Level Architecture
+
+```
+       +----------------------+           +----------------------+
+  Telemetry --->  |  Ingestion API /    |  enqueue  |   In-Memory Event    |
+ (XDR, agents,    |  Normalization      |  ----->   |      Queue           |
+  logs, enrich)   +----------+-----------           +-----------+----------+
+         |                                   |
+         v                                   v (worker consumes)
+       +-------------+                    +---------------------+
+       | Orchestrator|------------------->| Progressive Pipeline |
+       |  (registry  |                    |  1. Baseline        |
+       |  & lifecycle)|                   |  2. Regex           |
+       +------+------+                    |  3. Adaptive Blend  |
+         |                           |  4. (Optional Deep) |
+       +-----------+----------+                +----------+----------+
+       | Custody Chain /      |                           |
+       | Audit Hashing        |<--------------------------+
+       +-----------+----------+                           |
+         |                                      |
+         v                                      v
+          +------------------+                   +-------------------+
+          | Decision Storage |<------------------| Feedback / Weights|
+          +---------+--------+                   +-------------------+
+          |                                       |
+          v                                       v
+         +--------------------+             +--------------------------+
+         | Observability      |<------------| Drift Analyzer (JS Div.) |
+         | (Prometheus + SSE) |             +--------------------------+
+         +----------+---------+
+          |
+          v
+       +---------------+
+       | Analyst & API |
+       | (NLP, Similar)|
+       +---------------+
+```
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -135,24 +172,24 @@ Graceful degradation: if dependencies or models unavailable, manager downgrades 
                           └─────────────────────────────────┘
 ```
 
-## 🧩 Core Components
+## 🧩 Core Components (Representative)
 
-### Baseline Module (baseline.py)
+### Baseline Module (`baseline.py`)
 - **Purpose**: Deterministic pattern matching using bloom filters and hash tables
 - **Performance**: <1ms p95 processing time
 - **Features**: Known bad IPs/domains/hashes, benign pattern learning
 
-### Regex Engine (regex_engine.py)  
+### Regex Engine (`regex_engine.py`)
 - **Purpose**: Loose regex pattern matching with complexity analysis
 - **Performance**: <10ms p95 with timeout protection
 - **Features**: 10+ security patterns, performance optimization, false positive tracking
 
-### Adaptive Tuner (adaptive_tuner.py)
+### Adaptive Tuner (`adaptive_tuner.py`)
 - **Purpose**: Drift detection and automatic threshold optimization
 - **ML Models**: Isolation Forest, MiniBatch K-Means, statistical drift detection
 - **Features**: Jensen-Shannon divergence monitoring, confidence calibration
 
-### Module Registry (module_registry.py)
+### Module Registry (`module_registry.py`)
 - **Purpose**: Lazy loading, health checks, circuit breaker pattern
 - **Features**: Core modules (always loaded), analysis modules (lazy), circuit breakers
 
@@ -168,7 +205,7 @@ Graceful degradation: if dependencies or models unavailable, manager downgrades 
 1. **Clone and install dependencies**:
 ```bash
 git clone <repository>
-cd Threat_thy_sniffer
+cd JanuSec
 pip install -r requirements.txt
 ```
 
@@ -179,7 +216,7 @@ pip install -r requirements.txt
 # Configure storage backends
 ```
 
-3. **Run the platform**:
+3. **Run the platform** (or run only API via module):
 ```bash
 python run_platform.py
 ```
@@ -221,7 +258,7 @@ integrations:
 4. **PyBloom Filters**: Memory-efficient indicator storage
 5. **MMH3 Hashing**: Fast, collision-resistant hashing
 
-## 📈 Adaptive Tuning Features
+## 📈 Adaptive & Feedback Features
 
 - **Drift Detection**: Monitors confidence distributions, pattern performance, error rates
 - **Threshold Optimization**: Automatically suggests optimal confidence thresholds  
@@ -248,8 +285,8 @@ integrations:
 
 | Variable | Purpose | Example |
 |----------|---------|---------|
-| `APP_DB_DSN` | Full Postgres DSN override | `postgresql://user:pass@db:5432/threatsifter` |
-| `DB_HOST` / `DB_PORT` / `DB_USER` / `DB_PASSWORD` / `DB_NAME` | Component DB settings (fallback if no DSN) | `db` / `5432` / `postgres` / `postgres` / `threatsifter` |
+| `APP_DB_DSN` | Full Postgres DSN override | `postgresql://user:pass@db:5432/janusec` |
+| `DB_HOST` / `DB_PORT` / `DB_USER` / `DB_PASSWORD` / `DB_NAME` | Component DB settings (fallback if no DSN) | `db` / `5432` / `postgres` / `postgres` / `janusec` |
 | `EVENT_QUEUE_MAX` | Max ingestion queue depth | `5000` |
 | `ECLIPSE_XDR_SHARED_SECRET` | Webhook auth for `/api/v1/events/eclipse-xdr` | `supersecret` |
 | `SLACK_WEBHOOK_URL` | Slack incoming webhook (alt to config file) | `https://hooks.slack.com/services/...` |
@@ -257,7 +294,7 @@ integrations:
 
 #### Database Migration
 ```powershell
-$env:APP_DB_DSN = 'postgresql://user:pass@localhost:5432/threatsifter'
+$env:APP_DB_DSN = 'postgresql://user:pass@localhost:5432/janusec'
 python scripts/run_migrations.py
 ```
 
@@ -283,10 +320,10 @@ slack:
 Prometheus scrapes `/metrics`; Grafana dashboards aggregate:
 ```yaml
 scrape_configs:
-  - job_name: 'threat-sifter'
+  - job_name: 'janusec'
     metrics_path: /metrics
     static_configs:
-      - targets: ['threat-sifter:8080']
+  - targets: ['janusec:8080']
 ```
 Recommended Panels:
 - Pipeline Stage Latency (`pipeline_stage_latency_ms`)
@@ -316,7 +353,7 @@ Planned Enhancements (Phase 2):
 - Fallback utilization heatmap
 - Redaction summary & PII pattern breakdown
 
-### 🔍 NLP Query Endpoint (Experimental)
+### 🔍 NLP Query Endpoint (Hardened Preview)
 Endpoint: `POST /api/v1/query/nlp`
 Payload:
 ```json
@@ -334,7 +371,7 @@ Notes:
 - Rule-based parser; future semantic factor search (embedding) not yet active.
 - Safe internal usage; production hardening will parameterize SQL.
 
-### 🧠 Semantic Factor Search (Planned)
+### 🧠 Semantic Factor & NLP Features
 - **Similarity Search**: `GET /api/v1/query/factors?similar=privilege%20escalation&limit=5`
   Returns factors with cosine similarity score to the provided phrase.
 - **NLP Query (Hardened)**: `POST /api/v1/query/nlp` now supports `page` and `size` plus optional `x-api-key` header when `API_QUERY_KEY` env set.
@@ -429,7 +466,7 @@ $env:API_KEYS_JSON='[{"key":"devkey123","scopes":["nlp.query","factors.search","
 JWT (optional) environment variables:
 ```powershell
 $env:JWT_SECRET='supersecret'
-$env:JWT_AUDIENCE='threat-sifter'
+$env:JWT_AUDIENCE='janusec'
 $env:JWT_ISSUER='your-company'
 ```
 Scopes:
@@ -473,7 +510,7 @@ Planned progression: Replace vanilla modules with React + Vite build (componenti
 - **Integration Tests**: End-to-end workflow validation
 - **Chaos Testing**: Failure resilience validation
 
-## 🎯 Direct CyberStash Integration
+## 🎯 Direct CyberStash Alignment
 
 This platform directly addresses CyberStash's requirements:
 
@@ -485,7 +522,7 @@ This platform directly addresses CyberStash's requirements:
 ✅ **40% Time Reduction**: Fast-path processing eliminates manual triage for obvious cases  
 ✅ **99% Reliability**: Circuit breakers and graceful degradation ensure uptime  
 
-## 🔄 Development Roadmap
+## 🔄 Development Roadmap (Condensed)
 
 ### Phase 1: Core Foundation ✅
 - [x] Main orchestrator with circuit breakers
@@ -525,4 +562,39 @@ This project is proprietary to CyberStash security operations.
 
 ---
 
-**Built with pragmatic engineering principles - solving real security problems with appropriate tools, not over-engineered complexity.**
+---
+
+### 🔗 Public API Surface (Current)
+
+| Purpose | Method & Path | Notes |
+|---------|---------------|-------|
+| Health | `GET /health` | Liveness summary |
+| Readiness | `GET /ready` | Module health fan-out |
+| Metrics | `GET /metrics` | Prometheus exposition |
+| Ingest Event | `POST /api/v1/events` | JSON event (id required) |
+| Eclipse XDR Ingest | `POST /api/v1/events/eclipse-xdr` | Optional shared secret |
+| Decision (single) | `GET /api/v1/decisions/{event_id}` | Recent cached decision |
+| Recent Decisions | `GET /api/v1/decisions/recent` | List recent decisions |
+| Recent Alerts | `GET /api/v1/alerts/recent` | Alerts (best-effort) |
+| Custody Chain | `GET /api/v1/chain/{event_id}` | Hash-linked audit chain |
+| Factor Similarity | `GET /api/v1/query/factors?similar=...` | Scope: `factors.search` |
+| NLP Query | `POST /api/v1/query/nlp` | Scope: `nlp.query`; paginated |
+| Factor Stats | `GET /api/v1/stats/factors/top` | Windowed frequency |
+| Factor Weights | `GET /api/v1/weights/factors` | Learned weights snapshot |
+| Embedding Metrics | `GET /api/v1/metrics/embedding` | Avg norm & JS divergence |
+| Feedback Vote | `POST /api/v1/feedback/factor` | Scope: `feedback.write` |
+| SSE Decision Stream | `GET /stream/decisions` | Server-sent events (array) |
+| Risk Register | `GET /risk_register` | Markdown risk register |
+| Console Preview | `GET /console` | Minimal embedded console |
+
+### 🔐 Scopes Overview
+Required scopes: `nlp.query`, `factors.search`, `feedback.write` (or `*`). JWT audience now `janusec`.
+
+### ♻️ Rebrand Notice
+Repository rebranded to **JanuSec** on 2025-09-21. Legacy identifiers still accepted where practical:
+- Legacy DB default: `threatsifter` (supply via env to continue using)
+- Legacy JWT audience: `threat-sifter` (update tokens; new default `janusec`)
+- Legacy log paths under `/var/log/threat-sifter/*` continue until ops migration; new defaults use `/var/log/janusec/*`.
+See `BRANDING_CHANGE.md` for migration guidance & compatibility notes.
+
+**Built with pragmatic engineering principles – reduce noise, preserve signal, stay adaptive.**

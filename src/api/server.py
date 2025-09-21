@@ -57,7 +57,7 @@ class DecisionRecord(BaseModel):
     timestamp: float
 
 # Globals (could be injected via dependency override in tests)
-app = FastAPI(title="Threat Sifter API", version="0.1.0-pre")
+app = FastAPI(title="JanuSec API", version="0.1.0-pre")
 
 EVENT_QUEUE: EventQueue = EventQueue(max_size=int(os.getenv('EVENT_QUEUE_MAX', '1000')))
 ORCHESTRATOR: Optional[SecurityOrchestrator] = None
@@ -231,35 +231,35 @@ async def get_decision(event_id: str):
 
 @app.get('/api/v1/decisions/recent')
 async def recent_decisions(limit: int = 50):
-        # Prefer in-memory for very recent; always include DB fallback for history
-        try:
-                db_rows = await decisions_repo.list_recent(limit)
-        except Exception:
-                db_rows = []
-        return {'decisions': db_rows[:limit]}
+    # Prefer in-memory for very recent; always include DB fallback for history
+    try:
+        db_rows = await decisions_repo.list_recent(limit)
+    except Exception:
+        db_rows = []
+    return {'decisions': db_rows[:limit]}
 
 @app.get('/api/v1/alerts/recent')
 async def recent_alerts(limit: int = 50):
-        try:
-                rows = await alerts_repo.list_recent(limit)
-        except Exception:
-                rows = []
-        return {'alerts': rows[:limit]}
+    try:
+        rows = await alerts_repo.list_recent(limit)
+    except Exception:
+        rows = []
+    return {'alerts': rows[:limit]}
 
 @app.get('/api/v1/chain/{event_id}')
 async def chain(event_id: str):
-        try:
-                chain = await audit_repo.get_chain(event_id)
-        except Exception:
-                chain = []
-        return {'event_id': event_id, 'chain': chain}
+    try:
+        chain = await audit_repo.get_chain(event_id)
+    except Exception:
+        chain = []
+    return {'event_id': event_id, 'chain': chain}
 
 @app.get('/console')
 async def console_landing():
-        html = """<html><head><title>Threat Sifter Console</title>
+    html = """<html><head><title>JanuSec Analyst Console</title>
         <style>body{font-family:Arial;margin:20px;} .card{border:1px solid #ccc;padding:12px;margin-bottom:12px;border-radius:6px;} pre{background:#f7f7f7;padding:8px;} .row{display:flex;gap:12px;flex-wrap:wrap;} .small{font-size:12px;color:#555}</style>
         </head><body>
-        <h1>Threat Sifter Analyst Console (Preview)</h1>
+    <h1>JanuSec Analyst Console (Preview)</h1>
         <div class='small'>See <a href='/risk_register' target='_blank'>Risk Register</a></div>
         <div class='card'>
             <h3>Recent Decisions</h3>
@@ -305,37 +305,37 @@ async def console_landing():
         setInterval(loadDecisions, 10000); setInterval(loadAlerts, 15000);
         </script>
         </body></html>"""
-        return HTMLResponse(html)
+    return HTMLResponse(html)
 
 @app.post('/api/v1/query/nlp')
 async def nlp_query(body: Dict[str, Any], request: Request, auth: AuthContext = Depends(require_scopes('nlp.query'))):
-        """Accepts JSON: {"query": "show high confidence malicious events last 2h"} returns DSL + SQL."""
-        q = body.get('query', '')
-        parsed = parse_nl(q)
-        page = int(body.get('page', 1) or 1)
-        size = int(body.get('size', 50) or 50)
-        size = min(max(size, 1), 200)
-        # Optional API key (simple gate). Key expected in env API_QUERY_KEY
-        api_key_req = os.getenv('API_QUERY_KEY')
-        provided = request.headers.get('x-api-key')
-        if api_key_req and api_key_req != provided:
-            return JSONResponse(status_code=401, content={'error': 'unauthorized'})
-        # Attach auth context for middleware logging
-        try:
-            request.state.auth_ctx = auth
-        except Exception:
-            pass
-        sql, params = parsed.build(page=page, size=size)
-        rows = []
-        try:
-            from db.database import get_pool
-            pool = await get_pool()
-            async with pool.acquire() as conn:
-                rows_raw = await conn.fetch(sql, *params)
-                rows = [dict(r) for r in rows_raw]
-        except Exception:
-            pass
-        return { 'dsl': parsed.dsl, 'page': page, 'size': size, 'results': rows }
+    """Accepts JSON: {"query": "show high confidence malicious events last 2h"} returns DSL + SQL."""
+    q = body.get('query', '')
+    parsed = parse_nl(q)
+    page = int(body.get('page', 1) or 1)
+    size = int(body.get('size', 50) or 50)
+    size = min(max(size, 1), 200)
+    # Optional API key (simple gate). Key expected in env API_QUERY_KEY
+    api_key_req = os.getenv('API_QUERY_KEY')
+    provided = request.headers.get('x-api-key')
+    if api_key_req and api_key_req != provided:
+        return JSONResponse(status_code=401, content={'error': 'unauthorized'})
+    # Attach auth context for middleware logging
+    try:
+        request.state.auth_ctx = auth
+    except Exception:
+        pass
+    sql, params = parsed.build(page=page, size=size)
+    rows = []
+    try:
+        from db.database import get_pool
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            rows_raw = await conn.fetch(sql, *params)
+            rows = [dict(r) for r in rows_raw]
+    except Exception:
+        pass
+    return { 'dsl': parsed.dsl, 'page': page, 'size': size, 'results': rows }
 
 def _cosine(a, b):
         if not a or not b: return 0.0

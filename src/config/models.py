@@ -9,7 +9,7 @@ class DBConfig(BaseModel):
     port: int = 5432
     user: str = "postgres"
     password: str = "postgres"
-    database: str = "threatsifter"
+    database: str = "janusec"  # renamed default (legacy: threatsifter)
     min_size: int = 1
     max_size: int = 10
 

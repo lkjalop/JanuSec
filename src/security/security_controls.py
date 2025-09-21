@@ -55,11 +55,12 @@ class SecureConfigManager:
     """
     
     def __init__(self, vault_path: str = None):
-        self.vault_path = vault_path or os.getenv('VAULT_PATH', '/etc/threat-sifter/vault')
+        # Updated brand path; retain legacy env override compatibility
+        self.vault_path = vault_path or os.getenv('VAULT_PATH', '/etc/janusec/vault')
         self.encryption_key = self._get_or_create_encryption_key()
         self.cipher = Fernet(self.encryption_key)
         self.logger = logging.getLogger(__name__)
-        
+
         # Environment-based configuration
         self.environment = os.getenv('ENVIRONMENT', 'development')
         self.debug_mode = self.environment == 'development'
@@ -173,9 +174,8 @@ class PIIRedactionEngine:
             'windows_username': re.compile(r'\\[a-zA-Z0-9._-]+'),
             'file_paths': re.compile(r'[C-Z]:\\[^<>:"|?*\n\r]+'),
         }
-        
-    self.logger = logging.getLogger(__name__)
-    self.metrics = metrics  # expected to provide async record_redaction(count)
+        self.logger = logging.getLogger(__name__)
+        self.metrics = metrics  # expected to provide async record_redaction(count)
     
     async def redact_for_external_ai(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Redact PII from data before sending to external AI services"""
@@ -382,9 +382,9 @@ class ComprehensiveAuditLogger:
     """
     
     def __init__(self, audit_file_path: str = None):
-        self.audit_file_path = audit_file_path or '/var/log/threat-sifter/audit.log'
+        self.audit_file_path = audit_file_path or '/var/log/janusec/audit.log'
         os.makedirs(os.path.dirname(self.audit_file_path), exist_ok=True)
-        
+
         # Set up structured logging
         self.audit_logger = logging.getLogger('audit')
         handler = logging.FileHandler(self.audit_file_path)
@@ -394,9 +394,9 @@ class ComprehensiveAuditLogger:
         handler.setFormatter(formatter)
         self.audit_logger.addHandler(handler)
         self.audit_logger.setLevel(logging.INFO)
-        
+
         # Separate file for high-sensitivity events
-        self.sensitive_audit_path = '/var/log/threat-sifter/sensitive-audit.log'
+        self.sensitive_audit_path = '/var/log/janusec/sensitive-audit.log'
         self.sensitive_logger = logging.getLogger('sensitive_audit')
         sensitive_handler = logging.FileHandler(self.sensitive_audit_path)
         sensitive_handler.setFormatter(formatter)
@@ -419,7 +419,7 @@ class ComprehensiveAuditLogger:
                 'processing_time_ms': result.get('processing_time_ms')
             },
             source_ip=source_ip or 'localhost',
-            user_agent='threat_sifter_platform',
+            user_agent='janusec_platform',
             success=True,
             risk_level='low'
         )
@@ -449,7 +449,7 @@ class ComprehensiveAuditLogger:
                 'response_hash': hashlib.sha256(response.encode()).hexdigest()[:16]
             },
             source_ip='localhost',
-            user_agent='threat_sifter_platform',
+            user_agent='janusec_platform',
             success=True,
             risk_level='medium'
         )
@@ -473,7 +473,7 @@ class ComprehensiveAuditLogger:
                 'approval_id': approval_id
             },
             source_ip='localhost',
-            user_agent='threat_sifter_platform',
+            user_agent='janusec_platform',
             success=all(action.get('success', False) for action in actions),
             risk_level='high'
         )
@@ -496,7 +496,7 @@ class ComprehensiveAuditLogger:
                 'change_size': abs(len(str(new_value)) - len(str(old_value)))
             },
             source_ip=source_ip,
-            user_agent='threat_sifter_platform',
+            user_agent='janusec_platform',
             success=True,
             risk_level='medium'
         )
