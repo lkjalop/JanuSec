@@ -1,0 +1,63 @@
+{
+  "title": "Threat Sifter Overview",
+  "uid": "threat-sifter-overview",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "panels": [
+    {
+      "type": "row",
+      "title": "Pipeline Performance",
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Decision Latency (ms)",
+      "targets": [{"expr": "histogram_quantile(0.95, sum(rate(decision_latency_ms_bucket[5m])) by (le))"}],
+      "gridPos": {"x":0, "y":4, "w":8, "h":8}
+    },
+    {
+      "type": "timeseries",
+      "title": "Pipeline Stage Latency (ms)",
+      "targets": [{"expr": "sum(rate(pipeline_stage_latency_ms_sum[5m])) by (stage) / sum(rate(pipeline_stage_latency_ms_count[5m])) by (stage)"}],
+      "gridPos": {"x":8, "y":4, "w":8, "h":8}
+    },
+    {
+      "type": "timeseries",
+      "title": "Queue Depth",
+      "targets": [{"expr": "event_queue_depth"}],
+      "gridPos": {"x":16, "y":4, "w":8, "h":8}
+    },
+    {
+      "type": "stat",
+      "title": "Fallback Usage (rate)",
+      "targets": [{"expr": "rate(fallback_tier_usage_total[5m])"}],
+      "gridPos": {"x":0, "y":12, "w":4, "h":6}
+    },
+    {
+      "type": "stat",
+      "title": "Slack Failures (rate)",
+      "targets": [{"expr": "rate(slack_failures_total[5m])"}],
+      "gridPos": {"x":4, "y":12, "w":4, "h":6}
+    },
+    {
+      "type": "stat",
+      "title": "Alerts Generated (rate)",
+      "targets": [{"expr": "rate(alerts_generated_total[5m])"}],
+      "gridPos": {"x":8, "y":12, "w":4, "h":6}
+    },
+    {
+      "type": "stat",
+      "title": "Redactions (rate)",
+      "targets": [{"expr": "rate(redactions_total[5m])"}],
+      "gridPos": {"x":12, "y":12, "w":4, "h":6}
+    },
+    {
+      "type": "timeseries",
+      "title": "Confidence Progression (per stage)",
+      "targets": [{"expr": "avg(rate(pipeline_confidence_progress_sum[5m])) by (stage) / avg(rate(pipeline_confidence_progress_count[5m])) by (stage)"}],
+      "gridPos": {"x":16, "y":12, "w":8, "h":8}
+    }
+  ]
+}

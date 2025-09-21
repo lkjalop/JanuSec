@@ -1,0 +1,95 @@
+# Main configuration for Pragmatic Security Threat Sifting Platform
+# Author: Security Engineering Team
+# Version: 1.0.0
+
+# System settings
+system:
+  name: "Pragmatic Security Platform"
+  version: "1.0.0"
+  environment: "development"
+  log_level: "INFO"
+  
+# Performance settings
+performance:
+  max_concurrent_events: 100
+  baseline_timeout_ms: 1
+  regex_timeout_ms: 10
+  global_timeout_ms: 1000
+  max_memory_mb: 1024
+
+# Confidence thresholds (adaptive)
+confidence:
+  benign_threshold: 0.10
+  malicious_threshold: 0.90
+  suspicious_range: [0.10, 0.90]
+
+# Module settings
+modules:
+  baseline:
+    enabled: true
+    bloom_filter_capacity: 1000000
+    bloom_filter_error_rate: 0.001
+  
+  regex_engine:
+    enabled: true
+    max_patterns_per_event: 25
+    pattern_complexity_limit: 5
+    timeout_ms: 10
+  
+  adaptive_tuner:
+    enabled: true
+    tuning_cycle_hours: 1
+    drift_threshold: 0.15
+    auto_apply_threshold: 0.8
+
+# Storage configuration
+storage:
+  hot_tier:
+    type: "redis"
+    host: "localhost"
+    port: 6379
+    retention_hours: 1
+    
+  warm_tier:
+    type: "postgresql"
+    host: "localhost"
+    port: 5432
+    database: "threat_sifter"
+    retention_days: 30
+    
+  cold_tier:
+    type: "s3"
+    bucket: "threat-sifter-archive"
+    retention_days: 365
+
+# External integrations
+integrations:
+  eclipse_xdr:
+    enabled: true
+    api_url: "https://eclipse.xdr/api/v2"
+    timeout_seconds: 10
+    retry_attempts: 3
+  
+  eclipse_soar:
+    enabled: true
+    api_url: "https://eclipse.soar/api/v1"
+    timeout_seconds: 15
+
+# Monitoring
+monitoring:
+  prometheus:
+    enabled: true
+    port: 9090
+    
+  grafana:
+    enabled: true
+    port: 3000
+    
+  health_check_interval_seconds: 30
+
+# Security settings
+security:
+  enable_pii_redaction: true
+  audit_all_decisions: true
+  encrypt_at_rest: true
+  api_key_rotation_days: 90

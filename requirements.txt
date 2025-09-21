@@ -1,0 +1,64 @@
+# Pragmatic Security Threat Sifting Platform - Core Dependencies
+# Author: Security Engineering Team
+# Version: 1.0.0
+
+# Core async framework
+asyncio-mqtt>=0.13.0
+aiohttp>=3.9.0
+aiofiles>=23.2.0
+
+# Data processing and ML
+numpy>=1.24.0
+pandas>=2.0.0
+scikit-learn>=1.3.0
+scipy>=1.11.0
+
+# Efficient data structures
+pybloom-live>=4.0.0
+mmh3>=4.0.0
+
+# Configuration and serialization
+PyYAML>=6.0
+pydantic>=2.0.0
+
+# Database connections
+asyncpg>=0.29.0
+aioredis>=2.0.0
+
+# Monitoring and metrics
+prometheus-client>=0.19.0
+structlog>=23.2.0
+
+# Security and cryptography
+cryptography>=41.0.0
+hashlib-compat>=1.0.0
+
+# HTTP client with retries
+httpx>=0.25.0
+tenacity>=8.2.0
+
+# Testing and development
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+pytest-mock>=3.12.0
+
+# Optional: Enhanced regex performance
+regex>=2023.10.0
+
+# Optional: Better JSON handling
+orjson>=3.9.0
+
+# Optional: Memory profiling
+memory-profiler>=0.61.0
+
+# Optional: Advanced caching
+cachetools>=5.3.0
+
+# Jupyter notebook support (for analysis)
+notebook>=7.0.0
+matplotlib>=3.7.0
+seaborn>=0.12.0
+
+# Optional: Open-source transformer models (install if enabling oss models)
+transformers>=4.42.0  # optional
+torch>=2.2.0          # optional; consider CPU-only build if no GPU
