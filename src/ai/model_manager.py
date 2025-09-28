@@ -1,155 +1,27 @@
-# 🤖 **AI Architecture & Graceful Degradation Strategy**
-## **JanuSec Platform - Multi-Tier AI Implementation**
-
----
-
-## 📊 **AI Platform Classification**
-
-The **JanuSec Platform** (formerly "Threat Sifter") is an **Adaptive Threat Decision Platform** with the following characteristics:
-
-### **🧠 Hybrid AI Architecture**
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    AI PROCESSING TIERS                      │
-│                                                             │
-│  Tier 1: Rule-Based Intelligence (Always Available)        │
-│  ├── Deterministic pattern matching                        │
-│  ├── Signature-based detection                             │
-│  ├── Threat intelligence feeds                             │
-│  └── Regex pattern engine                                  │
-│                                                             │
-│  Tier 2: Lightweight ML (Local Models)                     │
-│  ├── Scikit-learn Isolation Forest                         │
-│  ├── MiniBatch K-Means clustering                          │
-│  ├── Statistical anomaly detection                         │
-│  └── Drift detection algorithms                            │
-│                                                             │
-│  Tier 3: Advanced AI Services (External APIs)              │
-│  ├── Large Language Models (OpenAI/Azure)                  │
-│  ├── Advanced threat attribution                           │
-│  ├── Natural language analysis                             │
-│  └── Complex behavioral modeling                           │
-│                                                             │
-│  Tier 4: Specialized Models (Optional Enhancement)         │
-│  ├── Custom trained models                                 │
-│  ├── Industry-specific patterns                            │
-│  ├── Organization-specific tuning                          │
-│  └── Advanced ML pipelines                                 │
-└─────────────────────────────────────────────────────────────┘
-```
-
----
-
-## 🔧 **AI Models & Technologies Used**
-
-### **Core ML Models** (Always Available - Local)
-```python
-# Lightweight ML Stack
-CORE_ML_MODELS = {
-    'anomaly_detection': {
-        'model': 'IsolationForest',
-        'library': 'scikit-learn',
-        'memory_usage': '<50MB',
-        'inference_time': '<10ms',
-        'accuracy': '85%+',
-        'use_case': 'Detect behavioral anomalies in security events'
-    },
-    
-    'clustering': {
-        'model': 'MiniBatchKMeans',
-        'library': 'scikit-learn', 
-        'memory_usage': '<30MB',
-        'inference_time': '<5ms',
-        'accuracy': '78%+',
-        'use_case': 'Group similar threats and attack patterns'
-    },
-    
-    'drift_detection': {
-        'model': 'Jensen-Shannon Divergence',
-        'library': 'scipy',
-        'memory_usage': '<10MB',
-        'inference_time': '<2ms',
-        'accuracy': '92%+',
-        'use_case': 'Detect changes in threat landscape'
-    },
-    
-    'statistical_analysis': {
-        'model': 'Custom Statistical Algorithms',
-        'library': 'numpy/scipy',
-        'memory_usage': '<20MB', 
-        'inference_time': '<3ms',
-        'accuracy': '80%+',
-        'use_case': 'Time series analysis and threshold optimization'
-    }
-}
-```
-
-### **Advanced AI Services** (External APIs)
-```python
-# External AI Enhancement Stack
-EXTERNAL_AI_SERVICES = {
-    'primary_llm': {
-        'service': 'Azure OpenAI GPT-4',
-        'fallback': 'OpenAI GPT-3.5-turbo',
-        'use_case': 'Complex threat analysis and attribution',
-        'timeout': '30s',
-        'retry_attempts': 3
-    },
-    
-    'threat_intelligence': {
-        'service': 'Microsoft Defender Threat Intelligence',
-        'fallback': 'VirusTotal API',
-        'use_case': 'IOC enrichment and threat actor attribution',
-        'timeout': '15s',
-        'retry_attempts': 2
-    },
-    
-    'behavioral_analysis': {
-        'service': 'Custom Neural Network (Optional)',
-        'fallback': 'Statistical baseline comparison',
-        'use_case': 'Advanced user behavior analysis',
-        'timeout': '45s',
-        'retry_attempts': 2
-    }
-}
-```
-
----
-
-## 🛡️ **Graceful Degradation Architecture**
-
-### **Multi-Tier Fallback Strategy**
-
-<function_calls>
-<invoke name="create_file">
-<parameter name="content">"""
-AI Model Manager with Graceful Degradation
-Handles model availability, fallback strategies, and performance optimization
-
-Author: AI Engineering Team
-Version: 1.0.0
-"""
+﻿"""AI model manager with graceful degradation and provider selection."""
+from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
-import json
-from typing import Dict, Any, List, Optional, Union
-from dataclasses import dataclass, asdict
-from enum import Enum
+from dataclasses import dataclass
 from datetime import datetime, timedelta
+from enum import Enum
+from typing import Any, Dict, List, Optional, Tuple
+
 import aiohttp
 import numpy as np
-from sklearn.ensemble import IsolationForest
 from sklearn.cluster import MiniBatchKMeans
+from sklearn.ensemble import IsolationForest
 from sklearn.preprocessing import StandardScaler
 
-# Optional open-source model manager
+from core.metrics.cost_ledger import get_cost_ledger
+
 try:
     from .oss_models import OpenSourceModelManager
-except Exception:  # fallback if file missing or deps not installed
+except ImportError:  # pragma: no cover
     OpenSourceModelManager = None
-
 
 class ModelTier(Enum):
     RULE_BASED = "rule_based"
@@ -195,7 +67,28 @@ class AIModelManager:
     def __init__(self, config: Dict[str, Any]):
         self.config = config
         self.logger = logging.getLogger(__name__)
-        
+
+        oss_cfg: Dict[str, Any] = {}
+        if isinstance(config, dict):
+            oss_cfg = dict(config.get('oss_models', {}))
+        else:
+            try:
+                oss_cfg = dict((config.get('oss_models') or {}))
+            except Exception:
+                oss_cfg = {}
+        self.oss_config = oss_cfg
+        backend = (oss_cfg.get('backend') or 'transformers').lower()
+        device = (oss_cfg.get('device') or 'cpu').lower()
+        self.oss_config['backend'] = backend
+        self.oss_config['device'] = device
+        self.oss_config.setdefault('ollama_root', 'D:/Ollama')
+        self.oss_config.setdefault('ollama_host', 'http://127.0.0.1:11434')
+        self.oss_config.setdefault('ollama_cmd', None)
+        if 'enable' not in self.oss_config:
+            self.oss_config['enable'] = bool(self.oss_config.get('enable') or self.oss_config.get('enable_oss_models'))
+        self.oss_backend = self.oss_config['backend']
+        self.oss_device = self.oss_config['device']
+
         # Model health tracking
         self.model_health = {}
         self.performance_history = []
@@ -218,9 +111,9 @@ class AIModelManager:
 
         # Optional OSS model manager (specialized tier)
         self.oss_manager = None
-        if OpenSourceModelManager and config.get('oss_models', {}).get('enable', False):
+        if OpenSourceModelManager and self.oss_config.get('enable'):
             try:
-                self.oss_manager = OpenSourceModelManager(config.get('oss_models'))
+                self.oss_manager = OpenSourceModelManager(self.oss_config)
                 self._update_model_health(ModelTier.SPECIALIZED, 'oss_models', ModelStatus.AVAILABLE, 0, 100.0)
             except Exception as e:
                 self._update_model_health(ModelTier.SPECIALIZED, 'oss_models', ModelStatus.UNAVAILABLE, 0, 0.0, str(e))
@@ -285,17 +178,20 @@ class AIModelManager:
         if cached_result:
             self.logger.debug("Returning cached analysis result")
             return cached_result
-        
+
         # Try analysis with preferred tier first, then fallback
         analysis_result = None
         fallback_applied = False
+        ledger = get_cost_ledger()
         
         # Tier 4: Specialized Models (if available)
         if preferred_tier == ModelTier.SPECIALIZED and self._is_model_available(ModelTier.SPECIALIZED):
             try:
+                t0 = time.perf_counter()
                 analysis_result = await self._analyze_with_specialized_models(event_data)
                 if analysis_result:
                     analysis_result.model_tier_used = ModelTier.SPECIALIZED
+                    ledger.record('specialized','oss_models', t0, tokens=0, cached=False, success=True)
             except Exception as e:
                 self.logger.warning(f"Specialized models failed, falling back: {e}")
                 fallback_applied = True
@@ -303,11 +199,14 @@ class AIModelManager:
         # Tier 3: External AI Services (if available and not already tried)
         if not analysis_result and self._is_model_available(ModelTier.EXTERNAL_AI):
             try:
+                t0 = time.perf_counter()
                 analysis_result = await self._analyze_with_external_ai(event_data)
                 if analysis_result:
                     analysis_result.model_tier_used = ModelTier.EXTERNAL_AI
                     if preferred_tier != ModelTier.EXTERNAL_AI:
                         fallback_applied = True
+                    # tokens unknown placeholder 0; future: parse usage
+                    ledger.record('external_ai','primary', t0, tokens=0, cached=False, success=True)
             except Exception as e:
                 self.logger.warning(f"External AI failed, falling back: {e}")
                 fallback_applied = True
@@ -315,21 +214,25 @@ class AIModelManager:
         # Tier 2: Lightweight ML (if available and not already tried)
         if not analysis_result and self._is_model_available(ModelTier.LIGHTWEIGHT_ML):
             try:
+                t0 = time.perf_counter()
                 analysis_result = await self._analyze_with_lightweight_ml(event_data)
                 if analysis_result:
                     analysis_result.model_tier_used = ModelTier.LIGHTWEIGHT_ML
                     if preferred_tier not in [ModelTier.LIGHTWEIGHT_ML]:
                         fallback_applied = True
+                    ledger.record('lightweight_ml','iforest_kmeans', t0, tokens=0, cached=False, success=True)
             except Exception as e:
                 self.logger.warning(f"Lightweight ML failed, falling back: {e}")
                 fallback_applied = True
         
         # Tier 1: Rule-based Intelligence (always available fallback)
         if not analysis_result:
+            t0 = time.perf_counter()
             analysis_result = await self._analyze_with_rule_based(event_data)
             analysis_result.model_tier_used = ModelTier.RULE_BASED
             if preferred_tier != ModelTier.RULE_BASED:
                 fallback_applied = True
+            ledger.record('rule_based','rules', t0, tokens=0, cached=False, success=True)
         
         # Update processing time and fallback status
         processing_time_ms = (time.time() - start_time) * 1000

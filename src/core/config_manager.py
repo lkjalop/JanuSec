@@ -12,6 +12,46 @@ import os
 from typing import Dict, Any
 from pathlib import Path
 from config.models import AppConfig
+from pydantic import BaseModel
+
+
+class ConfigNamespace(dict):
+    """Dict wrapper exposing attribute-style access for config sections."""
+
+    def __init__(self, data=None):
+        super().__init__()
+        if data:
+            for key, value in data.items():
+                super().__setitem__(key, self._wrap(value))
+
+    def __getattr__(self, item):
+        try:
+            return self[item]
+        except KeyError as exc:
+            raise AttributeError(item) from exc
+
+    def __setattr__(self, key, value):
+        super().__setitem__(key, self._wrap(value))
+
+    @classmethod
+    def _wrap(cls, value):
+        if isinstance(value, dict) and not isinstance(value, ConfigNamespace):
+            return ConfigNamespace(value)
+        return value
+
+    def get(self, key, default=None):
+        value = super().get(key, default)
+        if isinstance(value, dict) and not isinstance(value, ConfigNamespace):
+            value = ConfigNamespace(value)
+            super().__setitem__(key, value)
+        return value
+
+    def setdefault(self, key, default=None):
+        value = super().setdefault(key, default)
+        if isinstance(value, dict) and not isinstance(value, ConfigNamespace):
+            value = ConfigNamespace(value)
+            super().__setitem__(key, value)
+        return value
 
 
 class ConfigManager:
@@ -24,6 +64,19 @@ class ConfigManager:
         self.logger = logging.getLogger(__name__)
         self.app_config: AppConfig | None = None
         
+    def _wrap_value(self, value):
+        """Wrap config sections to provide mapping + attribute access"""
+        if isinstance(value, ConfigNamespace):
+            return value
+        if isinstance(value, dict):
+            return ConfigNamespace(value)
+        try:
+            if isinstance(value, BaseModel):
+                return ConfigNamespace(value.model_dump())
+        except Exception:
+            pass
+        return value
+
     def load_config(self) -> Dict[str, Any]:
         """Load configuration from file and build AppConfig"""
         raw: Dict[str, Any] = {}
@@ -68,9 +121,99 @@ class ConfigManager:
     def get_current_digests(self) -> Dict[str, str]:
         """Get current configuration digests"""
         return self.config_digests.copy()
-    
+
     def get(self, key: str, default: Any = None) -> Any:
         """Get configuration value (raw dict or typed attribute)."""
         if self.app_config and hasattr(self.app_config, key):
-            return getattr(self.app_config, key)
-        return self.config_data.get(key, default)
+            value = getattr(self.app_config, key)
+            return self._wrap_value(value)
+        raw_value = self.config_data.get(key, default)
+        wrapped = self._wrap_value(raw_value)
+        if isinstance(wrapped, ConfigNamespace) and key in self.config_data:
+            self.config_data[key] = wrapped
+        return wrapped
+
+    def setdefault(self, key: str, default: Any):
+        """Dictionary-like helper to aid tests that expect mapping behaviour."""
+        if key not in self.config_data:
+            if isinstance(default, dict):
+                value = dict(default)
+            else:
+                value = default
+            self.config_data[key] = value
+        else:
+            value = self.config_data[key]
+        if isinstance(value, dict) and self.app_config and hasattr(self.app_config, key):
+            target = getattr(self.app_config, key)
+            if isinstance(target, dict):
+                for sub_key, sub_value in value.items():
+                    target.setdefault(sub_key, sub_value)
+        wrapped = self._wrap_value(value)
+        if isinstance(wrapped, ConfigNamespace):
+            self.config_data[key] = wrapped
+        return wrapped
+
+    # --- Mutation Helpers (for tests / dynamic toggles) ---
+    def set_pipeline_flag(self, section: str, flag: str, value: Any):
+        """Set a nested flag under pipeline.<section>.<flag> in raw config and apply to typed config if present.
+
+        Creates intermediate dictionaries as needed so tests can safely toggle features without directly
+        manipulating internal objects. After mutation, merges into app_config to keep runtime view consistent.
+        """
+        try:
+            pipeline = self.config_data.setdefault('pipeline', {})
+            sub = pipeline.setdefault(section, {})
+            sub[flag] = value
+            if self.app_config:
+                # Basic merge: if app_config has 'pipeline', update nested dict if attribute exists
+                if hasattr(self.app_config, 'pipeline'):
+                    # assume pipeline attribute is a dict-like or object; attempt attribute then mapping
+                    target = getattr(self.app_config, 'pipeline')
+                    if isinstance(target, dict):
+                        target.setdefault(section, {})[flag] = value
+        except Exception:
+            self.logger.warning("Failed to set pipeline flag", exc_info=True)
+    
+    def set_flag(self, dotted_path: str, value: Any) -> bool:
+        """Generic nested assignment into config_data using dotted path (e.g. 'pipeline.correlation.enabled').
+
+        Returns True if mutation succeeded. Always updates raw config; best-effort update of typed app_config.
+        """
+        try:
+            parts = [p for p in dotted_path.split('.') if p]
+            if not parts:
+                return False
+            cursor = self.config_data
+            for p in parts[:-1]:
+                nxt = cursor.get(p)
+                if not isinstance(nxt, dict):
+                    nxt = {}
+                    cursor[p] = nxt
+                cursor = nxt
+            cursor[parts[-1]] = value
+            # propagate to typed config if possible
+            if self.app_config:
+                # Walk attributes if chain exists
+                obj = self.app_config
+                chain_ok = True
+                for p in parts[:-1]:
+                    if hasattr(obj, p):
+                        obj = getattr(obj, p)
+                    elif isinstance(obj, dict) and p in obj:
+                        obj = obj[p]
+                    else:
+                        chain_ok = False
+                        break
+                if chain_ok:
+                    last = parts[-1]
+                    if isinstance(obj, dict):
+                        obj[last] = value
+                    else:
+                        if hasattr(obj, last):
+                            setattr(obj, last, value)
+            return True
+        except Exception:
+            self.logger.warning("Failed to set flag via dotted path", exc_info=True)
+            return False
+
+

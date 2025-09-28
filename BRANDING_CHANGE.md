@@ -55,3 +55,31 @@ The platform has been rebranded from **Threat Sifter** to **JanuSec** to better 
 
 ---
 Questions or issues: file an internal ticket tagged `branding`.
+
+## Phase 2 Rebrand Adjustments (2025-09-22)
+
+| Area | Change | Notes |
+|------|--------|-------|
+| Frontend Static | Titles & package name updated (`janusec-react`) | Legacy wording removed from all index pages |
+| SOAR Engine | `threat_sifter_platform` → `janusec_platform` | Affects request attribution & Slack footer |
+| Docker / Compose | Default DB & DSN changed to `janusec` | Legacy name usable via env override |
+| Prometheus Job | `threat-sifter` → `janusec` | Legacy job may still appear until config redeployed |
+| Config Defaults | `database: janusec`, `bucket: janusec-archive` | Inline comments note legacy names |
+| Migration Script | DSN example updated to `janusec` | Backward compatible if env still points to old DB |
+| Executive Collateral | Archived originals; stubs now branded | Originals stored under `archive/` folder |
+| Risk Register | Heading updated with history note | Content otherwise unchanged |
+| Release Notes & Checklist | Headings rebranded | Snapshot date preserved |
+
+### Deprecation Timeline (Suggested)
+- T+0 (now): Dual support (legacy DB name & JWT audience accepted)
+- T+30 days: Remove legacy job name from Prometheus configs
+- T+60 days: Drop legacy DB default fallback (require explicit override if still in use)
+
+### Verification Steps Post-Deployment
+1. `curl /health` returns status & uptime
+2. `curl /metrics | grep janusec` (ensure custom labels unaffected)
+3. Test legacy DB override: set `DB_NAME=threatsifter` and confirm migrations skipped (already applied)
+4. Hit `/api/v1/query/nlp` with new JWT `aud=janusec`; ensure old `aud=threat-sifter` still accepted if required
+5. Confirm Slack playbook notifications footer now displays `JanuSec Platform`
+
+---

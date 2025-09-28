@@ -12,12 +12,16 @@ from dataclasses import dataclass
 
 @dataclass
 class RoutingDecision:
-    """Routing decision with justification"""
+    """Routing decision with justification and pipeline metadata"""
     path: str  # 'benign', 'malicious', 'deep'
     confidence: float
     factors: list
     reason: str
-    
+    processing_time: float | None = None
+    stage_timings: list | None = None
+    config_digests: Dict[str, str] | None = None
+    custody_hash: str | None = None
+    verdict: str | None = None
 
 class DecisionEngine:
     """Centralized routing and confidence calculation logic"""
@@ -37,29 +41,42 @@ class DecisionEngine:
     async def make_decision(self, pipeline_result) -> RoutingDecision:
         """Make routing decision based on confidence"""
         confidence = pipeline_result.confidence
-        
+        stage_timings = getattr(pipeline_result, 'stage_timings', [])
+        processing_time = getattr(pipeline_result, 'processing_time', 0.0)
+        metadata = {
+            'processing_time': processing_time,
+            'stage_timings': stage_timings,
+            'config_digests': self.config.get_current_digests(),
+        }
+
         if confidence >= self.malicious_threshold:
             return RoutingDecision(
                 path='malicious',
                 confidence=confidence,
                 factors=pipeline_result.factors,
-                reason=f"High confidence malicious ({confidence:.2f})"
+                reason=f"High confidence malicious ({confidence:.2f})",
+                verdict='malicious',
+                **metadata,
             )
         elif confidence <= self.benign_threshold:
             return RoutingDecision(
                 path='benign',
                 confidence=confidence,
                 factors=pipeline_result.factors,
-                reason=f"Low confidence benign ({confidence:.2f})"
+                reason=f"Low confidence benign ({confidence:.2f})",
+                verdict='benign',
+                **metadata,
             )
         else:
             return RoutingDecision(
                 path='deep',
                 confidence=confidence,
                 factors=pipeline_result.factors,
-                reason=f"Uncertain - needs deep analysis ({confidence:.2f})"
+                reason=f"Uncertain - needs deep analysis ({confidence:.2f})",
+                verdict='suspicious',
+                **metadata,
             )
-    
+
     async def finalize_decision(self, analysis_result):
         """Finalize decision after deep analysis"""
         return analysis_result

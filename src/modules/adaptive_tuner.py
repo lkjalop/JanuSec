@@ -18,11 +18,65 @@ from collections import deque, defaultdict
 from datetime import datetime, timedelta
 
 # Lightweight ML models
-from sklearn.ensemble import IsolationForest
-from sklearn.cluster import MiniBatchKMeans
-from sklearn.preprocessing import StandardScaler
-from scipy.stats import entropy
-from scipy.spatial.distance import jensenshannon
+try:  # Optional heavy deps
+    from sklearn.ensemble import IsolationForest  # type: ignore
+    from sklearn.cluster import MiniBatchKMeans  # type: ignore
+    from sklearn.preprocessing import StandardScaler  # type: ignore
+    _SKLEARN_AVAILABLE = True
+except ImportError:  # pragma: no cover
+    _SKLEARN_AVAILABLE = False
+    def _inc_stub_counter():  # lazy import to avoid circular
+        try:
+            from api.server import FALLBACK_COUNTS  # type: ignore
+            FALLBACK_COUNTS['ml_stub_predictions'] = FALLBACK_COUNTS.get('ml_stub_predictions',0) + 1
+        except Exception:
+            pass
+    class IsolationForest:  # minimal stub
+        def __init__(self, *a, **kw):
+            pass
+        def fit(self, X):
+            return self
+        def predict(self, X):  # Return all normal (1)
+            _inc_stub_counter()
+            return [1] * len(X)
+    class MiniBatchKMeans:
+        def __init__(self, *a, **kw):
+            self.cluster_centers_ = None
+        def partial_fit(self, X):
+            self.cluster_centers_ = None
+            return self
+    class StandardScaler:
+        def fit_transform(self, X):
+            return X
+        def transform(self, X):
+            return X
+try:
+    from scipy.stats import entropy  # type: ignore
+    from scipy.spatial.distance import jensenshannon  # type: ignore
+    _SCIPY_AVAILABLE = True
+except ImportError:  # pragma: no cover
+    _SCIPY_AVAILABLE = False
+    def entropy(pk, qk=None, base=None):  # simple fallback
+        import math
+        s = 0.0
+        total = float(sum(pk)) or 1.0
+        for v in pk:
+            p = v / total
+            if p > 0:
+                s -= p * math.log(p, base or math.e)
+        return s
+    def jensenshannon(p, q):
+        # crude symmetric KL approximation
+        import math
+        def _norm(a):
+            s = float(sum(a)) or 1.0
+            return [x / s for x in a]
+        p2, q2 = _norm(p), _norm(q)
+        m = [(x + y) / 2 for x, y in zip(p2, q2)]
+        def _kl(a, b):
+            eps = 1e-12
+            return sum(ai * math.log((ai + eps)/(bi + eps)) for ai, bi in zip(a, b) if ai > 0)
+        return math.sqrt((_kl(p2, m) + _kl(q2, m)) / 2.0)
 
 
 @dataclass

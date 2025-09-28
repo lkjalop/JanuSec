@@ -1,4 +1,6 @@
-# 🧠 **AI Architecture Deep Dive - Threat Sifter Platform**
+# 🧠 **AI Architecture Deep Dive - JanuSec Platform (Rebrand)**
+
+Legacy Threat Sifter version archived under `archive/AI_Architecture_Deep_Dive_original.md`.
 ## **Complete AI Model Specification & Graceful Degradation Strategy**
 
 ---

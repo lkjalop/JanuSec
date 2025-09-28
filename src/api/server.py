@@ -1,483 +1,525 @@
-"""FastAPI Ingestion & Control Service
+from __future__ import annotations
 
-Endpoints:
-- GET /health
-- GET /ready
-- GET /metrics
-- POST /api/v1/events
-- POST /api/v1/events/eclipse-xdr
-- GET /api/v1/decisions/{event_id}
-
-Integrates with SecurityOrchestrator via an EventQueue and a background worker.
-"""
-import asyncio
 import logging
 import os
 import time
-from typing import Dict, Any, Optional
-from fastapi import FastAPI, HTTPException, Depends, Request, Header
-from fastapi.responses import PlainTextResponse, JSONResponse, HTMLResponse
-from fastapi import Response
-from fastapi.responses import StreamingResponse
-from fastapi.staticfiles import StaticFiles
+from collections import deque
+import asyncio
+from dataclasses import dataclass
+from typing import Any, Dict, List, MutableMapping, Optional, Tuple, Union
+
+from fastapi import HTTPException
+from starlette.requests import Request
 from pydantic import BaseModel, Field
 
-try:
-    from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
-except Exception:
-    generate_latest = lambda : b''  # type: ignore
-    CONTENT_TYPE_LATEST = 'text/plain'
+from .app import app
+from .dependencies import get_platform_state
+from .alerts_endpoints import (
+    router as _alerts_router,
+    ALERT_RING as _ALERT_RING,
+    ALERT_RING_LOCK as _ALERT_RING_LOCK,
+    append_alert,
+)
+from .artifact_endpoints import router as _artifact_router
+from .custody import router as _custody_router
+from .finops_endpoints import router as _finops_router, finops_overview as _finops_overview_impl
+from .runtime_state import (
+    ServerRuntime,
+    get_file_batch_analysis,
+    get_file_hash_factors,
+    get_server_runtime_state,
+)
+from .schemas import DecisionRecord
+from repositories import decisions_repo
+from core.quality.factor_quality import get_quality_manager
+from src.live import rules_engine, dns_agg, asn_stats
 
-from core.event_queue import EventQueue
-from core.event_pipeline import PipelineResult
-from main import SecurityOrchestrator  # assuming relative import works
+LOGGER = logging.getLogger(__name__)
 
-logger = logging.getLogger(__name__)
+__all__ = [
+    'app',
+    'DECISION_CACHE',
+    '_ALERT_RING',
+    '_ALERT_RING_LOCK',
+    '_guardrail_single_pass',
+    'DecisionRecord',
+    'FILE_HASH_FACTORS',
+    'EVENT_QUEUE',
 
-# Pydantic models
-class IngestEvent(BaseModel):
-    id: str = Field(..., description="Unique event id")
-    source: Optional[str] = "api"
-    event_type: Optional[str] = None
-    severity: Optional[str] = "low"
-    timestamp: Optional[str] = None
-    details: Dict[str, Any] = Field(default_factory=dict)
+]
 
-class IngestResponse(BaseModel):
-    accepted: bool
-    event_id: str
-    queued_depth: int
 
-class DecisionRecord(BaseModel):
-    event_id: str
-    verdict: str
-    confidence: float
-    processing_time_ms: float
-    factors: list[str]
-    timestamp: float
 
-# Globals (could be injected via dependency override in tests)
-app = FastAPI(title="JanuSec API", version="0.1.0-pre")
 
-EVENT_QUEUE: EventQueue = EventQueue(max_size=int(os.getenv('EVENT_QUEUE_MAX', '1000')))
-ORCHESTRATOR: Optional[SecurityOrchestrator] = None
-DECISION_CACHE: Dict[str, DecisionRecord] = {}
-CACHE_MAX = 5000
-ECLIPSE_SHARED_SECRET = os.getenv('ECLIPSE_XDR_SHARED_SECRET', '')
-WORKER_TASK: Optional[asyncio.Task] = None
-STOP_EVENT = asyncio.Event()
 
-# Utility functions
-async def orchestrator_provider() -> SecurityOrchestrator:
-    global ORCHESTRATOR
-    if ORCHESTRATOR is None:
-        ORCHESTRATOR = SecurityOrchestrator()
-        await ORCHESTRATOR.initialize()
-        # Inject registry references into pipeline if needed
-        ORCHESTRATOR.event_pipeline.config.module_registry = ORCHESTRATOR.module_registry
-    return ORCHESTRATOR
+class _EventQueueStub:
+    def stats(self) -> Dict[str, int]:
+        return {'depth': 0, 'max_size': 1}
 
-async def background_worker():
-    orchestrator = await orchestrator_provider()
-    while not STOP_EVENT.is_set():
-        event = await EVENT_QUEUE.dequeue(timeout=1.0)
-        if not event:
-            continue
-        try:
-            result = await orchestrator.process_event(event)
-            record = DecisionRecord(
-                event_id=result.event_id,
-                verdict=result.verdict,
-                confidence=result.confidence,
-                processing_time_ms=result.processing_time_ms,
-                factors=result.factors,
-                timestamp=time.time()
-            )
-            DECISION_CACHE[result.event_id] = record
-            if len(DECISION_CACHE) > CACHE_MAX:
-                # Drop oldest (simple heuristic)
-                for k in list(DECISION_CACHE.keys())[:1000]:
-                    DECISION_CACHE.pop(k, None)
-        except Exception as e:
-            logger.error(f"Worker processing error: {e}")
 
-@app.on_event("startup")
-async def startup_event():
-    global WORKER_TASK
-    logger.info("API startup: launching orchestrator & worker")
-    await orchestrator_provider()
-    WORKER_TASK = asyncio.create_task(background_worker())
+EVENT_QUEUE: Any = _EventQueueStub()
 
-@app.on_event("shutdown")
-async def shutdown_event():
-    STOP_EVENT.set()
-    if WORKER_TASK:
-        await WORKER_TASK
-    if ORCHESTRATOR:
-        await ORCHESTRATOR.shutdown()
+_state = get_platform_state()
+_RUNTIME = get_server_runtime_state(app)
+FILE_HASH_FACTORS = get_file_hash_factors(_RUNTIME)
+_FILE_BATCH_ANALYSIS = get_file_batch_analysis(_RUNTIME)
+DECISION_CACHE: MutableMapping[str, DecisionRecord] = getattr(_state, '_decisions', {})  # type: ignore[attr-defined]
 
-from repositories import decisions_repo, alerts_repo, audit_repo
-from repositories import factors_repo
-from repositories import feedback_repo
-from repositories import access_log_repo
-from repositories import factor_weights_repo
-import math
-from nlp_query import parse_nl
-from security.auth import require_scopes, AuthContext
+RECENT_DECISION_WINDOW = int(os.getenv('GUARDRAIL_DECISION_WINDOW', '100'))
+GUARDRAIL_HISTORY_SIZE = int(os.getenv('GUARDRAIL_HISTORY_SIZE', '50'))
+GUARDRAIL_MIN_SAMPLE = int(os.getenv('GUARDRAIL_MIN_SAMPLE', '50'))
+_recent_guardrail_select: List[int] = []
+_recent_guardrail_fallback: List[int] = []
 
-# Mount static console (will create folder later)
-try:
-    app.mount('/console_static', StaticFiles(directory='frontend'), name='console_static')
-    app.mount('/docs_static', StaticFiles(directory='docs'), name='docs_static')
-except Exception:
-    pass
+if not getattr(app.state, '_alerts_router_registered', False):
+    app.include_router(_alerts_router)
+    app.state._alerts_router_registered = True
 
-# Endpoints
-@app.middleware("http")
-async def access_logging_middleware(request: Request, call_next):
-    # Only log for API paths (basic filter)
-    path = request.url.path
-    method = request.method
-    subject = 'anonymous'
-    scopes: list[str] = []
-    # Attempt to extract auth context from request.state if set by dependencies
-    # We'll inject inside protected endpoints manually after response if needed
-    try:
-        response = await call_next(request)
-    except Exception as e:
-        from fastapi.responses import PlainTextResponse
-        response = PlainTextResponse("internal error", status_code=500)
-    try:
-        # Protected endpoints use require_scopes; we adapt by patching them to attach context
-        auth_ctx = getattr(request.state, 'auth_ctx', None)
-        if auth_ctx:
-            subject = getattr(auth_ctx, 'subject', subject)
-            scopes = getattr(auth_ctx, 'scopes', scopes)
-        if path.startswith('/api/') or path.startswith('/stream'):
-            # Sampling
-            import random
-            sample_rate = float(os.getenv('ACCESS_LOG_SAMPLE_RATE','1'))
-            if sample_rate >= 1 or random.random() < sample_rate:
-                ip = request.client.host if request.client else None
-                ua = request.headers.get('user-agent')
-                try:
-                    await access_log_repo.record(subject, method, path, response.status_code, scopes, ip, ua)
-                except Exception:
-                    pass
-    except Exception:
-        pass
-    return response
-@app.get('/health')
-async def health():
-    orch = await orchestrator_provider()
-    queue_stats = EVENT_QUEUE.stats()
+if not getattr(app.state, '_artifact_router_registered', False):
+    app.include_router(_artifact_router)
+    app.state._artifact_router_registered = True
+
+if not getattr(app.state, '_custody_router_registered', False):
+    app.include_router(_custody_router)
+    app.state._custody_router_registered = True
+
+if not getattr(app.state, '_finops_router_registered', False):
+    app.include_router(_finops_router)
+    app.state._finops_router_registered = True
+
+
+
+
+def _sanitize_event(raw: Dict[str, Any], rules: List[str], classification: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a sanitized snapshot for SSE/debug consumers (legacy compatibility)."""
+    process = raw.get('process') or {}
+    parent = raw.get('parent_process') or {}
     return {
-        'status': orch.health_status,
-        'uptime_seconds': time.time() - orch.start_time,
-        'events_processed': orch.events_processed,
-        'queue': queue_stats
+        'id': raw.get('id'),
+        'host': raw.get('host') or raw.get('details', {}).get('host'),
+        'proc_name': raw.get('proc_name') or process.get('name'),
+        'parent_proc': raw.get('parent_proc') or parent.get('name'),
+        'dest_ip': raw.get('dest_ip') or raw.get('dst_ip'),
+        'dest_port': raw.get('dest_port') or raw.get('dst_port'),
+        'asn': raw.get('asn'),
+        'dns_rcode': raw.get('dns_rcode'),
+        'rules': list(rules),
+        'verdict': classification.get('verdict'),
+        'score': classification.get('score'),
+        'timestamp': time.time(),
     }
 
-@app.get('/ready')
-async def ready():
-    orch = await orchestrator_provider()
-    healthy = orch.health_status == 'healthy'
-    return JSONResponse(
-        status_code=200 if healthy else 503,
-        content={
-            'ready': healthy,
-            'module_health': await orch.module_registry.health_check(),
-        }
+
+def _record_decision(event_id: str, verdict: str, confidence: float, factors: List[str]) -> None:
+    """Maintain in-memory decision cache for backward compatibility."""
+    decision = DecisionRecord(event_id=event_id, verdict=verdict, confidence=float(confidence), factors=list(factors))
+    try:
+        object.__setattr__(decision, 'processing_time_ms', 0.0)
+    except Exception:
+        try:
+            setattr(decision, 'processing_time_ms', 0.0)
+        except Exception:
+            pass
+    try:
+        DECISION_CACHE.pop(event_id, None)
+    except Exception:
+        try:
+            DECISION_CACHE.pop(event_id)
+        except Exception:
+            pass
+    DECISION_CACHE[event_id] = decision
+    cache_limit = getattr(_state, 'cache_size', 5000)
+    try:
+        while len(DECISION_CACHE) > cache_limit:
+            try:
+                DECISION_CACHE.popitem(last=False)
+            except Exception:
+                try:
+                    first_key = next(iter(DECISION_CACHE))
+                    DECISION_CACHE.pop(first_key)
+                except Exception:
+                    break
+    except Exception:
+        pass
+
+
+async def detections_governance_report(limit_trends: int = 50, min_sessions: int = 2, top_n: int = 15) -> Dict[str, Any]:
+    """Compatibility shim providing governance report structure for legacy imports."""
+    from core.hunt.sidecar_session import get_sidecar_manager
+
+    manager = get_sidecar_manager()
+    try:
+        trends = manager.coverage_trends(limit=limit_trends)
+    except Exception:
+        trends = []
+    try:
+        promotion = manager.promotion_candidates(min_sessions=min_sessions, top_n=top_n)
+    except Exception:
+        promotion = []
+
+    active_sessions = 0
+    try:
+        active_sessions = len(getattr(manager, '_sessions', {}))
+    except Exception:
+        active_sessions = 0
+
+    summary = {
+        'active_sessions': active_sessions,
+        'promotion_candidates': len(promotion),
+        'coverage_trend_points': len(trends),
+    }
+
+    overrides = {}
+    try:
+        overrides = getattr(manager, 'severity_weight_overrides', {}) or {}
+    except Exception:
+        overrides = {}
+
+    meta = {
+        'generated_at': time.time(),
+        'limit_trends': limit_trends,
+        'min_sessions': min_sessions,
+        'top_n': top_n,
+    }
+
+    return {
+        'summary': summary,
+        'trends': trends,
+        'promotion_candidates': promotion,
+        'effective_severity_weight_overrides': overrides,
+        'meta': meta,
+    }
+
+
+@app.get('/api/v1/factors/promotion/status')
+async def factor_promotion_status(request: Request, limit: int = 500) -> Dict[str, Any]:
+    tenant_id = request.headers.get('X-Tenant-ID') or request.headers.get('x-tenant-id')
+    if not tenant_id:
+        raise HTTPException(status_code=400, detail='tenant_required')
+    try:
+        decisions = await decisions_repo.list_recent(limit, tenant_id)
+    except Exception:
+        decisions = []
+    counts: Dict[str, int] = {}
+    for dec in decisions or []:
+        factors = dec.get('factors') if isinstance(dec, dict) else getattr(dec, 'factors', None)
+        if not factors:
+            continue
+        for factor in factors:
+            if isinstance(factor, str):
+                counts[factor] = counts.get(factor, 0) + 1
+    qm = get_quality_manager()
+    suppressed = getattr(qm, 'suppressed', set())
+    promotion_min_sessions = int(os.getenv('PROMOTION_MIN_SESSIONS', '3') or 3)
+    entries = []
+    for factor, count in sorted(counts.items(), key=lambda item: (-item[1], item[0])):
+        is_suppressed = factor in suppressed
+        if is_suppressed:
+            status = 'observe'
+        elif count >= promotion_min_sessions:
+            status = 'candidate'
+        else:
+            status = 'insufficient_data'
+        entries.append({
+            'factor': factor,
+            'observations': count,
+            'suppressed': is_suppressed,
+            'status': status,
+        })
+    note = 'No recent factor observations' if not entries else 'Sorted by observation count (desc)'
+    return {
+        'tenant_id': tenant_id,
+        'factors': entries,
+        'note': note,
+    }
+
+
+async def finops_overview(tenant_id: str | None = None, alpha: float = 0.3, k: float = 3.0) -> Dict[str, Any]:
+    """Compatibility wrapper delegating to finops endpoints while preserving legacy import path."""
+    scope = {
+        'type': 'http',
+        'asgi': {'version': '3.0', 'spec_version': '2.1'},
+        'method': 'GET',
+        'headers': [],
+        'path': '/api/v1/finops/overview',
+        'query_string': b'',
+        'client': ('internal', 0),
+        'server': ('internal', 0),
+        'scheme': 'http',
+        'app': app,
+        'state': {},
+    }
+    request = Request(scope)
+    return await _finops_overview_impl(request, tenant_id=tenant_id, alpha=alpha, k=k)
+
+
+class LogEvent(BaseModel):
+    """Normalized event representation for batch ingestion."""
+
+    id: Optional[str] = Field(default=None, min_length=1, max_length=128, description='Event identifier supplied by the caller')
+    host: Optional[str] = Field(default=None, max_length=255, description='Hostname or agent identifier associated with the event')
+    dns_rcode: Optional[Union[int, str]] = Field(default=None, description='DNS response code, numeric or textual')
+    process: Optional[Dict[str, Any]] = Field(default=None, description='Process-level metadata for the event')
+    parent_process: Optional[Dict[str, Any]] = Field(default=None, description='Parent process metadata if available')
+    details: Dict[str, Any] = Field(default_factory=dict, description='Additional structured context for the event')
+
+    class Config:
+        extra = 'allow'
+
+
+class LogBatchRequest(BaseModel):
+    """Request schema for the /api/v1/endpoints/log_batch endpoint."""
+
+    events: List[LogEvent] = Field(default_factory=list, min_length=1, description='Events to ingest and evaluate')
+    classify: bool = Field(default=False, description='Run scoring/classification pipeline for the events')
+    send_alerts: bool = Field(default=False, description='Emit alerts for qualifying events')
+    include_rules: bool = Field(default=False, description='Evaluate detection rules against the events')
+    tenant_id: Optional[str] = Field(default=None, max_length=64, description='Tenant context for the ingestion batch')
+
+
+
+@dataclass
+class LogBatchContext:
+    """Runtime options shared while processing a log batch."""
+
+    runtime: ServerRuntime
+    include_rules: bool
+    classify: bool
+    send_alerts: bool
+    tenant_id: Optional[str]
+    nx_enabled: bool
+    dedup_ttl: float
+
+
+async def _guardrail_single_pass(
+    orchestrator: Any,
+    alerts_repo: Any,
+    queue_util_threshold: float = 0.85,
+    drift_threshold: float = 0.4,
+    latency_thresh: float = 2500.0,
+    fallback_ratio_threshold: float = 0.25,
+    recent_fallback: Optional[List[int]] = None,
+    recent_select: Optional[List[int]] = None,
+) -> None:
+    """Evaluate guardrail conditions and emit alerts for degraded states."""
+    if alerts_repo is None:
+        return
+
+    fallback_buffer = recent_fallback if recent_fallback is not None else _recent_guardrail_fallback
+    select_buffer = recent_select if recent_select is not None else _recent_guardrail_select
+    alerts: List[Tuple[str, Dict[str, Any]]] = []
+
+    try:
+        stats = EVENT_QUEUE.stats() if EVENT_QUEUE else {}
+    except Exception as exc:
+        LOGGER.debug('Unable to collect event queue stats: %s', exc, exc_info=exc)
+        stats = {}
+    depth = stats.get('depth')
+    max_size = stats.get('max_size') or 0
+    if depth is not None and max_size:
+        util = depth / max_size if max_size else 0.0
+        if util >= queue_util_threshold:
+            alerts.append(('queue', {'utilization': round(util, 3), 'depth': depth, 'max_size': max_size}))
+
+    drift_value: Optional[float]
+    try:
+        gauges = getattr(getattr(orchestrator, 'metrics', None), 'gauges', {})
+        drift_value = gauges.get('factor_freq_js_divergence')
+    except Exception as exc:
+        LOGGER.debug('Guardrail metric lookup failed: %s', exc, exc_info=exc)
+        drift_value = None
+    if drift_value is not None and drift_value >= drift_threshold:
+        alerts.append(('drift', {'drift': drift_value}))
+
+    window = list(DECISION_CACHE.values())[-RECENT_DECISION_WINDOW:]
+    latencies = [float(getattr(rec, 'processing_time_ms', 0) or 0) for rec in window if getattr(rec, 'processing_time_ms', None) is not None]
+    if latencies:
+        latencies.sort()
+        idx = max(int(len(latencies) * 0.95) - 1, 0)
+        p95 = latencies[idx]
+        avg = sum(latencies) / len(latencies)
+        if p95 >= latency_thresh:
+            alerts.append(('latency', {'p95': p95, 'avg': avg, 'samples': len(latencies)}))
+
+    fallback_count = 0
+    for rec in window:
+        factors = getattr(rec, 'factors', []) or []
+        if any('hash_provider' in str(f) for f in factors):
+            fallback_count += 1
+    total = len(window)
+
+    buffer = deque(select_buffer, maxlen=GUARDRAIL_HISTORY_SIZE)
+    buffer.append(total)
+    select_buffer.clear()
+    select_buffer.extend(buffer)
+
+    buffer = deque(fallback_buffer, maxlen=GUARDRAIL_HISTORY_SIZE)
+    buffer.append(fallback_count)
+    fallback_buffer.clear()
+    fallback_buffer.extend(buffer)
+
+    if total >= GUARDRAIL_MIN_SAMPLE:
+        ratio = fallback_count / total if total else 0.0
+        if ratio >= fallback_ratio_threshold:
+            alerts.append(('embedding', {'fallback_ratio': round(ratio, 3), 'window': total}))
+
+    for category, details in alerts:
+        try:
+            message = f'{category}_guardrail_triggered'
+            await alerts_repo.insert_alert('system', category, 'warning', message, details, f'guardrail-{category}')
+        except Exception as exc:
+            LOGGER.warning('Failed to emit guardrail alert for %s: %s', category, exc, exc_info=exc)
+
+def _configure_nx_tracking(runtime: ServerRuntime) -> Tuple[bool, float]:
+    """Prepare NX tracking state for the current batch."""
+    threshold_raw = os.getenv('ZEEK_NXDOMAIN_RATE_THRESHOLD', '0.35')
+    try:
+        current_threshold = float(threshold_raw)
+    except ValueError:
+        current_threshold = runtime.nx_threshold_cache
+    nx_enabled = os.getenv('NX_RATE_TRACKER_ENABLED', '1').lower() not in {'0', 'false', 'no'}
+    runtime.nx_tracker_enabled = nx_enabled
+    if not nx_enabled:
+        runtime.reset_nx_tracker(current_threshold)
+    elif abs(current_threshold - runtime.nx_threshold_cache) > 1e-9:
+        runtime.reset_nx_tracker(current_threshold)
+    return nx_enabled, current_threshold
+
+
+async def _process_endpoint_event(event_model: LogEvent, ctx: LogBatchContext) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
+    """Normalize, classify, and optionally escalate a single endpoint event."""
+    event = event_model.model_dump()
+    event_id = event.get('id') or f"evt-{int(time.time()*1000)}"
+    event['id'] = event_id
+
+    if ctx.nx_enabled:
+        host = event.get('host')
+        if host:
+            tracker = ctx.runtime.nx_rate_tracker[host]
+            rcode = event.get('dns_rcode')
+            if rcode is not None:
+                is_nx = False
+                if isinstance(rcode, str) and 'NXDOMAIN' in rcode.upper():
+                    is_nx = True
+                elif isinstance(rcode, int) and rcode == 3:
+                    is_nx = True
+                tracker.append(is_nx)
+            event['zeek_dns_nxdomain'] = sum(tracker)
+            event['zeek_dns_total'] = len(tracker)
+
+    dns_agg.record(event.get('host'), event.get('dns_rcode'))
+    asn_stats.record(event.get('asn'))
+
+    hits = rules_engine.evaluate_event(event) if ctx.include_rules else []
+    rules = [hit.rule for hit in hits]
+    classification = rules_engine.score_and_classify(hits) if ctx.classify else {'verdict': 'OBSERVE', 'score': 0.0}
+
+    sanitized = _sanitize_event(event, rules, classification)
+    async with ctx.runtime.get_sanitized_lock():
+        ctx.runtime.sanitized_events.appendleft(sanitized)
+
+    processed_event = {
+        'id': event_id,
+        'rules': rules,
+        'verdict': sanitized['verdict'],
+        'score': sanitized['score'],
+    }
+
+    _record_decision(event_id, sanitized['verdict'] or 'OBSERVE', sanitized['score'] or 0.0, rules)
+
+    alert: Optional[Dict[str, Any]] = None
+    if ctx.send_alerts:
+        now = time.time()
+        dedup_key = event_id
+        dedup_hit = False
+        async with ctx.runtime.get_dedup_lock():
+            for key, ts in list(ctx.runtime.dedup_cache.items()):
+                if now - ts >= ctx.dedup_ttl:
+                    ctx.runtime.dedup_cache.pop(key, None)
+            if dedup_key in ctx.runtime.dedup_cache:
+                dedup_hit = True
+            else:
+                ctx.runtime.dedup_cache[dedup_key] = now
+        if not dedup_hit:
+            alert = {
+                'id': event_id,
+                'host': event.get('host'),
+                'verdict': sanitized['verdict'],
+                'score': sanitized['score'],
+                'rules': rules,
+                'ts': now,
+                'tenant_id': ctx.tenant_id or 'public',
+            }
+    return processed_event, alert
+
+
+@app.post('/api/v1/endpoints/log_batch', summary='Ingest endpoint telemetry events')
+async def log_batch(payload: LogBatchRequest) -> Dict[str, Any]:
+    """Process endpoint events, optionally emit alerts, and feed decision caches."""
+    runtime = _RUNTIME
+    nx_enabled, _ = _configure_nx_tracking(runtime)
+    dedup_ttl = float(os.getenv('ALERT_DEDUP_TTL_SECONDS', '30'))
+    ctx = LogBatchContext(
+        runtime=runtime,
+        include_rules=payload.include_rules,
+        classify=payload.classify,
+        send_alerts=payload.send_alerts,
+        tenant_id=payload.tenant_id,
+        nx_enabled=nx_enabled,
+        dedup_ttl=dedup_ttl,
     )
 
-@app.get('/metrics')
-async def metrics():
-    data = generate_latest()
-    return PlainTextResponse(content=data.decode('utf-8'), media_type=CONTENT_TYPE_LATEST)
+    accepted = 0
+    alerts_emitted = 0
+    processed_events: List[Dict[str, Any]] = []
+    errors: List[str] = []
 
-@app.post('/api/v1/events', response_model=IngestResponse)
-async def ingest_event(payload: IngestEvent):
-    accepted = await EVENT_QUEUE.enqueue(payload.model_dump())
-    stats = EVENT_QUEUE.stats()
-    return IngestResponse(accepted=accepted, event_id=payload.id, queued_depth=stats['depth'])
+    for event_model in payload.events:
+        processed, alert = await _process_endpoint_event(event_model, ctx)
+        processed_events.append(processed)
+        accepted += 1
+        if alert:
+            append_alert(alert)
+            alerts_emitted += 1
 
-@app.post('/api/v1/events/eclipse-xdr', response_model=IngestResponse)
-async def ingest_eclipse_event(request: Request, x_eclipse_secret: Optional[str] = Header(None)):
-    if ECLIPSE_SHARED_SECRET and x_eclipse_secret != ECLIPSE_SHARED_SECRET:
-        raise HTTPException(status_code=401, detail="Invalid shared secret")
-    body = await request.json()
-    # Normalize if needed
-    event_id = body.get('id') or body.get('event_id') or body.get('uuid')
-    if not event_id:
-        raise HTTPException(status_code=400, detail="Missing event id")
-    event = {
-        'id': event_id,
-        'source': 'eclipse_xdr',
-        'event_type': body.get('type') or body.get('event_type'),
-        'severity': body.get('severity', 'medium'),
-        'timestamp': body.get('timestamp'),
-        'details': body
+    return {
+        'accepted': accepted,
+        'errors': errors,
+        'alerts_emitted': alerts_emitted,
+        'buffer_size': len(runtime.sanitized_events),
+        'events': processed_events,
     }
-    accepted = await EVENT_QUEUE.enqueue(event)
-    stats = EVENT_QUEUE.stats()
-    return IngestResponse(accepted=accepted, event_id=event_id, queued_depth=stats['depth'])
 
-@app.get('/api/v1/decisions/{event_id}', response_model=DecisionRecord)
-async def get_decision(event_id: str):
-    rec = DECISION_CACHE.get(event_id)
-    if not rec:
-        raise HTTPException(status_code=404, detail="Decision not found")
-    return rec
-
-@app.get('/api/v1/decisions/recent')
-async def recent_decisions(limit: int = 50):
-    # Prefer in-memory for very recent; always include DB fallback for history
+@app.get('/api/v1/decisions/{event_id}/explain')
+def explain_decision(event_id: str) -> Dict[str, Any]:
+    decision = DECISION_CACHE.get(event_id)
+    if not decision:
+        raise HTTPException(status_code=404, detail='decision_not_found')
+    factors = list(getattr(decision, 'factors', []) or [])
     try:
-        db_rows = await decisions_repo.list_recent(limit)
-    except Exception:
-        db_rows = []
-    return {'decisions': db_rows[:limit]}
+        from src.core.mappings import mitre_stride
+        stride_tags = mitre_stride.map_factors(factors)
+    except Exception as exc:
+        LOGGER.debug('Failed to map MITRE stride factors: %s', exc, exc_info=exc)
+        stride_tags = []
+    factor_payload = [{'name': f, 'weight': None, 'weight_decayed': None} for f in factors]
+    return {
+        'event_id': event_id,
+        'verdict': getattr(decision, 'verdict', 'UNKNOWN'),
+        'confidence': getattr(decision, 'confidence', 0.0),
+        'factors': factor_payload,
+        'mitre_stride_tags': stride_tags,
+    }
 
-@app.get('/api/v1/alerts/recent')
-async def recent_alerts(limit: int = 50):
-    try:
-        rows = await alerts_repo.list_recent(limit)
-    except Exception:
-        rows = []
-    return {'alerts': rows[:limit]}
 
-@app.get('/api/v1/chain/{event_id}')
-async def chain(event_id: str):
-    try:
-        chain = await audit_repo.get_chain(event_id)
-    except Exception:
-        chain = []
-    return {'event_id': event_id, 'chain': chain}
+@app.get('/api/v1/events/sanitized', summary='Retrieve recently sanitized events')
+async def events_sanitized(limit: int = 50) -> Dict[str, Any]:
+    """Return the most recent sanitized events for debugging clients."""
+    runtime = _RUNTIME
+    limit = max(0, min(limit, len(runtime.sanitized_events)))
+    async with runtime.get_sanitized_lock():
+        items = list(runtime.sanitized_events)[:limit]
+    return {'events': items, 'count': len(items)}
 
-@app.get('/console')
-async def console_landing():
-    html = """<html><head><title>JanuSec Analyst Console</title>
-        <style>body{font-family:Arial;margin:20px;} .card{border:1px solid #ccc;padding:12px;margin-bottom:12px;border-radius:6px;} pre{background:#f7f7f7;padding:8px;} .row{display:flex;gap:12px;flex-wrap:wrap;} .small{font-size:12px;color:#555}</style>
-        </head><body>
-    <h1>JanuSec Analyst Console (Preview)</h1>
-        <div class='small'>See <a href='/risk_register' target='_blank'>Risk Register</a></div>
-        <div class='card'>
-            <h3>Recent Decisions</h3>
-            <div id='decisions'>Loading...</div>
-        </div>
-        <div class='card'>
-            <h3>Recent Alerts</h3>
-            <div id='alerts'>Loading...</div>
-        </div>
-        <div class='card'>
-            <h3>Custody Chain Lookup</h3>
-            <input id='chainId' placeholder='Event ID' /> <button onclick='loadChain()'>Load</button>
-            <pre id='chainBox'></pre>
-        </div>
-        <div class='card'>
-            <h3>Factor Similarity Search</h3>
-            <input id='factorQuery' placeholder='e.g. privilege escalation' size='40' /> <button onclick='searchFactor()'>Search</button>
-            <pre id='factorResults'>Enter a phrase and search.</pre>
-        </div>
-        <script>
-        async function loadDecisions(){
-            const r = await fetch('/api/v1/decisions/recent');
-            const j = await r.json();
-            document.getElementById('decisions').innerHTML = '<pre>'+JSON.stringify(j.decisions, null,2)+'</pre>';
-        }
-        async function loadAlerts(){
-            const r = await fetch('/api/v1/alerts/recent');
-            const j = await r.json();
-            document.getElementById('alerts').innerHTML = '<pre>'+JSON.stringify(j.alerts, null,2)+'</pre>';
-        }
-        async function loadChain(){
-            const id=document.getElementById('chainId').value; if(!id) return;
-            const r=await fetch('/api/v1/chain/'+id); const j=await r.json();
-            document.getElementById('chainBox').textContent = JSON.stringify(j.chain, null, 2);
-        }
-        async function searchFactor(){
-            const q = document.getElementById('factorQuery').value; if(!q) return;
-            const r = await fetch('/api/v1/query/factors?similar='+encodeURIComponent(q));
-            const j = await r.json();
-            document.getElementById('factorResults').textContent = JSON.stringify(j.results, null, 2);
-        }
-        loadDecisions(); loadAlerts();
-        setInterval(loadDecisions, 10000); setInterval(loadAlerts, 15000);
-        </script>
-        </body></html>"""
-    return HTMLResponse(html)
-
-@app.post('/api/v1/query/nlp')
-async def nlp_query(body: Dict[str, Any], request: Request, auth: AuthContext = Depends(require_scopes('nlp.query'))):
-    """Accepts JSON: {"query": "show high confidence malicious events last 2h"} returns DSL + SQL."""
-    q = body.get('query', '')
-    parsed = parse_nl(q)
-    page = int(body.get('page', 1) or 1)
-    size = int(body.get('size', 50) or 50)
-    size = min(max(size, 1), 200)
-    # Optional API key (simple gate). Key expected in env API_QUERY_KEY
-    api_key_req = os.getenv('API_QUERY_KEY')
-    provided = request.headers.get('x-api-key')
-    if api_key_req and api_key_req != provided:
-        return JSONResponse(status_code=401, content={'error': 'unauthorized'})
-    # Attach auth context for middleware logging
-    try:
-        request.state.auth_ctx = auth
-    except Exception:
-        pass
-    sql, params = parsed.build(page=page, size=size)
-    rows = []
-    try:
-        from db.database import get_pool
-        pool = await get_pool()
-        async with pool.acquire() as conn:
-            rows_raw = await conn.fetch(sql, *params)
-            rows = [dict(r) for r in rows_raw]
-    except Exception:
-        pass
-    return { 'dsl': parsed.dsl, 'page': page, 'size': size, 'results': rows }
-
-def _cosine(a, b):
-        if not a or not b: return 0.0
-        n = min(len(a), len(b))
-        num = sum(a[i]*b[i] for i in range(n))
-        da = math.sqrt(sum(a[i]*a[i] for i in range(n)))
-        db = math.sqrt(sum(b[i]*b[i] for i in range(n)))
-        if da == 0 or db == 0: return 0.0
-        return num/(da*db)
-
-@app.get('/api/v1/query/factors')
-async def factor_similarity(similar: str, limit: int = 10, auth: AuthContext = Depends(require_scopes('factors.search'))):
-        """Similarity search over factor embeddings.
-
-        Tries to generate an embedding for the query using optional transformer model
-        (MiniLM) if available; else uses deterministic hash fallback. Then delegates to
-        repository similarity_search which uses pgvector if available, else Python cosine.
-        """
-        limit = max(1, min(limit, 50))
-        # Build query embedding
-        query_emb: list[float]
-        try:
-            from transformers import AutoTokenizer, AutoModel  # type: ignore
-            if not hasattr(app.state, 'embed_tokenizer'):
-                app.state.embed_tokenizer = AutoTokenizer.from_pretrained('sentence-transformers/all-MiniLM-L6-v2')
-                app.state.embed_model = AutoModel.from_pretrained('sentence-transformers/all-MiniLM-L6-v2')
-            toks = app.state.embed_tokenizer(similar, return_tensors='pt', truncation=True)
-            with __import__('torch').no_grad():
-                out = app.state.embed_model(**toks)
-                vec = out.last_hidden_state.mean(dim=1).squeeze().tolist()
-                if isinstance(vec, float):
-                    vec = [vec]
-                query_emb = vec[:384]
-        except Exception:
-            import hashlib
-            h = hashlib.sha256(similar.encode()).digest()
-            query_emb = [b/255.0 for b in h][:32]
-        try:
-            results = await factors_repo.similarity_search(query_emb, limit=limit)
-        except Exception:
-            results = []
-        return { 'query': similar, 'results': results }
-
-@app.get('/risk_register')
-async def risk_register():
-    try:
-        with open('docs/risk_register.md','r', encoding='utf-8') as f:
-            content = f.read()
-    except Exception:
-        raise HTTPException(status_code=404, detail='Risk register not found')
-    return PlainTextResponse(content, media_type='text/markdown')
-
-@app.get('/stream/decisions')
-async def stream_decisions():
-    async def event_gen():
-        last_sent = 0
-        while True:
-            await asyncio.sleep(2)
-            items = [d for d in DECISION_CACHE.values() if d.timestamp > last_sent]
-            if items:
-                max_ts = max(d.timestamp for d in items)
-                last_sent = max(last_sent, max_ts)
-                payload = [d.model_dump() for d in items]
-                import json
-                yield f"data: {json.dumps(payload)}\n\n"
-    return StreamingResponse(event_gen(), media_type='text/event-stream')
-
-@app.get('/api/v1/stats/factors/top')
-async def factors_top(window: str = '1h', limit: int = 20):
-    # window parsing limited to Nh / Nm
-    import re
-    m = re.match(r'^(\d+)([hm])$', window)
-    if not m:
-        window = '1h'
-        m = ('1','h')
-    qty, unit = int(m[0] if isinstance(m, tuple) else m.group(1)), (m[1] if isinstance(m, tuple) else m.group(2))
-    seconds = qty * (3600 if unit == 'h' else 60)
-    try:
-        from db.database import get_pool
-        pool = await get_pool()
-        async with pool.acquire() as conn:
-            rows = await conn.fetch(
-                """
-                SELECT jsonb_array_elements_text(factors) AS factor, count(*) AS c
-                FROM decisions
-                WHERE created_at >= (NOW() - $1::interval)
-                GROUP BY factor
-                ORDER BY c DESC
-                LIMIT $2
-                """, f"{qty} { 'hour' if unit=='h' else 'minute' }", limit)
-            data = [dict(r) for r in rows]
-    except Exception:
-        data = []
-    return {'window': window, 'limit': limit, 'top': data}
-
-@app.get('/api/v1/weights/factors')
-async def factor_weights():
-    try:
-        weights = await factor_weights_repo.load_weights()
-    except Exception:
-        weights = {}
-    return {'weights': weights}
-
-@app.get('/api/v1/metrics/embedding')
-async def embedding_metrics():
-    # Expose embedding avg norm & drift gauges (best-effort)
-    try:
-        from main import ORCHESTRATOR  # global orchestrator instance
-        orch = ORCHESTRATOR
-        if orch and orch.metrics:
-            avg_norm = orch.metrics.gauges.get('embedding_avg_norm', 0.0)
-            drift = orch.metrics.gauges.get('factor_freq_js_divergence', 0.0)
-            return {'embedding_avg_norm': avg_norm, 'factor_freq_js_divergence': drift}
-    except Exception:
-        pass
-    return {'embedding_avg_norm': 0.0, 'factor_freq_js_divergence': 0.0}
-
-class FactorFeedbackPayload(BaseModel):
-    event_id: str
-    factor: str
-    vote: int  # +1 or -1
-    comment: Optional[str] = None
-
-@app.post('/api/v1/feedback/factor')
-async def factor_feedback(payload: FactorFeedbackPayload, auth: AuthContext = Depends(require_scopes('feedback.write'))):
-    # Attach auth context for middleware logging
-    try:
-        from fastapi import Request as _Req  # type: ignore
-    except Exception:
-        pass
-    if payload.vote not in (1,-1):
-        raise HTTPException(status_code=400, detail='invalid_vote')
-    try:
-        await feedback_repo.insert_feedback(payload.event_id, payload.factor, payload.vote, payload.comment)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail='persist_failed')
-    return {'status':'ok'}
-
-# Convenience run helper
-def run():
-    import uvicorn
-    uvicorn.run(app, host='0.0.0.0', port=int(os.getenv('PORT', '8080')))
-
-if __name__ == '__main__':
-    run()
+def track_alert_event(timestamp: float | None) -> None:
+    return None

@@ -11,7 +11,11 @@ from typing import Dict, Any, Optional
 
 
 class EclipseXDRConnector:
-    """Manages bidirectional communication with Eclipse.XDR platform"""
+    """Manages bidirectional communication with Eclipse.XDR platform.
+
+    Phase 1: Minimal stub; real API methods can integrate via core.soar.interface.get_soar_client()
+    to route automated actions (alert create / enrich / containment) once enabled.
+    """
     
     def __init__(self, config):
         self.config = config

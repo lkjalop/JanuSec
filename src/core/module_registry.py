@@ -81,7 +81,8 @@ class ModuleRegistry:
         self.analysis_module_definitions = {
             'network_hunter': NetworkThreatHunter,
             'endpoint_hunter': EndpointHunter,
-            'compliance_mapper': ComplianceMapper
+            'compliance_mapper': ComplianceMapper,
+            'sbom_vuln_mapper': __import__('modules.sbom_vuln_mapper', fromlist=['SBOMVulnMapper']).SBOMVulnMapper  # dynamic import to avoid early cost
         }
         
         # Support modules - background services

@@ -1,30 +1,32 @@
-"""Open-Source Security Models Integration
+﻿"""Open-Source Security Models Integration.
 
-Provides optional integration with open-source transformer and domain-specific security language models.
-Lazy loads models only when requested; degrades gracefully if dependencies missing.
-
-Models supported (config-driven):
-- roberta-base / roberta-large
-- microsoft/DeBERTa-v3-base (classification)
-- sentence-transformers/all-MiniLM-L6-v2 (embeddings lightweight)
-- security BERT variants (placeholder names: securebert-base, cybert-base)*
-- mistral-7b-instruct (through text-generation pipeline)
-
-(* custom fine-tuned models can be mapped in config)
+Supports Hugging Face transformers (CPU by default) and optional Ollama models
+residing under D:\\ by default. Loading is lazy and failures degrade gracefully.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
+import pathlib
 from dataclasses import dataclass
-from typing import Dict, Any, Optional, List
+from typing import Any, Dict, List, Optional
+
+import requests
 
 logger = logging.getLogger(__name__)
 
-try:
-    from transformers import AutoTokenizer, AutoModel, AutoModelForSequenceClassification, pipeline
+try:  # Optional heavy dependencies
+    from transformers import (
+        AutoModel,
+        AutoModelForSequenceClassification,
+        AutoTokenizer,
+        pipeline,
+    )
     import torch
     TRANSFORMERS_AVAILABLE = True
-except Exception:  # broad: if any import fails we mark unavailable
+except Exception:  # pragma: no cover - env without transformers/torch
+    AutoModel = AutoModelForSequenceClassification = AutoTokenizer = pipeline = None  # type: ignore
+    torch = None  # type: ignore
     TRANSFORMERS_AVAILABLE = False
 
 
@@ -38,23 +40,81 @@ class OSSModelSpec:
     device_pref: str = 'auto'
 
 
+class _OllamaClient:
+    """Thin wrapper around the Ollama HTTP API (installed on D:\\ by default)."""
+
+    def __init__(self, host: str, root: pathlib.Path, command: Optional[str] = None):
+        self.host = host.rstrip('/')
+        self.root = root
+        self.command = command
+
+    def _post(self, path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        url = f"{self.host}{path}"
+        try:
+            response = requests.post(url, json=payload, timeout=60)
+            response.raise_for_status()
+            return response.json()
+        except requests.RequestException as exc:  # pragma: no cover - network error paths
+            raise RuntimeError(f"Ollama request failed: {exc}") from exc
+
+    def embed(self, model: str, text: str) -> Optional[List[float]]:
+        data = self._post('/api/embeddings', {'model': model, 'prompt': text})
+        return data.get('embedding')
+
+    def generate(self, model: str, prompt: str, max_new_tokens: int) -> str:
+        payload = {
+            'model': model,
+            'prompt': prompt,
+            'stream': False,
+            'options': {'num_predict': max_new_tokens},
+        }
+        data = self._post('/api/generate', payload)
+        return data.get('response', '')
+
+    def classification_scores(self, text: str) -> Dict[str, float]:
+        """Very light heuristic scoring when Ollama is provider."""
+        baseline = {'benign': 0.4, 'suspicious': 0.3, 'malicious': 0.3}
+        lowered = text.lower()
+        malicious_tokens = ('mimikatz', 'c2', 'ransom', 'payload', 'malware')
+        suspicious_tokens = ('suspicious', 'unknown', 'encoded', 'anomaly')
+        benign_tokens = ('baseline', 'expected', 'allow', 'whitelist')
+        if any(tok in lowered for tok in malicious_tokens):
+            baseline['malicious'] += 0.4
+        if any(tok in lowered for tok in suspicious_tokens):
+            baseline['suspicious'] += 0.3
+        if any(tok in lowered for tok in benign_tokens):
+            baseline['benign'] += 0.3
+        total = sum(baseline.values()) or 1.0
+        return {k: v / total for k, v in baseline.items()}
+
+
 class OpenSourceModelManager:
-    """Manages optional open-source models with lazy loading and caching."""
+    """Manages optional open-source models with lazy loading and backend selection."""
+
+    _OLLAMA_LABELS = ['benign', 'suspicious', 'malicious']
 
     def __init__(self, config: Dict[str, Any]):
         self.config = config or {}
+        self.backend = (self.config.get('backend') or 'transformers').lower()
+        self.device_pref = (self.config.get('device') or 'cpu').lower()
+        self.enabled = bool(self.config.get('enable') or self.config.get('enable_oss_models'))
         self.models: Dict[str, Any] = {}
+        self.model_devices: Dict[str, str] = {}
         self.tokenizers: Dict[str, Any] = {}
         self.model_specs: Dict[str, OSSModelSpec] = {}
         self.health: Dict[str, Dict[str, Any]] = {}
-        self.enabled = self.config.get('enable_oss_models', False)
-        if not TRANSFORMERS_AVAILABLE:
-            logger.warning("transformers/torch not installed. OSS models disabled.")
 
-        # Default model registry (can be overridden)
+        self.ollama_root = pathlib.Path(self.config.get('ollama_root') or 'D:/Ollama')
+        self.ollama_host = self.config.get('ollama_host') or 'http://127.0.0.1:11434'
+        self.ollama_client = _OllamaClient(self.ollama_host, self.ollama_root, self.config.get('ollama_cmd'))
+
+        if self.backend == 'transformers' and not TRANSFORMERS_AVAILABLE:
+            logger.warning('transformers/torch not available. Disabling OSS transformers backend.')
+            self.enabled = False
+
         self._register_default_models()
 
-    def _register_default_models(self):
+    def _register_default_models(self) -> None:
         defaults = [
             OSSModelSpec('roberta_embed', 'embedding', 'sentence-transformers/all-MiniLM-L6-v2', 384),
             OSSModelSpec('roberta_cls', 'classification', 'roberta-base'),
@@ -62,56 +122,81 @@ class OpenSourceModelManager:
             OSSModelSpec('mistral_gen', 'generation', 'mistralai/Mistral-7B-Instruct-v0.2', 1024, True),
         ]
         for spec in defaults:
-            self.model_specs[spec.name] = spec
-
-        # Merge user-defined specs
+            self.model_specs.setdefault(spec.name, spec)
         for custom in self.config.get('oss_model_specs', []):
             try:
                 spec = OSSModelSpec(**custom)
                 self.model_specs[spec.name] = spec
-            except Exception as e:
-                logger.error(f"Invalid custom OSS model spec {custom}: {e}")
+            except Exception as exc:  # pragma: no cover - config error paths
+                logger.error("Invalid custom OSS model spec %s: %s", custom, exc)
 
     def list_available(self) -> List[str]:
-        return list(self.model_specs.keys()) if self.enabled and TRANSFORMERS_AVAILABLE else []
+        if not self.enabled:
+            return []
+        if self.backend == 'transformers' and not TRANSFORMERS_AVAILABLE:
+            return []
+        return list(self.model_specs.keys())
 
     async def ensure_loaded(self, name: str) -> bool:
-        if not self.enabled or not TRANSFORMERS_AVAILABLE:
+        if not self.enabled:
             return False
         if name in self.models:
             return True
         if name not in self.model_specs:
-            logger.error(f"Model spec {name} not registered")
+            logger.error("Model spec %s not registered", name)
             return False
         spec = self.model_specs[name]
+
+        if self.backend == 'ollama':
+            self.models[name] = {'model_id': spec.model_id}
+            self.health[name] = {'loaded': True, 'backend': 'ollama', 'error': None}
+            return True
+
+        if not TRANSFORMERS_AVAILABLE:
+            logger.error("transformers backend unavailable for model %s", name)
+            self.health[name] = {'loaded': False, 'error': 'transformers_unavailable'}
+            return False
+
         try:
-            device = 0 if torch.cuda.is_available() else -1
+            chosen_device = spec.device_pref.lower() if spec.device_pref else 'auto'
+            if chosen_device == 'auto':
+                chosen_device = self.device_pref
+            if chosen_device == 'cuda' and not torch.cuda.is_available():  # type: ignore[union-attr]
+                logger.warning("CUDA requested for %s but unavailable; falling back to CPU", name)
+                chosen_device = 'cpu'
+            torch_device = 'cuda' if chosen_device == 'cuda' else 'cpu'
+            pipeline_device = 0 if torch_device == 'cuda' else -1
+
             if spec.task == 'embedding':
-                tok = AutoTokenizer.from_pretrained(spec.model_id, trust_remote_code=spec.trust_remote_code)
-                mdl = AutoModel.from_pretrained(spec.model_id, trust_remote_code=spec.trust_remote_code)
-                self.tokenizers[name] = tok
-                self.models[name] = mdl.to('cuda' if device == 0 else 'cpu')
+                tokenizer = AutoTokenizer.from_pretrained(spec.model_id, trust_remote_code=spec.trust_remote_code)
+                model = AutoModel.from_pretrained(spec.model_id, trust_remote_code=spec.trust_remote_code)
+                model = model.to(torch_device)
+                self.tokenizers[name] = tokenizer
+                self.models[name] = model
             elif spec.task == 'classification':
-                tok = AutoTokenizer.from_pretrained(spec.model_id, trust_remote_code=spec.trust_remote_code)
-                mdl = AutoModelForSequenceClassification.from_pretrained(spec.model_id, trust_remote_code=spec.trust_remote_code)
-                self.tokenizers[name] = tok
-                self.models[name] = mdl.to('cuda' if device == 0 else 'cpu')
+                tokenizer = AutoTokenizer.from_pretrained(spec.model_id, trust_remote_code=spec.trust_remote_code)
+                model = AutoModelForSequenceClassification.from_pretrained(spec.model_id, trust_remote_code=spec.trust_remote_code)
+                model = model.to(torch_device)
+                self.tokenizers[name] = tokenizer
+                self.models[name] = model
             elif spec.task == 'generation':
                 self.models[name] = pipeline(
                     'text-generation',
                     model=spec.model_id,
                     trust_remote_code=spec.trust_remote_code,
-                    device=device
+                    device=pipeline_device,
                 )
             else:
-                logger.error(f"Unknown task {spec.task} for {name}")
+                logger.error("Unknown task %s for model %s", spec.task, name)
                 return False
-            self.health[name] = {'loaded': True, 'error': None}
-            logger.info(f"Loaded OSS model {name} ({spec.model_id})")
+
+            self.model_devices[name] = torch_device
+            self.health[name] = {'loaded': True, 'backend': self.backend, 'device': torch_device, 'error': None}
+            logger.info("Loaded OSS model %s (%s) on %s", name, spec.model_id, torch_device)
             return True
-        except Exception as e:
-            self.health[name] = {'loaded': False, 'error': str(e)}
-            logger.error(f"Failed loading model {name}: {e}")
+        except Exception as exc:
+            self.health[name] = {'loaded': False, 'error': str(exc)}
+            logger.error("Failed loading model %s: %s", name, exc)
             return False
 
     async def embed(self, name: str, text: str) -> Optional[List[float]]:
@@ -119,14 +204,18 @@ class OpenSourceModelManager:
             return None
         spec = self.model_specs[name]
         if spec.task not in ('embedding', 'classification'):
-            logger.error(f"Model {name} not suitable for embeddings")
+            logger.error("Model %s not suitable for embeddings", name)
             return None
+        if self.backend == 'ollama':
+            return await asyncio.to_thread(self.ollama_client.embed, spec.model_id, text)
         tokenizer = self.tokenizers[name]
         model = self.models[name]
+        device = self.model_devices.get(name, 'cpu')
         inputs = tokenizer(text, truncation=True, max_length=spec.max_length, return_tensors='pt')
-        with torch.no_grad():
+        if device == 'cuda':
+            inputs = inputs.to('cuda')  # type: ignore[union-attr]
+        with torch.no_grad():  # type: ignore[union-attr]
             outputs = model(**inputs)
-            # CLS token or mean pooling
             if hasattr(outputs, 'last_hidden_state'):
                 emb = outputs.last_hidden_state.mean(dim=1).squeeze().cpu().tolist()
             else:
@@ -138,18 +227,26 @@ class OpenSourceModelManager:
             return None
         spec = self.model_specs[name]
         if spec.task != 'classification':
-            logger.error(f"Model {name} not classification type")
+            logger.error("Model %s not classification type", name)
             return None
-        tok = self.tokenizers[name]
-        mdl = self.models[name]
-        inputs = tok(text, truncation=True, max_length=spec.max_length, return_tensors='pt')
-        with torch.no_grad():
-            logits = mdl(**inputs).logits
-            probs = torch.softmax(logits, dim=-1).squeeze().cpu().tolist()
+        if self.backend == 'ollama':
+            scores = self.ollama_client.classification_scores(text)
+            probabilities = [scores[label] for label in self._OLLAMA_LABELS]
+            idx = int(max(range(len(probabilities)), key=lambda i: probabilities[i]))
+            return {'labels': self._OLLAMA_LABELS, 'probabilities': probabilities, 'predicted_index': idx}
+        tokenizer = self.tokenizers[name]
+        model = self.models[name]
+        device = self.model_devices.get(name, 'cpu')
+        inputs = tokenizer(text, truncation=True, max_length=spec.max_length, return_tensors='pt')
+        if device == 'cuda':
+            inputs = inputs.to('cuda')  # type: ignore[union-attr]
+        with torch.no_grad():  # type: ignore[union-attr]
+            logits = model(**inputs).logits
+            probs = torch.softmax(logits, dim=-1).squeeze().cpu().tolist()  # type: ignore[union-attr]
         return {
-            'labels': list(range(len(probs))),  # Without label mapping unless config provides
+            'labels': list(range(len(probs))),
             'probabilities': probs,
-            'predicted_index': int(max(range(len(probs)), key=lambda i: probs[i]))
+            'predicted_index': int(max(range(len(probs)), key=lambda i: probs[i])),
         }
 
     async def generate(self, name: str, prompt: str, max_new_tokens: int = 128) -> Optional[str]:
@@ -157,8 +254,10 @@ class OpenSourceModelManager:
             return None
         spec = self.model_specs[name]
         if spec.task != 'generation':
-            logger.error(f"Model {name} not generation type")
+            logger.error("Model %s not generation type", name)
             return None
+        if self.backend == 'ollama':
+            return await asyncio.to_thread(self.ollama_client.generate, spec.model_id, prompt, max_new_tokens)
         pipe = self.models[name]
         out = pipe(prompt, max_new_tokens=max_new_tokens, do_sample=False)
         return out[0]['generated_text'] if out else None
@@ -166,7 +265,10 @@ class OpenSourceModelManager:
     def get_health(self) -> Dict[str, Any]:
         return {
             'enabled': self.enabled,
+            'backend': self.backend,
+            'device': self.device_pref,
             'transformers_available': TRANSFORMERS_AVAILABLE,
             'models': self.health,
-            'registered': list(self.model_specs.keys())
+            'registered': list(self.model_specs.keys()),
+            'ollama_root': str(self.ollama_root),
         }

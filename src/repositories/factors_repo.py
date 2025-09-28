@@ -10,27 +10,28 @@ from typing import List, Dict, Any, Optional, Tuple
 from db.database import execute, fetch, with_retry
 
 INSERT = """
-INSERT INTO factor_embeddings (event_id, factor, embedding, embedding_json)
-VALUES ($1,$2,$3,$4::jsonb)
+INSERT INTO factor_embeddings (event_id, factor, embedding, embedding_json, tenant_id)
+VALUES ($1,$2,$3,$4::jsonb,$5)
 """
 
 INSERT_FALLBACK = """
-INSERT INTO factor_embeddings (event_id, factor, embedding_json)
-VALUES ($1,$2,$3::jsonb)
+INSERT INTO factor_embeddings (event_id, factor, embedding_json, tenant_id)
+VALUES ($1,$2,$3::jsonb,$4)
 """
 
 SELECT_SAMPLE = """
 SELECT event_id, factor, embedding_json
 FROM factor_embeddings
-LIMIT $1
+WHERE (tenant_id=$1 OR (tenant_id IS NULL AND $1 IS NULL))
+LIMIT $2
 """
 
 VECTOR_SIMILAR = """
 SELECT event_id, factor, 1 - (embedding <=> $1::vector) AS similarity
 FROM factor_embeddings
-WHERE embedding IS NOT NULL
+WHERE embedding IS NOT NULL AND (tenant_id=$2 OR (tenant_id IS NULL AND $2 IS NULL))
 ORDER BY embedding <=> $1::vector
-LIMIT $2
+LIMIT $3
 """
 
 async def _pgvector_available() -> bool:
@@ -50,19 +51,19 @@ async def _pgvector_available() -> bool:
     except Exception:
         return False
 
-async def insert_embedding(event_id: str, factor: str, embedding: List[float]):
+async def insert_embedding(event_id: str, factor: str, embedding: List[float], tenant_id: str | None):
     """Insert embedding (vector + json fallback). If pgvector not available, only JSON stored."""
     async def _do():
         if await _pgvector_available():
             vec = embedding[:384]
             # Postgres vector expects array cast; asyncpg maps Python list -> array
-            return await execute(INSERT, event_id, factor, vec, json.dumps(vec))
+            return await execute(INSERT, event_id, factor, vec, json.dumps(vec), tenant_id)
         else:
-            return await execute(INSERT_FALLBACK, event_id, factor, json.dumps(embedding[:384]))
+            return await execute(INSERT_FALLBACK, event_id, factor, json.dumps(embedding[:384]), tenant_id)
     return await with_retry(_do)
 
-async def load_sample(limit: int = 2000):
-    rows = await fetch(SELECT_SAMPLE, limit)
+async def load_sample(limit: int = 2000, tenant_id: str | None = None):
+    rows = await fetch(SELECT_SAMPLE, tenant_id, limit)
     return [dict(r) for r in rows]
 
 def _cosine(a: List[float], b: List[float]) -> float:
@@ -76,19 +77,19 @@ def _cosine(a: List[float], b: List[float]) -> float:
         return 0.0
     return num/(da*db)
 
-async def similarity_search(query_embedding: List[float], limit: int = 10) -> List[Dict[str, Any]]:
+async def similarity_search(query_embedding: List[float], limit: int = 10, tenant_id: str | None = None) -> List[Dict[str, Any]]:
     """Return similarity results using pgvector if present, else fallback in Python."""
     if await _pgvector_available():
         try:
             from db.database import get_pool
             pool = await get_pool()
             async with pool.acquire() as conn:
-                rows = await conn.fetch(VECTOR_SIMILAR, query_embedding[:384], limit)
+                rows = await conn.fetch(VECTOR_SIMILAR, query_embedding[:384], tenant_id, limit)
                 return [dict(r) for r in rows]
         except Exception:
             pass  # fallback below
     # Fallback path
-    sample = await load_sample(limit=2000)
+    sample = await load_sample(limit=2000, tenant_id=tenant_id)
     scored: List[Tuple[float, Dict[str, Any]]] = []
     for r in sample:
         emb = r.get('embedding_json')

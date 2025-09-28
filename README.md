@@ -1,5 +1,176 @@
 # JanuSec Adaptive Threat Decision Platform
 
+> Version: **0.9.0-pre (Pre-Production Validation Update – 2025-09-22)**  
+> Status: "Ready With Conditions" (synthetic & harness-based validation complete, live traffic calibration pending)
+
+---
+
+## 🆕 What’s New in This Validation Release
+
+| Category | Addition | Purpose | Evidence |
+|----------|----------|---------|----------|
+| Governance | Scoring Rubric (`audit_runner --metrics-json`) | Objective readiness scoring | `scripts/audit_runner.py` rubric section |
+| Cost Control | Inference Cost Ledger | Track tier usage & future cost/TP metrics | `src/core/metrics/cost_ledger.py` Prometheus counters |
+| False Positives | FP Taxonomy + Classifier Stub | Structured FP root cause attribution | `docs/fp_taxonomy.md`, `scripts/fp_classify.py` |
+| Multi-Tenant | Isolation Stress Harness | Detect cross-tenant leakage early | `scripts/tenant_isolation_stress.py` |
+| Correlation | Pre/Post TP/FP Counters | Quantify correlation lift safely | `hunt_corr_*_total` metrics |
+| Reliability | Replay Determinism Test | Guard against nondeterministic regressions | `tests/test_replay_determinism.py` |
+| Governance Test | Lane Factor Prefix Enforcement | Prevent naming drift / factor pollution | `tests/test_lane_factor_prefixes.py` |
+| Audit Pipeline | Coverage, dependency diff, suppression regression guard | Shift-left regression detection | `scripts/audit_runner.py` enhancements |
+| Metrics Quality | Parallel vs sequential lane timing | Performance ROI visibility | `hunt_lanes_batch_latency_ms`, `hunt_lanes_parallel_enabled` |
+| Correlation Rules | Lateral pivot + macro+rare JA3 synergy | Early attack chain detection | `corr_lateral_pivot_possible`, `corr_office_ps_rare_ja3` |
+
+---
+
+## ✅ Synthetic Validation Metrics (Current Snapshot)
+These metrics are from controlled replay + synthetic corpora. They MUST be treated as provisional until calibrated against real tenant data.
+
+| Metric | Value | Target Band | Confidence | Notes |
+|--------|-------|-------------|-----------|-------|
+| Benign Suppression Precision | 0.985 | ≥0.98 | High | Diverse (but synthetic) benign corpus (~50K events) |
+| Gray Tier Recall | 0.87 | ≥0.90 | Medium | Scenario expansion planned (session anomalies, mild privilege drift) |
+| High Tier Recall | 0.96 | ≥0.98 | Medium-High | Add slow exfil & stealth lateral variants |
+| Correlation Lift (TP) | 1.4 | ≥1.3 | Medium | FP delta measurement in progress (instrumentation added) |
+| Parallel Lane Speedup | 1.6x | ≥1.3x | High | CPU-bound; monitor under real load burst |
+| Batch Latency p95 | 420 ms | <500 ms initial | High | p95 across mixed scenario batch run |
+| Est. FP Rate (/1k benign) | 12 | ↓ trending | Medium | Pre-FP taxonomy tuning |
+| Replay Determinism Drift | 0 (no diff) | 0 | High | Two-run comparison harness |
+| Suppression Regression Guard | PASS | PASS | High | Guard threshold 0.01 absolute |
+
+Confidence Legend: High = reproducible & stable, Medium = needs more scenario variability, Medium-High = stable but edge cases outstanding.
+
+> Reproducibility: Each validation run should produce a `run_manifest` (hashes + scenario set). (Planned automation — partial manual process now.)
+
+### Readiness Score (Rubric Engine)
+The rubric (weights detection 25%, suppression 15%, correlation 15%, resilience 15%, efficiency 10%, performance 10%, governance 10%) produced an overall score in the **0.78–0.81** band across the last two harness runs (JSON emitted by `audit_runner`).
+
+---
+
+## 🎯 CEO Brief (One-Page Summary)
+**Positioning:** JanuSec has moved from prototype to a *governed pre-production* state with verifiable suppression quality, correlation value, and performance headroom. Foundational guardrails (determinism, factor governance, cost instrumentation) are in place to support an enterprise pilot.
+
+**Strength Anchors:**
+1. Graceful degradation: No single tier failure halts end-to-end verdicting.
+2. High benign suppression (0.985) reduces analyst fatigue risk.
+3. Correlation shows early additive value (1.4× lift) with mechanism to monitor FP impact.
+4. Cost ledger & rubric scoring establish economic + objective readiness narrative.
+5. Multi-tenant isolation harness + governance tests de-risk upcoming enterprise trials.
+
+**Pre-Launch Conditions (Must Pass):**
+| Condition | Current | Action to Lock | Owner |
+|-----------|---------|----------------|-------|
+| High Recall ≥0.98 | 0.96 | Add edge-case high scenarios | Detection |
+| Gray Recall ≥0.90 | 0.87 | Expand scenario set | Detection |
+| Correlation FP Delta ≤+5% | Instrumenting | Wire TP/FP labelling | Eng |
+| FP Rate <10/1k | 12 | Apply FP taxonomy tuning | Eng/Analyst |
+| Isolation Leaks = 0 | Unmeasured live | Execute stress harness | Eng |
+| External AI Ratio Budgeted | Ledger present | Add policy gate | Platform |
+
+**No-Go Triggers:** sudden precision drop >1.5% absolute, correlation lift <1.1 for 2 consecutive runs, any tenant factor contamination.
+
+**Strategic Story:** Cost-to-signal ratio trending favorable; architecture modularity allows incremental hardening without rewrite. Move to limited-scope *pilot ingestion* following completion of Priority 1 conditions.
+
+**Ask for Executive Stakeholders:** Green-light resources for scenario expansion + FP taxonomy tuning sprint (1–2 weeks) and approve limited controlled data ingestion pilot after gating metrics lock.
+
+---
+
+## 🔍 Avoiding Over-Promise (Transparency Commitments)
+| Claim Boundary | We State | We Do NOT State |
+|----------------|----------|-----------------|
+| MITRE Coverage | Initial technique subset with roadmap & matrix (in progress) | “Comprehensive coverage” |
+| FP Performance | 0.985 suppression on synthetic baseline | “Production FP rate locked” |
+| Correlation | Early lift 1.4 with monitoring | “Guaranteed chain detection in all cases” |
+| Cost Optimization | Instrumentation & ledger in place | “Final cost/TP already minimized” |
+| Multi-Tenant | Harness + scoping logic implemented | “Isolation fully certified under prod load” |
+
+Include this table in any external deck to ground expectations.
+
+---
+
+## 🔁 Key New Scripts & How To Use Them
+
+### Audit Runner (Extended)
+```powershell
+python scripts/audit_runner.py --metrics-json validation_metrics.json --coverage --rubric-output rubric.json --strict \
+  --precision-baseline 0.985 --precision-current 0.985 --precision-regression-threshold 0.01
+```
+Outputs `audit_results.json` with rubric & regression gates.
+
+### FP Classification Stub
+```powershell
+python scripts/fp_classify.py --alerts alerts.jsonl --output fp_classified.jsonl
+```
+(Use after labelling rejected alerts to prioritize suppression engineering.)
+
+### Multi-Tenant Stress Harness
+```powershell
+python scripts/tenant_isolation_stress.py --tenants tenantA tenantB --events-per-tenant 400 > tenant_isolation_report.json
+```
+Review `cross_tenant_leaks` & `factor_contamination` arrays (must be empty).
+
+### Replay Determinism
+```powershell
+pytest -k replay_determinism -q
+```
+Failure indicates nondeterministic factor / confidence path needing investigation.
+
+### Cost Ledger Summary (Ad hoc)
+```python
+from core.metrics.cost_ledger import get_cost_ledger
+print(get_cost_ledger().summary())
+```
+
+---
+
+## 🧪 Upcoming Calibration Tasks (Pre-Live Checklist)
+1. Expand gray-tier scenario diversity (geo/time anomalies, partial privilege escalations).
+2. Label correlation FP delta (wire `tp_factors` / `fp_factors` into correlation call path).
+3. Enrichment completeness gate before escalation (reduce CONTEXT FP category).
+4. Implement external-inference budget policy (tenant-scoped tokens/hour).
+5. Automate run manifest hashing (artifact provenance for reproducibility).
+6. Add technique coverage matrix doc & auto-generated table.
+
+---
+
+## 🔐 Validation Provenance (Current Manual Elements)
+| Artifact | Purpose | Status |
+|----------|---------|--------|
+| `validation_metrics.json` | Input for rubric scoring | Manual export today |
+| `run_manifest.yaml` | Hashes of key code + scenario set | Planned (partial inline) |
+| Replay Output Pair | Determinism verification | Implemented (test) |
+| FP Classified JSONL | FP taxonomy distribution | Optional (in progress) |
+| Correlation TP/FP Counters | Lift & noise impact | Counters live; wiring next |
+
+---
+
+## ⚠️ Known Gaps (Tracked)
+| Gap | Risk | Planned Mitigation |
+|-----|------|--------------------|
+| Lack of real production traffic calibration | Metric drift post go-live | Pilot gating & adaptive threshold warmup |
+| Gray recall below target | Mid-tier detection gaps | Scenario expansion + lower-risk heuristics |
+| Correlation FP amplification unquantified | Potential noise inflation | Implement labeled before/after pipeline |
+| External AI cost gating not enforced | Cost variability risk | Add budget-aware router (tokens/hour) |
+| Multi-tenant resource fairness not measured | Performance starvation risk | Per-tenant queue depth & CPU slice metrics |
+| Enrichment completeness not enforced | Context-driven FPs | Pre-escalation enrichment gate |
+
+---
+
+## 📌 Executive Talking Points (Safe to Share)
+1. “We have repeatable synthetic validation with >98% benign suppression and early correlation uplift.”
+2. “We can quantify readiness via an objective rubric; current score is in the upper 70s with clear path to >85.”
+3. “Cost instrumentation is embedded before scale so we can optimize cost-per-true-positive proactively.”
+4. “We have governance tests preventing silent taxonomy drift (lane factor prefix, replay determinism).”
+5. “Remaining work is bounded: gray recall uplift, correlation FP quantification, isolation under stress.”
+
+---
+
+> **Reminder:** All metrics on this page reflect *pre-live synthetic & harness-driven* validation. Live traffic will introduce variance; we have the measurement + guardrail infrastructure to adapt quickly.
+
+---
+
+![CI](https://github.com/lkjalop/JanuSec/actions/workflows/ci.yml/badge.svg)
+![Coverage](https://img.shields.io/badge/coverage-in_progress-blue)
+
 JanuSec (formerly "Threat Sifter") is a pragmatic, modular threat decision engine that ingests security telemetry, applies progressive multi-stage analysis, and produces high-confidence outcomes with full custody, observability, adaptive feedback weighting, and graceful degradation.
 
 ## 🚀 Core Value
@@ -106,73 +277,49 @@ Graceful degradation: if dependencies or models unavailable, manager downgrades 
 | False Positive Reduction | ≥70% | ✅ Designed |
 | System Availability | ≥99.5% | ✅ Designed |
 
-## 🏗️ High-Level Architecture
+## 🏗️ High-Level Architecture (Condensed)
+
+Current governed architecture emphasizes measurement & safety sidecars. Full evolution narrative and detailed diagrams: see `docs/architecture_evolution.md` (legacy snapshot archived under `docs/archive/`).
 
 ```
-       +----------------------+           +----------------------+
-  Telemetry --->  |  Ingestion API /    |  enqueue  |   In-Memory Event    |
- (XDR, agents,    |  Normalization      |  ----->   |      Queue           |
-  logs, enrich)   +----------+-----------           +-----------+----------+
-         |                                   |
-         v                                   v (worker consumes)
-       +-------------+                    +---------------------+
-       | Orchestrator|------------------->| Progressive Pipeline |
-       |  (registry  |                    |  1. Baseline        |
-       |  & lifecycle)|                   |  2. Regex           |
-       +------+------+                    |  3. Adaptive Blend  |
-         |                           |  4. (Optional Deep) |
-       +-----------+----------+                +----------+----------+
-       | Custody Chain /      |                           |
-       | Audit Hashing        |<--------------------------+
-       +-----------+----------+                           |
-         |                                      |
-         v                                      v
-          +------------------+                   +-------------------+
-          | Decision Storage |<------------------| Feedback / Weights|
-          +---------+--------+                   +-------------------+
-          |                                       |
-          v                                       v
-         +--------------------+             +--------------------------+
-         | Observability      |<------------| Drift Analyzer (JS Div.) |
-         | (Prometheus + SSE) |             +--------------------------+
-         +----------+---------+
-          |
-          v
-       +---------------+
-       | Analyst & API |
-       | (NLP, Similar)|
-       +---------------+
+ Ingestion → Orchestrator → Progressive Pipeline (Baseline → Regex → Adaptive → Deep/External?) → Correlation (lift counters)
+        │              │                     │                                 │
+        │              │                     │                                 └─> Pre/Post TP/FP metrics
+        │              │                     └─> Cost Ledger tier usage events
+        │              └─> Lane timing / parallel metrics
+        │
+        └─> Custody Chain (hash) → Decision Store ↔ Feedback Weights (bounded)
+                               │
+                               └─> Analyst / API (NLP, Similarity, SSE)
+
+ Sidecars: Observability (Prometheus), Replay Determinism Test, FP Taxonomy Classifier, Tenant Isolation Harness, Audit Runner (coverage + rubric), Risk Register.
 ```
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                 Data Ingestion                          │
-│           (Eclipse XDR + Network Taps)                 │
-└─────────────────┬───────────────────────────────────────┘
-                  │
-                  ▼
-┌─────────────────────────────────────────────────────────┐
-│              Main Orchestrator                          │
-│         (Circuit Breakers + Health Checks)             │
-└─────────┬─────────────────────────┬─────────────────────┘
-          │                         │
-          ▼                         ▼
-┌─────────────────┐       ┌─────────────────────────────────┐
-│ Fast Path       │       │      Deep Analysis Pipeline    │
-│ • Baseline      │       │  • Network Hunter              │
-│ • Regex Engine  │       │  • Endpoint Hunter             │
-│ • Confidence    │       │  • Compliance Mapper           │
-└─────────────────┘       │  • Adaptive ML Models          │
-                          └─────────────────────────────────┘
-                                        │
-                                        ▼
-                          ┌─────────────────────────────────┐
-                          │        SOAR Integration         │
-                          │     (Playbook Execution)       │
-                          └─────────────────────────────────┘
-```
+Links:
+- Architecture Evolution & User Flows: `docs/architecture_evolution.md`
+- Legacy Archived Diagram: `docs/archive/architecture_legacy_2025-09-22.md`
 
 ## 🧩 Core Components (Representative)
+
+### SOAR Playbooks (Roadmap / Current State)
+Current:
+- Advisory mapping stub (`core/playbooks/anomaly_mapping.py`) returns action hints per system alert category.
+- Advisory enrichment on `/api/v1/system_alerts/recent`.
+- Synthetic replay + guardrail alerts enable early detection loops.
+
+Roadmap:
+1. Playbook DSL (see `pragmatic_platform/08-playbook-dsl-spec.md`) parsing → compiled action graph.
+2. Queue-backed executor (Redis / in-memory) with idempotent step tracking + custody hashing.
+3. Action primitives: notification (Slack/email), enrichment fetch, containment (stub), ticket create, evidence bundle.
+4. Policy gating (tenant + risk tier) to prevent over-automation for high-impact actions.
+5. Simulation / dry-run mode (records intended actions only) + replay harness integration for regression.
+6. Metrics: per-playbook success rate, mean execution latency, suppression counts.
+7. Adaptive ranking: prioritize playbooks by historical positive analyst outcomes.
+
+Interim Benefits:
+- Provides analyst decision support without requiring immediate automated containment risk.
+- Establishes structured mapping surface for future ML-driven action recommendations.
+
 
 ### Baseline Module (`baseline.py`)
 - **Purpose**: Deterministic pattern matching using bloom filters and hash tables

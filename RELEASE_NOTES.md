@@ -1,4 +1,4 @@
-# Threat Sifter Pilot Release Notes (Snapshot 2025-09-21)
+# JanuSec Pilot Release Notes (Snapshot 2025-09-21)
 
 ## Overview
 This pilot snapshot delivers an operational threat sifting platform with progressive analysis, semantic factor exploration, analyst feedback loop, and foundational observability. It is engineered for reliability via graceful degradation and explicit auditability.

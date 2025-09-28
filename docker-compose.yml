@@ -5,7 +5,7 @@ services:
     environment:
       POSTGRES_PASSWORD: postgres
       POSTGRES_USER: postgres
-      POSTGRES_DB: threatsifter
+      POSTGRES_DB: janusec  # legacy: threatsifter
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./migrations:/docker-entrypoint-initdb.d:ro
@@ -15,7 +15,7 @@ services:
   app:
     build: .
     environment:
-      APP_DB_DSN: postgresql://postgres:postgres@db:5432/threatsifter
+      APP_DB_DSN: postgresql://postgres:postgres@db:5432/janusec  # set DB_NAME=threatsifter to reuse legacy schema
       API_KEYS_JSON: '[{"key":"devkey123","scopes":["nlp.query","factors.search","feedback.write"]}]'
       ACCESS_LOG_SAMPLE_RATE: 0.5
     depends_on:
@@ -41,6 +41,7 @@ services:
     volumes:
       - grafana_data:/var/lib/grafana
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
     depends_on:
       - prometheus
 

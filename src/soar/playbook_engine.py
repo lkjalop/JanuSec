@@ -1,5 +1,5 @@
 """
-SOAR Playbook Integration for Threat Sifter Platform
+SOAR Playbook Integration for JanuSec Platform (formerly Threat Sifter)
 Automated response playbooks integrated with Eclipse XDR and AI enrichment
 
 Author: Security Automation Team  
@@ -86,7 +86,7 @@ class EclipseXDRIntegration:
             'endpoint_id': endpoint_id,
             'action': 'isolate',
             'reason': reason,
-            'requested_by': 'threat_sifter_platform'
+            'requested_by': 'janusec_platform'
         }
         
         try:
@@ -124,7 +124,7 @@ class EclipseXDRIntegration:
             'ip_address': ip_address,
             'action': 'block',
             'duration_hours': duration_hours,
-            'source': 'threat_sifter_platform',
+            'source': 'janusec_platform',
             'category': 'automated_response'
         }
         
@@ -163,7 +163,7 @@ class EclipseXDRIntegration:
             'file_hash': file_hash,
             'endpoints': endpoints,
             'action': 'quarantine',
-            'source': 'threat_sifter_platform'
+            'source': 'janusec_platform'
         }
         
         try:
@@ -202,7 +202,7 @@ class EclipseXDRIntegration:
             'domain': domain,
             'action': 'disable',
             'reason': 'Automated response to security incident',
-            'source': 'threat_sifter_platform'
+            'source': 'janusec_platform'
         }
         
         try:
@@ -370,7 +370,7 @@ class NotificationService:
                 'color': color_map.get(severity, '#36a64f'),
                 'title': f'🚨 Security Alert - {severity.upper()}',
                 'text': message,
-                'footer': 'Threat Sifter Platform',
+                'footer': 'JanuSec Platform',
                 'ts': int(datetime.utcnow().timestamp())
             }]
         }
@@ -428,8 +428,8 @@ class TicketingIntegration:
             'subcategory': 'Security Incident',
             'priority': self._map_severity_to_priority(severity),
             'assigned_to': assignee,
-            'caller_id': 'threat_sifter_platform',
-            'created_by': 'threat_sifter_platform'
+            'caller_id': 'janusec_platform',
+            'created_by': 'janusec_platform'
         }
         
         try:
@@ -942,7 +942,7 @@ async def demo_soar_playbook():
     execution_id = await soar_engine.execute_playbook(
         'malware_response',
         malware_event,
-        'threat_sifter_platform'
+    'janusec_platform'
     )
     
     print(f"Started playbook execution: {execution_id}")

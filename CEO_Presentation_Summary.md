@@ -1,4 +1,6 @@
-# 🎯 **CEO Presentation - Threat Sifter Platform**
+# 🎯 **CEO Presentation - JanuSec Platform (Rebrand)**
+
+Legacy Threat Sifter version archived under `archive/CEO_Presentation_Summary_original.md`.
 ## **Production-Ready Security Solution for CyberStash**
 
 ---

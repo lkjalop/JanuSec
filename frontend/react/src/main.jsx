@@ -6,7 +6,7 @@ import { NlpQuery } from './nlp.jsx';
 function App(){
   return <div style={{fontFamily:'Arial',padding:12}}>
     <ApiKeyBar />
-    <h1>Threat Sifter React Console (Alpha)</h1>
+  <h1>JanuSec React Console (Alpha)</h1>
     <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(340px,1fr))',gap:16}}>
       <div style={{border:'1px solid #ccc',padding:8}}><DecisionStream /></div>
       <div style={{border:'1px solid #ccc',padding:8}}><FactorSimilarity /></div>

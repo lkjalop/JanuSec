@@ -6,7 +6,7 @@ import { FeedbackWidget } from './modules/feedback.js';
 
 const root = document.getElementById('root');
 root.innerHTML = `
-  <h1>Threat Sifter SPA (Alpha)</h1>
+  <h1>JanuSec SPA (Alpha)</h1>
   <nav>
     <a href="#stream">Stream</a> | <a href="#similarity">Similarity</a> | <a href="#stats">Stats</a>
   </nav>

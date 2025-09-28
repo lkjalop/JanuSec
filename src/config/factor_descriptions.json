@@ -1,0 +1,20 @@
+{
+  "office_macro_spawn_powershell": "Office application spawning PowerShell - common macro execution chain.",
+  "powershell_encoded_command": "PowerShell launched with an encoded command parameter (possible obfuscation).",
+  "orphan_process_without_parent_metadata": "Process lacks expected parent metadata - may indicate tampering or telemetry loss.",
+  "signed_to_unsigned_transition": "Signed parent spawning unsigned child binary - potential living-off-the-land or dropper behavior.",
+  "ja3_novel": "Previously unseen JA3 TLS client fingerprint (novel client behavior).",
+  "ja3_rare": "Low-frequency JA3 fingerprint in environment baseline.",
+  "corr_office_ps_rare_ja3": "Correlation: Office macro PowerShell spawn combined with rare JA3 TLS client.",
+  "corr_encoded_ps_signed_to_unsigned": "Correlation: Encoded PowerShell plus signed→unsigned transition - elevated suspicion.",
+  "exfil_volume_high": "Outbound data transfer volume exceeding heuristic threshold.",
+  "dns_tunnel_pattern": "DNS query patterns consistent with tunneling (length/structure heuristic)."
+  ,"suspicious_parent_child_pair": "Known suspicious parent→child process execution chain indicative of potential macro or LOLBin abuse."
+  ,"beacon_low_jitter": "Network destination exhibiting low jitter periodic connections (possible beacon)."
+  ,"beacon_periodic": "Sustained periodic outbound connections with stable interval suggesting C2 beacon behavior."
+  ,"non_sbom_component_exec": "Execution of a binary not present in the provided SBOM component inventory (potential shadow or dropped binary)."
+  ,"component_hash_drift": "Observed process hash differs from SBOM-declared canonical hash (possible tampering or version drift)."
+  ,"egress_volume_spike": "Outbound bytes exceed EWMA-based anomaly threshold (sudden egress spike)."
+  ,"new_domain_seen": "First observation of this domain within novelty window (potential staging/bootstrap)."
+  ,"cmd_rare_token_spike": "Command line contains unusually high ratio of rare tokens (possible obfuscation or generated payload)."
+}

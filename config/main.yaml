@@ -23,7 +23,26 @@ confidence:
   malicious_threshold: 0.90
   suspicious_range: [0.10, 0.90]
 
-# Module settings
+pipeline:
+  blending:
+    mode: "add"
+    baseline_weight: 1.0
+    regex_weight: 1.0
+    cap: 1.0
+  allowlists:
+    vendors:
+      - "Microsoft"
+      - "Microsoft Corporation"
+      - "Windows Defender"
+      - "Windows Security"
+    binaries:
+      - "mpam-d.exe"
+      - "mpam-fe.exe"
+      - "mpam-fe_bd.exe"
+      - "snippingtool.exe"
+    suppress_factors:
+      - "endpoint:signed_mismatch"
+    vendor_max_confidence: 0.35\n\n# Module settings
 modules:
   baseline:
     enabled: true
@@ -54,12 +73,12 @@ storage:
     type: "postgresql"
     host: "localhost"
     port: 5432
-    database: "threat_sifter"
+    database: "${DB_NAME:-janusec}"  # legacy default was 'threat_sifter'
     retention_days: 30
     
   cold_tier:
     type: "s3"
-    bucket: "threat-sifter-archive"
+    bucket: "janusec-archive"  # legacy: threat-sifter-archive
     retention_days: 365
 
 # External integrations
@@ -93,3 +112,7 @@ security:
   audit_all_decisions: true
   encrypt_at_rest: true
   api_key_rotation_days: 90
+
+
+
+

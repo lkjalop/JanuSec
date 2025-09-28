@@ -53,6 +53,12 @@ class MetricsCollector:
             self.__class__.decision_latency = Histogram(
                 'decision_latency_ms', 'End-to-end decision latency (ms)'
             )
+            try:
+                self.__class__.decision_time_hist = Histogram(
+                    'decision_time_ms_histogram', 'Time to decision including correlation & mapping (ms)'
+                )
+            except Exception:
+                pass
             self.__class__._prom_init = True
         except Exception:
             pass

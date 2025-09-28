@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>JanuSec Artifact Intelligence</title>
+  <link rel="icon" href="logo.png" />
+  <style>
+    /* Reusing core styles from original design (trimmed where unchanged for brevity) */
+    :root { --bg-base:#0B0E14; --bg-surface:#151922; --bg-surface-2:#1C2230; --bg-surface-3:#232834; --accent-primary:#4A63E7; --accent-primary-hover:#5B72F0; --accent-primary-light:rgba(74,99,231,0.1); --text-primary:#E8EBF0; --text-secondary:#A8B2C3; --text-muted:#6B7789; --border-default:#2A3142; --risk-critical:#E54D4D; --risk-high:#E67E22; --risk-medium:#F39C12; --risk-low:#3498DB; --risk-minimal:#52C41A; }
+    * { box-sizing:border-box; margin:0; padding:0; }
+    body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Inter',sans-serif; background:var(--bg-base); color:var(--text-primary); }
+    .container { display:grid; grid-template-columns:64px 1fr 360px; grid-template-rows:56px 1fr; height:100vh; overflow:hidden; }
+    .header { grid-column:1 / -1; background:var(--bg-surface); border-bottom:1px solid var(--border-default); display:flex; align-items:center; padding:0 20px; gap:24px; }
+    .logo-container { display:flex; align-items:center; gap:12px; padding-right:24px; border-right:1px solid var(--border-default); }
+    .logo-text { font-size:18px; font-weight:600; letter-spacing:-0.5px; }
+    .header-stats { display:flex; gap:32px; margin-left:auto; }
+    .stat-item { display:flex; flex-direction:column; gap:2px; }
+    .stat-label { font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px; }
+    .stat-value { font-size:14px; font-weight:600; }
+    .status-indicator { display:flex; align-items:center; gap:8px; padding:6px 12px; background:rgba(82,196,26,0.1); border:1px solid rgba(82,196,26,0.3); border-radius:6px; }
+    .status-dot { width:8px; height:8px; background:var(--risk-minimal); border-radius:50%; animation:pulse 2s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:0.5;} }
+    .sidebar { background:var(--bg-surface); border-right:1px solid var(--border-default); padding:16px 0; display:flex; flex-direction:column; gap:8px; }
+    .nav-icon { width:48px; height:48px; margin:0 8px; display:flex; align-items:center; justify-content:center; border-radius:8px; cursor:pointer; color:var(--text-muted); position:relative; transition:0.2s; }
+    .nav-icon:hover { background:var(--bg-surface-2); color:var(--text-primary); }
+    .nav-icon.active { background:var(--accent-primary-light); color:var(--accent-primary); }
+    .main-content { display:flex; flex-direction:column; overflow:hidden; }
+    .toolbar { background:var(--bg-surface); padding:12px 20px; display:flex; gap:16px; align-items:center; border-bottom:1px solid var(--border-default); }
+    .search-box { display:flex; align-items:center; gap:8px; padding:8px 12px; background:var(--bg-surface-2); border:1px solid var(--border-default); border-radius:6px; width:280px; }
+    .search-box input { flex:1; background:none; border:none; outline:none; color:var(--text-primary); font-size:13px; }
+    .filter-chips { display:flex; gap:8px; }
+    .chip { padding:6px 12px; background:var(--bg-surface-2); border:1px solid var(--border-default); border-radius:16px; font-size:12px; cursor:pointer; font-weight:500; }
+    .chip.active { background:var(--accent-primary); border-color:var(--accent-primary); color:#fff; }
+    .action-buttons { margin-left:auto; display:flex; gap:8px; }
+    .btn { padding:8px 16px; border-radius:6px; font-size:12px; font-weight:500; cursor:pointer; display:flex; align-items:center; gap:6px; border:1px solid var(--border-default); background:var(--bg-surface-2); color:var(--text-primary); }
+    .btn:hover { background:var(--bg-surface-3); }
+    .btn-primary { background:var(--accent-primary); border-color:var(--accent-primary); color:#fff; }
+    .btn-primary:hover { background:var(--accent-primary-hover); }
+    .data-grid { flex:1; overflow:auto; background:var(--bg-base); }
+    .grid-header, .grid-row { display:grid; grid-template-columns:40px 240px 100px 80px 110px 90px 190px 1fr; align-items:center; }
+    .grid-header { position:sticky; top:0; background:var(--bg-surface); padding:12px 20px; font-size:11px; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-muted); font-weight:600; border-bottom:1px solid var(--border-default); z-index:10; }
+    .grid-row { padding:12px 20px; border-bottom:1px solid rgba(255,255,255,0.04); font-size:13px; cursor:pointer; transition:0.15s; }
+    .grid-row:hover { background:var(--bg-surface); }
+    .grid-row.selected { background:var(--bg-surface-2); border-left:2px solid var(--accent-primary); }
+    .risk-score { display:inline-flex; align-items:center; justify-content:center; padding:3px 8px; border-radius:4px; font-size:11px; font-weight:600; min-width:32px; }
+    .risk-critical { background:rgba(229,77,77,0.2); color:var(--risk-critical); border:1px solid rgba(229,77,77,0.3); }
+    .risk-high { background:rgba(230,126,34,0.2); color:var(--risk-high); border:1px solid rgba(230,126,34,0.3); }
+    .risk-medium { background:rgba(243,156,18,0.2); color:var(--risk-medium); border:1px solid rgba(243,156,18,0.3); }
+    .risk-low { background:rgba(52,152,219,0.2); color:var(--risk-low); border:1px solid rgba(52,152,219,0.3); }
+    .risk-minimal { background:rgba(82,196,26,0.2); color:var(--risk-minimal); border:1px solid rgba(82,196,26,0.3); }
+    .details-panel { background:var(--bg-surface); border-left:1px solid var(--border-default); padding:20px; overflow-y:auto; position:relative; }
+    .panel-header { font-size:14px; font-weight:600; margin-bottom:20px; display:flex; gap:8px; align-items:center; }
+    .detachable { position:absolute; top:10px; right:10px; font-size:11px; cursor:pointer; color:var(--text-muted); }
+    .metric-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:16px; }
+    .metric-card { padding:12px; background:var(--bg-surface-2); border:1px solid var(--border-default); border-radius:8px; }
+    .metric-value { font-size:22px; font-weight:600; }
+    .metric-label { font-size:11px; color:var(--text-muted); letter-spacing:0.5px; text-transform:uppercase; }
+    .hash-display { padding:12px; background:var(--bg-base); border-radius:6px; font-family:monospace; font-size:11px; word-break:break-all; color:var(--text-muted); margin:12px 0; }
+    .factor-table { margin-top:12px; }
+    .factor-header { font-size:12px; font-weight:600; margin-bottom:8px; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-secondary); }
+    .factor-row { display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px solid rgba(255,255,255,0.05); font-size:12px; }
+    .business-summary { margin-top:16px; padding:12px; background:var(--bg-surface-2); border:1px solid var(--border-default); border-radius:8px; font-size:13px; line-height:1.4; }
+    .nlp-panel { margin-top:20px; }
+    .nlp-panel textarea { width:100%; min-height:70px; background:var(--bg-surface-2); border:1px solid var(--border-default); color:var(--text-primary); padding:8px; border-radius:6px; font-size:13px; resize:vertical; }
+    .inline-note { font-size:11px; color:var(--text-muted); margin-top:6px; }
+    .hunt-panel { margin-top:20px; padding:14px; background:var(--bg-surface-2); border:1px solid var(--border-default); border-radius:8px; display:flex; flex-direction:column; gap:10px; }
+    .hunt-panel h4 { margin:0; font-size:13px; font-weight:600; text-transform:uppercase; letter-spacing:0.6px; color:var(--text-secondary); }
+    .hunt-panel label { font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px; }
+    .hunt-panel input, .hunt-panel select { background:var(--bg-base); border:1px solid var(--border-default); color:var(--text-primary); padding:6px 8px; border-radius:4px; font-size:12px; }
+    .hunt-panel-controls { display:flex; gap:8px; flex-wrap:wrap; }
+    .hunt-progress { background:var(--bg-base); border:1px solid var(--border-default); border-radius:6px; padding:10px; font-size:11px; min-height:80px; white-space:pre-wrap; color:var(--text-muted); }
+    .hunt-toggle { display:flex; align-items:center; gap:6px; font-size:12px; }
+    /* Confidence badges */
+    .confidence-badge { display:inline-block; padding:2px 6px; border-radius:12px; font-size:10px; font-weight:600; letter-spacing:0.5px; margin-left:4px; vertical-align:middle; }
+    .confidence-badge.conf-certain { background:rgba(82,196,26,0.18); color:#52C41A; border:1px solid rgba(82,196,26,0.4); }
+    .confidence-badge.conf-high { background:rgba(74,99,231,0.15); color:var(--accent-primary); border:1px solid rgba(74,99,231,0.45); }
+    .confidence-badge.conf-mod { background:rgba(243,156,18,0.18); color:var(--risk-medium); border:1px solid rgba(243,156,18,0.4); }
+    .confidence-badge.conf-low { background:rgba(229,77,77,0.18); color:var(--risk-critical); border:1px solid rgba(229,77,77,0.4); }
+  /* Capability badges */
+  .cap-badge { display:inline-block; padding:2px 6px; border-radius:10px; font-size:10px; font-weight:600; letter-spacing:0.5px; background:#1C2230; border:1px solid #2A3142; color:#8D9AAF; }
+  .cap-badge.cap-optimized, .cap-badge.cap-ml, .cap-badge.cap-available, .cap-badge.cap-enabled { background:rgba(82,196,26,0.15); color:#52C41A; border-color:rgba(82,196,26,0.4); }
+  .cap-badge.cap-heuristic, .cap-badge.cap-approx { background:rgba(243,156,18,0.18); color:var(--risk-medium); border-color:rgba(243,156,18,0.4); }
+  .cap-badge.cap-stub, .cap-badge.cap-misconfigured, .cap-badge.cap-missing { background:rgba(229,77,77,0.18); color:var(--risk-critical); border-color:rgba(229,77,77,0.4); }
+  .cap-badge.cap-unknown, .cap-badge.cap-disabled { opacity:0.55; }
+  .escalation-badge { display:inline-block; padding:2px 6px; border-radius:12px; font-size:9px; font-weight:600; letter-spacing:0.5px; margin-left:4px; vertical-align:middle; background:#1F2532; border:1px solid #2D3647; color:#8899B0; }
+  .escalation-badge.esc-accepted { background:rgba(82,196,26,0.20); color:#52C41A; border-color:rgba(82,196,26,0.45); }
+  .escalation-badge.esc-partial { background:rgba(243,156,18,0.20); color:var(--risk-medium); border-color:rgba(243,156,18,0.45); }
+  .escalation-badge.esc-all_failed, .escalation-badge.esc-error { background:rgba(229,77,77,0.20); color:var(--risk-critical); border-color:rgba(229,77,77,0.45); }
+  .esc-trace-row { display:flex; gap:8px; font-size:11px; padding:4px 6px; border-bottom:1px solid #1E2531; }
+  .esc-trace-row:nth-child(even){ background:#10141C; }
+  .esc-trace-head { font-weight:600; font-size:11px; letter-spacing:0.5px; text-transform:uppercase; color:#6A7688; padding:4px 6px; }
+    /* Push integration buttons */
+    .push-actions { display:flex; flex-wrap:wrap; gap:6px; margin-top:12px; }
+    .push-actions .btn { font-size:11px; padding:6px 10px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header class="header">
+      <div class="logo-container">
+        <div class="logo" id="logo-inline">
+          <svg width="32" height="32" viewBox="0 0 64 64" fill="none">
+            <circle cx="32" cy="32" r="30" stroke="var(--accent-primary)" stroke-width="2"/>
+            <path d="M32 8 L32 56" stroke="var(--accent-primary)" stroke-width="1" opacity="0.3"/>
+            <path d="M20 24 Q20 20 24 20 L28 20 L28 44 Q28 48 24 48 L20 48 Z" fill="var(--accent-primary)" opacity="0.8"/>
+            <path d="M44 24 Q44 20 40 20 L36 20 L36 44 Q36 48 40 48 L44 48 Z" fill="var(--accent-primary)" opacity="0.8"/>
+          </svg>
+        </div>
+        <div class="logo-text">JanuSec</div>
+      </div>
+      <div class="header-stats">
+        <div class="stat-item"><span class="stat-label">Batch</span><span class="stat-value" id="stat-batch">—</span></div>
+        <div class="stat-item"><span class="stat-label">Artifacts</span><span class="stat-value" id="stat-artifacts">0</span></div>
+        <div class="stat-item"><span class="stat-label">High/Mal</span><span class="stat-value" id="stat-high">0</span></div>
+        <div class="status-indicator"><div class="status-dot" id="status-dot"></div><span id="status-text" style="font-size:12px;font-weight:500;">Idle</span></div>
+        <div id="capability-panel" style="display:flex;gap:6px;flex-wrap:wrap;margin-left:24px;max-width:420px;"></div>
+      </div>
+    </header>
+
+    <nav class="sidebar">
+      <div class="nav-icon active" title="Artifacts" id="nav-artifacts">A</div>
+      <div class="nav-icon" title="Clusters" id="nav-clusters">C</div>
+      <div class="nav-icon" title="Coverage" id="nav-coverage">M</div>
+      <div class="nav-icon" title="Prevalence" id="nav-prevalence">P</div>
+      <div class="nav-icon" title="Reports" id="nav-report">R</div>
+      <div class="nav-icon" title="Settings" id="nav-settings" style="margin-top:auto;">S</div>
+    </nav>
+
+    <main class="main-content">
+      <div class="toolbar">
+        <div class="search-box"><input id="search-input" placeholder="Search artifacts or factors..." /></div>
+        <div class="filter-chips">
+          <div class="chip active" data-filter="all" id="chip-all">All</div>
+          <div class="chip" data-filter="high" id="chip-high">High+ </div>
+          <div class="chip" data-filter="rare" id="chip-rare">Rare</div>
+          <div class="chip" data-filter="multi" id="chip-multi">Multi-Host</div>
+        </div>
+        <div class="action-buttons">
+          <button class="btn" id="btn-refresh">Refresh</button>
+          <button class="btn" id="btn-toggle-view" data-mode="top">View: Top</button>
+          <button class="btn" id="btn-export">Export MD</button>
+          <button class="btn" id="btn-monitoring">Monitoring</button>
+          <button class="btn" id="btn-business">Business</button>
+          <button class="btn btn-primary" id="btn-upload">Upload Batch</button>
+          <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text-muted);margin-left:12px;">
+            <input type="checkbox" id="auto-refresh" style="margin:0;"> Auto
+          </label>
+          <span id="last-refresh" style="font-size:11px;color:var(--text-muted);min-width:70px;text-align:right;">--:--:--</span>
+        </div>
+        <input type="file" id="file-input" style="display:none" multiple />
+      </div>
+      <div class="data-grid">
+        <div class="grid-header">
+          <div></div><div>Artifact</div><div>Type</div><div>Risk</div><div>Verdict</div><div>Hosts</div><div>MITRE</div><div>Factors</div>
+        </div>
+        <div id="artifact-rows"></div>
+        <div id="pagination" style="display:none;padding:8px 16px;display:flex;gap:12px;align-items:center;background:var(--bg-surface);border-top:1px solid var(--border-default);font-size:12px;">
+          <button class="btn" id="page-prev" style="padding:4px 10px;">Prev</button>
+          <span id="page-info" style="flex:0 0 auto;">Page 1 / 1</span>
+          <button class="btn" id="page-next" style="padding:4px 10px;">Next</button>
+          <span style="margin-left:auto;">Page Size:
+            <select id="page-size" style="background:var(--bg-surface-2);color:var(--text-primary);border:1px solid var(--border-default);padding:4px 6px;border-radius:4px;">
+              <option value="50">50</option>
+              <option value="100" selected>100</option>
+              <option value="250">250</option>
+              <option value="500">500</option>
+            </select>
+          </span>
+        </div>
+      </div>
+    </main>
+
+    <aside class="details-panel" id="detail-panel">
+      <div class="detachable" id="btn-detach" title="Open in new window">⇱ Pop-out</div>
+      <h3 class="panel-header">Artifact Intelligence</h3>
+      <div class="metric-grid">
+        <div class="metric-card"><div class="metric-value" id="detail-risk">—</div><div class="metric-label">Risk Score</div></div>
+        <div class="metric-card"><div class="metric-value" id="detail-hosts">—</div><div class="metric-label">Hosts</div></div>
+        <div class="metric-card"><div class="metric-value" id="detail-cluster">—</div><div class="metric-label">Cluster</div></div>
+        <div class="metric-card"><div class="metric-value" id="detail-rarity">—</div><div class="metric-label">Prevalence</div></div>
+      </div>
+      <div>
+        <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px;">SHA-256 Hash</div>
+        <div class="hash-display" id="detail-hash">(not available)</div>
+      </div>
+      <div class="factor-table">
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
+          <div class="factor-header" style="margin-bottom:0;">Details</div>
+          <div id="detail-tabs" style="margin-left:auto;display:flex;gap:4px;">
+            <button class="btn" data-tab="factors" id="tab-factors" style="padding:4px 10px;font-size:11px;">Factors</button>
+            <button class="btn" data-tab="nlp" id="tab-nlp" style="padding:4px 10px;font-size:11px;">NLP</button>
+          </div>
+        </div>
+        <div id="detail-factors" data-tabpanel="factors"></div>
+        <div id="detail-nlp" data-tabpanel="nlp" style="display:none;font-size:12px;line-height:1.4;"></div>
+      </div>
+      <div class="business-summary" id="business-summary" style="display:none;"></div>
+      <div class="business-summary" id="cost-summary" style="display:none; margin-top:8px;"></div>
+      <div class="nlp-panel" id="nlp-query-panel" style="display:none;">
+        <div style="font-size:12px;font-weight:600;margin-bottom:6px;">NLP Query</div>
+        <textarea id="nlp-input" placeholder="Ask: Summarize multi-host rare artifacts..."></textarea>
+        <div style="display:flex;align-items:center;gap:6px;margin-top:6px;">
+          <button class="btn" id="btn-nlp">Run Query</button>
+          <select id="nlp-history" style="flex:1;background:var(--bg-surface-2);color:var(--text-primary);border:1px solid var(--border-default);padding:4px 6px;border-radius:4px;font-size:11px;">
+            <option value="" disabled selected>History (last 5)...</option>
+          </select>
+        </div>
+        <div class="inline-note">Heuristic NLP (no external model cost). History stored locally.</div>
+      </div>
+      <div style="margin-top:16px;display:flex;flex-direction:column;gap:8px;">
+        <button class="btn btn-primary" id="btn-override">Override Verdict</button>
+        <button class="btn" id="btn-incident">Create Incident (Stub)</button>
+        <div class="push-actions">
+          <button class="btn" id="btn-push-slack" title="Push summary to Slack">Push Slack</button>
+          <button class="btn" id="btn-push-teams" title="Push summary to Teams">Push Teams</button>
+          <button class="btn" id="btn-push-webhook" title="Push summary to generic webhook">Push Webhook</button>
+          <button class="btn" id="btn-push-whatsapp" title="Push critical to WhatsApp">Push WhatsApp</button>
+          <button class="btn" id="btn-hash" title="Fetch integrity hash">Report Hash</button>
+        </div>
+        <div id="hash-display-inline" style="font-size:10px;color:var(--text-muted);word-break:break-all;display:none;"></div>
+      </div>
+      <div class="hunt-panel" id="hunt-panel">
+        <h4>Hunt Sidecar</h4>
+        <div style="display:flex;flex-direction:column;gap:6px;">
+          <label for="hunt-session-id">Session ID</label>
+          <input id="hunt-session-id" type="text" placeholder="e.g. hunt-2025-01" />
+          <label for="hunt-window">Window (hours)</label>
+          <input id="hunt-window" type="number" min="1" max="168" value="24" />
+          <div class="hunt-toggle">
+            <input type="checkbox" id="hunt-model-enabled" />
+            <label for="hunt-model-enabled" style="margin:0;text-transform:none;">Enable model escalation</label>
+          </div>
+        </div>
+        <div class="hunt-panel-controls">
+          <button class="btn btn-primary" id="btn-hunt-start">Start Hunt</button>
+          <button class="btn" id="btn-hunt-refresh">Refresh Progress</button>
+          <button class="btn" id="btn-hunt-download">Download Report</button>
+        </div>
+        <div class="inline-note">Hunts analyse recent decisions without impacting live ingest. Progress polls `/hunts/session/&lt;id&gt;/progress`.</div>
+        <div class="hunt-progress" id="hunt-progress">No hunt session started.</div>
+      </div>
+    </aside>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>

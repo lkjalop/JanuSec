@@ -19,7 +19,8 @@ mmh3>=4.0.0
 
 # Configuration and serialization
 PyYAML>=6.0
-pydantic>=2.0.0
+# NOTE: Codebase mixes v1/v2 styles in places; pin to <3.0. Adjust if strictly v2.
+pydantic>=2.0.0,<3.0
 
 # Database connections
 asyncpg>=0.29.0
@@ -31,7 +32,7 @@ structlog>=23.2.0
 
 # Security and cryptography
 cryptography>=41.0.0
-hashlib-compat>=1.0.0
+# hashlib is part of stdlib; removed hashlib-compat which is unnecessary
 
 # HTTP client with retries
 httpx>=0.25.0
@@ -60,5 +61,22 @@ matplotlib>=3.7.0
 seaborn>=0.12.0
 
 # Optional: Open-source transformer models (install if enabling oss models)
-transformers>=4.42.0  # optional
+transformers>=4.42.0  # optional (OSS models)
 torch>=2.2.0          # optional; consider CPU-only build if no GPU
+
+# API framework & server
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+openpyxl>=3.1.0
+requests>=2.31.0
+
+# Coverage reporting
+pytest-cov>=4.1.0
+
+# Integrations (comment in as needed)
+# slack_sdk>=3.27.0        # Slack notifications
+# twilio>=9.0.0            # WhatsApp/SMS alerts
+# msal>=1.28.0             # Advanced Teams auth flows
+
+# Windows note: uvloop not installed; if on Linux add:
+# uvloop>=0.19.0 ; platform_system != 'Windows'

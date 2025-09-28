@@ -25,7 +25,7 @@ python scripts/integrity_hash.py
 ## 4. Environment Variables (.env or compose override)
 | Key | Example | Required |
 |-----|---------|----------|
-| APP_DB_DSN | postgresql://postgres:postgres@db:5432/threatsifter | No (compose default) |
+| APP_DB_DSN | postgresql://postgres:postgres@db:5432/janusec | No (compose default; legacy threatsifter supported) |
 | API_KEYS_JSON | [{"key":"pilot123","scopes":["nlp.query","factors.search","feedback.write"]}] | Yes |
 | ACCESS_LOG_SAMPLE_RATE | 0.5 | No |
 | SLACK_WEBHOOK_URL | https://hooks.slack.com/services/... | Optional |

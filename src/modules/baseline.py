@@ -19,9 +19,31 @@ from collections import defaultdict
 import ipaddress
 import re
 
-# Efficient data structures
-from pybloom_live import BloomFilter
-import mmh3  # Fast hashing
+# Efficient data structures (with graceful fallbacks if optional deps missing)
+try:
+    from pybloom_live import BloomFilter  # type: ignore
+except ImportError:  # pragma: no cover - fallback path
+    class BloomFilter:  # Minimal stand‑in so the module still functions
+        """Very small in‑memory fallback when pybloom_live isn't installed.
+        NOTE: This behaves like a plain set (no probabilistic compression).
+        Suitable for dev only – install pybloom-live for memory efficiency & speed:
+            pip install pybloom-live
+        """
+        def __init__(self, capacity: int = 100000, error_rate: float = 0.001):  # noqa: D401
+            self._data = set()
+        def add(self, item):
+            self._data.add(item)
+        def __contains__(self, item):
+            return item in self._data
+
+try:
+    import mmh3  # type: ignore  # Fast hashing if available
+    def fast_hash(val: str) -> int:
+        return mmh3.hash(val)
+except ImportError:  # pragma: no cover
+    def fast_hash(val: str) -> int:
+        # Fallback – less uniform but acceptable for development use
+        return hash(val) & 0xffffffff
 
 
 @dataclass
@@ -268,20 +290,125 @@ class BaselineModule:
     async def _check_benign_patterns(self, event: Dict[str, Any]) -> float:
         """Check for known benign patterns"""
         benign_confidence = 0.0
-        
+
         # Check specific fields for benign indicators
         if 'process_name' in event:
             process_name = str(event['process_name']).lower()
-            
-            # Known benign processes
-            benign_processes = {
-                'explorer.exe', 'chrome.exe', 'firefox.exe', 'notepad.exe',
-                'winword.exe', 'excel.exe', 'outlook.exe', 'teams.exe'
+
+            # Microsoft Windows Security Components (HIGH CONFIDENCE)
+            microsoft_security_processes = {
+                'mpam-d.exe',           # Windows Defender antimalware
+                'mpam-fe_bd.exe',       # Windows Defender signatures
+                'msmpeng.exe',          # Windows Defender Antimalware Service
+                'mssense.exe',          # Windows Defender Advanced Threat Protection
+                'windefend.exe',        # Windows Defender Service
+                'mpcmdrun.exe',         # Windows Defender Command Line Utility
+                'nissrv.exe',           # Windows Defender Network Inspection Service
+                'trustedinstaller.exe', # Windows Trusted Installer
+                'svchost.exe',          # Windows Service Host
+                'wuauclt.exe',          # Windows Update Auto Update Client
+                'wudfhost.exe',         # Windows User-mode Driver Framework Host
+                'dwm.exe',              # Desktop Window Manager
+                'csrss.exe',            # Client Server Runtime Process
+                'lsass.exe',            # Local Security Authority Subsystem Service
+                'winlogon.exe',         # Windows Logon Process
+                'smss.exe',             # Session Manager Subsystem
+                'services.exe',         # Services Control Manager
+                'system'                # System process
             }
-            
-            if process_name in benign_processes:
-                benign_confidence = max(benign_confidence, 0.2)
-        
+
+            if process_name in microsoft_security_processes:
+                benign_confidence = max(benign_confidence, 0.8)  # High confidence for MS security
+
+            # Windows Built-in Tools and Utilities
+            windows_builtin_tools = {
+                'snippingtool.exe',     # Snipping Tool
+                'calc.exe',             # Calculator
+                'notepad.exe',          # Notepad
+                'mspaint.exe',          # MS Paint
+                'wordpad.exe',          # WordPad
+                'charmap.exe',          # Character Map
+                'cleanmgr.exe',         # Disk Cleanup
+                'defrag.exe',           # Disk Defragmenter
+                'dxdiag.exe',           # DirectX Diagnostic Tool
+                'msconfig.exe',         # System Configuration
+                'msinfo32.exe',         # System Information
+                'regedit.exe',          # Registry Editor
+                'taskmgr.exe',          # Task Manager
+                'control.exe',          # Control Panel
+                'explorer.exe'          # Windows Explorer
+            }
+
+            if process_name in windows_builtin_tools:
+                benign_confidence = max(benign_confidence, 0.6)  # Good confidence for built-in tools
+
+            # Common legitimate applications
+            common_legitimate_processes = {
+                'chrome.exe', 'firefox.exe', 'edge.exe', 'iexplore.exe',
+                'winword.exe', 'excel.exe', 'outlook.exe', 'powerpnt.exe',
+                'teams.exe', 'skype.exe', 'zoom.exe',
+                'adobe.exe', 'acrobat.exe', 'photoshop.exe',
+                'steam.exe', 'discord.exe', 'spotify.exe'
+            }
+
+            if process_name in common_legitimate_processes:
+                benign_confidence = max(benign_confidence, 0.4)  # Moderate confidence
+
+        # Check file path patterns for legitimate software locations
+        if 'process_path' in event or 'path' in event:
+            file_path = str(event.get('process_path', event.get('path', ''))).lower()
+
+            # Microsoft/Windows system directories (HIGH TRUST)
+            microsoft_paths = [
+                'c:\\windows\\system32\\',
+                'c:\\windows\\syswow64\\',
+                'c:\\windows\\systemtemp\\',
+                'c:\\windows\\temp\\',
+                'c:\\windows\\softwaredistribution\\',
+                'c:\\program files\\windows defender\\',
+                'c:\\program files (x86)\\windows defender\\',
+                'c:\\programdata\\microsoft\\windows defender\\'
+            ]
+
+            if any(file_path.startswith(path) for path in microsoft_paths):
+                benign_confidence = max(benign_confidence, 0.7)  # High confidence for MS paths
+
+            # Known legitimate software vendors
+            trusted_vendor_paths = [
+                'c:\\program files\\microsoft',
+                'c:\\program files (x86)\\microsoft',
+                'c:\\program files\\google\\',
+                'c:\\program files (x86)\\google\\',
+                'c:\\program files\\mozilla\\',
+                'c:\\program files (x86)\\mozilla\\',
+                'c:\\program files\\adobe\\',
+                'c:\\program files (x86)\\adobe\\',
+                'c:\\program files\\teamviewer\\',
+                'c:\\program files (x86)\\teamviewer\\',
+                'c:\\program files\\epson\\',
+                'c:\\program files (x86)\\epson\\'
+            ]
+
+            if any(file_path.startswith(path) for path in trusted_vendor_paths):
+                benign_confidence = max(benign_confidence, 0.5)  # Good confidence for trusted vendors
+
+        # Check digital signature information if available
+        if 'signed' in event and event['signed']:
+            if 'signer' in event:
+                signer = str(event['signer']).lower()
+                trusted_signers = {
+                    'microsoft corporation',
+                    'microsoft windows',
+                    'google llc',
+                    'mozilla corporation',
+                    'adobe systems incorporated',
+                    'teamviewer gmbh',
+                    'epson corporation'
+                }
+
+                if any(trusted in signer for trusted in trusted_signers):
+                    benign_confidence = max(benign_confidence, 0.6)  # Good confidence for trusted signers
+
         # Check for internal IP patterns
         if 'src_ip' in event:
             try:
