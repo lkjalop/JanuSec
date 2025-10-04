@@ -1,6 +1,8 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { getJSON, postJSON, apiBase } from './api.js';
 import { tenantHeaders } from './api.js';
+// Build-time env for gating overview sampler (Vite)
+const SAMPLER_ENABLED = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_OVERVIEW_SAMPLER === '1');
 
 // SVG Icons
 const SearchIcon = () => (
@@ -1008,7 +1010,7 @@ const EstimatorCard = ({ addToast }) => {
 export const ArtifactIntelligencePlatform = () => {
   // Periodic FinOps overview sampling (env-guarded)
   useEffect(() => {
-    const enabled = window?.JANUSEC_OVERVIEW_SAMPLER === true;
+  const enabled = SAMPLER_ENABLED === true;
     if (!enabled) return;
     let cancelled = false;
     const sampleOverview = async () => {
