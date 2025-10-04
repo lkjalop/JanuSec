@@ -1247,15 +1247,25 @@ export const ArtifactIntelligencePlatform = () => {
           } catch(_){ }
           // Load FinOps metrics in parallel (best-effort)
           try {
-            const [o,l,dly,f,a,h] = await Promise.all([
-              getJSON('/api/v1/finops/overview').catch(()=>null),
-              getJSON('/api/v1/finops/ledger').catch(()=>null),
-              getJSON('/api/v1/finops/daily').catch(()=>null),
-              getJSON('/api/v1/finops/forecast').catch(()=>null),
-              getJSON('/api/v1/finops/accuracy?limit=15').catch(()=>null),
-              getJSON('/api/v1/finops/history?limit=60').catch(()=>null),
-            ]);
-            if(!cancelled) setFinops({ overview:o, ledger:l, daily:dly, forecast:f, accuracy:a, history:h });
+            let usedSummary = false;
+            try {
+              const s = await getJSON('/api/v1/finops/cost_summary', { headers: tenantHeaders(tenant) });
+              if (!cancelled && s && (s.overview || s.daily || s.forecast)) {
+                setFinops({ overview: s.overview || null, ledger: null, daily: s.daily || null, forecast: s.forecast || null, accuracy: null, history: null });
+                usedSummary = true;
+              }
+            } catch(_){ /* fallback to per-endpoint */ }
+            if (!usedSummary) {
+              const [o,l,dly,f,a,h] = await Promise.all([
+                getJSON('/api/v1/finops/overview').catch(()=>null),
+                getJSON('/api/v1/finops/ledger').catch(()=>null),
+                getJSON('/api/v1/finops/daily').catch(()=>null),
+                getJSON('/api/v1/finops/forecast').catch(()=>null),
+                getJSON('/api/v1/finops/accuracy?limit=15').catch(()=>null),
+                getJSON('/api/v1/finops/history?limit=60').catch(()=>null),
+              ]);
+              if(!cancelled) setFinops({ overview:o, ledger:l, daily:dly, forecast:f, accuracy:a, history:h });
+            }
           } catch(_){}
         }
       } catch(err){ if(!cancelled) setErrorMsg(err.message || 'load error'); }
