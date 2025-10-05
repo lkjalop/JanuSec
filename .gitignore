@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.retry
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDEs & tooling
+.vscode/
+.idea/
+.pytest_cache/
+.mypy_cache/
+coverage.xml
+htmlcov/
+.pyre/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs & temp
+*.log
+*.tmp
+artifacts/
+
+# Node
+node_modules/
+
+# Docker
+*.pid
+
+# Build outputs
+build/
+dist/
+*.egg-info/
+
+# Notebooks checkpoints
+.ipynb_checkpoints/
