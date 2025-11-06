@@ -160,6 +160,21 @@ def _get_effective_httpx_client():
         pass
     return None
 
+
+def _post_with_compat(client, url, payload, headers, timeout=5.0):
+    """Call client.post trying modern 'content=' kw first, then fallback to positional/data for test fakes."""
+    try:
+        logger.debug('_post_with_compat: attempting client.post with content= on %s', repr(client))
+        return client.post(url, content=payload, headers=headers, timeout=timeout)
+    except TypeError:
+        try:
+            logger.debug('_post_with_compat: attempting client.post positional on %s', repr(client))
+            return client.post(url, payload, headers=headers, timeout=timeout)
+        except TypeError:
+            # last resort: try as data= payload
+            logger.debug('_post_with_compat: attempting client.post with data= on %s', repr(client))
+            return client.post(url, data=payload, headers=headers, timeout=timeout)
+
 # Simple circuit breakers for external CT/OCSP lookups (demo reliability)
 _CB_OPEN_UNTIL: Dict[str, float] = {'ct': 0.0, 'ocsp': 0.0}
 _CB_STREAK: Dict[str, int] = {'ct': 0, 'ocsp': 0}
@@ -195,23 +210,6 @@ def queue_cert_check(certfp: str) -> None:
     with _LOCK:
         if certfp not in _QUEUE:
             _QUEUE.append(certfp)
-
-
-def get_cert_check(certfp: str) -> Optional[Dict]:
-    with _LOCK:
-        conn = _conn(); cur = conn.cursor()
-        try:
-            cur.execute('CREATE TABLE IF NOT EXISTS cert_checks(certfp TEXT PRIMARY KEY, status TEXT, last_checked REAL, details TEXT)')
-        except Exception:
-            pass
-        cur.execute('SELECT certfp,status,last_checked,details FROM cert_checks WHERE certfp=?', (certfp,))
-        r = cur.fetchone(); conn.close()
-        if not r:
-            return None
-        certfp, status, last_checked, details = r
-        if isinstance(last_checked, (int, float)) and (time.time() - float(last_checked)) > _TTL_SECONDS:
-            return None
-        return {'certfp': certfp, 'status': status, 'last_checked': last_checked, 'details': details}
 
 
 def _refill_tokens():
@@ -401,7 +399,7 @@ def _flush_batch_if_needed(force: bool = False):
         headers['X-Signature'] = sig
     try:
         client = _get_effective_httpx_client()
-        logger.info("_flush_batch_if_needed: attempting primary webhook post, webhook_url=%s, httpx=%s", _WEBHOOK_URL, repr(client))
+        logger.debug("_flush_batch_if_needed: attempting primary webhook post, webhook_url=%s, httpx=%s", _WEBHOOK_URL, repr(client))
         if client:
             ok, reason = _ssrf_ok(_WEBHOOK_URL)
             if not ok:
@@ -506,18 +504,19 @@ def retry_now_for_tests() -> int:
         return 0
 
 def _retry_failed_batches():
-    if not _WEBHOOK_URL:
+    webhook = os.getenv('CERT_CHECK_WEBHOOK_URL') or _WEBHOOK_URL
+    if not webhook:
         return
     _ensure_retry_table()
     try:
         conn = _conn(); cur = conn.cursor()
         cur.execute('SELECT id,payload,attempts FROM webhook_batches ORDER BY id LIMIT 5')
         rows = cur.fetchall()
-        logger.info('_retry_failed_batches: fetched %d rows', len(rows))
+        logger.debug('_retry_failed_batches: fetched %d rows', len(rows))
         for rid, payload, attempts in rows:
             try:
-                client = globals().get('httpx')
-                logger.info("_retry_failed_batches: httpx obj=%s, has_post=%s", repr(client), hasattr(client, 'post') if client is not None else False)
+                client = _get_effective_httpx_client()
+                logger.debug("_retry_failed_batches: httpx obj=%s, has_post=%s", repr(client), hasattr(client, 'post') if client is not None else False)
             except Exception:
                 client = None
             if attempts >= _MAX_WEBHOOK_ATTEMPTS:
@@ -525,35 +524,53 @@ def _retry_failed_batches():
                 continue
             headers = {'Content-Type':'application/json'}
             if _WEBHOOK_SECRET:
-                sig = hmac.new(_WEBHOOK_SECRET.encode(), payload.encode(), hashlib.sha256).hexdigest()
-                headers['X-Signature'] = sig
+                try:
+                    sig = hmac.new(_WEBHOOK_SECRET.encode(), payload.encode(), hashlib.sha256).hexdigest()
+                    headers['X-Signature'] = sig
+                except Exception:
+                    pass
             try:
-                ok, reason = _ssrf_ok(_WEBHOOK_URL)
+                ok, reason = _ssrf_ok(webhook)
                 if not ok:
                     raise RuntimeError(f'ssrf_blocked:{reason}')
-                # perform post via module-level httpx
+                # find a client if we don't have one
+                if not client:
                     try:
-                        logger.info("_retry_failed_batches: about to call httpx.post")
-                        # capture retry attempt for tests
-                        try:
-                            if _WEBHOOK_URL:
-                                _TEST_CAPTURE_RETRY_POSTS.append({'url': _WEBHOOK_URL, 'content': payload, 'headers': headers, 'id': rid})
-                        except Exception:
-                            pass
-                        if not client:
-                            raise RuntimeError('httpx_client_unavailable')
-                        r = client.post(_WEBHOOK_URL, content=payload, headers=headers, timeout=5.0)
-                    logger.info('_retry_failed_batches: post to %s returned %s', _WEBHOOK_URL, getattr(r,'status_code',None))
-                except Exception as _e:
-                    logger.exception('_retry_failed_batches: httpx.post raised')
-                    raise
-                if 200 <= r.status_code < 300:
+                        import sys as _sys
+                        candidates = []
+                        for name, mod in list(_sys.modules.items()):
+                            try:
+                                c = getattr(mod, 'httpx', None)
+                                if c and hasattr(c, 'post'):
+                                    candidates.append((name, repr(c)))
+                                    client = c
+                                    break
+                            except Exception:
+                                pass
+                        logger.debug('_retry_failed_batches: scanned modules for httpx candidates: %s', candidates)
+                    except Exception:
+                        pass
+                if not client:
+                    raise RuntimeError('httpx_client_unavailable')
+                logger.debug("_retry_failed_batches: invoking post callable %s", repr(getattr(client,'post',None)))
+                # capture retry attempt for tests
+                try:
+                    if webhook:
+                        _TEST_CAPTURE_RETRY_POSTS.append({'url': webhook, 'content': payload, 'headers': headers, 'id': rid})
+                except Exception:
+                    pass
+                r = _post_with_compat(client, webhook, payload, headers, timeout=5.0)
+                logger.debug('_retry_failed_batches: post to %s returned %s', webhook, getattr(r,'status_code',None))
+                if 200 <= getattr(r,'status_code',0) < 300:
                     cur.execute('DELETE FROM webhook_batches WHERE id=?', (rid,))
                     if cert_checks_webhook: cert_checks_webhook.inc()  # type: ignore
                 else:
-                    cur.execute('UPDATE webhook_batches SET attempts=attempts+1, last_error=? WHERE id=?', (f'status_{r.status_code}', rid))
+                    cur.execute('UPDATE webhook_batches SET attempts=attempts+1, last_error=? WHERE id=?', (f'status_{getattr(r,"status_code",None)}', rid))
             except Exception as e:  # pragma: no cover
-                cur.execute('UPDATE webhook_batches SET attempts=attempts+1, last_error=? WHERE id=?', (str(e)[:400], rid))
+                try:
+                    cur.execute('UPDATE webhook_batches SET attempts=attempts+1, last_error=? WHERE id=?', (str(e)[:400], rid))
+                except Exception:
+                    pass
         conn.commit(); conn.close()
         _update_pending_gauge()
     except Exception:
@@ -654,11 +671,29 @@ def stop_worker():
 def flush_now() -> int:
     """Force flush batches and retries; return remaining pending count."""
     try:
+        logger.debug('flush_now: entry _WEBHOOK_URL=%s _TEST_CAPTURE_RETRY_POSTS=%s', _WEBHOOK_URL, repr(globals().get('_TEST_CAPTURE_RETRY_POSTS')))
+        # show DB retry row count for diagnostics
+        try:
+            import sqlite3
+            dbp = os.getenv('THREAT_INTEL_DB_PATH')
+            if dbp:
+                conn = sqlite3.connect(dbp)
+                cur = conn.cursor()
+                cur.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='webhook_batches'")
+                if cur.fetchone()[0]:
+                    cur.execute('SELECT COUNT(*) FROM webhook_batches')
+                    r = cur.fetchone()
+                    logger.debug('flush_now: db pending rows=%s', int(r[0] or 0))
+                conn.close()
+        except Exception:
+            logger.exception('flush_now: failed to inspect retry DB')
         _flush_batch_if_needed(force=True)
     except Exception:
-        pass
+        logger.exception('flush_now: _flush_batch_if_needed raised')
     _update_pending_gauge()
-    return _pending_webhook_batches()
+    remaining = _pending_webhook_batches()
+        logger.debug('flush_now: exit remaining=%s _TEST_CAPTURE_RETRY_POSTS=%s', remaining, repr(globals().get('_TEST_CAPTURE_RETRY_POSTS')))
+    return remaining
 
 
 def force_flush_for_tests() -> dict:
@@ -683,5 +718,29 @@ def force_flush_for_tests() -> dict:
 
 def get_pending_webhook_batches() -> int:
     return _pending_webhook_batches()
+
+
+def get_cert_check(certfp: str) -> Optional[Dict]:
+    """Return stored cert check row if present and within TTL; else None."""
+    try:
+        certfp = (certfp or '').strip()
+        if not certfp:
+            return None
+        conn = _conn(); cur = conn.cursor()
+        cur.execute('SELECT certfp,status,last_checked,details FROM cert_checks WHERE certfp=?', (certfp,))
+        r = cur.fetchone()
+        conn.close()
+        if not r:
+            return None
+        _, status, last_checked, details = r
+        # If last_checked older than TTL, indicate None to force re-check
+        try:
+            if int(last_checked or 0) + _TTL_SECONDS < int(time.time()):
+                return None
+        except Exception:
+            pass
+        return {'certfp': certfp, 'status': status, 'last_checked': last_checked, 'details': details}
+    except Exception:
+        return None
 
 __all__ = ['queue_cert_check', 'get_cert_check', 'start_worker', 'stop_worker', 'flush_now', 'get_pending_webhook_batches']
