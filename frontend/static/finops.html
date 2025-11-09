@@ -1,0 +1,132 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>FinOps / Budget</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root { --bg:#0b0f15; --card:#0f1620; --text:#e6eef8; --muted:#8aa1b4; --accent:#4cc2ff; --ok:#3ddc97; --warn:#ffcc00; --err:#ff6b6b; }
+    body{background:var(--bg);color:var(--text);font-family:system-ui,Segoe UI,Roboto,Arial;margin:0}
+    .wrap{max-width:980px;margin:24px auto;padding:16px}
+    h1{font-size:20px;margin:0 0 12px}
+    .card{background:var(--card);padding:16px;border-radius:8px;margin-bottom:12px}
+    label{display:block;margin:8px 0 4px;color:var(--muted)}
+    input,button{background:#0b1320;color:var(--text);border:1px solid #233447;border-radius:6px;padding:8px}
+    .row{display:flex;gap:12px}
+    .col{flex:1}
+    .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+    .kpi{background:#0b1320;border:1px solid #233447;border-radius:6px;padding:12px}
+    .muted{color:var(--muted)}
+    table{width:100%;border-collapse:collapse;margin-top:8px}
+    th,td{border:1px solid #233447;padding:6px 8px;text-align:left;font-size:12px}
+    th{color:var(--muted);background:#0b1320}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>FinOps / Budget</h1>
+    <div class="card">
+      <div class="grid">
+        <div class="kpi"><div class="muted">Points</div><div id="points">-</div></div>
+        <div class="kpi"><div class="muted">Latest Cost</div><div id="latest">-</div></div>
+        <div class="kpi"><div class="muted">EWMA</div><div id="ewma">-</div></div>
+      </div>
+      <div class="grid" style="margin-top:12px">
+        <div class="kpi"><div class="muted">Threshold</div><div id="thr">-</div></div>
+        <div class="kpi"><div class="muted">Anomaly</div><div id="anom">-</div></div>
+        <div class="kpi"><div class="muted">Tenant</div><div id="tenant">all</div></div>
+      </div>
+    </div>
+    <div class="card">
+      <h3 style="margin:0 0 8px">Set Budget</h3>
+      <div class="row">
+        <div class="col">
+          <label>Monthly USD</label>
+          <input id="bMonthly" type="number" step="0.01" />
+        </div>
+        <div class="col">
+          <label>Daily USD</label>
+          <input id="bDaily" type="number" step="0.01" />
+        </div>
+        <div class="col">
+          <label><input type="checkbox" id="bBlock" /> Block on exceed</label>
+        </div>
+      </div>
+      <div style="margin-top:8px">
+        <button onclick="saveBudget()">Save Budget</button>
+      </div>
+    </div>
+    <div class="card">
+      <h3 style="margin:0 0 8px">Inference Cost Ledger (summary)</h3>
+      <div class="muted">Most recent summary of inference paths and token usage.</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px">
+        <div class="muted">Last 12 summaries</div>
+        <div>
+          <button id="runTestBtn" onclick="runTestCall()">Run test call</button>
+        </div>
+      </div>
+      <div id="ledgerBox">
+        <div class="muted">Loading…</div>
+      </div>
+    </div>
+  </div>
+  <script>
+    function safeNotify(msg, level){ try{ if(window.showNotification) return window.showNotification(msg, level); if(window.notifications && typeof window.notifications.showToast === 'function') return window.notifications.showToast(msg, 4000); console.log('[notify]', level||'info', msg); }catch(e){ console.log('notify-fail', e, msg); } }
+    const apiKey = localStorage.getItem('apiKey') || 'devkey123';
+    const hdrs = {'Content-Type':'application/json','x-api-key':apiKey};
+    async function load(){
+      const r = await fetch('/api/v1/finops/overview',{headers: hdrs});
+      const j = await r.json();
+      document.getElementById('points').innerText = j.points;
+      document.getElementById('latest').innerText = (j.latest_cost==null?'-':j.latest_cost.toFixed(4));
+      document.getElementById('ewma').innerText = (j.ewma==null?'-':j.ewma.toFixed(4));
+      document.getElementById('thr').innerText = (j.ewma_threshold==null?'-':j.ewma_threshold.toFixed(4));
+      document.getElementById('anom').innerText = j.anomaly_flag?'Yes':'No';
+    }
+    async function saveBudget(){
+      const payload = {
+        monthly_usd: parseFloat(document.getElementById('bMonthly').value||'0'),
+        daily_usd: parseFloat(document.getElementById('bDaily').value||'0'),
+        block_on_exceed: document.getElementById('bBlock').checked,
+        per_task_caps: {}
+      };
+      await fetch('/api/v1/finops/budget',{method:'POST', headers: hdrs, body: JSON.stringify(payload)});
+      safeNotify('Budget saved','success');
+      load();
+    }
+    async function loadLedger(){
+      try{
+        const r = await fetch('/api/v1/finops/ledger',{headers: hdrs});
+        const j = await r.json();
+        const rows = (j.inference_summary||[]).slice(-12); // last N rows
+        const host = document.getElementById('ledgerBox');
+        if(!rows.length){ host.innerHTML = '<div class="muted">No ledger data</div>'; return; }
+        const html = [
+          '<table><thead><tr>',
+          '<th>Tier</th><th>Path</th><th>Calls</th><th>Avg Latency (ms)</th><th>Tokens</th>',
+          '</tr></thead><tbody>',
+          rows.map(r=>`<tr><td>${r.tier}</td><td>${r.path}</td><td>${r.calls}</td><td>${r.avg_latency_ms}</td><td>${r.tokens}</td></tr>`).join(''),
+          '</tbody></table>'
+        ].join('');
+        host.innerHTML = html;
+      }catch(e){
+        document.getElementById('ledgerBox').innerHTML = '<div class="muted">Failed to load ledger</div>';
+      }
+    }
+    async function runTestCall(){
+      try{
+        document.getElementById('runTestBtn').disabled = true;
+        const payload = { provider: 'openai', tenant: 'default', mock: true, text: 'finops test' };
+        const r = await fetch('/api/v1/ai/force_external',{method:'POST', headers: hdrs, body: JSON.stringify(payload)});
+        const j = await r.json();
+        if(!r.ok){ safeNotify('Test call failed: '+(j.detail||JSON.stringify(j)),'error'); }
+        // small delay to allow ledger snapshot to be appended by server
+        setTimeout(()=>{ loadLedger(); document.getElementById('runTestBtn').disabled = false; }, 350);
+      }catch(e){ safeNotify('Test call error: '+e,'error'); document.getElementById('runTestBtn').disabled = false; }
+    }
+    load();
+    loadLedger();
+  </script>
+  <script src="/static/js/notifications.js"></script>
+</body>
+</html>

@@ -20,6 +20,8 @@
   let huntPollTimer = null;
 
   // ---------- Helpers ----------
+  // Non-blocking notification shim for headless / test environments
+  function safeNotify(msg, level){ try{ if(window.showNotification) return window.showNotification(msg, level); if(window.notifications && typeof window.notifications.showToast === 'function') return window.notifications.showToast(msg, 4000); console.log('[notify]', level||'info', msg); }catch(e){ console.log('notify-fail', e, msg); } }
   function qs(id){ return document.getElementById(id); }
   function authHeaders(){
     const h={'Accept':'application/json'};
@@ -155,12 +157,12 @@
   function downloadHuntReport(format='markdown'){
     const sessionInput = qs('hunt-session-id');
     if(!sessionInput){
-      alert('Hunt panel unavailable');
+      safeNotify('Hunt panel unavailable','error');
       return;
     }
     const sessionId = (sessionInput.value||'').trim();
     if(!sessionId){
-      alert('Provide a session id before downloading a report.');
+      safeNotify('Provide a session id before downloading a report.','error');
       return;
     }
     const url = huntsUrl(`/hunts/report/${encodeURIComponent(sessionId)}?format=${encodeURIComponent(format)}`);
@@ -297,6 +299,7 @@
       const riskCls = verdictClass(a.verdict);
       const mitreTags = (a.mitre||[]).slice(0,4).map(m=>`<span class="mitre-tag">${m}</span>`).join('');
       const hostCount = a.host_count!=null ? a.host_count : '—';
+      const dreadSeverity = a.dread_severity || (a.dread && a.dread_score!=null ? (a.dread_score>=0.66?'high':(a.dread_score>=0.33?'medium':'low')) : null);
       const factorIds = (a.factor_contributions||[]).map(f=>f.factor_id);
       const factorsShort = (a.factors&&a.factors.length?a.factors:factorIds).slice(0,6).join(' • ');
       const displayName = a.name || a.indicator || (a.path||'').split(/[\\/]/).pop() || a.artifact_id;
@@ -327,6 +330,7 @@
   <div><span class="verdict-badge" style="color:inherit;">${a.verdict}</span> ${confBadge} ${escBadge}</div>
         <div class="hosts-count">${hostCount}</div>
         <div class="mitre-tags">${mitreTags || '-'}</div>
+        <div style="font-size:12px;">${dreadSeverity?`<span class="dread-badge dread-${dreadSeverity}">${dreadSeverity.toUpperCase()}</span>`:'-'}</div>
         <div style="font-size:11px;color:var(--text-muted);">${escapeHtml(factorsShort)}</div>`;
       row.addEventListener('click',()=>{
         SELECTED_ID = a.artifact_id;
@@ -350,6 +354,26 @@
     qs('detail-cluster').textContent = a && a.cluster_id ? `#${a.cluster_id}` : '—';
     qs('detail-rarity').textContent = a && (a.rarity!=null) ? (typeof a.rarity==='number'?a.rarity.toFixed(3):a.rarity) : '—';
     qs('detail-hash').textContent = a && a.sha256 ? a.sha256 : '(not available)';
+    // DREAD breakdown
+    try {
+      const dd = qs('detail-dread');
+      if (dd) {
+        dd.innerHTML = '';
+        if (a && (a.dread || a.dread_score != null)) {
+          const score = a.dread_score != null ? (Math.round(a.dread_score * 100) / 100) : '—';
+          dd.innerHTML = `<div><strong>DREAD</strong>: ${score} <em>${a.dread_severity || ''}</em></div>`;
+          if (a.dread && typeof a.dread === 'object') {
+            const ul = document.createElement('ul'); ul.style.margin = '6px 0 0 0'; ul.style.paddingLeft = '18px';
+            for (const k of Object.keys(a.dread)) {
+              const li = document.createElement('li'); li.textContent = `${k}: ${a.dread[k]}`; ul.appendChild(li);
+            }
+            dd.appendChild(ul);
+          }
+        } else {
+          dd.innerHTML = '<div style="color:var(--text-muted);">DREAD not available</div>';
+        }
+      }
+    } catch (e) { /* ignore */ }
     const fac = qs('detail-factors');
     if(fac){
       fac.innerHTML='';
@@ -473,8 +497,8 @@
       });
       if(!r.ok) throw new Error(await r.text());
       const data = await r.json();
-      alert('Pushed to: '+data.pushed.join(', '));
-    } catch(e){ alert('Push failed: '+e.message); }
+      safeNotify('Pushed to: '+data.pushed.join(', '),'success');
+    } catch(e){ safeNotify('Push failed: '+e.message,'error'); }
   }
 
   async function fetchReportHash(){
@@ -484,7 +508,7 @@
       const j = await r.json();
       const el = qs('hash-display-inline');
       if(el){ el.style.display='block'; el.textContent = `Hash: ${j.hash}`; }
-    } catch(e){ alert('Hash fetch failed: '+e.message); }
+    } catch(e){ safeNotify('Hash fetch failed: '+e.message,'error'); }
   }
 
   function initSSE(){
@@ -536,7 +560,7 @@
   }
 
   async function applyOverride(){
-    if(!SELECTED_ID){ alert('Select an artifact first'); return; }
+    if(!SELECTED_ID){ safeNotify('Select an artifact first','error'); return; }
     const verdict = prompt('Enter new verdict (BENIGN|LOW|SUSPICIOUS|HIGH|MALICIOUS):');
     if(!verdict) return;
     const comment = prompt('Rationale (optional):')||'';
@@ -552,12 +576,12 @@
           .forEach(a=>{ if(a.artifact_id===SELECTED_ID) a.verdict = verdict; });
         renderArtifacts();
       }
-      alert('Override submitted');
-    } catch(e){ alert('Override failed: '+e.message); }
+      safeNotify('Override submitted','success');
+    } catch(e){ safeNotify('Override failed: '+e.message,'error'); }
   }
 
   function detachPanel(){
-    if(!SELECTED_ID){ alert('Select an artifact first'); return; }
+    if(!SELECTED_ID){ safeNotify('Select an artifact first','error'); return; }
     const art = [...(REPORT?.top_risky||[]), ...(REPORT?.all_artifacts||[])].find(a=>a.artifact_id===SELECTED_ID);
     const w = window.open('', '_blank','width=520,height=720');
     if(!w) return;
@@ -596,7 +620,7 @@
         });
       } catch(err){ console.warn('parse fail', f.name, err); }
     }
-    if(!items.length){ alert('No CSV indicators parsed'); return; }
+    if(!items.length){ safeNotify('No CSV indicators parsed','error'); return; }
     try {
       const r=await fetch(`${API_BASE}/artifacts/analyze_batch`, {
         method:'POST',
@@ -605,8 +629,8 @@
       });
       if(!r.ok) throw new Error(await r.text());
       const data=await r.json();
-      alert('Batch submitted. Batch ID: '+(data.batch_id||'n/a'));
-    } catch(err){ alert('Batch error: '+err.message); }
+      safeNotify('Batch submitted. Batch ID: '+(data.batch_id||'n/a'),'success');
+    } catch(err){ safeNotify('Batch error: '+err.message,'error'); }
   }
 
   async function refreshCostSummaryIfVisible(){
@@ -677,7 +701,7 @@
           const panel = qs('detail-nlp');
           if(panel) panel.innerHTML = `<pre style="font-size:11px;white-space:pre-wrap;">${escapeHtml(JSON.stringify(res,null,2))}</pre>`;
           switchTab('nlp');
-        } catch(err){ alert('NLP failed: '+err.message); }
+        } catch(err){ safeNotify('NLP failed: '+err.message,'error'); }
         finally { nlpBtn.disabled=false; nlpBtn.textContent=orig; }
       });
       renderNlpHistory();
@@ -728,7 +752,7 @@
     qs('btn-hunt-start')?.addEventListener('click', startHunt);
     qs('btn-hunt-refresh')?.addEventListener('click', ()=>{
       const sid = (qs('hunt-session-id')?.value||'').trim();
-      fetchHuntProgress(sid).catch(err=> alert('Progress error: '+err.message));
+      fetchHuntProgress(sid).catch(err=> safeNotify('Progress error: '+err.message,'error'));
     });
     qs('btn-hunt-download')?.addEventListener('click', ()=> downloadHuntReport('markdown'));
 

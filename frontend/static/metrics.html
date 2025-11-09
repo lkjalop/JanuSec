@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8"/>
+	<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+	<title>Metrics</title>
+	<link rel="stylesheet" href="/static/css/tokens.css"/>
+	<link rel="stylesheet" href="/static/css/components.css"/>
+	<link rel="stylesheet" href="/static/css/responsive.css"/>
+	<style>
+		.kv { display:grid; grid-template-columns:220px 1fr; gap: var(--space-2); }
+		.actions-row { display:flex; flex-wrap:wrap; gap: var(--space-2); margin-bottom: var(--space-3); }
+		.btn { background: var(--color-bg-tertiary); border:1px solid var(--color-border); color: var(--color-text-secondary); padding:6px 12px; font-size: var(--font-size-sm); border-radius: var(--radius-sm); cursor:pointer; }
+		.btn:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
+		h2 { margin: var(--space-2) 0 var(--space-3); font-size: var(--font-size-lg); }
+		.kv div:nth-child(odd){ color: var(--color-text-muted); }
+	</style>
+</head>
+<body class="with-topbar">
+	<a href="#contentWrapper" class="skip-link">Skip to content</a>
+	<div class="page-root">
+		<div class="actions-row">
+			<a class="btn" href="/static/janusec-platform-complete-LIVE.html">← Console</a>
+			<a class="btn" href="/static/hunt_network.html">Network</a>
+			<a class="btn" href="/static/hunt_endpoint.html">Endpoint</a>
+			<a class="btn" href="/static/integrations.html">Integrations</a>
+			<a class="btn" href="/static/sbom.html">SBOM</a>
+			<button class="btn" id="btnRefresh">Refresh</button>
+		</div>
+		<h2>Metrics (Queues / Ingest / Detection / Cost)</h2>
+		<div class="panel" id="metricsPanel">
+			<div class="skeleton skeleton-line" style="width:60%"></div>
+			<div class="skeleton skeleton-line" style="width:40%"></div>
+			<div class="skeleton skeleton-line" style="width:50%"></div>
+		</div>
+		<div class="panel" id="costPanel">
+			<h3 style="margin-top:0">Cost Summary</h3>
+			<div id="cost" class="kv"></div>
+		</div>
+	</div>
+	<script>
+		function authHeaders(){ try{ const k=localStorage.getItem('apiKey')||'devkey123'; return { 'x-api-key': k }; }catch(_){ return { 'x-api-key':'devkey123' }; } }
+		async function loadMetrics(){
+			const panel = document.getElementById('metricsPanel');
+			const kvWrap = document.createElement('div'); kvWrap.className='kv';
+			try{
+				const dashResp = await safeFetch('/api/v1/status/dashboard',{ headers: authHeaders() });
+				const dash = dashResp.ok ? await dashResp.json() : {};
+				const costResp = await safeFetch('/api/v1/finops/cost_summary',{ headers: authHeaders() });
+				const costData = costResp.ok ? await costResp.json() : {};
+				const metricsResp = await safeFetch('/api/v1/status/metrics',{ headers: authHeaders() }).catch(()=>null);
+				const metrics = metricsResp && metricsResp.ok ? await metricsResp.json() : {};
+				panel.innerHTML = '';
+				function add(k,v){ const dk=document.createElement('div'); dk.textContent=k; const dv=document.createElement('div'); dv.textContent=v; kvWrap.appendChild(dk); kvWrap.appendChild(dv); }
+				const alerts = dash.alerts || { critical:0, high:0, medium:0 };
+				add('Alerts (crit/high/med)', `${alerts.critical}/${alerts.high}/${alerts.medium}`);
+				if(metrics.sse){ add('SSE Clients', metrics.sse.clients||'-'); add('SSE Queue', metrics.sse.queue_depth||'-'); }
+				if(metrics.queue){ add('Ingest Queue', metrics.queue.depth||'-'); }
+				panel.appendChild(kvWrap);
+				// Cost
+				const costKv = document.getElementById('cost'); costKv.innerHTML='';
+				const ov = costData.overview || {};
+				function addCost(k,v){ const dk=document.createElement('div'); dk.textContent=k; const dv=document.createElement('div'); dv.textContent=v; costKv.appendChild(dk); costKv.appendChild(dv); }
+				addCost('Latest', ov.latest_cost ?? '-');
+				addCost('EWMA', ov.ewma ?? '-');
+				addCost('Anomaly', String(ov.anomaly_flag ?? false));
+			}catch(err){ panel.innerHTML = '<div style="font-size:12px;opacity:.7;">Failed to load metrics</div>'; console.error(err); }
+		}
+		document.getElementById('btnRefresh').addEventListener('click', loadMetrics);
+		loadMetrics();
+	</script>
+</body>
+</html>

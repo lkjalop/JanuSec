@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Security</title>
+  <link rel="stylesheet" href="/static/css/theme.css">
+  <script>
+    window.authHeaders = function(){ try { const key = (localStorage.getItem('apiKey') || 'devkey123'); const tenant = localStorage.getItem('tenantId'); const h = { 'x-api-key': key }; if (tenant) h['X-Tenant-ID'] = tenant; return h; } catch (_){ return { 'x-api-key': 'devkey123' }; } };
+  </script>
+</head>
+<body class="theme-dark" style="padding:20px;">
+  <h1 style="margin-bottom:6px;">AI Security</h1>
+  <div style="color:var(--text-secondary); margin-bottom:18px;">MITRE ATLAS, OWASP LLM, and NIST AI RMF aligned signals</div>
+
+  <div class="card" style="background:var(--bg-elevated); border:1px solid var(--border); padding:16px; border-radius:var(--radius);">
+    <p style="margin-top:0">This page is a lightweight, static companion for the LIVE console. It will surface AI-domain events (prompts, tool calls, guardrails) when available.</p>
+    <ul>
+      <li>Ingest AI logs to domain <code>ai</code> with headers like <code>model</code>, <code>prompt</code>, <code>tool</code>, <code>guardrail</code>.</li>
+      <li>All requests include <code>x-api-key</code> from localStorage (defaults to <code>devkey123</code>).</li>
+      <li>No backend requirement for this page; it’s safe in demos.</li>
+    </ul>
+  </div>
+
+  <div id="aiStatus" style="margin-top:18px; color:var(--text-muted);">Ready. Awaiting AI-domain events.</div>
+</body>
+</html>
+

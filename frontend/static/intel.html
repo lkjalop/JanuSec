@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Threat Intel</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" href="data:," />
+  <style>
+    :root { --bg:#0B0E14; --card:#151922; --muted:#A8B2C3; --border:#2A3142; --accent:#4A63E7; --ok:#52C41A; --err:#E54D4D; --text:#E8EBF0; }
+    body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Inter, sans-serif; background: var(--bg); color: var(--text); }
+    .wrap { max-width: 1100px; margin: 0 auto; padding: 16px; }
+    h1 { font-size: 20px; font-weight: 600; }
+    .grid { display:grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .card { background: var(--card); border:1px solid var(--border); border-radius:8px; padding:12px; }
+    .btn { background:#1C2230; border:1px solid var(--border); color:var(--text); padding:8px 12px; border-radius:6px; cursor:pointer; }
+    .btn:hover { background:#232834; }
+    .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .kvs { display:grid; grid-template-columns: 140px 1fr; gap:6px; font-size: 13px; }
+    .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    .muted { color: var(--muted); font-size: 12px; }
+    pre { background:#0E121A; border:1px solid var(--border); padding:10px; border-radius:6px; overflow:auto; }
+    .tag { display:inline-block; padding:2px 6px; border-radius:10px; border:1px solid var(--border); font-size:11px; margin-right:6px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Threat Intelligence</h1>
+    <p class="muted">Trigger syncs for free feeds and view current intel cache status.</p>
+    <div class="grid">
+      <div class="card">
+        <h3>Sync Feeds</h3>
+        <div class="row" style="margin:8px 0;">
+          <button class="btn" onclick="syncFeed('abusech/sslbl')">Sync abuse.ch SSLBL</button>
+          <button class="btn" onclick="syncFeed('malwarebazaar')">Sync MalwareBazaar</button>
+          <button class="btn" onclick="syncFeed('otx')">Sync OTX</button>
+          <button class="btn" onclick="syncFeed('misp')">Sync MISP</button>
+          <button class="btn" onclick="syncFeed('opencti')">Sync OpenCTI</button>
+        </div>
+        <div id="syncResult" class="muted">No sync attempted yet.</div>
+      </div>
+      <div class="card">
+        <h3>Status</h3>
+        <div class="kvs" id="statusKvs"></div>
+        <div class="row" style="margin-top:8px;">
+          <button class="btn" onclick="refreshStatus()">Refresh Status</button>
+        </div>
+      </div>
+    </div>
+    <div class="card" style="margin-top:12px;">
+      <h3>Raw Status JSON</h3>
+      <pre id="statusRaw">{}</pre>
+    </div>
+  </div>
+  <script>
+    function h(){ try { return { 'x-api-key': localStorage.getItem('apiKey') || 'devkey123' }; } catch { return { 'x-api-key': 'devkey123' }; } }
+    async function syncFeed(name){
+      const map = {
+        'abusech/sslbl': '/api/v1/integrations/abusech/sslbl/sync',
+        'malwarebazaar': '/api/v1/integrations/malwarebazaar/sync',
+        'otx': '/api/v1/integrations/otx/sync',
+        'misp': '/api/v1/integrations/misp/sync',
+        'opencti': '/api/v1/integrations/opencti/sync'
+      };
+      const path = map[name];
+      const r = await fetch(path, { method:'POST', headers: {...h()} });
+      const j = await r.json();
+      document.getElementById('syncResult').textContent = r.ok ? JSON.stringify(j) : (j.detail || 'sync failed');
+      refreshStatus();
+    }
+    async function refreshStatus(){
+      const r = await fetch('/api/v1/integrations/intel/status', { headers: {...h()} });
+      const j = await r.json();
+      const kvs = document.getElementById('statusKvs');
+      const rows = [
+        ['Enabled', j.enabled],
+        ['IPs', j.counts && j.counts.ips],
+        ['Domains', j.counts && j.counts.domains],
+        ['URLs', j.counts && j.counts.urls],
+        ['Hashes', j.counts && j.counts.hashes],
+        ['JA3', j.counts && j.counts.ja3],
+        ['Cert FPs', j.counts && j.counts.certfps]
+      ];
+      kvs.innerHTML = rows.map(r=>`<div class="muted">${r[0]}</div><div>${(r[1]===undefined||r[1]===null)?'-':r[1]}</div>`).join('');
+      document.getElementById('statusRaw').textContent = JSON.stringify(j, null, 2);
+    }
+    refreshStatus();
+  </script>
+  <script src="/static/js/notifications.js"></script>
+</body>
+</html>

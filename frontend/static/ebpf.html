@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>eBPF / Falco Events</title>
+  <link rel="stylesheet" href="/static/css/theme.css" />
+  <style>
+    body { margin:0; background:var(--bg-primary); color:var(--text-primary); font-family:Inter,Segoe UI,system-ui,sans-serif; }
+    header { padding:16px 20px; background:var(--bg-secondary); border-bottom:1px solid var(--border); display:flex; justify-content:space-between; }
+    .container { padding:20px; max-width:1200px; margin:0 auto; }
+    .btn { padding:8px 12px; background:var(--bg-tertiary); border:1px solid var(--border); color:var(--text-primary); border-radius:6px; cursor:pointer; }
+    .btn:hover { background:var(--bg-hover); }
+    table { width:100%; border-collapse:collapse; font-size:12px; }
+    th, td { border:1px solid var(--border); padding:6px 8px; text-align:left; }
+    th { background:var(--bg-tertiary); }
+    .muted { color:var(--text-muted); font-size:12px; }
+  </style>
+</head>
+<body>
+  <header>
+    <div style="font-weight:600;">eBPF / Falco Events</div>
+    <div>
+      <button class="btn" id="refreshBtn">Refresh</button>
+      <a class="btn" href="/">Back</a>
+    </div>
+  </header>
+  <div class="container">
+    <div class="muted" style="margin-bottom:8px;">Lists recent Falco webhook events via /api/v1/events/ebpf (demo store)</div>
+    <table>
+      <thead>
+        <tr>
+          <th>Time</th>
+          <th>Severity</th>
+          <th>Rule</th>
+          <th>Container</th>
+          <th>Image</th>
+          <th>User</th>
+          <th>Syscall</th>
+          <th>Command</th>
+        </tr>
+      </thead>
+      <tbody id="rows"><tr><td colspan="8" class="muted">No data</td></tr></tbody>
+    </table>
+  </div>
+  <script>
+    function _auth(){ try{ const k=localStorage.getItem('apiKey')||'devkey123'; const h={'x-api-key':k}; const t=localStorage.getItem('tenantId'); if(t) h['X-Tenant-ID']=t; return h; }catch(_){ return {'x-api-key':'devkey123'}; } }
+    async function load(){
+      const tbody = document.getElementById('rows'); tbody.innerHTML = '<tr><td class="muted" colspan="8">Loading...</td></tr>';
+      try{
+        const r = await fetch('/api/v1/events/ebpf?limit=200', { headers: _auth() });
+        const j = await r.json(); const ev = j.events||[]; if(!ev.length){ tbody.innerHTML = '<tr><td class="muted" colspan="8">No events</td></tr>'; return; }
+        const fmt = (v)=> (v==null||v==='')?'<span class="muted">n/a</span>':String(v);
+        tbody.innerHTML = ev.map(e=>`<tr>
+          <td>${fmt(new Date((e.ts||Date.now())*1000).toISOString().replace('T',' ').replace('Z',''))}</td>
+          <td>${fmt(e.severity)}</td>
+          <td>${fmt(e.rule_name)}</td>
+          <td>${fmt(e.container_id)}</td>
+          <td>${fmt(e.image)}</td>
+          <td>${fmt(e.user)}</td>
+          <td>${fmt(e.syscall)}</td>
+          <td><code>${fmt(e.command)}</code></td>
+        </tr>`).join('');
+      }catch(e){ tbody.innerHTML = '<tr><td class="muted" colspan="8">Error loading</td></tr>'; }
+    }
+    document.getElementById('refreshBtn').addEventListener('click', load);
+    document.addEventListener('DOMContentLoaded', load);
+  </script>
+</body>
+</html>
+

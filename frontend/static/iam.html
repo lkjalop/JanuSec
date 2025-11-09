@@ -1,0 +1,60 @@
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>IAM Risk</title>
+<style>
+body{background:#0B0E14;color:#E8EBF0;font-family:Inter,Segoe UI,sans-serif}
+.wrap{max-width:1150px;margin:20px auto;padding:12px}
+.card{background:#151922;border:1px solid #2A3142;border-radius:8px;margin-bottom:16px;padding:12px}
+.row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+.btn{padding:8px 14px;background:#1C2230;border:1px solid #2A3142;border-radius:6px;color:#E8EBF0;cursor:pointer}
+.input{padding:8px;background:#1C2230;border:1px solid #2A3142;border-radius:6px;color:#E8EBF0}
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.kpi{background:#1C2230;border:1px solid #2A3142;border-radius:8px;padding:12px}
+.kpi .v{font-size:22px;font-weight:600}
+.kpi .l{font-size:12px;color:#A8B2C3;margin-top:4px}
+.hint{color:#A8B2C3;font-size:12px}
+.table{border-collapse:collapse;width:100%}
+.table th,.table td{border:1px solid #2A3142;padding:6px 8px;font-size:12px}
+</style></head>
+<body>
+<div class="wrap">
+  <div class="row">
+    <a class="btn" href="/static/janusec-platform-complete-LIVE.html">← Console</a>
+    <a class="btn" href="/static/cspm.html">CSPM</a>
+    <a class="btn" href="/static/compliance.html">Compliance</a>
+  </div>
+  <h2>IAM Risk Overview</h2>
+  <div class="card">
+    <div class="kpis">
+      <div class="kpi"><div class="v" id="k_keys_no_mfa">–</div><div class="l">Keys without MFA</div></div>
+      <div class="kpi"><div class="v" id="k_unused_keys">–</div><div class="l">Unused Keys >90d</div></div>
+      <div class="kpi"><div class="v" id="k_wildcard">–</div><div class="l">Wildcard Policies</div></div>
+      <div class="kpi"><div class="v" id="k_admin_no_mfa">–</div><div class="l">Admin without MFA</div></div>
+    </div>
+    <div class="hint" style="margin-top:6px">Feed via POST /api/v1/compliance/iam/audit. Tenant auto from localStorage.</div>
+  </div>
+  <div class="card">
+    <h3>Top Findings</h3>
+    <div id="findings"></div>
+  </div>
+  <div class="card">
+    <h3>Violations & Remediation</h3>
+    <div class="row" style="gap:8px"><a class="btn" href="/api/v1/compliance/cloud/crossmap" target="_blank">View Cloud Crossmap</a></div>
+    <div id="violations" style="margin-top:8px"></div>
+  </div>
+</div>
+<script>
+function H(){ try{ const k=localStorage.getItem('apiKey')||'devkey123'; const t=localStorage.getItem('tenantId'); const h={'x-api-key':k}; if(t) h['X-Tenant-ID']=t; return h; }catch(_){ return {'x-api-key':'devkey123'} } }
+async function remediate(endpoint, body){ try{ const t=localStorage.getItem('tenantId'); if(t) body.tenant_id=t; const r=await fetch(endpoint,{method:'POST',headers:{...H(),'content-type':'application/json'},body:JSON.stringify(body)}); if(r.ok){ alert('Remediation dispatched (dry-run by default).'); } else { alert('Remediation failed: '+r.status); } }catch(e){ alert('Remediation error'); } }
+function renderViolations(j){ const ks=(j.violating_keys_no_mfa||[]).map(k=>`<tr><td>${k.user||''}</td><td>${k.id||''}</td><td><button class="btn" onclick="remediate('/api/v1/soar/remediate/iam/disable-key',{key_id:'${k.id||''}',dry_run:true})">Disable Key</button></td></tr>`).join(''); const uk=(j.violating_unused_keys||[]).map(k=>`<tr><td>${k.user||''}</td><td>${k.id||''}</td><td>${k.last_used_days||''}</td><td><button class="btn" onclick="remediate('/api/v1/soar/remediate/iam/disable-key',{key_id:'${k.id||''}',dry_run:true})">Disable Key</button></td></tr>`).join(''); const ad=(j.violating_admin_no_mfa||[]).map(u=>`<tr><td>${u.name||''}</td><td><button class="btn" onclick="remediate('/api/v1/soar/remediate/iam/enforce-mfa',{user:'${u.name||''}',dry_run:true})">Enforce MFA</button></td></tr>`).join(''); const wp=(j.violating_wildcard_policies||[]).map(p=>`<tr><td>${p.name||''}</td><td>${(p.attached_to||'')}</td><td><span class="hint">Tighten to least-privilege</span></td></tr>`).join(''); document.getElementById('violations').innerHTML=`
+    <div class="row" style="gap:12px;flex-wrap:wrap">
+      <div style="flex:1;min-width:320px"><h4>Keys without MFA</h4><table class="table"><thead><tr><th>User</th><th>Key</th><th>Action</th></tr></thead><tbody>${ks||'<tr><td colspan=3>None</td></tr>'}</tbody></table></div>
+      <div style="flex:1;min-width:320px"><h4>Unused keys >90d</h4><table class="table"><thead><tr><th>User</th><th>Key</th><th>Last Used (d)</th><th>Action</th></tr></thead><tbody>${uk||'<tr><td colspan=4>None</td></tr>'}</tbody></table></div>
+    </div>
+    <div class="row" style="gap:12px;flex-wrap:wrap;margin-top:10px">
+      <div style="flex:1;min-width:320px"><h4>Admins without MFA</h4><table class="table"><thead><tr><th>User</th><th>Action</th></tr></thead><tbody>${ad||'<tr><td colspan=2>None</td></tr>'}</tbody></table></div>
+      <div style="flex:1;min-width:320px"><h4>Wildcard Policies</h4><table class="table"><thead><tr><th>Name</th><th>Attached To</th><th>Hint</th></tr></thead><tbody>${wp||'<tr><td colspan=3>None</td></tr>'}</tbody></table></div>
+    </div>`; }
+async function loadIam(){ try{ const r=await fetch('/api/v1/compliance/iam/risks',{headers:H()}); if(!r.ok) return; const j=await r.json(); document.getElementById('k_keys_no_mfa').textContent=j.keys_without_mfa; document.getElementById('k_unused_keys').textContent=j.unused_keys; document.getElementById('k_wildcard').textContent=j.wildcard_policies; document.getElementById('k_admin_no_mfa').textContent=j.admin_no_mfa; const rows=(j.top_findings||[]).map(x=>`<tr><td>${x.type}</td><td>${x.count}</td></tr>`).join(''); document.getElementById('findings').innerHTML=`<table class="table"><thead><tr><th>Finding</th><th>Count</th></tr></thead><tbody>${rows}</tbody></table>`; renderViolations(j); }catch(e){} }
+loadIam();
+</script>
+</body></html>

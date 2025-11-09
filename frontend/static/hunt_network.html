@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Threat Hunting - Network</title>
+  <link rel="stylesheet" href="/static/css/tokens.css" />
+  <link rel="stylesheet" href="/static/css/components.css" />
+  <link rel="stylesheet" href="/static/css/responsive.css" />
+  <style>
+    .actions-row { display:flex; flex-wrap:wrap; gap: var(--space-2); margin-bottom: var(--space-3); }
+    .btn { background: var(--color-bg-tertiary); border:1px solid var(--color-border); color: var(--color-text-secondary); padding:6px 12px; font-size: var(--font-size-sm); border-radius: var(--radius-sm); cursor:pointer; text-decoration:none; }
+    .btn:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
+    .btn-primary { background: var(--color-accent); border-color: var(--color-accent); color:#fff; }
+    table { border-collapse:collapse; width:100%; font-size: var(--font-size-xs); }
+    th,td { border:1px solid var(--color-border); padding:6px 8px; }
+    h2 { margin: var(--space-2) 0 var(--space-3); font-size: var(--font-size-lg); }
+    .muted { color: var(--color-text-muted); font-size: var(--font-size-xs); }
+  </style>
+</head>
+<body class="with-topbar">
+  <a href="#contentWrapper" class="skip-link">Skip to content</a>
+  <div class="page-root">
+    <div class="row" style="margin-bottom:8px">
+      <a class="btn" href="/static/hunt_endpoint.html">Endpoint</a>
+      <a class="btn" href="/static/metrics.html">Metrics</a>
+      <a class="btn" href="/static/integrations.html">Integrations</a>
+      <a class="btn" href="/static/sbom.html">SBOM</a>
+    </div>
+    <h2>Threat Hunting - Network (Zeek)</h2>
+    <div class="panel">
+      <div class="row">
+        <button class="btn" id="btnUpload">Upload Zeek logs</button>
+        <input type="file" id="fileInput" style="display:none" multiple accept=".log,.json,.ndjson,.csv" />
+        <button class="btn" id="btnRefresh">Refresh</button>
+      </div>
+      <div class="muted">Use Upload to send dns.log/conn.log (TSV or NDJSON). Click an entry below for explain.</div>
+    </div>
+    <div class="panel">
+      <h3 style="margin-top:0">Recent Zeek Decisions</h3>
+      <table id="tbl"><thead><tr><th>ID</th><th>Verdict</th><th>Score</th><th>Host</th><th>Tags</th></tr></thead><tbody></tbody></table>
+    </div>
+    <div class="panel">
+      <h3 style="margin-top:0">Network Events Filter</h3>
+      <div class="muted">Filters from URL are applied automatically. You can also use the quick filter below.</div>
+      <div class="row" style="margin:8px 0">
+        <input id="qInput" placeholder="quick filter (src/dst/host/ja3/ja4/domain)" style="flex:1; min-width:260px; padding:6px 8px; background:#0B0E14; color:#E8EBF0; border:1px solid #2A3142; border-radius:6px" />
+        <button class="btn btn-primary" id="btnApply">Apply</button>
+      </div>
+      <div id="activeFilters" class="muted"></div>
+      <table><thead><tr><th>TS</th><th>Src</th><th>Dst</th><th>Port</th><th>JA3</th><th>JA4</th><th>DNS</th><th>DoH</th><th>Factors</th></tr></thead>
+        <tbody id="netBody"><tr><td colspan="9" class="muted">Loading…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+  <script>
+    function safeNotify(msg, level){
+      try{
+        if(window.showNotification) return showNotification(msg, level);
+        if(window.notifications && typeof window.notifications.showToast === 'function') return window.notifications.showToast(msg, 4000);
+        console.log('notify:', level||'info', msg);
+      }catch(e){ console.log('notify-fail', e, msg); }
+    }
+
+    function authHeaders() { try { const k=localStorage.getItem('apiKey')||'devkey123'; return {'x-api-key':k}; } catch(_) { return {'x-api-key':'devkey123'} } }
+    async function loadRecent(){
+      const r = await fetch('/api/v1/decisions/recent?limit=50',{headers: authHeaders()});
+      if(!r.ok){ return }
+      const j = await r.json();
+      const rows = (j.rows||j.events||[]).filter(x=>{
+        const pn = (x.process_name||x.proc_name||'').toLowerCase();
+        const tags = ((x.tags||[]).join(',')||'').toLowerCase();
+        return pn.includes('zeek') || tags.includes('zeek');
+      });
+      const tb = document.querySelector('#tbl tbody'); tb.innerHTML='';
+      rows.forEach(rr=>{
+        const tr=document.createElement('tr'); tr.style.cursor='pointer';
+        const id = rr.event_id||rr.id; tr.innerHTML=`<td>${id}</td><td>${rr.verdict||''}</td><td>${(rr.confidence||rr.score||'')}</td><td>${rr.host||''}</td><td>${(rr.tags||[]).join(',')}</td>`;
+        tr.addEventListener('click',()=>explain(id)); tb.appendChild(tr);
+      });
+    }
+    function esc(s){return String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;')}
+  function params(){ const u=new URLSearchParams(location.search); return { host:u.get('host')||'', src:u.get('src')||'', dst:u.get('dst')||'', port:u.get('port')||'', ja3:u.get('ja3')||'', ja4:u.get('ja4')||'', since: u.get('since')||'' } }
+    function renderFilters(p){
+      const pills=[]; for(const [k,v] of Object.entries(p)){ if(v) pills.push(`<span class="btn" style="background:#2A3142">${esc(k)}=${esc(v)}</span>`); }
+      document.getElementById('activeFilters').innerHTML = pills.join(' ')||'None';
+    }
+    function matchEvent(ev, p, q){
+      const s = (x)=>String(x||'').toLowerCase();
+      // since filter (seconds back from now) using event ts
+      if(p.since){
+        const dur = parseInt(String(p.since), 10);
+        if(!isNaN(dur) && dur > 0){
+          let ts = ev.ts||ev.timestamp||ev.time; if(typeof ts==='string'){ try{ ts = Date.parse(ts)/1000; }catch(_){ ts = undefined; } }
+          const now = Date.now()/1000; if(typeof ts==='number' && ts < (now - dur)) return false;
+        }
+      }
+      if(p.host && s(ev.host)!==s(p.host)) return false;
+      if(p.src && s(ev.src_ip||ev.source_ip)!==s(p.src)) return false;
+      if(p.dst && s(ev.dst_ip||ev.destination_ip)!==s(p.dst)) return false;
+      if(p.port && String(ev.dst_port||ev.destination_port||ev.port)!==String(p.port)) return false;
+      if(p.ja3 && s(ev.ja3)!==s(p.ja3)) return false;
+      if(p.ja4 && s(ev.ja4)!==s(p.ja4)) return false;
+      if(q){ const qq=s(q); const hay=[ev.src_ip,ev.source_ip,ev.dst_ip,ev.destination_ip,ev.host,ev.hostname,ev.ja3,ev.ja4,ev.dns_query,ev.sni].map(s).join(' '); if(!hay.includes(qq)) return false; }
+      return true;
+    }
+    function tsFmt(t){ try{ if(typeof t==='number') return new Date(t*1000).toISOString(); if(typeof t==='string') return new Date(t).toISOString(); }catch(_){ } return '' }
+    async function loadNetworkTable(){
+      const p = params(); renderFilters(p);
+      // Pull a recent sanitized sample for client filtering
+      const r = await fetch('/api/v1/events/sanitized?limit=1000');
+      if(!r.ok){ document.getElementById('netBody').innerHTML='<tr><td colspan="9" class="muted">Failed to load</td></tr>'; return; }
+      const j = await r.json(); const items = j.events||[]; const q = document.getElementById('qInput').value || '';
+      const out = items.filter(ev=>matchEvent(ev,p,q)).slice(0,300);
+      document.getElementById('netBody').innerHTML = out.length? out.map(ev=>{
+        const doh = ((ev.factors||[]).includes('network:doh_tunnel_suspect')|| (ev.factors||[]).includes('network:doh_quic'))? 'Yes':'No';
+        return `<tr><td>${esc(tsFmt(ev.ts||ev.timestamp||ev.time))}</td><td>${esc(ev.src_ip||ev.source_ip||'')}</td><td>${esc(ev.dst_ip||ev.destination_ip||'')}</td><td>${esc(ev.dst_port||ev.destination_port||ev.port||'')}</td><td>${esc(ev.ja3||'')}</td><td>${esc(ev.ja4||'')}</td><td>${esc(ev.dns_query||'')}</td><td>${doh}</td><td>${esc((ev.factors||[]).join(', '))}</td></tr>`;
+      }).join('') : '<tr><td colspan="9" class="muted">No matches</td></tr>';
+    }
+    document.getElementById('btnApply').onclick = loadNetworkTable;
+    document.getElementById('qInput').addEventListener('keypress', (e)=>{ if(e.key==='Enter'){ loadNetworkTable(); }});
+    loadNetworkTable();
+    async function explain(id){
+      const r=await fetch(`/api/v1/decisions/${id}/explain`,{headers: authHeaders()}); if(!r.ok) return safeNotify('Explain failed','error');
+      const j=await r.json(); safeNotify(`Decision ${id} — Verdict: ${j.verdict} — Factors: ${(j.factors||[]).length}`,'info');
+    }
+    document.getElementById('btnRefresh').onclick=loadRecent;
+    document.getElementById('btnUpload').onclick=()=>document.getElementById('fileInput').click();
+    document.getElementById('fileInput').addEventListener('change', async (e)=>{
+      const files=e.target.files; if(!files||!files.length) return;
+      const form=new FormData(); for(const f of files) form.append('files', f);
+      const r=await fetch('/api/v1/upload/files',{method:'POST', headers: authHeaders(), body: form});
+      if(!r.ok){ safeNotify('Upload failed','error'); return } safeNotify('Uploaded','success'); setTimeout(loadRecent, 1000);
+      e.target.value='';
+    });
+    loadRecent();
+  </script>
+  <script src="/static/js/hunt_overview.js"></script>
+  <script src="/static/js/notifications.js"></script>
+</body>
+</html>

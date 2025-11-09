@@ -1,0 +1,1061 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JanuSec SOC Platform</title>
+    <style>
+        :root {
+            --bg-primary: #0B0E14;
+            --bg-secondary: #151922;
+            --bg-tertiary: #1C2230;
+            --bg-hover: #232834;
+            --accent: #4A63E7;
+            --accent-hover: #5B72F0;
+            --text-primary: #E8EBF0;
+            --text-secondary: #A8B2C3;
+            --text-muted: #6B7789;
+            --border: #2A3142;
+            --critical: #E54D4D;
+            --high: #E67E22;
+            --medium: #F39C12;
+            --low: #3498DB;
+            --safe: #52C41A;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            overflow: hidden;
+        }
+
+        .app-container {
+            display: grid;
+            grid-template-columns: 240px 1fr 380px;
+            grid-template-rows: 56px 1fr;
+            height: 100vh;
+            transition: grid-template-columns 0.3s ease;
+        }
+
+        .app-container.panel-detached {
+            grid-template-columns: 240px 1fr;
+        }
+
+        /* Header */
+        .header {
+            grid-column: 1 / -1;
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            padding: 0 20px;
+            justify-content: space-between;
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-weight: 600;
+            font-size: 18px;
+        }
+
+        .status-bar {
+            display: flex;
+            gap: 24px;
+            align-items: center;
+        }
+
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+
+        .status-dot.active {
+            background: var(--safe);
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        /* Sidebar */
+        .sidebar {
+            background: var(--bg-secondary);
+            border-right: 1px solid var(--border);
+            padding: 16px;
+            overflow-y: auto;
+        }
+
+        .nav-section {
+            margin-bottom: 24px;
+        }
+
+        .nav-title {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-muted);
+            margin-bottom: 8px;
+            font-weight: 600;
+        }
+
+        .nav-item {
+            padding: 10px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 4px;
+            font-size: 14px;
+        }
+
+        .nav-item:hover {
+            background: var(--bg-hover);
+        }
+
+        .nav-item.active {
+            background: var(--accent);
+            color: white;
+        }
+
+        .nav-badge {
+            margin-left: auto;
+            background: var(--critical);
+            color: white;
+            font-size: 10px;
+            padding: 2px 6px;
+            border-radius: 10px;
+            font-weight: 600;
+        }
+
+        /* Main Content */
+        .main-content {
+            background: var(--bg-primary);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .content-header {
+            background: var(--bg-secondary);
+            padding: 16px 24px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .content-title {
+            font-size: 20px;
+            font-weight: 600;
+        }
+
+        .action-bar {
+            display: flex;
+            gap: 12px;
+        }
+
+        .btn {
+            padding: 8px 16px;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: 1px solid var(--border);
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .btn:hover {
+            background: var(--bg-hover);
+        }
+
+        .btn-primary {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: var(--accent-hover);
+        }
+
+        /* Dashboard Grid */
+        .dashboard-grid {
+            padding: 24px;
+            overflow-y: auto;
+            flex: 1;
+        }
+
+        .metrics-row {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        .metric-card {
+            background: var(--bg-secondary);
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+        }
+
+        .metric-value {
+            font-size: 32px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .metric-label {
+            font-size: 12px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .chart-container {
+            background: var(--bg-secondary);
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            padding: 20px;
+            margin-bottom: 24px;
+            height: 300px;
+        }
+
+        /* Alert Feed */
+        .alert-feed {
+            background: var(--bg-secondary);
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            padding: 16px;
+        }
+
+        .alert-item {
+            padding: 12px;
+            border-radius: 6px;
+            margin-bottom: 8px;
+            background: var(--bg-tertiary);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .alert-item:hover {
+            background: var(--bg-hover);
+        }
+
+        .alert-severity {
+            width: 4px;
+            height: 40px;
+            border-radius: 2px;
+        }
+
+        .alert-severity.critical {
+            background: var(--critical);
+        }
+
+        .alert-severity.high {
+            background: var(--high);
+        }
+
+        .alert-content {
+            flex: 1;
+        }
+
+        .alert-title {
+            font-size: 14px;
+            font-weight: 500;
+            margin-bottom: 4px;
+        }
+
+        .alert-meta {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        /* Right Panel */
+        .right-panel {
+            background: var(--bg-secondary);
+            border-left: 1px solid var(--border);
+            padding: 20px;
+            overflow-y: auto;
+            position: relative;
+        }
+
+        .panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .detach-btn {
+            width: 32px;
+            height: 32px;
+            border-radius: 6px;
+            border: 1px solid var(--border);
+            background: var(--bg-tertiary);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+        }
+
+        .detach-btn:hover {
+            background: var(--bg-hover);
+        }
+
+        /* Investigation Details */
+        .investigation-section {
+            margin-bottom: 24px;
+        }
+
+        .section-title {
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 12px;
+            color: var(--text-secondary);
+        }
+
+        .evidence-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .evidence-item {
+            padding: 10px;
+            background: var(--bg-primary);
+            border-radius: 6px;
+            font-size: 13px;
+            font-family: 'Monaco', 'Consolas', monospace;
+        }
+
+        /* Integration Section */
+        .integration-panel {
+            background: var(--bg-tertiary);
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 16px;
+        }
+
+        .integration-header {
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-muted);
+            margin-bottom: 12px;
+        }
+
+        .integration-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 8px;
+        }
+
+        .integration-btn {
+            padding: 10px;
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+        }
+
+        .integration-btn:hover {
+            background: var(--bg-hover);
+            border-color: var(--accent);
+        }
+
+        .integration-btn.connected {
+            border-color: var(--safe);
+            background: rgba(82, 196, 26, 0.1);
+        }
+
+        /* Upload Zone */
+        .upload-zone {
+            border: 2px dashed var(--border);
+            border-radius: 8px;
+            padding: 32px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-bottom: 24px;
+        }
+
+        .upload-zone:hover {
+            border-color: var(--accent);
+            background: var(--bg-tertiary);
+        }
+
+        .upload-zone.dragover {
+            border-color: var(--accent);
+            background: rgba(74, 99, 231, 0.1);
+        }
+
+        /* Modal for detached panel */
+        .detached-window {
+            display: none;
+            position: fixed;
+            top: 50px;
+            right: 50px;
+            width: 600px;
+            height: 80vh;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+        }
+
+        .detached-window.active {
+            display: block;
+        }
+
+        .detached-header {
+            padding: 16px 20px;
+            background: var(--bg-tertiary);
+            border-bottom: 1px solid var(--border);
+            border-radius: 8px 8px 0 0;
+            cursor: move;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .detached-content {
+            padding: 20px;
+            height: calc(100% - 56px);
+            overflow-y: auto;
+        }
+
+        /* Notification System */
+        .notification {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--accent);
+            border-radius: 8px;
+            padding: 16px;
+            min-width: 300px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+            animation: slideIn 0.3s ease;
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateX(400px);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="app-container" id="appContainer">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-left">
+                <div class="logo">
+                    <svg width="28" height="28" viewBox="0 0 64 64" fill="none">
+                        <circle cx="32" cy="32" r="30" stroke="var(--accent)" stroke-width="2"/>
+                        <path d="M32 8 L32 56" stroke="var(--accent)" stroke-width="1" opacity="0.3"/>
+                        <path d="M20 24 Q20 20 24 20 L28 20 L28 44 Q28 48 24 48 L20 48 Z" fill="var(--accent)" opacity="0.8"/>
+                        <path d="M44 24 Q44 20 40 20 L36 20 L36 44 Q36 48 40 48 L44 48 Z" fill="var(--accent)" opacity="0.8"/>
+                    </svg>
+                    JanuSec Platform
+                </div>
+                <div class="status-bar">
+                    <div class="status-item">
+                        <div class="status-dot active"></div>
+                        <span>Connected to XDR</span>
+                    </div>
+                    <div class="status-item">
+                        <span style="color: var(--text-muted);">Last Update:</span>
+                        <span id="lastUpdate">2 min ago</span>
+                    </div>
+                </div>
+            </div>
+            <div class="status-bar">
+                <div class="status-item">
+                    <span style="color: var(--critical);">●</span>
+                    Critical: <strong id="criticalCount">2</strong>
+                </div>
+                <div class="status-item">
+                    <span style="color: var(--high);">●</span>
+                    High: <strong id="highCount">8</strong>
+                </div>
+                <div class="status-item">
+                    <span style="color: var(--medium);">●</span>
+                    Medium: <strong id="mediumCount">15</strong>
+                </div>
+            </div>
+        </header>
+
+        <!-- Sidebar -->
+        <nav class="sidebar">
+            <div class="nav-section">
+                <div class="nav-title">Detection & Response</div>
+                <div class="nav-item active" onclick="switchView('dashboard')">
+                    <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/>
+                    </svg>
+                    Dashboard
+                </div>
+                <div class="nav-item" onclick="switchView('artifacts')">
+                    <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                    </svg>
+                    Artifacts
+                    <span class="nav-badge">342</span>
+                </div>
+                <div class="nav-item" onclick="switchView('threats')">
+                    <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                    </svg>
+                    Active Threats
+                    <span class="nav-badge">2</span>
+                </div>
+                <div class="nav-item" onclick="switchView('hunt')">
+                    <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                    </svg>
+                    Threat Hunt
+                </div>
+            </div>
+
+            <div class="nav-section">
+                <div class="nav-title">Analysis Tools</div>
+                <div class="nav-item" onclick="switchView('mitre')">
+                    <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+                    </svg>
+                    MITRE ATT&CK
+                </div>
+                <div class="nav-item" onclick="switchView('yara')">
+                    <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/>
+                    </svg>
+                    YARA Rules
+                </div>
+                <div class="nav-item" onclick="switchView('timeline')">
+                    <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                    </svg>
+                    Timeline
+                </div>
+            </div>
+
+            <div class="nav-section">
+                <div class="nav-title">Integrations</div>
+                <div class="nav-item" onclick="switchView('integrations')">
+                    <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 4a2 2 0 114 0v1a1 1 0 001 1h3a1 1 0 011 1v3a1 1 0 01-1 1h-1a2 2 0 100 4h1a1 1 0 011 1v3a1 1 0 01-1 1h-3a1 1 0 01-1-1v-1a2 2 0 10-4 0v1a1 1 0 01-1 1H7a1 1 0 01-1-1v-3a1 1 0 00-1-1H4a2 2 0 110-4h1a1 1 0 001-1V7a1 1 0 011-1h3a1 1 0 001-1V4z"/>
+                    </svg>
+                    API & Webhooks
+                </div>
+                <div class="nav-item" onclick="switchView('notifications')">
+                    <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/>
+                    </svg>
+                    Notifications
+                </div>
+            </div>
+
+            <div class="nav-section">
+                <div class="nav-title">System</div>
+                <div class="nav-item" onclick="switchView('settings')">
+                    <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                    </svg>
+                    Settings
+                </div>
+            </div>
+        </nav>
+
+        <!-- Main Content Area -->
+        <main class="main-content" id="mainContent">
+            <div class="content-header">
+                <h1 class="content-title">Security Operations Dashboard</h1>
+                <div class="action-bar">
+                    <button class="btn" onclick="refreshData()">
+                        <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                        </svg>
+                        Refresh
+                    </button>
+                    <button class="btn btn-primary" onclick="showUploadZone()">
+                        <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+                        </svg>
+                        Upload Logs
+                    </button>
+                </div>
+            </div>
+
+            <div class="dashboard-grid">
+                <!-- Upload Zone (hidden by default) -->
+                <div class="upload-zone" id="uploadZone" style="display: none;">
+                    <svg width="48" height="48" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="margin: 0 auto 16px; opacity: 0.5;">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+                    </svg>
+                    <div style="color: var(--text-primary); font-weight: 500; margin-bottom: 8px;">Drop log files here</div>
+                    <div style="color: var(--text-muted); font-size: 13px;">Supports PCAP, EVTX, JSON, and CSV formats</div>
+                    <input type="file" id="fileInput" style="display: none;" multiple accept=".pcap,.evtx,.json,.csv,.log">
+                </div>
+
+                <!-- Metrics Cards -->
+                <div class="metrics-row">
+                    <div class="metric-card">
+                        <div class="metric-value" style="color: var(--critical);">2</div>
+                        <div class="metric-label">Critical Threats</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-value">342</div>
+                        <div class="metric-label">Artifacts Analyzed</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-value" style="color: var(--safe);">98.2%</div>
+                        <div class="metric-label">Detection Rate</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-value">1.2s</div>
+                        <div class="metric-label">Avg Response Time</div>
+                    </div>
+                </div>
+
+                <!-- Real-time Chart -->
+                <div class="chart-container">
+                    <h3 style="margin-bottom: 16px; font-size: 14px; font-weight: 600;">Threat Detection Timeline</h3>
+                    <canvas id="threatChart"></canvas>
+                </div>
+
+                <!-- Alert Feed -->
+                <div class="alert-feed">
+                    <h3 style="margin-bottom: 16px; font-size: 14px; font-weight: 600;">Recent Alerts</h3>
+                    <div id="alertFeed">
+                        <div class="alert-item">
+                            <div class="alert-severity critical"></div>
+                            <div class="alert-content">
+                                <div class="alert-title">Ransomware Behavior Detected - powerscan.exe</div>
+                                <div class="alert-meta">MITRE: T1486 • 4 hosts affected • 2 minutes ago</div>
+                            </div>
+                        </div>
+                        <div class="alert-item">
+                            <div class="alert-severity high"></div>
+                            <div class="alert-content">
+                                <div class="alert-title">Suspicious Macro Execution - macro_payload.dotm</div>
+                                <div class="alert-meta">MITRE: T1566 • 2 hosts affected • 15 minutes ago</div>
+                            </div>
+                        </div>
+                        <div class="alert-item">
+                            <div class="alert-severity critical"></div>
+                            <div class="alert-content">
+                                <div class="alert-title">C2 Communication Pattern Identified</div>
+                                <div class="alert-meta">MITRE: T1071 • Network beacon detected • 18 minutes ago</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- Right Panel (Investigation/Details) -->
+        <aside class="right-panel" id="rightPanel">
+            <div class="panel-header">
+                <h3 style="font-size: 16px; font-weight: 600;">Investigation Console</h3>
+                <button class="detach-btn" onclick="toggleDetachPanel()" title="Detach Panel">
+                    <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
+                    </svg>
+                </button>
+            </div>
+
+            <!-- Integration Panel -->
+            <div class="integration-panel">
+                <div class="integration-header">Quick Integrations</div>
+                <div class="integration-grid">
+                    <button class="integration-btn connected" onclick="toggleIntegration('xdr')">
+                        <svg width="14" height="14" fill="currentColor" viewBox="0 0 20 20">
+                            <path d="M10 12a2 2 0 100-4 2 2 0 000 4z"/>
+                            <path fill-rule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clip-rule="evenodd"/>
+                        </svg>
+                        XDR
+                    </button>
+                    <button class="integration-btn" onclick="toggleIntegration('zeek')">
+                        <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0"/>
+                        </svg>
+                        ZEEK
+                    </button>
+                    <button class="integration-btn" onclick="toggleIntegration('slack')">
+                        <svg width="14" height="14" fill="currentColor" viewBox="0 0 20 20">
+                            <path d="M2 5a2 2 0 012-2h7a2 2 0 012 2v4a2 2 0 01-2 2H9l-3 3v-3H4a2 2 0 01-2-2V5z"/>
+                            <path d="M15 7v2a4 4 0 01-4 4H9.828l-1.766 1.767c.28.149.599.233.938.233h2l3 3v-3h2a2 2 0 002-2V9a2 2 0 00-2-2h-1z"/>
+                        </svg>
+                        Slack
+                    </button>
+                    <button class="integration-btn" onclick="toggleIntegration('teams')">
+                        <svg width="14" height="14" fill="currentColor" viewBox="0 0 20 20">
+                            <path d="M13 6a3 3 0 11-6 0 3 3 0 016 0zM18 8a2 2 0 11-4 0 2 2 0 014 0zM14 15a4 4 0 00-8 0v3h8v-3zM6 8a2 2 0 11-4 0 2 2 0 014 0zM16 18v-3a5.972 5.972 0 00-.75-2.906A3.005 3.005 0 0119 15v3h-3zM4.75 12.094A5.973 5.973 0 004 15v3H1v-3a3 3 0 013.75-2.906z"/>
+                        </svg>
+                        Teams
+                    </button>
+                </div>
+            </div>
+
+            <!-- Active Investigation -->
+            <div class="investigation-section">
+                <div class="section-title">Active Investigation: powerscan.exe</div>
+                <div class="evidence-list">
+                    <div class="evidence-item">
+                        SHA256: a7c24b7dc90e8a67f9c3b1d4e5f6789abcdef
+                    </div>
+                    <div class="evidence-item">
+                        First Seen: 2025-09-23 14:32:00 UTC
+                    </div>
+                    <div class="evidence-item">
+                        Affected Hosts: DESKTOP-A1B2C3, LAPTOP-X4Y5Z6
+                    </div>
+                </div>
+            </div>
+
+            <!-- Cost Metrics -->
+            <div class="investigation-section">
+                <div class="section-title">Cost Analysis</div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                    <div style="padding: 12px; background: var(--bg-primary); border-radius: 6px;">
+                        <div style="font-size: 20px; font-weight: 600; color: var(--accent);">$342</div>
+                        <div style="font-size: 11px; color: var(--text-muted);">Detection Costs Today</div>
+                    </div>
+                    <div style="padding: 12px; background: var(--bg-primary); border-radius: 6px;">
+                        <div style="font-size: 20px; font-weight: 600; color: var(--safe);">$8,420</div>
+                        <div style="font-size: 11px; color: var(--text-muted);">Prevented Damage</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- MITRE Techniques -->
+            <div class="investigation-section">
+                <div class="section-title">MITRE ATT&CK Mapping</div>
+                <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+                    <span style="padding: 4px 8px; background: var(--bg-primary); border-radius: 4px; font-size: 11px; font-family: monospace;">T1059 - Command Execution</span>
+                    <span style="padding: 4px 8px; background: var(--bg-primary); border-radius: 4px; font-size: 11px; font-family: monospace;">T1105 - Remote File Copy</span>
+                    <span style="padding: 4px 8px; background: var(--bg-primary); border-radius: 4px; font-size: 11px; font-family: monospace;">T1057 - Process Discovery</span>
+                </div>
+            </div>
+
+            <!-- Action Buttons -->
+            <div style="margin-top: auto; padding-top: 20px;">
+                <button class="btn btn-primary" style="width: 100%; justify-content: center; margin-bottom: 8px;">
+                    Create Security Incident
+                </button>
+                <button class="btn" style="width: 100%; justify-content: center; margin-bottom: 8px;">
+                    Export Investigation Report
+                </button>
+                <button class="btn" style="width: 100%; justify-content: center;">
+                    Send to SIEM
+                </button>
+            </div>
+        </aside>
+
+        <!-- Detached Window -->
+        <div class="detached-window" id="detachedWindow">
+            <div class="detached-header" id="detachedHeader">
+                <span style="font-weight: 600;">Investigation Console</span>
+                <button class="detach-btn" onclick="toggleDetachPanel()">
+                    <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                </button>
+            </div>
+            <div class="detached-content" id="detachedContent">
+                <!-- Content will be cloned here when detached -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Panel Management
+        let isPanelDetached = false;
+        
+        function toggleDetachPanel() {
+            const appContainer = document.getElementById('appContainer');
+            const rightPanel = document.getElementById('rightPanel');
+            const detachedWindow = document.getElementById('detachedWindow');
+            const detachedContent = document.getElementById('detachedContent');
+            
+            isPanelDetached = !isPanelDetached;
+            
+            if (isPanelDetached) {
+                // Clone the panel content to detached window
+                const panelContent = rightPanel.innerHTML;
+                detachedContent.innerHTML = panelContent;
+                
+                // Hide original panel and show detached
+                appContainer.classList.add('panel-detached');
+                detachedWindow.classList.add('active');
+                
+                showNotification('Panel detached - drag to reposition');
+            } else {
+                // Restore panel
+                appContainer.classList.remove('panel-detached');
+                detachedWindow.classList.remove('active');
+                
+                showNotification('Panel reattached');
+            }
+        }
+        
+        // Make detached window draggable
+        let isDragging = false;
+        let currentX;
+        let currentY;
+        let initialX;
+        let initialY;
+        let xOffset = 0;
+        let yOffset = 0;
+        
+        const detachedWindow = document.getElementById('detachedWindow');
+        const detachedHeader = document.getElementById('detachedHeader');
+        
+        detachedHeader.addEventListener('mousedown', dragStart);
+        document.addEventListener('mousemove', drag);
+        document.addEventListener('mouseup', dragEnd);
+        
+        function dragStart(e) {
+            if (e.target === detachedHeader || detachedHeader.contains(e.target)) {
+                initialX = e.clientX - xOffset;
+                initialY = e.clientY - yOffset;
+                isDragging = true;
+            }
+        }
+        
+        function drag(e) {
+            if (isDragging) {
+                e.preventDefault();
+                currentX = e.clientX - initialX;
+                currentY = e.clientY - initialY;
+                xOffset = currentX;
+                yOffset = currentY;
+                
+                detachedWindow.style.transform = `translate(${currentX}px, ${currentY}px)`;
+            }
+        }
+        
+        function dragEnd(e) {
+            initialX = currentX;
+            initialY = currentY;
+            isDragging = false;
+        }
+        
+        // Upload functionality
+        function showUploadZone() {
+            const uploadZone = document.getElementById('uploadZone');
+            uploadZone.style.display = uploadZone.style.display === 'none' ? 'block' : 'none';
+        }
+        
+        // Drag and drop for file upload
+        const uploadZone = document.getElementById('uploadZone');
+        const fileInput = document.getElementById('fileInput');
+        
+        uploadZone.addEventListener('click', () => fileInput.click());
+        
+        uploadZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadZone.classList.add('dragover');
+        });
+        
+        uploadZone.addEventListener('dragleave', () => {
+            uploadZone.classList.remove('dragover');
+        });
+        
+        uploadZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadZone.classList.remove('dragover');
+            handleFiles(e.dataTransfer.files);
+        });
+        
+        fileInput.addEventListener('change', (e) => {
+            handleFiles(e.target.files);
+        });
+        
+        function handleFiles(files) {
+            console.log('Files uploaded:', files);
+            showNotification(`Uploaded ${files.length} file(s) for analysis`);
+            uploadZone.style.display = 'none';
+            
+            // Simulate processing
+            setTimeout(() => {
+                updateMetrics();
+                showNotification('Analysis complete - 2 new threats detected', 'critical');
+            }, 2000);
+        }
+        
+        // Integration toggles
+        function toggleIntegration(service) {
+            const btn = event.target.closest('.integration-btn');
+            btn.classList.toggle('connected');
+            
+            const isConnected = btn.classList.contains('connected');
+            const message = isConnected ? 
+                `Connected to ${service.toUpperCase()}` : 
+                `Disconnected from ${service.toUpperCase()}`;
+            
+            showNotification(message);
+            
+            // Send webhook to service
+            if (isConnected) {
+                sendWebhook(service);
+            }
+        }
+        
+        function sendWebhook(service) {
+            // Simulate webhook sending
+            const webhookUrls = {
+                slack: 'https://hooks.slack.com/services/YOUR/WEBHOOK/URL',
+                teams: 'https://outlook.office.com/webhook/YOUR/WEBHOOK/URL',
+                xdr: 'https://xdr.company.com/api/webhook',
+                zeek: 'https://zeek-sensor.local/api/events'
+            };
+            
+            console.log(`Sending webhook to ${service}:`, webhookUrls[service]);
+        }
+        
+        // View switching
+        function switchView(view) {
+            // Update navigation
+            document.querySelectorAll('.nav-item').forEach(item => {
+                item.classList.remove('active');
+            });
+            event.target.closest('.nav-item').classList.add('active');
+            
+            // Update content (simplified for demo)
+            const contentTitle = document.querySelector('.content-title');
+            contentTitle.textContent = view.charAt(0).toUpperCase() + view.slice(1);
+            
+            showNotification(`Switched to ${view} view`);
+        }
+        
+        // Notifications
+        function showNotification(message, type = 'info') {
+            const notification = document.createElement('div');
+            notification.className = 'notification';
+            notification.innerHTML = `
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <div style="width: 8px; height: 8px; background: ${type === 'critical' ? 'var(--critical)' : 'var(--accent)'}; border-radius: 50%;"></div>
+                    <span>${message}</span>
+                </div>
+            `;
+            
+            document.body.appendChild(notification);
+            
+            setTimeout(() => {
+                notification.style.animation = 'slideOut 0.3s ease';
+                setTimeout(() => notification.remove(), 300);
+            }, 3000);
+        }
+        
+        // Update metrics
+        function updateMetrics() {
+            document.getElementById('criticalCount').textContent = 
+                Math.floor(Math.random() * 5) + 1;
+            document.getElementById('highCount').textContent = 
+                Math.floor(Math.random() * 15) + 5;
+            document.getElementById('mediumCount').textContent = 
+                Math.floor(Math.random() * 30) + 10;
+            document.getElementById('lastUpdate').textContent = 'Just now';
+        }
+        
+        // Refresh data
+        function refreshData() {
+            showNotification('Refreshing data...');
+            setTimeout(() => {
+                updateMetrics();
+                showNotification('Data refreshed successfully');
+            }, 1000);
+        }
+        
+        // Simulate real-time updates
+        setInterval(() => {
+            const alertFeed = document.getElementById('alertFeed');
+            const newAlert = document.createElement('div');
+            newAlert.className = 'alert-item';
+            newAlert.style.animation = 'slideIn 0.3s ease';
+            
+            const severities = ['critical', 'high', 'medium'];
+            const severity = severities[Math.floor(Math.random() * severities.length)];
+            
+            const alerts = [
+                { title: 'Suspicious PowerShell Activity Detected', mitre: 'T1059.001' },
+                { title: 'Lateral Movement Attempt Blocked', mitre: 'T1021' },
+                { title: 'Data Exfiltration Pattern Identified', mitre: 'T1041' },
+                { title: 'Privilege Escalation Attempt', mitre: 'T1068' }
+            ];
+            
+            const alert = alerts[Math.floor(Math.random() * alerts.length)];
+            
+            newAlert.innerHTML = `
+                <div class="alert-severity ${severity}"></div>
+                <div class="alert-content">
+                    <div class="alert-title">${alert.title}</div>
+                    <div class="alert-meta">MITRE: ${alert.mitre} • Just now</div>
+                </div>
+            `;
+            
+            if (alertFeed.children.length > 5) {
+                alertFeed.removeChild(alertFeed.lastChild);
+            }
+            
+            alertFeed.insertBefore(newAlert, alertFeed.firstChild);
+        }, 30000); // Add new alert every 30 seconds
+        
+        // Initialize
+        showNotification('JanuSec Platform initialized successfully');
+    </script>
+  <script src="/static/js/notifications.js"></script>
+</body>
+</html>

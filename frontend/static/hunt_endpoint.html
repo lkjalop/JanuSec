@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8"/>
+	<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+	<title>Threat Hunting - Endpoint</title>
+	<link rel="stylesheet" href="/static/css/tokens.css"/>
+	<link rel="stylesheet" href="/static/css/components.css"/>
+	<link rel="stylesheet" href="/static/css/responsive.css"/>
+	<style>
+		.actions-row { display:flex; flex-wrap:wrap; gap: var(--space-2); margin-bottom: var(--space-3); }
+		.btn { background: var(--color-bg-tertiary); border:1px solid var(--color-border); color: var(--color-text-secondary); padding:6px 12px; font-size: var(--font-size-sm); border-radius: var(--radius-sm); cursor:pointer; text-decoration:none; }
+		.btn:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
+		.btn-primary { background: var(--color-accent); border-color: var(--color-accent); color:#fff; }
+		table { border-collapse:collapse; width:100%; font-size: var(--font-size-xs); }
+		th,td { border:1px solid var(--color-border); padding:6px 8px; }
+		h2 { margin: var(--space-2) 0 var(--space-3); font-size: var(--font-size-lg); }
+		.muted { color: var(--color-text-muted); font-size: var(--font-size-xs); }
+	</style>
+</head>
+<body class="with-topbar">
+	<a href="#contentWrapper" class="skip-link">Skip to content</a>
+	<div class="page-root">
+		<div class="actions-row">
+			<a class="btn" href="/static/janusec-platform-complete-LIVE.html">← Console</a>
+			<a class="btn" href="/static/hunt_network.html">Network</a>
+			<a class="btn" href="/static/metrics.html">Metrics</a>
+			<a class="btn" href="/static/integrations.html">Integrations</a>
+			<a class="btn" href="/static/sbom.html">SBOM</a>
+		</div>
+		<h2>Threat Hunting - Endpoint</h2>
+		<div class="panel">
+			<div class="actions-row" style="margin-bottom:0">
+				<button class="btn" id="btnRefresh">Refresh</button>
+				<button class="btn" id="btnIncident">Create Incident (latest)</button>
+			</div>
+			<div class="muted">Shows lineage anomalies, LOLBIN misuse, suspicious cmd flags, rare ASN. Click a row for explain.</div>
+		</div>
+		<div class="panel">
+			<h3 style="margin-top:0">Recent Endpoint Decisions</h3>
+			<table id="tbl"><thead><tr><th>ID</th><th>Verdict</th><th>Score</th><th>Proc</th><th>Parent</th></tr></thead><tbody></tbody></table>
+		</div>
+	</div>
+
+		<script>
+			function safeNotify(msg, level){
+				try{
+					if(window.showNotification) return window.showNotification(msg, level);
+					if(window.notifications && typeof window.notifications.showToast === 'function') return window.notifications.showToast(msg, 4000);
+					console.log('[notify]', level||'info', msg);
+				}catch(e){ console.log('notify-fail', e, msg); }
+			}
+
+			function H(){
+				try{ const k = localStorage.getItem('apiKey') || 'devkey123'; return {'x-api-key': k}; }
+				catch(_){ return {'x-api-key': 'devkey123'}; }
+			}
+
+			async function recent(){
+				const r = await fetch('/api/v1/decisions/recent?limit=50', { headers: H() });
+				if(!r.ok) return safeNotify('Failed to load recent decisions','error');
+				const j = await r.json();
+				const rows = (j.rows||j.events||[]).filter(x=>{ const pn = (x.process_name||x.proc_name||'').toLowerCase(); return pn; });
+				const tb = document.querySelector('#tbl tbody'); tb.innerHTML = '';
+				rows.forEach(rr=>{
+					const tr = document.createElement('tr'); tr.style.cursor = 'pointer';
+					const id = rr.event_id || rr.id;
+					tr.innerHTML = `<td>${id}</td><td>${rr.verdict||''}</td><td>${(rr.confidence||rr.score||'')}</td><td>${rr.process_name||rr.proc_name||''}</td><td>${rr.parent_process_name||rr.parent_proc||''}</td>`;
+					tr.addEventListener('click', ()=> explain(id)); tb.appendChild(tr);
+				});
+				window._latest = (rows[0] && (rows[0].event_id||rows[0].id));
+			}
+
+			async function explain(id){
+				const r = await fetch(`/api/v1/decisions/${id}/explain`, { headers: H() });
+				if(!r.ok) return safeNotify('Explain failed','error');
+				const j = await r.json();
+				safeNotify(`Decision ${id} — Verdict: ${j.verdict} — Factors: ${(j.factors||[]).length}`,'info');
+			}
+
+			document.getElementById('btnRefresh').onclick = recent;
+			document.getElementById('btnIncident').onclick = async ()=>{
+				const id = window._latest || 'manual';
+				const cr = await fetch('/api/v1/incidents', { method: 'POST', headers: {'Content-Type':'application/json', ...H()}, body: JSON.stringify({ artifact_id: id, title: 'Endpoint Incident', severity: 'high' }) });
+				const cj = await cr.json();
+				if(cr.ok) safeNotify('Incident created '+(cj.incident&&cj.incident.id||''),'success'); else safeNotify('Incident failed','error');
+			};
+
+			recent();
+		</script>
+
+  <script src="/static/js/notifications.js"></script>
+</body>
+</html>

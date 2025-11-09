@@ -1,0 +1,25 @@
+<!-- Shared layout shell -->
+<link rel="stylesheet" href="/static/css/tokens.css" />
+<link rel="stylesheet" href="/static/css/components.css" />
+<link rel="stylesheet" href="/static/css/responsive.css" />
+<a href="#contentWrapper" class="skip-link" style="position:absolute;left:-999px;top:-999px;background:var(--color-accent);color:#fff;padding:8px 12px;border-radius:4px;z-index:var(--z-nav);">Skip to content</a>
+<div id="globalBanner" role="status" aria-live="polite"></div>
+<div id="topBar" role="navigation" aria-label="Global navigation">
+  <div class="brand">JanuSec Console</div>
+  <div class="env-switch">
+    <label for="envSelect" style="font-size:11px;opacity:.7;">Env:</label>
+    <select id="envSelect" aria-label="Select environment">
+      <option value="dev">dev</option>
+      <option value="staging">staging</option>
+      <option value="prod">prod</option>
+    </select>
+    <div class="auth-state" id="authState" aria-label="Authentication state">auth: pending</div>
+  </div>
+</div>
+<div id="toastContainer" aria-live="assertive" aria-relevant="additions"></div>
+<main id="contentWrapper" tabindex="-1" role="main" aria-label="Main content area"></main>
+<script type="module" src="/static/js/layout_loader.js"></script>
+<script type="module" src="/static/js/toast.js"></script>
+<script type="module" src="/static/js/command_palette.js"></script>
+<script type="module" src="/static/js/fetch_wrapper.js"></script>
+<script type="module" src="/static/js/health_poll.js"></script>

@@ -1,0 +1,83 @@
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Reports</title>
+<style>
+  :root{
+    --bg:#0B0E14;--card:#151922;--border:#2A3142;--fg:#E8EBF0;--muted:#A9B2C3;--accent:#3B82F6
+  }
+  body{background:var(--bg);color:var(--fg);font-family:Inter,Segoe UI,Arial,sans-serif;margin:0}
+  .wrap{max-width:1000px;margin:20px auto;padding:12px}
+  .row{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+  .btn{padding:8px 14px;background:#1C2230;border:1px solid var(--border);border-radius:6px;color:var(--fg);cursor:pointer;text-decoration:none}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:8px;margin-bottom:16px;padding:12px}
+  table{width:100%;border-collapse:collapse}
+  th,td{border-bottom:1px solid var(--border);padding:8px;text-align:left}
+  th{color:var(--muted)}
+  .muted{color:var(--muted)}
+  code{background:#0F1320;border:1px solid var(--border);padding:2px 4px;border-radius:4px}
+  .pill{display:inline-block;padding:2px 8px;border:1px solid var(--border);border-radius:999px;font-size:.85em;margin-left:6px;color:var(--muted)}
+</style></head>
+<body>
+  <div class="wrap">
+    <div class="row">
+      <a class="btn" href="/static/janusec-platform-complete-LIVE.html">← Console</a>
+      <a class="btn" href="/static/hunt_network.html">Network</a>
+      <a class="btn" href="/static/hunt_endpoint.html">Endpoint</a>
+      <a class="btn" href="/static/metrics.html">Metrics</a>
+      <a class="btn" href="/static/integrations.html">Integrations</a>
+      <a class="btn" href="/static/sbom.html">SBOM</a>
+    </div>
+    <h2>Reports <span class="pill" id="count">0</span></h2>
+    <div class="card">
+      <h3>Latest Janusec Summary</h3>
+      <div id="summary" class="muted">Loading…</div>
+    </div>
+    <div class="card">
+      <h3>Available Files</h3>
+      <table>
+        <thead><tr><th>Name</th><th>Size</th><th>Modified</th><th></th></tr></thead>
+        <tbody id="files"></tbody>
+      </table>
+    </div>
+  </div>
+<script>
+  const apiBase = (localStorage.apiBase || '').replace(/\/$/,'') || '';
+  const apiKey = localStorage.apiKey || 'devkey123';
+  function fmtBytes(n){ if(n==null) return ''; const u=['B','KB','MB','GB']; let i=0; while(n>=1024&&i<u.length-1){n/=1024;i++;} return n.toFixed( (i?1:0) )+ ' ' + u[i]; }
+  function ts(t){ if(!t) return ''; const d=new Date(t*1000); return d.toLocaleString(); }
+  async function fetchJSON(path){
+    const res = await fetch((apiBase||'') + path, { headers: { 'x-api-key': apiKey } });
+    if(!res.ok) throw new Error(await res.text());
+    return res.json();
+  }
+  async function loadSummary(){
+    const el = document.getElementById('summary');
+    try{
+      const data = await fetchJSON('/api/v1/report/summary/latest');
+      const over = data.summary?.overall || {};
+      const stride = data.summary?.csv2?.taxonomy?.stride?.categories || [];
+      const maestro = data.summary?.csv2?.taxonomy?.maestro?.phases || [];
+      el.innerHTML = `
+        <div>Total: <b>${over.total||0}</b> · Good: <b>${over.good||0}</b> · Bad: <b>${over.bad||0}</b></div>
+        <div class="muted">STRIDE (csv2): ${stride.slice(0,6).join(', ')}</div>
+        <div class="muted">MAESTRO (csv2): ${(maestro||[]).slice(0,5).map(x=>x[0]).join(', ')}</div>
+        <div style="margin-top:8px"><a class="btn" href="/api/v1/report/files/janusec_summary.json">Download JSON</a></div>`;
+    }catch(e){ el.textContent = 'No summary found. Generate via xdr_excel_summary.py.' }
+  }
+  async function loadFiles(){
+    const tbody = document.getElementById('files');
+    try{
+      const data = await fetchJSON('/api/v1/report/files');
+      document.getElementById('count').textContent = data.count || 0;
+      tbody.innerHTML = (data.files||[]).map(f=>{
+        const href = (apiBase||'') + f.url;
+        const dt = new Date(f.mtime*1000).toLocaleString();
+        return `<tr><td>${f.name}</td><td>${fmtBytes(f.size)}</td><td>${dt}</td><td><a class="btn" href="${href}">Download</a></td></tr>`;
+      }).join('');
+    }catch(e){ tbody.innerHTML = `<tr><td colspan="4" class="muted">Failed to load files</td></tr>` }
+  }
+  loadSummary();
+  loadFiles();
+</script>
+  <script src="/static/js/notifications.js"></script>
+</body></html>
+

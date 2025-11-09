@@ -1,0 +1,139 @@
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Framework Coverage Map</title>
+<style>
+body{background:#0B0E14;color:#E8EBF0;font-family:Inter,Segoe UI,sans-serif;margin:0;padding:0}
+.wrap{max-width:1180px;margin:18px auto;padding:12px}
+.card{background:#151922;border:1px solid #2A3142;border-radius:8px;margin-bottom:16px;padding:14px}
+.row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+.btn{padding:8px 14px;background:#1C2230;border:1px solid #2A3142;border-radius:6px;color:#E8EBF0;cursor:pointer;font-size:13px}
+.btn:hover{background:#223042}
+.table-wrap{overflow-x:auto}
+table{border-collapse:collapse;width:100%;min-width:760px}
+th,td{border:1px solid #2A3142;padding:6px 8px;font-size:12px;text-align:left}
+th{background:#1C2230}
+.metric-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-top:8px}
+.metric{background:#1C2230;border:1px solid #2A3142;border-radius:8px;padding:10px}
+.metric .v{font-size:22px;font-weight:600}
+.metric .l{font-size:11px;color:#A8B2C3;margin-top:4px;text-transform:uppercase;letter-spacing:.5px}
+.pill{display:inline-block;padding:4px 8px;background:#1C2230;border:1px solid #2A3142;border-radius:999px;font-size:11px;margin:2px 4px 2px 0}
+.badge-critical{background:#E54848;border-color:#E54848;color:#fff}
+.badge-high{background:#FF8A3C;border-color:#FF8A3C;color:#0B0E14}
+.badge-medium{background:#E0C446;border-color:#E0C446;color:#0B0E14}
+.badge-low{background:#3FA860;border-color:#3FA860;color:#0B0E14}
+.small{font-size:11px;color:#A8B2C3}
+.code{font-family:Consolas,monospace;font-size:11px}
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:980px){.grid-2{grid-template-columns:1fr}}
+</style></head>
+<body>
+<div class="wrap">
+  <div class="row">
+    <a class="btn" href="/static/janusec-platform-complete-LIVE.html">← Console</a>
+    <button class="btn" id="btnReload">Reload Coverage</button>
+    <button class="btn" id="btnShowFactors">Toggle Vulnerability Factors</button>
+    <a class="btn" href="/api/v1/executive/summary?format=html" target="_blank">Executive Export (HTML)</a>
+    <a class="btn" href="/api/v1/executive/summary?format=markdown" target="_blank">Executive Export (MD)</a>
+  </div>
+  <h2 style="margin:10px 0 6px">Framework Coverage Map</h2>
+  <div class="small">Unified factor taxonomy mapped to key frameworks (MITRE, STRIDE, DREAD, MAESTRO, PASTA, CVSS, compliance). Demonstrates breadth of detection semantics for executive review.</div>
+  <div class="card">
+    <h3 style="margin:0 0 6px">Coverage KPIs</h3>
+    <div id="kpiGrid" class="metric-grid"></div>
+    <div style="margin-top:10px" class="small">Legend: <span class="pill domain-email">Email</span> <span class="pill domain-cloud">Cloud</span> <span class="pill" style="background:#5D8B6A">Playbook</span> <span class="pill" style="background:#A07C3D">Supply Chain</span> <span class="pill" style="background:#6F4EA8">MAESTRO</span></div>
+  </div>
+  <div class="card">
+    <h3 style="margin:0 0 6px">Cross-Framework Coverage Table</h3>
+    <div class="small" style="margin-bottom:6px">Source: /api/v1/compliance/report?format=json</div>
+    <div class="table-wrap"><table><thead><tr><th>Framework</th><th>Mapped</th><th>Total</th><th>Coverage %</th></tr></thead><tbody id="tblFw"></tbody></table></div>
+  </div>
+  <div class="grid-2">
+    <div class="card">
+      <h3 style="margin:0 0 6px">Sample Unmapped (Focus Backlog)</h3>
+      <div class="small">Representative slice of remaining factor gaps.</div>
+      <div id="unmappedList" style="margin-top:6px"></div>
+    </div>
+    <div class="card" id="vulnFactorsCard" style="display:none">
+      <h3 style="margin:0 0 6px">Recent Vulnerability Factors</h3>
+      <div class="small">Derived from CVE stub, KEV, EPSS, SBOM ingestion.</div>
+      <div id="vulnFactorList" style="margin-top:4px"></div>
+    </div>
+  </div>
+  <div class="card">
+    <h3 style="margin:0 0 6px">Explanation & Notes</h3>
+    <div class="small">Coverage is calculated from factors_taxonomy.json single best-fit mappings. Gaps indicate domains slated for expansion (e.g. deeper MAESTRO phase alignment, extended SOC2 crosswalk). Vulnerability factors show live enrichment signals (critical CVSS, KEV listed, high EPSS probability). Executive narrative: breadth + prioritization focus.</div>
+    <pre id="rawJson" class="code" style="margin-top:10px; max-height:240px; overflow:auto; background:#10141C; padding:8px; border:1px solid #2A3142; border-radius:6px"></pre>
+  </div>
+</div>
+<script>
+function H(){ try{ return {'x-api-key': localStorage.getItem('apiKey')||'devkey123'} }catch(_){ return {'x-api-key':'devkey123'} } }
+const kpiGrid = document.getElementById('kpiGrid');
+const tblFw = document.getElementById('tblFw');
+const unmappedList = document.getElementById('unmappedList');
+const rawJson = document.getElementById('rawJson');
+const vulnCard = document.getElementById('vulnFactorsCard');
+const vulnList = document.getElementById('vulnFactorList');
+let _lastReport = null; let _showVuln = false;
+async function loadCoverage(){
+  try{
+    const r = await fetch('/api/v1/compliance/report?format=json', { headers: H() });
+    const j = await r.json(); _lastReport = j;
+    renderReport(j);
+  }catch(e){ tblFw.innerHTML = '<tr><td colspan=4>error</td></tr>'; }
+}
+function pct(a,b){ if(!b) return 0; return Math.round((a/b)*1000)/10 }
+function renderReport(j){
+  tblFw.innerHTML='';
+  (j.frameworks||[]).forEach(fw=>{
+    const tr=document.createElement('tr');
+    tr.innerHTML = `<td>${fw.name}</td><td>${fw.mapped}</td><td>${fw.total}</td><td>${pct(fw.mapped,fw.total)}%</td>`; tblFw.appendChild(tr);
+  });
+  // KPIs
+  kpiGrid.innerHTML='';
+  const totalMapped = (j.frameworks||[]).reduce((s,f)=>s+f.mapped,0);
+  const totalControls = (j.frameworks||[]).reduce((s,f)=>s+f.total,0);
+  const coverageOverall = pct(totalMapped,totalControls);
+  addKpi(coverageOverall+'%','Overall Coverage');
+  const mitre = (j.frameworks||[]).find(f=>/mitre/i.test(f.name||''));
+  if(mitre) addKpi(pct(mitre.mapped,mitre.total)+'%','MITRE');
+  const stride = (j.frameworks||[]).find(f=>/stride/i.test(f.name||''));
+  if(stride) addKpi(pct(stride.mapped,stride.total)+'%','STRIDE');
+  const dread = (j.frameworks||[]).find(f=>/dread/i.test(f.name||''));
+  if(dread) addKpi(pct(dread.mapped,dread.total)+'%','DREAD');
+  if(j.unmapped_sample){
+    unmappedList.innerHTML='';
+    j.unmapped_sample.slice(0,40).forEach(f=>{
+      const div=document.createElement('div'); div.className='pill'; div.textContent=f.factor_id||f.id||f; unmappedList.appendChild(div);
+    });
+  }
+  rawJson.textContent = JSON.stringify(j,null,2);
+  if(_showVuln) loadVulnFactors(); else vulnCard.style.display='none';
+}
+function addKpi(val,label){
+  const d=document.createElement('div'); d.className='metric'; d.innerHTML = `<div class='v'>${val}</div><div class='l'>${label}</div>`; kpiGrid.appendChild(d);
+}
+async function loadVulnFactors(){
+  try{
+    vulnCard.style.display='block';
+    vulnList.innerHTML = '<div class="small">Loading...</div>';
+    // Demo sourcing: call CVE lookup stub for a few canned IDs & show KEV/EPSS counts
+    const kevRes = await fetch('/api/v1/enrichment/kev/stats', { headers: H() }).catch(()=>null);
+    let kevCount = 0; try{ kevCount = (await kevRes.json()).count||0; }catch(_){ }
+    const epssRes = await fetch('/api/v1/enrichment/epss/stats', { headers: H() }).catch(()=>null);
+    let epssEntries = 0; try{ epssEntries = (await epssRes.json()).count||0; }catch(_){ }
+    const cves = ['CVE-2023-0001','CVE-2024-2193','CVE-2025-1020'];
+    const factors = [];
+    for(const id of cves){
+      try{ const r = await fetch('/api/v1/enrichment/cve/'+encodeURIComponent(id), { headers: H() }); const j = await r.json(); if(j.factors) j.factors.forEach(f=> factors.push(f)); }catch(_){ }
+    }
+    vulnList.innerHTML='';
+    if(!factors.length){ vulnList.innerHTML = '<div class="small">No demo factors returned.</div>'; }
+    factors.forEach(f=>{ const span=document.createElement('span'); span.className='pill badge-high'; span.textContent=f; vulnList.appendChild(span); });
+    const meta=document.createElement('div'); meta.className='small'; meta.style.marginTop='8px'; meta.textContent = `KEV cached: ${kevCount} • EPSS entries: ${epssEntries}`; vulnList.appendChild(meta);
+  }catch(e){ vulnList.innerHTML = '<div class="small">Failed to load vulnerability factors.</div>'; }
+}
+// Events
+ document.getElementById('btnReload').onclick = loadCoverage;
+ document.getElementById('btnShowFactors').onclick = ()=>{ _showVuln=!_showVuln; renderReport(_lastReport||{}); };
+loadCoverage();
+</script>
+</body></html>

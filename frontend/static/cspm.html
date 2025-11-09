@@ -1,0 +1,86 @@
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>CSPM Dashboard</title>
+<style>
+body{background:#0B0E14;color:#E8EBF0;font-family:Inter,Segoe UI,sans-serif}
+.wrap{max-width:1150px;margin:20px auto;padding:12px}
+.card{background:#151922;border:1px solid #2A3142;border-radius:8px;margin-bottom:16px;padding:12px}
+.row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+.btn{padding:8px 14px;background:#1C2230;border:1px solid #2A3142;border-radius:6px;color:#E8EBF0;cursor:pointer}
+.input{padding:8px;background:#1C2230;border:1px solid #2A3142;border-radius:6px;color:#E8EBF0}
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.kpi{background:#1C2230;border:1px solid #2A3142;border-radius:8px;padding:12px}
+.kpi .v{font-size:22px;font-weight:600}
+.kpi .l{font-size:12px;color:#A8B2C3;margin-top:4px}
+.table{border-collapse:collapse;width:100%}
+.table th,.table td{border:1px solid #2A3142;padding:6px 8px;font-size:12px}
+.hint{color:#A8B2C3;font-size:12px}
+</style></head>
+<body>
+<div class="wrap">
+  <div class="row">
+    <a class="btn" href="/static/janusec-platform-complete-LIVE.html">← Console</a>
+    <a class="btn" href="/static/compliance.html">Compliance</a>
+    <a class="btn" href="/static/sbom.html">SBOM</a>
+  </div>
+  <h2>Cloud Posture & CSPM</h2>
+  <div class="card">
+    <div class="row">
+      <label class="hint">Tenant: auto from localStorage</label>
+      <span class="hint">API uses x-api-key from localStorage or devkey123</span>
+    </div>
+    <div class="kpis" id="kpis">
+      <div class="kpi"><div class="v" id="k_total">–</div><div class="l">Total Findings</div></div>
+      <div class="kpi"><div class="v" id="k_crit">–</div><div class="l">Critical</div></div>
+      <div class="kpi"><div class="v" id="k_high">–</div><div class="l">High</div></div>
+      <div class="kpi"><div class="v" id="k_med">–</div><div class="l">Medium</div></div>
+    </div>
+  </div>
+  <div class="card">
+    <h3>Top Misconfigurations</h3>
+    <div class="row" style="gap:8px">
+      <label class="hint">Group by</label>
+      <select id="gb" class="input" style="max-width:160px"><option value="type">Type</option><option value="service">Service</option></select>
+      <button class="btn" id="btnTop">Refresh</button>
+    </div>
+    <div id="topTbl" style="margin-top:8px"></div>
+  </div>
+  <div class="card">
+    <h3>History (last 7 days)</h3>
+    <div class="row" style="gap:8px">
+      <select id="bucket" class="input" style="max-width:160px"><option value="1d">Daily</option><option value="1h">Hourly</option></select>
+      <button class="btn" id="btnHist">Refresh</button>
+    </div>
+    <div id="hist" class="hint" style="margin-top:8px">Loading…</div>
+  </div>
+  <div class="card">
+    <h3>Assets</h3>
+    <div class="row" style="gap:8px">
+      <input class="input" id="f_service" placeholder="service (s3/ec2/iam/k8s)"/>
+      <input class="input" id="f_cloud" placeholder="cloud (aws/azure/gcp)"/>
+      <input class="input" id="f_region" placeholder="region (us-east-1)"/>
+      <button class="btn" id="btnAssets">Search</button>
+    </div>
+    <div id="assets" style="margin-top:8px"></div>
+  </div>
+  <div class="card">
+    <h3>Security Group Drift</h3>
+    <div class="row" style="gap:8px">
+      <button class="btn" id="btnDrift">Refresh</button>
+      <a class="btn" href="/api/v1/compliance/cloud/crossmap" target="_blank">Cloud Crossmap</a>
+    </div>
+    <div id="drift" style="margin-top:8px" class="hint">Loading…</div>
+  </div>
+</div>
+<script>
+function H(){ try{ const k=localStorage.getItem('apiKey')||'devkey123'; const t=localStorage.getItem('tenantId'); const h={'x-api-key':k}; if(t) h['X-Tenant-ID']=t; return h; }catch(_){ return {'x-api-key':'devkey123'} } }
+async function loadSummary(){ try{ const r=await fetch('/api/v1/compliance/posture',{headers:H()}); if(!r.ok) return; const j=await r.json(); const sev=j.severity||{}; document.getElementById('k_total').textContent=j.total||0; document.getElementById('k_crit').textContent=sev.critical||0; document.getElementById('k_high').textContent=sev.high||0; document.getElementById('k_med').textContent=sev.medium||0; }catch(e){} }
+async function loadTop(){ try{ const gb=document.getElementById('gb').value; const r=await fetch('/api/v1/compliance/posture/top?group_by='+encodeURIComponent(gb),{headers:H()}); if(!r.ok){ document.getElementById('topTbl').textContent='n/a'; return;} const j=await r.json(); const rows=(j.items||[]).map(it=>`<tr><td>${it.key}</td><td>${it.count}</td></tr>`).join(''); document.getElementById('topTbl').innerHTML=`<table class="table"><thead><tr><th>${gb}</th><th>Count</th></tr></thead><tbody>${rows}</tbody></table>`; }catch(e){ document.getElementById('topTbl').textContent='error'; } }
+async function loadHist(){ try{ const b=document.getElementById('bucket').value; const r=await fetch('/api/v1/compliance/posture/history?bucket='+encodeURIComponent(b),{headers:H()}); if(!r.ok){ document.getElementById('hist').textContent='n/a'; return;} const j=await r.json(); const s=(j.series||[]); if(!s.length){ document.getElementById('hist').textContent='No data'; return; } const rows=s.map(x=>`<tr><td>${new Date(x.ts*1000).toISOString().slice(0,19)}</td><td>${x.critical}</td><td>${x.high}</td><td>${x.medium}</td><td>${x.low}</td></tr>`).join(''); document.getElementById('hist').innerHTML=`<table class="table"><thead><tr><th>Bucket</th><th>Crit</th><th>High</th><th>Med</th><th>Low</th></tr></thead><tbody>${rows}</tbody></table>`; }catch(e){ document.getElementById('hist').textContent='error'; } }
+async function loadAssets(){ try{ const u=new URL('/api/v1/compliance/assets',location.origin); const svc=document.getElementById('f_service').value; const cl=document.getElementById('f_cloud').value; const rg=document.getElementById('f_region').value; if(svc) u.searchParams.set('service',svc); if(cl) u.searchParams.set('cloud',cl); if(rg) u.searchParams.set('region',rg); const r=await fetch(u.toString(),{headers:H()}); const j=await r.json(); const rows=(j.items||[]).map(a=>`<tr><td>${a.id}</td><td>${a.service||''}</td><td>${a.type||''}</td><td>${a.cloud||''}</td><td>${a.region||''}</td></tr>`).join(''); document.getElementById('assets').innerHTML=`<table class="table"><thead><tr><th>ID</th><th>Service</th><th>Type</th><th>Cloud</th><th>Region</th></tr></thead><tbody>${rows}</tbody></table>`; }catch(e){ document.getElementById('assets').textContent='error'; } }
+document.getElementById('btnTop').onclick=loadTop; document.getElementById('btnHist').onclick=loadHist; document.getElementById('btnAssets').onclick=loadAssets;
+async function remediateTighten(sg){ try{ const body={sg_id:sg,dry_run:true}; const t=localStorage.getItem('tenantId'); if(t) body.tenant_id=t; const r=await fetch('/api/v1/soar/remediate/net/sg-tighten',{method:'POST',headers:{...H(),'content-type':'application/json'},body:JSON.stringify(body)}); if(r.ok){ alert('Tighten dispatched (dry-run).'); } else { alert('Failed: '+r.status); } }catch(e){ alert('Error'); } }
+async function loadDrift(){ try{ const r=await fetch('/api/v1/compliance/net/sg/drift',{headers:H()}); if(!r.ok){ document.getElementById('drift').textContent='n/a'; return; } const j=await r.json(); const rows=(j.by_sg||[]).map(x=>`<tr><td>${x.sg_id}</td><td>${x.added}</td><td>${x.removed}</td><td>${x.open_to_world}</td><td>${x.open_to_world?`<button class=\"btn\" onclick=\"remediateTighten('${x.sg_id}')\">Tighten</button>`:''}</td></tr>`).join(''); document.getElementById('drift').innerHTML=`<table class=\"table\"><thead><tr><th>SG</th><th>Added</th><th>Removed</th><th>Open-World</th><th>Action</th></tr></thead><tbody>${rows||'<tr><td colspan=5>No recent drift</td></tr>'}</tbody></table>`; }catch(e){ document.getElementById('drift').textContent='error'; } }
+document.getElementById('btnDrift').onclick=loadDrift;
+loadSummary(); loadTop(); loadHist(); loadDrift();
+</script>
+</body></html>

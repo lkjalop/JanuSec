@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Bulk Upload & Stats</title>
+  <style>
+    :root{--bg:#0B0E14;--card:#151922;--muted:#A8B2C3;--text:#E8EBF0;--border:#2A3142;--accent:#4A63E7}
+    body{margin:0;background:var(--bg);color:var(--text);font-family:Inter, Segoe UI, sans-serif}
+    .wrap{max-width:1100px;margin:20px auto;padding:12px}
+    .row{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+    .btn{padding:8px 12px;background:#1C2230;border:1px solid var(--border);border-radius:6px;color:var(--text);cursor:pointer}
+    .btn-primary{background:var(--accent);border-color:var(--accent);color:#fff}
+    .card{background:var(--card);border:1px solid var(--border);border-radius:8px;margin-bottom:16px;padding:12px}
+    .input{padding:8px;background:#1C2230;border:1px solid var(--border);border-radius:6px;color:var(--text)}
+    .muted{color:var(--muted);font-size:12px}
+    .zone{border:2px dashed var(--border);border-radius:8px;padding:16px;text-align:center;margin-top:8px}
+    table{border-collapse:collapse;width:100%}
+    th,td{border:1px solid var(--border);padding:6px 8px;font-size:12px}
+    .ok{color:#9BE28C}
+    .err{color:#FF8C8C}
+  </style>
+  <script>
+    function safeNotify(msg, level){
+      try{
+        if(window.showNotification) return showNotification(msg, level);
+        if(window.notifications && typeof window.notifications.showToast === 'function') return window.notifications.showToast(msg, 4000);
+        console.log('notify:', level||'info', msg);
+      }catch(e){ console.log('notify-fail', e, msg); }
+    }
+
+    function authHeaders(){
+      try{ const k = localStorage.getItem('apiKey') || 'devkey123'; return {'x-api-key': k}; }catch(_){ return {'x-api-key':'devkey123'} }
+    }
+    function setTenant(v){ try{ localStorage.setItem('tenantId', v||''); }catch(_){ } }
+    function getTenant(){ try{ return localStorage.getItem('tenantId') || ''; }catch(_){ return '' } }
+
+    async function doUpload(files){
+      if(!files || !files.length){ safeNotify('Pick one or more files','error'); return; }
+      const form = new FormData();
+      for(const f of files) form.append('files', f);
+      const h = {...authHeaders()};
+      const t = getTenant(); if(t) h['X-Tenant-ID'] = t;
+      const btn = document.getElementById('btnUpload'); btn.disabled = true; btn.textContent = 'Uploading...';
+      try{
+        const r = await fetch('/api/v1/upload/files', { method:'POST', headers: h, body: form });
+        const j = await r.json();
+        if(!r.ok){ throw new Error(j.detail || 'upload_failed'); }
+        renderSummary(j);
+      }catch(e){ safeNotify('Upload failed: ' + (e.message||e),'error'); }
+      finally{ btn.disabled=false; btn.textContent='Upload'; }
+    }
+
+    function renderSummary(j){
+      const sum = document.getElementById('summary');
+      const filesProcessed = j.files_processed ?? (j.results? j.results.length : 0);
+      const totalThreats = j.total_threats_detected ?? 0;
+      const totalSize = j.total_size ?? 0;
+      sum.innerHTML = `Processed <b>${filesProcessed}</b> files • Threats: <b>${totalThreats}</b> • Size: <b>${(totalSize/1024).toFixed(1)} KiB</b>`;
+      const tb = document.getElementById('tbody'); tb.innerHTML='';
+      (j.results||[]).forEach(r=>{
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${r.filename||'-'}</td>
+                        <td>${(r.status||'').toUpperCase()==='PROCESSED'?'<span class=ok>processed</span>':'<span class=err>'+(r.status||'error')+'</span>'}</td>
+                        <td>${r.file_type||'-'}</td>
+                        <td>${r.size||0}</td>
+                        <td>${(r.analysis && r.analysis.potential_threats)||0}</td>
+                        <td><pre style="white-space:pre-wrap;margin:0;max-height:80px;overflow:auto">${r.error||''}</pre></td>`;
+        tb.appendChild(tr);
+      });
+    }
+
+    function handleFiles(){ const el = document.getElementById('files'); doUpload(el.files); }
+    function setupDnD(){
+      const z = document.getElementById('zone');
+      ;['dragenter','dragover','dragleave','drop'].forEach(ev=> z.addEventListener(ev, e=>{e.preventDefault(); e.stopPropagation();}));
+      ;['dragenter','dragover'].forEach(ev=> z.addEventListener(ev, ()=> z.style.background='#101521'));
+      ;['dragleave','drop'].forEach(ev=> z.addEventListener(ev, ()=> z.style.background=''));
+      z.addEventListener('drop', e=>{ const dt = e.dataTransfer; if(dt && dt.files && dt.files.length){ doUpload(dt.files); }});
+    }
+    window.addEventListener('DOMContentLoaded', setupDnD);
+  </script>
+  <link rel="preconnect" href="/static/metrics.html" />
+  <meta http-equiv="Cache-Control" content="no-store" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
+  </head>
+<body>
+  <div class="wrap">
+    <div class="row">
+      <a class="btn" href="/static/janusec-platform-complete-LIVE.html">← Console</a>
+      <a class="btn" href="/static/metrics.html" target="_blank">Open Metrics</a>
+    </div>
+
+    <div class="card">
+      <h2>Bulk Upload & Stats</h2>
+      <div class="row">
+        <input id="files" class="input" type="file" multiple />
+        <button id="btnUpload" class="btn btn-primary" onclick="handleFiles()">Upload</button>
+        <input id="tenant" class="input" placeholder="X-Tenant-ID (optional)" onblur="setTenant(this.value)" style="min-width:220px" />
+      </div>
+      <div id="zone" class="zone muted">Drag and drop files here to upload</div>
+      <div class="muted" style="margin-top:8px">Sends to <code>/api/v1/upload/files</code> with your <code>x-api-key</code> from localStorage (defaults to <code>devkey123</code>).</div>
+    </div>
+
+    <div class="card">
+      <h3>Summary</h3>
+      <div id="summary" class="muted">No uploads yet.</div>
+      <table style="margin-top:8px">
+        <thead><tr><th>File</th><th>Status</th><th>Type</th><th>Size</th><th>Threats</th><th>Error</th></tr></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+  </div>
+  <script src="/static/js/notifications.js"></script>
+</body>
+</html>
+

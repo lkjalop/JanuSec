@@ -1,0 +1,154 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>AI Providers Settings</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root { --bg:#0b0f15; --card:#0f1620; --text:#e6eef8; --muted:#8aa1b4; --accent:#4cc2ff; --ok:#3ddc97; --warn:#ffcc00; --err:#ff6b6b; }
+    body{background:var(--bg);color:var(--text);font-family:system-ui,Segoe UI,Roboto,Arial;margin:0}
+    .wrap{max-width:980px;margin:24px auto;padding:16px}
+    h1{font-size:20px;margin:0 0 12px}
+    .card{background:var(--card);padding:16px;border-radius:8px;margin-bottom:12px}
+    label{display:block;margin:8px 0 4px;color:var(--muted)}
+    input,select,button,textarea{background:#0b1320;color:var(--text);border:1px solid #233447;border-radius:6px;padding:8px;width:100%}
+    .row{display:flex;gap:12px}
+    .col{flex:1}
+    .actions{display:flex;gap:8px;margin-top:12px}
+    .status{font-size:12px;color:var(--muted);margin-left:8px}
+    a{color:var(--accent)}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>AI Providers</h1>
+    <div class="card">
+      <div class="row">
+        <div class="col">
+          <label>Default Provider</label>
+          <select id="defaultProvider">
+            <option value="ollama">Ollama (local)</option>
+            <option value="openai">OpenAI</option>
+            <option value="anthropic">Anthropic</option>
+          </select>
+        </div>
+        <div class="col">
+          <label>Summarize → Provider</label>
+          <input id="providerSummarize" placeholder="e.g., openai:gpt-4o-mini" />
+        </div>
+        <div class="col">
+          <label>Embed → Provider</label>
+          <input id="providerEmbed" placeholder="e.g., hf:all-MiniLM" />
+        </div>
+      </div>
+      <div class="row">
+        <div class="col">
+          <h3 style="margin:12px 0 4px">Ollama (local)</h3>
+          <label>URL</label>
+          <input id="ollamaUrl" placeholder="http://127.0.0.1:11434" />
+          <label>Model</label>
+          <input id="ollamaModel" placeholder="llama3" />
+          <div class="actions">
+            <button onclick="test('ollama')">Test Connection</button>
+            <span class="status" id="status-ollama"></span>
+          </div>
+        </div>
+        <div class="col">
+          <h3 style="margin:12px 0 4px">OpenAI</h3>
+          <label>API Key</label>
+          <input id="openaiKey" placeholder="sk-..." />
+          <label>Model</label>
+          <input id="openaiModel" placeholder="gpt-4o-mini" />
+          <div class="actions">
+            <button onclick="test('openai')">Test Connection</button>
+            <span class="status" id="status-openai"></span>
+          </div>
+        </div>
+        <div class="col">
+          <h3 style="margin:12px 0 4px">Anthropic</h3>
+          <label>API Key</label>
+          <input id="anthropicKey" placeholder="api-key" />
+          <label>Model</label>
+          <input id="anthropicModel" placeholder="claude-3-haiku" />
+          <div class="actions">
+            <button onclick="test('anthropic')">Test Connection</button>
+            <span class="status" id="status-anthropic"></span>
+          </div>
+        </div>
+      </div>
+      <div class="row">
+        <div class="col">
+          <h3 style="margin:12px 0 4px">Limits</h3>
+          <label>Monthly USD</label>
+          <input id="limitMonthly" type="number" step="0.01" />
+          <label>Daily USD</label>
+          <input id="limitDaily" type="number" step="0.01" />
+          <label>Per-request max tokens</label>
+          <input id="limitTokens" type="number" step="1" />
+          <label><input type="checkbox" id="limitBlock" /> Block on exceed (fallback to local)</label>
+        </div>
+      </div>
+      <div class="actions">
+        <button onclick="save()">Save</button>
+        <button onclick="loadCfg()">Reload</button>
+      </div>
+    </div>
+  </div>
+  <script>
+    const apiKey = localStorage.getItem('apiKey') || 'devkey123';
+    const hdrs = {'Content-Type':'application/json','x-api-key':apiKey};
+    async function loadCfg(){
+      const r = await fetch('/api/v1/integrations/ai/config',{headers: hdrs});
+      const j = await r.json();
+      const cfg = (j.config)||{};
+      const providers = cfg.providers||{};
+      const routing = cfg.routing||{};
+      const limits = cfg.limits||{};
+      document.getElementById('defaultProvider').value = routing.default||'ollama';
+      document.getElementById('providerSummarize').value = routing.summarize||'';
+      document.getElementById('providerEmbed').value = routing.embed||'';
+      document.getElementById('ollamaUrl').value = (providers.ollama||{}).url||'';
+      document.getElementById('ollamaModel').value = (providers.ollama||{}).model||'';
+      document.getElementById('openaiKey').value = (providers.openai||{}).key||'';
+      document.getElementById('openaiModel').value = (providers.openai||{}).model||'';
+      document.getElementById('anthropicKey').value = (providers.anthropic||{}).key||'';
+      document.getElementById('anthropicModel').value = (providers.anthropic||{}).model||'';
+      document.getElementById('limitMonthly').value = limits.monthly_usd||0;
+      document.getElementById('limitDaily').value = limits.daily_usd||0;
+      document.getElementById('limitTokens').value = limits.max_tokens_per_request||1000;
+      document.getElementById('limitBlock').checked = !!limits.block_on_exceed;
+    }
+    async function save(){
+      const cfg = {
+        providers: {
+          ollama: { url: document.getElementById('ollamaUrl').value, model: document.getElementById('ollamaModel').value },
+          openai: { key: document.getElementById('openaiKey').value, model: document.getElementById('openaiModel').value },
+          anthropic: { key: document.getElementById('anthropicKey').value, model: document.getElementById('anthropicModel').value }
+        },
+        routing: {
+          default: document.getElementById('defaultProvider').value,
+          summarize: document.getElementById('providerSummarize').value || null,
+          embed: document.getElementById('providerEmbed').value || null
+        },
+        fallback: ['ollama','openai','anthropic'],
+        limits: {
+          monthly_usd: parseFloat(document.getElementById('limitMonthly').value||'0'),
+          daily_usd: parseFloat(document.getElementById('limitDaily').value||'0'),
+          max_tokens_per_request: parseInt(document.getElementById('limitTokens').value||'1000'),
+          block_on_exceed: document.getElementById('limitBlock').checked,
+          per_task_caps: {}
+        }
+      };
+      await fetch('/api/v1/integrations/ai/config',{method:'POST', headers: hdrs, body: JSON.stringify(cfg)});
+      try{ if(window.showNotification) showNotification('Saved','success'); else if(window.notifications && typeof window.notifications.showToast==='function') window.notifications.showToast('Saved',3000); else console.log('Saved'); }catch(e){ console.log('notify-fail', e); }
+    }
+    async function test(provider){
+      const r = await fetch('/api/v1/integrations/ai/test?provider='+encodeURIComponent(provider), {method:'POST', headers: hdrs});
+      const j = await r.json();
+      document.getElementById('status-'+provider).innerText = (j.ok?'OK':'ERR')+` ${j.latency_ms||'-'}ms`;
+    }
+    loadCfg();
+  </script>
+  <script src="/static/js/notifications.js"></script>
+</body>
+</html>

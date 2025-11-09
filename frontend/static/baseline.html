@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Baseline Metrics</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+  <style>
+    body { font-family: Inter, sans-serif; background:#0e1117; color:#e6e8ea; }
+    .container { padding:20px; max-width:1200px; margin:0 auto; }
+    h1 { font-size:20px; margin-bottom:16px; }
+    .panel { background:#161b22; border:1px solid #2d333b; padding:16px; border-radius:8px; margin-bottom:20px; }
+    code { background:#1f242c; padding:2px 4px; border-radius:4px; }
+    table { width:100%; border-collapse:collapse; margin-top:8px; }
+    th, td { text-align:left; padding:6px 8px; border-bottom:1px solid #2d333b; font-size:12px; }
+    th { background:#1c2229; }
+    .small { font-size:11px; color:#89939d; }
+    .badge { display:inline-block; padding:2px 6px; border-radius:4px; background:#30363d; font-size:11px; margin-right:4px; }
+    .rare { background:#9d4edd; }
+    .warn { color:#ffa657; }
+    .ok { color:#56d364; }
+    button { background:#238636; border:none; padding:6px 14px; border-radius:6px; color:#fff; cursor:pointer; font-size:12px; }
+    button.secondary { background:#30363d; }
+    .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(340px,1fr)); gap:16px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Baseline Metrics</h1>
+    <div class="panel">
+      <p class="small">Live baseline view of NXDOMAIN DNS failure rates and ASN rarity scores. These values feed correlation path factors (<code>nxdomain_spike</code>, <code>asn_rarity</code>).</p>
+      <div style="margin-top:8px;">
+        <button onclick="refreshAll()">Refresh</button>
+        <button class="secondary" onclick="autoToggle()" id="autoBtn">Auto: Off</button>
+      </div>
+    </div>
+    <div class="grid">
+      <div class="panel">
+        <h2 style="font-size:16px;margin:0 0 8px;">NXDOMAIN Rate</h2>
+        <div id="nxdomainSummary" class="small">Loading...</div>
+        <canvas id="nxdomainChart" height="140"></canvas>
+      </div>
+      <div class="panel">
+        <h2 style="font-size:16px;margin:0 0 8px;">ASN Rarity</h2>
+        <table id="asnTable"><thead><tr><th>ASN</th><th>Count</th><th>Rarity</th></tr></thead><tbody></tbody></table>
+      </div>
+      <div class="panel" style="grid-column:1/-1;">
+        <h2 style="font-size:16px;margin:0 0 8px;">Factor Preview</h2>
+        <p class="small">Quick check of factor contributions using a synthetic path referencing rare ASN and elevated NXDOMAIN rate.</p>
+        <button class="secondary" onclick="previewFactors()">Preview Factors</button>
+        <pre id="factorPreview" style="background:#11151c; padding:10px; font-size:11px; overflow:auto; max-height:260px; margin-top:10px;">(run preview)</pre>
+      </div>
+    </div>
+  </div>
+<script>
+const API_KEY = localStorage.apiKey || 'devkey123';
+let auto = false; let autoTimer = null; let nxHistory=[];
+function headers(){ return { 'x-api-key': API_KEY }; }
+async function fetchJSON(url){ const r = await fetch(url,{headers:headers()}); if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); }
+async function loadNX(){
+  try {
+    const data = await fetchJSON('/api/v1/baseline/nxdomain');
+    nxHistory.push({t:Date.now(), rate:data.rate}); if(nxHistory.length>50) nxHistory.shift();
+    const cls = data.rate >= 0.35 ? 'warn':'ok';
+    document.getElementById('nxdomainSummary').innerHTML = `Rate: <span class="${cls}">${data.rate}</span> Threshold: ${data.threshold} Window: ${data.window_seconds}s Total Queries: ${data.total_queries}`;
+    drawNXChart();
+  } catch(e){ console.warn(e); }
+}
+function drawNXChart(){ const c = document.getElementById('nxdomainChart'); const ctx = c.getContext('2d'); ctx.clearRect(0,0,c.width,c.height); if(nxHistory.length<2) return; const w=c.width; const h=c.height; const maxRate=1; const pad=10; ctx.strokeStyle='#2d333b'; ctx.strokeRect(0,0,w,h); ctx.beginPath(); nxHistory.forEach((p,i)=>{ const x = (i/(nxHistory.length-1))*(w-pad*2)+pad; const y = h-pad - (p.rate/maxRate)*(h-pad*2); if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y); }); ctx.strokeStyle='#ffa657'; ctx.lineWidth=2; ctx.stroke(); }
+async function loadASN(){
+  try {
+    const data = await fetchJSON('/api/v1/baseline/asn');
+    const tb = document.querySelector('#asnTable tbody'); tb.innerHTML='';
+    const rows = Object.keys(data.asn_counts).map(asn=>({asn, count:data.asn_counts[asn], rarity:data.rarity_scores[asn]})).sort((a,b)=>b.rarity-a.rarity);
+    rows.forEach(r=>{ const tr=document.createElement('tr'); const rarityBadge = r.rarity >=0.85 ? 'badge rare':'badge'; tr.innerHTML=`<td>${r.asn}</td><td>${r.count}</td><td><span class="${rarityBadge}">${r.rarity}</span></td>`; tb.appendChild(tr); });
+  } catch(e){ console.warn(e); }
+}
+function refreshAll(){ loadNX(); loadASN(); }
+async function previewFactors(){
+  try {
+    const body = { paths: [ { nodes: [ { domain: 'example.com', asn: pickRareAsn(), process:'C:/Temp/svchost.exe', file_hash:'' } ] } ] };
+    const r = await fetch('/api/v1/graph/preview/score', {method:'POST', headers:{...headers(),'content-type':'application/json'}, body: JSON.stringify(body)});
+    const js = await r.json();
+    document.getElementById('factorPreview').textContent = JSON.stringify(js, null,2);
+  } catch(e){ document.getElementById('factorPreview').textContent = 'Preview error: '+e; }
+}
+function pickRareAsn(){
+  const rows = Array.from(document.querySelectorAll('#asnTable tbody tr'));
+  if(!rows.length) return 'AS0';
+  // table is sorted by rarity desc already
+  return rows[0].children[0].textContent.trim();
+}
+function autoToggle(){ auto=!auto; const btn=document.getElementById('autoBtn'); btn.textContent = 'Auto: ' + (auto?'On':'Off'); if(auto){ autoTimer=setInterval(refreshAll,5000); refreshAll(); } else { clearInterval(autoTimer); } }
+refreshAll();
+</script>
+</body>
+</html>
