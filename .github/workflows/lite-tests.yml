@@ -1,0 +1,26 @@
+name: Lite-mode tests
+
+on:
+  push:
+    branches: [ main, feature/** ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  pytest-lite:
+    runs-on: ubuntu-latest
+    env:
+      PLATFORM_LITE_INIT: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Run lite pytest matrix
+        run: |
+          python -m pytest -q
