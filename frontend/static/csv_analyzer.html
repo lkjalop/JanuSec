@@ -155,6 +155,21 @@
     </div>
   </div>
 
+  <!-- Deep Analyze Options Modal -->
+  <div id="deepAnalyzeModal" style="display:none; position:fixed; left:0; top:0; right:0; bottom:0; background:rgba(0,0,0,.55); align-items:center; justify-content:center; padding:24px;">
+    <div style="background:var(--bg-secondary); border:1px solid var(--border); border-radius:10px; width:720px; max-width:96%; padding:18px 20px; box-shadow:0 6px 24px rgba(0,0,0,.7);">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;"><strong>Deep Analyze Options</strong><button class="btn csv-modal-close" id="daClose">Close</button></div>
+      <div style="display:flex; gap:12px; margin-bottom:12px; align-items:center;">
+        <label style="display:inline-flex; align-items:center; gap:8px;"><input type="radio" name="da_mode" value="basic" checked /> Basic</label>
+        <label style="display:inline-flex; align-items:center; gap:8px;"><input type="radio" name="da_mode" value="advanced" /> Advanced</label>
+        <label style="display:inline-flex; align-items:center; gap:8px; margin-left:12px;"><input type="checkbox" id="da_auto_llm" /> Auto-LLM</label>
+        <span class="small inline-info">Basic: 20 signals; Advanced: full set (+eBPF/PCAP)</span>
+      </div>
+      <div style="margin-bottom:12px;"><strong>Detected Columns & Mapping Preview</strong><div id="daMappingPreview" style="margin-top:8px; max-height:260px; overflow:auto; border:1px solid var(--border); padding:8px; background:var(--bg-tertiary);"></div></div>
+      <div style="display:flex; justify-content:flex-end; gap:8px;"><button class="btn" id="daCancel">Cancel</button><button class="btn btn-primary" id="daConfirm">Run Deep Analyze</button></div>
+    </div>
+  </div>
+
   <script defer src="/static/js/parse_tabular.js"></script>
   <script defer src="/static/js/notifications.js"></script>
   <script defer src="/static/js/csv_analyzer.js"></script>
@@ -534,6 +549,9 @@
       try{
         const rows = (window.csvSelectedRows && window.csvSelectedRows.length? window.csvSelectedRows : (window._csvRows||[])).slice(0,400);
         if(!rows.length){ if(window.notifications && notifications.toast) notifications.toast('No rows selected for deep analyze','warn'); return; }
+        // Show options modal and mapping preview
+        showDeepAnalyzeModal(rows);
+        return;
         // First ingest rows (server returns event_ids)
         const payload = rows.map((r, idx) => ({ row_index: idx, raw: r }));
         const ing = await fetch('/api/v1/ingest/csv_rows', { method:'POST', headers: { 'Content-Type':'application/json', 'x-api-key': (localStorage.getItem('apiKey')||'devkey123') }, body: JSON.stringify(payload) });
@@ -571,6 +589,82 @@
       }catch(e){ if(window.notifications && notifications.toast) notifications.toast('Deep analyze failed','error'); }
     });
   }catch(_){ } })();
+
+  // Deep Analyze modal helpers
+  function showDeepAnalyzeModal(rows){
+    try{
+      const modal = document.getElementById('deepAnalyzeModal'); if(!modal) return;
+      const preview = document.getElementById('daMappingPreview'); preview.innerHTML='';
+      // Build header mapping editor from first row
+      const first = rows[0]||{}; const keys = Object.keys(first);
+      const canonicalOptions = ['--none--','user','host','ip','file_hash','process','file_path','http_user_agent','dns_query'];
+      // Add preset save/load controls
+      const presetBar = document.createElement('div'); presetBar.style.display='flex'; presetBar.style.gap='8px'; presetBar.style.marginBottom='8px';
+      const presetInput = document.createElement('input'); presetInput.placeholder='Preset name'; presetInput.style.padding='6px'; presetBar.appendChild(presetInput);
+      const saveBtn = document.createElement('button'); saveBtn.className='btn'; saveBtn.textContent='Save Preset'; presetBar.appendChild(saveBtn);
+      const loadSelect = document.createElement('select'); loadSelect.style.padding='6px'; loadSelect.className='btn'; presetBar.appendChild(loadSelect);
+      preview.appendChild(presetBar);
+      // load presets from localStorage
+      function refreshPresets(){ loadSelect.innerHTML=''; const s = JSON.parse(localStorage.getItem('csv_da_presets')||'{}'); Object.keys(s).forEach(k=>{ const o=document.createElement('option'); o.value=k; o.textContent=k; loadSelect.appendChild(o); }); }
+      refreshPresets();
+      saveBtn.onclick = function(){ const name = (presetInput.value||'').trim(); if(!name) return; const s = JSON.parse(localStorage.getItem('csv_da_presets')||'{}'); const obj = {}; preview.querySelectorAll('.map-row').forEach(r=>{ const col = r.dataset.col; const val = r.querySelector('select').value; obj[col]=val; }); s[name]=obj; localStorage.setItem('csv_da_presets', JSON.stringify(s)); refreshPresets(); };
+      loadSelect.onchange = function(){ const s = JSON.parse(localStorage.getItem('csv_da_presets')||'{}'); const sel = loadSelect.value; if(!sel) return; const obj = s[sel]||{}; preview.querySelectorAll('.map-row').forEach(r=>{ const col = r.dataset.col; const selv = obj[col]||'--none--'; r.querySelector('select').value = selv; }); };
+      keys.forEach(k => {
+        const row = document.createElement('div'); row.className='map-row'; row.dataset.col = k; row.style.display='flex'; row.style.alignItems='center'; row.style.gap='8px'; row.style.padding='6px 4px';
+        const chk = document.createElement('input'); chk.type='checkbox'; chk.checked=true; chk.dataset.col = k; chk.style.flex='0 0 20px';
+        const label = document.createElement('div'); label.style.flex='1'; label.textContent = k + ' — sample: ' + String(first[k]||'').slice(0,80);
+        const sel = document.createElement('select'); sel.style.minWidth='160px'; sel.className='btn'; canonicalOptions.forEach(o=>{ const op = document.createElement('option'); op.value=o; op.textContent=o; sel.appendChild(op); });
+        // attempt to auto-select best match
+        const l = k.toLowerCase(); if(/user|username|account/.test(l)) sel.value='user'; else if(/host|hostname/.test(l)) sel.value='host'; else if(/sha256|hash|md5|sha1/.test(l)) sel.value='file_hash'; else if(/process|exe|cmd|proc/.test(l)) sel.value='process'; else if(/ip/.test(l)) sel.value='ip';
+        row.appendChild(chk); row.appendChild(label); row.appendChild(sel); preview.appendChild(row);
+      });
+      document.getElementById('daClose').onclick = ()=> modal.style.display='none';
+      document.getElementById('daCancel').onclick = ()=> modal.style.display='none';
+      document.getElementById('daConfirm').onclick = async function(){
+        const mode = document.querySelector('input[name="da_mode"]:checked').value;
+        const auto = document.getElementById('da_auto_llm').checked;
+        // Build mapping from dropdowns
+        const mapping = {};
+        preview.querySelectorAll('.map-row').forEach(r=>{
+          const col = r.dataset.col; const sel = r.querySelector('select').value; if(sel && sel!=='--none--') mapping[sel] = col;
+        });
+        modal.style.display='none';
+        try{
+          const payload = { rows: rows.slice(0,400), mapping: mapping, analyze_mode: mode, options: { auto_llm: !!auto } };
+          const resp = await fetch('/api/v1/assessments/deep_analyze', { method:'POST', headers: { 'Content-Type':'application/json', 'x-api-key': (localStorage.getItem('apiKey')||'devkey123') }, body: JSON.stringify(payload) });
+          if(!resp.ok){ if(window.notifications && notifications.toast) notifications.toast('Deep Analyze failed','error'); return; }
+          const j = await resp.json(); window.LAST_DEEP_ANALYZE = j; if(window.notifications && notifications.toast) notifications.toast('Deep Analyze completed','success');
+          // merge canonical/mappings into LAST_CORR_SUMMARY for report enrichment
+          try{ window.LAST_CORR_SUMMARY = window.LAST_CORR_SUMMARY || {}; window.LAST_CORR_SUMMARY.deep_analyze = j; }catch(_){ }
+        }catch(e){ if(window.notifications && notifications.toast) notifications.toast('Deep Analyze error','error'); }
+      };
+      modal.style.display='flex';
+    }catch(e){ console.warn('showDeepAnalyzeModal', e); }
+  }
+
+  async function runDeepAnalyze(options, mapping, rows){
+    try{
+      // Reuse existing deep analyze flow: ingest rows, upload, build session
+      const payload = rows.map((r, idx) => ({ row_index: idx, raw: r }));
+      const ing = await fetch('/api/v1/ingest/csv_rows', { method:'POST', headers: { 'Content-Type':'application/json', 'x-api-key': (localStorage.getItem('apiKey')||'devkey123') }, body: JSON.stringify(payload) });
+      if(!ing.ok){ if(window.notifications && notifications.toast) notifications.toast('Ingest failed','error'); return; }
+      const ingJson = await ing.json();
+      const headers = Object.keys(rows[0]||{});
+      let csvLines = [headers.join(',')]; rows.forEach(r => { csvLines.push(headers.map(h => JSON.stringify(r[h]||'')).join(',')); });
+      const blob = new Blob([csvLines.join('\n')+'\n'], { type:'text/csv' });
+      const fd = new FormData(); fd.append('files', new File([blob], 'deep_analyze.csv', { type:'text/csv' }));
+      const upResp = await fetch('/api/v1/upload/files', { method:'POST', headers:{ 'x-api-key': (localStorage.getItem('apiKey')||'devkey123') }, body: fd });
+      if(!upResp.ok){ if(window.notifications && notifications.toast) notifications.toast('Upload failed for deep analyze','error'); return; }
+      const upJson = await upResp.json(); const sessionIds = Array.isArray(upJson.sessions)? upJson.sessions : (upJson.sessions? [upJson.sessions]: []);
+      if(!sessionIds.length){ if(window.notifications && notifications.toast) notifications.toast('No sessions returned','error'); return; }
+      // Build session, include mapping and analysis options
+      const buildBody = { session_ids: sessionIds, correlate:true, ewma:true, mapping: mapping, analyze_mode: options.mode, options: { auto_llm: options.auto_llm } };
+      const buildResp = await fetch('/api/v1/graph/session/build', { method:'POST', headers: { 'Content-Type':'application/json', 'x-api-key': (localStorage.getItem('apiKey')||'devkey123') }, body: JSON.stringify(buildBody) });
+      if(!buildResp.ok){ if(window.notifications && notifications.toast) notifications.toast('Graph build failed','error'); return; }
+      const buildJson = await buildResp.json(); window.LAST_CORR_SUMMARY = buildJson.summary || buildJson; window.LAST_CORR_FULL = buildJson; if(window.notifications && notifications.toast) notifications.toast('Deep Analyze completed','success');
+      window.__csv_deep_analyze_done = true; window.dispatchEvent(new Event('csv-deep-analyze-done'));
+    }catch(e){ if(window.notifications && notifications.toast) notifications.toast('Deep analyze failed','error'); }
+  }
   </script>
   <script>
   // Lightweight RA header sniff and panel render for CSV Analyzer

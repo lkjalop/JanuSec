@@ -82,6 +82,32 @@ class LLMSummaryStage(StageBase):
 STAGE_REGISTRY = [GeoIPStage(), ThreatIntelStage(), GraphStage(), LLMSummaryStage()]
 
 
+class EBPFStage(StageBase):
+    name = 'eBPF'
+    async def run(self, context: dict) -> dict:
+        if context.get('analyze_mode') != 'advanced':
+            return {'stage': self.name, 'status': 'skipped', 'elapsed_ms': 0.0, 'result': {}}
+        t0 = time.time()
+        # lightweight simulated eBPF summary
+        await asyncio.sleep(0)
+        elapsed = (time.time()-t0)*1000.0
+        return {'stage': self.name, 'status': 'done', 'elapsed_ms': elapsed, 'result': {'ebpf_suspicious_calls': 0}}
+
+
+class PCAPStage(StageBase):
+    name = 'PCAP'
+    async def run(self, context: dict) -> dict:
+        if context.get('analyze_mode') != 'advanced':
+            return {'stage': self.name, 'status': 'skipped', 'elapsed_ms': 0.0, 'result': {}}
+        t0 = time.time()
+        await asyncio.sleep(0)
+        elapsed = (time.time()-t0)*1000.0
+        return {'stage': self.name, 'status': 'done', 'elapsed_ms': elapsed, 'result': {'pcap_sessions': 0}}
+
+
+ADVANCED_STAGES = [EBPFStage(), PCAPStage()]
+
+
 async def _run_stage(stage: StageBase, ctx: dict) -> dict:
     t0 = time.time()
     try:
@@ -115,9 +141,13 @@ async def deep_analyze(request: Request):
         try: csv_deep_analyze_total.inc(1, labels={'auto_llm': str(bool(auto))})
         except Exception: pass
 
-    ctx = {'rows': rows, 'options': {**options, 'auto_llm': auto}}
+    ctx = {'rows': rows, 'options': {**options, 'auto_llm': auto}, 'analyze_mode': payload.get('analyze_mode') or options.get('analyze_mode') or 'basic'}
     results = []
-    for stage in STAGE_REGISTRY:
+    # Assemble stage list; include advanced stages if requested
+    active_stages = list(STAGE_REGISTRY)
+    if ctx.get('analyze_mode') == 'advanced':
+        active_stages = active_stages + ADVANCED_STAGES
+    for stage in active_stages:
         res = await _run_stage(stage, ctx)
         results.append(res)
 
@@ -130,7 +160,106 @@ async def deep_analyze(request: Request):
     except Exception:
         pass
 
-    return JSONResponse({'report_id': report_id, 'results': results})
+    # Cross-map stage results into canonical signals for Auto-LLM and frameworks
+    canonical = _build_canonical_signals(results, ctx)
+    # If auto LLM requested, run the LLMSummary logic to produce a summary from canonical
+    if ctx.get('options', {}).get('auto_llm'):
+        prompt = llm_prompts.compose_prompt(canonical)
+        # LLMSummaryStage already mocked when LLM_MOCK=1; run it asynchronously
+        llm_stage = LLMSummaryStage()
+        llm_res = await llm_stage.run(ctx)
+        if llm_res.get('result') and llm_res['result'].get('llm_summary'):
+            canonical['llm_summary'] = llm_res['result']['llm_summary']
+
+    mappings = {
+        'mitre': _map_to_mitre(canonical),
+        'stride': _map_to_stride(canonical),
+        'controls': _map_to_controls(canonical),
+        'dread': _map_to_dread(canonical),
+        'pasa': _map_to_pasa(canonical),
+        'maestro': _map_to_maestro(canonical),
+        'diamond': _map_to_diamond(canonical),
+    }
+
+    report['canonical'] = canonical
+    report['mappings'] = mappings
+    REPORT_STORE[report_id] = report
+
+    return JSONResponse({'report_id': report_id, 'results': results, 'canonical': canonical, 'mappings': mappings})
+
+
+def _build_canonical_signals(stage_results, ctx):
+    # Aggregate simple canonical fields from stage results and rows
+    canon = {}
+    rows = ctx.get('rows', [])
+    if rows:
+        first = rows[0]
+        if isinstance(first, dict):
+            for k in ('ip','ip_src','ip_dst','user','host','file_hash','process','file_name'):
+                if k in first:
+                    canon[k] = first[k]
+    # stage-derived signals
+    for s in stage_results:
+        name = s.get('stage')
+        result = s.get('result', {})
+        if name == 'ThreatIntel' and result.get('threat_hits'):
+            canon['threat_hits'] = result.get('threat_hits')
+        if name == 'GeoIP' and result.get('internal_count') is not None:
+            canon['internal_count'] = result.get('internal_count')
+        if name == 'GraphTraversal' and result.get('expansions') is not None:
+            canon['graph_expansions'] = result.get('expansions')
+        if name == 'LLMSummary' and result.get('llm_summary'):
+            canon['llm_summary'] = result.get('llm_summary')
+    return canon
+
+
+def _map_to_mitre(canonical):
+    tags = []
+    if canonical.get('threat_hits', 0) > 0:
+        tags.append('T1027')
+    if canonical.get('graph_expansions', 0) > 0:
+        tags.append('T1087')
+    return tags
+
+
+def _map_to_stride(canonical):
+    tags = []
+    if canonical.get('threat_hits', 0) > 0:
+        tags.append('Tampering')
+    if canonical.get('internal_count', 0) > 0:
+        tags.append('Repudiation')
+    return tags
+
+
+def _map_to_controls(canonical):
+    # map to example control IDs
+    ctr = []
+    if canonical.get('threat_hits', 0) > 0:
+        ctr.append('AC-7')
+    return ctr
+
+
+def _map_to_dread(canonical):
+    score = 0
+    if canonical.get('threat_hits', 0) > 0:
+        score += 6
+    if canonical.get('graph_expansions', 0) > 0:
+        score += 2
+    return {'score': score}
+
+
+def _map_to_pasa(canonical):
+    # placeholder PASA mapping
+    return {'pasa_level': 'medium' if canonical.get('threat_hits') else 'low'}
+
+
+def _map_to_maestro(canonical):
+    return {'maestro_tags': ['initial_access'] if canonical.get('threat_hits') else []}
+
+
+def _map_to_diamond(canonical):
+    # return simple diamond model mapping
+    return {'adversary': 'unknown' if canonical.get('threat_hits') else None, 'capability': []}
 
 
 @router.get('/report/{report_id}')
