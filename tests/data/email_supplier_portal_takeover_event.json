@@ -1,0 +1,21 @@
+{
+  "subject": "Supplier Portal: Action Required - Update Your Account",
+  "from": "accounts@vendorsupport.co",
+  "indicators": {
+    "login_link_present": true,
+    "brand_mismatch": true,
+    "urgency_language": true,
+    "reply_to_mismatch": true
+  },
+  "links": [
+    {"type": "link", "url": "https://suspicious-portal.example/login", "domain": "suspicious-portal.example"}
+  ],
+  "attachments": [
+    {"filename": "login.html"}
+  ],
+  "thread_context": {
+    "reply_chain": [
+      {"from_domain": "vendor.com", "reply_to_domain": "vendor.com"}
+    ]
+  }
+}
