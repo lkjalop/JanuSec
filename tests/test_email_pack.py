@@ -39,3 +39,13 @@ def test_email_pack(rule_id, vector_path):
         elif hasattr(h, 'name'):
             hit_names.add(getattr(h, 'name'))
     assert rule_id in hit_names, f"Rule {rule_id} did not fire; hits={hit_names}"
+
+
+def test_email_supplier_portal_edgecase():
+    full_path = os.path.join(os.getcwd(), 'tests/data/email_supplier_portal_takeover_edgecase.json')
+    assert os.path.exists(full_path), "Missing edgecase vector"
+    with open(full_path, 'r', encoding='utf-8') as fh:
+        payload = json.load(fh)
+    hits = reg.CORRELATION_RULES.evaluate(payload)
+    names = {getattr(h, 'rule', getattr(h, 'name', None)) for h in hits}
+    assert 'bec_supplier_portal_takeover_enriched' in names

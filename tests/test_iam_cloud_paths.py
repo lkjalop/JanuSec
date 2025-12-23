@@ -82,3 +82,13 @@ async def test_cloudtrail_high_risk_edges():
     assert 'ip:1.2.3.4' in nodes
     assert ('user:bob','event:CreateAccessKey','invokes') in edges
     assert ('ip:1.2.3.4','event:CreateAccessKey','source_ip') in edges
+
+
+def test_iam_cross_cloud_edgecase_gcp():
+    full_path = os.path.join(os.getcwd(), 'tests/data/cloud_access_key_creation_cross_tenant_gcp_event.json')
+    assert os.path.exists(full_path), "Missing GCP cross-tenant vector"
+    with open(full_path, 'r', encoding='utf-8') as fh:
+        payload = json.load(fh)
+    hits = reg.CORRELATION_RULES.evaluate(payload)
+    names = {getattr(h, 'rule', getattr(h, 'name', None)) for h in hits}
+    assert 'cloud_access_key_creation_no_rotation_cross_account' in names

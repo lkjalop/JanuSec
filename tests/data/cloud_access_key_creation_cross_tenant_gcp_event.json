@@ -1,0 +1,12 @@
+{
+  "domain": "cloud",
+  "provider": "gcp",
+  "eventSource": "iam.googleapis.com",
+  "methodName": "google.iam.admin.v1.CreateServiceAccountKey",
+  "iam_create_access_key": true,
+  "actor_account_id": "gcp-project-a",
+  "target_account_id": "gcp-project-b",
+  "key_age_days": null,
+  "off_hours": false,
+  "src_asn_cloud": true
+}
