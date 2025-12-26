@@ -4,12 +4,14 @@ Provides deterministic hashing for a hunt session's initiating parameters so
 that replay equivalence can be asserted without relying on dynamic timestamps.
 """
 from __future__ import annotations
-import hashlib, json
+
+import hashlib
+import json
 from typing import Any, Dict
 
 PROVENANCE_VERSION = 1
 
-def compute_session_hash(window_hours: int, model_enabled: bool, tenant: str, estimate_units: float, version_digest: str = "v0", extra: Dict[str, Any] | None = None) -> str:
+def compute_session_hash(window_hours: int, model_enabled: bool, tenant: str, estimate_units: float, version_digest: str = "v0", extra: dict[str, Any] | None = None) -> str:
     payload = {
         'v': PROVENANCE_VERSION,
         'window_hours': window_hours,

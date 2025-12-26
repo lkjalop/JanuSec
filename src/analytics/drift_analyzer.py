@@ -11,8 +11,13 @@ Strategy:
 If insufficient data (< MIN_EVENTS threshold) sets gauge to 0.
 """
 from __future__ import annotations
-import math, time, asyncio, logging
+
+import asyncio
+import logging
+import math
+import time
 from typing import Dict, List
+
 from db.database import get_pool
 
 logger = logging.getLogger(__name__)
@@ -20,14 +25,14 @@ logger = logging.getLogger(__name__)
 WINDOW_MINUTES = 30
 MIN_EVENTS = 20
 
-async def _factor_counts(conn, start_ts, end_ts) -> Dict[str,int]:
+async def _factor_counts(conn, start_ts, end_ts) -> dict[str,int]:
     rows = await conn.fetch(
         """
         SELECT factors FROM decisions
         WHERE created_at >= to_timestamp($1) AND created_at < to_timestamp($2)
         """, start_ts, end_ts
     )
-    counts: Dict[str,int] = {}
+    counts: dict[str,int] = {}
     for r in rows:
         farr = r.get('factors')
         if isinstance(farr, list):
@@ -36,13 +41,13 @@ async def _factor_counts(conn, start_ts, end_ts) -> Dict[str,int]:
                     counts[f] = counts.get(f,0)+1
     return counts
 
-def _normalize(counts: Dict[str,int]) -> Dict[str,float]:
+def _normalize(counts: dict[str,int]) -> dict[str,float]:
     total = sum(counts.values())
     if total == 0:
         return {}
     return {k: v/total for k,v in counts.items()}
 
-def _js_divergence(p: Dict[str,float], q: Dict[str,float]) -> float:
+def _js_divergence(p: dict[str,float], q: dict[str,float]) -> float:
     if not p or not q:
         return 0.0
     keys = set(p.keys()) | set(q.keys())

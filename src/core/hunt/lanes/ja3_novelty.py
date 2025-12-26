@@ -15,8 +15,10 @@ Config (pipeline.hunt_lanes.ja3):
 Metrics: lane_registry handles per-lane counts; gauge (later) can publish distinct JA3 seen.
 """
 from __future__ import annotations
-from typing import Dict, List
+
 from collections import OrderedDict
+from typing import Dict, List
+
 try:
     from prometheus_client import Gauge  # type: ignore
 except Exception:  # pragma: no cover
@@ -65,7 +67,7 @@ class JA3NoveltyLane:
         first_seen = ja3 not in self.freq
         self._touch(ja3)
 
-        factors: List[str] = []
+        factors: list[str] = []
         if self.total >= self.warm_min:
             distinct = len(self.freq)
             if first_seen:
@@ -76,6 +78,17 @@ class JA3NoveltyLane:
                     count = self.freq.get(ja3, 0)
                     if count <= self.rare_threshold:
                         factors.append('ja3_rare')
+        # Daily rarity (rolling TTL) across tenant if available
+        try:
+            from metrics.streaming import RARITY_DAILY as _RARITY  # type: ignore
+        except Exception:
+            _RARITY = None  # type: ignore
+        try:
+            tenant = e.get('tenant_id') or 'default'
+            if _RARITY is not None and isinstance(ja3, str) and ja3 and _RARITY.update(f"{tenant}::ja3::{ja3}"):
+                factors.append('rare:ja3_daily')
+        except Exception:
+            pass
         if factors:
             envelope.add_emission(self.name, factors, notes=None, latency_ms=0.0)
         # update gauges best-effort

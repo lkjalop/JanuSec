@@ -1,8 +1,10 @@
 """Repository for system alerts (guardrail emissions)."""
 from __future__ import annotations
-from typing import Any, Dict, List
-from db.database import execute, fetch, with_retry
+
 import json
+from typing import Any, Dict, List
+
+from db.database import execute, fetch, with_retry
 
 INSERT = """
 INSERT INTO system_alerts (tenant_id, category, severity, message, details, dedupe_hash)
@@ -20,13 +22,13 @@ LIMIT $2
 
 ACK = """UPDATE system_alerts SET acknowledged=TRUE WHERE id=$1 RETURNING id"""
 
-async def insert_alert(tenant_id: str | None, category: str, severity: str, message: str, details: Dict[str, Any], dedupe_hash: str | None):
+async def insert_alert(tenant_id: str | None, category: str, severity: str, message: str, details: dict[str, Any], dedupe_hash: str | None):
     async def _do():
         return await fetch(INSERT, tenant_id, category, severity, message, json.dumps(details), dedupe_hash)
     row = await with_retry(_do)
     return dict(row) if row else None
 
-async def list_recent(tenant_id: str | None, limit: int = 50) -> List[Dict[str, Any]]:
+async def list_recent(tenant_id: str | None, limit: int = 50) -> list[dict[str, Any]]:
     rows = await fetch(RECENT, tenant_id, limit)
     return [dict(r) for r in rows]
 

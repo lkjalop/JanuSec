@@ -4,6 +4,7 @@ Approximate factor informational value: track occurrence counts and compute
 entropy contribution to gauge discriminative power.
 """
 from __future__ import annotations
+
 from collections import defaultdict
 from math import log2
 from typing import Dict
@@ -11,7 +12,8 @@ from typing import Dict
 try:
     from prometheus_client import Gauge
 except Exception:
-    Gauge = lambda *a, **k: None  # type: ignore
+    def Gauge(*a, **k):
+        return None  # type: ignore
 
 _factor_entropy = Gauge('factor_entropy_estimate','Approx entropy contribution per factor', ['factor']) if callable(Gauge) else None
 _factor_count = defaultdict(int)

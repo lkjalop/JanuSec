@@ -17,6 +17,7 @@ from sklearn.ensemble import IsolationForest
 from sklearn.preprocessing import StandardScaler
 
 from core.metrics.cost_ledger import get_cost_ledger
+from core.finops.finops_manager import get_finops_manager
 
 try:
     from .oss_models import OpenSourceModelManager
@@ -46,7 +47,7 @@ class ModelHealth:
     response_time_ms: float
     success_rate: float
     error_count: int
-    last_error: Optional[str] = None
+    last_error: str | None = None
 
 
 @dataclass
@@ -56,7 +57,7 @@ class AnalysisResult:
     processing_time_ms: float
     model_tier_used: ModelTier
     fallback_applied: bool
-    additional_context: Dict[str, Any]
+    additional_context: dict[str, Any]
 
 
 class AIModelManager:
@@ -64,16 +65,16 @@ class AIModelManager:
     Central manager for all AI models with graceful degradation capabilities
     """
     
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: dict[str, Any]):
         self.config = config
         self.logger = logging.getLogger(__name__)
 
-        oss_cfg: Dict[str, Any] = {}
+        oss_cfg: dict[str, Any] = {}
         if isinstance(config, dict):
             oss_cfg = dict(config.get('oss_models', {}))
         else:
             try:
-                oss_cfg = dict((config.get('oss_models') or {}))
+                oss_cfg = dict(config.get('oss_models') or {})
             except Exception:
                 oss_cfg = {}
         self.oss_config = oss_cfg
@@ -164,7 +165,7 @@ class AIModelManager:
         except Exception as e:
             self.logger.error(f"Failed to initialize external AI session: {e}")
     
-    async def analyze_threat(self, event_data: Dict[str, Any], 
+    async def analyze_threat(self, event_data: dict[str, Any], 
                            preferred_tier: ModelTier = ModelTier.EXTERNAL_AI) -> AnalysisResult:
         """
         Analyze threat using best available AI model with graceful degradation
@@ -179,7 +180,29 @@ class AIModelManager:
             self.logger.debug("Returning cached analysis result")
             return cached_result
 
-        # Try analysis with preferred tier first, then fallback
+        # Check FinOps budget gates (simple guard): if closed, prefer local tiers
+        fm = get_finops_manager()
+        budget_closed = False
+        try:
+            # Very lightweight heuristic: if latest hourly cost exceeds EWMA threshold, treat as closed when block flag is set
+            # In demo, limits are stored under integrations ai.config.limits via integrations_endpoints
+            from api.integrations_endpoints import _STATE as _INTEG_STATE  # type: ignore
+            limits = ((_INTEG_STATE.get('ai') or {}).get('config') or {}).get('limits') or {}
+            block_on_exceed = bool(limits.get('block_on_exceed'))
+            if block_on_exceed:
+                ov = fm.hourly_summary(None)
+                hours = (ov.get('hours') or [])
+                if hours:
+                    # Treat any cost spike over 95th percentile of last window as closed (demo heuristic)
+                    vals = [h.get('cost_units', 0.0) for h in hours][-24:]
+                    import numpy as _np
+                    p95 = float(_np.percentile(vals, 95)) if vals else 0.0
+                    if (vals and vals[-1] > p95 and p95 > 0):
+                        budget_closed = True
+        except Exception:
+            budget_closed = False
+
+        # Try analysis with preferred tier first, then fallback (respecting budget)
         analysis_result = None
         fallback_applied = False
         ledger = get_cost_ledger()
@@ -197,7 +220,7 @@ class AIModelManager:
                 fallback_applied = True
         
         # Tier 3: External AI Services (if available and not already tried)
-        if not analysis_result and self._is_model_available(ModelTier.EXTERNAL_AI):
+        if not analysis_result and (not budget_closed) and self._is_model_available(ModelTier.EXTERNAL_AI):
             try:
                 t0 = time.perf_counter()
                 analysis_result = await self._analyze_with_external_ai(event_data)
@@ -205,8 +228,14 @@ class AIModelManager:
                     analysis_result.model_tier_used = ModelTier.EXTERNAL_AI
                     if preferred_tier != ModelTier.EXTERNAL_AI:
                         fallback_applied = True
-                    # tokens unknown placeholder 0; future: parse usage
-                    ledger.record('external_ai','primary', t0, tokens=0, cached=False, success=True)
+                    # Record token usage (if present) and optional tenant for real-time cost linkage
+                    toks = 0
+                    try:
+                        toks = int((analysis_result.additional_context or {}).get('tokens_used') or 0)
+                    except Exception:
+                        toks = 0
+                    tenant = (event_data.get('tenant') or event_data.get('tenant_id') or 'default') if isinstance(event_data, dict) else 'default'
+                    ledger.record('external_ai','primary', t0, tokens=toks, cached=False, success=True, tenant=tenant)
             except Exception as e:
                 self.logger.warning(f"External AI failed, falling back: {e}")
                 fallback_applied = True
@@ -220,7 +249,8 @@ class AIModelManager:
                     analysis_result.model_tier_used = ModelTier.LIGHTWEIGHT_ML
                     if preferred_tier not in [ModelTier.LIGHTWEIGHT_ML]:
                         fallback_applied = True
-                    ledger.record('lightweight_ml','iforest_kmeans', t0, tokens=0, cached=False, success=True)
+                    tenant = (event_data.get('tenant') or event_data.get('tenant_id') or 'default') if isinstance(event_data, dict) else 'default'
+                    ledger.record('lightweight_ml','iforest_kmeans', t0, tokens=0, cached=False, success=True, tenant=tenant)
             except Exception as e:
                 self.logger.warning(f"Lightweight ML failed, falling back: {e}")
                 fallback_applied = True
@@ -232,7 +262,8 @@ class AIModelManager:
             analysis_result.model_tier_used = ModelTier.RULE_BASED
             if preferred_tier != ModelTier.RULE_BASED:
                 fallback_applied = True
-            ledger.record('rule_based','rules', t0, tokens=0, cached=False, success=True)
+            tenant = (event_data.get('tenant') or event_data.get('tenant_id') or 'default') if isinstance(event_data, dict) else 'default'
+            ledger.record('rule_based','rules', t0, tokens=0, cached=False, success=True, tenant=tenant)
         
         # Update processing time and fallback status
         processing_time_ms = (time.time() - start_time) * 1000
@@ -247,7 +278,7 @@ class AIModelManager:
         
         return analysis_result
     
-    async def _analyze_with_external_ai(self, event_data: Dict[str, Any]) -> Optional[AnalysisResult]:
+    async def _analyze_with_external_ai(self, event_data: dict[str, Any]) -> AnalysisResult | None:
         """Analyze using external AI services with circuit breaker"""
         
         service_name = 'external_ai'
@@ -292,6 +323,17 @@ class AIModelManager:
                 if response.status == 200:
                     result = await response.json()
                     ai_analysis = result['choices'][0]['message']['content']
+                    # Optional token usage if provider returns usage metrics
+                    tokens_used = 0
+                    try:
+                        usage = result.get('usage') or {}
+                        # prefer total_tokens; else sum prompt+completion
+                        if 'total_tokens' in usage:
+                            tokens_used = int(usage.get('total_tokens') or 0)
+                        else:
+                            tokens_used = int((usage.get('prompt_tokens') or 0) + (usage.get('completion_tokens') or 0))
+                    except Exception:
+                        tokens_used = 0
                     
                     # Parse AI response
                     verdict, confidence, context = self._parse_ai_response(ai_analysis)
@@ -308,7 +350,8 @@ class AIModelManager:
                         additional_context={
                             'ai_analysis': ai_analysis,
                             'context': context,
-                            'model': 'external_ai'
+                            'model': 'external_ai',
+                            'tokens_used': tokens_used
                         }
                     )
                 else:
@@ -321,7 +364,7 @@ class AIModelManager:
             self._record_circuit_failure(service_name, str(e))
             return None
     
-    async def _analyze_with_lightweight_ml(self, event_data: Dict[str, Any]) -> Optional[AnalysisResult]:
+    async def _analyze_with_lightweight_ml(self, event_data: dict[str, Any]) -> AnalysisResult | None:
         """Analyze using local lightweight ML models"""
         
         try:
@@ -368,12 +411,12 @@ class AIModelManager:
             self.logger.error(f"Lightweight ML analysis failed: {e}")
             return None
     
-    async def _analyze_with_rule_based(self, event_data: Dict[str, Any]) -> AnalysisResult:
+    async def _analyze_with_rule_based(self, event_data: dict[str, Any]) -> AnalysisResult:
         """Rule-based analysis - always available fallback"""
         
         event_type = event_data.get('event_type', 'unknown')
         severity = event_data.get('severity', 'low')
-        confidence_base = event_data.get('confidence', 0.5)
+        event_data.get('confidence', 0.5)
         
         # Simple rule-based logic
         threat_indicators = 0
@@ -429,14 +472,14 @@ class AIModelManager:
             }
         )
     
-    async def _analyze_with_specialized_models(self, event_data: Dict[str, Any]) -> Optional[AnalysisResult]:
+    async def _analyze_with_specialized_models(self, event_data: dict[str, Any]) -> AnalysisResult | None:
         """Use open-source transformer models if configured for enrichment/classification."""
         if not self.oss_manager:
             return None
         try:
             # Simple heuristic: use classification model if severity high or event_type suspicious
-            event_type = event_data.get('event_type', '')
-            severity = event_data.get('severity', 'low')
+            event_data.get('event_type', '')
+            event_data.get('severity', 'low')
             text_blob = str(event_data.get('details', {}))[:1000]
 
             cls_model = self.oss_manager.config.get('default_classification_model', 'roberta_cls')
@@ -482,7 +525,7 @@ class AIModelManager:
             self.logger.error(f"Specialized OSS model analysis failed: {e}")
             return None
     
-    def _extract_ml_features(self, event_data: Dict[str, Any]) -> List[float]:
+    def _extract_ml_features(self, event_data: dict[str, Any]) -> list[float]:
         """Extract numerical features for ML analysis"""
         
         features = []
@@ -521,66 +564,145 @@ class AIModelManager:
         
         return features
     
-    def _build_threat_analysis_prompt(self, event_data: Dict[str, Any]) -> str:
-        """Build prompt for AI threat analysis"""
-        
-        return f"""
-        Analyze this security event and provide a threat assessment:
-        
-        Event Type: {event_data.get('event_type', 'unknown')}
-        Severity: {event_data.get('severity', 'unknown')}
-        Source: {event_data.get('source', 'unknown')}
-        Timestamp: {event_data.get('timestamp', 'unknown')}
-        
-        Event Details:
-        {json.dumps(event_data.get('details', {}), indent=2)}
-        
-        Please respond in JSON format:
-        {{
-            "verdict": "malicious|suspicious|benign",
-            "confidence": 0.0-1.0,
-            "reasoning": "explanation of analysis",
-            "mitre_tactics": ["list of MITRE ATT&CK tactics"],
-            "recommended_actions": ["list of recommended response actions"]
-        }}
+    def _sanitize_prompt_input(self, text: Any, max_length: int = 1000) -> str:
+        """Sanitize arbitrary user/content text before placing into prompts.
+
+        - Coerce to str and truncate to max_length (prevents stuffing)
+        - Strip common role/instruction markers (prompt-injection hints)
+        - Remove attempt to set roles (system:, assistant:, human:)
+        - Normalize whitespace
         """
-    
-    def _parse_ai_response(self, ai_response: str) -> Tuple[str, float, Dict[str, Any]]:
-        """Parse AI response into structured format"""
-        
+        import re as _re
         try:
-            # Try to extract JSON from response
+            s = str(text if text is not None else "")
+        except Exception:
+            s = ""
+
+        if len(s) > max_length:
+            s = s[:max_length]
+
+        # Block known injection phrasings and role prefaces
+        blocked = [
+            r"(?i)\bignore\s+(previous|all)\s+instructions\b",
+            r"(?i)\bdisregard\s+(previous|all)\s+instructions\b",
+            r"(?i)\boverride\s+system\s+prompt\b",
+            r"(?i)\bas\s+an\s+assistant,?\b",
+            r"(?i)\bsystem\s*:\s*",
+            r"(?i)\bassistant\s*:\s*",
+            r"(?i)\bhuman\s*:\s*",
+            r"(?i)\btool\s*:\s*",
+        ]
+        for pat in blocked:
+            s = _re.sub(pat, "", s)
+
+        # Normalize whitespace
+        s = " ".join(s.split())
+        return s
+
+    def _sanitize_nested(self, value: Any, max_leaf: int = 300) -> Any:
+        """Recursively sanitize dict/list/string leaves for prompt safety."""
+        if isinstance(value, dict):
+            return {self._sanitize_prompt_input(k): self._sanitize_nested(v, max_leaf) for k, v in value.items()}
+        if isinstance(value, list):
+            return [self._sanitize_nested(v, max_leaf) for v in value]
+        if isinstance(value, (str, int, float, bool)) or value is None:
+            return self._sanitize_prompt_input(value, max_leaf)
+        # Fallback to string coercion
+        return self._sanitize_prompt_input(value, max_leaf)
+
+    def _build_threat_analysis_prompt(self, event_data: dict[str, Any]) -> str:
+        """Build structured prompt for AI threat analysis with injection defenses."""
+
+        ev_type = self._sanitize_prompt_input(event_data.get('event_type', 'unknown'), 120)
+        sev = self._sanitize_prompt_input(event_data.get('severity', 'unknown'), 60)
+        src = self._sanitize_prompt_input(event_data.get('source', 'unknown'), 120)
+        ts = self._sanitize_prompt_input(event_data.get('timestamp', 'unknown'), 120)
+        details = self._sanitize_nested(event_data.get('details', {}) or {})
+
+        try:
+            details_json = json.dumps(details, ensure_ascii=False, separators=(",", ":"))
+        except Exception:
+            details_json = "{}"
+
+        return (
+            "You are a cybersecurity analyst. Assess the following event.\n"
+            "Use only the content within the BEGIN/END markers.\n"
+            "Respond strictly in JSON schema described. Do not include prose.\n\n"
+            f"BEGIN_EVENT_META\n"
+            f"event_type={ev_type}\n"
+            f"severity={sev}\n"
+            f"source={src}\n"
+            f"timestamp={ts}\n"
+            f"END_EVENT_META\n\n"
+            f"BEGIN_EVENT_DETAILS_JSON\n{details_json}\nEND_EVENT_DETAILS_JSON\n\n"
+            "RESPONSE_SCHEMA:\n"
+            "{\n"
+            "  \"verdict\": \"malicious|suspicious|benign\",\n"
+            "  \"confidence\": 0.0-1.0,\n"
+            "  \"reasoning\": \"short explanation\",\n"
+            "  \"mitre_tactics\": [\"TAxxxx\"],\n"
+            "  \"recommended_actions\": [\"action\"]\n"
+            "}\n"
+        )
+    
+    def _parse_ai_response(self, ai_response: str) -> tuple[str, float, dict[str, Any]]:
+        """Parse and validate AI response using a strict schema with sanitization."""
+        try:
             import re
-            json_match = re.search(r'\{.*\}', ai_response, re.DOTALL)
-            
-            if json_match:
-                response_data = json.loads(json_match.group())
-                return (
-                    response_data.get('verdict', 'suspicious'),
-                    response_data.get('confidence', 0.5),
-                    {
-                        'reasoning': response_data.get('reasoning', ''),
-                        'mitre_tactics': response_data.get('mitre_tactics', []),
-                        'recommended_actions': response_data.get('recommended_actions', [])
-                    }
-                )
-            else:
-                # Fallback to simple text parsing
-                if 'malicious' in ai_response.lower():
-                    verdict = 'malicious'
-                    confidence = 0.8
-                elif 'suspicious' in ai_response.lower():
-                    verdict = 'suspicious' 
-                    confidence = 0.6
-                else:
-                    verdict = 'benign'
-                    confidence = 0.7
-                
-                return verdict, confidence, {'reasoning': ai_response}
-                
+            import html
+            from typing import Literal
+            from pydantic import BaseModel, Field, ValidationError, field_validator
+
+            class ThreatAnalysisResponse(BaseModel):  # type: ignore[misc]
+                verdict: Literal['malicious', 'suspicious', 'benign']
+                confidence: float = Field(ge=0.0, le=1.0)
+                reasoning: str = Field(default="", max_length=2000)
+                mitre_tactics: list[str] = Field(default_factory=list, max_items=20)
+                recommended_actions: list[str] = Field(default_factory=list, max_items=20)
+
+                @field_validator('reasoning')
+                @classmethod
+                def _sanitize_reasoning(cls, v: str) -> str:  # noqa: N805
+                    return html.escape(v or "")[:2000]
+
+                @field_validator('mitre_tactics', 'recommended_actions')
+                @classmethod
+                def _trim_items(cls, v: list[str]) -> list[str]:  # noqa: N805
+                    out: list[str] = []
+                    for it in v or []:
+                        try:
+                            out.append((it or "").strip()[:120])
+                        except Exception:
+                            continue
+                    return out[:20]
+
+            # Extract first JSON object
+            json_match = re.search(r"\{[\s\S]*\}", ai_response, re.DOTALL)
+            if not json_match:
+                # Simple fallback classification
+                low = ai_response.lower()
+                if 'malicious' in low:
+                    return 'malicious', 0.8, {'reasoning': html.escape(ai_response)[:500]}
+                if 'suspicious' in low:
+                    return 'suspicious', 0.6, {'reasoning': html.escape(ai_response)[:500]}
+                return 'benign', 0.7, {'reasoning': html.escape(ai_response)[:500]}
+
+            raw = json_match.group()
+            obj = json.loads(raw)
+            validated = ThreatAnalysisResponse(**obj)
+            ctx: dict[str, Any] = {
+                'reasoning': validated.reasoning,
+                'mitre_tactics': list(validated.mitre_tactics or []),
+                'recommended_actions': list(validated.recommended_actions or []),
+            }
+            return validated.verdict, float(validated.confidence), ctx
+
+        except ValidationError as ve:  # type: ignore[name-defined]
+            self.logger.warning(f"AI response validation failed: {ve}")
+            return 'suspicious', 0.5, {'error': 'validation_failed'}
         except Exception as e:
             self.logger.error(f"Failed to parse AI response: {e}")
-            return 'suspicious', 0.5, {'error': 'Failed to parse AI response'}
+            return 'suspicious', 0.5, {'error': 'parse_failed'}
     
     # Circuit Breaker Implementation
     def _is_circuit_open(self, service_name: str) -> bool:
@@ -635,7 +757,7 @@ class AIModelManager:
         self.circuit_breakers[service_name] = breaker
     
     # Caching Implementation
-    def _generate_cache_key(self, event_data: Dict[str, Any]) -> str:
+    def _generate_cache_key(self, event_data: dict[str, Any]) -> str:
         """Generate cache key for event data"""
         
         # Create deterministic hash of key event fields
@@ -651,7 +773,7 @@ class AIModelManager:
         cache_key = hashlib.md5(json.dumps(key_fields, sort_keys=True).encode()).hexdigest()
         return cache_key
     
-    def _get_cached_result(self, cache_key: str) -> Optional[AnalysisResult]:
+    def _get_cached_result(self, cache_key: str) -> AnalysisResult | None:
         """Get cached analysis result if available and not expired"""
         
         if cache_key in self.result_cache:
@@ -798,7 +920,7 @@ class AIModelManager:
                                     ModelStatus.UNAVAILABLE, 0, 0.0, str(e))
             self.logger.error(f"External AI service unavailable: {e}")
     
-    def get_model_status_summary(self) -> Dict[str, Any]:
+    def get_model_status_summary(self) -> dict[str, Any]:
         """Get comprehensive model status summary"""
         
         summary = {

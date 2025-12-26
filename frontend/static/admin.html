@@ -44,7 +44,7 @@
     }
     async function fetchRateLimits(){
       try {
-        const r = await fetch('/api/v1/admin/rate_limits/tenant', { headers: apiHeaders() });
+        const r = await (window.safeFetch || fetch)('/api/v1/admin/rate_limits/tenant', { headers: apiHeaders() });
         const j = await r.json();
         if (!r.ok) throw new Error(j.detail||'forbidden');
         document.getElementById('rlEnabled').checked = !!j.enabled;
@@ -68,7 +68,7 @@
         const enabled = document.getElementById('rlEnabled').checked;
         const max = parseInt(document.getElementById('rlMax').value||'0',10);
         const window_seconds = parseInt(document.getElementById('rlWindow').value||'0',10);
-        const r = await fetch('/api/v1/admin/rate_limits/tenant', { method:'POST', headers: { 'Content-Type': 'application/json', ...apiHeaders() }, body: JSON.stringify({ enabled, max, window_seconds }) });
+        const r = await (window.safeFetch || fetch)('/api/v1/admin/rate_limits/tenant', { method:'POST', headers: { 'Content-Type': 'application/json', ...apiHeaders() }, body: JSON.stringify({ enabled, max, window_seconds }) });
         const j = await r.json();
         if (!r.ok) throw new Error(j.detail||'update_failed');
         toast('Tenant rate limits updated', true);
@@ -79,7 +79,7 @@
         const name = (document.getElementById('obsName')||{}).value||'';
         const observed = document.getElementById('obsObserved').checked;
         if (!name) { toast('Factor name is required', false); return; }
-        const r = await fetch('/api/v1/admin/factors/observe', { method:'POST', headers: { 'Content-Type':'application/json', ...apiHeaders() }, body: JSON.stringify({ name, observed }) });
+        const r = await (window.safeFetch || fetch)('/api/v1/admin/factors/observe', { method:'POST', headers: { 'Content-Type':'application/json', ...apiHeaders() }, body: JSON.stringify({ name, observed }) });
         const j = await r.json();
         if (!r.ok) throw new Error(j.detail||'set_failed');
         toast(`Factor '${j.name}' set to ${j.observed ? 'OBSERVE' : 'ENFORCE'}`, true);
@@ -87,7 +87,7 @@
     }
     async function applyPreset(name, observed){
       try{
-        const r = await fetch('/api/v1/admin/factors/observe_preset', { method:'POST', headers:{ 'Content-Type':'application/json', ...apiHeaders() }, body: JSON.stringify({ name, observed }) });
+        const r = await (window.safeFetch || fetch)('/api/v1/admin/factors/observe_preset', { method:'POST', headers:{ 'Content-Type':'application/json', ...apiHeaders() }, body: JSON.stringify({ name, observed }) });
         const j = await r.json();
         if(!r.ok) throw new Error(j.detail||'preset_failed');
         toast(`Preset '${j.preset}' -> ${observed?'OBSERVE':'ENFORCE'} (${(j.factors||[]).length} factors)`, true);
@@ -203,7 +203,7 @@
   <script>
     async function fetchFlags(){
       try{
-        const r = await fetch('/api/v1/admin/flags', { headers: apiHeaders() });
+        const r = await (window.safeFetch || fetch)('/api/v1/admin/flags', { headers: apiHeaders() });
         const j = await r.json(); if(!r.ok) throw new Error(j.detail||'forbidden');
         const eff = j.effective||{}; const ov = j.overrides||{};
         const vIso = ov.ENABLE_ISO_ML ?? eff.ENABLE_ISO_ML ?? false;
@@ -217,7 +217,7 @@
     }
     async function _setFlag(name, value){
       const body = { name, value, persist: true };
-      const r = await fetch('/api/v1/admin/flags/set', { method:'POST', headers:{ 'Content-Type':'application/json', ...apiHeaders() }, body: JSON.stringify(body) });
+      const r = await (window.safeFetch || fetch)('/api/v1/admin/flags/set', { method:'POST', headers:{ 'Content-Type':'application/json', ...apiHeaders() }, body: JSON.stringify(body) });
       const j = await r.json(); if(!r.ok) throw new Error(j.detail||'set_failed');
     }
     async function saveFlags(){

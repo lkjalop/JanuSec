@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
-import { getJSON, postJSON, apiBase } from './api.js';
+import { getJSON, postJSON, apiBase, sseUrl } from './api.js';
 import { tenantHeaders } from './api.js';
 // Build-time env for gating overview sampler (Vite)
 const SAMPLER_ENABLED = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_OVERVIEW_SAMPLER === '1');
@@ -36,7 +36,7 @@ const InfoIcon = () => (
 );
 
 // Header Component
-const Header = ({ stats, onRefresh }) => (
+const Header = ({ stats, onRefresh, panelDetached, setPanelDetached, panelCollapsed, setPanelCollapsed }) => (
   <header style={{
     gridColumn: '1 / -1',
     background: 'var(--bg-surface)',
@@ -87,12 +87,23 @@ const Header = ({ stats, onRefresh }) => (
         <span style={{ fontSize: '14px', fontWeight: '600', color: 'var(--text-primary)' }}>{stats.liveStatus}</span>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <span style={{ fontSize: '12px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>SSE</span>
+        <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>clients:</span>
+        <span style={{ fontSize: '13px', fontWeight: '600', color: 'var(--text-primary)' }}>{stats.sseClients ?? '—'}</span>
+        <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>q:</span>
+        <span style={{ fontSize: '13px', fontWeight: '600', color: 'var(--text-primary)' }}>{stats.sseQueue ?? '—'}</span>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
         <span style={{ fontSize: '12px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Artifacts</span>
         <span style={{ fontSize: '14px', fontWeight: '600', color: 'var(--text-primary)' }}>{stats.totalArtifacts}</span>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
         <span style={{ fontSize: '12px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Critical</span>
         <span style={{ fontSize: '14px', fontWeight: '600', color: 'var(--risk-critical)' }}>{stats.criticalCount}</span>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <span style={{ fontSize: '12px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Slow Path</span>
+        <span title="Total large-batch slow-path activations" style={{ fontSize: '13px', fontWeight: '600', color: 'var(--text-primary)' }}>{stats.ingestSlowPath ?? '—'}</span>
       </div>
       <div style={{
         display: 'flex',
@@ -111,6 +122,14 @@ const Header = ({ stats, onRefresh }) => (
           animation: 'pulse 2s infinite'
         }}></div>
         <span style={{ fontSize: '12px', fontWeight: '500' }}>Processing</span>
+      </div>
+      <div style={{ display:'flex', alignItems:'center', gap:'8px', marginLeft: 12 }}>
+        <button onClick={()=> setPanelCollapsed(v=>!v)} title={panelCollapsed? 'Expand Panel':'Collapse Panel'} style={{ padding:'6px 10px', fontSize:'12px', border:'1px solid var(--border-default)', borderRadius:6, background:'var(--bg-surface-2)', color:'var(--text-primary)' }}>
+          {panelCollapsed ? 'Show Details' : 'Hide Details'}
+        </button>
+        <button onClick={()=> setPanelDetached(v=>!v)} title={panelDetached? 'Attach Right Panel':'Detach Right Panel'} style={{ padding:'6px 10px', fontSize:'12px', border:'1px solid var(--border-default)', borderRadius:6, background:'var(--bg-surface-2)', color:'var(--text-primary)' }}>
+          {panelDetached ? 'Attach Panel' : 'Detach Panel'}
+        </button>
       </div>
     </div>
   </header>
@@ -165,6 +184,34 @@ const IconReports = () => (
     <path d="M8 8h8v2H8zM8 12h5v2H8z" />
   </svg>
 );
+
+// Adjudication Panel
+export const AdjudicationPanel = () => {
+  const [claims, setClaims] = React.useState([]);
+  const load = React.useCallback(async ()=>{
+    try{
+      const j = await getJSON('/api/v1/llm/tier1/claims/pending');
+      setClaims(j.pending || []);
+    }catch(e){ setClaims([]); }
+  }, []);
+  React.useEffect(()=>{ load(); const iv = setInterval(load,5000); return ()=>clearInterval(iv); }, [load]);
+  return (
+    <div style={{ padding:12 }}>
+      <h3>LLM Claims (Pending)</h3>
+      {claims.length===0 && <div>No pending claims</div>}
+      {claims.map(c=> (
+        <div key={c.id} style={{ padding:10, marginBottom:8, background:'var(--bg-surface-2)', borderRadius:8 }}>
+          <div style={{ fontWeight:600 }}>{c.claim_type} #{c.id}</div>
+          <div style={{ marginTop:6 }}>{c.claim_text}</div>
+          <div style={{ marginTop:8 }}>
+            <button onClick={async ()=>{ await postJSON(`/api/v1/llm/tier1/claims/${c.id}/adjudicate`,{is_correct:true}); await load(); }} style={{ marginRight:8 }}>Correct</button>
+            <button onClick={async ()=>{ await postJSON(`/api/v1/llm/tier1/claims/${c.id}/adjudicate`,{is_correct:false}); await load(); }}>Incorrect</button>
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
 
 // Sidebar Navigation
 const Sidebar = ({ activeView, setActiveView }) => {
@@ -546,7 +593,7 @@ const DetailsPanel = ({ selectedArtifact, zeekEvents, setZeekEvents, addToast })
     function connect() {
       if (closed) return;
       try {
-        sseRef.current = new EventSource('/api/v1/stream/decisions');
+        sseRef.current = new EventSource(sseUrl('/api/v1/stream/decisions'));
         sseRef.current.onopen = () => {
           retryRef.current = 0;
           addToast('Live stream connected', 'success', 2500, 'sse-connected');
@@ -1047,10 +1094,13 @@ export const ArtifactIntelligencePlatform = () => {
   const [toasts, setToasts] = useState([]);
   const [maturityData, setMaturityData] = useState(null);
   const [finops, setFinops] = useState({ overview:null, ledger:null, daily:null, forecast:null, accuracy:null, history:null });
+  const [metricsSummary, setMetricsSummary] = useState(null);
   const [dreadInfo, setDreadInfo] = useState(null);
   const [webhookInfo, setWebhookInfo] = useState({ vendor: 'generic', secret: '', body: '{"events":[{"id":"demo","foo":"bar"}]}' , sig: '', ts: '' , recent: []});
   const timelinePageSize = 120;
   const [timelinePage, setTimelinePage] = useState(0);
+  const [panelDetached, setPanelDetached] = useState(false);
+  const [panelCollapsed, setPanelCollapsed] = useState(false);
 
   // toast helpers
   const addToast = useCallback((title, level='info', ttl=3000, idOverride=null, msg='') => {
@@ -1093,11 +1143,12 @@ export const ArtifactIntelligencePlatform = () => {
           risk_factors: a.risk_factors || []
         }));
         setArtifacts(arts);
-        setStats({
+        setStats((prev) => ({
+          ...prev,
           liveStatus: 'Connected',
           totalArtifacts: arts.length,
           criticalCount: arts.filter(a => a.risk_score >= 80).length
-        });
+        }));
         if (arts.length && !selectedArtifact) setSelectedArtifact(arts[0]);
         return; // Done
       } catch (error) {
@@ -1123,7 +1174,7 @@ export const ArtifactIntelligencePlatform = () => {
             ]
           })) || [];
           setArtifacts(mockArtifacts);
-          setStats({ liveStatus: 'Connected', totalArtifacts: mockArtifacts.length, criticalCount: mockArtifacts.filter(a => a.risk_score >= 80).length });
+          setStats((prev) => ({ ...prev, liveStatus: 'Connected', totalArtifacts: mockArtifacts.length, criticalCount: mockArtifacts.filter(a => a.risk_score >= 80).length }));
           if (mockArtifacts.length && !selectedArtifact) setSelectedArtifact(mockArtifacts[0]);
         } catch (e2) {
           addToast('Initial artifact load failed', 'error', 5000);
@@ -1132,6 +1183,22 @@ export const ArtifactIntelligencePlatform = () => {
     };
     loadData();
   }, [tenant, addToast, selectedArtifact]);
+
+  // Periodic metrics summary to populate header SSE stats
+  useEffect(() => {
+    let stop = false;
+    async function tick() {
+      try {
+        const m = await getJSON('/api/v1/metrics/summary');
+        if (!stop && m && m.sse) {
+          setStats(prev => ({ ...prev, sseClients: m.sse.clients, sseQueue: m.sse.queue_depth, ingestSlowPath: m.ingest?.slow_path_total }));
+        }
+      } catch(_) {}
+      if (!stop) setTimeout(tick, 8000);
+    }
+    tick();
+    return () => { stop = true; };
+  }, []);
 
   // Periodically fetch sessions when dropdown is open
   useEffect(() => {
@@ -1247,6 +1314,9 @@ export const ArtifactIntelligencePlatform = () => {
           try {
             const d = await getJSON('/api/v1/dashboard/maturity', { headers: tenantHeaders(tenant) }); if(!cancelled) setMaturityData(d);
           } catch(_){ }
+          try {
+            const m = await getJSON('/api/v1/metrics/summary', { headers: tenantHeaders(tenant) }); if(!cancelled) setMetricsSummary(m);
+          } catch(_){ }
           // Load FinOps metrics in parallel (best-effort)
           try {
             let usedSummary = false;
@@ -1299,15 +1369,16 @@ export const ArtifactIntelligencePlatform = () => {
   const totalTimelinePages = Math.ceil(timeline.length / timelinePageSize);
   const pageItems = timeline.slice(timelinePage * timelinePageSize, (timelinePage+1)*timelinePageSize);
 
+  const gridTemplate = panelCollapsed ? '64px 1fr' : '64px 1fr 360px';
   return (
     <div style={{
       display: 'grid',
-      gridTemplateColumns: '64px 1fr 360px',
+      gridTemplateColumns: gridTemplate,
       gridTemplateRows: '56px 1fr',
       height: '100vh',
       overflow: 'hidden'
     }}>
-      <Header stats={stats} />
+      <Header stats={stats} panelDetached={panelDetached} setPanelDetached={setPanelDetached} panelCollapsed={panelCollapsed} setPanelCollapsed={setPanelCollapsed} />
       <Sidebar activeView={activeView} setActiveView={setActiveView} />
 
       <main style={{ display:'flex', flexDirection:'column', overflow:'hidden' }}>
@@ -1394,6 +1465,25 @@ export const ArtifactIntelligencePlatform = () => {
           <div style={{ flex:1, overflow:'auto', padding:'12px 20px' }}>
             <h3 style={{ margin:'4px 0 12px', fontSize:'14px' }}>Reports</h3>
             <p style={{ fontSize:'12px', color:'var(--text-muted)' }}>Use Export to generate new reports. A history view can be added.</p>
+            {/* Curated Metrics Summary */}
+            <div style={{ marginTop: '12px', display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px' }}>
+              <div style={{ background:'var(--bg-surface)', border:'1px solid var(--border-default)', borderRadius:'6px', padding:'10px' }}>
+                <div style={{ fontSize:'13px', fontWeight:600, marginBottom:'8px' }}>Pipeline Snapshot</div>
+                <div style={{ fontSize:'12px', color:'var(--text-secondary)' }}>
+                  <div>Events: {metricsSummary?.pipeline?.events_total ?? '—'}</div>
+                  <div>Terminal: {metricsSummary?.pipeline?.terminal ?? '—'} | Non-Terminal: {metricsSummary?.pipeline?.non_terminal ?? '—'}</div>
+                  <div>Stage Exec: {metricsSummary?.pipeline?.stage_exec_total ?? '—'} | Skips: {metricsSummary?.pipeline?.stage_skips_total ?? '—'}</div>
+                </div>
+              </div>
+              <div style={{ background:'var(--bg-surface)', border:'1px solid var(--border-default)', borderRadius:'6px', padding:'10px' }}>
+                <div style={{ fontSize:'13px', fontWeight:600, marginBottom:'8px' }}>SSE & Queue</div>
+                <div style={{ fontSize:'12px', color:'var(--text-secondary)' }}>
+                  <div>SSE Clients: {metricsSummary?.sse?.clients ?? '—'}</div>
+                  <div>SSE Queue Depth: {metricsSummary?.sse?.queue_depth ?? '—'}</div>
+                  <div>Ingest Queue Depth: {metricsSummary?.queue?.depth ?? '—'}</div>
+                </div>
+              </div>
+            </div>
             {/* Maturity Coverage Card */}
             <div style={{ marginTop: '12px', display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px' }}>
               <div style={{ background:'var(--bg-surface)', border:'1px solid var(--border-default)', borderRadius:'6px', padding:'10px' }}>
@@ -1509,7 +1599,12 @@ export const ArtifactIntelligencePlatform = () => {
         )}
       </main>
 
-      <DetailsPanel selectedArtifact={selectedArtifact} zeekEvents={zeekEvents} setZeekEvents={setZeekEvents} addToast={addToast} />
+      {!panelCollapsed && (
+        <DetailsPanel selectedArtifact={selectedArtifact} zeekEvents={zeekEvents} setZeekEvents={setZeekEvents} addToast={addToast} />
+      )}
+      {panelDetached && (
+        <iframe title="Detached Details" src="/sidepanel" style={{ display: panelCollapsed ? 'none':'block', position:'fixed', right: 12, top: 64, width: 420, height: '80vh', border: '1px solid var(--border-default)', borderRadius: 8, background:'var(--bg-surface)', zIndex: 999 }} />
+      )}
       <input ref={fileInputRef} type="file" style={{ display:'none' }} multiple onChange={onUploadChange} />
       <Toasts toasts={toasts} dismiss={dismissToast} />
     </div>

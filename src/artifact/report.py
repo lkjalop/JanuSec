@@ -1,7 +1,18 @@
 from __future__ import annotations
-from typing import List, Dict, Any
-import time, os, json
+
+import json
+import os
+import time
 from collections import Counter
+from typing import Any, Dict, List
+try:
+    from src.core.threat_modeling.factor_taxonomy import compute_dread_score  # type: ignore
+except Exception:
+    try:
+        from core.threat_modeling.factor_taxonomy import compute_dread_score  # type: ignore
+    except Exception:
+        compute_dread_score = None  # type: ignore
+
 from .models import ArtifactObservation
 
 REPORT_DIR = os.path.join('dump','artifact_reports')
@@ -11,14 +22,79 @@ LATEST_REPORT_PATH = os.path.join(REPORT_DIR,'latest.json')
 
 SECTION_FACTORS_OF_INTEREST = ['lolbin_misuse','tunneling_utility','macro_autoexec','script_obfuscation_high','fresh_download','rapid_multi_host_appearance','malicious_neighbor']
 
-def build_report(artifacts: List[ArtifactObservation], batch_meta: Dict[str,Any]) -> Dict[str,Any]:
+
+def _extract_threat_intel(raw: Dict[str, Any] | None) -> List[Dict[str, Any]]:
+    hits: List[Dict[str, Any]] = []
+    if not isinstance(raw, dict):
+        return hits
+    ti = raw.get('threat_intel') or raw.get('ti_hits') or raw.get('intel')
+    if isinstance(ti, list):
+        for entry in ti:
+            if isinstance(entry, dict):
+                hits.append(entry)
+            else:
+                hits.append({'source': 'indicator', 'value': entry})
+    elif isinstance(ti, dict):
+        for source, value in ti.items():
+            if value is None or value == '':
+                continue
+            if isinstance(value, list):
+                for elem in value:
+                    hits.append({'source': source, 'value': elem})
+            else:
+                hits.append({'source': source, 'value': value})
+    elif isinstance(ti, str):
+        hits.append({'source': 'note', 'value': ti})
+    return hits
+
+def build_report(artifacts: list[ArtifactObservation], batch_meta: dict[str,Any]) -> dict[str,Any]:
     totals = Counter(a.verdict.value for a in artifacts)
     factor_counts = Counter(f for a in artifacts for f in a.factors)
     lolbin_items = [a for a in artifacts if 'lolbin_misuse' in a.factors or 'tunneling_utility' in a.factors][:25]
     macro_items = [a for a in artifacts if any(f.startswith('macro_') for f in a.factors)][:25]
     fresh_downloads = [a for a in artifacts if 'fresh_download' in a.factors][:25]
     graph_impacted = [a for a in artifacts if a.graph_context]
+    hopgraph_summary: dict[str, dict[str, Any]] = {}
+    for a in graph_impacted:
+        gc = a.graph_context or {}
+        sid = gc.get('session_id')
+        if not sid:
+            continue
+        entry = hopgraph_summary.setdefault(sid, {
+            'samples': 0,
+            'verdict': gc.get('verdict'),
+            'confidence': gc.get('confidence'),
+            'key_factors': list(gc.get('key_factors') or []),
+            'domains': list(gc.get('domains_present') or []),
+            'source': gc.get('source'),
+        })
+        entry['samples'] += 1
+        if gc.get('hotspots'):
+            entry['hotspots'] = gc['hotspots']
+        if gc.get('mapping_stats'):
+            entry['mapping_stats'] = gc['mapping_stats']
+        if gc.get('confidence_breakdown'):
+            entry['confidence_breakdown'] = gc['confidence_breakdown']
+        if gc.get('narrative'):
+            entry.setdefault('narratives', [])
+            if len(entry['narratives']) < 5:
+                entry['narratives'].append(gc['narrative'])
     top_risky = sorted(artifacts, key=lambda x: x.final_risk, reverse=True)[:20]
+    ti_counter = Counter()
+    ti_samples: List[Dict[str, Any]] = []
+    for entry in artifacts:
+        hits = _extract_threat_intel(getattr(entry, 'raw', None))
+        if not hits:
+            continue
+        ti_samples.append({
+            'path': entry.path,
+            'host': entry.host,
+            'verdict': entry.verdict.value if hasattr(entry.verdict, 'value') else entry.verdict,
+            'hits': hits[:3],
+        })
+        for hit in hits:
+            indicator = f"{hit.get('source','unknown')}::{hit.get('value')}"
+            ti_counter[indicator] += 1
     # Technique coverage
     mitre_counts = Counter(t for a in artifacts for t in getattr(a,'mitre',[]) or [])
     stride_counts = Counter()
@@ -29,7 +105,7 @@ def build_report(artifacts: List[ArtifactObservation], batch_meta: Dict[str,Any]
     prev = None
     try:
         if os.path.exists(LATEST_REPORT_PATH):
-            with open(LATEST_REPORT_PATH,'r',encoding='utf-8') as fh:
+            with open(LATEST_REPORT_PATH,encoding='utf-8') as fh:
                 prev = json.load(fh)
     except Exception:
         prev = None
@@ -50,11 +126,19 @@ def build_report(artifacts: List[ArtifactObservation], batch_meta: Dict[str,Any]
         'mitre_coverage': mitre_counts.most_common(40),
         'stride_coverage': stride_counts.most_common(),
     }
+    if ti_counter:
+        rep['threat_intel_summary'] = {
+            'total_hits': int(sum(ti_counter.values())),
+            'top_indicators': [{'indicator': ind, 'count': cnt} for ind, cnt in ti_counter.most_common(20)],
+            'samples': ti_samples[:20],
+        }
+    if hopgraph_summary:
+        rep['hopgraph_summary'] = hopgraph_summary
     # Narrative summary (simple keyword frequency)
     narratives = [a.narrative for a in artifacts if a.narrative]
     if narratives:
-        from collections import Counter as _C
         import re
+        from collections import Counter as _C
         tokens = []
         for n in narratives:
             tokens.extend([t.lower() for t in re.findall(r"[A-Za-z]{4,}", n)])
@@ -93,7 +177,7 @@ def build_report(artifacts: List[ArtifactObservation], batch_meta: Dict[str,Any]
     return rep
 
 
-def serialize_artifact(a: ArtifactObservation) -> Dict[str,Any]:
+def serialize_artifact(a: ArtifactObservation) -> dict[str,Any]:
     # Extended serialization: include optional sha256, host_count, rarity if available.
     # If the ArtifactObservation model does not yet define these, they will appear as None
     # allowing the frontend to degrade gracefully while we iteratively enrich the pipeline.
@@ -134,10 +218,17 @@ def serialize_artifact(a: ArtifactObservation) -> Dict[str,Any]:
         , 'ambiguity': getattr(a,'ambiguity', None)
         , 'escalation_trace': getattr(a,'escalation_trace', None)
         , 'escalation_status': getattr(a,'escalation_status', None)
+        # DREAD enrichment (components + normalized score + severity)
+        , 'dread': None if compute_dread_score is None else (compute_dread_score(a.factors or [])['components'] if compute_dread_score else None)
+        , 'dread_score': None if compute_dread_score is None else (compute_dread_score(a.factors or [])['risk_score'] if compute_dread_score else None)
+        , 'dread_severity': None if compute_dread_score is None else (
+            (lambda s: 'high' if s>=0.66 else ('medium' if s>=0.33 else 'low'))(compute_dread_score(a.factors or [])['risk_score']) if compute_dread_score else None
+        )
+        , 'threat_intel': _extract_threat_intel(getattr(a,'raw', None))
     }
 
 
-def markdown_summary(rep: Dict[str,Any]) -> str:
+def markdown_summary(rep: dict[str,Any]) -> str:
     t = rep['verdict_totals']
     lines = [f"# Artifact Risk Report {time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime(rep['generated_at']))}"]
     lines.append("\n## Verdict Totals")

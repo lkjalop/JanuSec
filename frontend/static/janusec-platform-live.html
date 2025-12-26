@@ -651,6 +651,16 @@
                     </svg>
                     Timeline
                 </div>
+                <div class="nav-item" onclick="window.open('/static/factors_top20.html','_blank')">
+                        <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 3h18v4H3zM3 10h18v11H3z"/>
+                        </svg>
+                        Factors Top-20
+                    </div>
+                    <a class="nav-item" href="/static/factors_top20.html" target="_blank" data-feature="factors-top20" title="Factors taxonomy & playbooks">
+                        <span class="nav-ico nav-ico--factors"></span>
+                        Factors Top-20
+                    </a>
             </div>
 
             <div class="nav-section">
@@ -664,6 +674,25 @@
                 </div>
             </div>
         </nav>
+
+        <script>
+            (function(){
+                try{
+                    const h = (location && location.hostname) ? location.hostname : '';
+                    const k = (localStorage.getItem && localStorage.getItem('apiKey')) || '';
+                    const showLocal = (h === 'localhost' || h === '127.0.0.1' || h === '::1');
+                    const showDevKey = (k === 'devkey123');
+                    if(!(showLocal || showDevKey)){
+                        try{ document.querySelectorAll('[data-feature="factors-top20"]').forEach(function(el){ el.style.display='none'; }); }catch(_){ }
+                    }
+                }catch(_){ }
+            })();
+        </script>
+
+        <script>
+            // Non-destructive nav include loader to reuse the shared sidebar
+            (function(){ try{ fetch('/static/components/nav.html').then(r=>{ if(!r.ok) return; return r.text(); }).then(html=>{ if(!html) return; const parser = new DOMParser(); const doc = parser.parseFromString(html,'text/html'); const newNav = doc.body.firstElementChild; if(!newNav) return; const old = document.querySelector('.sidebar'); if(old && old.parentNode){ old.parentNode.replaceChild(newNav, old); } }).catch(e=>{ /* ignore */ }); }catch(e){} })();
+        </script>
 
         <!-- Main Content Area -->
         <main class="main-content" id="mainContent">
@@ -875,7 +904,7 @@
                 };
 
                 try {
-                    const response = await fetch(`${this.baseUrl}${endpoint}`, {
+                    const response = await (window.safeFetch || fetch)(`${this.baseUrl}${endpoint}`, {
                         headers: { ...defaultHeaders, ...(options.headers || {}) },
                         ...options
                     });

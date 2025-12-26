@@ -44,7 +44,7 @@
     async function loadReport(){
       const grid = document.getElementById('grid');
       try{
-        const r = await fetch('/api/v1/report/ingestion?format=json', { headers: authHeaders() });
+        const r = await (window.safeFetch || fetch)('/api/v1/report/ingestion?format=json', { headers: authHeaders() });
         if(!r.ok){ grid.textContent = 'Failed to load report'; return; }
         const j = await r.json();
         const techniques = j.top_mitre_techniques || [];
@@ -75,7 +75,7 @@
     async function showEventsForTechnique(tech){
       const out = document.getElementById('events');
       out.innerHTML = `<div class="muted">Loading events for ${tech}...</div>`;
-      try { const r = await fetch('/api/v1/report/ingestion?format=json', { headers: authHeaders() }); const j = r.ok ? await r.json() : {}; const flagged = j.flagged_events || []; const rows = [];
+      try { const r = await (window.safeFetch || fetch)('/api/v1/report/ingestion?format=json', { headers: authHeaders() }); const j = r.ok ? await r.json() : {}; const flagged = j.flagged_events || []; const rows = [];
         for(const f of flagged){ const techniques = (f.techniques || f.mitre || []).map(String); if (techniques.includes(tech)) { const severity = f.severity || f.verdict || 'unknown'; const severityColor = {critical:'#e74c3c', high:'#e67e22', medium:'#f39c12', low:'#27ae60', info:'#3498db'}[severity] || '#95a5a6'; rows.push(`
             <div class=\"event-item\" style=\"border-left-color:${severityColor};\"> <strong>Event ${f.event_id || 'n/a'}</strong> <span style=\"float:right;color:${severityColor};\">${severity}</span><br><span class=\"muted\">${f.timestamp || 'No timestamp'}</span><br>${f.description || f.raw_output || 'No description'} </div>`); } }
         if(!rows.length){ out.innerHTML = `<div class="muted">No events found for ${tech}.</div>`; return; }
@@ -86,4 +86,3 @@
   <script src="/static/js/notifications.js"></script>
 </body>
 </html>
-

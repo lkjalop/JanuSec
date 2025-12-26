@@ -4,10 +4,14 @@ These functions operate on HopGraph Light view to derive hunt factors.
 They return simple dicts so the hunt sidecar can assemble a factor table.
 """
 from __future__ import annotations
-from typing import Dict, List, Iterable
+
+from collections.abc import Iterable
+from typing import Dict, List
+
 from .hopgraph_light import HopGraphLight
 
-def lateral_chain_density(graph: HopGraphLight, max_depth: int = 4) -> Dict[str, float]:
+
+def lateral_chain_density(graph: HopGraphLight, max_depth: int = 4) -> dict[str, float]:
     """Compute ratio of multi-host chains vs total nodes.
     Placeholder heuristic: chains approximated by nodes with degree > 1.
     """
@@ -18,7 +22,7 @@ def lateral_chain_density(graph: HopGraphLight, max_depth: int = 4) -> Dict[str,
     density = branching / total_nodes
     return {'lateral_chain_density': round(density, 4)}
 
-def multi_host_same_user(graph: HopGraphLight) -> Dict[str, float]:
+def multi_host_same_user(graph: HopGraphLight) -> dict[str, float]:
     """Placeholder: detect same user appearing on many assets quickly.
     We assume node id format may contain prefixes like user:alice host:web01
     """
@@ -27,7 +31,7 @@ def multi_host_same_user(graph: HopGraphLight) -> Dict[str, float]:
     user_to_hosts = defaultdict(set)
     # Access protected structures cautiously
     # (graph intentionally exposes internal via stats only; for stub we peek)
-    g_nodes = getattr(graph, '_nodes')  # type: ignore
+    g_nodes = graph._nodes  # type: ignore
     for node in g_nodes.values():  # type: ignore
         if node.kind == 'asset':
             continue
@@ -46,8 +50,8 @@ def multi_host_same_user(graph: HopGraphLight) -> Dict[str, float]:
     score = max_hosts / 10.0  # normalized crude scale
     return {'multi_host_same_user_score': round(min(score, 1.0), 4)}
 
-def aggregate(graph: HopGraphLight) -> Dict[str, float]:
-    features: Dict[str, float] = {}
+def aggregate(graph: HopGraphLight) -> dict[str, float]:
+    features: dict[str, float] = {}
     for fn in (lateral_chain_density, multi_host_same_user):
         try:
             features.update(fn(graph))

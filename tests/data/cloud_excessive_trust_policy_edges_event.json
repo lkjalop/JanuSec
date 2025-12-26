@@ -1,0 +1,11 @@
+{
+  "domain": "cloud",
+  "eventSource": "iam.amazonaws.com",
+  "eventName": "PutRolePolicy",
+  "userName": "admin-svc",
+  "iam_put_role_policy": true,
+  "principal": "*",
+  "principal_wildcard": true,
+  "principal_accounts": ["333333333333","444444444444"],
+  "account_id": "222222222222"
+}

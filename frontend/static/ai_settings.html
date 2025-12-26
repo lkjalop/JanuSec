@@ -98,7 +98,7 @@
     const apiKey = localStorage.getItem('apiKey') || 'devkey123';
     const hdrs = {'Content-Type':'application/json','x-api-key':apiKey};
     async function loadCfg(){
-      const r = await fetch('/api/v1/integrations/ai/config',{headers: hdrs});
+      const r = await (window.safeFetch || fetch)('/api/v1/integrations/ai/config',{headers: hdrs});
       const j = await r.json();
       const cfg = (j.config)||{};
       const providers = cfg.providers||{};
@@ -139,11 +139,11 @@
           per_task_caps: {}
         }
       };
-      await fetch('/api/v1/integrations/ai/config',{method:'POST', headers: hdrs, body: JSON.stringify(cfg)});
+      await (window.safeFetch || fetch)('/api/v1/integrations/ai/config',{method:'POST', headers: hdrs, body: JSON.stringify(cfg)});
       try{ if(window.showNotification) showNotification('Saved','success'); else if(window.notifications && typeof window.notifications.showToast==='function') window.notifications.showToast('Saved',3000); else console.log('Saved'); }catch(e){ console.log('notify-fail', e); }
     }
     async function test(provider){
-      const r = await fetch('/api/v1/integrations/ai/test?provider='+encodeURIComponent(provider), {method:'POST', headers: hdrs});
+      const r = await (window.safeFetch || fetch)('/api/v1/integrations/ai/test?provider='+encodeURIComponent(provider), {method:'POST', headers: hdrs});
       const j = await r.json();
       document.getElementById('status-'+provider).innerText = (j.ok?'OK':'ERR')+` ${j.latency_ms||'-'}ms`;
     }

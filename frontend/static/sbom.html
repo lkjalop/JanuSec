@@ -45,6 +45,23 @@
 
     <h2 class="mt-0" style="margin:12px 0 6px">SBOM Upload & Vulnerability Assessment</h2>
 
+    <div class="panel" id="correlationPanel" style="display:none;">
+      <div class="panel-header">
+        <h3 class="mt-0">Correlation Recommendations</h3>
+      </div>
+      <div class="panel-body">
+        <div id="corrInsightList" class="details">No multi-domain guidance yet.</div>
+        <div style="margin-top:12px;">
+          <div style="font-weight:600; margin-bottom:4px;">Correlation Timeline</div>
+          <div id="corrTimelineList" class="details">No timeline activity yet.</div>
+        </div>
+        <div style="margin-top:12px;">
+          <div style="font-weight:600; margin-bottom:4px;">Recommendation Catalog</div>
+          <ul id="corrCatalogList" class="muted"></ul>
+        </div>
+      </div>
+    </div>
+
     <div class="panel" id="sbomPanel">
       <div class="panel-header">
         <h3 class="mt-0">Upload SBOM</h3>
@@ -131,13 +148,241 @@
 
     async function loadRecent(){
       try{
-        const r = await fetch('/api/v1/sbom/recent', { headers: authHeaders() });
+        const r = await (window.safeFetch || fetch)('/api/v1/sbom/recent', { headers: authHeaders() });
         const j = await r.json();
         const sel = document.getElementById('recent'); sel.innerHTML='';
         (j.recent||[]).forEach(id=>{ const o=document.createElement('option'); o.value=id; o.textContent=id; sel.appendChild(o); });
       }catch(_){ /*noop*/ }
     }
     loadRecent();
+
+    const _formatCorrelationTtl = (seconds) => {
+        if (!Number.isFinite(seconds)) return '';
+        const sec = Math.max(0, Math.floor(seconds));
+        const hrs = Math.floor(sec / 3600);
+        const mins = Math.floor((sec % 3600) / 60);
+        const rem = sec % 60;
+        if (hrs) return `${hrs}h ${mins}m`;
+        if (mins) return `${mins}m ${rem}s`;
+        return `${rem}s`;
+    };
+
+    async function loadCorrelationInsights(){
+        try{
+            const panel = document.getElementById('correlationPanel');
+            const list = document.getElementById('corrInsightList');
+            const catalog = document.getElementById('corrCatalogList');
+            const timeline = document.getElementById('corrTimelineList');
+            if(!panel || !list || !catalog || !timeline) return;
+            const r = await (window.safeFetch || fetch)('/api/v1/decisions/recent?limit=10', { headers: authHeaders() });
+            if(!r.ok){
+              panel.style.display='none';
+              return;
+            }
+            const j = await r.json().catch(()=>({}));
+            const rows = j.decisions || j.rows || j.events || [];
+            const insights = [];
+            rows.forEach(row => {
+              try{
+                const arr = row.correlation_insights || row.correlationInsights;
+                if(Array.isArray(arr)){
+                  arr.forEach(ins => insights.push(ins));
+                }
+              }catch(_){}
+            });
+            let hasContent = false;
+            const nowSec = Date.now() / 1000;
+            if(insights.length){
+              const cards = insights.slice(0,5).map((ins, idx) => {
+                const domains = (ins.domains || ins.domains_involved || []).map(d => `<span class="pill">${_htmlEsc(d)}</span>`).join(' ');
+                const recs = (ins.recommendations || []).map(r => `<li>${_htmlEsc(r)}</li>`).join('') || '<li>No specific actions listed.</li>';
+                const summary = ins.narrative && ins.narrative.trim() ? ins.narrative : `Correlation ${idx+1}`;
+                const conf = ins.confidence !== undefined ? Number(ins.confidence).toFixed(2) : 'n/a';
+                const ttlSeconds = typeof ins.expires_at === 'number' ? Math.max(0, ins.expires_at - nowSec) : null;
+                const ttlLabel = ttlSeconds !== null ? ` · TTL ${_formatCorrelationTtl(ttlSeconds)}` : '';
+                const hop = ins.hopgraph_context || {};
+                const hopNodes = Array.isArray(hop.chains) && hop.chains.length ? hop.chains[0].nodes.slice(0,5).map(n => `<span class="pill">${_htmlEsc(n)}</span>`).join(' &rarr; ') : '';
+                const hopBlock = hop.summary || hopNodes ? `<div class="muted" style="font-size:11px;margin-top:4px;">HopGraph ${hop.summary ? _htmlEsc(hop.summary) : ''}${hopNodes ? `<div>${hopNodes}</div>`:''}</div>` : '';
+                const catalogItems = Array.isArray(ins.recommendation_catalog) && ins.recommendation_catalog.length
+                  ? ins.recommendation_catalog.slice(0,4).map(entry => `<li><span class="pill">${_htmlEsc(entry.domain || 'multi')}</span> ${_htmlEsc(entry.action || '')} <span class="muted" style="font-size:10px;">${_htmlEsc(entry.priority || '')}</span></li>`).join('')
+                  : '';
+                const catalogBlock = catalogItems ? `<div class="muted" style="font-size:11px;margin-top:4px;">Catalog:</div><ul style="margin:4px 0 0 18px;">${catalogItems}</ul>` : '';
+                return `<div style="border:1px solid var(--color-border); border-radius:8px; padding:10px; margin-bottom:8px;">
+                  <div style="font-weight:600;">${_htmlEsc(summary)}</div>
+                  <div class="muted" style="font-size:11px;">Confidence ${conf}${ttlLabel}</div>
+                  <div style="margin:6px 0;">${domains || '<span class="pill">unknown</span>'}</div>
+                  <div style="font-size:11px; color:var(--color-text-muted);">Recommended:</div>
+                  <ul style="margin:4px 0 0 18px;">${recs}</ul>
+                  ${catalogBlock}
+                  ${hopBlock}
+                </div>`;
+              }).join('');
+              list.innerHTML = cards;
+              hasContent = true;
+            } else {
+              list.innerHTML = '<div class="muted">No multi-domain guidance yet.</div>';
+            }
+            const catalogEntries = new Map();
+            insights.forEach(ins => {
+              if (Array.isArray(ins.recommendation_catalog) && ins.recommendation_catalog.length){
+                ins.recommendation_catalog.forEach(rec => {
+                  if(!rec || !rec.action) return;
+                  const key = `${rec.domain||'multi'}|${rec.action}`;
+                  if(!catalogEntries.has(key)){
+                      catalogEntries.set(key, { action: rec.action, domain: rec.domain || 'multi', priority: rec.priority || '', status: rec.status || '' });
+                  }
+                });
+              } else {
+                (ins.recommendations || []).forEach(rec => {
+                  if(!rec) return;
+                  if(!catalogEntries.has(rec)){
+                      catalogEntries.set(rec, { action: rec, domain: 'multi', priority: '' });
+                  }
+                });
+              }
+            });
+            let latestIncident = null;
+            try{
+                const incResp = await (window.safeFetch || fetch)('/api/v1/incidents?limit=1', { headers: authHeaders() });
+                if(incResp.ok){
+                    const incJson = await incResp.json().catch(()=>({}));
+                    latestIncident = (incJson && (incJson.incidents || incJson.rows || incJson.data || []))[0] || null;
+                }
+            }catch(_){}
+            const incidentId = latestIncident ? (latestIncident.id || latestIncident.incident_id || latestIncident.incidentId || latestIncident.uuid || '') : '';
+            const timelineEntries = latestIncident && Array.isArray(latestIncident.correlation_timeline)
+              ? latestIncident.correlation_timeline.slice().sort((a,b) => {
+                  const aTs = typeof a.ts === 'number' ? a.ts : 0;
+                  const bTs = typeof b.ts === 'number' ? b.ts : 0;
+                  return bTs - aTs;
+                })
+              : [];
+            if(timelineEntries.length){
+              timeline.innerHTML = timelineEntries.slice(0,5).map(entry => {
+                const ts = typeof entry.ts === 'number' ? new Date(entry.ts * 1000).toLocaleString() : 'recent';
+                const ttlRaw = typeof entry.ttl_seconds === 'number' ? entry.ttl_seconds : null;
+                const elapsed = (typeof entry.ts === 'number' && ttlRaw !== null) ? Math.max(0, nowSec - entry.ts) : 0;
+                const ttlSeconds = ttlRaw !== null ? Math.max(0, ttlRaw - elapsed) : null;
+                const ttlBadge = ttlSeconds !== null ? `<span class="pill ${ttlSeconds < 120 ? 'pill-warn' : 'pill-info'}">TTL ${_formatCorrelationTtl(ttlSeconds)}</span>` : '';
+                const narrative = entry.narrative ? _htmlEsc(entry.narrative) : 'HopGraph correlation update';
+                const actions = Array.isArray(entry.recommendation_actions) ? entry.recommendation_actions.slice(0,4) : [];
+                const actionHtml = actions.length ? `<ul style="margin:4px 0 0 18px;">${actions.map(act => {
+                    if(!act) return '';
+                    const actionId = act.id || `${act.domain || 'multi'}|${act.action || ''}`;
+                    const status = (act.status || 'pending').toString();
+                    const nextState = status === 'completed' ? 'pending' : 'completed';
+                    const stateClass = status === 'completed' ? 'pill-safe' : (status === 'acknowledged' ? 'pill-info' : 'pill-warn');
+                    const updated = act.updated_ts ? new Date(act.updated_ts * 1000).toLocaleTimeString() : '';
+                    const buttonLabel = status === 'completed' ? 'Reopen' : 'Mark done';
+                    return `<li>
+                        <span class="pill">${_htmlEsc(act.domain || 'multi')}</span>
+                        ${_htmlEsc(act.action || '')}
+                        <span class="pill ${stateClass}" style="margin-left:4px;text-transform:capitalize;">${_htmlEsc(status)}</span>
+                        ${incidentId ? `<button class="btn corr-action-toggle" style="margin-left:6px;padding:2px 6px;font-size:10px;" data-incident-id="${_htmlEsc(incidentId)}" data-action-id="${_htmlEsc(actionId)}" data-next-status="${_htmlEsc(nextState)}">${buttonLabel}</button>` : ''}
+                        ${updated ? `<span class="muted" style="font-size:10px;margin-left:4px;">${_htmlEsc(updated)}</span>` : ''}
+                    </li>`;
+                }).join('')}</ul>` : '';
+                return `<div style="border:1px solid var(--color-border); border-radius:6px; padding:8px; margin-bottom:8px;">
+                    <div style="font-weight:600;">${_htmlEsc(entry.chain_id || '') || 'HopGraph Session'}</div>
+                    <div class="muted" style="font-size:11px;">${_htmlEsc(ts)} ${ttlBadge}</div>
+                    <div style="margin-top:4px;">${narrative}</div>
+                    ${actionHtml}
+                </div>`;
+              }).join('');
+              hasContent = true;
+            } else {
+              timeline.textContent = 'No timeline activity yet.';
+            }
+            const recItems = [];
+            if(latestIncident && Array.isArray(latestIncident.recommendation_catalog) && latestIncident.recommendation_catalog.length){
+                const actionMap = {};
+                try{
+                    const rawActions = latestIncident.recommendation_actions;
+                    if(rawActions){
+                        Object.values(rawActions).forEach(a => {
+                            if(!a) return;
+                            const key = a.id || `${a.domain || 'multi'}|${a.action || ''}`;
+                            actionMap[key] = a;
+                        });
+                    }
+                }catch(_){}
+                latestIncident.recommendation_catalog.forEach(entry => {
+                    if(!entry) return;
+                    const actionId = entry.id || `${entry.domain || 'multi'}|${entry.action || ''}`;
+                    const state = actionMap[actionId] && actionMap[actionId].status ? actionMap[actionId].status : 'pending';
+                    recItems.push({
+                        ...entry,
+                        id: actionId,
+                        status: state
+                    });
+                });
+            } else {
+                recItems.push(...Array.from(catalogEntries.values()));
+            }
+            if(recItems.length){
+                catalog.innerHTML = recItems.slice(0,10).map(r => {
+                    const status = (r.status || '').toString();
+                    const stateClass = status === 'completed' ? 'pill-safe' : (status === 'acknowledged' ? 'pill-info' : 'pill-warn');
+                    const nextState = status === 'completed' ? 'pending' : 'completed';
+                    const buttonLabel = status === 'completed' ? 'Reopen' : 'Mark done';
+                    const actionId = r.id || `${r.domain || 'multi'}|${r.action || ''}`;
+                    const statusPill = status ? `<span class="pill ${stateClass}" style="margin-left:4px;text-transform:capitalize;">${_htmlEsc(status)}</span>` : '';
+                    const actionBtn = incidentId ? `<button class="btn corr-action-toggle" style="margin-left:6px;padding:2px 6px;font-size:10px;" data-incident-id="${_htmlEsc(incidentId)}" data-action-id="${_htmlEsc(actionId)}" data-next-status="${_htmlEsc(nextState)}">${buttonLabel}</button>` : '';
+                    return `<li>
+                        <span class="pill">${_htmlEsc(r.domain || 'multi')}</span>
+                        ${_htmlEsc(r.action || '')}
+                        <span class="muted" style="font-size:10px;">${_htmlEsc(r.priority || '')}</span>
+                        ${statusPill}
+                        ${actionBtn}
+                    </li>`;
+                }).join('');
+                hasContent = true;
+            } else {
+                catalog.innerHTML = '<li class="muted">No catalog entries yet.</li>';
+            }
+            panel.style.display = hasContent ? 'block' : 'none';
+        }catch(_){
+            const panel = document.getElementById('correlationPanel');
+            if(panel) panel.style.display='none';
+        }
+    }
+    loadCorrelationInsights();
+    if(!window.__corrActionToggleBound){
+        window.__corrActionToggleBound = true;
+        document.addEventListener('click', async (evt) => {
+            const btn = evt.target.closest('.corr-action-toggle');
+            if(!btn) return;
+            evt.preventDefault();
+            const incidentId = btn.getAttribute('data-incident-id');
+            const actionId = btn.getAttribute('data-action-id');
+            const nextStatus = btn.getAttribute('data-next-status') || 'completed';
+            if(!incidentId || !actionId) return;
+            const originalLabel = btn.textContent;
+            btn.disabled = true;
+            btn.textContent = 'Updating…';
+            try{
+                const resp = await (window.safeFetch || fetch)(`/api/v1/incidents/${encodeURIComponent(incidentId)}/recommendations/act`, {
+                    method: 'POST',
+                    headers: { ...authHeaders() },
+                    body: JSON.stringify({ action_id: actionId, status: nextStatus })
+                });
+                if(!resp.ok){
+                    let detail = '';
+                    try{
+                        const err = await resp.json();
+                        detail = err && (err.detail || err.error) || '';
+                    }catch(_){}
+                    throw new Error(detail || resp.statusText);
+                }
+                await loadCorrelationInsights();
+            }catch(err){
+                alert('Failed to update recommendation: ' + (err && err.message ? err.message : err));
+            }finally{
+                btn.disabled = false;
+                btn.textContent = originalLabel;
+            }
+        });
+    }
 
     function renderVulns(data){
       const tb=document.querySelector('#tbl tbody'); tb.innerHTML='';
@@ -151,8 +396,10 @@
         const cvss = (x.cvss!=null? x.cvss : (x.cvss_base_score!=null? x.cvss_base_score : ''));
         const vpr = (x.vpr!=null? x.vpr : (x.vpr_score!=null? x.vpr_score : ''));
         const explainBtn = `<button class="btn" data-explain='1'>Open</button>`;
-        tr.innerHTML = `<td>${x.component||''}</td><td>${x.version||''}</td><td>${x.severity||''}</td><td>${risk}</td><td>${cvss}</td><td>${vpr}</td><td>${kev}</td><td>${epss}</td><td>${x.cve||''}</td><td>${x.summary||''}</td><td>${explainBtn}</td>`;
+        const copyBtn = `<button class="btn" data-copy='1' style="margin-left:6px">Copy Summary</button>`;
+        tr.innerHTML = `<td>${x.component||''}</td><td>${x.version||''}</td><td>${x.severity||''}</td><td>${risk}</td><td>${cvss}</td><td>${vpr}</td><td>${kev}</td><td>${epss}</td><td>${x.cve||''}</td><td>${x.summary||''}</td><td>${explainBtn}${copyBtn}</td>`;
         tr.querySelector('[data-explain]')?.addEventListener('click', ()=> openExplain(x));
+        tr.querySelector('[data-copy]')?.addEventListener('click', ()=> { try{ const txt = [x.component||'', x.version||'', x.cve||'', x.summary||''].filter(Boolean).join(' — '); navigator.clipboard && navigator.clipboard.writeText(txt); }catch(_){ } });
         tb.appendChild(tr);
       }
       // SBOM render ready marker for tests
@@ -225,7 +472,7 @@
         }catch(_){ }
       }catch(e){ try{ if(window.showNotification) window.showNotification('Upload error: '+(e.message||e),'error'); else if(window.notifications) window.notifications.showNotification('Upload error: '+(e.message||e),'error'); else console.warn('Upload error', e); }catch(_){} } finally { if(spinner) spinner.style.display='none'; }
     }
-    async function reload(){ if(!lastSbomId) return; const inc = document.getElementById('incSup').checked? '&include_suppressed=true':''; const r = await fetch('/api/v1/sbom/vulns?sbom_id='+encodeURIComponent(lastSbomId)+inc, { headers: authHeaders() }); const j = await r.json(); renderVulns(j); }
+    async function reload(){ if(!lastSbomId) return; const inc = document.getElementById('incSup').checked? '&include_suppressed=true':''; const r = await (window.safeFetch || fetch)('/api/v1/sbom/vulns?sbom_id='+encodeURIComponent(lastSbomId)+inc, { headers: authHeaders() }); const j = await r.json(); renderVulns(j); }
 
     // don't auto-prefill SBOM textarea; require explicit action
     // wire Use example button
@@ -253,7 +500,7 @@
         const comp=document.getElementById('vxComp').value||''; const cve=document.getElementById('vxCve').value||''; const status=document.getElementById('vxStatus').value||'not_affected'; const range=document.getElementById('vxRange').value||''; const just=document.getElementById('vxJust').value||'';
         if(!comp||!cve){ try{ if(window.showToast) showToast('component and cve are required',3000); else if(window.notifications) window.notifications.showToast('component and cve are required',3000); }catch(_){} return; }
         const body={sbom_id:lastSbomId,statements:[{component:comp,cve:cve,status:status,version_range:range||undefined,justification:just||undefined}]};
-        const r = await fetch('/api/v1/sbom/vex',{method:'POST',headers:authHeaders(), body: JSON.stringify(body)});
+        const r = await (window.safeFetch || fetch)('/api/v1/sbom/vex',{method:'POST',headers:authHeaders(), body: JSON.stringify(body)});
         const j=await r.json(); if(!r.ok){ try{ if(window.showNotification) showNotification('VEX add failed: '+(j.detail||r.status),'error'); else if(window.notifications) window.notifications.showNotification('VEX add failed: '+(j.detail||r.status),'error'); }catch(_){} return; }
         reload();
       }catch(e){ try{ if(window.showNotification) showNotification('VEX add failed: '+(e.message||e),'error'); else if(window.notifications) window.notifications.showNotification('VEX add failed: '+(e.message||e),'error'); }catch(_){} }
@@ -261,7 +508,7 @@
     // KEV status and refresh
     async function loadKevStatus(){
       try{
-        const r = await fetch('/api/v1/compliance/kev/status', { headers: authHeaders() });
+        const r = await (window.safeFetch || fetch)('/api/v1/compliance/kev/status', { headers: authHeaders() });
         if(!r.ok) return;
         const j = await r.json();
         const el = document.getElementById('kevStatus');
@@ -270,7 +517,7 @@
     }
     async function refreshKev(){
       try{
-        const r = await fetch('/api/v1/compliance/kev/refresh', { method:'POST', headers: authHeaders() });
+        const r = await (window.safeFetch || fetch)('/api/v1/compliance/kev/refresh', { method:'POST', headers: authHeaders() });
         const j = await r.json();
         if(r.ok && j.ok){ if(window.showToast) showToast('KEV/EPSS refresh triggered',2000); else if(window.notifications) window.notifications.showToast('KEV/EPSS refresh triggered',2000); }
         await loadKevStatus();

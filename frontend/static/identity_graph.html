@@ -80,7 +80,7 @@
       const raw = (document.getElementById('node').value||'').trim(); if(!raw) return;
       const n = raw;
       try { localStorage.setItem('lastIdentityViewed', n.startsWith('user:')? n : `user:${n}`); } catch(_) {}
-      const r = await fetch(`/api/v1/graph/explain?node=${encodeURIComponent(n)}`, { headers: authHeaders() });
+      const r = await (window.safeFetch || fetch)(`/api/v1/graph/explain?node=${encodeURIComponent(n)}`, { headers: authHeaders() });
       const j = await r.json();
       render(j);
       loadIdentityFactors();
@@ -115,7 +115,7 @@
     async function loadIdentityFactors(){
       const tbody = document.getElementById('id-factors-body');
       try {
-        const r = await fetch('/api/v1/decisions/recent?limit=100', { headers: authHeaders() });
+        const r = await (window.safeFetch || fetch)('/api/v1/decisions/recent?limit=100', { headers: authHeaders() });
         const j = r.ok ? await r.json() : {};
         const rows = (j.decisions || j.rows || j.events || [])
           .map(d => ({ ts: d.ts || d.timestamp || null, id: d.event_id || d.id, verdict: d.verdict || '', factors: d.reasons || d.factors || [] }))
@@ -143,7 +143,7 @@
     async function loadIdentityPaths(user){
       const tbody = document.getElementById('id-paths-body');
       try {
-        const r = await fetch(`/api/v1/graph/identity/paths?user=${encodeURIComponent(user)}&limit=5`, { headers: authHeaders() });
+        const r = await (window.safeFetch || fetch)(`/api/v1/graph/identity/paths?user=${encodeURIComponent(user)}&limit=5`, { headers: authHeaders() });
         if(!r.ok){ tbody.innerHTML = '<tr><td colspan="6" style="border:1px solid #2a3142;padding:6px">Failed to load paths</td></tr>'; return; }
         const j = await r.json();
         const rows = (j.paths||[]).map(p => {
@@ -170,7 +170,7 @@
     async function loadIdentitySummary(user){
       const el = document.getElementById('id-state');
       try {
-        const r = await fetch(`/api/v1/identity/summary?user=${encodeURIComponent(user)}`, { headers: authHeaders() });
+        const r = await (window.safeFetch || fetch)(`/api/v1/identity/summary?user=${encodeURIComponent(user)}`, { headers: authHeaders() });
         if(!r.ok){ el.textContent = ''; return; }
         const j = await r.json();
         const st = j.state || 'Benign';
@@ -184,7 +184,7 @@
     async function loadIdentityTimeline(user){
       const tbody = document.getElementById('id-timeline-body');
       try {
-        const r = await fetch(`/api/v1/identity/${encodeURIComponent(user)}/timeline?limit=50`, { headers: authHeaders() });
+        const r = await (window.safeFetch || fetch)(`/api/v1/identity/${encodeURIComponent(user)}/timeline?limit=50`, { headers: authHeaders() });
         if(!r.ok){ tbody.innerHTML = '<tr><td colspan="4" style="border:1px solid #2a3142;padding:6px">Failed to load timeline</td></tr>'; return; }
         const j = await r.json();
         const rows = (j.recent||[]).map(x => {

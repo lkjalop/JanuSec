@@ -31,7 +31,7 @@ function _setXlsxStatus(el, ok){
 // Policy: Never auto-clear (org)
 async function refreshPolicy(){
   try{
-    const r = await fetch('/api/v1/csv/policy', { headers:{ ...authHeaders() } });
+    const r = await (window.safeFetch || fetch)('/api/v1/csv/policy', { headers:{ ...authHeaders() } });
     if(!r.ok) throw new Error('policy_fetch_failed');
     const j = await r.json();
     const el=document.getElementById('orgNeverAutoClear');
@@ -45,7 +45,7 @@ async function refreshPolicy(){
 
 async function setPolicy(val) {
   try{
-    const r = await fetch('/api/v1/csv/policy', { method:'POST', headers:{ 'Content-Type':'application/json', ...authHeaders() }, body: JSON.stringify({ never_auto_clear: !!val }) });
+    const r = await (window.safeFetch || fetch)('/api/v1/csv/policy', { method:'POST', headers:{ 'Content-Type':'application/json', ...authHeaders() }, body: JSON.stringify({ never_auto_clear: !!val }) });
     const j = await r.json();
     if(!r.ok) throw new Error(j.detail||'policy_set_failed');
     window.CSV_POLICY = j;

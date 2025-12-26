@@ -42,7 +42,7 @@
 <script>
 async function api(path, opts){
   const headers = {'x-api-key': localStorage.getItem('apiKey')||'devkey123','Content-Type':'application/json'}
-  const r = await fetch(path, Object.assign({headers}, opts||{}))
+  const r = await (window.safeFetch || fetch)(path, Object.assign({headers}, opts||{}))
   return r.json().catch(()=>({status:'ok'}))
 }
 async function load(){

@@ -7,8 +7,10 @@ from typing import Any, Dict, List, Optional
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi import Query
 from fastapi import Depends
 from pydantic import BaseModel
+from src.core.configuration import get_scoring_config as _load_scoring_config
 
 from security.auth import require_api_key
 
@@ -30,15 +32,14 @@ ADAPTIVE_EWMA_MIN_ALPHA = float(os.getenv("ADAPTIVE_EWMA_MIN_ALPHA", "0.3"))
 ADAPTIVE_EWMA_MAX_ALPHA = float(os.getenv("ADAPTIVE_EWMA_MAX_ALPHA", "0.85"))
 ADAPTIVE_EWMA_VOL_SCALE = float(os.getenv("ADAPTIVE_EWMA_VOL_SCALE", "0.4"))
 
-# Scoring weights
-SCORING_DIVERSITY_WEIGHT = float(os.getenv("SCORING_DIVERSITY_WEIGHT", "0.0"))
-SCORING_MAPPING_WEIGHT = float(os.getenv("SCORING_MAPPING_WEIGHT", "0.0"))
+# Scoring weights (shared config)
 try:
-    import json as _json
-    _weights_json = os.getenv("SCORING_WEIGHTS_JSON", "")
-    SCORING_WEIGHTS_JSON = _json.loads(_weights_json) if _weights_json else {}
+    _SCORING_CFG = _load_scoring_config()
 except Exception:
-    SCORING_WEIGHTS_JSON = {}
+    _SCORING_CFG = {'weights': {}, 'adaptive_ewma': {}}
+SCORING_WEIGHTS_JSON = dict(_SCORING_CFG.get('weights', {}))
+SCORING_DIVERSITY_WEIGHT = float(SCORING_WEIGHTS_JSON.get("diversity", 0.0))
+SCORING_MAPPING_WEIGHT = float(SCORING_WEIGHTS_JSON.get("mapping", 0.0))
 
 
 def _safe_write(path: Path, obj: dict) -> None:
@@ -203,6 +204,104 @@ def _factor_tags(mat: Dict[str, Dict[str,int]], mapping: Dict[str,str]) -> List[
     return factors
 
 
+def _lolbins_factors(batches: List[dict]) -> List[dict]:
+    macos = ["osascript","launchctl","security","dscl","curl","bash"]
+    linux = ["curl","wget","nc","socat","cron","systemctl","iptables","ssh"]
+    suspicious = []
+    for b in batches or []:
+        rows = b.get("rows") or []
+        for r in rows:
+            proc = str(r.get("process") or r.get("cmd") or "").lower()
+            parent = str(r.get("parent") or r.get("ppid_name") or "").lower()
+            if not proc:
+                continue
+            tag = None
+            if any(p in proc for p in macos):
+                tag = "macos_lolbin"
+            if any(p in proc for p in linux):
+                tag = (tag or "") + " linux_lolbin"
+            if tag:
+                sev = 0.2
+                if parent and any(x in parent for x in ["browser","chrome","safari","firefox"]):
+                    sev += 0.15  # lineage-aware browser->osascript
+                if "cron" in proc and ("/tmp" in (r.get("path") or "") or "tmp" in (r.get("args") or "")):
+                    sev += 0.1  # cron -> tmp scripts
+                suspicious.append({"factor":"lolbin_usage","process":proc,"parent":parent,"score":round(min(1.0,sev),3),"tags":[tag.strip(),"MITRE:T1059","MITRE:T1547"]})
+    return suspicious
+
+
+def _supply_chain_factors(batches: List[dict]) -> List[dict]:
+    out = []
+    exfil_tlds = [".zip",".tk",".xyz",".top"]
+    for b in batches or []:
+        pkg = b.get("package") or {}
+        name = str(pkg.get("name") or "")
+        repo = str(pkg.get("repo") or "")
+        deps = pkg.get("deps") or []
+        if name and pkg.get("typosquat"):
+            out.append({"factor":"supply_chain:typosquat","package":name,"score":0.35,"tags":["npm","pypi","maven","rubygems","docker"]})
+        if pkg.get("script_abuse"):
+            out.append({"factor":"supply_chain:script_abuse","package":name,"score":0.25})
+        if any(str(repo).lower().endswith(t) for t in exfil_tlds):
+            out.append({"factor":"supply_chain:exfil_tld","repo":repo,"score":0.2})
+        new_rare = [d for d in deps if (d.get("new") or d.get("rare"))]
+        if new_rare:
+            out.append({"factor":"supply_chain:new_rare_dependencies","count":len(new_rare),"score":min(0.4,0.1*len(new_rare))})
+    return out
+
+
+def _iam_factors(batches: List[dict]) -> List[dict]:
+    out = []
+    for b in batches or []:
+        events = b.get("events") or []
+        for e in events:
+            act = str(e.get("action") or "").lower()
+            if any(x in act for x in ["assume_role","attach_policy","add_user_to_group","create_access_key"]):
+                score = 0.3
+                if e.get("off_hours"):
+                    score += 0.1
+                if e.get("source_ip_novel"):
+                    score += 0.1
+                out.append({"factor":"iam_priv_escalation","action":act,"score":round(min(1.0,score),3),"tags":["MITRE:T1098"]})
+    return out
+
+
+def _email_factors(batches: List[dict]) -> List[dict]:
+    out = []
+    for b in batches or []:
+        mails = b.get("emails") or []
+        for m in mails:
+            att = m.get("attachment") or {}
+            flags = att.get("flags") or []
+            if flags:
+                out.append({"factor":"email_attachment_risk","flags":flags,"score":0.25})
+            if m.get("bec"):
+                out.append({"factor":"email_bec","score":0.35,"tags":["impersonation","payment","mailbox_rules","login_anomaly"]})
+    return out
+
+
+def _binary_factors(batches: List[dict]) -> List[dict]:
+    out = []
+    for b in batches or []:
+        bins = b.get("binaries") or []
+        for bi in bins:
+            static = bi.get("static") or {}
+            dyn = bi.get("dynamic") or {}
+            mem = bi.get("memory") or {}
+            score = 0.0
+            if static.get("suspicious_imports") or static.get("rwx_sections") or static.get("unusual_sections"):
+                score += 0.3
+            if dyn.get("network") or dyn.get("registry") or dyn.get("anti_analysis"):
+                score += 0.25
+            if mem.get("lsass") or mem.get("injected_code") or mem.get("hidden_procs"):
+                score += 0.25
+            if bi.get("fuzzy_similarity"):
+                score += 0.1
+            if score>0:
+                out.append({"factor":"binary_analysis","score":round(min(1.0,score),3),"tags":["PE","ELF","MITRE"]})
+    return out
+
+
 def _diversity_score(domain_taxonomy: Dict[str, List[str]]) -> float:
     target = 6.0
     distinct = len([k for k,v in domain_taxonomy.items() if v])
@@ -254,6 +353,25 @@ def _pipeline_scoring(mapping_stats: Dict[str,int], factors: List[dict]) -> Dict
         'Evidence Corroboration': 0.05 if any(f.get('factor')=='multi_source_correlation' for f in factors) else 0.0,
         'Timeline Synthesis': 0.05
     }
+    # Context multipliers from domain-specific factors
+    try:
+        if any(f.get('factor')=='lolbin_usage' for f in factors):
+            boosts['Execution'] = max(boosts.get('Execution',0.0), 0.15)
+            boosts['Persistence'] = max(boosts.get('Persistence',0.0), 0.1)
+        if any(str(f.get('factor','')).startswith('supply_chain:') for f in factors):
+            boosts['Resource Development'] = max(boosts.get('Resource Development',0.0), 0.12)
+            boosts['Impact'] = max(boosts.get('Impact',0.0), 0.08)
+        if any(f.get('factor')=='iam_priv_escalation' for f in factors):
+            boosts['Privilege Escalation'] = max(boosts.get('Privilege Escalation',0.0), 0.15)
+            boosts['Defense Evasion'] = max(boosts.get('Defense Evasion',0.0), 0.08)
+        if any(f.get('factor')=='email_bec' for f in factors):
+            boosts['Initial Access'] = max(boosts.get('Initial Access',0.0), 0.12)
+            boosts['Command and Control'] = max(boosts.get('Command and Control',0.0), 0.08)
+        if any(f.get('factor')=='binary_analysis' for f in factors):
+            boosts['Execution'] = max(boosts.get('Execution',0.0), 0.12)
+            boosts['Collection'] = max(boosts.get('Collection',0.0), 0.08)
+    except Exception:
+        pass
     coverage_hits = 0
     for name in _PIPELINE_STEPS:
         base = 0.3  # baseline visibility
@@ -268,7 +386,7 @@ def _pipeline_scoring(mapping_stats: Dict[str,int], factors: List[dict]) -> Dict
 
 
 @router.post("/build")
-async def build_session(payload: BuildPayload, request: Request, auth=Depends(require_api_key)) -> Dict[str, Any]:
+async def build_session(payload: BuildPayload, request: Request, auth=Depends(require_api_key), args: Optional[List[str]] = None, kwargs: Optional[str] = None) -> Dict[str, Any]:
     if not payload.session_ids or len(payload.session_ids) < 2:
         raise HTTPException(status_code=400, detail="need_at_least_two_sessions")
     sid = payload.session_id or f"sess-{int(time.time()*1000)}"
@@ -279,7 +397,14 @@ async def build_session(payload: BuildPayload, request: Request, auth=Depends(re
     alpha = payload.ewma_alpha
     if payload.ewma and (alpha is None) and ADAPTIVE_EWMA:
         alpha = _derive_alpha(counts)
+    # Validate alpha when provided
     if payload.ewma and alpha is not None:
+        try:
+            a = float(alpha)
+        except Exception:
+            raise HTTPException(status_code=400, detail="invalid_alpha")
+        if not (0.0 <= a <= 1.0):
+            raise HTTPException(status_code=400, detail="invalid_alpha")
         smoothed = _ewma_matrix(mat, float(alpha))
     else:
         smoothed = None
@@ -292,6 +417,15 @@ async def build_session(payload: BuildPayload, request: Request, auth=Depends(re
     mapping_score = _mapping_semantics_score(payload.mapping or {})
     vc = _verdict_and_confidence(mat, diversity_score, mapping_score)
     factors = _factor_tags(mat, payload.mapping or {})
+    # Extend with domain-specific factors
+    try:
+        factors.extend(_lolbins_factors(batches))
+        factors.extend(_supply_chain_factors(batches))
+        factors.extend(_iam_factors(batches))
+        factors.extend(_email_factors(batches))
+        factors.extend(_binary_factors(batches))
+    except Exception:
+        pass
     summary = {
         "session_id": sid,
         "session_ids": payload.session_ids,
@@ -314,6 +448,24 @@ async def build_session(payload: BuildPayload, request: Request, auth=Depends(re
     _safe_write(SESSION_PERSIST_DIR / f"session_{sid}.json", data)
     if SESSION_CLEAN_INTERVAL_SECONDS > 0:
         _prune_sessions_now()
+    # Tiered LLM summaries (stubbed, driven by factors)
+    try:
+        tier1 = {
+            "summary": "High-level correlation overview with key factors.",
+            "top_factors": sorted([{"factor": f.get("factor"), "score": f.get("score", 0.0)} for f in factors], key=lambda x: x["score"], reverse=True)[:5]
+        }
+        tier2 = {
+            "summary": "Detailed 21-step pipeline context and recommended triage.",
+            "pipeline": summary.get("pipeline_summary"),
+            "recommendations": [
+                "Collect EDR and DNS logs to bridge gaps",
+                "Verify IAM changes against baseline and off-hours",
+                "Inspect LOLBin execution lineage and persistence markers"
+            ]
+        }
+        summary["llm_summaries"] = {"tier1": tier1, "tier2": tier2}
+    except Exception:
+        pass
     return summary
 
 
@@ -647,14 +799,14 @@ def _apply_ewma(current: List[List[int]], prev_hist: Dict[str, Dict[str, Any]], 
 
 
 @router.post('/session/build')
-async def build_session(req: Request):
+async def build_session(req: Request, args: Optional[List[str]] = None, kwargs: Optional[str] = None): 
     start_ts = time.time()
     try:
         body = await req.json()
     except Exception:
         raise HTTPException(status_code=400, detail='invalid_json')
     try:
-        payload = BuildSessionRequest.model_validate(body) if hasattr(BuildSessionRequest, 'model_validate') else BuildSessionRequest.parse_obj(body)
+        payload = BuildSessionRequest.model_validate(body)
     except Exception as e:
         raise HTTPException(status_code=422, detail=str(e))
 
@@ -1043,7 +1195,7 @@ async def attack_candidates(req: Request):
     except Exception:
         raise HTTPException(status_code=400, detail='invalid_json')
     try:
-        payload = BuildSessionRequest.model_validate(body) if hasattr(BuildSessionRequest, 'model_validate') else BuildSessionRequest.parse_obj(body)
+        payload = BuildSessionRequest.model_validate(body)
     except Exception as e:
         raise HTTPException(status_code=422, detail=str(e))
 
@@ -1213,4 +1365,3 @@ async def get_enrich_status(job_id: str):
         if it['id'] == job_id:
             return {'id': it['id'], 'status': it['status']}
     raise HTTPException(status_code=404, detail='job_not_found')
-

@@ -1,6 +1,9 @@
 from __future__ import annotations
-from typing import List, Dict, Any, Optional
-import threading, math, random
+
+import math
+import random
+import threading
+from typing import Any, Dict, List, Optional
 
 try:
     from sentence_transformers import SentenceTransformer
@@ -18,7 +21,7 @@ class EmbeddingProvider:
             except Exception:
                 self._model = None
 
-    def embed_texts(self, texts: List[str]) -> List[List[float]]:
+    def embed_texts(self, texts: list[str]) -> list[list[float]]:
         if self._model:
             embs = self._model.encode(texts, convert_to_numpy=True, normalize_embeddings=True)
             return [e.tolist() for e in embs]
@@ -32,19 +35,19 @@ class EmbeddingProvider:
 class SimpleClusterManager:
     def __init__(self, similarity_threshold: float = 0.83):
         self.similarity_threshold = similarity_threshold
-        self.centroids: Dict[str, List[float]] = {}
-        self.cluster_counts: Dict[str, int] = {}
+        self.centroids: dict[str, list[float]] = {}
+        self.cluster_counts: dict[str, int] = {}
         self._lock = threading.RLock()
         self._next_id = 1
 
     @staticmethod
-    def cosine(a: List[float], b: List[float]) -> float:
-        num = sum(x*y for x,y in zip(a,b))
+    def cosine(a: list[float], b: list[float]) -> float:
+        num = sum(x*y for x,y in zip(a,b, strict=False))
         da = math.sqrt(sum(x*x for x in a)) or 1.0
         db = math.sqrt(sum(x*x for x in b)) or 1.0
         return num/(da*db)
 
-    def assign(self, vec: List[float]) -> str:
+    def assign(self, vec: list[float]) -> str:
         with self._lock:
             best_id = None
             best_sim = -1.0
@@ -55,7 +58,7 @@ class SimpleClusterManager:
             if best_id and best_sim >= self.similarity_threshold:
                 # update centroid incremental
                 count = self.cluster_counts[best_id]
-                new_centroid = [ (c*count + v)/(count+1) for c,v in zip(self.centroids[best_id], vec)]
+                new_centroid = [ (c*count + v)/(count+1) for c,v in zip(self.centroids[best_id], vec, strict=False)]
                 self.centroids[best_id] = new_centroid
                 self.cluster_counts[best_id] = count + 1
                 return best_id
@@ -66,5 +69,5 @@ class SimpleClusterManager:
             self.cluster_counts[cid] = 1
             return cid
 
-    def stats(self, cid: str) -> Dict[str, Any]:
+    def stats(self, cid: str) -> dict[str, Any]:
         return {'size': self.cluster_counts.get(cid,0)}

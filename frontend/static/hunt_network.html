@@ -41,6 +41,21 @@
       <table id="tbl"><thead><tr><th>ID</th><th>Verdict</th><th>Score</th><th>Host</th><th>Tags</th></tr></thead><tbody></tbody></table>
     </div>
     <div class="panel">
+      <h3 style="margin-top:0">Hunt Assist</h3>
+      <div class="row" style="margin:8px 0">
+        <button class="btn btn-primary" id="btnSuggestLogs">Suggest Missing Logs</button>
+        <span class="muted">Uses recent sessions to compute overlap and suggest collection targets.</span>
+      </div>
+      <div id="suggestLogs" class="muted">No suggestions yet.</div>
+    </div>
+    <div class="panel">
+      <h3 style="margin-top:0">Ops & FinOps</h3>
+      <div class="row" style="margin:8px 0">
+        <button class="btn" id="btnFinops">Refresh Cost Overview</button>
+      </div>
+      <div id="finopsOverview" class="muted">No cost data.</div>
+    </div>
+    <div class="panel">
       <h3 style="margin-top:0">Network Events Filter</h3>
       <div class="muted">Filters from URL are applied automatically. You can also use the quick filter below.</div>
       <div class="row" style="margin:8px 0">
@@ -64,7 +79,7 @@
 
     function authHeaders() { try { const k=localStorage.getItem('apiKey')||'devkey123'; return {'x-api-key':k}; } catch(_) { return {'x-api-key':'devkey123'} } }
     async function loadRecent(){
-      const r = await fetch('/api/v1/decisions/recent?limit=50',{headers: authHeaders()});
+      const r = await (window.safeFetch || fetch)('/api/v1/decisions/recent?limit=50',{headers: authHeaders()});
       if(!r.ok){ return }
       const j = await r.json();
       const rows = (j.rows||j.events||[]).filter(x=>{
@@ -108,7 +123,7 @@
     async function loadNetworkTable(){
       const p = params(); renderFilters(p);
       // Pull a recent sanitized sample for client filtering
-      const r = await fetch('/api/v1/events/sanitized?limit=1000');
+      const r = await (window.safeFetch || fetch)('/api/v1/events/sanitized?limit=1000');
       if(!r.ok){ document.getElementById('netBody').innerHTML='<tr><td colspan="9" class="muted">Failed to load</td></tr>'; return; }
       const j = await r.json(); const items = j.events||[]; const q = document.getElementById('qInput').value || '';
       const out = items.filter(ev=>matchEvent(ev,p,q)).slice(0,300);
@@ -121,10 +136,44 @@
     document.getElementById('qInput').addEventListener('keypress', (e)=>{ if(e.key==='Enter'){ loadNetworkTable(); }});
     loadNetworkTable();
     async function explain(id){
-      const r=await fetch(`/api/v1/decisions/${id}/explain`,{headers: authHeaders()}); if(!r.ok) return safeNotify('Explain failed','error');
+      const r=await (window.safeFetch || fetch)(`/api/v1/decisions/${id}/explain`,{headers: authHeaders()}); if(!r.ok) return safeNotify('Explain failed','error');
       const j=await r.json(); safeNotify(`Decision ${id} — Verdict: ${j.verdict} — Factors: ${(j.factors||[]).length}`,'info');
     }
     document.getElementById('btnRefresh').onclick=loadRecent;
+    document.getElementById('btnSuggestLogs').onclick=async ()=>{
+      try{
+        const r = await (window.safeFetch || fetch)('/api/v1/decisions/recent?limit=12',{headers: authHeaders()});
+        if(!r.ok){ throw new Error('recent failed'); }
+        const j = await r.json();
+        const rows = (j.rows||j.events||[]).slice(0,5);
+        const sessions = rows.map((rr,i)=>({ id: rr.event_id||rr.id||('sess-'+i), entities: {
+          user: rr.user||rr.username||null,
+          host: rr.host||rr.hostname||null,
+          process: rr.process_name||rr.proc_name||null,
+          file_hash: rr.sha256||rr.hash||null,
+          ip: rr.src_ip||rr.source_ip||rr.dst_ip||rr.destination_ip||null,
+          domain: rr.domain||rr.sni||rr.dns_query||null
+        }}));
+        const resp = await (window.safeFetch || fetch)('/api/v1/graph/session/build',{
+          method:'POST',headers: Object.assign({'Content-Type':'application/json'}, authHeaders()),
+          body: JSON.stringify({ sessions, correlate:true, ewma:true })
+        });
+        if(!resp.ok){ throw new Error('session build failed'); }
+        const data = await resp.json();
+        const sugg = data.suggested_missing_logs || [];
+        document.getElementById('suggestLogs').innerHTML = (sugg.length? ('<ul>'+sugg.map(s=>`<li><strong>${esc(s.log_type||'')}</strong> — ${esc(s.reason||'')} <span class="muted">(${esc(s.priority||'')})</span></li>`).join('')+'</ul>') : 'No suggestions. Add more diverse telemetry to improve correlation.');
+      }catch(err){ document.getElementById('suggestLogs').textContent = 'Suggestion error: '+err.message; }
+    };
+    document.getElementById('btnFinops').onclick=async ()=>{
+      try{
+        const ov = await (window.safeFetch || fetch)('/api/v1/finops/overview',{headers: authHeaders()});
+        const cs = await (window.safeFetch || fetch)('/api/v1/finops/cost_summary',{headers: authHeaders()});
+        const hi = await (window.safeFetch || fetch)('/api/v1/finops/history',{headers: authHeaders()});
+        if(!ov.ok || !cs.ok || !hi.ok){ throw new Error('finops fetch failed'); }
+        const o = await ov.json(); const c = await cs.json(); const h = await hi.json();
+        document.getElementById('finopsOverview').textContent = JSON.stringify({ overview:o, cost:c, history:h }, null, 2);
+      }catch(err){ document.getElementById('finopsOverview').textContent = 'FinOps error: '+err.message; }
+    };
     document.getElementById('btnUpload').onclick=()=>document.getElementById('fileInput').click();
     document.getElementById('fileInput').addEventListener('change', async (e)=>{
       const files=e.target.files; if(!files||!files.length) return;

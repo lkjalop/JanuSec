@@ -35,7 +35,7 @@
       if(!id){ out.textContent='Enter an Event ID'; return; }
       out.textContent='Loading…';
       try{
-        const r = await fetch(`/api/v1/decisions/${encodeURIComponent(id)}/explain`, { headers: authHeaders() });
+        const r = await (window.safeFetch || fetch)(`/api/v1/decisions/${encodeURIComponent(id)}/explain`, { headers: authHeaders() });
         if(!r.ok){ out.textContent='Not found or unauthorized'; return; }
         const j = await r.json();
         // prefer explicit process lineage keys if present
@@ -50,4 +50,3 @@
   <script src="/static/js/notifications.js"></script>
 </body>
 </html>
-

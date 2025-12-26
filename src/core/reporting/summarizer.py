@@ -7,6 +7,7 @@ Dual-mode:
 Future: plug-in interface for ML (SecBERT/CyBERT style) summarizer.
 """
 from __future__ import annotations
+
 from typing import List
 
 BASE_TEMPLATES = [
@@ -18,9 +19,9 @@ BASE_TEMPLATES = [
      lambda f: "Suspicious parent-child process lineage suggests lateral movement or staged execution."),
 ]
 
-def _condense(factors: List[str], max_len: int) -> str:
+def _condense(factors: list[str], max_len: int) -> str:
     core = [f for f in factors if not f.startswith('timings:')]
-    seen = set(); ordered: List[str] = []
+    seen = set(); ordered: list[str] = []
     for f in core:
         if f not in seen:
             seen.add(f); ordered.append(f)
@@ -29,13 +30,13 @@ def _condense(factors: List[str], max_len: int) -> str:
         summary = summary[:max_len-3] + '...'
     return summary
 
-def summarize_factors(factors: List[str], max_len: int = 240, narrative: bool = True) -> str:
+def summarize_factors(factors: list[str], max_len: int = 240, narrative: bool = True) -> str:
     if not factors:
         return "no factors"
     compressed = _condense(factors, max_len)
     if not narrative:
         return compressed
-    messages: List[str] = []
+    messages: list[str] = []
     for pred, builder in BASE_TEMPLATES:
         try:
             if pred(factors):

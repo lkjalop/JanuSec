@@ -1,8 +1,10 @@
 """Alerts Repository"""
 from __future__ import annotations
+
 import json
 from typing import Any, Dict
-from db.database import execute, with_retry, fetch
+
+from db.database import execute, fetch, with_retry
 
 INSERT_ALERT = """
 INSERT INTO alerts (event_id, verdict, confidence, severity, factors, playbook_result, tenant_id)

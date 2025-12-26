@@ -37,7 +37,51 @@
 			<h3 style="margin-top:0">Cost Summary</h3>
 			<div id="cost" class="kv"></div>
 		</div>
+		<div class="panel" id="llmPanel">
+			<h3 style="margin-top:0; display:flex; justify-content:space-between; align-items:center;">
+				<span>LLM Cost & Usage</span>
+				<span class="inline-info" id="llmLastUpdate">--</span>
+			</h3>
+			<div id="llmCost" class="kv"></div>
+		</div>
+		<div class="panel" id="tokenBinsPanel">
+			<h3 style="margin-top:0">Token Usage Bins</h3>
+			<div id="tokenBins" class="kv"></div>
+		</div>
+		<div class="panel" id="precisionPanel">
+			<h3 style="margin-top:0; display:flex; gap: var(--space-2); align-items:center;">
+				<span>Precision/Recall Trend</span>
+				<select id="tenantSelect" class="btn" style="min-width:140px"></select>
+				<input type="date" id="startDate" class="btn"/>
+				<input type="date" id="endDate" class="btn"/>
+				<button class="btn" id="btnLoadTrend">Load Trend</button>
+			</h3>
+			<canvas id="precisionChart" height="120" style="background:var(--color-bg-tertiary); border:1px solid var(--color-border); border-radius: var(--radius-sm);"></canvas>
+		</div>
+		<!-- Before/After FP Reduction -->
+		<div class="panel" id="beforeAfterPanel">
+			<h3 style="margin-top:0; display:flex; gap: var(--space-2); align-items:center;">
+				<span>FP Reduction: Before/After</span>
+				<select id="baTenantSelect" class="btn" style="min-width:140px"></select>
+				<input type="date" id="changeDate" class="btn"/>
+				<button class="btn" id="btnComputeBA">Compute</button>
+			</h3>
+			<div id="baSummary" class="kv"></div>
+			<canvas id="baChart" height="120" style="background:var(--color-bg-tertiary); border:1px solid var(--color-border); border-radius: var(--radius-sm);"></canvas>
+		</div>
+		<!-- AB Test Analysis -->
+		<div class="panel" id="abPanel">
+			<h3 style="margin-top:0; display:flex; gap: var(--space-2); align-items:center;">
+				<span>A/B Test Analysis</span>
+				<select id="abTenantSelect" class="btn" style="min-width:140px"></select>
+				<input id="abTestId" class="btn" placeholder="test_id" style="min-width:160px"/>
+				<button class="btn" id="btnRunAB">Run Analysis</button>
+			</h3>
+			<div id="abSummary" class="kv"></div>
+			<canvas id="abChart" height="120" style="background:var(--color-bg-tertiary); border:1px solid var(--color-border); border-radius: var(--radius-sm);"></canvas>
+		</div>
 	</div>
+	<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 	<script>
 		function authHeaders(){ try{ const k=localStorage.getItem('apiKey')||'devkey123'; return { 'x-api-key': k }; }catch(_){ return { 'x-api-key':'devkey123' }; } }
 		async function loadMetrics(){
@@ -48,8 +92,12 @@
 				const dash = dashResp.ok ? await dashResp.json() : {};
 				const costResp = await safeFetch('/api/v1/finops/cost_summary',{ headers: authHeaders() });
 				const costData = costResp.ok ? await costResp.json() : {};
+				const llmResp = await safeFetch('/api/v1/metrics/llm_costs',{ headers: authHeaders() }).catch(()=>null);
+				const llmData = llmResp && llmResp.ok ? await llmResp.json() : null;
 				const metricsResp = await safeFetch('/api/v1/status/metrics',{ headers: authHeaders() }).catch(()=>null);
 				const metrics = metricsResp && metricsResp.ok ? await metricsResp.json() : {};
+				const summaryResp = await safeFetch('/api/v1/metrics/summary',{ headers: authHeaders() }).catch(()=>null);
+				const summary = summaryResp && summaryResp.ok ? await summaryResp.json() : {};
 				panel.innerHTML = '';
 				function add(k,v){ const dk=document.createElement('div'); dk.textContent=k; const dv=document.createElement('div'); dv.textContent=v; kvWrap.appendChild(dk); kvWrap.appendChild(dv); }
 				const alerts = dash.alerts || { critical:0, high:0, medium:0 };
@@ -64,9 +112,180 @@
 				addCost('Latest', ov.latest_cost ?? '-');
 				addCost('EWMA', ov.ewma ?? '-');
 				addCost('Anomaly', String(ov.anomaly_flag ?? false));
+
+				const llmKv = document.getElementById('llmCost'); llmKv.innerHTML='';
+				const llmStamp = document.getElementById('llmLastUpdate');
+				if(llmData){
+					const ext = llmData.external || {};
+					const loc = llmData.local || {};
+					const totalCost = (ext.total_cost || 0).toFixed(4);
+					const totalExternal = ext.total_calls || 0;
+					const totalLocal = loc.total_calls || 0;
+					const inputTokens = ext.total_input_tokens || 0;
+					const outputTokens = ext.total_output_tokens || 0;
+					const gpuMs = loc.total_gpu_time_ms || 0;
+					addCostRow(llmKv, 'External cost (total)', '$'+totalCost);
+					addCostRow(llmKv, 'External calls', totalExternal);
+					addCostRow(llmKv, 'Local calls', totalLocal);
+					addCostRow(llmKv, 'Input tokens', inputTokens);
+					addCostRow(llmKv, 'Output tokens', outputTokens);
+					addCostRow(llmKv, 'GPU time (ms)', gpuMs);
+					llmStamp.textContent = 'Updated '+new Date().toLocaleTimeString();
+				}else{
+					llmKv.innerHTML = '<div style="grid-column:span 2; font-size:12px; color:var(--color-text-muted);">LLM metrics unavailable</div>';
+					llmStamp.textContent = 'Updated --';
+				}
+
+				function addCostRow(node, label, value){
+					const dk=document.createElement('div'); dk.textContent=label;
+					const dv=document.createElement('div'); dv.textContent=value;
+					node.appendChild(dk); node.appendChild(dv);
+				}
+
+				// Token bins
+				try{
+					const bins = summary.inference_token_bins;
+					const tokenKv = document.getElementById('tokenBins'); tokenKv.innerHTML='';
+					if(bins && Array.isArray(bins.bins)){
+						bins.bins.forEach(b=>{
+							const label = b.label || `${b.start}-${b.end}`;
+							const count = b.count ?? 0;
+							const dk=document.createElement('div'); dk.textContent=label;
+							const dv=document.createElement('div'); dv.textContent=String(count);
+							tokenKv.appendChild(dk); tokenKv.appendChild(dv);
+						});
+						// Add total calls row
+						const dk=document.createElement('div'); dk.textContent='Total calls';
+						const dv=document.createElement('div'); dv.textContent=String(bins.total_calls ?? 0);
+						tokenKv.appendChild(dk); tokenKv.appendChild(dv);
+					}else{
+						document.getElementById('tokenBins').innerHTML = '<div style="grid-column:span 2; font-size:12px; color:var(--color-text-muted);">No token bin data</div>';
+					}
+				}catch(_){
+					document.getElementById('tokenBins').innerHTML = '<div style="grid-column:span 2; font-size:12px; color:var(--color-text-muted);">Failed to load token bins</div>';
+				}
 			}catch(err){ panel.innerHTML = '<div style="font-size:12px;opacity:.7;">Failed to load metrics</div>'; console.error(err); }
 		}
+
+		async function populateTenants(){
+			try{
+				const resp = await safeFetch('/api/v1/metrics/tenants',{ headers: authHeaders() });
+				const j = resp.ok ? await resp.json() : { tenants: ['default'] };
+				const sel = document.getElementById('tenantSelect');
+				sel.innerHTML = '';
+				(j.tenants||['default']).forEach(t=>{ const o=document.createElement('option'); o.value=t; o.textContent=t; sel.appendChild(o); });
+			}catch(err){ console.warn('tenants list failed', err); }
+		}
+
+		let chart;
+		async function loadTrend(){
+			const tenant = document.getElementById('tenantSelect').value || 'default';
+			const sd = document.getElementById('startDate').value || new Date(Date.now()-27*86400000).toISOString().slice(0,10);
+			const ed = document.getElementById('endDate').value || new Date().toISOString().slice(0,10);
+			const url = `/api/v1/metrics/precision_recall_trend?tenant_id=${encodeURIComponent(tenant)}&start=${sd}&end=${ed}`;
+			const resp = await safeFetch(url, { headers: authHeaders() });
+			const j = resp.ok ? await resp.json() : { series: [] };
+			const labels = (j.series||[]).map(r=>r.day);
+			const prec = (j.series||[]).map(r=> (r.precision==null? null : Number(r.precision)) );
+			const rec = (j.series||[]).map(r=> (r.recall==null? null : Number(r.recall)) );
+			const ctx = document.getElementById('precisionChart');
+			if(chart){ chart.destroy(); }
+			chart = new Chart(ctx, {
+				type: 'line',
+				data: {
+					labels,
+					datasets: [
+						{ label:'Precision', data:prec, borderColor:'#5ec8f8', backgroundColor:'rgba(94,200,248,0.2)', tension:0.2 },
+						{ label:'Recall', data:rec, borderColor:'#7ee787', backgroundColor:'rgba(126,231,135,0.2)', tension:0.2 }
+					]
+
+					// Populate tenant selects for BA and AB panels
+					async function populateTenantsExtra(){
+						try{
+							const resp = await safeFetch('/api/v1/metrics/tenants',{ headers: authHeaders() });
+							const j = resp.ok ? await resp.json() : { tenants: ['default'] };
+							const sels = [document.getElementById('baTenantSelect'), document.getElementById('abTenantSelect')];
+							sels.forEach(sel=>{ sel.innerHTML=''; (j.tenants||['default']).forEach(t=>{ const o=document.createElement('option'); o.value=t; o.textContent=t; sel.appendChild(o); }); });
+						} catch(err) { /* ignore */ }
+					}
+
+					// Before/After computation
+					let baChartInstance;
+					async function computeBeforeAfter(){
+						const tenant = document.getElementById('baTenantSelect').value || 'default';
+						const cd = document.getElementById('changeDate').value || new Date().toISOString().slice(0,10);
+						const change = new Date(cd);
+						const beforeStart = new Date(change); beforeStart.setDate(change.getDate()-14);
+						const beforeEnd = new Date(change); beforeEnd.setDate(change.getDate()-1);
+						const afterStart = new Date(change); afterStart.setDate(change.getDate()+1);
+						const afterEnd = new Date(change); afterEnd.setDate(change.getDate()+14);
+						async function fetchSeries(s,e){
+							const url = `/api/v1/metrics/precision_recall_trend?tenant_id=${encodeURIComponent(tenant)}&start=${s.toISOString().slice(0,10)}&end=${e.toISOString().slice(0,10)}`;
+							const r = await safeFetch(url, { headers: authHeaders() }); const j = r.ok ? await r.json() : { series: [] };
+							return j.series||[];
+						}
+						const before = await fetchSeries(beforeStart,beforeEnd);
+						const after = await fetchSeries(afterStart,afterEnd);
+						function avgPrecision(arr){ const vals = arr.map(x=>x.precision).filter(v=> v!=null); if(!vals.length) return null; return vals.reduce((a,b)=>a+b,0)/vals.length; }
+						const bp = avgPrecision(before); const ap = avgPrecision(after);
+						const delta = (bp!=null && ap!=null) ? (ap - bp) : null;
+						const kv = document.getElementById('baSummary'); kv.innerHTML='';
+						function addKV(k,v){ const dk=document.createElement('div'); dk.textContent=k; const dv=document.createElement('div'); dv.textContent=v; kv.appendChild(dk); kv.appendChild(dv); }
+						addKV('Before avg precision (14d)', bp!=null? (Math.round(bp*10000)/100)+'%' : 'n/a');
+						addKV('After avg precision (14d)', ap!=null? (Math.round(ap*10000)/100)+'%' : 'n/a');
+						addKV('Delta', delta!=null? (Math.round(delta*10000)/100)+'%' : 'n/a');
+						// chart
+						const labels = [...before.map(r=>r.day), cd, ...after.map(r=>r.day)];
+						const data = [...before.map(r=>r.precision), null, ...after.map(r=>r.precision)].map(v=> v==null? null : Number(v));
+						const ctx = document.getElementById('baChart').getContext('2d');
+						if(baChartInstance){ baChartInstance.destroy(); }
+						baChartInstance = new Chart(ctx, { type:'line', data:{ labels, datasets:[{ label:'Precision', data, borderColor:'#FF8A3C', backgroundColor:'rgba(255,138,60,0.2)', tension:0.2, spanGaps:true }] }, options:{ responsive:true, scales:{ y:{ min:0, max:1 } } } });
+					}
+
+					// AB analysis panel
+					let abChartInstance;
+					async function runAB(){
+						const tenant = document.getElementById('abTenantSelect').value || 'default';
+						const testId = document.getElementById('abTestId').value || '';
+						if(!testId){ return; }
+						const url = `/api/v1/metrics/ab/analysis?tenant_id=${encodeURIComponent(tenant)}&test_id=${encodeURIComponent(testId)}`;
+						const r = await safeFetch(url, { headers: authHeaders() }); const j = r.ok ? await r.json() : {};
+						const kv = document.getElementById('abSummary'); kv.innerHTML='';
+						function addKV(k,v){ const dk=document.createElement('div'); dk.textContent=k; const dv=document.createElement('div'); dv.textContent=v; kv.appendChild(dk); kv.appendChild(dv); }
+						if(j.comparison){
+							addKV('Winner (top precision)', j.comparison.a);
+							addKV('Uplift', (Math.round((j.comparison.uplift||0)*10000)/100)+'%');
+							addKV('p-value', (j.comparison.p_value!=null? Number(j.comparison.p_value).toFixed(4) : 'n/a'));
+							if(j.comparison.required_sample_per_group!=null){ addKV('Required per group (MDE '+(j.comparison.mde)+')', j.comparison.required_sample_per_group); }
+						}
+						// CI chart
+						const labels = (j.stats||[]).map(s=> s.variant);
+						const points = (j.stats||[]).map(s=> ({ x: s.variant, y: s.precision }));
+						const ciLo = (j.stats||[]).map(s=> s.ci && s.ci.lo);
+						const ciHi = (j.stats||[]).map(s=> s.ci && s.ci.hi);
+						const ctx = document.getElementById('abChart').getContext('2d');
+						if(abChartInstance){ abChartInstance.destroy(); }
+						abChartInstance = new Chart(ctx, { type:'bar', data:{ labels, datasets:[{ label:'Precision', data: (j.stats||[]).map(s=> s.precision), backgroundColor:'#4A63E7' }] }, options:{ responsive:true, scales:{ y:{ min:0, max:1 } }, plugins:{ tooltip:{ callbacks:{ label: c=>{ const i=c.dataIndex; const p=c.parsed.y; const lo=ciLo[i], hi=ciHi[i]; return `p=${(p!=null? (Math.round(p*10000)/100)+'%':'n/a')} • CI [${lo!=null? lo.toFixed(3):'–'}, ${hi!=null? hi.toFixed(3):'–'}]`; } } } } });
+					}
+
+					document.getElementById('btnComputeBA').addEventListener('click', computeBeforeAfter);
+					document.getElementById('btnRunAB').addEventListener('click', runAB);
+					populateTenantsExtra();
+					// defaults
+					document.getElementById('changeDate').value = new Date().toISOString().slice(0,10);
+				},
+				options: { responsive:true, scales:{ y:{ min:0, max:1 } }, plugins:{ legend:{ labels:{ color:'var(--color-text-secondary)' } } } }
+			});
+		}
+
+		document.getElementById('btnLoadTrend').addEventListener('click', loadTrend);
 		document.getElementById('btnRefresh').addEventListener('click', loadMetrics);
+		populateTenants().then(()=>{
+			// set default dates
+			document.getElementById('startDate').value = new Date(Date.now()-27*86400000).toISOString().slice(0,10);
+			document.getElementById('endDate').value = new Date().toISOString().slice(0,10);
+			loadTrend();
+		});
 		loadMetrics();
 	</script>
 </body>

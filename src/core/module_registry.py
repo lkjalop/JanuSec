@@ -10,20 +10,20 @@ Implements circuit breaker pattern for resilient module management.
 import asyncio
 import logging
 import time
-from typing import Dict, Any, Optional, Type
-from dataclasses import dataclass
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
+from typing import Any, Dict, Optional, Type
 
 from modules.baseline import BaselineModule
-from modules.regex_engine import RegexPatternMatcher
-from modules.intelligent_router import IntelligentRouter
-from modules.threat_intel_cache import ThreatIntelCache
-from modules.network_hunter import NetworkThreatHunter
-from modules.endpoint_hunter import EndpointHunter
 from modules.compliance_mapper import ComplianceMapper
-from modules.playbook_executor import PlaybookExecutor
-from modules.storage_manager import StorageManager
+from modules.endpoint_hunter import EndpointHunter
 from modules.governance import GovernanceModule
+from modules.intelligent_router import IntelligentRouter
+from modules.network_hunter import NetworkThreatHunter
+from modules.playbook_executor import PlaybookExecutor
+from modules.regex_engine import RegexPatternMatcher
+from modules.storage_manager import StorageManager
+from modules.threat_intel_cache import ThreatIntelCache  # Deprecated; kept for backward compatibility
 
 
 @dataclass
@@ -33,7 +33,7 @@ class ModuleHealth:
     healthy: bool
     last_check: float
     error_count: int
-    last_error: Optional[str] = None
+    last_error: str | None = None
 
 
 @dataclass 
@@ -74,7 +74,7 @@ class ModuleRegistry:
             'baseline': BaselineModule,
             'regex_engine': RegexPatternMatcher,
             'router': IntelligentRouter,
-            'intel_cache': ThreatIntelCache
+            # 'intel_cache': ThreatIntelCache  # deprecated – load only if explicitly requested
         }
         
         # Analysis modules - lazy loaded
@@ -118,7 +118,7 @@ class ModuleRegistry:
                         f"Support: {len(self.support_modules)}, "
                         f"Analysis (lazy): {len(self.analysis_module_definitions)}")
 
-    async def _initialize_module(self, name: str, module_class: Type, storage: Dict[str, Any]):
+    async def _initialize_module(self, name: str, module_class: type, storage: dict[str, Any]):
         """Initialize a single module with error handling"""
         start_time = time.time()
         
@@ -271,7 +271,7 @@ class ModuleRegistry:
         stats['usage_count'] += 1
         stats['last_used'] = time.time()
 
-    async def health_check(self) -> Dict[str, Any]:
+    async def health_check(self) -> dict[str, Any]:
         """Perform health check on all modules"""
         healthy_modules = []
         unhealthy_modules = []
@@ -316,7 +316,7 @@ class ModuleRegistry:
             'circuit_breaker_states': {name: cb.state for name, cb in self.circuit_breakers.items()}
         }
 
-    async def get_module_stats(self) -> Dict[str, Any]:
+    async def get_module_stats(self) -> dict[str, Any]:
         """Get comprehensive module statistics"""
         return {
             'core_modules': list(self.core_modules.keys()),

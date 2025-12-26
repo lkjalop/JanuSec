@@ -1,5 +1,6 @@
 from __future__ import annotations
-from prometheus_client import Counter, Histogram, Gauge
+
+from prometheus_client import Counter, Gauge, Histogram
 
 artifact_ingest_total = Counter('artifact_ingest_total','Total artifacts ingested', ['type'])
 artifact_factor_total = Counter('artifact_factor_total','Factor occurrence', ['factor'])

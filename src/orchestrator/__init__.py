@@ -1,3 +1,3 @@
-from .core import SecurityOrchestrator, ProcessingResult
+from .core import ProcessingResult, SecurityOrchestrator
 
 __all__ = ['SecurityOrchestrator', 'ProcessingResult']

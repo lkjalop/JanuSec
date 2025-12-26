@@ -6,37 +6,54 @@ lightweight metadata. Confidence deltas are disabled initially (advisory mode) a
 can be enabled later via governance toggle.
 """
 from __future__ import annotations
+
+import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
-import time
+
 
 @dataclass
 class LaneEmission:
     lane: str
-    factors: List[str]
-    notes: Optional[str] = None
+    factors: list[str]
+    notes: str | None = None
     latency_ms: float = 0.0
 
 @dataclass
 class EvidenceEnvelope:
-    event: Dict[str, Any]
+    event: dict[str, Any]
     # Factors added by lanes (prefixed with lane name)
-    lane_factors: List[str] = field(default_factory=list)
-    emissions: List[LaneEmission] = field(default_factory=list)
+    lane_factors: list[str] = field(default_factory=list)
+    emissions: list[LaneEmission] = field(default_factory=list)
 
-    def add_emission(self, lane: str, factors: List[str], notes: Optional[str], latency_ms: float):
+    def add_emission(self, lane: str, factors: list[str], notes: str | None, latency_ms: float):
         # ensure lane prefix for governance clarity
         tagged = [f"lane_{lane}:{f}" for f in factors]
         self.lane_factors.extend(tagged)
         self.emissions.append(LaneEmission(lane=lane, factors=tagged, notes=notes, latency_ms=latency_ms))
 
+    def export_hopgraph_signals(self) -> list[dict]:
+        """Export emissions as lightweight hopgraph signals suitable for session builder ingestion.
+
+        Returns list of dicts: {'lane': lane, 'factor': factor_name, 'tags':[], 'notes': notes}
+        """
+        out = []
+        for e in self.emissions:
+            for f in e.factors:
+                # strip lane_ prefix if present
+                name = f
+                if name.startswith(f'lane_{e.lane}:'):
+                    name = name.split(':',1)[1]
+                out.append({'lane': e.lane, 'factor': name, 'notes': e.notes, 'latency_ms': e.latency_ms})
+        return out
+
     @property
-    def all_factors(self) -> List[str]:
+    def all_factors(self) -> list[str]:
         # Expose normalized factor names without the lane prefix for convenience in
         # unit tests and any legacy callers that only care about the emission key.
         # Callers that need the fully-qualified value should access lane_factors
         # directly.
-        factors: List[str] = []
+        factors: list[str] = []
         for f in self.lane_factors:
             if ':' in f:
                 factors.append(f.split(':', 1)[1])

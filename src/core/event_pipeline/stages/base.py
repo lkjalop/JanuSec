@@ -2,21 +2,21 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
-
-StageRunner = Callable[[Dict[str, Any], 'StageContext'], Awaitable['StageResult']]
+StageRunner = Callable[[dict[str, Any], 'StageContext'], Awaitable['StageResult']]
 
 
 @dataclass
 class StageResult:
     name: str
-    factors: List[str]
+    factors: list[str]
     confidence_delta: float = 0.0
     terminal: bool = False
     duration_ms: float = 0.0
-    metadata: Dict[str, Any] | None = None
+    metadata: dict[str, Any] | None = None
 
 
 @dataclass
@@ -31,7 +31,7 @@ class StageContext:
     registry: Any
     config: Any
     logger: Any
-    state: Dict[str, Any]
+    state: dict[str, Any]
 
     async def resolve_module(self, name: str) -> Any:
         if not self.registry:
@@ -57,7 +57,7 @@ async def maybe_await(value: Any) -> Any:
 
 def timed_stage(name: str):
     def decorator(func: StageRunner) -> StageRunner:
-        async def wrapper(event: Dict[str, Any], ctx: StageContext) -> StageResult:
+        async def wrapper(event: dict[str, Any], ctx: StageContext) -> StageResult:
             start = time.perf_counter()
             result = await func(event, ctx)
             duration = (time.perf_counter() - start) * 1000

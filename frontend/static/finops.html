@@ -70,12 +70,30 @@
       </div>
     </div>
   </div>
+    <div class="card">
+      <h3 style="margin:0 0 8px">Per‑Tenant Tier2 Budget</h3>
+      <div class="row">
+        <div class="col">
+          <label>Tenant ID</label>
+          <input id="tTenant" type="text" placeholder="default" />
+        </div>
+        <div class="col">
+          <label>Tier2 Budget Left (units)</label>
+          <input id="tBudget" type="number" step="0.01" />
+        </div>
+      </div>
+      <div style="margin-top:8px;display:flex;gap:8px">
+        <button onclick="loadTenantBudget()">Load Tenant Budget</button>
+        <button onclick="saveTenantBudget()">Save Tenant Budget</button>
+      </div>
+      <div class="muted" id="tNote" style="margin-top:8px">Use overrides for per‑tenant Tier2 caps applied by SSE guard.</div>
+    </div>
   <script>
     function safeNotify(msg, level){ try{ if(window.showNotification) return window.showNotification(msg, level); if(window.notifications && typeof window.notifications.showToast === 'function') return window.notifications.showToast(msg, 4000); console.log('[notify]', level||'info', msg); }catch(e){ console.log('notify-fail', e, msg); } }
     const apiKey = localStorage.getItem('apiKey') || 'devkey123';
     const hdrs = {'Content-Type':'application/json','x-api-key':apiKey};
     async function load(){
-      const r = await fetch('/api/v1/finops/overview',{headers: hdrs});
+      const r = await (window.safeFetch || fetch)('/api/v1/finops/overview',{headers: hdrs});
       const j = await r.json();
       document.getElementById('points').innerText = j.points;
       document.getElementById('latest').innerText = (j.latest_cost==null?'-':j.latest_cost.toFixed(4));
@@ -90,13 +108,13 @@
         block_on_exceed: document.getElementById('bBlock').checked,
         per_task_caps: {}
       };
-      await fetch('/api/v1/finops/budget',{method:'POST', headers: hdrs, body: JSON.stringify(payload)});
+      await (window.safeFetch || fetch)('/api/v1/finops/budget',{method:'POST', headers: hdrs, body: JSON.stringify(payload)});
       safeNotify('Budget saved','success');
       load();
     }
     async function loadLedger(){
       try{
-        const r = await fetch('/api/v1/finops/ledger',{headers: hdrs});
+        const r = await (window.safeFetch || fetch)('/api/v1/finops/ledger',{headers: hdrs});
         const j = await r.json();
         const rows = (j.inference_summary||[]).slice(-12); // last N rows
         const host = document.getElementById('ledgerBox');
@@ -117,12 +135,33 @@
       try{
         document.getElementById('runTestBtn').disabled = true;
         const payload = { provider: 'openai', tenant: 'default', mock: true, text: 'finops test' };
-        const r = await fetch('/api/v1/ai/force_external',{method:'POST', headers: hdrs, body: JSON.stringify(payload)});
+        const r = await (window.safeFetch || fetch)('/api/v1/ai/force_external',{method:'POST', headers: hdrs, body: JSON.stringify(payload)});
         const j = await r.json();
         if(!r.ok){ safeNotify('Test call failed: '+(j.detail||JSON.stringify(j)),'error'); }
         // small delay to allow ledger snapshot to be appended by server
         setTimeout(()=>{ loadLedger(); document.getElementById('runTestBtn').disabled = false; }, 350);
       }catch(e){ safeNotify('Test call error: '+e,'error'); document.getElementById('runTestBtn').disabled = false; }
+    }
+    async function loadTenantBudget(){
+      try{
+        const tenant = (document.getElementById('tTenant').value||'default');
+        const url = new URL('/api/v1/finops/tenant_budget', window.location.origin);
+        url.searchParams.set('tenant_id', tenant);
+        const r = await (window.safeFetch || fetch)(url.toString(),{headers: hdrs});
+        const j = await r.json();
+        document.getElementById('tTenant').value = j.tenant || tenant;
+        document.getElementById('tBudget').value = j.tier2_budget_left != null ? j.tier2_budget_left : '';
+        safeNotify('Loaded tenant budget','info');
+      }catch(e){ safeNotify('Load tenant budget failed','error'); }
+    }
+    async function saveTenantBudget(){
+      try{
+        const payload = { tenant: (document.getElementById('tTenant').value||'default'), tier2_budget_left: parseFloat(document.getElementById('tBudget').value||'0') };
+        const r = await (window.safeFetch || fetch)('/api/v1/finops/tenant_budget',{method:'POST', headers: hdrs, body: JSON.stringify(payload)});
+        const j = await r.json();
+        if(!r.ok || j.saved!==true){ throw new Error(j.error||'save_failed'); }
+        safeNotify('Tenant budget saved','success');
+      }catch(e){ safeNotify('Save tenant budget failed: '+(e&&e.message||e),'error'); }
     }
     load();
     loadLedger();

@@ -9,19 +9,22 @@ Metrics (best-effort):
     asn_decay_runs_total
 """
 from __future__ import annotations
-import time, threading, os
+
+import os
+import threading
+import time
 from typing import Dict
 
 _TTL = int(__import__('os').getenv('ASN_FREQ_TTL_SECONDS','3600'))
 _lock = threading.Lock()
-_asn_counts: Dict[str, dict] = {}
+_asn_counts: dict[str, dict] = {}
 _total = 0
 _DECAY_INTERVAL = int(os.getenv('ASN_DECAY_INTERVAL_SECONDS','0'))
 _DECAY_FACTOR = float(os.getenv('ASN_DECAY_FACTOR','0.9'))
 _LAST_DECAY = time.time()
 
 try:  # pragma: no cover
-    from prometheus_client import Gauge as _G, Counter as _C  # type: ignore
+    from prometheus_client import Counter as _C, Gauge as _G  # type: ignore
     _asn_distinct_gauge = _G('asn_distinct_current','Current distinct ASNs tracked')  # type: ignore
     _asn_decay_runs = _C('asn_decay_runs_total','ASN decay applications')  # type: ignore
 except Exception:  # pragma: no cover
@@ -79,6 +82,44 @@ def rarity(asn: str | None) -> float:
         denom = max(1,_total)
         freq = rec['c']/denom
         return max(0.0, 1.0 - freq * 50)  # amplify rarity; cap at ~1 for very low frequency
+
+
+def percentile(asn: str | None) -> float:
+    """Return percentile rank of ASN frequency (0..1), lower means rarer."""
+    if not asn:
+        return 1.0
+    with _lock:
+        counts = [rec['c'] for rec in _asn_counts.values()]
+        if not counts:
+            return 1.0
+        counts_sorted = sorted(counts)
+        rec = _asn_counts.get(asn)
+        if not rec:
+            # treat unseen as rare (0.0)
+            return 0.0
+        val = rec['c']
+        # percentile rank
+        less = sum(1 for c in counts_sorted if c < val)
+        return less / len(counts_sorted)
+
+
+def populate_from_source(sample: dict | None = None):
+    """Best-effort helper to seed ASN counts from an external sample dict mapping asn->count.
+    If sample is None, no-op. Tests and CI can call this to seed values."""
+    global _total
+    if not sample:
+        return
+    with _lock:
+        for a, c in (sample or {}).items():
+            rec = _asn_counts.get(a)
+            if not rec:
+                rec = {'c': 0, 'last': time.time()}
+                _asn_counts[a] = rec
+            rec['c'] = float(c)
+            rec['last'] = time.time()
+            _total += float(c)
+    try: _asn_distinct_gauge.set(len(_asn_counts))
+    except Exception: pass
 
 def get_current_asn_distinct() -> int:
     now = time.time()

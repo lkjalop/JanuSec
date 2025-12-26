@@ -1,9 +1,10 @@
 """Async Slack Notifier with basic rate limiting"""
 from __future__ import annotations
+
 import asyncio
-import time
 import json
 import logging
+import time
 from typing import Optional
 
 try:
@@ -14,7 +15,7 @@ except Exception:  # pragma: no cover
 logger = logging.getLogger(__name__)
 
 class SlackNotifier:
-    def __init__(self, webhook_url: Optional[str], default_channel: Optional[str], channel_map: dict[str, str] | None, rate_limit_per_minute: int = 30):
+    def __init__(self, webhook_url: str | None, default_channel: str | None, channel_map: dict[str, str] | None, rate_limit_per_minute: int = 30):
         self.webhook_url = webhook_url
         self.default_channel = default_channel
         self.channel_map = channel_map or {}
@@ -46,7 +47,8 @@ class SlackNotifier:
         if blocks:
             payload["blocks"] = blocks
         try:
-            async with httpx.AsyncClient(timeout=5) as client:
+            # Basic SSRF safety: https-only and no redirects
+            async with httpx.AsyncClient(timeout=5, follow_redirects=False) as client:
                 resp = await client.post(self.webhook_url, json=payload)
                 if resp.status_code >= 300:
                     logger.warning(f"Slack post failed: {resp.status_code} {resp.text}")

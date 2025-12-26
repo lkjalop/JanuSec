@@ -24,5 +24,11 @@
   "bec_vendor_spoof_chain_enriched",
   "bec_invoice_fraud_pattern_enriched",
   "cloud_access_key_creation_no_rotation_cross_account",
-  "bec_supplier_portal_takeover_enriched"
+  "bec_supplier_portal_takeover_enriched",
+  "cloud_excessive_trust_policy_edges",
+  "cloud_oidc_provider_anomaly",
+  "cloud_access_key_creation_atypical_geo",
+  "email_oauth_brand_spoof_enriched",
+  "bec_supplier_portal_free_reply_enriched",
+  "bec_payment_change_dkim_flip_enriched"
 ]

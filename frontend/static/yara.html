@@ -90,24 +90,24 @@
       const text = (document.getElementById('ruleText')||{}).value || '';
       if(!name||!text){ document.getElementById('ruleMsg').textContent='Name and rule text required'; return; }
       try {
-        const r = await fetch('/api/v1/yara/rules', { method:'POST', headers: h(), body: JSON.stringify({ name, rule: text }) });
+        const r = await (window.safeFetch || fetch)('/api/v1/yara/rules', { method:'POST', headers: h(), body: JSON.stringify({ name, rule: text }) });
         const j = await r.json();
         document.getElementById('ruleMsg').textContent = r.ok ? 'Rule saved' : (j.detail||'save failed');
       } catch(e){ document.getElementById('ruleMsg').textContent = 'Save failed: '+(e.message||e); }
     }
     async function listRules(){
-      try { const r = await fetch('/api/v1/yara/rules', { headers: h() }); const j = await r.json(); document.getElementById('ruleMsg').textContent = r.ok ? (Array.isArray(j.rules)?('Rules: '+j.rules.map(x=>x.name||'rule').join(', ')) : 'No rules') : (j.detail||'list failed'); } catch(e){ document.getElementById('ruleMsg').textContent = 'List failed: '+(e.message||e); }
+      try { const r = await (window.safeFetch || fetch)('/api/v1/yara/rules', { headers: h() }); const j = await r.json(); document.getElementById('ruleMsg').textContent = r.ok ? (Array.isArray(j.rules)?('Rules: '+j.rules.map(x=>x.name||'rule').join(', ')) : 'No rules') : (j.detail||'list failed'); } catch(e){ document.getElementById('ruleMsg').textContent = 'List failed: '+(e.message||e); }
     }
     async function deleteRule(){
       const name = (document.getElementById('ruleName')||{}).value || '';
       if(!name){ document.getElementById('ruleMsg').textContent='Provide rule name to delete'; return; }
-      try { const r = await fetch('/api/v1/yara/rules?name='+encodeURIComponent(name), { method:'DELETE', headers: h() }); const j = await r.json(); document.getElementById('ruleMsg').textContent = r.ok ? 'Rule deleted' : (j.detail||'delete failed'); } catch(e){ document.getElementById('ruleMsg').textContent = 'Delete failed: '+(e.message||e); }
+      try { const r = await (window.safeFetch || fetch)('/api/v1/yara/rules?name='+encodeURIComponent(name), { method:'DELETE', headers: h() }); const j = await r.json(); document.getElementById('ruleMsg').textContent = r.ok ? 'Rule deleted' : (j.detail||'delete failed'); } catch(e){ document.getElementById('ruleMsg').textContent = 'Delete failed: '+(e.message||e); }
     }
     async function scanSamplePath(){
       const p = (document.getElementById('samplePath')||{}).value || '';
       const ev = (document.getElementById('eventId')||{}).value || '';
       if(!p){ document.getElementById('scanOut').textContent='Enter a server-accessible file path.'; return; }
-      try { const r = await fetch('/api/v1/yara/scan_path', { method:'POST', headers: h(), body: JSON.stringify(ev?{ path: p, event_id: ev }:{ path: p }) }); const j = await r.json(); document.getElementById('scanOut').textContent = r.ok ? 'Scan complete' : (j.detail||'scan failed'); document.getElementById('scanJson').textContent = JSON.stringify(j,null,2); } catch(e){ document.getElementById('scanOut').textContent = 'Scan failed: '+(e.message||e); }
+      try { const r = await (window.safeFetch || fetch)('/api/v1/yara/scan_path', { method:'POST', headers: h(), body: JSON.stringify(ev?{ path: p, event_id: ev }:{ path: p }) }); const j = await r.json(); document.getElementById('scanOut').textContent = r.ok ? 'Scan complete' : (j.detail||'scan failed'); document.getElementById('scanJson').textContent = JSON.stringify(j,null,2); } catch(e){ document.getElementById('scanOut').textContent = 'Scan failed: '+(e.message||e); }
     }
     async function scanUploaded(){
       try {
@@ -116,7 +116,7 @@
         const ev = (document.getElementById('eventId')||{}).value || '';
         const form = new FormData(); form.append('file', fi.files[0]);
         const url = ev ? ('/api/v1/yara/scan_upload?event_id='+encodeURIComponent(ev)) : '/api/v1/yara/scan_upload';
-        const r = await fetch(url, { method:'POST', headers: { 'x-api-key': (localStorage.getItem('apiKey')||'devkey123') }, body: form });
+        const r = await (window.safeFetch || fetch)(url, { method:'POST', headers: { 'x-api-key': (localStorage.getItem('apiKey')||'devkey123') }, body: form });
         const j = await r.json();
         document.getElementById('scanOut').textContent = r.ok ? 'Scan complete' : (j.detail||'scan failed');
         document.getElementById('scanJson').textContent = JSON.stringify(j,null,2);

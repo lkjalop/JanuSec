@@ -1,6 +1,10 @@
 """Authentication & rate limiting dependency for alert endpoints."""
 from __future__ import annotations
-import os, time, asyncio
+
+import asyncio
+import os
+import time
+
 from fastapi import HTTPException, Request, Security
 from fastapi.security import APIKeyHeader
 

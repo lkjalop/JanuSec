@@ -1,27 +1,29 @@
 """Hunt / Finops related endpoints."""
 from __future__ import annotations
-from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
-from typing import Optional
+
 import time
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, ConfigDict
 
 router = APIRouter()
 
 # External helpers (import lazily in handlers to avoid heavy deps at import time)
 
-class HuntStartRequest(BaseModel):
+class HuntStartRequest(BaseModel):  # type: ignore[misc]
     session_id: str
     window_hours: int = 24
     model_enabled: bool = False
     budget_cap_units: float | None = None
     async_run: bool = False
-    model_config = {"protected_namespaces": ()}
+    model_config = ConfigDict(protected_namespaces=())
 
 def resolve_tenant():  # placeholder dependency
     return None
 
 @router.post('/hunts/start')
-async def hunts_start(payload: HuntStartRequest, tenant_id: Optional[str] = Depends(resolve_tenant)):
+async def hunts_start(payload: HuntStartRequest, tenant_id: str | None = Depends(resolve_tenant)):
     from sidecar_server import get_sidecar_manager  # type: ignore
     mgr = get_sidecar_manager()
     try:
@@ -31,7 +33,7 @@ async def hunts_start(payload: HuntStartRequest, tenant_id: Optional[str] = Depe
     return {'session_id': sess.id, 'status': sess.status, 'estimate_units': sess.estimate_units, 'async': payload.async_run}
 
 @router.get('/hunts/report/{session_id}')
-async def hunts_report(session_id: str, format: str = 'json', tenant_id: Optional[str] = Depends(resolve_tenant)):
+async def hunts_report(session_id: str, format: str = 'json', tenant_id: str | None = Depends(resolve_tenant)):
     from sidecar_server import get_sidecar_manager  # type: ignore
     mgr = get_sidecar_manager()
     rep = mgr.report(session_id)
@@ -45,7 +47,7 @@ async def hunts_report(session_id: str, format: str = 'json', tenant_id: Optiona
     return rep
 
 @router.get('/hunts/session/{session_id}/progress')
-async def hunts_progress(session_id: str, tenant_id: Optional[str] = Depends(resolve_tenant)):
+async def hunts_progress(session_id: str, tenant_id: str | None = Depends(resolve_tenant)):
     from sidecar_server import get_sidecar_manager  # type: ignore
     mgr = get_sidecar_manager()
     sess = mgr.get(session_id)

@@ -422,7 +422,7 @@
     <script>
         async function refresh(){
             try {
-                const d = await fetch('/api/v1/decisions/recent').then(r=>r.json());
+                const d = await (window.safeFetch || fetch)('/api/v1/decisions/recent').then(r=>r.json());
                 document.getElementById('decisions').textContent = JSON.stringify(d.decisions, null, 2);
                 document.getElementById('api-status').textContent = 'Connected';
                 document.getElementById('api-status').style.color = 'var(--status-active)';
@@ -433,7 +433,7 @@
                 document.getElementById('api-status').style.color = 'var(--status-error)';
             }
             try {
-                const a = await fetch('/api/v1/alerts/recent').then(r=>r.json());
+                const a = await (window.safeFetch || fetch)('/api/v1/alerts/recent').then(r=>r.json());
                 document.getElementById('alerts').textContent = JSON.stringify(a.alerts, null, 2);
             } catch(e){
                 console.error(e);
@@ -449,7 +449,7 @@
             }
             try {
                 document.getElementById('chainBox').textContent = 'Loading chain data...';
-                const c = await fetch('/api/v1/chain/'+id).then(r=>r.json());
+                const c = await (window.safeFetch || fetch)('/api/v1/chain/'+id).then(r=>r.json());
                 document.getElementById('chainBox').textContent = JSON.stringify(c.chain, null, 2);
                 document.getElementById('chain-status').textContent = 'Loaded';
                 document.getElementById('chain-status').style.color = 'var(--status-active)';

@@ -3,8 +3,15 @@
 Tracks per-host outbound bytes with EWMA + variance to emit egress_volume_spike.
 """
 from __future__ import annotations
+
+import hashlib
+import json
+import math
+import os
+import threading
+import time
 from typing import Dict, Tuple
-import threading, time, math, json, os, hashlib
+
 
 class EgressEWMA:
     """Per-tenant EWMA egress spike tracker.
@@ -16,7 +23,7 @@ class EgressEWMA:
         self.k = k
         self._lock = threading.Lock()
         # tenant -> host -> (ewma, ewvar, last_ts)
-        self._state: Dict[str, Dict[str, Tuple[float,float,float]]] = {}
+        self._state: dict[str, dict[str, tuple[float,float,float]]] = {}
         self._dirty: set[str] = set()
         self._base_dir = base_dir
         self._load_all()
@@ -49,7 +56,7 @@ class EgressEWMA:
                 if not os.path.exists(path):
                     continue
                 try:
-                    with open(path,'r',encoding='utf-8') as f:
+                    with open(path,encoding='utf-8') as f:
                         wrapper = json.load(f)
                     data = wrapper.get('payload', wrapper)
                     expected = wrapper.get('sha256')

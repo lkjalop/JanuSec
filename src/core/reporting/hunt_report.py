@@ -4,15 +4,16 @@ Generates JSON (dict) & Markdown representations from a HuntSession
 and supplementary data (future: coverage deltas, anomalies, lineage hashes).
 """
 from __future__ import annotations
-from typing import Dict, Any
+
 from datetime import datetime
+from typing import Any, Dict
 
 REQUIRED_SECTIONS = [
     'session_id','tenant','window_hours','duration_seconds','estimate_units','actual_units',
     'delta_pct','factors','model_tiers_used','status'
 ]
 
-def to_json(session_report: Dict[str, Any]) -> Dict[str, Any]:
+def to_json(session_report: dict[str, Any]) -> dict[str, Any]:
     missing = [k for k in REQUIRED_SECTIONS if k not in session_report]
     return {
         'report': session_report,
@@ -20,7 +21,7 @@ def to_json(session_report: Dict[str, Any]) -> Dict[str, Any]:
         'generated_at': datetime.utcnow().isoformat()+'Z'
     }
 
-def to_markdown(session_report: Dict[str, Any]) -> str:
+def to_markdown(session_report: dict[str, Any]) -> str:
     lines = [f"# Hunt Session Report: {session_report.get('session_id')}\n"]
     lines.append(f"Tenant: `{session_report.get('tenant')}`  Window Hours: {session_report.get('window_hours')}  Status: **{session_report.get('status')}**\n")
     lines.append("## Cost Summary")

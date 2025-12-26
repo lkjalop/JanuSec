@@ -22,6 +22,12 @@ EMAIL_VECTORS = [
     ('bec_vendor_spoof_chain_enriched', 'tests/data/email_bec_vendor_spoof_chain_event.json'),
     ('bec_invoice_fraud_pattern_enriched', 'tests/data/email_bec_invoice_fraud_event.json'),
     ('bec_supplier_portal_takeover_enriched', 'tests/data/email_supplier_portal_takeover_event.json'),
+    ('bec_brand_oauth_spoof_enriched', 'tests/data/email_brand_oauth_spoof_event.json'),
+    ('bec_supplier_replyto_freemail_enriched', 'tests/data/email_supplier_replyto_freemail_event.json'),
+    ('bec_payment_change_dkim_pass_domain_flip_enriched', 'tests/data/email_payment_change_dkim_pass_domain_flip_event.json'),
+        ('email_oauth_brand_spoof_enriched', 'tests/data/email_oauth_brand_spoof_event.json'),
+        ('bec_supplier_portal_free_reply_enriched', 'tests/data/email_supplier_portal_free_reply_event.json'),
+        ('bec_payment_change_dkim_flip_enriched', 'tests/data/email_payment_change_dkim_flip_event.json'),
 ]
 
 

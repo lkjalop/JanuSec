@@ -14,6 +14,12 @@ from src.core.correlation.rules import registry as reg
     ('cloud_access_key_rotation_anomaly', 'tests/data/cloud_access_key_rotation_anomaly_event.json'),
     ('cloud_org_policy_attach_wildcard', 'tests/data/cloud_org_policy_attach_wildcard_event.json'),
     ('cloud_access_key_creation_no_rotation_cross_account', 'tests/data/cloud_access_key_creation_no_rotation_cross_account_event.json'),
+    ('cloud_excessive_trust_policy_edges', 'tests/data/cloud_excessive_trust_policy_edges_event.json'),
+    ('cloud_oidc_provider_anomaly', 'tests/data/cloud_oidc_provider_anomaly_event.json'),
+    ('cloud_access_key_creation_atypical_geo', 'tests/data/cloud_access_key_creation_atypical_geo_event.json'),
+    ('cloud_excessive_trust_policy_edges', 'tests/data/cloud_excessive_trust_policy_edges_event.json'),
+    ('cloud_oidc_provider_anomaly', 'tests/data/cloud_oidc_provider_anomaly_event.json'),
+    ('cloud_access_key_creation_atypical_geo', 'tests/data/cloud_access_key_creation_atypical_geo_event.json'),
 ])
 def test_iam_cloud_pack(rule_id, vector_path):
     full_path = os.path.join(os.getcwd(), vector_path)

@@ -11,7 +11,7 @@ class ProcessingResult:
     verdict: str
     confidence: float
     processing_time_ms: float
-    factors: List[str]
-    stage_timings: List[Dict[str, object]]
-    config_digests: Dict[str, str]
+    factors: list[str]
+    stage_timings: list[dict[str, object]]
+    config_digests: dict[str, str]
     custody_hash: str

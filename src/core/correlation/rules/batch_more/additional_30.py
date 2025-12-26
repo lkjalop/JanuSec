@@ -590,3 +590,98 @@ def cloud_access_key_creation_no_rotation_cross_account(e):
         return score >= 0.75
     except Exception:
         return False
+
+
+# IAM: excessive trust policy attachments or role trusts (broad Principal: "*" or external accounts)
+@register_rule(name='cloud_excessive_trust_policy_edges', mitre=['T1199','T1531'],
+               factors_required=['iam_put_role_policy','role_trusts_external','principal_wildcard'],
+               window_seconds=7200, severity='critical', confidence_boost=0.5)
+def cloud_excessive_trust_policy_edges(e):
+    try:
+        put = bool(e.get('iam_put_role_policy') or e.get('attach_role_policy') or e.get('iam_policy_attach'))
+        trusts_external = bool(e.get('role_trusts_external') or e.get('principal_accounts') and any(a not in (e.get('account_id') or '') for a in (e.get('principal_accounts') or [])))
+        wildcard = bool(e.get('principal_wildcard') or (str(e.get('principal') or '').strip() == '*'))
+        score = 0.0
+        if put and (trusts_external or wildcard):
+            score += 0.7
+        if wildcard:
+            score += 0.15
+        if trusts_external and put:
+            score += 0.1
+        e.setdefault('correlation_emission', {})
+        e['correlation_emission'].update({
+            'rule': 'cloud_excessive_trust_policy_edges',
+            'mitre': ['T1199','T1531'],
+            'stride': ['Elevation of Privilege'],
+            'dread': {'score': 9},
+            'maestro': {'tags': ['privilege_escalation','cross_account_trust']},
+            'evidence': {'put_policy': put, 'trusts_external': trusts_external, 'principal_wildcard': wildcard}
+        })
+        return score >= 0.8
+    except Exception:
+        return False
+
+
+# IAM: OIDC provider anomalies (new provider, unexpected thumbprint, external issuer)
+@register_rule(name='cloud_oidc_provider_anomaly', mitre=['T1530'],
+               factors_required=['oidc_provider_create','oidc_thumbprint_mismatch','oidc_issuer_unusual'],
+               window_seconds=7200, severity='high', confidence_boost=0.45)
+def cloud_oidc_provider_anomaly(e):
+    try:
+        created = bool(e.get('oidc_provider_create') or e.get('create_oidc_provider'))
+        thumb_mismatch = bool(e.get('oidc_thumbprint_mismatch'))
+        issuer_unusual = bool(e.get('oidc_issuer_unusual') or e.get('issuer_domain_unexpected'))
+        score = 0.0
+        if created:
+            score += 0.4
+        if thumb_mismatch:
+            score += 0.3
+        if issuer_unusual:
+            score += 0.2
+        e.setdefault('correlation_emission', {})
+        e['correlation_emission'].update({
+            'rule': 'cloud_oidc_provider_anomaly',
+            'mitre': ['T1530'],
+            'stride': ['Tampering','Spoofing'],
+            'dread': {'score': 7},
+            'maestro': {'tags': ['identity_federation','oidc']},
+            'evidence': {'created': created, 'thumb_mismatch': thumb_mismatch, 'issuer_unusual': issuer_unusual}
+        })
+        return score >= 0.6
+    except Exception:
+        return False
+
+
+# IAM: atypical geo for access key creation (geo anomaly relative to account or actor baseline)
+@register_rule(name='cloud_access_key_creation_atypical_geo', mitre=['T1098'],
+               factors_required=['iam_create_access_key','src_geo','actor_home_geo'],
+               window_seconds=7200, severity='high', confidence_boost=0.45)
+def cloud_access_key_creation_atypical_geo(e):
+    try:
+        created = bool(e.get('iam_create_access_key') or e.get('service_account_key_create'))
+        src_geo = str(e.get('src_geo') or '').lower()
+        actor_geo = str(e.get('actor_home_geo') or e.get('actor_geo') or '').lower()
+        atypical = False
+        if created and src_geo and actor_geo and src_geo != actor_geo:
+            atypical = True
+        # Accept also when src_geo is in high-risk list and actor has no baseline
+        high_risk = bool(src_geo in ('cn','ru','kp','ir'))
+        score = 0.0
+        if atypical:
+            score += 0.6
+        if high_risk:
+            score += 0.2
+        if e.get('off_hours'):
+            score += 0.1
+        e.setdefault('correlation_emission', {})
+        e['correlation_emission'].update({
+            'rule': 'cloud_access_key_creation_atypical_geo',
+            'mitre': ['T1098'],
+            'stride': ['Elevation of Privilege','Repudiation'],
+            'dread': {'score': 7},
+            'maestro': {'tags': ['credential_access','geo_anomaly']},
+            'evidence': {'created': created, 'src_geo': src_geo, 'actor_geo': actor_geo, 'atypical': atypical}
+        })
+        return score >= 0.7
+    except Exception:
+        return False

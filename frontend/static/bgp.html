@@ -34,7 +34,7 @@
     }
     async function load(){
       try{
-        const r = await fetch('/api/v1/bgp/incidents', { headers: H() });
+        const r = await (window.safeFetch || fetch)('/api/v1/bgp/incidents', { headers: H() });
         const j = await r.json();
         const rows = Array.isArray(j.incidents) ? j.incidents : [];
         const tbl = document.getElementById('tbl');
@@ -46,7 +46,7 @@
       try{
         const s = document.getElementById('status');
         s.textContent = 'Loading status...';
-        const r = await fetch('/api/v1/admin/bgp/status', { headers: adminHeaders() });
+        const r = await (window.safeFetch || fetch)('/api/v1/admin/bgp/status', { headers: adminHeaders() });
         if(!r.ok){ s.textContent = 'Status unavailable (check admin key)'; return; }
         const j = await r.json();
         const ts = j.last_refresh_ts? new Date(j.last_refresh_ts*1000).toISOString() : 'n/a';
@@ -55,7 +55,7 @@
     }
     async function forceRefresh(){
       try{
-        const r = await fetch('/api/v1/admin/bgp/refresh', { method:'POST', headers: adminHeaders() });
+        const r = await (window.safeFetch || fetch)('/api/v1/admin/bgp/refresh', { method:'POST', headers: adminHeaders() });
         if(!r.ok){ safeNotify('Refresh failed (check admin key)','error'); return; }
         await Promise.all([loadStatus(), load()]);
       }catch(e){ console.error(e); safeNotify('Refresh error','error'); }

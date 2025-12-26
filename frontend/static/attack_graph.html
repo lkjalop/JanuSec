@@ -40,6 +40,18 @@ svg{width:100%;height:520px;background:#10141C;border:1px solid #2A3142;border-r
     <div id="metricsBar" style="margin-top:10px;font-size:12px;color:#A8B2C3"></div>
   </div>
   <div class="card">
+    <h3 style="margin:0 0 6px">HopGraph Presets & Overlay</h3>
+    <div class="row" style="margin-bottom:8px">
+      <label class="small">Preset</label>
+      <select id="presetSelect" style="padding:6px 10px;border-radius:6px;background:#0B0E14;color:#E8EBF0;border:1px solid #2A3142;"></select>
+      <button class="btn" id="btnRunPreset">Run Preset</button>
+    </div>
+    <div id="presetSummary" class="small">Presets not loaded yet.</div>
+    <pre id="presetNodes" class="code" style="margin-top:8px;max-height:160px;overflow:auto;background:#10141C;padding:8px;border:1px solid #2A3142;border-radius:6px;"></pre>
+    <div class="small" style="margin-top:10px">Overlay Snapshot</div>
+    <div id="overlaySummary" class="small" style="margin-top:4px">No overlay data yet.</div>
+  </div>
+  <div class="card">
     <h3 style="margin:0 0 6px">Session Summary</h3>
     <div id="sessionSummary" class="small">No session yet.</div>
     <pre id="rawSession" class="code" style="margin-top:8px; max-height:220px; overflow:auto; background:#10141C; padding:8px; border:1px solid #2A3142; border-radius:6px"></pre>
@@ -61,6 +73,7 @@ svg{width:100%;height:520px;background:#10141C;border:1px solid #2A3142;border-r
     <div style="margin-top:8px" class="small">Replay Controls: <select id="replaySelect" style="margin-left:8px"></select> <button class="btn" id="btnReplay">Replay</button></div>
   </div>
 </div>
+<script defer src="/static/js/hopgraph_stream_overlay.js"></script>
 <script>
 function H(){ try{ return {'x-api-key': localStorage.getItem('apiKey')||'devkey123'} }catch(_){ return {'x-api-key':'devkey123'} } }
 let _session = null; let _adaptive = false;
@@ -80,7 +93,7 @@ function buildDemoPayload(){
 async function buildSession(){
   try{
     const payload = buildDemoPayload();
-    const r = await fetch('/api/v1/graph/session/build', { method:'POST', headers: { 'Content-Type':'application/json', ...H() }, body: JSON.stringify(payload) });
+    const r = await (window.safeFetch || fetch)('/api/v1/graph/session/build', { method:'POST', headers: { 'Content-Type':'application/json', ...H() }, body: JSON.stringify(payload) });
     const j = await r.json(); if(!r.ok){ sessionSummary.textContent = 'Error building session: '+(j.detail||r.status); return; }
     _session = j; renderSession(j);
   }catch(e){ sessionSummary.textContent='Session error'; }
@@ -95,6 +108,7 @@ function renderSession(j){
     const dd = j.domain_diversity_score; const ms = j.mapping_semantics_score; const conf = j.confidence; const verdict = j.verdict;
     document.getElementById('metricsBar').textContent = `Verdict: ${verdict} • Confidence ${conf} • Domain Diversity ${dd} • Mapping Semantics ${ms}`;
   }catch(_){ }
+  renderOverlay(j.hopgraph_overlay);
   loadSessionList();
 }
 function nodeColor(domain){
@@ -165,7 +179,7 @@ function explainGraph(){
 }
 async function loadSessionList(){
   try{
-    const r = await fetch('/api/v1/graph/session/list', { headers: H() });
+    const r = await (window.safeFetch || fetch)('/api/v1/graph/session/list', { headers: H() });
     const j = await r.json();
     if(!r.ok){ return; }
     const el = document.getElementById('sessionList');
@@ -182,11 +196,88 @@ async function loadSessionList(){
     }catch(e){ }
   }catch(e){ }
 }
+function renderOverlay(overlay){
+  const el = document.getElementById('overlaySummary');
+  if(!el) return;
+  if(!overlay || !overlay.snapshot){
+    el.textContent = 'No overlay data yet.';
+    return;
+  }
+  try{
+    const snap = overlay.snapshot || {};
+    const nodes = snap.node_count || (snap.nodes ? snap.nodes.length : 0);
+    const edges = snap.edge_count || (snap.edges ? snap.edges.length : 0);
+    const supply = overlay.supply_chain_nodes || 0;
+    const binary = overlay.binary_nodes || 0;
+    const infra = overlay.infrastructure_nodes || 0;
+    const recent = (snap.nodes || []).slice(0,6).map(n => `${n.type}:${n.label}`).join(', ');
+    el.textContent = `Nodes ${nodes} | Edges ${edges} | Supply-chain ${supply} | Binary ${binary} | Infra ${infra}` + (recent ? ` | Recent: ${recent}` : '');
+  }catch(e){
+    el.textContent = 'Overlay unavailable.';
+  }
+}
+async function loadPresets(){
+  const sel = document.getElementById('presetSelect');
+  if(!sel) return;
+  sel.innerHTML = '<option value="">Loading presets...</option>';
+  try{
+    const r = await (window.safeFetch || fetch)('/api/v1/graph/session/presets', { headers: H() });
+    const j = await r.json();
+    if(!r.ok){ sel.innerHTML = '<option value="">Preset load failed</option>'; return; }
+    const presets = j.presets || [];
+    sel.innerHTML = '';
+    if(!presets.length){
+      sel.innerHTML = '<option value="">No presets available</option>';
+      document.getElementById('presetSummary').textContent = 'Backend did not return any preset definitions.';
+      return;
+    }
+    presets.forEach((p, idx)=>{
+      const opt = document.createElement('option');
+      opt.value = p.name || `preset-${idx}`;
+      opt.textContent = p.title ? `${p.title} (${p.name})` : (p.name || `preset-${idx}`);
+      opt.dataset.description = p.description || '';
+      sel.appendChild(opt);
+    });
+    const summary = document.getElementById('presetSummary');
+    summary.textContent = (presets[0].description || 'Select a preset to view its description.');
+    sel.onchange = ()=>{
+      const chosen = sel.options[sel.selectedIndex];
+      document.getElementById('presetSummary').textContent = chosen?.dataset?.description || 'Select a preset to view its description.';
+    };
+  }catch(e){
+    sel.innerHTML = '<option value="">Preset load error</option>';
+    document.getElementById('presetSummary').textContent = 'Unable to load preset list.';
+  }
+}
+async function runPreset(){
+  const sel = document.getElementById('presetSelect');
+  const summary = document.getElementById('presetSummary');
+  const pre = document.getElementById('presetNodes');
+  if(!sel || !sel.value){
+    summary.textContent = 'Select a preset first.';
+    return;
+  }
+  summary.textContent = 'Running preset...';
+  pre.textContent = '';
+  try{
+    const r = await (window.safeFetch || fetch)(`/api/v1/graph/session/presets/${encodeURIComponent(sel.value)}`, { headers: H() });
+    const j = await r.json();
+    if(!r.ok){
+      summary.textContent = 'Preset failed: '+(j.detail || r.status);
+      return;
+    }
+    const matchCount = j.summary && typeof j.summary.match_count !== 'undefined' ? `Matches ${j.summary.match_count}` : '';
+    summary.textContent = `${(j.summary && j.summary.description) || 'Preset result'} ${matchCount}`.trim();
+    pre.textContent = JSON.stringify({ nodes: (j.nodes || []).slice(0, 20), edges: (j.edges || []).slice(0, 20) }, null, 2);
+  }catch(e){
+    summary.textContent = 'Preset error: '+(e.message || e);
+  }
+}
 // Session controls
 document.getElementById('btnRefreshSessions').onclick = loadSessionList;
 document.getElementById('btnClearExpired').onclick = async ()=>{
   try{
-    const r = await fetch('/api/v1/graph/session/cleanup?expired=true', { method: 'POST', headers: H() });
+    const r = await (window.safeFetch || fetch)('/api/v1/graph/session/cleanup?expired=true', { method: 'POST', headers: H() });
     const j = await r.json();
     loadSessionList();
     alert('Cleanup completed: '+(j.removed||0)+' removed');
@@ -204,7 +295,7 @@ try{
 document.getElementById('btnReplay').onclick = async ()=>{
   const sel = document.getElementById('replaySelect'); if(!sel || !sel.value){ alert('Select a session to replay'); return; }
   try{
-    const r = await fetch('/api/v1/graph/session/'+encodeURIComponent(sel.value), { headers: H() });
+    const r = await (window.safeFetch || fetch)('/api/v1/graph/session/'+encodeURIComponent(sel.value), { headers: H() });
     const j = await r.json(); if(!r.ok){ alert('Replay failed'); return; }
     _session = j.summary || j;
     renderSession(_session);
@@ -213,7 +304,7 @@ document.getElementById('btnReplay').onclick = async ()=>{
 };
 async function loadAlphaCurve(){
   try{
-    const r = await fetch('/api/v1/graph/session/alpha_curve', { headers: H() });
+    const r = await (window.safeFetch || fetch)('/api/v1/graph/session/alpha_curve', { headers: H() });
     const j = await r.json();
     if(!r.ok) return;
     document.getElementById('alphaCurve').textContent = JSON.stringify(j.curve||[], null, 2);
@@ -223,8 +314,10 @@ async function loadAlphaCurve(){
  document.getElementById('btnBuildDemo').onclick = buildSession;
  document.getElementById('btnAdaptive').onclick = ()=>{ _adaptive=!_adaptive; document.getElementById('btnAdaptive').textContent = _adaptive? 'Adaptive ON':'Adaptive EWMA'; };
  document.getElementById('btnExplain').onclick = explainGraph;
+ document.getElementById('btnRunPreset').onclick = runPreset;
  // Initial draw (empty baseline)
  drawGraph({});
  loadAlphaCurve();
+ loadPresets();
 </script>
 </body></html>

@@ -4,20 +4,21 @@ Author: Security Engineering Team
 Version: 1.0.0
 """
 
-import pytest
 import asyncio
-import time
-from unittest.mock import Mock, AsyncMock
-import sys
 import os
+import sys
+import time
+from unittest.mock import AsyncMock, Mock
+
+import pytest
 
 # Add src to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 from main import SecurityOrchestrator
+from modules.adaptive_tuner import AdaptiveTuner
 from modules.baseline import BaselineModule
 from modules.regex_engine import RegexPatternMatcher
-from modules.adaptive_tuner import AdaptiveTuner
 
 
 @pytest.fixture

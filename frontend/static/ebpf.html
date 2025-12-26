@@ -48,7 +48,7 @@
     async function load(){
       const tbody = document.getElementById('rows'); tbody.innerHTML = '<tr><td class="muted" colspan="8">Loading...</td></tr>';
       try{
-        const r = await fetch('/api/v1/events/ebpf?limit=200', { headers: _auth() });
+        const r = await (window.safeFetch || fetch)('/api/v1/events/ebpf?limit=200', { headers: _auth() });
         const j = await r.json(); const ev = j.events||[]; if(!ev.length){ tbody.innerHTML = '<tr><td class="muted" colspan="8">No events</td></tr>'; return; }
         const fmt = (v)=> (v==null||v==='')?'<span class="muted">n/a</span>':String(v);
         tbody.innerHTML = ev.map(e=>`<tr>
@@ -68,4 +68,3 @@
   </script>
 </body>
 </html>
-

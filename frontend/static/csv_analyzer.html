@@ -9,6 +9,19 @@
        Shared tokens imported from /static/css/theme.css for DRY. -->
   <link rel="stylesheet" href="/static/css/theme.css" />
     <script defer src="/static/js/theme.js"></script>
+  <script>
+  // Actions dropdown wiring
+  (function actionsDropdown(){ try{
+    const btn = document.getElementById('btnActions'); const menu = document.getElementById('actionsMenu');
+    if(!btn || !menu) return;
+    btn.addEventListener('click', function(e){ e.stopPropagation(); menu.style.display = (menu.style.display==='flex' ? 'none' : 'flex'); menu.style.flexDirection='column'; });
+    document.addEventListener('click', function(){ try{ menu.style.display='none'; }catch(_){ } });
+    menu.querySelectorAll('button[data-action]').forEach(function(b){ b.addEventListener('click', function(ev){ var act = b.getAttribute('data-action'); try{ if(act==='analyze') document.getElementById('btnAnalyzePipeline').click(); else if(act==='batch') document.getElementById('btnBatchAnalyze').click(); else if(act==='send-identity') document.getElementById('btnSendIdentity').click(); else if(act==='send-cloud') document.getElementById('btnSendCloud').click(); else if(act==='send-network') document.getElementById('btnSendNetwork').click(); else if(act==='correlate') document.getElementById('btnCorrelateHopGraph').click(); else if(act==='export') document.getElementById('btnExportReport').click(); else if(act==='share') { const sb=document.getElementById('btnShareReport'); if(sb) sb.click(); } }catch(_){ }
+      menu.style.display='none'; ev.stopPropagation(); }); });
+  }catch(_){ } })();
+
+    // authHeaders provided by shared /static/js/theme.js
+  </script>
   <style>
     html, body { margin:0; }
     h2 { margin-top:0; }
@@ -19,6 +32,12 @@
     .btn:hover { background:var(--bg-hover); }
     .btn-primary { background:var(--accent); border-color:var(--accent); color:#fff; }
     .btn-primary:hover { background:var(--accent-hover); }
+    .verdict-view-toggle { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-left:auto; }
+    .verdict-toggle-group { display:inline-flex; border:1px solid var(--border); border-radius:8px; overflow:hidden; }
+    .verdict-toggle-group .btn { border-radius:0; border:0; border-right:1px solid var(--border); padding:6px 14px; background:transparent; color:var(--text-muted); }
+    .verdict-toggle-group .btn:last-child { border-right:0; }
+    .verdict-toggle-group .btn.active-view { background:var(--accent); color:#fff; border-color:var(--accent); }
+    .inline-info { font-size:12px; color:var(--text-muted); }
     .table-wrapper { width:100%; overflow:auto; }
     table { width:100%; border-collapse:collapse; font-size:13px; min-width:900px; }
     td, th { padding:8px 10px; border:1px solid var(--border); vertical-align:middle; }
@@ -29,6 +48,8 @@
     th[data-sort="asc"]::after { border-bottom:8px solid var(--text-primary); }
     th[data-sort="desc"]::after { border-top:8px solid var(--text-primary); }
     tbody tr:hover { background:var(--bg-hover); }
+    .llm-status-cell { width:70px; text-align:center; font-weight:600; }
+    .llm-indicator { display:inline-block; min-width:1.5em; text-align:center; font-size:14px; }
     .pill { background:var(--accent); color:#fff; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:600; }
     #pipelineBadge { margin-left:8px; }
     #csvDrillModal { position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,.55); display:none; align-items:center; justify-content:center; padding:40px; }
@@ -40,6 +61,83 @@
     .inline-info { font-size:11px; color:var(--text-muted); margin-left:6px; }
     .empty-hint { color:var(--text-muted); font-size:13px; padding:12px 4px; }
     .small { font-size:11px; color:var(--text-muted); }
+    .auto-pipeline-controls { display:flex; align-items:center; flex-wrap:wrap; gap:10px; margin:8px 0 4px; }
+    .auto-pipeline-note { font-size:11px; color:var(--text-muted); }
+    .pipeline-legend { display:flex; flex-wrap:wrap; gap:8px; align-items:center; font-size:10px; color:var(--text-muted); margin-bottom:12px; }
+    .pipeline-legend strong { font-size:11px; color:var(--text-muted); }
+    .persona-tabs { display:flex; gap:6px; flex-wrap:wrap; }
+    .persona-tab { border:1px solid var(--border); background:var(--bg-tertiary); color:var(--text-primary); padding:4px 10px; border-radius:999px; font-size:11px; cursor:pointer; text-transform:uppercase; letter-spacing:0.4px; }
+    .persona-tab.active { background:var(--accent); border-color:var(--accent); color:#fff; }
+    .stage-row { display:flex; justify-content:space-between; font-size:12px; padding:2px 0; border-bottom:1px solid rgba(255,255,255,0.05); }
+    .stage-row:last-child { border-bottom:none; }
+    .stage-row span { color:var(--text-muted); }
+    .stage-row.stage-done span { color:#2ecc71; }
+    .stage-row.stage-running span { color:#f1c40f; }
+    .stage-row.stage-error span { color:#e74c3c; }
+    .telemetry-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:6px; font-size:12px; }
+    .telemetry-grid div { background:var(--bg-tertiary); border:1px solid var(--border); border-radius:6px; padding:6px 8px; line-height:1.4; }
+    .mapping-pill { display:inline-flex; align-items:center; gap:6px; padding:4px 8px; border-radius:999px; background:rgba(255,255,255,0.05); font-size:11px; margin:2px; border:1px solid rgba(255,255,255,0.08); }
+    .report-meta-line { font-size:12px; color:var(--text-muted); margin-top:6px; }
+    .priority-wrapper { border:1px solid var(--border); border-radius:8px; padding:10px; background:var(--bg-tertiary); margin-bottom:10px; }
+    .priority-card { display:flex; align-items:center; justify-content:space-between; gap:10px; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:8px 10px; margin-bottom:8px; background:rgba(255,255,255,0.02); }
+    .priority-card:last-child { margin-bottom:0; }
+    .priority-rank { font-size:18px; font-weight:600; color:var(--accent); min-width:36px; text-align:center; }
+    .priority-meta { font-size:11px; color:var(--text-muted); margin-top:2px; }
+    .review-summary { font-size:12px; color:var(--text-muted); margin:6px 0; }
+    .deep-row-card { border:1px solid var(--border); border-radius:8px; padding:10px; margin-bottom:10px; background:var(--bg-tertiary); }
+    .deep-row-card.important { box-shadow:0 0 0 1px rgba(255,255,255,0.08), inset 0 0 12px rgba(255,255,255,0.05); }
+    .row-score-pill { display:inline-flex; align-items:center; border:1px solid var(--border); border-radius:999px; font-size:11px; padding:2px 8px; margin-left:6px; }
+    .review-controls { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
+    .review-pill { border:1px solid var(--border); border-radius:999px; padding:4px 10px; font-size:11px; background:transparent; color:var(--text-primary); cursor:pointer; transition:background .2s, border-color .2s; }
+    .review-pill.active { background:var(--accent); border-color:var(--accent); color:#fff; }
+    .review-note { width:100%; min-height:60px; background:rgba(255,255,255,0.03); border:1px solid var(--border); border-radius:6px; padding:6px 8px; margin-top:8px; color:var(--text-primary); font-size:12px; font-family:inherit; resize:vertical; }
+    .review-note:focus { outline:none; border-color:var(--accent); }
+    .domain-cue-line { font-size:12px; color:var(--text-muted); margin:4px 0 8px; }
+    .domain-pill { display:inline-flex; align-items:center; border:1px solid rgba(255,255,255,0.15); border-radius:999px; padding:2px 8px; font-size:10px; margin:2px; text-transform:uppercase; letter-spacing:0.4px; color:var(--text-muted); }
+    .text-muted { color:var(--text-muted); font-size:11px; }
+    .llm-sidebar { position:fixed; top:0; right:-460px; width:420px; max-width:60vw; height:100%; background:var(--bg-secondary); border-left:1px solid var(--border); box-shadow:-8px 0 24px rgba(0,0,0,0.45); padding:20px; transition:right .25s ease; z-index:1500; display:flex; flex-direction:column; }
+    .llm-sidebar.visible { right:0; }
+    .llm-sidebar.detached { right:auto; left:50%; transform:translateX(-50%); border:1px solid var(--border); box-shadow:0 12px 32px rgba(0,0,0,0.55); max-width:70vw; width:640px; }
+    .llm-sidebar-body { flex:1; overflow-y:auto; overflow-x:hidden; max-height:calc(100vh - 160px); border:1px solid var(--border); border-radius:8px; padding:12px; background:var(--bg-tertiary); white-space:normal; font-size:13px; line-height:1.45; }
+    .tier1-section { margin-bottom:12px; padding-bottom:8px; border-bottom:1px solid rgba(255,255,255,0.08); }
+    .tier1-section:last-child { border-bottom:none; }
+    .tier1-section h4 { margin:0 0 4px; font-size:13px; letter-spacing:0.4px; text-transform:uppercase; color:var(--text-muted); }
+    .tier1-table { width:100%; border-collapse:collapse; font-size:12px; margin-bottom:6px; color:var(--text-primary); }
+    .tier1-table td { padding:6px 8px; border-bottom:1px solid rgba(255,255,255,0.06); vertical-align:top; }
+    .tier1-table td:first-child { color:var(--text-muted); width:42%; text-transform:none; letter-spacing:0.2px; }
+    .tier1-table td:last-child { color:#f2f5ff; font-weight:600; }
+    .tier1-table tr:nth-child(odd) td { background:rgba(255,255,255,0.02); }
+    .tier1-table tr:last-child td { border-bottom:none; }
+    .tier1-chip-list { display:flex; flex-wrap:wrap; gap:6px; margin:6px 0 4px; }
+    .tier1-chip { padding:2px 8px; border-radius:999px; background:rgba(255,255,255,0.08); font-size:11px; }
+    .playbook-steps { margin:6px 0 4px 18px; padding-left:6px; line-height:1.5; }
+    .playbook-steps li { margin-bottom:6px; }
+    .tier1-playbook-meta { display:flex; flex-wrap:wrap; gap:6px; margin-top:6px; font-size:11px; color:var(--text-muted); }
+    .tier1-playbook-meta .tier1-meta-field { border:1px solid rgba(255,255,255,0.12); border-radius:6px; padding:3px 8px; background:rgba(255,255,255,0.02); }
+    body.llm-detached { overflow:auto; }
+    .llm-sidebar h3 { margin:0; font-size:18px; }
+    .llm-sidebar .close-btn { border:none; background:transparent; color:var(--text-muted); font-size:20px; cursor:pointer; }
+    .llm-sidebar-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; }
+    .llm-sidebar-footer { display:flex; justify-content:space-between; align-items:center; margin-top:12px; }
+    .llm-sidebar-footer .cost { font-size:12px; color:var(--text-muted); }
+    .badge { display:inline-flex; align-items:center; padding:2px 8px; border-radius:999px; font-size:11px; font-weight:600; letter-spacing:0.5px; }
+    .badge-info { background:#17809b; color:#fff; }
+    .badge-success { background:#1e8e3e; color:#fff; }
+    .badge-secondary { background:#4d4f59; color:#f5f5f7; }
+    .tier1-action-hint { font-size:11px; color:var(--text-muted); border-left:2px solid rgba(255,255,255,0.15); padding-left:10px; margin-bottom:10px; line-height:1.5; }
+    .tier1-action-hint ul { margin:6px 0 0 16px; padding:0; }
+    .tier1-action-hint li { margin-bottom:4px; }
+    .tier1-action-status { font-size:12px; color:var(--text-muted); margin-bottom:8px; }
+    .tier1-confidence { border:1px solid rgba(255,255,255,0.12); border-radius:8px; padding:12px; margin-top:12px; background:rgba(255,255,255,0.02); font-size:12px; line-height:1.5; }
+    .tier1-confidence-label { font-size:11px; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-muted); margin-bottom:4px; }
+    .tier1-confidence-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:8px; margin-bottom:8px; }
+    .tier1-confidence-metric { border:1px solid rgba(255,255,255,0.08); border-radius:6px; padding:8px; background:rgba(255,255,255,0.02); }
+    .tier1-confidence-metric .label { font-size:11px; letter-spacing:0.4px; text-transform:uppercase; color:var(--text-muted); }
+    .tier1-confidence-metric .value { font-size:14px; font-weight:600; margin-top:2px; }
+    .tier1-pipeline-list { margin:4px 0 0 18px; padding:0; }
+    .tier1-pipeline-list li { margin-bottom:4px; }
+    .tier1-uncertainty { font-size:11px; color:#f6c177; margin-top:6px; }
+    .tier1-factor-pill { display:inline-flex; border:1px solid rgba(255,255,255,0.15); border-radius:999px; padding:2px 8px; margin:2px 4px 0 0; font-size:11px; }
     /* Verdict visual helpers */
     tr.verdict-pass { box-shadow: inset 4px 0 0 0 #27ae60; }
     tr.verdict-medium { box-shadow: inset 4px 0 0 0 #f39c12; }
@@ -55,9 +153,13 @@
       <div id="raSignalsSummary" style="font-family:Consolas,monospace; font-size:11px; background:var(--bg-tertiary); padding:8px; border:1px solid var(--border); border-radius:6px; white-space:pre; overflow:auto; max-height:220px;">No remote access signals detected.</div>
     </div>
     <div class="controls">
-      <input id="fileInput" data-test="csv-file-input" type="file" class="btn" />
+      <input id="fileInput" data-test="csv-file-input" type="file" style="display:none;" />
+      <button id="btnSelectFiles" class="btn" title="Select CSV/XLSX files">Select Files</button>
       <button id="btnLoad" data-test="csv-btn-load" class="btn btn-primary">Load</button>
+      <button id="btnEditMapping" class="btn" title="Adjust canonical field mapping" disabled>Edit Mapping</button>
       <button id="btnExplain" data-test="csv-btn-explain" class="btn">Fetch Explain</button>
+      <!-- Deep Analyze button with test selector -->
+      <button id="btnAnalyzePipeline" data-test="csv-btn-deep-analyze" class="btn" title="Run Deep Analyze on selected or all rows">Deep Analyze</button>
       <button id="btnSignalDetails" class="btn" title="Show/hide signal explanations">Signal Details</button>
       <label style="display:inline-flex; align-items:center; gap:8px;">
         <span class="small">Graph</span>
@@ -67,16 +169,51 @@
           <option value="network">Network</option>
         </select>
       </label>
-      <button id="btnAnalyzePipeline" data-test="csv-btn-deep-analyze" class="btn">Deep Analyze</button>
-      <button id="btnSendIdentity" class="btn" title="Post selected rows as identity events">Send to Identity Graph</button>
-      <button id="btnSendCloud" class="btn" title="Post selected rows as cloud resources">Send to Cloud Graph</button>
-      <button id="btnSendNetwork" class="btn" title="Post selected rows as network flows">Send to Network Graph</button>
-      <button id="btnCorrelateHopGraph" class="btn" style="background:#2b3443" title="Upload selected rows and build correlation session">Correlate (HopGraph)</button>
+      <div class="actions-dropdown" style="position:relative; display:inline-block;">
+        <button id="btnActions" class="btn">⚡ Actions ▾</button>
+        <div id="actionsMenu" class="actions-menu" style="display:none; position:absolute; right:0; margin-top:6px; background:var(--bg-secondary); border:1px solid var(--border); border-radius:8px; padding:8px; min-width:240px; z-index:1000;">
+          <style>
+            .actions-menu .menu-item { display:flex; align-items:center; gap:10px; width:100%; text-align:left; padding:6px 8px; border-radius:6px; background:transparent; border:none; cursor:pointer; }
+            .actions-menu .menu-item:hover { background:rgba(255,255,255,0.02); }
+            .actions-menu svg { width:16px; height:16px; flex:0 0 16px; fill:currentColor; opacity:0.9; }
+            .actions-menu .menu-label { flex:1; font-size:13px; }
+          </style>
+          <button class="menu-item" data-action="analyze"><svg data-name="icon-deep-analyze" viewBox="0 0 24 24" aria-hidden="true"><title>Deep Analyze</title><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm1 14h-2v-2h2v2zm0-4h-2V6h-2v6z"/></svg><span class="menu-label">Deep Analyze</span></button>
+          <button class="menu-item" data-action="batch"><svg data-name="icon-batch-analyze" viewBox="0 0 24 24" aria-hidden="true"><title>Batch Analyze</title><path d="M3 13h2v-2H3v2zm4 0h14v-2H7v2zM3 17h2v-2H3v2zm0-8h2V7H3v2z"/></svg><span class="menu-label">Batch Analyze</span></button>
+          <button class="menu-item" data-action="send-identity"><svg data-name="icon-send-identity" viewBox="0 0 24 24" aria-hidden="true"><title>Send to Identity</title><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg><span class="menu-label">Send to Identity</span></button>
+          <button class="menu-item" data-action="send-cloud"><svg data-name="icon-send-cloud" viewBox="0 0 24 24" aria-hidden="true"><title>Send to Cloud</title><path d="M19.35 10.04A7 7 0 0 0 5 9c0-2.76 2.24-5 5-5 1.64 0 3.09.8 4 2.03A5.994 5.994 0 0 1 19.35 10.04zM18 18H6v-1c0-2.21 3.58-4 6-4s6 1.79 6 4v1z"/></svg><span class="menu-label">Send to Cloud</span></button>
+          <button class="menu-item" data-action="send-network"><svg data-name="icon-send-network" viewBox="0 0 24 24" aria-hidden="true"><title>Send to Network</title><path d="M12 4l4 4h-3v6h-2V8H8l4-4zm6 10v6H6v-6H4v6a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-6h-2z"/></svg><span class="menu-label">Send to Network</span></button>
+          <button class="menu-item" data-action="correlate"><svg data-name="icon-correlate" viewBox="0 0 24 24" aria-hidden="true"><title>Correlate (HopGraph)</title><path d="M12 2L3 7v6c0 5 3.58 9.74 9 11 5.42-1.26 9-6 9-11V7l-9-5zM11 12h2v5h-2zM11 7h2v3h-2z"/></svg><span class="menu-label">Correlate (HopGraph)</span></button>
+          <div style="height:8px"></div>
+          <button class="menu-item" data-action="export"><svg data-name="icon-export" viewBox="0 0 24 24" aria-hidden="true"><title>Export Report</title><path d="M5 20h14v-2H5v2zm7-18L5.33 9h3.67v6h6V9h3.67L12 2z"/></svg><span class="menu-label">Export Report</span></button>
+          <button class="menu-item" data-action="share"><svg data-name="icon-share" viewBox="0 0 24 24" aria-hidden="true"><title>Share Report</title><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.03-.47-.09-.7l7.02-4.11c.54.5 1.25.82 2.07.82 1.66 0 3-1.34 3-3S19.66 2 18 2s-3 1.34-3 3c0 .24.04.47.09.7L8.07 9.81C7.54 9.3 6.83 9 6 9 4.34 9 3 10.34 3 12s1.34 3 3 3c.83 0 1.54-.3 2.07-.81l7.12 4.17c-.05.21-.09.43-.09.64 0 1.66 1.34 3 3 3s3-1.34 3-3-1.34-3-3-3z"/></svg><span class="menu-label">Share Report</span></button>
+        </div>
+      </div>
+      <label style="display:inline-flex; align-items:center; gap:8px;">
+        <span class="small">LLM Summaries</span>
+        <select id="llmLimit" class="btn" style="padding:6px 10px;">
+          <option value="25" selected>Top 25</option>
+          <option value="50">Top 50</option>
+          <option value="75">Top 75</option>
+          <option value="0">All</option>
+        </select>
+      </label>
+      <span id="llmCostEstimate" class="small" style="min-width:90px;">Est. cost: $0.000</span>
+      <span id="llmAggregateCost" class="small" style="min-width:110px;">Total cost: $0.000</span>
+      <button id="btnGenerateMore" class="btn" style="display:none;" title="Generate LLM summaries for next batch">Generate More</button>
       <label style="display:inline-flex; align-items:center; gap:8px;">
         <input id="reportCompany" placeholder="Company (optional)" style="padding:6px 10px; border-radius:6px; border:1px solid var(--border); background:var(--bg-tertiary); color:var(--text-primary);" />
       </label>
       <label style="display:inline-flex; align-items:center; gap:8px;">
         <input id="reportRecipients" placeholder="Recipients (comma separated)" style="padding:6px 10px; border-radius:6px; border:1px solid var(--border); background:var(--bg-tertiary); color:var(--text-primary); width:260px;" />
+      </label>
+      <label style="display:inline-flex; align-items:center; gap:8px;">
+        <span class="small">Persona</span>
+        <select id="reportPersona" class="btn" style="padding:6px 10px;">
+          <option value="ciso">CISO</option>
+          <option value="soc">SOC</option>
+          <option value="compliance">Compliance</option>
+        </select>
       </label>
       <label style="display:inline-flex; align-items:center; gap:6px; font-size:13px;">
         <input type="checkbox" id="reportIncludeModel" />
@@ -85,6 +222,20 @@
       <button id="btnExportReport" class="btn" title="Generate comprehensive report for selected rows">Export Report</button>
       <div id="pipelineBadge" style="display:inline-block"><span class="pill" style="display:none">pipeline</span></div>
       <button class="btn" id="btnThemeToggle" type="button">Toggle Theme</button>
+    </div>
+    <div id="mappingSummaryBanner" class="mapping-pill" style="display:none; margin:6px 0 12px;"></div>
+    <div class="panel" id="reportDocumentPanel" style="display:none; margin-bottom:16px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+        <h3 style="margin:0;">Latest Assessment Report</h3>
+        <div id="reportPersonaTabs" class="persona-tabs">
+          <button type="button" class="persona-tab" data-persona="ciso">CISO</button>
+          <button type="button" class="persona-tab" data-persona="soc">SOC</button>
+          <button type="button" class="persona-tab" data-persona="compliance">Compliance</button>
+        </div>
+      </div>
+      <div id="reportDocumentMeta" class="report-meta-line"></div>
+      <div id="reportReviewCoverage" class="report-meta-line">Analyst review coverage will appear after Deep Analyze.</div>
+      <div id="reportDocumentBody" style="margin-top:12px; font-size:13px; line-height:1.5;">Export a report to view persona-ready guidance.</div>
     </div>
     <div class="panel" id="signalHelpPanel" style="display:none; margin-bottom:16px;">
       <h3 style="margin:0 0 6px; font-size:15px;">Signal Explanations</h3>
@@ -102,6 +253,23 @@
         <span style="font-size:12px">Show ranking explanation</span>
       </label>
       <input id="csvSearch" placeholder="Quick search (process/path/host)" style="margin-left:12px; padding:6px 10px; border-radius:6px; border:1px solid var(--border); background:var(--bg-tertiary); color:var(--text-primary);" />
+      <div class="verdict-view-toggle">
+        <span class="small">Verdict View:</span>
+        <div class="verdict-toggle-group" role="group" aria-label="Toggle verdict view">
+          <button id="btnVerdictViewInitial" class="btn" type="button">Initial</button>
+          <button id="btnVerdictViewPipeline" class="btn" type="button">Post-pipeline</button>
+        </div>
+        <span id="verdictViewInfo" class="inline-info">Initial heuristics</span>
+      </div>
+      <div style="display:flex; align-items:center; gap:8px; margin-left:12px;">
+        <button id="btnPipelineSort" class="btn" title="Sort rows by pipeline triage score">Pipeline Sort</button>
+        <div class="pipeline-legend" id="pipelineLegend">
+          <strong>Legend:</strong>
+          <span style="background:#27ae60;color:#fff;padding:4px 8px;border-radius:6px;">Low</span>
+          <span style="background:#f39c12;color:#fff;padding:4px 8px;border-radius:6px;">Medium</span>
+          <span style="background:#e74c3c;color:#fff;padding:4px 8px;border-radius:6px;">High</span>
+        </div>
+      </div>
       <span id="rowsSummary" class="inline-info"></span>
     </div>
     <div id="csv_results_ready" data-test="csv-results-ready" style="display:none"></div>
@@ -117,17 +285,48 @@
       </div>
       <div class="table-wrapper">
         <table id="results" role="table" aria-label="CSV results"><thead><tr>
+          <th role="columnheader" aria-label="LLM status">LLM</th>
           <th data-col="process_name" role="columnheader" aria-sort="none">Process</th>
           <th data-col="file_path" role="columnheader" aria-sort="none">Path</th>
           <th data-col="sha256" role="columnheader" aria-sort="none">SHA256</th>
           <th data-col="host" role="columnheader" aria-sort="none">Host</th>
           <th data-col="verdict" role="columnheader" aria-sort="none">Verdict</th>
+          <th role="columnheader">Actions</th>
+          <th data-col="domain" role="columnheader" aria-sort="none">Domain</th>
           <th data-col="dread" role="columnheader" aria-sort="none">DREAD</th>
           <th data-col="signals" role="columnheader" aria-sort="none">Signals</th>
           <th role="columnheader">Details</th>
-        </tr></thead><tbody id="tbody"><tr class="initial"><td colspan="8" class="empty-hint">No rows loaded yet.</td></tr></tbody></table>
+        </tr></thead><tbody id="tbody"><tr class="initial"><td colspan="10" class="empty-hint">No rows loaded yet.</td></tr></tbody></table>
       </div>
       <div class="small">Tip: Client parsing supports large files; showing up to 1000 rows. Deep Analyze merges signals and opens the deep frameworks page.</div>
+    </div>
+  </div>
+  <!-- Deep Analyze progress bar (global small indicator) -->
+  <div id="deepBackfillRibbonPlaceholder" style="position:fixed; right:18px; bottom:86px; display:block; z-index:1200;">
+    <div id="deepBackfillRibbon" style="background:linear-gradient(90deg,#06394b,#06485a); color:#eaffff; border:1px solid rgba(255,255,255,0.04); padding:8px; border-radius:8px; box-shadow:0 8px 24px rgba(0,0,0,0.45); display:flex; gap:10px; align-items:center;">
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <div><strong id="deepBackfillLabel">Auto Backfill</strong><div class="small" id="deepBackfillState" style="font-weight:700">idle</div></div>
+        <div style="display:flex;gap:8px;align-items:center"> 
+          <label class="small">Batch:<input id="deepBackfillBatch" type="number" min="1" value="10" style="width:72px;margin-left:6px;padding:4px;border-radius:6px;border:1px solid var(--border);background:var(--bg-tertiary);color:var(--text-primary)"/></label>
+          <label class="small">Interval(s):<input id="deepBackfillWindow" type="number" min="1" value="30" style="width:72px;margin-left:6px;padding:4px;border-radius:6px;border:1px solid var(--border);background:var(--bg-tertiary);color:var(--text-primary)"/></label>
+          <label class="small">Target%:<input id="deepBackfillTarget" type="number" min="0" max="100" value="100" style="width:72px;margin-left:6px;padding:4px;border-radius:6px;border:1px solid var(--border);background:var(--bg-tertiary);color:var(--text-primary)"/></label>
+        </div>
+      </div>
+      <div style="margin-left:6px"><button id="deepBackfillToggleGlobal" class="btn" style="padding:6px 10px;">Start</button></div>
+    </div>
+  </div>
+  <div id="deepAnalyzeProgress" style="position:fixed; right:18px; bottom:18px; display:none; width:320px; z-index:1200;">
+    <div style="background:var(--bg-secondary); border:1px solid var(--border); padding:8px; border-radius:8px; box-shadow:0 8px 24px rgba(0,0,0,0.45);">
+      <div style="font-size:13px; margin-bottom:6px;">Deep Analyze Progress <span id="dap_percent" style="float:right;color:var(--text-muted)">0%</span></div>
+      <div style="background:var(--bg-tertiary); height:12px; border-radius:6px; overflow:hidden;"><div id="dap_bar" style="height:100%; width:0%; background:linear-gradient(90deg,#4A63E7,#6C8CFF);"></div></div>
+    </div>
+  </div>
+  <!-- Confirm Cancel Modal -->
+  <div id="cancelConfirmModal" style="display:none; position:fixed; left:0; top:0; right:0; bottom:0; background:rgba(0,0,0,0.45); align-items:center; justify-content:center; z-index:1300;">
+    <div style="background:var(--bg-secondary); border:1px solid var(--border); border-radius:8px; width:360px; max-width:96%; padding:16px; box-shadow:0 8px 32px rgba(0,0,0,.6);">
+      <div style="font-weight:700; margin-bottom:8px;">Confirm Cancel Backfill</div>
+      <div id="cancelConfirmBody" class="small" style="margin-bottom:12px;">Are you sure you want to stop backfill for this assessment?</div>
+      <div style="display:flex; gap:8px; justify-content:flex-end;"><button id="cancelConfirmNo" class="btn">No</button><button id="cancelConfirmYes" class="btn btn-danger">Yes, stop</button></div>
     </div>
   </div>
   <!-- Correlation Results Panel (hidden until built) -->
@@ -161,9 +360,21 @@
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;"><strong>Deep Analyze Options</strong><button class="btn csv-modal-close" id="daClose">Close</button></div>
       <div style="display:flex; gap:12px; margin-bottom:12px; align-items:center;">
         <label style="display:inline-flex; align-items:center; gap:8px;"><input type="radio" name="da_mode" value="basic" checked /> Basic</label>
-        <label style="display:inline-flex; align-items:center; gap:8px;"><input type="radio" name="da_mode" value="advanced" /> Advanced</label>
-        <label style="display:inline-flex; align-items:center; gap:8px; margin-left:12px;"><input type="checkbox" id="da_auto_llm" /> Auto-LLM</label>
-        <span class="small inline-info">Basic: 20 signals; Advanced: full set (+eBPF/PCAP)</span>
+        <label style="display:inline-flex; align-items:center; gap:8px;"><input type="radio" name="da_mode" value="advanced" /> Advanced <span title="Advanced mode enables the full signal set including optional eBPF syscall traces and PCAP-derived artifacts when available. Requires additional sensors (e.g., eBPF agents, Falco/Tetragon, or network capture) and may increase collection, storage, and privacy implications; use in controlled environments or with explicit approval." style="cursor:help;color:var(--text-muted);">ℹ️</span></label>
+        <label style="display:inline-flex; align-items:center; gap:8px; margin-left:12px;"><input type="checkbox" id="da_auto_llm" checked /> Auto-LLM <span title="Generates per-row AI summaries using your configured LLM provider. This consumes tokens and may incur cost; disable to skip LLM analysis for faster, cheaper runs. Requires an API key configured in Settings." style="cursor:help;color:var(--text-muted);">ℹ️</span></label>
+        <span class="small inline-info">Basic: 20 signals; Advanced: full set (+eBPF/PCAP where present)</span>
+      </div>
+      <div style="display:flex; align-items:center; gap:12px; margin-bottom:12px; flex-wrap:wrap;">
+        <label style="font-size:13px; display:inline-flex; align-items:center; gap:6px;">LLM Summaries:
+          <!-- Renamed IDs to avoid collisions with main controls -->
+          <select id="da_llmLimit" class="btn" style="padding:6px 10px;">
+            <option value="25" selected>Top 25 (DREAD sorted)</option>
+            <option value="50">Top 50</option>
+            <option value="75">Top 75</option>
+            <option value="0">All suspicious rows</option>
+          </select>
+        </label>
+        <span id="da_llmCostEstimate" class="small inline-info">Est. cost: $0.000</span>
       </div>
       <div style="margin-bottom:12px;"><strong>Detected Columns & Mapping Preview</strong><div id="daMappingPreview" style="margin-top:8px; max-height:260px; overflow:auto; border:1px solid var(--border); padding:8px; background:var(--bg-tertiary);"></div></div>
       <div style="display:flex; justify-content:flex-end; gap:8px;"><button class="btn" id="daCancel">Cancel</button><button class="btn btn-primary" id="daConfirm">Run Deep Analyze</button></div>
@@ -172,9 +383,16 @@
 
   <script defer src="/static/js/parse_tabular.js"></script>
   <script defer src="/static/js/notifications.js"></script>
+  <script defer src="/static/js/dread_utils.js"></script>
+  <script defer src="/static/js/csv_ingest_shared.js"></script>
   <script defer src="/static/js/csv_analyzer.js"></script>
-  <script src="/static/js/threat_ranking.js"></script>
+  <script defer src="/static/js/threat_ranking.js"></script>
   <script>
+  // File chooser wiring: expose #btnSelectFiles to trigger native chooser
+  (function fileChooser(){ try{
+    var btn = document.getElementById('btnSelectFiles'); var inp = document.getElementById('fileInput');
+    if(btn && inp){ btn.addEventListener('click', function(){ try{ inp.click(); }catch(_){ } }); }
+  }catch(_){ } })();
   (function reportButton(){ try{
     var btn = document.getElementById('btnExportReport'); if(!btn) return;
     // Helper: inject enhancements into a generated report window
@@ -326,7 +544,8 @@
         try{
           // csv_analyzer.js should expose window.csvSelectedRows or similar;
           // fall back to first 50 rows in tbody if not available
-          const rows = (window.csvSelectedRows && window.csvSelectedRows.length? window.csvSelectedRows : (window._csvRows||[])).slice(0,200);
+          const sourceRows = (window.csvSelectedRows && window.csvSelectedRows.length? window.csvSelectedRows : ((window.LAST_RESULTS && window.LAST_RESULTS.length)? window.LAST_RESULTS : (window._csvRows||[])));
+          const rows = sourceRows.slice(0,200);
           if(!rows || !rows.length){ notifications && notifications.toast && notifications.toast('No rows selected','warn'); return; }
           let sent=0; for(const r of rows){ const ev=_rowToIdentity(r); if(ev.user){ await _postIdentityEvent(ev); sent++; } }
           if(window.notifications && notifications.toast){ notifications.toast(`Posted ${sent} identity events`, 'success'); }
@@ -350,7 +569,8 @@
       const btn = document.getElementById('btnSendCloud'); if(!btn) return;
       btn.addEventListener('click', async function(){
         try{
-          const rows = (window.csvSelectedRows && window.csvSelectedRows.length? window.csvSelectedRows : (window._csvRows||[])).slice(0,200);
+          const sourceRows = (window.csvSelectedRows && window.csvSelectedRows.length? window.csvSelectedRows : ((window.LAST_RESULTS && window.LAST_RESULTS.length)? window.LAST_RESULTS : (window._csvRows||[])));
+          const rows = sourceRows.slice(0,200);
           if(!rows || !rows.length){ notifications && notifications.toast && notifications.toast('No rows selected','warn'); return; }
           const payload=[]; for(const r of rows){ const cr=_rowToCloudResource(r); if(cr){ payload.push(cr); } }
           if(payload.length){ await _postCloudResources(payload); if(window.notifications && notifications.toast){ notifications.toast(`Posted ${payload.length} cloud resources`, 'success'); } }
@@ -377,7 +597,8 @@
       const btn = document.getElementById('btnSendNetwork'); if(!btn) return;
       btn.addEventListener('click', async function(){
         try{
-          const rows = (window.csvSelectedRows && window.csvSelectedRows.length? window.csvSelectedRows : (window._csvRows||[])).slice(0,200);
+          const sourceRows = (window.csvSelectedRows && window.csvSelectedRows.length? window.csvSelectedRows : ((window.LAST_RESULTS && window.LAST_RESULTS.length)? window.LAST_RESULTS : (window._csvRows||[])));
+          const rows = sourceRows.slice(0,200);
           if(!rows || !rows.length){ notifications && notifications.toast && notifications.toast('No rows selected','warn'); return; }
           const payload=[]; for(const r of rows){ const f=_rowToNetworkFlow(r); if(f){ payload.push(f); } }
           if(payload.length){ await _postNetworkFlows(payload); if(window.notifications && notifications.toast){ notifications.toast(`Posted ${payload.length} network flows`, 'success'); } }
@@ -425,7 +646,7 @@
       btn.addEventListener('click', async function(){
         try{
           // build preview payload from first selected row or first table row
-          const rows = (window.csvSelectedRows && window.csvSelectedRows.length? window.csvSelectedRows : (window._csvRows||[]));
+          const rows = (window.csvSelectedRows && window.csvSelectedRows.length? window.csvSelectedRows : ((window.LAST_RESULTS && window.LAST_RESULTS.length)? window.LAST_RESULTS : (window._csvRows||[])));
           const sel = rows && rows.length? rows[0] : null;
           if(!sel){ notifications && notifications.toast && notifications.toast('No row selected for preview','warn'); return; }
           const graph = (document.getElementById('graphSelector')||{value:'identity'}).value || 'identity';
@@ -448,33 +669,28 @@
     const btn = document.getElementById('btnCorrelateHopGraph'); if(!btn) return;
     btn.addEventListener('click', async function(){
       try {
-        // Gather selected or fallback rows
-        const rows = (window.csvSelectedRows && window.csvSelectedRows.length? window.csvSelectedRows : (window._csvRows||[])).slice(0,400);
-        if(!rows.length){ if(window.notifications && notifications.toast){ notifications.toast('No rows selected','warn'); } return; }
-        // Build CSV blob for upload endpoint
-        const headers = Object.keys(rows[0]||{});
-        const canonicalMap = {};
-        headers.forEach(h => { const l = h.toLowerCase(); if(/user/.test(l)) canonicalMap['user']=h; else if(/host/.test(l)) canonicalMap['host']=h; else if(/proc|process/.test(l)) canonicalMap['process']=h; else if(/sha256|hash/.test(l)) canonicalMap['file_hash']=h; else if(l==='domain'||/dns|sni/.test(l)) canonicalMap['domain']=h; else if(l==='ip'||l==='src_ip') canonicalMap['ip']=h; else if(l==='dst_ip'||l==='dest_ip') canonicalMap['ip_dst']=h; });
-        let csvLines = [headers.join(',')];
-        rows.forEach(r => { csvLines.push(headers.map(h => JSON.stringify(r[h]||'')).join(',')); });
-        const blob = new Blob([csvLines.join('\n')+'\n'], { type:'text/csv' });
-        const fd = new FormData();
-        fd.append('files', new File([blob], 'single_source_selection.csv', { type:'text/csv' }));
-        const upResp = await fetch('/api/v1/upload/files', { method:'POST', headers:{ ..._authHeaders(), 'X-Correlation-Analyze':'csv-single' }, body: fd });
-        let upJson={}; try{ upJson = await upResp.json().catch(()=>({})); }catch(_){ }
-        if(!upResp.ok){ document.getElementById('corrSummary').textContent = 'Upload failed: '+upResp.status+' '+(upJson.detail||''); document.getElementById('correlationPanel').style.display='block'; return; }
-        const sessionIds = Array.isArray(upJson.sessions)? upJson.sessions : (upJson.sessions? [upJson.sessions]: []);
-        if(!sessionIds.length){ document.getElementById('corrSummary').textContent='No session IDs returned.'; document.getElementById('correlationPanel').style.display='block'; return; }
-        // Build session
-        const body = { session_ids: sessionIds, correlate: true, ewma: true, mapping: canonicalMap };
+        const sourceRows = (window.csvSelectedRows && window.csvSelectedRows.length? window.csvSelectedRows : ((window.LAST_RESULTS && window.LAST_RESULTS.length)? window.LAST_RESULTS : (window._csvRows||[])));
+        if(!sourceRows.length){ if(window.notifications && notifications.toast){ notifications.toast('No rows selected','warn'); } return; }
+        const rows = sourceRows.slice(0,400).map(function(r){ return (r && r.raw) ? r.raw : r; });
+        const mapping = window.__CSV_CURRENT_MAPPING || (sourceRows[0] && sourceRows[0].mapping) || {};
+        const body = {
+          rows: rows,
+          mapping: mapping,
+          correlate: true,
+          ewma: true,
+          adaptive_ewma: true,
+          weights: { diversity: true, mapping: true }
+        };
         const buildResp = await (window.safeFetch || fetch)('/api/v1/graph/session/build', { method:'POST', headers:{ 'Content-Type':'application/json', ..._authHeaders() }, body: JSON.stringify(body) });
         let buildJson={}; try{ buildJson = await buildResp.json().catch(()=>({})); }catch(_){ }
         document.getElementById('correlationPanel').style.display='block';
         if(!buildResp.ok){ document.getElementById('corrSummary').textContent='Build failed: '+buildResp.status+' '+(buildJson.detail||''); return; }
         const summary = buildJson.summary || buildJson;
+        try{ window.LAST_CORR_SUMMARY = summary; }catch(_){ }
         const factors = summary.factors || [];
         const conf = summary.confidence; const verdict = summary.verdict;
-        let txt = 'Session IDs: '+(summary.session_ids||[]).join(', ')+'\n';
+        const sid = (summary.session_ids||[]);
+        let txt = sid.length ? ('Session IDs: '+sid.join(', ')+'\n') : '';
         txt += 'Verdict: '+verdict+'  Confidence: '+conf+'\n';
         txt += 'Factors:\n'+(factors.map(f => typeof f==='string'? ' - '+f : ' - '+(f.factor||f.name)+'('+ (f.score||'') +')').join('\n') || ' (none)');
         const corr = summary.correlation || {}; const pairs=[]; Object.keys(corr).forEach(a => { Object.keys(corr[a]||{}).forEach(b => { const v=corr[a][b]; if(v>0) pairs.push(`${a}<->${b}:${v}`); }); });
@@ -545,47 +761,14 @@
   // Deep Analyze: ingest selected rows then build hopgraph and save summary for report enrichment
   (function deepAnalyze(){ try{
     const btn = document.getElementById('btnAnalyzePipeline'); if(!btn) return;
+    try{ btn.dataset.daModal = 'true'; }catch(_){}
     btn.addEventListener('click', async function(){
       try{
-        const rows = (window.csvSelectedRows && window.csvSelectedRows.length? window.csvSelectedRows : (window._csvRows||[])).slice(0,400);
+        const sourceRows = (window.csvSelectedRows && window.csvSelectedRows.length? window.csvSelectedRows : ((window.LAST_RESULTS && window.LAST_RESULTS.length)? window.LAST_RESULTS : (window._csvRows||[])));
+        const rows = sourceRows.slice(0,400);
         if(!rows.length){ if(window.notifications && notifications.toast) notifications.toast('No rows selected for deep analyze','warn'); return; }
         // Show options modal and mapping preview
         showDeepAnalyzeModal(rows);
-        return;
-        // First ingest rows (server returns event_ids)
-        const payload = rows.map((r, idx) => ({ row_index: idx, raw: r }));
-        const ing = await fetch('/api/v1/ingest/csv_rows', { method:'POST', headers: { 'Content-Type':'application/json', 'x-api-key': (localStorage.getItem('apiKey')||'devkey123') }, body: JSON.stringify(payload) });
-        if(!ing.ok){ if(window.notifications && notifications.toast) notifications.toast('Ingest failed','error'); return; }
-        const ingJson = await ing.json(); // expected: [{row_index, event_id}, ...]
-        // attach event_ids back to LAST_RESULTS if present
-        try{ (ingJson||[]).forEach(it => { const rec = (window.LAST_RESULTS||[])[it.row_index]; if(rec && rec.raw) rec.raw.event_id = it.event_id; }); }catch(_){ }
-        // Now upload file batch and build session (reuse hopgraph correlate logic)
-        // Build CSV blob for upload endpoint
-        const headers = Object.keys(rows[0]||{});
-        let csvLines = [headers.join(',')];
-        rows.forEach(r => { csvLines.push(headers.map(h => JSON.stringify(r[h]||'')).join(',')); });
-        const blob = new Blob([csvLines.join('\n')+'\n'], { type:'text/csv' });
-        const fd = new FormData(); fd.append('files', new File([blob], 'deep_analyze.csv', { type:'text/csv' }));
-        const upResp = await fetch('/api/v1/upload/files', { method:'POST', headers:{ 'x-api-key': (localStorage.getItem('apiKey')||'devkey123') }, body: fd });
-        if(!upResp.ok){ if(window.notifications && notifications.toast) notifications.toast('Upload failed for deep analyze','error'); return; }
-        const upJson = await upResp.json(); const sessionIds = Array.isArray(upJson.sessions)? upJson.sessions : (upJson.sessions? [upJson.sessions]: []);
-        if(!sessionIds.length){ if(window.notifications && notifications.toast) notifications.toast('No sessions returned','error'); return; }
-        const canonicalMap = {};
-        headers.forEach(h => { const l = h.toLowerCase(); if(/user/.test(l)) canonicalMap['user']=h; else if(/host/.test(l)) canonicalMap['host']=h; else if(/proc|process/.test(l)) canonicalMap['process']=h; else if(/sha256|hash/.test(l)) canonicalMap['file_hash']=h; else if(l==='domain'||/dns|sni/.test(l)) canonicalMap['domain']=h; else if(l==='ip'||l==='src_ip') canonicalMap['ip']=h; else if(l==='dst_ip'||l==='dest_ip') canonicalMap['ip_dst']=h; });
-        const buildResp = await fetch('/api/v1/graph/session/build', { method:'POST', headers: { 'Content-Type':'application/json', 'x-api-key': (localStorage.getItem('apiKey')||'devkey123') }, body: JSON.stringify({ session_ids: sessionIds, correlate:true, ewma:true, mapping: canonicalMap }) });
-        if(!buildResp.ok){ if(window.notifications && notifications.toast) notifications.toast('Graph build failed','error'); return; }
-        const buildJson = await buildResp.json(); window.LAST_CORR_SUMMARY = buildJson.summary || buildJson; window.LAST_CORR_FULL = buildJson; if(window.notifications && notifications.toast) notifications.toast('Deep Analyze completed','success');
-        try{ window.__csv_deep_analyze_done = true; window.dispatchEvent(new Event('csv-deep-analyze-done')); }catch(_){ }
-        // Ensure UI sees merged pipeline signals: mark first loaded row as deep_enriched (test-friendly)
-        try{
-          var lr = window.LAST_RESULTS || [];
-          if(lr && lr.length){
-            lr[0].factors = Array.isArray(lr[0].factors)? Array.from(new Set([...(lr[0].factors||[]), 'deep_enriched'])) : ['deep_enriched'];
-            lr[0]._dread = (typeof computeDreadBreakdown === 'function') ? computeDreadBreakdown(lr[0].factors, lr[0].raw) : (lr[0]._dread||{});
-            window.LAST_RESULTS = lr;
-            try{ if(typeof renderTableFromResults === 'function') renderTableFromResults(); }catch(_){ }
-          }
-        }catch(_){ }
       }catch(e){ if(window.notifications && notifications.toast) notifications.toast('Deep analyze failed','error'); }
     });
   }catch(_){ } })();
@@ -598,10 +781,11 @@
       // Build header mapping editor from first row
       const first = rows[0]||{}; const keys = Object.keys(first);
       const canonicalOptions = ['--none--','user','host','ip','file_hash','process','file_path','http_user_agent','dns_query'];
-      // Add preset save/load controls
+      // Add preset save/load controls and Smart Detect All
       const presetBar = document.createElement('div'); presetBar.style.display='flex'; presetBar.style.gap='8px'; presetBar.style.marginBottom='8px';
       const presetInput = document.createElement('input'); presetInput.placeholder='Preset name'; presetInput.style.padding='6px'; presetBar.appendChild(presetInput);
       const saveBtn = document.createElement('button'); saveBtn.className='btn'; saveBtn.textContent='Save Preset'; presetBar.appendChild(saveBtn);
+      const smartBtn = document.createElement('button'); smartBtn.className='btn'; smartBtn.textContent='Smart Detect All'; presetBar.appendChild(smartBtn);
       const loadSelect = document.createElement('select'); loadSelect.style.padding='6px'; loadSelect.className='btn'; presetBar.appendChild(loadSelect);
       preview.appendChild(presetBar);
       // load presets from localStorage
@@ -614,13 +798,57 @@
         const chk = document.createElement('input'); chk.type='checkbox'; chk.checked=true; chk.dataset.col = k; chk.style.flex='0 0 20px';
         const label = document.createElement('div'); label.style.flex='1'; label.textContent = k + ' — sample: ' + String(first[k]||'').slice(0,80);
         const sel = document.createElement('select'); sel.style.minWidth='160px'; sel.className='btn'; canonicalOptions.forEach(o=>{ const op = document.createElement('option'); op.value=o; op.textContent=o; sel.appendChild(op); });
-        // attempt to auto-select best match
-        const l = k.toLowerCase(); if(/user|username|account/.test(l)) sel.value='user'; else if(/host|hostname/.test(l)) sel.value='host'; else if(/sha256|hash|md5|sha1/.test(l)) sel.value='file_hash'; else if(/process|exe|cmd|proc/.test(l)) sel.value='process'; else if(/ip/.test(l)) sel.value='ip';
+        // attempt to auto-select best match (enhanced patterns)
+        const l = k.toLowerCase();
+        if(/process|proc|exe|executable|cmd|command/.test(l)) sel.value='process';
+        else if(/path|file_path|filepath|file|location/.test(l)) sel.value='file_path';
+        else if(/hash|sha256|sha1|md5|checksum|digest/.test(l)) sel.value='file_hash';
+        else if(/host|hostname|computer|machine|endpoint|asset/.test(l)) sel.value='host';
+        else if(/user|username|account|principal|identity/.test(l)) sel.value='user';
+        else if(/ip|ipv4|ip_addr|address/.test(l)) sel.value='ip';
+        else if(/dns|domain|query/.test(l)) sel.value='dns_query';
+        else if(/agent|browser|ua/.test(l)) sel.value='http_user_agent';
+        else sel.value='--none--';
         row.appendChild(chk); row.appendChild(label); row.appendChild(sel); preview.appendChild(row);
       });
       document.getElementById('daClose').onclick = ()=> modal.style.display='none';
       document.getElementById('daCancel').onclick = ()=> modal.style.display='none';
-      document.getElementById('daConfirm').onclick = async function(){
+      // Local cost estimator for modal-specific LLM limit controls (renamed IDs)
+      try {
+        const daLimit = document.getElementById('da_llmLimit');
+        const daCostEl = document.getElementById('da_llmCostEstimate');
+        function daEstimate(){
+          try {
+            if(!daLimit || !daCostEl) return;
+            const val = parseInt(daLimit.value,10) || 25;
+            const rows = (window.LAST_RESULTS||[]).filter(r => { try { return (r && r.verdict && /MALICIOUS|SUSPICIOUS|THREAT/i.test(r.verdict)); } catch(_) { return false; } });
+            const count = (val === 0) ? rows.length : Math.min(rows.length, val);
+            const cost = (count * 0.003).toFixed(3);
+            daCostEl.textContent = 'Est. cost: $'+cost;
+          } catch(_) { if(daCostEl) daCostEl.textContent = 'Est. cost: n/a'; }
+        }
+        if(daLimit){ daLimit.addEventListener('change', daEstimate); daEstimate(); }
+      } catch(_) { }
+      // Smart detect button: re-run auto-detection across all map rows
+      smartBtn.addEventListener('click', function(){
+        preview.querySelectorAll('.map-row').forEach(function(r){
+          try{
+            const col = r.dataset.col || '';
+            const sel = r.querySelector('select');
+            const l = String(col).toLowerCase();
+            if(/process|proc|exe|executable|cmd|command/.test(l)) sel.value='process';
+            else if(/path|file_path|filepath|file|location/.test(l)) sel.value='file_path';
+            else if(/hash|sha256|sha1|md5|checksum|digest/.test(l)) sel.value='file_hash';
+            else if(/host|hostname|computer|machine|endpoint|asset/.test(l)) sel.value='host';
+            else if(/user|username|account|principal|identity/.test(l)) sel.value='user';
+            else if(/ip|ipv4|ip_addr|address/.test(l)) sel.value='ip';
+            else if(/dns|domain|query/.test(l)) sel.value='dns_query';
+            else if(/agent|browser|ua/.test(l)) sel.value='http_user_agent';
+            else sel.value='--none--';
+          }catch(_){ }
+        });
+      });
+      document.getElementById('daConfirm').onclick = function(){
         const mode = document.querySelector('input[name="da_mode"]:checked').value;
         const auto = document.getElementById('da_auto_llm').checked;
         // Build mapping from dropdowns
@@ -630,40 +858,19 @@
         });
         modal.style.display='none';
         try{
-          const payload = { rows: rows.slice(0,400), mapping: mapping, analyze_mode: mode, options: { auto_llm: !!auto } };
-          const resp = await fetch('/api/v1/assessments/deep_analyze', { method:'POST', headers: { 'Content-Type':'application/json', 'x-api-key': (localStorage.getItem('apiKey')||'devkey123') }, body: JSON.stringify(payload) });
-          if(!resp.ok){ if(window.notifications && notifications.toast) notifications.toast('Deep Analyze failed','error'); return; }
-          const j = await resp.json(); window.LAST_DEEP_ANALYZE = j; if(window.notifications && notifications.toast) notifications.toast('Deep Analyze completed','success');
-          // merge canonical/mappings into LAST_CORR_SUMMARY for report enrichment
-          try{ window.LAST_CORR_SUMMARY = window.LAST_CORR_SUMMARY || {}; window.LAST_CORR_SUMMARY.deep_analyze = j; }catch(_){ }
-        }catch(e){ if(window.notifications && notifications.toast) notifications.toast('Deep Analyze error','error'); }
+          if(typeof window.initiateDeepAnalyze === 'function'){
+            window.initiateDeepAnalyze({ analyze_mode: mode, mapping: mapping, auto_llm: !!auto });
+          } else if(window.notifications && notifications.toast){
+            notifications.toast('Deep Analyze module unavailable','error');
+          }
+        }catch(e){
+          console.warn('deep analyze modal launch', e);
+          if(window.notifications && notifications.toast) notifications.toast('Deep Analyze error','error');
+        }
       };
       modal.style.display='flex';
+      // Safety: do not auto-close the modal automatically; let user dismiss it.
     }catch(e){ console.warn('showDeepAnalyzeModal', e); }
-  }
-
-  async function runDeepAnalyze(options, mapping, rows){
-    try{
-      // Reuse existing deep analyze flow: ingest rows, upload, build session
-      const payload = rows.map((r, idx) => ({ row_index: idx, raw: r }));
-      const ing = await fetch('/api/v1/ingest/csv_rows', { method:'POST', headers: { 'Content-Type':'application/json', 'x-api-key': (localStorage.getItem('apiKey')||'devkey123') }, body: JSON.stringify(payload) });
-      if(!ing.ok){ if(window.notifications && notifications.toast) notifications.toast('Ingest failed','error'); return; }
-      const ingJson = await ing.json();
-      const headers = Object.keys(rows[0]||{});
-      let csvLines = [headers.join(',')]; rows.forEach(r => { csvLines.push(headers.map(h => JSON.stringify(r[h]||'')).join(',')); });
-      const blob = new Blob([csvLines.join('\n')+'\n'], { type:'text/csv' });
-      const fd = new FormData(); fd.append('files', new File([blob], 'deep_analyze.csv', { type:'text/csv' }));
-      const upResp = await fetch('/api/v1/upload/files', { method:'POST', headers:{ 'x-api-key': (localStorage.getItem('apiKey')||'devkey123') }, body: fd });
-      if(!upResp.ok){ if(window.notifications && notifications.toast) notifications.toast('Upload failed for deep analyze','error'); return; }
-      const upJson = await upResp.json(); const sessionIds = Array.isArray(upJson.sessions)? upJson.sessions : (upJson.sessions? [upJson.sessions]: []);
-      if(!sessionIds.length){ if(window.notifications && notifications.toast) notifications.toast('No sessions returned','error'); return; }
-      // Build session, include mapping and analysis options
-      const buildBody = { session_ids: sessionIds, correlate:true, ewma:true, mapping: mapping, analyze_mode: options.mode, options: { auto_llm: options.auto_llm } };
-      const buildResp = await fetch('/api/v1/graph/session/build', { method:'POST', headers: { 'Content-Type':'application/json', 'x-api-key': (localStorage.getItem('apiKey')||'devkey123') }, body: JSON.stringify(buildBody) });
-      if(!buildResp.ok){ if(window.notifications && notifications.toast) notifications.toast('Graph build failed','error'); return; }
-      const buildJson = await buildResp.json(); window.LAST_CORR_SUMMARY = buildJson.summary || buildJson; window.LAST_CORR_FULL = buildJson; if(window.notifications && notifications.toast) notifications.toast('Deep Analyze completed','success');
-      window.__csv_deep_analyze_done = true; window.dispatchEvent(new Event('csv-deep-analyze-done'));
-    }catch(e){ if(window.notifications && notifications.toast) notifications.toast('Deep analyze failed','error'); }
   }
   </script>
   <script>
@@ -716,5 +923,83 @@
     }
   } catch(_){ } })();
   </script>
+  <script>
+  // LLM controls: estimate cost, generate more, aggregate cost polling
+  (function llmControls(){ try{
+    const limitEl = document.getElementById('llmLimit');
+    const estEl = document.getElementById('llmCostEstimate');
+    const aggEl = document.getElementById('llmAggregateCost');
+    const genBtn = document.getElementById('btnGenerateMore');
+    if(!limitEl || !estEl || !aggEl || !genBtn) return;
+    genBtn.style.display = 'inline-flex';
+
+    async function estimate(){
+      try{
+        const lines = parseInt(limitEl.value,10) || 25;
+        const q = '/api/v1/llm/cost_estimate?lines='+encodeURIComponent(lines);
+        const r = await (window.safeFetch || fetch)(q, { headers: _authHeaders() });
+        if(!r.ok) { estEl.textContent = 'Est. cost: n/a'; return; }
+        const j = await r.json();
+        const cost = (j.estimated_cost || j.cost || 0).toFixed(6);
+        estEl.textContent = 'Est. cost: $'+cost;
+      }catch(e){ estEl.textContent = 'Est. cost: n/a'; }
+    }
+
+    async function fetchAggregate(){
+      try{
+        const url = '/api/v1/metrics/llm_costs';
+        const r = await (window.safeFetch || fetch)(url, { headers: _authHeaders() });
+        if(!r.ok){ aggEl.textContent = 'Total cost: $0.000'; return; }
+        const j = await r.json();
+        const ext = (j.external && j.external.total_cost) ? j.external.total_cost : (j.external_total_cost || 0);
+        const loc = (j.local && j.local.gpu_time_cost) ? j.local.gpu_time_cost : 0;
+        const total = (Number(ext||0) + Number(loc||0)).toFixed(6);
+        aggEl.textContent = 'Total cost: $'+ total;
+      }catch(e){ aggEl.textContent = 'Total cost: $0.000'; }
+    }
+
+    limitEl.addEventListener('change', estimate);
+    genBtn.addEventListener('click', async function(){
+      try{
+        genBtn.disabled = true; genBtn.textContent = 'Queuing...';
+        const limit = parseInt(limitEl.value,10) || 25;
+        const aid = (window.__LAST_ASSESSMENT_ID || localStorage.getItem('last_assessment_id')) || null;
+        const body = { limit: limit };
+        if(aid) body.assessment_id = aid;
+        const resp = await (window.safeFetch || fetch)('/api/v1/assessments/generate_llm_summaries', { method: 'POST', headers: Object.assign({'Content-Type':'application/json'}, _authHeaders()), body: JSON.stringify(body) });
+        if(!resp.ok){ if(window.notifications&&notifications.toast) notifications.toast('Generate failed','error'); genBtn.textContent='Generate More'; genBtn.disabled=false; return; }
+        const j = await resp.json().catch(()=>({}));
+        if(window.notifications && notifications.toast) notifications.toast('LLM summaries queued','success');
+        await fetchAggregate(); await estimate();
+        genBtn.textContent = 'Generate More'; genBtn.disabled = false;
+      }catch(e){ genBtn.textContent='Generate More'; genBtn.disabled=false; if(window.notifications && notifications.toast) notifications.toast('Generate error','error'); }
+    });
+
+    // initial load
+    estimate(); fetchAggregate();
+    // poll aggregate every 30s
+    setInterval(fetchAggregate, 30000);
+  }catch(_){ } })();
+  </script>
+
+  <div id="llmSidebar" class="llm-sidebar">
+    <div class="llm-sidebar-header">
+      <div>
+        <h3>LLM Tier 1 Summary</h3>
+        <div id="llmSidebarMeta" class="text-muted"></div>
+      </div>
+      <div style="display:flex; gap:6px; align-items:center;">
+        <button class="btn" id="llmSidebarDetach" type="button" title="Toggle dock / pop-out">Detach</button>
+        <button class="close-btn" id="llmSidebarClose" aria-label="Close Tier 1 summary">&times;</button>
+      </div>
+    </div>
+    <div id="llmSidebarBody" class="llm-sidebar-body" tabindex="0">
+      <p class="text-muted">Select a suspicious row and click “LLM T1”.</p>
+    </div>
+    <div class="llm-sidebar-footer">
+      <span id="llmSidebarCost" class="cost">$0.0000</span>
+      <button class="btn btn-primary" id="llmSidebarT2">T2: Investigate</button>
+    </div>
+  </div>
 </body>
 </html>

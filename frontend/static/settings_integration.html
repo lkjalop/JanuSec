@@ -1,45 +1,139 @@
 <!doctype html>
-<html>
-<head><meta charset="utf-8"><title>Integration Settings</title></head>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>LLM & Integration Settings</title>
+  <link rel="stylesheet" href="/static/css/theme.css">
+  <style>
+    body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg-primary); color: var(--text-primary); margin:0; padding:0; }
+    .wrapper { max-width: 960px; margin: 0 auto; padding: 32px 24px 60px; }
+    h1 { margin-top:0; font-size: 26px; }
+    .card { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 12px; padding: 20px 24px; margin-bottom: 24px; box-shadow: 0 6px 20px rgba(0,0,0,0.25); }
+    .card h2 { margin-top:0; font-size: 18px; }
+    label { display:block; font-size: 13px; margin-bottom:6px; color: var(--text-muted); }
+    input[type="text"], input[type="password"], textarea { width:100%; padding:10px 12px; border-radius:8px; border:1px solid var(--border); background: var(--bg-tertiary); color: var(--text-primary); font-size:14px; }
+    textarea { min-height:120px; resize:vertical; }
+    .btn { display:inline-flex; align-items:center; justify-content:center; padding:10px 18px; border-radius:8px; border:1px solid var(--border); background:var(--bg-tertiary); color:var(--text-primary); font-weight:600; cursor:pointer; transition:background .2s, transform .1s; }
+    .btn-primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+    .btn:active { transform:translateY(1px); }
+    .status-chip { display:inline-flex; align-items:center; gap:6px; padding:4px 10px; border-radius:999px; font-size:12px; font-weight:600; }
+    .status-ok { background:#1e8e3e; color:#fff; }
+    .status-missing { background:#8b1c1c; color:#fff; }
+    .inline-note { font-size:12px; color:var(--text-muted); margin-top:6px; }
+    .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:18px; }
+    .message { margin-top:12px; font-size:13px; }
+    .success { color:#1e8e3e; }
+    .error { color:#d64545; }
+  </style>
+</head>
 <body>
-<h1>Integration Settings</h1>
-<form id="cfg">
-  <label>Tenant ID: <input id="tenant" value="default"></label><br>
-  <label>Integration Name: <input id="name" value="postgres"></label><br>
-  <label>Config JSON:</label><br>
-  <textarea id="cfgjson" rows="10" cols="80">{"dsn":"postgresql://postgres:postgres@localhost:5432/janusec"}</textarea><br>
-  <button type="button" id="save">Save</button>
-  <button type="button" id="test">Test</button>
-    <h2>Retention & Sampling</h2>
-    <label>Retention Days: <input id="retention" value="90" type="number"></label><br>
-    <label>Sampling Rate (0-1): <input id="sampling" value="1" type="number" step="0.01" min="0" max="1"></label><br>
-    <button type="button" id="saveRetention">Save Retention</button>
-  <div id="res"></div>
-</form>
-<script>
-async function save(){
-  const tenant=document.getElementById('tenant').value;
-  const name=document.getElementById('name').value;
-  const cfg=JSON.parse(document.getElementById('cfgjson').value||'{}');
-  const res=await fetch('/api/v1/integrations/'+name+'/config',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({tenant_id:tenant,config:cfg})});
-  const j=await res.json(); document.getElementById('res').innerText=JSON.stringify(j);
-}
-async function saveRetention(){
-  const tenant=document.getElementById('tenant').value;
-  const retention=document.getElementById('retention').value;
-  const sampling=document.getElementById('sampling').value;
-  const res=await fetch('/api/v1/integrations/retention/config',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({tenant_id:tenant,config:{retention_days:parseInt(retention),sampling_rate:parseFloat(sampling)}})});
-  const j=await res.json(); document.getElementById('res').innerText=JSON.stringify(j);
-}
-document.getElementById('saveRetention').onclick=saveRetention;
-async function test(){
-  const name=document.getElementById('name').value;
-  const tenant=document.getElementById('tenant').value;
-  const res=await fetch('/api/v1/integrations/'+name+'/config/test?tenant_id='+tenant);
-  const j=await res.json(); document.getElementById('res').innerText=JSON.stringify(j);
-}
-document.getElementById('save').onclick=save;
-document.getElementById('test').onclick=test;
-</script>
+  <div class="wrapper">
+    <h1>Model & Integration Settings</h1>
+    <p class="inline-note">Configure API keys and Ollama endpoints used by Auto‑LLM, HopGraph insights, and CSV Analyzer summaries. Keys are stored locally on the server in <code>config/llm_settings.json</code>.</p>
+
+    <div class="card">
+      <h2>OpenAI (ChatGPT)</h2>
+      <div class="status-chip" id="openaiStatus">Loading…</div>
+      <label for="openaiKey">API Key</label>
+      <input type="password" id="openaiKey" placeholder="sk-..." autocomplete="off">
+      <p class="inline-note">Enter a new key to replace the stored one. Leave blank to remove.</p>
+    </div>
+
+    <div class="card">
+      <h2>Anthropic (Claude)</h2>
+      <div class="status-chip" id="anthropicStatus">Loading…</div>
+      <label for="anthropicKey">API Key</label>
+      <input type="password" id="anthropicKey" placeholder="sk-ant-..." autocomplete="off">
+      <p class="inline-note">Enter a new key to replace the stored one. Leave blank to remove.</p>
+    </div>
+
+    <div class="card">
+      <h2>Ollama / Local Models</h2>
+      <div class="grid">
+        <div>
+          <label for="ollamaUrl">Base URL</label>
+          <input type="text" id="ollamaUrl" placeholder="http://127.0.0.1:11434">
+        </div>
+        <div>
+          <label for="ollamaModel">Default Model</label>
+          <input type="text" id="ollamaModel" placeholder="llama3">
+        </div>
+      </div>
+      <p class="inline-note">Provide the Ollama endpoint and model name if you run a local LLM.</p>
+    </div>
+
+    <div class="card">
+      <h2>Save Settings</h2>
+      <button class="btn btn-primary" id="saveBtn">Save Changes</button>
+      <span id="saveMessage" class="message"></span>
+    </div>
+  </div>
+
+  <script>
+    function authHeaders(){
+      const headers = { 'Content-Type': 'application/json' };
+      const key = localStorage.getItem('apiKey') || 'devkey123';
+      headers['x-api-key'] = key;
+      const tenant = localStorage.getItem('tenantId');
+      if(tenant){
+        headers['X-Tenant-ID'] = tenant;
+      }
+      return headers;
+    }
+
+    function updateStatus(element, configured){
+      element.textContent = configured ? 'Configured' : 'Not Configured';
+      element.className = 'status-chip ' + (configured ? 'status-ok' : 'status-missing');
+    }
+
+    async function loadSettings(){
+      try{
+        const resp = await fetch('/api/v1/llm/settings', { headers: authHeaders() });
+        if(!resp.ok) throw new Error('HTTP '+resp.status);
+        const data = await resp.json();
+        updateStatus(document.getElementById('openaiStatus'), data.openai_configured);
+        updateStatus(document.getElementById('anthropicStatus'), data.anthropic_configured);
+        document.getElementById('ollamaUrl').value = data.ollama_base_url || '';
+        document.getElementById('ollamaModel').value = data.ollama_model || '';
+      }catch(err){
+        document.getElementById('saveMessage').textContent = 'Failed to load settings: '+err.message;
+        document.getElementById('saveMessage').className = 'message error';
+      }
+    }
+
+    async function saveSettings(){
+      const payload = {
+        openai_api_key: document.getElementById('openaiKey').value,
+        anthropic_api_key: document.getElementById('anthropicKey').value,
+        ollama_base_url: document.getElementById('ollamaUrl').value,
+        ollama_model: document.getElementById('ollamaModel').value
+      };
+      const msg = document.getElementById('saveMessage');
+      msg.textContent = 'Saving...';
+      msg.className = 'message';
+      try{
+        const resp = await fetch('/api/v1/llm/settings', {
+          method: 'POST',
+          headers: authHeaders(),
+          body: JSON.stringify(payload)
+        });
+        if(!resp.ok){
+          const text = await resp.text();
+          throw new Error(text || ('HTTP '+resp.status));
+        }
+        msg.textContent = 'Settings saved. New keys apply immediately.';
+        msg.className = 'message success';
+        document.getElementById('openaiKey').value = '';
+        document.getElementById('anthropicKey').value = '';
+        await loadSettings();
+      }catch(err){
+        msg.textContent = 'Save failed: '+err.message;
+        msg.className = 'message error';
+      }
+    }
+
+    document.getElementById('saveBtn').addEventListener('click', saveSettings);
+    window.addEventListener('DOMContentLoaded', loadSettings);
+  </script>
 </body>
 </html>

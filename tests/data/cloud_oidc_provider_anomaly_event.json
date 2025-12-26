@@ -1,0 +1,8 @@
+{
+  "domain": "cloud",
+  "eventSource": "iam.amazonaws.com",
+  "eventName": "CreateOpenIDConnectProvider",
+  "oidc_provider_create": true,
+  "oidc_thumbprint_mismatch": true,
+  "oidc_issuer_unusual": true
+}

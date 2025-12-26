@@ -30,14 +30,34 @@ def _rotate(path: Path) -> None:
     path.rename(rotated)
 
 
-def append(record: Dict[str, Any]) -> None:
+def append(record: dict[str, Any]) -> None:
+    # Refresh env-derived settings on each append to be robust in test harnesses
+    # which may set environment variables after initial import.
+    try:
+        path = Path(os.getenv('EVIDENCE_FILE_PATH', str(_EVIDENCE_PATH)))
+        max_bytes = int(os.getenv('EVIDENCE_MAX_BYTES', str(_MAX_BYTES)))
+        rotation_suffix = os.getenv('EVIDENCE_ROTATION_SUFFIX', _ROTATION_SUFFIX)
+    except Exception:
+        # Fallback to module-level defaults if env parsing fails
+        path = _EVIDENCE_PATH
+        max_bytes = _MAX_BYTES
+        rotation_suffix = _ROTATION_SUFFIX
     data = json.dumps(record, separators=(',', ':'))
     encoded = (data + '\n').encode('utf-8')
     with _LOCK:
-        _ensure_dir(_EVIDENCE_PATH)
-        if _EVIDENCE_PATH.exists() and _EVIDENCE_PATH.stat().st_size + len(encoded) > _MAX_BYTES:
-            _rotate(_EVIDENCE_PATH)
-        with _EVIDENCE_PATH.open('ab') as fh:
+        # Ensure directory for the target path
+        _ensure_dir(path)
+        if path.exists() and path.stat().st_size + len(encoded) > max_bytes:
+            # Use the runtime-obtained rotation suffix when renaming
+            # Temporarily override module-level rotation suffix for _rotate
+            old = globals().get('_ROTATION_SUFFIX')
+            globals()['_ROTATION_SUFFIX'] = rotation_suffix
+            try:
+                _rotate(path)
+            finally:
+                if old is not None:
+                    globals()['_ROTATION_SUFFIX'] = old
+        with path.open('ab') as fh:
             fh.write(encoded)
 
 

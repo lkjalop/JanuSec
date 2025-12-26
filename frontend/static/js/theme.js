@@ -30,3 +30,15 @@
   window.initTheme = initTheme;
   if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initTheme); else initTheme();
 })();
+// Shared authHeaders helper used across static pages
+(function(){
+  window.authHeaders = function(){
+    try{
+      var key = localStorage.getItem('apiKey') || 'devkey123';
+      var tenant = localStorage.getItem('tenantId');
+      var headers = { 'x-api-key': key };
+      if(tenant) headers['X-Tenant-ID'] = tenant;
+      return headers;
+    }catch(_){ return { 'x-api-key': 'devkey123' }; }
+  };
+})();

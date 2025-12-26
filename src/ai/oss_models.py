@@ -16,13 +16,13 @@ import requests
 logger = logging.getLogger(__name__)
 
 try:  # Optional heavy dependencies
+    import torch
     from transformers import (
         AutoModel,
         AutoModelForSequenceClassification,
         AutoTokenizer,
         pipeline,
     )
-    import torch
     TRANSFORMERS_AVAILABLE = True
 except Exception:  # pragma: no cover - env without transformers/torch
     AutoModel = AutoModelForSequenceClassification = AutoTokenizer = pipeline = None  # type: ignore
@@ -43,12 +43,12 @@ class OSSModelSpec:
 class _OllamaClient:
     """Thin wrapper around the Ollama HTTP API (installed on D:\\ by default)."""
 
-    def __init__(self, host: str, root: pathlib.Path, command: Optional[str] = None):
+    def __init__(self, host: str, root: pathlib.Path, command: str | None = None):
         self.host = host.rstrip('/')
         self.root = root
         self.command = command
 
-    def _post(self, path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    def _post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
         url = f"{self.host}{path}"
         try:
             response = requests.post(url, json=payload, timeout=60)
@@ -57,7 +57,7 @@ class _OllamaClient:
         except requests.RequestException as exc:  # pragma: no cover - network error paths
             raise RuntimeError(f"Ollama request failed: {exc}") from exc
 
-    def embed(self, model: str, text: str) -> Optional[List[float]]:
+    def embed(self, model: str, text: str) -> list[float] | None:
         data = self._post('/api/embeddings', {'model': model, 'prompt': text})
         return data.get('embedding')
 
@@ -71,7 +71,7 @@ class _OllamaClient:
         data = self._post('/api/generate', payload)
         return data.get('response', '')
 
-    def classification_scores(self, text: str) -> Dict[str, float]:
+    def classification_scores(self, text: str) -> dict[str, float]:
         """Very light heuristic scoring when Ollama is provider."""
         baseline = {'benign': 0.4, 'suspicious': 0.3, 'malicious': 0.3}
         lowered = text.lower()
@@ -93,16 +93,16 @@ class OpenSourceModelManager:
 
     _OLLAMA_LABELS = ['benign', 'suspicious', 'malicious']
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: dict[str, Any]):
         self.config = config or {}
         self.backend = (self.config.get('backend') or 'transformers').lower()
         self.device_pref = (self.config.get('device') or 'cpu').lower()
         self.enabled = bool(self.config.get('enable') or self.config.get('enable_oss_models'))
-        self.models: Dict[str, Any] = {}
-        self.model_devices: Dict[str, str] = {}
-        self.tokenizers: Dict[str, Any] = {}
-        self.model_specs: Dict[str, OSSModelSpec] = {}
-        self.health: Dict[str, Dict[str, Any]] = {}
+        self.models: dict[str, Any] = {}
+        self.model_devices: dict[str, str] = {}
+        self.tokenizers: dict[str, Any] = {}
+        self.model_specs: dict[str, OSSModelSpec] = {}
+        self.health: dict[str, dict[str, Any]] = {}
 
         self.ollama_root = pathlib.Path(self.config.get('ollama_root') or 'D:/Ollama')
         self.ollama_host = self.config.get('ollama_host') or 'http://127.0.0.1:11434'
@@ -130,7 +130,7 @@ class OpenSourceModelManager:
             except Exception as exc:  # pragma: no cover - config error paths
                 logger.error("Invalid custom OSS model spec %s: %s", custom, exc)
 
-    def list_available(self) -> List[str]:
+    def list_available(self) -> list[str]:
         if not self.enabled:
             return []
         if self.backend == 'transformers' and not TRANSFORMERS_AVAILABLE:
@@ -199,7 +199,7 @@ class OpenSourceModelManager:
             logger.error("Failed loading model %s: %s", name, exc)
             return False
 
-    async def embed(self, name: str, text: str) -> Optional[List[float]]:
+    async def embed(self, name: str, text: str) -> list[float] | None:
         if not await self.ensure_loaded(name):
             return None
         spec = self.model_specs[name]
@@ -222,7 +222,7 @@ class OpenSourceModelManager:
                 emb = outputs[0].mean(dim=1).squeeze().cpu().tolist()
         return emb
 
-    async def classify(self, name: str, text: str) -> Optional[Dict[str, Any]]:
+    async def classify(self, name: str, text: str) -> dict[str, Any] | None:
         if not await self.ensure_loaded(name):
             return None
         spec = self.model_specs[name]
@@ -249,7 +249,7 @@ class OpenSourceModelManager:
             'predicted_index': int(max(range(len(probs)), key=lambda i: probs[i])),
         }
 
-    async def generate(self, name: str, prompt: str, max_new_tokens: int = 128) -> Optional[str]:
+    async def generate(self, name: str, prompt: str, max_new_tokens: int = 128) -> str | None:
         if not await self.ensure_loaded(name):
             return None
         spec = self.model_specs[name]
@@ -262,7 +262,7 @@ class OpenSourceModelManager:
         out = pipe(prompt, max_new_tokens=max_new_tokens, do_sample=False)
         return out[0]['generated_text'] if out else None
 
-    def get_health(self) -> Dict[str, Any]:
+    def get_health(self) -> dict[str, Any]:
         return {
             'enabled': self.enabled,
             'backend': self.backend,

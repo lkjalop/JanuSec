@@ -2,18 +2,21 @@
 Supports YAML (PyYAML) or JSON; returns empty weights if file missing.
 """
 from __future__ import annotations
-import os, json
+
+import json
+import os
 from typing import Dict
+
 try:
     import yaml  # type: ignore
 except Exception:
     yaml = None  # type: ignore
 
 _PATH = os.getenv('RULES_CONFIG_PATH','config/fast_rules.yaml')
-_cached: Dict[str,float] = {}
+_cached: dict[str,float] = {}
 _mtime = 0.0
 
-def _parse(blob: str) -> Dict[str,float]:
+def _parse(blob: str) -> dict[str,float]:
     if _PATH.endswith('.json') or yaml is None:
         data = json.loads(blob)
     else:
@@ -23,7 +26,7 @@ def _parse(blob: str) -> Dict[str,float]:
     rules = data.get('rules')
     if not isinstance(rules, dict):
         return {}
-    out: Dict[str,float] = {}
+    out: dict[str,float] = {}
     for k,v in rules.items():
         if isinstance(v, dict):
             w = v.get('weight')
@@ -43,7 +46,7 @@ def _maybe_reload():
     if st.st_mtime <= _mtime:
         return
     try:
-        with open(_PATH,'r',encoding='utf-8') as f:
+        with open(_PATH,encoding='utf-8') as f:
             blob = f.read()
         weights = _parse(blob)
         _cached = weights
@@ -51,6 +54,6 @@ def _maybe_reload():
     except Exception:
         pass
 
-def get_weights() -> Dict[str,float]:
+def get_weights() -> dict[str,float]:
     _maybe_reload()
     return dict(_cached)

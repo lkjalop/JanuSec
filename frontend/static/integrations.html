@@ -81,6 +81,18 @@
         <pre id="status"></pre>
       </div>
     </div>
+    <div class="panel" id="smokePanel">
+      <div class="panel-header"><h3 class="mt-0">Connectivity Smoke</h3></div>
+      <div class="panel-body">
+        <div class="actions-row">
+          <button class="btn" id="smokeCrowdstrike">Send CrowdStrike sample</button>
+          <button class="btn" id="smokeSuricata">Send Suricata sample</button>
+          <button class="btn" id="smokeSysmon">Send Sysmon sample</button>
+          <button class="btn" id="smokeCloudTrail">Send CloudTrail sample</button>
+        </div>
+        <pre id="smokeOut"></pre>
+      </div>
+    </div>
   </div>
   <script>
     function authHeaders(){ try{ const k=localStorage.getItem('apiKey')||'devkey123'; return {'x-api-key':k,'Content-Type':'application/json'}; }catch(_){ return {'x-api-key':'devkey123','Content-Type':'application/json'}; } }
@@ -110,6 +122,24 @@
         g('saveJira').onclick = ()=> save('jira', v('jira'));
         g('mispSave').onclick = mispSave; g('mispSync').onclick = mispSync;
         g('octiSave').onclick = octiSave; g('octiSync').onclick = octiSync;
+        // Smoke sample buttons
+        const API = (path) => `${location.origin}${path}`;
+        const apiKey = localStorage.apiKey || 'devkey123';
+        const tenantId = localStorage.tenantId || 'demo';
+        async function postJSON(url, body) {
+          const r = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json','x-api-key':apiKey,'x-tenant-id':tenantId}, body: JSON.stringify(body)});
+          const t = await r.text(); try { return JSON.parse(t); } catch { return {text:t, status:r.status}; }
+        }
+        async function smoke(url, body) {
+          const out = g('smokeOut');
+          out.textContent = 'Sending...';
+          const j = await postJSON(url, body);
+          out.textContent = JSON.stringify(j, null, 2);
+        }
+        g('smokeCrowdstrike').onclick = () => smoke(API('/api/v1/ingest/endpoint'), {detections:[{id:'det-1',timestamp:Date.now()/1000,host:'host1',severity:'high',observables:[{type:'file',value:'evil.bin'}],raw:{ImageFileName:'C:\\Windows\\System32\\cmd.exe',sha256:'deadbeef'}}]});
+        g('smokeSuricata').onclick = () => smoke(API('/api/v1/ingest/suricata'), {events:[{timestamp:new Date().toISOString(),src_ip:'10.0.0.1',dst_ip:'10.0.0.2',proto:'TCP',alert:{signature:'ET MALWARE Suspicious',severity:2,category:'Malware'}}]});
+        g('smokeSysmon').onclick = () => smoke(API('/api/v1/ingest/sysmon'), {UtcTime:new Date().toISOString(),Computer:'host1',Image:'C:\\Windows\\System32\\powershell.exe',ProcessId:4321,Hashes:'SHA256=...'});
+        g('smokeCloudTrail').onclick = () => smoke(API('/api/v1/ingest/cloudtrail'), {events:[{eventTime:new Date().toISOString(),eventName:'CreateUser',eventSource:'iam.amazonaws.com',sourceIPAddress:'1.2.3.4',recipientAccountId:'123456789012',userIdentity:{userName:'alice'}}]});
         refresh();
       }catch(e){ console.warn('integrations wiring failed',e); }
     });

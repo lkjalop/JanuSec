@@ -5,8 +5,9 @@ processing path (fast_path / adaptive / correlated) they took. Exposes a
 Prometheus gauge for coverage ratio.
 """
 from __future__ import annotations
-from typing import Dict, Any
+
 from collections import defaultdict
+from typing import Any, Dict
 
 try:
     from prometheus_client import Counter, Gauge
@@ -35,7 +36,7 @@ class CoverageTracker:
         except Exception:
             pass
 
-    def record(self, event: Dict[str, Any], route: str):
+    def record(self, event: dict[str, Any], route: str):
         atype = event.get('alert_type') or event.get('event_type') or 'unknown'
         if getattr(self.__class__, 'alert_type_total', None):
             try: self.__class__.alert_type_total.labels(alert_type=atype).inc()
@@ -54,7 +55,7 @@ class CoverageTracker:
                     pass
         self.path_counts[route] += 1
 
-    def summary(self) -> Dict[str, Any]:
+    def summary(self) -> dict[str, Any]:
         return {
             'target_total': len(self.target_alert_types),
             'target_seen': len(self.seen_target),

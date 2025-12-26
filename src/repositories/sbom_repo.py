@@ -3,17 +3,20 @@
 Stores parsed SBOM components per tenant. Future: move to persistent store.
 """
 from __future__ import annotations
+
+import threading
+import time
 from dataclasses import dataclass
 from typing import Dict, List, Optional
-import threading, time
+
 
 @dataclass
 class SBOMComponent:
     name: str
     version: str | None
     purl: str | None
-    hashes: Dict[str,str]
-    licenses: List[str]
+    hashes: dict[str,str]
+    licenses: list[str]
     first_seen: float
     last_seen: float
 
@@ -21,9 +24,9 @@ class SBOMRepository:
     def __init__(self):
         self._lock = threading.Lock()
         # tenant -> (component_key -> SBOMComponent)
-        self._store: Dict[str, Dict[str, SBOMComponent]] = {}
+        self._store: dict[str, dict[str, SBOMComponent]] = {}
 
-    def upsert_components(self, tenant: str, comps: List[SBOMComponent]):
+    def upsert_components(self, tenant: str, comps: list[SBOMComponent]):
         now = time.time()
         with self._lock:
             bucket = self._store.setdefault(tenant, {})
@@ -40,7 +43,7 @@ class SBOMRepository:
                 else:
                     bucket[key] = c
 
-    def list_components(self, tenant: str, limit: int = 200) -> List[SBOMComponent]:
+    def list_components(self, tenant: str, limit: int = 200) -> list[SBOMComponent]:
         with self._lock:
             bucket = self._store.get(tenant, {})
             return list(bucket.values())[:limit]

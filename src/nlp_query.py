@@ -4,9 +4,10 @@ Phase 3 foundation: natural language -> internal DSL -> data fetch.
 This is intentionally lightweight & rule-based; can be extended with embeddings.
 """
 from __future__ import annotations
-import re
+
 import datetime as dt
-from typing import Dict, Any, Optional, List
+import re
+from typing import Any, Dict, List, Optional
 
 TIME_PATTERNS = [
     (re.compile(r'last\s+(\d+)\s*h'), 'hours'),
@@ -23,13 +24,13 @@ VERDICT_MAP = {
 CONF_PATTERN = re.compile(r'confidence\s*(?:>|>=)\s*(0?\.\d+|1\.0|1)')
 
 class ParsedQuery:
-    def __init__(self, dsl: Dict[str, Any]):
+    def __init__(self, dsl: dict[str, Any]):
         self.dsl = dsl
 
     def build(self, page: int = 1, size: int = 50):
         base = "SELECT event_id, verdict, confidence, processing_ms, factors, created_at FROM decisions"
         clauses = []
-        params: List[Any] = []
+        params: list[Any] = []
         dsl = self.dsl
         if 'verdict' in dsl:
             clauses.append("verdict = $%d" % (len(params)+1))
@@ -48,7 +49,7 @@ class ParsedQuery:
 
 def parse_nl(text: str) -> ParsedQuery:
     text_l = text.lower()
-    dsl: Dict[str, Any] = { 'limit': 50 }
+    dsl: dict[str, Any] = { 'limit': 50 }
 
     # Verdict extraction
     for k,v in VERDICT_MAP.items():
@@ -78,6 +79,6 @@ def parse_nl(text: str) -> ParsedQuery:
     return ParsedQuery(dsl)
 
 # Semantic factor search stub; returns empty until extended
-async def semantic_factor_search(factor_phrase: str, top_k: int = 5) -> List[str]:
+async def semantic_factor_search(factor_phrase: str, top_k: int = 5) -> list[str]:
     # Future: embed phrase & compare against stored factor embeddings
     return []

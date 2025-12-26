@@ -57,7 +57,7 @@
 			}
 
 			async function recent(){
-				const r = await fetch('/api/v1/decisions/recent?limit=50', { headers: H() });
+				const r = await (window.safeFetch || fetch)('/api/v1/decisions/recent?limit=50', { headers: H() });
 				if(!r.ok) return safeNotify('Failed to load recent decisions','error');
 				const j = await r.json();
 				const rows = (j.rows||j.events||[]).filter(x=>{ const pn = (x.process_name||x.proc_name||'').toLowerCase(); return pn; });
@@ -72,7 +72,7 @@
 			}
 
 			async function explain(id){
-				const r = await fetch(`/api/v1/decisions/${id}/explain`, { headers: H() });
+				const r = await (window.safeFetch || fetch)(`/api/v1/decisions/${id}/explain`, { headers: H() });
 				if(!r.ok) return safeNotify('Explain failed','error');
 				const j = await r.json();
 				safeNotify(`Decision ${id} — Verdict: ${j.verdict} — Factors: ${(j.factors||[]).length}`,'info');
@@ -81,7 +81,7 @@
 			document.getElementById('btnRefresh').onclick = recent;
 			document.getElementById('btnIncident').onclick = async ()=>{
 				const id = window._latest || 'manual';
-				const cr = await fetch('/api/v1/incidents', { method: 'POST', headers: {'Content-Type':'application/json', ...H()}, body: JSON.stringify({ artifact_id: id, title: 'Endpoint Incident', severity: 'high' }) });
+				const cr = await (window.safeFetch || fetch)('/api/v1/incidents', { method: 'POST', headers: {'Content-Type':'application/json', ...H()}, body: JSON.stringify({ artifact_id: id, title: 'Endpoint Incident', severity: 'high' }) });
 				const cj = await cr.json();
 				if(cr.ok) safeNotify('Incident created '+(cj.incident&&cj.incident.id||''),'success'); else safeNotify('Incident failed','error');
 			};

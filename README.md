@@ -3,7 +3,9 @@
 > Version: **0.9.0-pre (Pre-Production Validation Update – 2025-09-22)**  
 > Status: "Ready With Conditions" (synthetic & harness-based validation complete, live traffic calibration pending)
 
----
+[![pytest-lite](https://github.com/lkjalop/JanuSec/actions/workflows/pytest-lite.yml/badge.svg)](https://github.com/lkjalop/JanuSec/actions/workflows/pytest-lite.yml)
+[![pytest-full](https://github.com/lkjalop/JanuSec/actions/workflows/pytest-full.yml/badge.svg)](https://github.com/lkjalop/JanuSec/actions/workflows/pytest-full.yml)
+
 
 ## 🆕 What’s New in This Validation Release
 
@@ -21,6 +23,368 @@
 | Correlation Rules | Lateral pivot + macro+rare JA3 synergy | Early attack chain detection | `corr_lateral_pivot_possible`, `corr_office_ps_rare_ja3` |
 
 ---
+
+## Risk Explain API (New)
+
+This release adds an explainable risk composer and an API for retrieving
+component-level explanations for decisions.
+
+- Endpoint: GET /api/v1/risk/{event_id}/explain
+- Returns: JSON with fields: score, raw_score, breakdown (list of factors),
+  variance, ci95, method, confidence
+
+### Header accept eviction note (testing)
+
+The `NetworkThreatHunter` maintains in-memory frequency maps for `Accept` and `Accept-Language` headers.
+To avoid unbounded memory growth we cap these maps and perform eviction when they exceed ~2000 entries. Unit tests that exercise this behavior are under `tests/test_header_accept_eviction.py` and validate that the map size is reduced to <= 1500 while still recording new values.
+
+### HopGraph & Investigate CLI
+
+The lightweight hop graph is populated during event analysis (host->ip, ip->domain, proc->host edges).
+
+Generate an HTML evidence card for a node:
+
+```
+python scripts/investigate.py host:hostz --hops 2 --html -o evidence.html
+```
+
+Stream events (newline JSON) into the graph and auto-select first host:
+
+```
+cat events.ndjson | python scripts/investigate.py --from-events --html -o stream_evidence.html
+```
+
+Key environment variables:
+- RISK_HIGH_THRESHOLD (float) — high risk marker threshold (default 0.8)
+- RISK_FACTOR_WEIGHTS (CSV) — inline mapping e.g. "f1=0.5,f2=0.2"
+- RISK_WEIGHTS_YAML (path) — optional YAML file path for hot-reloadable weights
+- RISK_COMPLETENESS_EXPECTED_CLASSES — comma-separated factor classes for completeness checks
+- RISK_COMPLETENESS_MIN_PRESENT — minimum distinct classes required to avoid completeness penalty
+- RISK_COMPLETENESS_PENALTY — penalty magnitude applied when completeness gate fails
+- RISK_SIGMOID_CALIBRATION — if set, applies logistic calibration to the raw score; use with RISK_SIGMOID_K and RISK_SIGMOID_X0
+
+### New Detection & Heuristic Environment Variables
+These variables were recently added to tune new network & endpoint heuristics:
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| PORTSCAN_WINDOW_SECONDS | Sliding aggregation window for port scan tracking | 300 |
+| PORTSCAN_VERTICAL_THRESHOLD | Distinct dst ports to one host before vertical scan factor | 20 |
+| PORTSCAN_HORIZONTAL_THRESHOLD | Distinct destination hosts for same port before horizontal scan factor | 30 |
+| ACCEPT_RARE_THRESHOLD | Occurrence count threshold (<=) for rare Accept header factor | 2 |
+| ACCEPT_LANGUAGE_RARE_THRESHOLD | Occurrence count threshold (<=) for rare Accept-Language factor | 2 |
+| DISABLE_LOLBIN_REGISTRY | If set (1/true) disables loading `data/lolbins.yaml` | off |
+| PORT_SCATTER_WINDOW_SECONDS | (Existing) egress port scatter window | 300 |
+| PORT_SCATTER_THRESHOLD | (Existing) distinct ports threshold for scatter factor | 12 |
+| INCIDENT_SNAPSHOT_INTERVAL_SECONDS | Interval for background incident snapshot persistence (0 disables) | 0 |
+
+### Geo Enrichment & Heuristics (New)
+
+The platform now performs lightweight Geo-IP + ASN enrichment (CSV-backed) and exposes early geo-based rarity / risk factors. All geo logic is bounded and optional.
+
+## Unified HopGraph Architecture (Core + Lite)
+
+- Core: `src/core/graph/hopgraph_core.py` re-exports the production HopGraph from `src/graph/hopgraph.py` and provides `get_core_graph()` for final-stage correlation and explainability.
+- Lite: `src/core/graph/hopgraph_lite.py` is the early-stage cache/time-window graph used for fast temporal checks in the pipeline.
+- Light (compat): `src/core/hunt/hopgraph_light.py` retains late-stage lightweight tracking and now includes a deprecation note; prefer Core/Lite for new code.
+- Goal: minimize fragmentation, keep two canonical implementations (Core/Lite) without creating a monolith. Shims keep legacy imports working.
+
+## CEO Demo Quick Start
+
+- See `docs/QUICK_START_CEO_DEMO.md` for a 5-minute run-through using the LIVE console and Multi-Source Correlator (`/static/csv_multi_analyzer.html`).
+- Simulated streaming helper:
+  - `python -m scripts.demo_ceo tests/fixtures/api_gateway_sample.csv tests/fixtures/database_query_sample.csv tests/fixtures/vpn_access_sample.csv tests/fixtures/rdp_sessions_sample.csv`
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| GEOIP_ENABLED | Enable Geo-IP/ASN enrichment module | 1 (on) |
+| GEOIP_CSV | Path to CSV (start_ip,end_ip,country,asn) loaded at runtime | data/geoip_demo.csv |
+| COUNTRY_RARE_THRESHOLD | Emit `net:country_rare` for a country until its observation count exceeds this threshold | 3 |
+| HIGH_RISK_ASNS | Comma list of ASNs that trigger `net:asn_high_risk` factor when observed | AS15169,AS13335,AS9009 |
+| GEO_RARITY_DECAY_SECONDS | Inactivity window after which per-country/ASN counts decay (halved) to allow resurfacing rarity for sporadic geos | 3600 |
+
+Geo factors (confidence deltas capped inside NetworkThreatHunter overall MAX_CONFIDENCE=0.15):
+| Factor | Description | Approx Added Delta* |
+|--------|-------------|---------------------|
+| net:country_rare | Country seen <= COUNTRY_RARE_THRESHOLD times (after decay) | 0.01 |
+| net:asn_high_risk | Destination in HIGH_RISK_ASNS list | 0.015 |
+
+*Deltas are routed through `adjust_delta` and then clipped by the hunter's cumulative confidence ceiling; they will never push a single hunter above its `MAX_CONFIDENCE` cap.
+
+Decay Behavior: Every event triggers a check; if a country/ASN has not been seen for GEO_RARITY_DECAY_SECONDS its count is halved (integer floor). Entries reaching 0 are evicted, keeping state bounded and allowing legitimately rare regions to surface again after quiet periods.
+
+Testing: `tests/test_geoip_enrichment.py` validates enrichment lookups; `tests/test_geo_correlation_integration.py` ensures geo factors integrate with temporal correlation while respecting the confidence cap.
+
+Operational Notes:
+- CSV loading is lazy (first lookup) and cached in-memory with a binary search over sorted ranges.
+- Lookups are LRU memoized (size 2048) to reduce repeated int conversions and searches.
+- Prometheus counters `geoip_lookups_total` & `geoip_hits_total` track enrichment usage; module reloads in tests reuse existing collectors to avoid duplicate registration errors.
+
+
+### Correlation & Graph / Runner Environment Variables (New)
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| CORR_TEMPORAL_WINDOW_SEC | Time window seconds for multi-hop temporal correlation pattern tracking | 900 |
+| CORR_TEMPORAL_MAX_EVENTS | Max events retained per entity for temporal correlation | 200 |
+| CORR_TEMPORAL_COOLDOWN_SEC | Cooldown before emitting same temporal correlation factor again for an entity | 300 |
+| COOCC_ENABLED | Enable factor co-occurrence PMI correlation | 1 (on) |
+| COOCC_MIN_COUNT | Minimum pair co-occurrence count before PMI evaluated | 3 |
+| COOCC_PMI_THRESHOLD | Natural log PMI threshold to emit high-PMI pair factor | 0.8 |
+| COOCC_MAX_PAIRS | Soft cap on distinct pairs tracked (skip new beyond cap) | 50000 |
+| COOCC_COOLDOWN_SEC | Cooldown between emitting high-PMI pair factor for same pair | 600 |
+| HOPGRAPH_SOFT_EDGE_WM | Optional soft watermark for total HopGraph edges (gauge only) | unset |
+| HOPGRAPH_HARD_EDGE_WM | Optional hard watermark; exceed triggers edge trimming (75% newest retained) | unset |
+| HOPGRAPH_EXPLAIN_CACHE_MAX | LRU explain cache entry cap | 256 |
+| HOPGRAPH_EXPLAIN_CACHE_TTL_SECONDS | Optional TTL for explain cache items | 5 |
+| TEST_PER_FILE_TIMEOUT_SEC | Sequential runner per-file timeout (diagnostics harness) | 40 |
+| TEST_TWO_PASS | Enable two-pass sequential test run (fast sync pass then async pass) | 1 |
+
+Correlation emitted factors:
+- `corr:multi_stage_lateral_beacon` – Temporal sequence: rare lineage → lsass access → periodic beacon.
+- `corr:pair_high_pmi` – High pointwise mutual information factor pair (stable statistical co-occurrence) after minimum count & PMI threshold.
+
+### Session Persistence Backend (HopGraph Sessions)
+
+The graph session build endpoint supports pluggable persistence backends for session summaries:
+
+| Env Var | Purpose | Default |
+|---------|---------|---------|
+| SESSION_BACKEND | Persistence backend selector (`json` or `sqlite`) | json |
+| SESSION_PERSIST_DIR | Directory for JSON session files | data/sessions |
+| SESSION_PERSIST_SQLITE_PATH | SQLite database file path (used when backend=`sqlite`) | data/sessions/sessions.db |
+| SESSION_TTL_SECONDS | TTL for session records (applies to both backends) | 86400 |
+| SESSION_CLEAN_INTERVAL_SECONDS | Background cleanup interval (0 disables scheduler) | 0 |
+
+Behavior:
+- JSON backend writes one file per session (`<id>.json`). TTL enforced by mtime during load/cleanup.
+- SQLite backend stores rows in `sessions` table (`id`, `json`, `created_at`, `updated_at`). TTL enforced via `updated_at` cutoff during load and periodic cleanup.
+- Switching backends is instantaneous; existing JSON files remain untouched when moving to SQLite and vice versa. Dual-write during build is best-effort when a SQLite path is explicitly provided (for migration scenarios).
+- Cleanup loop removes expired JSON files or purges expired rows (`updated_at < now - SESSION_TTL_SECONDS`). Enable by setting `SESSION_CLEAN_INTERVAL_SECONDS` to a positive number.
+
+EWMA history persistence (optional):
+- `EWMA_HISTORY_PATH` sets the JSON file holding smoothing state (default `data/sessions/ewma_history.json`).
+- `EWMA_HISTORY_TTL_SECONDS` prunes stale entries in the same cleanup loop.
+
+Testing: See `tests/test_graph_session_sqlite.py` for round-trip and TTL expiration coverage.
+
+Migration Tip: Set `SESSION_BACKEND=sqlite` and `SESSION_PERSIST_SQLITE_PATH` early in deployment to accumulate historical session graph summaries with efficient pruning. Leave unset to retain legacy file-based behavior.
+
+## Automated Playbooks (authoring)
+
+You can author playbooks as JSON files under `src/data/playbooks/`.
+
+Basic structure:
+
+```json
+{
+  "name": "example-playbook",
+  "trigger": {"factor": "identity:pass_the_cookie_reuse"},
+  "dry_run": true,
+  "steps": [
+    {"type": "open_case", "params": {"title": "Detected ${user}"}},
+    {"type": "revoke_sessions", "params": {"user": "${user}"}},
+    {"type": "notify", "params": {"webhook_url": "${webhook}", "msg": "Remediated ${user}"}}
+  ]
+}
+```
+
+Triggers supported:
+- `factor` — exact factor match
+- `factor_any` — list of factors (matches any)
+- `factor_prefix` — prefix match for factor keys
+
+Templating:
+- Jinja2 is used if installed (recommended). Example: `{{ user|default('unknown') }}`
+- If Jinja2 is not available, simple `${var}` substitution via `string.Template` is used.
+- The platform exposes a small context extracted from events: `user`, `host`, `ip`, `file_hash`. You can supply additional context at runtime when previewing via `/api/v1/playbooks/resolve`.
+
+## Detection Rule Authoring (YAML Example)
+
+You can author detection rules using a simple YAML structure which maps to the Pydantic `DetectionRule` model at `src/core/rules/schema.py`.
+
+Example rule (YAML):
+
+```yaml
+meta:
+  id: rule-office-macro-powershell
+  name: Office Macro -> PowerShell chain
+  description: Detect Office macro invoking encoded PowerShell
+  author: security-team
+  version: '1.0'
+  tags: [office,macro,powershell]
+
+conditions:
+  - field: lane_process_lineage
+    op: contains
+    value: office_macro_spawn_powershell
+  - field: process_command_line
+    op: regex
+    value: "(?i)powershell\\s+.*-enc"
+
+actions:
+  - type: emit_factor
+    params:
+      factor: corr_office_macro_ps
+  - type: create_alert
+    params:
+      title: "Office macro spawned encoded PowerShell"
+      severity: HIGH
+
+score: 0.75
+enabled: true
+```
+
+Loader snippet (Python) using Pydantic model:
+
+```python
+import yaml
+import json
+from src.core.rules.schema import DetectionRule, export_json_schema
+
+def load_rule_from_yaml(path: str) -> DetectionRule:
+    with open(path, 'r', encoding='utf-8') as fh:
+        data = yaml.safe_load(fh)
+    rule = DetectionRule(**data)
+    return rule
+
+# Export JSON Schema for tooling (CLI or web UI)
+schema = export_json_schema()
+open('rule_schema.json','w',encoding='utf-8').write(json.dumps(schema, indent=2))
+```
+
+Runner steps supported (demo runnner):
+- `enrich`, `open_case`, `block_ip`, `notify`, `revoke_sessions`, `quarantine_file`, `policy_rollback`, `disable_mailbox_rule`, `reset_credentials`
+
+Auto-run behavior:
+- Enable auto-run by setting `AUTO_RUN_PLAYBOOKS=1`. Playbooks will be resolved for emitted rules and enqueued for background execution (dry-run by default).
+- Async queue worker count configurable via `PLAYBOOK_QUEUE_WORKERS` (default 1).
+
+Preview API:
+- POST `/api/v1/playbooks/resolve` with `{"factor":"net:tor_outbound_contact"}` to preview matching and rendered playbooks.
+
+Best practices:
+- Use dry-run in production by default and integrate secure connectors (IdP/firerwall) in the runner before enabling non-dry execution.
+- Keep playbooks idempotent and quick — long-running steps should be offloaded to external workflows.
+
+
+Watermark behavior:
+- Hard watermark breach triggers proportional trimming (per adjacency list keep newest 75%). Gauges exported: `hopgraph_total_edges`, `hopgraph_soft_edge_watermark`, `hopgraph_hard_edge_watermark`.
+- Explain cache metrics: `hopgraph_explain_cache_hits_total`, `hopgraph_explain_cache_misses_total` for cache efficiency tracking.
+
+Sequential two-pass test runner (`scripts/run_tests_sequential.py`):
+1. Pass 1: disables plugin autoload for speed & isolation (`PYTEST_DISABLE_PLUGIN_AUTOLOAD=1`).
+2. Pass 2 (if enabled): detects files containing async tests and reruns them with `pytest_asyncio` plugin only.
+Set env `TEST_TWO_PASS=0` to revert to single pass; adjust per-file timeout via `TEST_PER_FILE_TIMEOUT_SEC`.
+
+### Sample Prometheus Metrics Snapshot (Representative)
+
+```
+# HELP hopgraph_edges_total Total edges currently stored
+hopgraph_edges_total 4213
+# HELP hopgraph_total_edges Total HopGraph edges (for watermarks)
+hopgraph_total_edges 4213
+# HELP hopgraph_soft_edge_watermark Configured HopGraph soft edge watermark
+hopgraph_soft_edge_watermark 0
+# HELP hopgraph_hard_edge_watermark Configured HopGraph hard edge watermark
+hopgraph_hard_edge_watermark 0
+# HELP hopgraph_explain_cache_hits_total LRU explain cache hits
+hopgraph_explain_cache_hits_total 88
+# HELP hopgraph_explain_cache_misses_total LRU explain cache misses
+hopgraph_explain_cache_misses_total 12
+# HELP correlation_temporal_matches_total Temporal correlation pattern matches
+correlation_temporal_matches_total 3
+# HELP correlation_cooccurrence_high_pmi_total High PMI factor pair matches
+correlation_cooccurrence_high_pmi_total 1
+```
+
+Counts are illustrative only; real values depend on runtime load and event mix.
+
+
+Beacon Periodicity Gating:
+- Base factor `net:beacon_periodic` triggers when CV < BEACON_CV_THRESHOLD (default 0.20) OR moderately low CV with strong autocorr / spectral (Lomb-Scargle) evidence.
+- Elevation to `net:beacon_periodic` requires very tight CV (< 0.5 * threshold) OR tight CV plus high autocorrelation (>0.92) or Lomb-Scargle peak power (>0.8).
+- High jitter flows therefore emit at most `net:beacon_periodic` (or nothing) reducing false positives.
+
+Optional SciPy Integration:
+If SciPy is installed, Lomb-Scargle (`scipy.signal.lombscargle`) refines periodic strength; failures or absence gracefully degrade (`lomb_power=0`).
+
+Multi-Scale Beacon Explanation:
+See `BEACONING.md` for detailed multi-scale algorithm, explanation payload fields, and tuning environment variables (`MULTISCALE_BEACON_ENABLED`, `BEACON_CONN_MAXLEN`, `BEACON_CONN_RETENTION_SECONDS`).
+
+Registry file: `data/lolbins.yaml` (extend by adding entries & reloading service). Set `DISABLE_LOLBIN_REGISTRY=1` to revert to legacy inline heuristics only.
+
+The explain endpoint is best-effort and will compute the score on-demand if the decision cache entry is not pre-enriched.
+
+### Quick Usage
+
+```powershell
+# Retrieve explain breakdown for a decision
+curl -s http://localhost:8000/api/v1/risk/DECISION_ID/explain | python -m json.tool
+```
+
+### CSV Analyzer / Excel upload troubleshooting
+
+If you see client-side errors like "XLSX is not defined" or server errors saying the Excel library is unavailable, here are fast fixes:
+
+- Preferred quick fix (bundled starter — installs deps and relaxes CSP):
+
+  Run the included starter which installs Python deps (including openpyxl) and sets `DISABLE_CSP=1` so the client can load the XLSX script:
+
+  ```powershell
+  .\start_server.bat
+  ```
+
+- If you launch the server another way, install the Python Excel library in the active environment:
+
+  ```powershell
+  python -m pip install openpyxl
+  # optional legacy formats
+  python -m pip install xlrd pyexcel-ods3
+  ```
+
+- If your network blocks CDNs (client can't fetch SheetJS), prefer the local vendor copy. Use the helper to copy or download it:
+
+  ```powershell
+  ./scripts/fetch_sheetjs.ps1
+  ```
+
+- If you prefer server-side parsing only, use the CSV Analyzer's "Upload (Server Parse)" button — it will parse on the backend (requires openpyxl).
+
+These steps should eliminate common causes for Excel parsing failures.
+
+### Response Shape (Representative)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| score | float | Calibrated (final) risk score in [0,1] |
+| raw_score | float | Pre-calibration multiplicative fused score |
+| breakdown | list[{factor,weight,delta,contribution}] | Sorted by absolute contribution descending |
+| variance | float | Heuristic variance across factor contributions |
+| ci95 | [low, high] | 95% confidence interval bounds |
+| mean_contribution | float | Mean per-factor contribution |
+| method | str | Composer implementation identifier |
+| confidence | float | Downstream decision confidence (unchanged) |
+
+See full sample in `docs/risk_explain_example.json`.
+
+### Logistic Calibration (Optional)
+
+| Env Var | Purpose | Default |
+|---------|---------|---------|
+| RISK_SIGMOID_ENABLED | Enable logistic mapping of raw_score | off |
+| RISK_SIGMOID_SLOPE | Sigmoid k (steepness) | 4.0 |
+| RISK_SIGMOID_CENTER | Sigmoid x0 (midpoint) | 0.5 |
+
+Generate calibrated parameters from labeled historical data:
+
+```powershell
+# decisions.csv must contain columns: raw_score,label (label ∈ {0,1})
+python scripts/calibrate_risk_sigmoid.py --input decisions.csv --format csv --score-col raw_score --label-col label --metric auc
+```
+
+> Tip: Persist `raw_score` so you can retroactively re-calibrate without recomputing factor fusion.
+
 
 ## ✅ Synthetic Validation Metrics (Current Snapshot)
 These metrics are from controlled replay + synthetic corpora. They MUST be treated as provisional until calibrated against real tenant data.
@@ -132,7 +496,31 @@ print(get_cost_ledger().summary())
 
 ---
 
-## 🔐 Validation Provenance (Current Manual Elements)
+## � Development / Contributing
+
+For local reliability:
+
+| Command | Purpose |
+|---------|---------|
+| `make test` | Standard pytest run (plugins auto) |
+| `make test-seq` | Two-pass sequential (fast first, then async) |
+| `make test-async` | Async-only test subset |
+
+Two-pass runner uses `TEST_PER_FILE_TIMEOUT_SEC` (default 40) and `TEST_TWO_PASS=1` to control behavior. To skip async second pass: `TEST_TWO_PASS=0 make test-seq`.
+
+See `CONTRIBUTING.md` for:
+- Correlation module architecture
+- HopGraph watermark behavior & metrics
+- Naming governance (factor prefixes)
+- PR checklist (tests, docs, metrics cardinality)
+
+Keep tests deterministic (avoid wall-clock sleeps >0.1s). Use environment overrides for intervals instead of long delays.
+
+---
+
+---
+
+## �🔐 Validation Provenance (Current Manual Elements)
 | Artifact | Purpose | Status |
 |----------|---------|--------|
 | `validation_metrics.json` | Input for rubric scoring | Manual export today |
@@ -350,6 +738,45 @@ Interim Benefits:
 ### Quick Start
 
 1. **Clone and install dependencies**:
+## Optional: Enable MinHash-based clustering
+
+For very large similarity signatures, you can optionally enable MinHash to compress signatures before clustering. This can reduce memory and improve duplicate detection for high-token events.
+
+This feature is optional. If the package is not present or the flag is disabled, the system falls back safely to SHA-1 signatures.
+
+Steps:
+
+1) Install the library
+
+```powershell
+# Windows PowerShell
+pip install datasketch
+```
+
+```bash
+# macOS/Linux
+pip install datasketch
+```
+
+2) Enable the feature flag at runtime
+
+```powershell
+$env:CLUSTER_MINHASH_ENABLED = '1'
+# optional: adjust clustering TTL (seconds) for membership decay
+$env:CLUSTER_TTL_SECONDS = '3600'
+```
+
+```bash
+export CLUSTER_MINHASH_ENABLED=1
+# optional
+export CLUSTER_TTL_SECONDS=3600
+```
+
+Notes:
+- The code path is guarded: if datasketch is unavailable or the flag is not set, SHA-1 hashing is used instead.
+- MinHash is only applied when token volume justifies it (e.g., iocs + factors > 32 tokens).
+- You can revert by unsetting the environment variable or setting it to 0/false.
+
 ```bash
 git clone <repository>
 cd JanuSec
@@ -367,6 +794,11 @@ pip install -r requirements.txt
 ```bash
 python run_platform.py
 ```
+   *Optional warm-up / regression helpers (run in another terminal once the API is listening at http://localhost:8080):*
+   ```bash
+   python scripts/prewarm_ollama.py --model llama3:8b
+   python scripts/verify_loop_closure.py --server http://localhost:8080
+   ```
 
 4. **Run tests**:
 ```bash
@@ -467,6 +899,61 @@ slack:
 Prometheus scrapes `/metrics`; Grafana dashboards aggregate:
 ```yaml
 scrape_configs:
+
+## 🧵 Redis Streams Worker (Durable Ingest)
+
+The platform supports a Redis Streams-backed durable ingest path. A background worker consumes events from a stream, forwards them to the API batch endpoint, performs idempotent dedupe, reclaims stale messages, and exposes Prometheus metrics.
+
+Key script: `scripts/redis_streams_consumer.py`
+
+Environment variables (common):
+- `REDIS_URL` – e.g. `redis://localhost:6379/0`
+- `STREAM_INGEST_NAME` – stream name (default `ingest_stream`)
+- `STREAM_INGEST_GROUP` – consumer group (default `ingest_group`)
+- `STREAM_CONSUMER_NAME` – consumer name (auto-generated by default)
+- `INGEST_URL` – API batch endpoint (default `http://127.0.0.1:8000/api/v1/endpoints/log_batch`)
+- `STREAM_BLOCK_MS` – XREADGROUP block timeout (ms)
+- `STREAM_RECLAIM_MIN_IDLE_MS` – idle time before auto-claim
+- `STREAM_RECLAIM_INTERVAL_SEC` – reclaimer loop interval
+- `STREAM_DEDUPE_TTL_SEC` – dedupe TTL (seconds)
+- `STREAM_DLQ_NAME` / `STREAM_DLQ_DEAD` – DLQ streams
+- `STREAM_DLQ_MAX_ATTEMPTS` – DLQ retry attempts before dead-letter
+- `WORKER_METRICS_PORT` – if >0, starts an HTTP server at `/metrics` for Prometheus
+- `WORKER_BYPASS_HEADER` – header name for internal bypass (default `X-Worker-Secret`)
+- `WORKER_BYPASS_TOKEN` – shared secret; when set, worker injects this header to bypass API rate limits intended for external clients
+
+Run locally (PowerShell):
+```powershell
+$env:REDIS_URL='redis://localhost:6379/0'
+$env:INGEST_URL='http://127.0.0.1:8000/api/v1/endpoints/log_batch'
+$env:WORKER_METRICS_PORT='9108'
+$env:WORKER_BYPASS_TOKEN='changeme'  # also set same value for API
+python scripts/redis_streams_consumer.py
+```
+
+Docker Compose (provided: `docker-compose.redis.yml`) wires Redis + API + Worker:
+- Sets `INGEST_URL` to the correct batch endpoint
+- Exposes worker metrics on `9108`
+- Passes `WORKER_BYPASS_HEADER`/`WORKER_BYPASS_TOKEN` to both API and worker so internal traffic can bypass per-tenant/global rate limits
+
+Build images and run:
+```powershell
+docker compose -f docker-compose.redis.yml build
+docker compose -f docker-compose.redis.yml up -d
+```
+
+Prometheus scrape example for the worker:
+```yaml
+scrape_configs:
+  - job_name: 'janusec-worker'
+    static_configs:
+      - targets: ['worker:9108']
+```
+
+Notes:
+- The API will still enforce backpressure if internal queues are near saturation; the bypass only skips external rate limits.
+- Dedupe uses SHA-256 keys with TTL to avoid re-processing duplicates.
+- DLQ processing retries and eventually moves events to a dead-letter stream after the configured maximum attempts.
   - job_name: 'janusec'
     metrics_path: /metrics
     static_configs:
@@ -745,3 +1232,144 @@ Repository rebranded to **JanuSec** on 2025-09-21. Legacy identifiers still acce
 See `BRANDING_CHANGE.md` for migration guidance & compatibility notes.
 
 **Built with pragmatic engineering principles – reduce noise, preserve signal, stay adaptive.**
+## Canonical Frontend & API (for Copilot/Claude)
+
+- React source lives in `frontend/react`; build output is `frontend/react/dist`.
+- The API serves the React build at `/react` and, when present, also returns the React index at `/`.
+- The React app resolves the backend URL via `VITE_API_BASE` (if set) or `window.location.origin`.
+- Use the detachable right panel at `/sidepanel` for Live stream, Dashboards (Grafana), Metrics (/metrics), and Notify (SOAR demo).
+
+Build and run:
+
+```
+cd frontend/react && npm ci && npm run build
+uvicorn src.api.app:app --host 0.0.0.0 --port 8000
+```
+
+Optional Vite override (dev): create `frontend/react/.env` with `VITE_API_BASE=http://localhost:8000`.
+
+## Frontend of Record (READ ME)
+
+- Canonical LIVE console UI: `frontend/static/janusec-platform-complete-LIVE.html`
+- The API serves this page at `/` and `/live` when `DEFAULT_FRONTEND=console` (see `src/api/app.py`).
+- Extend the UI via static pages under `frontend/static/` and link from the left sidebar. Do not replace the LIVE console.
+- See `AGENTS.md` for agent/collaborator guidance and the list of supported API endpoints used by the UI.
+
+### New Multi-Format Upload & Spreadsheet Support (Added Q4 2025)
+
+The upload pipeline and File/CSV/Excel Analyzer now support these formats:
+
+| Format | Extensions | Detection Path | Notes |
+|--------|------------|----------------|-------|
+| CSV / TSV | .csv, .tsv, .log, .txt | Extension | Delimiter auto-detection (comma, tab, semicolon, pipe) in frontend; server uses Python csv. |
+| Excel (modern) | .xlsx, .xlsm | Extension → openpyxl | Read-only streaming parsing; pagination session created for large files. |
+| Excel (legacy) | .xls | Extension → xlrd (optional) | Requires `xlrd`; graceful error if missing. |
+| OpenDocument | .ods | Extension → pyexcel-ods3 (optional) | Requires `pyexcel-ods3`; graceful error if missing. |
+| Gzip-compressed | *.csv.gz, *.xlsx.gz etc. | Extension `.gz` | Frontend attempts client-side gzip for CSV; server transparently decompresses for csv/excel. |
+| ZIP archive (CSV bundle) | .zip | ZIP signature | Server inspects up to 10 CSV members, aggregates union headers + IoC scan. |
+
+Optional Python dependencies (install only what you need):
+
+```bash
+pip install openpyxl          # .xlsx / .xlsm
+pip install xlrd              # legacy .xls
+pip install pyexcel-ods3      # .ods
+```
+
+If a dependency is missing the API returns a structured error for that file (does not crash batch). The frontend hybrid parser uses SheetJS for client-side `.xlsx/.xlsm` preview and falls back to server parsing for legacy or large files.
+
+Environment overrides:
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| MAX_UPLOAD_BYTES | Per-file size cap (bytes) | 10485760 (10MB) |
+| CERT_CHECK_TTL_SEC | Cert cache TTL | 86400 |
+
+### Certificate Reputation & Validation (CT/OCSP) Module
+
+Background worker performs opportunistic CT + OCSP lookups with caching, batching, metrics, and durable webhook retry.
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| CERT_CT_API_URL | Base URL queried as `${base}/ct/{fp}` returning JSON `{suspicious: bool}` | unset (heuristic fallback) |
+| CERT_OCSP_API_URL | Base URL queried as `${base}/ocsp/{fp}` returning JSON `{status: good|revoked|unknown}` | unset (heuristic fallback) |
+| CERT_CHECK_TTL_SEC | Cache TTL for cert_results | 86400 |
+| CERT_CHECK_RATE_PER_MIN | Max outbound CT/OCSP queries per minute (token bucket) | 60 |
+| CERT_CHECK_BATCH_SIZE | Findings per webhook batch | 10 |
+| CERT_CHECK_BATCH_INTERVAL_SEC | Max seconds before flushing partial batch | 15 |
+| CERT_CHECK_WEBHOOK_URL | Destination for batched suspicious/revoked findings | unset |
+| CERT_CHECK_WEBHOOK_SECRET | HMAC-SHA256 signing secret (header `X-Signature`) | unset |
+| CERT_CHECK_WEBHOOK_MAX_ATTEMPTS | Max retry attempts for failed webhook batches | 5 |
+
+Durable Retry: Failed batches are stored in sqlite table `webhook_batches` and retried opportunistically on subsequent flush cycles until success or attempt limit reached.
+
+Metrics (Prometheus):
+| Metric | Description |
+|--------|-------------|
+| cert_checks_processed_total | Total cert fingerprints processed |
+| cert_checks_errors_total | Errors during individual CT/OCSP operations |
+| cert_checks_webhook_sent_total | Successful webhook batches (including retries) |
+| cert_checks_latency_seconds | Histogram of individual CT/OCSP call latencies |
+
+API Endpoint:
+`GET /api/v1/cert_checks/{fingerprint}` returns `{ fingerprint, cached: bool, status, last_checked, details }` or `cached:false` when absent/stale.
+
+Frontend Integration:
+- `certificate_analysis` and `network_hunter` enqueue cert fingerprints; cached results instantly enrich factors (`ssl:ct_suspected`, `ssl:revoked_cert`).
+
+Manual Test Snippet (PowerShell):
+```powershell
+$env:CERT_CHECK_WEBHOOK_URL='http://localhost:8001/mock'
+$env:CERT_CHECK_WEBHOOK_SECRET='devsecret'
+python - <<'PY'
+from src.integrations import cert_checks as cc
+cc.queue_cert_check('flag-cert-demo')
+cc.start_worker(background=False)
+cc._flush_batch_if_needed(force=True)
+print(cc.get_cert_check('flag-cert-demo'))
+PY
+```
+
+## Mailbox OAuth & Polling Setup
+
+Follow these steps to register OAuth apps, configure secrets, and validate the hardened polling worker:
+
+1. **Register client apps**
+   - *Microsoft Graph*: create an app registration with `Mail.Read` + `offline_access`. Record `MSGRAPH_CLIENT_ID`, `MSGRAPH_CLIENT_SECRET`, and set `MSGRAPH_REDIRECT` (e.g., `http://localhost:8080/api/v1/integrations/oauth/msgraph/callback`).
+   - *Google Workspace / Gmail*: create OAuth credentials with Gmail read-only scope. Record `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, and set `GMAIL_REDIRECT`.
+
+2. **Pick a secret backend**
+   Set `SECRET_BACKEND` (alias `SECRET_MANAGER_BACKEND`) to one of:
+   - `tenant` *(default)* – encrypted file store under `data/tenant_store`.
+   - `vault` – requires `VAULT_ADDR`, `VAULT_TOKEN`, and optional `VAULT_KV_MOUNT`.
+   - `azure` – requires `AZURE_KEY_VAULT_URL` and `AZURE_KEY_VAULT_TOKEN` (Bearer token or MSI).
+   Missing env vars automatically fall back to the file backend. For CI/tests you can use `SECRET_BACKEND=memory`.
+
+3. **Run OAuth start/callback**
+   Call `/api/v1/integrations/oauth/{msgraph|gmail}/start?tenant_id=demo` to obtain the authorization URL, complete the flow, then hit `/callback` which persists tokens via the selected backend. Tokens now include `client_id`, `client_secret`, and `expires_at`.
+
+4. **Configure the polling worker**
+   - `POLLING_MAX_ATTEMPTS` (default `5`) and `POLLING_BACKOFF_BASE` (default `1.0`) control exponential backoff with jitter.
+   - `POLLING_TENANT_RATE_CAPACITY`, `POLLING_TENANT_RATE_REFILL`, `POLLING_TENANT_RATE_TTL` feed the per-tenant token bucket leveraging the core `RateLimiter`. Set capacity/refill to `0` to disable throttling.
+   - The worker automatically persists `delta_link` (MS Graph) and `history_id` (Gmail) inside `data/polling_state` or the directory defined by `POLLING_STATE_DIR`.
+
+5. **Validate polling**
+   Run `python -m integrations.polling_worker TENANT_ID msgraph --loop` (or `gmail`). The worker now:
+   - Applies exponential backoff with jitter on HTTP 429/5xx responses.
+   - Detects token revocation (401) and clears tenant secrets so operators can restart the OAuth flow.
+   - Respects per-tenant rate limits before hitting provider APIs or pipelines.
+   - Stores `deltaLink`/`historyId` to drive incremental syncs and reports missing telemetry in logs.
+
+6. **Run focused tests**
+   ```bash
+   pytest tests/test_oauth_router.py
+   pytest tests/test_polling_worker.py
+   ```
+   These tests exercise the OAuth router, secret backend toggle, and polling worker behaviors (backoff, state persistence, revocation handling).
+
+7. **Exercise secret backend swaps**
+   ```bash
+   pytest tests/test_secret_backends.py
+   ```
+   This suite covers Vault/Azure integrations plus the fallback path so you can confirm `SECRET_BACKEND` and related env vars are wired correctly before enabling Vault or Key Vault in staging.
+
+Use the `PIPELINE_ENDPOINT` env var to post processed events to your ingestion API; otherwise the worker appends CSV rows under `data/polled_events/`.

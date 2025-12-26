@@ -1,8 +1,10 @@
 """Decisions Repository"""
 from __future__ import annotations
+
 import json
 from typing import Any, Dict, Optional
-from db.database import execute, fetchrow, fetch, with_retry
+
+from db.database import execute, fetch, fetchrow, with_retry
 
 INSERT_DECISION = """
 INSERT INTO decisions (event_id, verdict, confidence, processing_ms, factors, stage_timings, custody_hash, tenant_id)
@@ -24,6 +26,16 @@ async def upsert_decision(event_id: str, decision: Any, tenant_id: str | None):
     factors_json = json.dumps(decision.factors)
     stage_timings_json = json.dumps(decision.stage_timings)
     async def _do():
+        # Ownership check: existing row with different tenant may not be updated
+        try:
+            row = await fetchrow("SELECT tenant_id FROM decisions WHERE event_id=$1", event_id)
+            if row is not None:
+                existing_tid = row.get('tenant_id') if isinstance(row, dict) else row['tenant_id']
+                if existing_tid != tenant_id:
+                    raise PermissionError('cross_tenant_write_rejected')
+        except Exception as _e:
+            if isinstance(_e, PermissionError):
+                raise
         return await execute(
             INSERT_DECISION,
             event_id,
@@ -37,7 +49,7 @@ async def upsert_decision(event_id: str, decision: Any, tenant_id: str | None):
         )
     return await with_retry(_do)
 
-async def get_decision(event_id: str, tenant_id: str | None) -> Optional[Dict[str, Any]]:
+async def get_decision(event_id: str, tenant_id: str | None) -> dict[str, Any] | None:
     row = await fetchrow(GET_DECISION, event_id, tenant_id)
     return dict(row) if row else None
 

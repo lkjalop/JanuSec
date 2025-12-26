@@ -2,19 +2,23 @@ from __future__ import annotations
 
 from typing import List
 
-from core.coverage_tracker import get_coverage_tracker
 from core.correlation.cluster_dedupe import cluster_mark
 from core.correlation.factor_constants import ALL_CORR_FACTORS
 from core.correlation.hunt_correlation import get_correlation_engine
+from core.coverage_tracker import get_coverage_tracker
 from core.embedding.providers import EmbeddingSelector, embed_text
 from core.hunt.evidence_envelope import EvidenceEnvelope
 from core.hunt.lane_registry import LaneRegistry
 from core.mappings.mitre_stride import map_factors
+from core.metrics import make_counter
 from core.quality.factor_entropy import observe_factors
 from core.quality.factor_quality import get_quality_manager
 
 from ..utils import cfg_get
-from .base import StageContext, StageResult, timed_stage, maybe_await
+from .base import StageContext, StageResult, maybe_await, timed_stage
+
+# Correlation events counter
+_corr_counter = make_counter('hunt_correlation_events_total', 'Total events processed by correlation stage')
 
 
 @timed_stage('hunt_lanes')
@@ -38,6 +42,30 @@ async def hunt_lanes_stage(event: dict, ctx: StageContext) -> StageResult:
             registry.register(build_ja3(ctx.config))
         except Exception:
             pass
+        try:
+            # Register Email BEC lane for phishing/BEC detection
+            from core.hunt.lanes.email_bec import build as build_email_bec
+            registry.register(build_email_bec())
+        except Exception:
+            pass
+        # Optional new lanes (best-effort registration, gated by feature flags)
+        try:
+            from core.feature_flags import is_enabled
+        except Exception:
+            def is_enabled(_):
+                return False
+        if is_enabled('lane_privilege'):
+            try:
+                from core.hunt.lanes.privilege_misuse import build as build_priv
+                registry.register(build_priv())
+            except Exception:
+                pass
+        if is_enabled('lane_host_pivot'):
+            try:
+                from core.hunt.lanes.host_pivot import build as build_pivot
+                registry.register(build_pivot())
+            except Exception:
+                pass
 
     envelope = EvidenceEnvelope(event)
     try:
@@ -65,8 +93,8 @@ async def correlation_stage(event: dict, ctx: StageContext) -> StageResult:
 
     engine = get_correlation_engine(ctx.config)
     existing = list(ctx.state.get('factors') or [])
-    tp_factors: List[str] = []
-    fp_factors: List[str] = []
+    tp_factors: list[str] = []
+    fp_factors: list[str] = []
     expected = event.get('expected_verdict')
     if expected in ('malicious', 'benign'):
         for factor in existing:
@@ -81,7 +109,12 @@ async def correlation_stage(event: dict, ctx: StageContext) -> StageResult:
             elif factor.startswith('cluster_duplicate') or factor.startswith('timings:'):
                 fp_factors.append(factor)
     try:
-        new_corr = await engine.correlate(existing, tp_factors=tp_factors, fp_factors=fp_factors)
+        # Pass the original event so the correlation engine can apply temporal rules
+        new_corr = await engine.correlate(existing, tp_factors=tp_factors, fp_factors=fp_factors, event=event)
+        try:
+            _corr_counter.inc()
+        except Exception:
+            pass
     except Exception as exc:
         try:
             ctx.logger.debug('Correlation stage error: %s', exc)

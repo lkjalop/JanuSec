@@ -11,8 +11,10 @@ Expected event fields (best-effort):
 Adds factors prefixed automatically by envelope as lane_process_lineage:*
 """
 from __future__ import annotations
-from typing import List
+
 import re
+from typing import List
+
 
 class ProcessLineageLane:
     name = 'process_lineage'
@@ -32,8 +34,8 @@ class ProcessLineageLane:
         proc = (e.get('process_name') or '').lower()
         parent = (e.get('parent_process_name') or '').lower()
         cmd = (e.get('cmdline') or '')
-        parent_cmd = (e.get('parent_cmdline') or '')
-        factors: List[str] = []
+        (e.get('parent_cmdline') or '')
+        factors: list[str] = []
 
         key = (parent, proc)
         if key in self.SUSPICIOUS_PARENTS:

@@ -5,28 +5,31 @@ This is intentionally minimal—full implementation (parquet conversion, pointer
 embedding, etc.) deferred until activation.
 """
 from __future__ import annotations
-import time, threading
+
+import threading
+import time
 from dataclasses import dataclass, field
-from typing import Dict, Optional, List
+from typing import Dict, List, Optional
+
 
 @dataclass
 class BatchJob:
     job_id: str
     dataset_ref: str
     source_type: str  # upload|s3|fs
-    window_start: Optional[str]
-    window_end: Optional[str]
+    window_start: str | None
+    window_end: str | None
     status: str = 'registered'  # registered|running|complete|failed|aborted
     created_ts: float = field(default_factory=time.time)
     updated_ts: float = field(default_factory=time.time)
     progress_segments: int = 0
     total_segments: int = 0
-    errors: List[str] = field(default_factory=list)
-    report: Dict[str, object] = field(default_factory=dict)
+    errors: list[str] = field(default_factory=list)
+    report: dict[str, object] = field(default_factory=dict)
 
 class BatchIngestManager:
     def __init__(self):
-        self._jobs: Dict[str, BatchJob] = {}
+        self._jobs: dict[str, BatchJob] = {}
         self._lock = threading.Lock()
 
     def register(self, job_id: str, dataset_ref: str, source_type: str, window_start: str | None, window_end: str | None) -> BatchJob:
@@ -70,7 +73,7 @@ class BatchIngestManager:
         with self._lock:
             return self._jobs.get(job_id)
 
-    def report(self, job_id: str) -> Dict[str, object] | None:
+    def report(self, job_id: str) -> dict[str, object] | None:
         job = self.status(job_id)
         return None if not job else job.report
 

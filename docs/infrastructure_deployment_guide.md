@@ -498,12 +498,13 @@ groups:
           description: "95th percentile processing latency is {{ $value }}s"
 
       - alert: SystemDown
-        expr: up{job="threat-sifter"} == 0
+  # Updated to new job name 'janusec' (legacy 'threat-sifter' still scraped if left in ops/prometheus.yml)
+  expr: up{job="janusec"} == 0
         for: 1m
         labels:
           severity: critical
         annotations:
-          summary: "Threat Sifter system is down"
+          summary: "JanuSec system is down"
           description: "The Threat Sifter platform has been down for more than 1 minute"
 
       - alert: HighThreatRate
@@ -699,10 +700,10 @@ performance:
   - [ ] Log aggregation configured (ELK/Splunk)
 
 - [ ] **Integration**
-  - [ ] Eclipse XDR API connectivity tested
-  - [ ] Webhook endpoints configured in XDR
-  - [ ] SOAR playbook integration working
-  - [ ] Test events processed successfully
+- [ ] Eclipse XDR API connectivity tested
+- [ ] Webhook endpoints configured in XDR
+- [ ] SOAR playbook integration working (Cortex/Tines/Phantom connectors now emit `connector_id`, `tenant`, `idle_seconds`, `ttl_seconds`, and recommendation lists under `details` so playbooks can auto-assign to the “Connector Reliability” queue. Use those fields to route tickets or enrich downstream automation.)
+- [ ] Test events processed successfully
 
 - [ ] **Performance**
   - [ ] Load testing passed (1000+ events/sec)
@@ -739,3 +740,45 @@ docker exec threat-sifter-redis redis-cli info memory
 ```
 
 This infrastructure guide provides everything needed for a production-ready deployment of the Threat Sifter platform integrated with CyberStash's Eclipse XDR system!
+
+## Observability and Tracing
+
+### Distributed Tracing (OpenTelemetry + Jaeger)
+
+The API exposes optional OpenTelemetry tracing. Enable via envs:
+
+- OTEL_TRACING_ENABLED=1
+- OTEL_SERVICE_NAME=janusec-api
+- OTEL_EXPORTER_OTLP_ENDPOINT (e.g., http://jaeger-collector:4318)
+- OTEL_EXPORTER_OTLP_PROTOCOL = http/protobuf or grpc
+- OTEL_RESOURCE_ATTRIBUTES = deployment.environment=dev,cluster=demo
+- OTEL_TRACES_SAMPLER = always_on | always_off | parentbased_traceidratio
+- OTEL_TRACES_SAMPLER_ARG = 0.25 (only for parentbased_traceidratio)
+
+Helm values provide a minimal Jaeger deployment (jaeger.enabled=true) for demos. For production, use Jaeger/Tempo with persistence and HA.
+
+### Data Retention and Purge Scheduler
+
+- RETENTION_PURGE_INTERVAL_SECONDS=3600
+- RETENTION_EVENTS_DAYS=30, RETENTION_ALERTS_DAYS=60, RETENTION_DECISIONS_DAYS=60, RETENTION_AUDIT_DAYS=90
+
+### Redis and PgBouncer (Optional)
+
+- Redis HA demo: redisHa.enabled=true (not production). Prefer managed/Bitnami Redis. When enabled, REDIS_URL defaults to redis://redis-ha:6379/0.
+- PgBouncer: pgbouncer.enabled=true. Chart sets DB_HOST=pgbouncer, DB_PORT=6432. Provide a Secret for DB_PASSWORD or set pgbouncer.auth.password.
+
+### Prometheus Operator Integration
+
+- Enable metrics.serviceMonitor.enabled=true to create a ServiceMonitor for the API service. Jaeger ServiceMonitor via jaeger.metrics.serviceMonitor.enabled=true.
+
+### Security Hardening
+
+- Default podSecurityContext and container securityContext (non-root, read-only FS, drop caps), a PodDisruptionBudget, and a basic NetworkPolicy are included. Adjust in values.yaml.
+
+### Demo Templates Notice
+
+Redis HA and Jaeger all-in-one are demo-only. Replace with managed services or hardened charts for production.
+
+
+## Helm Auto-Wire Guards
+- Disable injection by setting utoWire.redisUrl=false or utoWire.dbHostPort=false if you provide REDIS_URL or DB_HOST/DB_PORT explicitly in alues.yaml (env:).

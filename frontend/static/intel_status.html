@@ -49,7 +49,7 @@
     }
     async function load(){
       try {
-        const r = await fetch('/api/v1/intel/status', { headers: { 'x-api-key': apiKey }});
+        const r = await (window.safeFetch || fetch)('/api/v1/intel/status', { headers: { 'x-api-key': apiKey }});
         const data = await r.json();
         render(data);
       } catch(e){ console.error(e); }

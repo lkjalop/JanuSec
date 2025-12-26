@@ -14,7 +14,7 @@ class DecisionPersistenceMixin:
     config: Any
     logger: Any
 
-    def _calculate_custody_hash(self, event: Dict[str, Any], factors: List[str]) -> str:
+    def _calculate_custody_hash(self, event: dict[str, Any], factors: list[str]) -> str:
         """Calculate cryptographic hash for chain of custody."""
         custody_data = {
             'event_id': event['id'],
@@ -25,7 +25,7 @@ class DecisionPersistenceMixin:
         canonical_json = json.dumps(custody_data, sort_keys=True)
         return hashlib.sha256(canonical_json.encode()).hexdigest()
 
-    async def _persist_decision(self, event: Dict[str, Any], result: ProcessingResult) -> None:
+    async def _persist_decision(self, event: dict[str, Any], result: ProcessingResult) -> None:
         """Persist decision record and append audit chain."""
         fast_mode = os.getenv('FAST_TEST_MODE', '0').lower() in {'1', 'true', 'yes'}
         if fast_mode:
@@ -36,12 +36,59 @@ class DecisionPersistenceMixin:
         try:
             await decisions_repo.upsert_decision(event['id'], result, event.get('tenant_id'))
             await self._persist_factor_embeddings(event['id'], result.factors)
+            # Trigger shadow A/B assignment for enabled tests (non-blocking)
+            try:
+                # schedule background assignment to avoid slowing persistence
+                try:
+                    from src.core.ab.shadow_runner import assign_if_enabled as _assign_if_enabled  # type: ignore
+                    from src.repositories import ab_test_repo as _ab_repo  # type: ignore
+                    # retrieve active tests and schedule assign_if_enabled for each
+                    async def _assign_loop():
+                        try:
+                            active = await _ab_repo.list_active()
+                            for t in (active or []):
+                                tid = t.get('id')
+                                if not tid:
+                                    continue
+                                try:
+                                    await _assign_if_enabled(tid, event['id'], event.get('tenant_id'))
+                                except Exception:
+                                    # swallow per-test errors
+                                    continue
+                        except Exception:
+                            pass
+                    # schedule as safe background task if possible
+                    try:
+                        # If tests request synchronous assignment (to avoid
+                        # races when asserting background behavior), run the
+                        # assign loop inline when ASSIGN_SYNC_FOR_TESTS is set.
+                        sync_assign = os.getenv('ASSIGN_SYNC_FOR_TESTS', '0').lower() in {'1','true','yes'}
+                        if sync_assign:
+                            try:
+                                # run inline to make unit tests deterministic
+                                await _assign_loop()
+                            except Exception:
+                                pass
+                        else:
+                            from src.api.server import safe_task
+                            safe_task(_assign_loop(), name='shadow_assign')
+                    except Exception:
+                        try:
+                            # fallback: create task directly
+                            import asyncio
+                            asyncio.create_task(_assign_loop())
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+            except Exception:
+                pass
         except Exception as exc:
             persistence_error = exc
 
         await self._append_audit_chain(event, result, persistence_error)
 
-    async def _persist_fast_mode(self, event: Dict[str, Any], result: ProcessingResult) -> None:
+    async def _persist_fast_mode(self, event: dict[str, Any], result: ProcessingResult) -> None:
         tenant_id = event.get('tenant_id')
         try:
             prev_hash = await audit_repo.get_last_hash(event['id'], tenant_id)
@@ -82,7 +129,32 @@ class DecisionPersistenceMixin:
             except Exception:
                 pass
 
-    async def _persist_factor_embeddings(self, event_id: str, factors: List[str]) -> None:
+        # When running in fast/test mode, allow tests to request a synchronous
+        # A/B assignment run so unit tests can deterministically observe it.
+        try:
+            sync_assign = os.getenv('ASSIGN_SYNC_FOR_TESTS', '0').lower() in {'1','true','yes'}
+        except Exception:
+            sync_assign = False
+        if sync_assign:
+            try:
+                from src.repositories import ab_test_repo as _ab_repo  # type: ignore
+                from src.core.ab.shadow_runner import assign_if_enabled as _assign_if_enabled  # type: ignore
+                try:
+                    active = await _ab_repo.list_active()
+                    for t in (active or []):
+                        tid = t.get('id')
+                        if not tid:
+                            continue
+                        try:
+                            await _assign_if_enabled(tid, event['id'], tenant_id)
+                        except Exception:
+                            continue
+                except Exception:
+                    pass
+            except Exception:
+                pass
+
+    async def _persist_factor_embeddings(self, event_id: str, factors: list[str]) -> None:
         slim_factors = [f for f in factors if isinstance(f, str) and ':' not in f][:25]
         if not slim_factors:
             return
@@ -107,7 +179,7 @@ class DecisionPersistenceMixin:
         except Exception:
             return None
 
-    async def _embed_factor(self, embedder, factor: str) -> List[float] | None:
+    async def _embed_factor(self, embedder, factor: str) -> list[float] | None:
         if not embedder:
             import hashlib
             digest = hashlib.sha256(factor.encode()).digest()
@@ -131,7 +203,7 @@ class DecisionPersistenceMixin:
 
     async def _append_audit_chain(
         self,
-        event: Dict[str, Any],
+        event: dict[str, Any],
         result: ProcessingResult,
         persistence_error: Exception | None,
     ) -> None:
@@ -171,5 +243,31 @@ class DecisionPersistenceMixin:
         except Exception as exc:
             try:
                 self.logger.debug('Audit append skipped: %s', exc)
+            except Exception:
+                pass
+
+        # In fast/test mode we may still want deterministic AB assignment for
+        # unit tests. If requested via ASSIGN_SYNC_FOR_TESTS, run the same
+        # assign loop inline so tests observing assignment can assert it.
+        try:
+            sync_assign = os.getenv('ASSIGN_SYNC_FOR_TESTS', '0').lower() in {'1','true','yes'}
+        except Exception:
+            sync_assign = False
+        if sync_assign:
+            try:
+                from src.repositories import ab_test_repo as _ab_repo  # type: ignore
+                from src.core.ab.shadow_runner import assign_if_enabled as _assign_if_enabled  # type: ignore
+                try:
+                    active = await _ab_repo.list_active()
+                    for t in (active or []):
+                        tid = t.get('id')
+                        if not tid:
+                            continue
+                        try:
+                            await _assign_if_enabled(tid, event['id'], tenant_id)
+                        except Exception:
+                            continue
+                except Exception:
+                    pass
             except Exception:
                 pass

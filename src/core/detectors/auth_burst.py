@@ -4,19 +4,21 @@ Maintains a sliding window of recent auth failure events per user and emits a
 factor when failures exceed a threshold within the window.
 """
 from __future__ import annotations
+
 import time
-from collections import deque, defaultdict
-from typing import Deque, Dict, List, Tuple, Any
+from collections import defaultdict, deque
+from typing import Any, Deque, Dict, List, Tuple
+
 
 class AuthBurstDetector:
     def __init__(self, window_seconds: int = 300, threshold: int = 5, max_events: int = 5000):
         self.window_seconds = window_seconds
         self.threshold = threshold
         self.max_events = max_events
-        self.events: Deque[Tuple[float, str]] = deque()  # (ts, user)
-        self.user_counts: Dict[str, int] = defaultdict(int)
+        self.events: deque[tuple[float, str]] = deque()  # (ts, user)
+        self.user_counts: dict[str, int] = defaultdict(int)
 
-    def observe(self, event: Dict[str, Any]):
+    def observe(self, event: dict[str, Any]):
         user = event.get('user') or event.get('username')
         if not user:
             return
@@ -48,7 +50,7 @@ class AuthBurstDetector:
                 if self.user_counts[u2] <= 0:
                     self.user_counts.pop(u2, None)
 
-    def factors(self, event: Dict[str, Any]) -> List[str]:
+    def factors(self, event: dict[str, Any]) -> list[str]:
         user = event.get('user') or event.get('username')
         if user and self.user_counts.get(user, 0) >= self.threshold:
             return ['auth_fail_burst_5m']
@@ -62,7 +64,7 @@ def get_auth_burst_detector() -> AuthBurstDetector:
         _default = AuthBurstDetector()
     return _default
 
-def auth_burst_factors(event: Dict[str, Any]) -> List[str]:
+def auth_burst_factors(event: dict[str, Any]) -> list[str]:
     det = get_auth_burst_detector()
     # Observe first so current event contributes
     det.observe(event)

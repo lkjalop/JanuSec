@@ -1,5 +1,7 @@
 import pytest
+
 from main import SecurityOrchestrator
+
 
 class SlackMock:
     def __init__(self, succeed=True):

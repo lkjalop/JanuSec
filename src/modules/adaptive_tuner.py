@@ -8,26 +8,26 @@ Integrates open-source models for enhanced pattern recognition and anomaly detec
 """
 
 import asyncio
-import logging
-import numpy as np
-import time
 import json
-from typing import Dict, Any, List, Optional, Tuple
-from dataclasses import dataclass, asdict
-from collections import deque, defaultdict
+import logging
+import time
+from collections import defaultdict, deque
+from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
+from typing import Any, Dict, List, Optional, Tuple
+
 
 # Lightweight ML models
 try:  # Optional heavy deps
-    from sklearn.ensemble import IsolationForest  # type: ignore
     from sklearn.cluster import MiniBatchKMeans  # type: ignore
+    from sklearn.ensemble import IsolationForest  # type: ignore
     from sklearn.preprocessing import StandardScaler  # type: ignore
     _SKLEARN_AVAILABLE = True
 except ImportError:  # pragma: no cover
     _SKLEARN_AVAILABLE = False
     def _inc_stub_counter():  # lazy import to avoid circular
         try:
-            from api.server import FALLBACK_COUNTS  # type: ignore
+            from src.api.server import FALLBACK_COUNTS  # type: ignore
             FALLBACK_COUNTS['ml_stub_predictions'] = FALLBACK_COUNTS.get('ml_stub_predictions',0) + 1
         except Exception:
             pass
@@ -51,8 +51,8 @@ except ImportError:  # pragma: no cover
         def transform(self, X):
             return X
 try:
-    from scipy.stats import entropy  # type: ignore
     from scipy.spatial.distance import jensenshannon  # type: ignore
+    from scipy.stats import entropy  # type: ignore
     _SCIPY_AVAILABLE = True
 except ImportError:  # pragma: no cover
     _SCIPY_AVAILABLE = False
@@ -72,10 +72,10 @@ except ImportError:  # pragma: no cover
             s = float(sum(a)) or 1.0
             return [x / s for x in a]
         p2, q2 = _norm(p), _norm(q)
-        m = [(x + y) / 2 for x, y in zip(p2, q2)]
+        m = [(x + y) / 2 for x, y in zip(p2, q2, strict=False)]
         def _kl(a, b):
             eps = 1e-12
-            return sum(ai * math.log((ai + eps)/(bi + eps)) for ai, bi in zip(a, b) if ai > 0)
+            return sum(ai * math.log((ai + eps)/(bi + eps)) for ai, bi in zip(a, b, strict=False) if ai > 0)
         return math.sqrt((_kl(p2, m) + _kl(q2, m)) / 2.0)
 
 
@@ -98,11 +98,11 @@ class TuningResults:
     """Results from a tuning cycle"""
     cycle_id: str
     timestamp: float
-    recommendations: List[TuningRecommendation]
+    recommendations: list[TuningRecommendation]
     has_recommendations: bool
     summary: str
     drift_detected: bool
-    performance_metrics: Dict[str, float]
+    performance_metrics: dict[str, float]
 
 
 @dataclass
@@ -136,10 +136,10 @@ class AdaptiveTuner:
         self.last_calibration = 0
         self.drift_threshold = 0.15  # Jensen-Shannon divergence threshold
         
-        # Lightweight ML models for anomaly detection
+        # Lightweight ML models for anomaly detection (created during initialize)
         self.anomaly_detector = None
         self.pattern_clusterer = None
-        self.scaler = StandardScaler()
+        self.scaler = None
         
         # Recommendation storage
         self.pending_recommendations = []
@@ -155,17 +155,26 @@ class AdaptiveTuner:
         self.logger.info("Initializing adaptive tuner...")
         
         # Initialize lightweight ML models
-        self.anomaly_detector = IsolationForest(
-            contamination=0.1,  # Expect 10% anomalies
-            random_state=42,
-            n_jobs=-1
-        )
-        
-        self.pattern_clusterer = MiniBatchKMeans(
-            n_clusters=20,  # Start with 20 pattern clusters
-            random_state=42,
-            batch_size=100
-        )
+        try:
+            self.anomaly_detector = IsolationForest(
+                contamination=0.1,  # Expect 10% anomalies
+                random_state=42,
+                n_jobs=-1
+            )
+        except Exception:
+            self.anomaly_detector = None
+        try:
+            self.pattern_clusterer = MiniBatchKMeans(
+                n_clusters=20,  # Start with 20 pattern clusters
+                random_state=42,
+                batch_size=100
+            )
+        except Exception:
+            self.pattern_clusterer = None
+        try:
+            self.scaler = StandardScaler()
+        except Exception:
+            self.scaler = None
         
         # Load historical data if available
         await self._load_historical_data()
@@ -291,7 +300,7 @@ class AdaptiveTuner:
             overall_drift_score=overall_drift
         )
 
-    def _calculate_distribution_shift(self, old_data: List[float], new_data: List[float]) -> float:
+    def _calculate_distribution_shift(self, old_data: list[float], new_data: list[float]) -> float:
         """Calculate Jensen-Shannon divergence between distributions"""
         if len(old_data) < 10 or len(new_data) < 10:
             return 0.0
@@ -321,7 +330,7 @@ class AdaptiveTuner:
         total_drift = 0
         pattern_count = 0
         
-        for pattern, history in self.pattern_performance.items():
+        for _pattern, history in self.pattern_performance.items():
             if len(history) < 20:
                 continue
             
@@ -380,7 +389,7 @@ class AdaptiveTuner:
             return abs(recent_avg - older_avg) / older_avg
         return 0.0
 
-    async def _analyze_performance(self) -> Dict[str, float]:
+    async def _analyze_performance(self) -> dict[str, float]:
         """Analyze overall system performance"""
         if len(self.confidence_history) < 50:
             return {}
@@ -402,7 +411,7 @@ class AdaptiveTuner:
         
         return metrics
 
-    async def _analyze_pattern_efficiency(self) -> Dict[str, float]:
+    async def _analyze_pattern_efficiency(self) -> dict[str, float]:
         """Analyze efficiency of regex patterns and other detectors"""
         if not self.pattern_performance:
             return {}
@@ -411,7 +420,7 @@ class AdaptiveTuner:
         inefficient_patterns = 0
         total_patterns = 0
         
-        for pattern, history in self.pattern_performance.items():
+        for _pattern, history in self.pattern_performance.items():
             if len(history) < 10:
                 continue
             
@@ -433,7 +442,7 @@ class AdaptiveTuner:
             'total_patterns_analyzed': total_patterns
         }
 
-    async def _generate_recommendations(self, drift_metrics: DriftMetrics, performance_metrics: Dict[str, float]) -> List[TuningRecommendation]:
+    async def _generate_recommendations(self, drift_metrics: DriftMetrics, performance_metrics: dict[str, float]) -> list[TuningRecommendation]:
         """Generate tuning recommendations based on analysis"""
         recommendations = []
         
@@ -451,7 +460,7 @@ class AdaptiveTuner:
         
         return recommendations
 
-    async def _generate_threshold_recommendations(self, metrics: Dict[str, float]) -> List[TuningRecommendation]:
+    async def _generate_threshold_recommendations(self, metrics: dict[str, float]) -> list[TuningRecommendation]:
         """Generate threshold adjustment recommendations"""
         recommendations = []
         
@@ -485,7 +494,7 @@ class AdaptiveTuner:
         
         return recommendations
 
-    async def _generate_pattern_recommendations(self, drift_metrics: DriftMetrics) -> List[TuningRecommendation]:
+    async def _generate_pattern_recommendations(self, drift_metrics: DriftMetrics) -> list[TuningRecommendation]:
         """Generate pattern optimization recommendations"""
         recommendations = []
         
@@ -514,7 +523,7 @@ class AdaptiveTuner:
         
         return recommendations
 
-    async def _generate_model_recommendations(self, drift_metrics: DriftMetrics, performance_metrics: Dict[str, float]) -> List[TuningRecommendation]:
+    async def _generate_model_recommendations(self, drift_metrics: DriftMetrics, performance_metrics: dict[str, float]) -> list[TuningRecommendation]:
         """Generate ML model retraining recommendations"""
         recommendations = []
         
@@ -534,7 +543,7 @@ class AdaptiveTuner:
         
         return recommendations
 
-    def _create_summary(self, recommendations: List[TuningRecommendation], drift_metrics: DriftMetrics) -> str:
+    def _create_summary(self, recommendations: list[TuningRecommendation], drift_metrics: DriftMetrics) -> str:
         """Create a human-readable summary of tuning results"""
         if not recommendations:
             return f"No recommendations. System stable (drift score: {drift_metrics.overall_drift_score:.3f})"
@@ -585,7 +594,7 @@ class AdaptiveTuner:
         except Exception as e:
             self.logger.warning(f"Error updating ML models: {e}")
 
-    def _extract_decision_features(self, decision_result) -> List[float]:
+    def _extract_decision_features(self, decision_result) -> list[float]:
         """Extract numerical features from decision result for ML models"""
         features = [
             decision_result.confidence,

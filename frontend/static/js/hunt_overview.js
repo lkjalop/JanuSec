@@ -1,8 +1,9 @@
 // Fetch demo hunt overview and inject into the DOM. Non-blocking and resilient.
 (async function(){
   try{
-    const resp = await fetch('/api/v1/hunt/overview');
-    if(!resp.ok) return;
+    const fetcher = window.safeFetch || fetch;
+    const resp = await fetcher('/api/v1/hunt/overview');
+    if(!resp || !resp.ok) return;
     const j = await resp.json();
     const ov = j.overview || {};
     const wrap = document.querySelector('.wrap');
@@ -19,5 +20,21 @@
     `;
     // place at top after nav
     const first = wrap.firstElementChild; if(first) wrap.insertBefore(card, first.nextSibling);
+
+    // Subscribe to stream to update counts live
+    try{
+      if(window.streamSubscribe){
+        window.streamSubscribe('message', (ev)=>{
+          try{
+            const data = JSON.parse(ev.data);
+            // Update if message contains hunt_overview-like deltas
+            if(data.type && data.type.includes('hunt')){
+              const decEl = card.querySelector('strong');
+              if(decEl && typeof data.recent_decisions === 'number') decEl.textContent = data.recent_decisions;
+            }
+          }catch(_e){}
+        });
+      }
+    }catch(_e){}
   }catch(_err){ /* best-effort */ }
 })();

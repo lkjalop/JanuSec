@@ -5,13 +5,17 @@ replay the file and keep only non-expired, open or unresolved items within TTL.
 Resolved entries remain addressable for stats until TTL expiry.
 """
 from __future__ import annotations
-from typing import Dict, Any, List
-import time, os, hashlib
+
+import hashlib
+import os
+import time
+from typing import Any, Dict, List
+
 
 class EscalationQueue:
     def __init__(self, ttl_seconds: int = 86400, path: str | None = None):
         self.ttl = ttl_seconds
-        self.items: Dict[str, Dict[str, Any]] = {}
+        self.items: dict[str, dict[str, Any]] = {}
         self.path = path or 'artifacts/escalations/escalations.log'
         os.makedirs(os.path.dirname(self.path), exist_ok=True)
         self._loaded = False
@@ -71,7 +75,7 @@ class EscalationQueue:
                 self.items.pop(k, None)
 
     # Persistence helpers
-    def _append_log(self, obj: Dict[str, Any]):
+    def _append_log(self, obj: dict[str, Any]):
         try:
             import json
             self._maybe_rotate()
@@ -89,7 +93,7 @@ class EscalationQueue:
         cutoff = time.time() - self.ttl
         try:
             import json
-            with open(self.path,'r',encoding='utf-8') as f:
+            with open(self.path,encoding='utf-8') as f:
                 for line in f:
                     line=line.strip()
                     if not line:

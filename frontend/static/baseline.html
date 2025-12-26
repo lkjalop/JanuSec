@@ -55,7 +55,7 @@
 const API_KEY = localStorage.apiKey || 'devkey123';
 let auto = false; let autoTimer = null; let nxHistory=[];
 function headers(){ return { 'x-api-key': API_KEY }; }
-async function fetchJSON(url){ const r = await fetch(url,{headers:headers()}); if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); }
+async function fetchJSON(url){ const r = await (window.safeFetch || fetch)(url,{headers:headers()}); if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); }
 async function loadNX(){
   try {
     const data = await fetchJSON('/api/v1/baseline/nxdomain');
@@ -78,7 +78,7 @@ function refreshAll(){ loadNX(); loadASN(); }
 async function previewFactors(){
   try {
     const body = { paths: [ { nodes: [ { domain: 'example.com', asn: pickRareAsn(), process:'C:/Temp/svchost.exe', file_hash:'' } ] } ] };
-    const r = await fetch('/api/v1/graph/preview/score', {method:'POST', headers:{...headers(),'content-type':'application/json'}, body: JSON.stringify(body)});
+    const r = await (window.safeFetch || fetch)('/api/v1/graph/preview/score', {method:'POST', headers:{...headers(),'content-type':'application/json'}, body: JSON.stringify(body)});
     const js = await r.json();
     document.getElementById('factorPreview').textContent = JSON.stringify(js, null,2);
   } catch(e){ document.getElementById('factorPreview').textContent = 'Preview error: '+e; }

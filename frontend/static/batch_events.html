@@ -146,7 +146,7 @@
         tenant_id: tenantId()
       };
       try {
-        const r = await fetch('/api/v1/endpoints/log_batch', {
+        const r = await (window.safeFetch || fetch)('/api/v1/endpoints/log_batch', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',

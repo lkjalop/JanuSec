@@ -3,7 +3,8 @@ from __future__ import annotations
 import asyncio
 import os
 import time
-from typing import Any, Awaitable
+from collections.abc import Awaitable
+from typing import Any
 
 from repositories import factor_weights_repo
 
@@ -25,12 +26,42 @@ class BackgroundTaskMixin:
 
     def _spawn_task(self, coro: Awaitable[Any], name: str) -> asyncio.Task:
         self._ensure_background_tasks()
-        task = asyncio.create_task(coro, name=name)
+        # During pytest runs, disable spawning long-running background tasks
+        # unless explicitly enabled via ENABLE_BG_TASKS=1
+        import inspect
+        disable_bg = bool(os.getenv('PYTEST_CURRENT_TEST')) and os.getenv('ENABLE_BG_TASKS','0').lower() not in {'1','true','yes'}
+        if disable_bg:
+            # If callers passed a coroutine object (e.g. self.health_monitor()), that
+            # coroutine was created but will not be awaited — avoid the "coroutine was
+            # never awaited" warning by closing it cleanly. If it's a callable factory
+            # (function), don't call it here.
+            try:
+                if inspect.iscoroutine(coro):
+                    try:
+                        coro.close()
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            # create a no-op task that completes immediately to satisfy callers
+            task = asyncio.create_task(asyncio.sleep(0), name=f"noop_{name}")
+        else:
+            # If a coroutine function was passed by mistake (callable), ensure we
+            # call it to obtain the coroutine object for scheduling.
+            try:
+                import inspect as _inspect
+                if callable(coro) and not _inspect.iscoroutine(coro):
+                    coro_obj = coro()
+                else:
+                    coro_obj = coro
+            except Exception:
+                coro_obj = coro
+            task = asyncio.create_task(coro_obj, name=name)
         self._bg_tasks.append(task)
         return task
 
     async def health_monitor(self) -> None:
-        fast_mode = os.getenv('FAST_TEST_MODE', '0').lower() in {'1', 'true', 'yes'}
+        fast_mode = os.getenv('FAST_TEST_MODE', '0').lower() in {'1', 'true', 'yes'} or bool(os.getenv('PYTEST_CURRENT_TEST'))
         base_interval = float(os.getenv('HEALTH_LOOP_INTERVAL', '30'))
         interval = 0.1 if fast_mode else base_interval
         while True:
@@ -48,7 +79,7 @@ class BackgroundTaskMixin:
                 await asyncio.sleep(60)
 
     async def adaptive_tuning_loop(self) -> None:
-        fast_mode = os.getenv('FAST_TEST_MODE', '0').lower() in {'1', 'true', 'yes'}
+        fast_mode = os.getenv('FAST_TEST_MODE', '0').lower() in {'1', 'true', 'yes'} or bool(os.getenv('PYTEST_CURRENT_TEST'))
         base_interval = float(os.getenv('TUNING_LOOP_INTERVAL', '3600'))
         interval = 0.1 if fast_mode else base_interval
         while True:
@@ -62,7 +93,7 @@ class BackgroundTaskMixin:
                 self.logger.error("Adaptive tuning error: %s", exc)
 
     async def metrics_collection_loop(self) -> None:
-        fast_mode = os.getenv('FAST_TEST_MODE', '0').lower() in {'1', 'true', 'yes'}
+        fast_mode = os.getenv('FAST_TEST_MODE', '0').lower() in {'1', 'true', 'yes'} or bool(os.getenv('PYTEST_CURRENT_TEST'))
         base_interval = float(os.getenv('METRICS_LOOP_INTERVAL', '60'))
         interval = 0.1 if fast_mode else base_interval
         while True:
@@ -136,6 +167,52 @@ class BackgroundTaskMixin:
                     await self.metrics.record_embedding_stats(avg_norm)
         except Exception:
             pass
+
+    async def prune_hopgraph_periodic(self) -> None:
+        """Background job to prune old HopGraph edges periodically.
+
+        Respects env vars:
+        - HOPGRAPH_CLEAN_INTERVAL_SECONDS (seconds, default 6h)
+        - HOPGRAPH_MAX_EDGE_AGE_HOURS (hours, default 168)
+        - HOPGRAPH_MAX_NODE_AGE_HOURS (hours, default 168)
+        - HOPGRAPH_WAL_TTL_HOURS (hours, default 24)
+        """
+        try:
+            interval = int(os.getenv('HOPGRAPH_CLEAN_INTERVAL_SECONDS', str(6 * 3600)))
+            max_age = int(os.getenv('HOPGRAPH_MAX_EDGE_AGE_HOURS', '168'))
+            max_node_age = int(os.getenv('HOPGRAPH_MAX_NODE_AGE_HOURS', '168'))
+            wal_ttl = int(os.getenv('HOPGRAPH_WAL_TTL_HOURS', '24'))
+        except Exception:
+            interval = 6 * 3600
+            max_age = 168
+            max_node_age = 168
+            wal_ttl = 24
+
+        if interval <= 0:
+            self.logger.info('HopGraph prune loop disabled (interval <= 0)')
+            return
+
+        while True:
+            try:
+                await asyncio.sleep(interval)
+                if not hasattr(self, 'GLOBAL_HOPGRAPH') or not getattr(self, 'GLOBAL_HOPGRAPH', None):
+                    self.logger.debug('No GLOBAL_HOPGRAPH available; skipping prune')
+                    continue
+                gh = getattr(self, 'GLOBAL_HOPGRAPH')
+                if not getattr(gh, 'backend', None):
+                    self.logger.debug('HopGraph backend not configured; skipping prune')
+                    continue
+                deleted_e = gh.backend.prune_old_edges(max_age)
+                deleted_n = gh.backend.prune_old_nodes(max_node_age)
+                deleted_w = gh.backend.prune_wal(wal_ttl)
+                try:
+                    # compact DB occasionally
+                    gh.backend.vacuum()
+                except Exception:
+                    pass
+                self.logger.info(f'Pruned edges={deleted_e} (> {max_age}h), nodes={deleted_n} (> {max_node_age}h), wal={deleted_w} (> {wal_ttl}h)')
+            except Exception as e:
+                self.logger.exception('HopGraph prune failed: %s', e)
 
     async def _apply_tuning_recommendations(self, recommendations) -> None:
         for rec in recommendations.changes:

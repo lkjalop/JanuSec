@@ -1,3 +1,10 @@
+FROM python:3.11-slim
+WORKDIR /app
+COPY . /app
+RUN pip install --no-cache-dir -r requirements.txt || true
+ENV PYTHONUNBUFFERED=1
+EXPOSE 8000
+CMD ["python","-m","service.janusec_runner"]
 # Multi-stage build for JanuSec (formerly Threat Sifter)
 # Stage 1: base with build deps
 FROM python:3.11-slim AS base
@@ -36,8 +43,8 @@ ENV EVENT_QUEUE_MAX=2000 \
 # Create non-root user
 RUN useradd -m appuser
 
-# Port alignment with FastAPI default (we run uvicorn at 8000)
-EXPOSE 8000
+# Port alignment with ecosystem (docker-compose, prometheus)
+EXPOSE 8080
 
 # Runtime env defaults (override as needed)
 ENV PERSIST_BACKEND=jsonl \
@@ -49,7 +56,7 @@ ENV PERSIST_BACKEND=jsonl \
 USER appuser
 
 # Optional: healthcheck hitting /health
-HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 CMD curl -fsS http://localhost:8000/health || exit 1
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 CMD curl -fsS http://localhost:8080/health || exit 1
 
 # Use uvicorn explicitly (enables reload off by default)
-ENTRYPOINT ["uvicorn","api.server:app","--host","0.0.0.0","--port","8000"]
+ENTRYPOINT ["uvicorn","api.server:app","--host","0.0.0.0","--port","8080"]

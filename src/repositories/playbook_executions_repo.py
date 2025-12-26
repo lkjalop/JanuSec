@@ -1,8 +1,10 @@
 """Repository for playbook executions."""
 from __future__ import annotations
-from typing import Any, Dict, List
-from db.database import fetch, with_retry
+
 import json
+from typing import Any, Dict, List
+
+from db.database import fetch, with_retry
 
 INSERT = """
 INSERT INTO playbook_executions (alert_id, category, playbook_id, actions, status, error)
@@ -23,7 +25,7 @@ async def insert_execution(alert_id: int | None, category: str, playbook_id: str
     row = await with_retry(_do)
     return dict(row) if row else None
 
-async def list_recent(limit: int = 100) -> List[Dict[str, Any]]:
+async def list_recent(limit: int = 100) -> list[dict[str, Any]]:
     rows = await fetch(RECENT, limit)
     return [dict(r) for r in rows]
 

@@ -6,10 +6,11 @@ Version: 1.0.0
 
 import asyncio
 import logging
-from typing import Dict, Any
 from collections import defaultdict
+from typing import Any, Dict
+
 try:
-    from prometheus_client import Histogram, Counter
+    from prometheus_client import Counter, Histogram
 except Exception:  # pragma: no cover
     Histogram = None  # type: ignore
     Counter = None  # type: ignore
@@ -59,6 +60,32 @@ class MetricsCollector:
                 )
             except Exception:
                 pass
+            # Export commonly referenced counters used by Grafana dashboards
+            try:
+                self.__class__.alerts_generated = Counter('alerts_generated_total', 'Alerts generated total')
+            except Exception:
+                self.__class__.alerts_generated = None  # type: ignore
+            try:
+                self.__class__.slack_failures = Counter('slack_failures_total', 'Slack delivery failures total')
+            except Exception:
+                self.__class__.slack_failures = None  # type: ignore
+            try:
+                self.__class__.fallback_tier_usage = Counter('fallback_tier_usage_total', 'Fallback tier usage total')
+            except Exception:
+                self.__class__.fallback_tier_usage = None  # type: ignore
+            try:
+                self.__class__.redactions = Counter('redactions_total', 'Redactions total')
+            except Exception:
+                self.__class__.redactions = None  # type: ignore
+            # Email ingest health counters
+            try:
+                self.__class__.email_poll_success = Counter('email_poll_success_total', 'Email poll successes total')
+            except Exception:
+                self.__class__.email_poll_success = None  # type: ignore
+            try:
+                self.__class__.email_poll_error = Counter('email_poll_error_total', 'Email poll errors total')
+            except Exception:
+                self.__class__.email_poll_error = None  # type: ignore
             self.__class__._prom_init = True
         except Exception:
             pass
@@ -67,7 +94,7 @@ class MetricsCollector:
         """Initialize metrics collector"""
         self.logger.info("Metrics collector initialized")
     
-    async def record_event_ingestion(self, event: Dict[str, Any]):
+    async def record_event_ingestion(self, event: dict[str, Any]):
         """Record event ingestion"""
         self.counters['events_ingested_total'] += 1
     
@@ -92,21 +119,60 @@ class MetricsCollector:
         """Record health status"""
         self.gauges['system_healthy'] = 1.0 if status == 'healthy' else 0.0
     
-    async def record_alert_generated(self, alert_data: Dict[str, Any]):
+    async def record_alert_generated(self, alert_data: dict[str, Any]):
         """Record alert generation"""
         self.counters['alerts_generated_total'] += 1
+        try:
+            if getattr(self.__class__, 'alerts_generated', None):
+                self.__class__.alerts_generated.inc()  # type: ignore
+        except Exception:
+            pass
 
     async def record_slack_failure(self):
         self.counters['slack_failures_total'] += 1
+        try:
+            if getattr(self.__class__, 'slack_failures', None):
+                self.__class__.slack_failures.inc()  # type: ignore
+        except Exception:
+            pass
 
     async def record_fallback_tier_usage(self):
         self.counters['fallback_tier_usage_total'] += 1
+        try:
+            if getattr(self.__class__, 'fallback_tier_usage', None):
+                self.__class__.fallback_tier_usage.inc()  # type: ignore
+        except Exception:
+            pass
 
     async def record_action_failure(self):
         self.counters['action_failures_total'] += 1
 
     async def record_redaction(self, count: int = 1):
         self.counters['redactions_total'] += count
+        try:
+            if getattr(self.__class__, 'redactions', None):
+                for _ in range(max(1, int(count))):
+                    self.__class__.redactions.inc()  # type: ignore
+        except Exception:
+            pass
+
+    async def record_email_poll_success(self, count: int = 1):
+        self.counters['email_poll_success_total'] += max(1, int(count))
+        try:
+            if getattr(self.__class__, 'email_poll_success', None):
+                for _ in range(max(1, int(count))):
+                    self.__class__.email_poll_success.inc()  # type: ignore
+        except Exception:
+            pass
+
+    async def record_email_poll_error(self, count: int = 1):
+        self.counters['email_poll_error_total'] += max(1, int(count))
+        try:
+            if getattr(self.__class__, 'email_poll_error', None):
+                for _ in range(max(1, int(count))):
+                    self.__class__.email_poll_error.inc()  # type: ignore
+        except Exception:
+            pass
 
     async def record_factor_feedback(self, vote: int):
         if vote > 0:
@@ -119,13 +185,13 @@ class MetricsCollector:
         if drift_value is not None:
             self.gauges['factor_embedding_drift'] = drift_value
     
-    async def record_system_metrics(self, metrics: Dict[str, Any]):
+    async def record_system_metrics(self, metrics: dict[str, Any]):
         """Record system-level metrics"""
         for key, value in metrics.items():
             if isinstance(value, (int, float)):
                 self.gauges[key] = float(value)
     
-    async def get_metrics_summary(self) -> Dict[str, Any]:
+    async def get_metrics_summary(self) -> dict[str, Any]:
         """Get metrics summary"""
         return {
             'counters': dict(self.counters),

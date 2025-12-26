@@ -2,6 +2,7 @@ from fastapi import APIRouter, Request, HTTPException
 import os
 import io
 import time
+from .runtime_state import get_file_batch_analysis
 
 router = APIRouter(prefix='/api/v1/dev')
 
@@ -69,23 +70,12 @@ async def dev_upload_sync(request: Request):
         # Best-effort: seed the runtime file_batch_analysis with richer synthetic batches
         try:
             from . import runtime_state
-            # Ensure both module-level alias and canonical runtime mapping exist
-            # and point to the same dict for maximum compatibility.
-            if getattr(runtime_state, 'FILE_BATCH_ANALYSIS', None) is None:
-                runtime_state.FILE_BATCH_ANALYSIS = {}
-            if getattr(runtime_state, '_RUNTIME', None) is None:
-                runtime_state._RUNTIME = runtime_state.ServerRuntime()
-            module_map = runtime_state.FILE_BATCH_ANALYSIS
-            runtime_map = runtime_state._RUNTIME.file_batch_analysis
-            # Keep them in sync (mutate in-place)
-            if runtime_map is not module_map:
-                # prefer the runtime_map if populated, else use module_map
-                if runtime_map:
-                    module_map = runtime_map
-                    runtime_state.FILE_BATCH_ANALYSIS = module_map
-                else:
-                    runtime_state._RUNTIME.file_batch_analysis = module_map
-                    runtime_map = module_map
+            runtime = getattr(runtime_state, '_RUNTIME', None)
+            if runtime is None:
+                runtime = runtime_state.ServerRuntime()
+                runtime_state._RUNTIME = runtime
+            module_map = get_file_batch_analysis(runtime)
+            runtime_map = runtime.file_batch_analysis
             now = int(time.time())
             for sid in sessions:
                 bid = sid if isinstance(sid, str) else f'batch-{int(time.time()*1000)}'
@@ -258,6 +248,21 @@ async def dev_seed_decisions(payload: dict, request: Request):
                 except Exception:
                     pass
             seeded.append(eid)
+            # Mirror into any app/server DECISION_CACHE bindings to keep routes consistent
+            try:
+                from . import app as app_module
+                app_cache = getattr(app_module, 'DECISION_CACHE', None)
+                if isinstance(app_cache, dict):
+                    app_cache[eid] = rec
+            except Exception:
+                pass
+            try:
+                from . import server as server_module
+                server_cache = getattr(server_module, 'DECISION_CACHE', None)
+                if isinstance(server_cache, dict):
+                    server_cache[eid] = rec
+            except Exception:
+                pass
         return {'seeded': seeded, 'count': len(seeded), 'tenant_id': tenant}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f'seed_failed:{e}')

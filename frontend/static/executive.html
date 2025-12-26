@@ -1,3 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Executive Overview</title>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <style>
+    body{ font-family:Inter,Segoe UI, system-ui; background:#0B0E14; color:#E8EBF0; margin:0; padding:20px 260px 40px 260px }
+    .kpis{ display:grid; grid-template-columns:repeat(5,1fr); gap:12px; margin-bottom:16px }
+    .kpi{ background:#141A24;padding:16px;border-radius:8px;border:1px solid rgba(255,255,255,0.03) }
+    .kpi .val{ font-size:20px;font-weight:700 }
+    .risk-drivers{ background:#141A24;padding:12px;border-radius:8px;border:1px solid rgba(255,255,255,0.03) }
+    .spark{ height:36px }
+  </style>
+</head>
+<body>
+  <h2>Executive Overview</h2>
+  <div class="kpis">
+    <div class="kpi"><div class="val" id="k_active">-</div><div class="label">Active Incidents</div></div>
+    <div class="kpi"><div class="val" id="k_mean_triage">-</div><div class="label">Mean Triage Time</div></div>
+    <div class="kpi"><div class="val" id="k_domain_cov">-</div><div class="label">Domain Coverage</div></div>
+    <div class="kpi"><div class="val" id="k_correlated">-</div><div class="label">Correlated Campaigns</div></div>
+    <div class="kpi"><div class="val" id="k_fp_rate">-</div><div class="label">False Positive Rate</div></div>
+  </div>
+
+  <div style="display:grid; grid-template-columns:2fr 1fr; gap:12px;">
+    <div class="risk-drivers">
+      <h3 style="margin-top:0">Risk Drivers (Top 5 Factors)</h3>
+      <div id="drivers"></div>
+    </div>
+    <div class="risk-drivers">
+      <h3 style="margin-top:0">Mini Trends</h3>
+      <div id="miniTrends"></div>
+    </div>
+  </div>
+
+  <script>
+    async function load(){
+      try{
+        document.getElementById('k_active').textContent = 3;
+        document.getElementById('k_mean_triage').textContent = '12m';
+        document.getElementById('k_domain_cov').textContent = '8 / 9';
+        document.getElementById('k_correlated').textContent = 2;
+        document.getElementById('k_fp_rate').textContent = '18%';
+        // load factors for drivers
+        const headers = { 'x-api-key': localStorage.getItem('apiKey')||'devkey123' };
+        const r = await fetch('/api/v1/factors',{ headers });
+        if(!r.ok) throw new Error('factors load failed');
+        const j = await r.json(); const factors = j.factors || [];
+        const top = factors.sort((a,b)=> (b.weight||0)-(a.weight||0)).slice(0,5);
+        const drivers = document.getElementById('drivers');
+        // contrast helper
+        const ensureContrast = (hex, bg='#141A24') => { try{ const s = hex.replace('#',''); const r=parseInt(s.substring(0,2),16), g=parseInt(s.substring(2,4),16), b=parseInt(s.substring(4,6),16); const l = 0.2126*(r/255)+0.7152*(g/255)+0.0722*(b/255); return l>0.18? hex : '#ffffff'; }catch(e){ return hex; } };
+        drivers.innerHTML = top.map(t=> {
+          const name = t.name||t.id; const domain = t.domain||''; const weight = (t.weight||0).toFixed(2);
+          const color = ensureContrast(t.color||'#4A63E7');
+          return `<div tabindex="0" role="listitem" style="display:flex;justify-content:space-between;padding:6px 4px;border-bottom:1px solid rgba(255,255,255,0.02)"><div><strong style=\"color:${color}\">${name}</strong><div style='font-size:11px;color:#A8B3C3'>${domain}</div></div><div style='text-align:right;color:#E8EBF0'>${weight}</div></div>`;
+        }).join('');
+        // mini trends mocked
+        const mini = document.getElementById('miniTrends'); mini.innerHTML = '<div style="font-size:12px;color:#A8B3C3">Threats last 7d</div><canvas id="miniSpark" width="200" height="40"></canvas>';
+        const ctx = document.getElementById('miniSpark').getContext('2d'); const arr = [1,3,2,5,4,6,3]; ctx.strokeStyle='#4A63E7'; ctx.beginPath(); arr.forEach((v,i)=>{ const x = i*(200/arr.length); const y = 40 - (v/6*36); if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y); }); ctx.stroke();
+      }catch(e){ console.warn(e); document.getElementById('drivers').textContent='Unable to load drivers'; }
+    }
+    load();
+  </script>
+</body>
+</html>
 <!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>JanuSec Executive Overview</title>
@@ -21,6 +89,16 @@
     <a class="btn" id="saveSnap" target="_blank">Save Snapshot</a>
     <label class="mut" style="display:flex;align-items:center;gap:6px">
       <input type="checkbox" id="toggleVex"> Include VEX-suppressed
+    </label>
+  </div>
+  <div class="row" style="margin-top:8px;">
+    <label class="mut" style="display:flex;align-items:center;gap:6px;">
+      Persona
+      <select id="personaSelect" style="background:#0B0E14;color:#E8EBF0;border:1px solid #2A3142;border-radius:6px;padding:4px 6px;">
+        <option value="executive">Executive</option>
+        <option value="soc_analyst">SOC Analyst</option>
+        <option value="threat_hunter">Threat Hunter</option>
+      </select>
     </label>
   </div>
   <div class="card"><h2>Executive Overview</h2>
@@ -133,6 +211,7 @@
     }catch(e){ console.log('notify-fail', e, msg); }
   }
 
+  const EXEC_PERSONA_VARIANTS = { executive: 'executive', soc_analyst: 'technical', threat_hunter: 'digest' };
   function authHeaders(){
     try{
       const k=localStorage.getItem('apiKey')||'devkey123';
@@ -145,11 +224,24 @@
     const params = new URLSearchParams(location.search);
     const sessions = params.get('sessions');
     const includeSupp = params.get('include_suppressed_vex') === 'true';
-    const baseQ = new URLSearchParams({ include_model: 'true', include_scenarios: 'true', include_suppressed_vex: String(includeSupp) });
+    const persona = params.get('persona') || 'executive';
+    const variant = params.get('variant') || EXEC_PERSONA_VARIANTS[persona] || 'executive';
+    const baseQ = new URLSearchParams({ include_model: 'true', include_scenarios: 'true', include_suppressed_vex: String(includeSupp), persona, variant });
     if(sessions){ baseQ.set('sessions', sessions); }
     const q = baseQ.toString();
     document.getElementById('openHtml').href = `/api/v1/report/ingestion?format=html&${q}`;
     document.getElementById('openPdf').href = `/api/v1/report/ingestion?format=pdf&${q}`;
+    const personaSelect = document.getElementById('personaSelect');
+    if (personaSelect) {
+      personaSelect.value = persona;
+      personaSelect.addEventListener('change', ()=>{
+        const next = new URLSearchParams(location.search);
+        const nextPersona = personaSelect.value || 'executive';
+        next.set('persona', nextPersona);
+        next.set('variant', EXEC_PERSONA_VARIANTS[nextPersona] || 'executive');
+        location.search = next.toString();
+      });
+    }
     const cb = document.getElementById('toggleVex');
     if (cb) {
       cb.checked = includeSupp;
@@ -166,7 +258,7 @@
       const ts = new Date().toISOString(); np.set('snapshot_title', `Exec Snapshot ${ts}`);
       window.open(`/api/v1/report/ingestion?${np.toString()}`, '_blank');
     }); }
-    const r = await fetch(`/api/v1/report/ingestion?format=json&${q}`, { headers: { ...authHeaders() }});
+    const r = await (window.safeFetch || fetch)(`/api/v1/report/ingestion?format=json&${q}`, { headers: { ...authHeaders() }});
     if(!r.ok){ document.getElementById('headline').textContent = 'Unable to load report. Ensure API is running and API key set.'; return; }
     const j = await r.json();
     const total = (j.verdict_stats && j.verdict_stats.total_events) || 0;
@@ -243,7 +335,7 @@
     }
     // Evidence metrics
     try {
-      const evr = await fetch('/api/v1/cases/metrics', { headers: { ...authHeaders() }});
+      const evr = await (window.safeFetch || fetch)('/api/v1/cases/metrics', { headers: { ...authHeaders() }});
       if (evr.ok){
         const em = await evr.json();
         const sev = em.case_severity_distribution || {}; const sevHtml = Object.entries(sev).map(([k,v])=>`<span class="pill">${esc(k)}: ${esc(v)}</span>`).join(' ');
@@ -259,7 +351,7 @@
     } catch(e){ document.getElementById('evidenceMetrics').textContent='Metrics error'; }
     // Snapshot hash fetch
     try {
-      const hs = await fetch(`/api/v1/report/ingestion/hash?${q}`, { headers: { ...authHeaders() }});
+      const hs = await (window.safeFetch || fetch)(`/api/v1/report/ingestion/hash?${q}`, { headers: { ...authHeaders() }});
       if(hs.ok){ const hj = await hs.json(); document.getElementById('snapHash').textContent = 'SHA256: ' + hj.sha256.slice(0,24) + '…'; document.getElementById('snapHash').dataset.fullHash = hj.sha256; }
     } catch {}
     // Start telemetry polling (TP/FP estimates)
@@ -271,7 +363,7 @@
   let _telemetryPollId = null;
   async function fetchTelemetryMetrics(){
     try{
-      const r = await fetch('/api/v1/telemetry/metrics', { headers:{ ...authHeaders() } });
+      const r = await (window.safeFetch || fetch)('/api/v1/telemetry/metrics', { headers:{ ...authHeaders() } });
       if(!r.ok) return null; const j = await r.json(); return j;
     }catch(_){ return null; }
   }
@@ -313,7 +405,7 @@
   async function loadUndoHistory(){
     const el = document.getElementById('undoHistory'); if(!el) return; el.textContent = 'Loading...';
     try{
-      const r = await fetch('/api/v1/telemetry/undo_tokens', { headers: { ...authHeaders() } });
+      const r = await (window.safeFetch || fetch)('/api/v1/telemetry/undo_tokens', { headers: { ...authHeaders() } });
       if(!r.ok){ el.textContent = 'Unable to load undo tokens'; return; }
       const j = await r.json(); const list = j.tokens || j || [];
       if(!list.length){ el.innerHTML = '<div class="muted">No undo tokens recorded</div>'; return; }
@@ -333,7 +425,7 @@
   async function showUndoDetails(token){
     const body = document.getElementById('undoDetailsBody'); if(!body) return; body.innerHTML = 'Loading…'; openUndoDetailsModal();
     try{
-      const r = await fetch('/api/v1/telemetry/preview_undo', { method:'POST', headers: { 'Content-Type':'application/json', ...authHeaders() }, body: JSON.stringify({ token }) });
+      const r = await (window.safeFetch || fetch)('/api/v1/telemetry/preview_undo', { method:'POST', headers: { 'Content-Type':'application/json', ...authHeaders() }, body: JSON.stringify({ token }) });
       if(!r.ok){ body.innerHTML = '<div class="mut">Preview failed or unauthorized</div>'; return; }
       const j = await r.json(); const rows = j.rows || [];
         // Build rows HTML with an "Open in CSV Analyzer" link when possible (prefers session identifiers)
@@ -364,17 +456,17 @@
     try{
       const token = window._exec_undo_token;
       if(!token){ safeNotify('No token available','error'); return; }
-      const resp = await fetch('/api/v1/telemetry/undo_with_token', { method:'POST', headers: { 'Content-Type':'application/json', ...authHeaders() }, body: JSON.stringify({ token }) });
+      const resp = await (window.safeFetch || fetch)('/api/v1/telemetry/undo_with_token', { method:'POST', headers: { 'Content-Type':'application/json', ...authHeaders() }, body: JSON.stringify({ token }) });
       if(!resp.ok){ const j = await resp.json().catch(()=>({})); safeNotify('Undo failed: '+(j.detail||resp.status),'error'); return; }
       safeNotify('Undo applied','success'); closeUndoDetailsModal();
-      try{ await fetch('/api/v1/telemetry/trigger_broadcast', { method:'POST', headers:{ ...authHeaders() } }); }catch(_){ /* ignore */ }
+      try{ await (window.safeFetch || fetch)('/api/v1/telemetry/trigger_broadcast', { method:'POST', headers:{ ...authHeaders() } }); }catch(_){ /* ignore */ }
     }catch(e){ safeNotify('Undo error','error'); }
   }
   // wire refresh button
   document.addEventListener('DOMContentLoaded', ()=>{ const btn=document.getElementById('refreshUndoHistory'); if(btn) btn.addEventListener('click', loadUndoHistory); setTimeout(()=>{ try{ loadUndoHistory(); }catch(_){ } }, 120); });
   async function loadNetwork(){
     try{
-      const r = await fetch('/api/v1/network/summary', { headers: { ...authHeaders() }});
+      const r = await (window.safeFetch || fetch)('/api/v1/network/summary', { headers: { ...authHeaders() }});
       if(!r.ok){ document.getElementById('beaconsBody').innerHTML = '<tr><td colspan="8" class="mut">Network summary unavailable</td></tr>'; return; }
       const j = await r.json();
       // Beacons
@@ -488,7 +580,7 @@
     for(let i=0;i<events.length;i+=chunkSize){
       const chunk = events.slice(i, i+chunkSize);
       try{
-        const r = await fetch('/api/v1/endpoints/log_batch', { method:'POST', headers:{ 'Content-Type':'application/json', ...authHeaders() }, body: JSON.stringify({ events: chunk, classify: false, include_rules: true, send_alerts: false }) });
+        const r = await (window.safeFetch || fetch)('/api/v1/endpoints/log_batch', { method:'POST', headers:{ 'Content-Type':'application/json', ...authHeaders() }, body: JSON.stringify({ events: chunk, classify: false, include_rules: true, send_alerts: false }) });
         if(r.ok){ const j = await r.json(); accepted += j.accepted||0; } else { errors++; }
       }catch(_){ errors++; }
       statusEl.textContent = `Uploaded ${Math.min(i+chunkSize, events.length)} / ${events.length}…`;
@@ -503,7 +595,7 @@
     const rf = document.getElementById('refreshNetBtn'); if(rf){ rf.addEventListener('click', loadNetwork); }
     const exp = document.getElementById('exportBeacons'); if(exp){ exp.addEventListener('click', async ()=>{
       try{
-        const r = await fetch('/api/v1/network/summary', { headers: { ...authHeaders() }});
+        const r = await (window.safeFetch || fetch)('/api/v1/network/summary', { headers: { ...authHeaders() }});
         if(!r.ok) return; const j = await r.json();
         const rows = [['src','dst','port','count','period','cv']].concat((j.beacons||[]).map(b=>[b.src,b.dst,b.port,b.count,b.period,b.cv]));
         const csv = rows.map(r=>r.map(x=>`"${(x??'').toString().replaceAll('"','""')}"`).join(',')).join('\n');
@@ -523,7 +615,7 @@
         const includeSupp = params.get('include_suppressed_vex') === 'true';
         const baseQ = new URLSearchParams({ include_model: 'true', include_scenarios: 'true', include_suppressed_vex: String(includeSupp) });
         const sessions = params.get('sessions'); if(sessions) baseQ.set('sessions', sessions);
-        const hs = await fetch(`/api/v1/report/ingestion/hash?${baseQ.toString()}`, { headers: { ...authHeaders() }});
+        const hs = await (window.safeFetch || fetch)(`/api/v1/report/ingestion/hash?${baseQ.toString()}`, { headers: { ...authHeaders() }});
         if(hs.ok){ const hj = await hs.json(); const el=document.getElementById('snapHash'); const current=el? el.dataset.fullHash: null; if(current && current===hj.sha256){ btn.textContent='Integrity: OK'; btn.style.background='#2A8F4A'; } else { btn.textContent='Integrity: MISMATCH'; btn.style.background='#A13D3D'; if(el) el.textContent='SHA256: '+hj.sha256.slice(0,24)+'…'; } }
         else { btn.textContent='Verify Failed'; btn.style.background='#A13D3D'; }
       }catch(e){ btn.textContent='Verify Error'; }

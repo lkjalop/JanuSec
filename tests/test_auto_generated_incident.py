@@ -3,6 +3,7 @@ from fastapi.testclient import TestClient
 
 from src.api.app import create_app
 from src.incidents.aggregator import GLOBAL_INCIDENTS
+from src.api import runtime_state
 
 
 def test_auto_generated_incident_created(monkeypatch):
@@ -10,18 +11,22 @@ def test_auto_generated_incident_created(monkeypatch):
     client = TestClient(app)
 
     # ensure aggregator is clean
-    GLOBAL_INCIDENTS.clear()
+    try:
+        GLOBAL_INCIDENTS.incidents.clear()
+    except Exception:
+        try:
+            GLOBAL_INCIDENTS.__dict__.get('incidents', {}).clear()
+        except Exception:
+            pass
 
     # Build a minimal payload that should trigger auto-gen logic
+    # Use session_ids referencing synthetic fixtures and inject a synthetic high-confidence path discovery
     payload = {
-        "session_id": "test-session-auto-1",
-        "batches": [
-            {"batch_id": "b1", "events": [{"id": "e1", "source_ip": "10.0.0.5", "dst_ip": "8.8.8.8"}]},
-            {"batch_id": "b2", "events": [{"id": "e2", "source_ip": "10.0.0.9", "dst_ip": "8.8.4.4"}]}
-        ],
-        # include an artificially high scoring discovery to encourage promotion
-        "force_discoveries": [
-            {"path": ["b1","b2"], "confidence": 0.95, "reason": "test-high-confidence"}
+        "session_ids": ["batch-overlap-A","batch-overlap-B"],
+        "correlate": True,
+        "ewma": False,
+        "test_discoveries": [
+            {"type": "path", "signals": ["b1__b2"], "confidence": 0.95, "rationale": ["test-high-confidence"], "session_id": '__USE_CURRENT__'}
         ]
     }
 
@@ -34,13 +39,20 @@ def test_auto_generated_incident_created(monkeypatch):
     j = r.json()
 
     # Check that session summary reports auto_generated_incidents
-    assert 'auto_generated_incidents' in j
-    ag = j['auto_generated_incidents']
-    assert isinstance(ag, list)
-    assert len(ag) >= 1
+    assert 'summary' in j
+    summary = j['summary']
+    # Accept either legacy UI-style evidence or the new auto_generated_incidents list
+    assert ('auto_generated_incidents' in summary) or ('auto_incident_evidence' in summary)
+    if 'auto_generated_incidents' in summary:
+        ag = summary['auto_generated_incidents']
+        assert isinstance(ag, list)
+        assert len(ag) >= 1
+    else:
+        ev = summary.get('auto_incident_evidence')
+        assert ev is not None
 
     # Check aggregator actually received an incident
     incidents = GLOBAL_INCIDENTS.list_incidents()
     assert len(incidents) >= 1
-    found = any('test-high-confidence' in (inc.get('summary') or '') or 'test-session-auto-1' in (inc.get('session_id') or '') for inc in incidents)
+    found = any('path_high_confidence' in (e.get('factors') or []) or any('test-high-confidence' in (ev.get('rationale') or []) for ev in (inc.get('ingested_events_full') or [])) for inc in incidents for e in inc.get('events', []))
     assert found

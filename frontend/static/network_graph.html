@@ -28,7 +28,7 @@
       const e = document.getElementById('entry').value.trim();
       const t = document.getElementById('target').value.trim();
       if(!e || !t) return;
-      const r = await fetch(`/api/v1/graph/network/paths?entry=${encodeURIComponent(e)}&target=${encodeURIComponent(t)}`, { headers: authHeaders() });
+      const r = await (window.safeFetch || fetch)(`/api/v1/graph/network/paths?entry=${encodeURIComponent(e)}&target=${encodeURIComponent(t)}`, { headers: authHeaders() });
       const j = await r.json();
       render(j);
     }
@@ -58,4 +58,3 @@
   </script>
 </body>
 </html>
-

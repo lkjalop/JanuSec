@@ -3,220 +3,2264 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>CSV Deep Analysis</title>
+  <title>Deep Dive | CSV Analyzer</title>
   <link rel="stylesheet" href="/static/css/theme.css" />
+  <script defer src="/static/js/csv_ingest_shared.js"></script>
   <style>
-    body{ margin:0; padding:20px 28px; background:var(--bg-primary); color:var(--text-primary); }
-    h2{ margin:0 0 8px; }
-    .panel{ background:var(--bg-secondary); border:1px solid var(--border); border-radius:8px; padding:16px 20px; box-shadow:0 2px 6px rgba(0,0,0,.35); margin-bottom:16px; }
-    .grid{ display:grid; grid-template-columns: repeat(auto-fit,minmax(280px,1fr)); gap:12px; }
-    .k{ color:var(--text-muted); font-size:12px; }
-    table{ width:100%; border-collapse:collapse; font-size:13px; }
-    td,th{ border:1px solid var(--border); padding:6px 8px; text-align:left; }
-    th{ background:var(--bg-tertiary); }
-    .pill{ background:var(--accent); color:#fff; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:600; }
-    .badge{ display:inline-block; border:1px solid var(--border); border-radius:999px; padding:2px 8px; font-size:11px; }
-    .muted{ color:var(--text-muted); font-size:12px; }
-    .row{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+    :root { --panel-bg: var(--bg-secondary); --border-color: var(--border); }
+    body { margin:0; padding:20px 28px 60px; background:var(--bg-primary); color:var(--text-primary); font-family:var(--font-stack, "Segoe UI", sans-serif); }
+    .top-bar { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:18px; }
+    .crumb a { color:var(--accent); text-decoration:none; font-size:13px; }
+    .crumb a:hover { text-decoration:underline; }
+    .pill { display:inline-flex; align-items:center; padding:4px 10px; border-radius:999px; font-size:12px; font-weight:600; background:var(--accent); color:#fff; }
+    .btn { padding:8px 14px; border-radius:6px; border:1px solid var(--border-color); background:var(--bg-tertiary); color:var(--text-primary); cursor:pointer; font-size:13px; display:inline-flex; gap:6px; align-items:center; }
+    .btn:hover { background:var(--bg-hover); }
+    .btn-primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+    .btn-primary:hover { background:var(--accent-hover); }
+    .btn-ghost { background:transparent; border-color:rgba(255,255,255,0.2); color:var(--text-muted); }
+    .btn-ghost:hover { background:rgba(255,255,255,0.05); color:var(--text-primary); }
+    .panel { background:var(--panel-bg); border:1px solid var(--border-color); border-radius:10px; padding:18px 20px; box-shadow:0 4px 14px rgba(0,0,0,0.35); margin-bottom:16px; }
+    .summary-panel pre { background:var(--bg-tertiary); border:1px solid var(--border-color); border-radius:8px; padding:16px; white-space:pre-wrap; line-height:1.35; max-height:360px; overflow:auto; font-family:"Cascadia Code","Consolas",monospace; font-size:13px; }
+    .section-header { width:100%; background:var(--bg-tertiary); border:1px solid var(--border-color); border-radius:8px; padding:10px 12px; margin:0; font-size:14px; display:flex; justify-content:space-between; align-items:center; cursor:pointer; }
+    .section-body { padding:12px 0 0; }
+    .section-body.collapsed { display:none; }
+    .section-body pre { background:var(--bg-tertiary); border:1px solid var(--border-color); border-radius:8px; padding:12px; font-size:12px; line-height:1.35; overflow:auto; }
+    .inline-muted { font-size:12px; color:var(--text-muted); }
+    .ai-panel .insight-row { display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-bottom:1px solid rgba(255,255,255,0.05); }
+    .ai-panel .insight-row:last-child { border-bottom:none; }
+    .ai-panel .cost-pill { font-size:11px; color:var(--text-muted); }
+    .insight-output { margin-top:8px; padding:10px; border:1px dashed var(--border-color); border-radius:6px; font-size:12px; white-space:pre-wrap; display:none; }
+    .notes-panel textarea { width:100%; min-height:140px; resize:vertical; border-radius:8px; border:1px solid var(--border-color); padding:12px; background:var(--bg-primary); color:var(--text-primary); font-size:13px; }
+    .note-actions { display:flex; gap:8px; margin-top:12px; flex-wrap:wrap; }
+    .running-cost { font-size:13px; margin-top:8px; color:var(--text-muted); }
+    .feature-teaser { border:2px dashed var(--border-color); border-radius:10px; padding:18px; background:rgba(255,255,255,0.02); margin-top:6px; }
+    .feature-teaser .teaser-content { display:flex; gap:18px; align-items:flex-start; }
+    .feature-teaser .teaser-icon { font-size:42px; opacity:0.6; }
+    .feature-teaser .teaser-benefits { margin:8px 0 0; padding-left:18px; color:var(--text-muted); font-size:12px; }
+    .feature-teaser .badge { font-size:10px; padding:2px 6px; border-radius:4px; border:1px solid rgba(255,255,255,0.15); margin-left:6px; }
+    .feature-teaser .teaser-footnote { margin-top:12px; font-size:12px; color:var(--text-muted); border-top:1px solid var(--border-color); padding-top:10px; }
+    .snapshot-grid { display:flex; flex-wrap:wrap; gap:18px; align-items:flex-start; }
+    .snapshot-card { flex:1; min-width:180px; border:1px solid var(--border-color); border-radius:8px; padding:12px; background:rgba(255,255,255,0.02); }
+    .snapshot-title { font-size:12px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.4px; }
+    .snapshot-value { font-size:20px; font-weight:600; margin-top:6px; }
+    .snapshot-actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; }
+    .filter-panel input { width:100%; padding:8px 10px; border-radius:6px; border:1px solid var(--border-color); background:var(--bg-tertiary); color:var(--text-primary); }
+    .filter-results { margin-top:10px; font-size:12px; color:var(--text-muted); }
+    .filter-results ul { margin:6px 0 0; padding-left:18px; }
+    .timeline-event { padding:8px 12px; margin:6px 0; border-left:4px solid var(--border-color); background:rgba(255,255,255,0.02); border-radius:4px; display:flex; gap:12px; }
+    .timeline-event.severity-high { border-left-color:#ff5555; }
+    .timeline-event.severity-medium { border-left-color:#ffbb55; }
+    .event-time { font-family:monospace; font-size:12px; color:var(--text-muted); min-width:160px; }
+    .event-desc { flex:1; }
+    .event-severity { font-size:11px; font-weight:600; }
+    .semantic-input { width:100%; min-height:120px; border-radius:8px; border:1px solid var(--border-color); background:var(--bg-tertiary); color:var(--text-primary); padding:10px; margin-top:6px; }
+    .tier2-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(240px,1fr)); gap:16px; }
+    .tier2-card { border:1px solid var(--border-color); border-radius:8px; padding:12px; background:rgba(255,255,255,0.03); min-height:120px; }
+    .query-card { border:1px solid var(--border-color); border-radius:8px; padding:10px; margin-bottom:10px; background:rgba(255,255,255,0.02); }
+    .query-card pre { background:rgba(0,0,0,0.3); padding:8px; border-radius:6px; white-space:pre-wrap; overflow:auto; }
+    .entity-list li { margin-bottom:6px; }
+    #tier2Output { border:1px solid rgba(255,255,255,0.15); border-radius:12px; background:rgba(7,14,24,0.7); box-shadow:inset 0 0 0 1px rgba(255,255,255,0.04); }
+    .tier2-summary-bar { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; }
+    .summary-meta { display:flex; flex-wrap:wrap; gap:6px; align-items:center; font-size:12px; color:var(--text-muted); }
+    .summary-pill { padding:4px 10px; border-radius:999px; font-size:11px; text-transform:uppercase; letter-spacing:0.5px; background:rgba(255,255,255,0.08); color:#fff; }
+    .summary-chip { padding:2px 10px; border-radius:999px; font-size:11px; background:rgba(255,255,255,0.05); color:var(--text-primary); }
+    .summary-chip.warning { background:rgba(255,165,0,0.15); color:#ffda8a; border:1px solid rgba(255,165,0,0.25); }
+    .summary-table { width:100%; border-collapse:collapse; font-size:12px; margin:6px 0; }
+    .summary-table td { padding:6px 8px; border-bottom:1px solid rgba(255,255,255,0.08); vertical-align:top; }
+    .summary-table td:first-child { width:38%; color:var(--text-muted); text-transform:capitalize; font-weight:500; }
+    .summary-table td:last-child { color:#f2f5ff; }
+    .summary-table tr:nth-child(odd) { background:rgba(255,255,255,0.02); }
+    .summary-table tr:last-child td { border-bottom:none; }
+    .summary-chip-list { display:flex; flex-wrap:wrap; gap:6px; margin:6px 0 0; }
+    .tier2-summary-grid { display:flex; flex-direction:column; gap:12px; margin-top:12px; }
+    .summary-row { display:flex; gap:14px; padding:16px; border:1px solid rgba(255,255,255,0.15); border-radius:14px; background:linear-gradient(135deg, rgba(17,24,39,0.92), rgba(14,21,33,0.9)); box-shadow:0 8px 18px rgba(0,0,0,0.25); }
+    .summary-prefix { width:48px; height:48px; border-radius:12px; display:flex; align-items:center; justify-content:center; font-weight:700; font-size:13px; letter-spacing:0.6px; color:#f5f9ff; background:rgba(255,255,255,0.08); }
+    .summary-prefix.pipeline { background:rgba(77,143,255,0.18); color:#8bc2ff; }
+    .summary-prefix.evidence { background:rgba(69,214,151,0.2); color:#93f7d0; }
+    .summary-prefix.action { background:rgba(255,184,108,0.2); color:#ffd7a4; }
+    .summary-content { flex:1; display:flex; flex-direction:column; gap:6px; }
+    .summary-heading-text { font-size:12px; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-muted); }
+    .summary-body { font-size:13px; line-height:1.55; color:var(--text-primary); }
+    .summary-body p { margin:0 0 6px; line-height:1.45; }
+    .summary-body ul { margin:6px 0 0 18px; padding:0; line-height:1.4; }
+    .tier2-summary-raw { margin-top:12px; background:rgba(0,0,0,0.4); border-radius:10px; padding:12px; border:1px solid rgba(255,255,255,0.08); font-family:"Cascadia Code","Consolas",monospace; font-size:12px; line-height:1.4; white-space:pre-wrap; }
   </style>
 </head>
 <body>
-  <div class="row" style="justify-content:space-between; margin-bottom:8px;">
+  <div class="top-bar">
     <div>
-      <a href="/static/csv_analyzer.html" class="badge">← Back to CSV Analyzer</a>
+      <div class="crumb"><a href="/static/csv_analyzer.html">&#8592; Back to CSV Analyzer</a></div>
+      <h1 style="margin:6px 0 0; font-size:20px;">Deep Dive</h1>
     </div>
-    <div class="muted">Use Deep Analyze from CSV Analyzer to populate this page.</div>
-  </div>
-  <h2>Deep Analysis</h2>
-  <div class="row" style="margin:6px 0 10px;">
-    <a class="badge" target="_blank" rel="noopener" href="/api/v1/report/ingestion?format=html&include_model=true&include_scenarios=true">Open Investigation Report</a>
-  </div>
-  <div id="summary" class="panel"></div>
-  <div class="grid">
-    <div class="panel">
-      <h3 style="margin:0 0 6px">DREAD</h3>
-      <div id="dread"></div>
-    </div>
-    <div class="panel">
-      <h3 style="margin:0 0 6px">MITRE ATT&CK</h3>
-      <div id="mitre"></div>
-    </div>
-    <div class="panel">
-      <h3 style="margin:0 0 6px">STRIDE</h3>
-      <div id="stride"></div>
-    </div>
-    <div class="panel">
-      <h3 style="margin:0 0 6px">PASTA</h3>
-      <div id="pasta"></div>
-    </div>
-    <div class="panel">
-      <h3 style="margin:0 0 6px">CVSS (estimate)</h3>
-      <div id="cvss"></div>
-    </div>
-    <div class="panel">
-      <h3 style="margin:0 0 6px">Compliance Controls</h3>
-      <div id="compliance"></div>
-    </div>
-    <div class="panel">
-      <h3 style="margin:0 0 6px">Rationale & Playbooks</h3>
-      <div id="rationales"></div>
-      <div class="muted" style="margin-top:8px">Recommended Playbooks / Policies:</div>
-      <ul id="playbooks" class="k"></ul>
+    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+      <a class="btn" href="/api/v1/report/ingestion?format=html&include_model=true&include_scenarios=true" target="_blank" rel="noopener">Open Investigation Report</a>
+      <button class="btn" onclick="copySummary()">Copy Summary</button>
+      <label style="display:inline-flex; align-items:center; gap:6px;">
+        Long Summary Model
+        <select id="llmLongModel" class="btn" style="padding:4px 8px;">
+          <option value="">Server default</option>
+          <option value="llama3:70b">llama3:70b (rich)</option>
+          <option value="llama3:8b" selected>llama3:8b (balanced)</option>
+          <option value="llama3:3b">llama3:3b (fast)</option>
+        </select>
+      </label>
+      <button class="btn btn-primary" onclick="generateLongSummary()">Generate Long Summary</button>
+      <button class="btn" onclick="verifyDecision()">Verify with HopGraph</button>
+      <button class="btn" id="btnDeepEditMapping">Edit Mapping</button>
     </div>
   </div>
 
+  <section class="panel summary-panel">
+    <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">
+      <div>
+        <div class="inline-muted" id="rowMeta">Row 0</div>
+        <h2 id="rowTitle" style="margin:4px 0 0;">Artifact</h2>
+        <div class="inline-muted" id="mappingSummaryLine"></div>
+      </div>
+      <span class="pill" id="verdictPill">Unknown</span>
+    </div>
+    <div id="aboveFold" style="display:grid; grid-template-columns: repeat(auto-fit, minmax(220px,1fr)); gap:12px; margin-top:10px;">
+      <div class="snapshot-card">
+        <div class="snapshot-title">Verdict</div>
+        <div class="snapshot-value" id="afVerdict">--</div>
+        <div class="inline-muted" id="afConfidence">Confidence: --</div>
+      </div>
+      <div class="snapshot-card">
+        <div class="snapshot-title">Recommended Action</div>
+        <div class="snapshot-value" id="afAction">--</div>
+        <div class="inline-muted" id="afOneLiner">No summary yet.</div>
+      </div>
+      <div class="snapshot-card">
+        <div class="snapshot-title">Evidence Coverage</div>
+        <div class="snapshot-value" id="afCoverage">--%</div>
+        <div class="inline-muted" id="afCoverageNotes">Run Verify to compute coverage.</div>
+      </div>
+    </div>
+    <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;">
+      <button class="btn" onclick="runTier2SchemaFlow()">Run Tier2 (schema)</button>
+      <button class="btn" onclick="runTier2VerifyFlow()">Verify Tier2</button>
+    </div>
+    <div style="margin-top:12px;">
+      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:8px;">
+        <button class="btn" onclick="showTab('tabEvidence')">Evidence</button>
+        <button class="btn" onclick="showTab('tabReasoning')">Reasoning</button>
+        <button class="btn" onclick="showTab('tabTimeline')">Timeline</button>
+        <button class="btn" onclick="showTab('tabActions')">Actions</button>
+        <button class="btn" onclick="showTab('tabIntel')">Intel</button>
+        <button class="btn" onclick="showTab('tabPipeline')">Pipeline</button>
+        <button class="btn" onclick="showTab('tabGraph')">Graph</button>
+      </div>
+      <div id="tabContainers">
+        <div id="tabEvidence" class="panel" style="display:none;"><div id="tabEvidenceBody" class="inline-muted">No evidence.</div></div>
+        <div id="tabReasoning" class="panel" style="display:none;"><div id="tabReasoningBody" class="inline-muted">No reasoning.</div></div>
+        <div id="tabTimeline" class="panel" style="display:none;"><div id="tabTimelineBody" class="inline-muted">No timeline.</div></div>
+        <div id="tabActions" class="panel" style="display:none;"><div id="tabActionsBody" class="inline-muted">No actions.</div></div>
+        <div id="tabIntel" class="panel" style="display:none;"><div id="tabIntelBody" class="inline-muted">No intel.</div></div>
+        <div id="tabPipeline" class="panel" style="display:none;"><div id="tabPipelineBody" class="inline-muted">No pipeline summary.</div></div>
+        <div id="tabGraph" class="panel" style="display:none;"><div id="tabGraphBody" class="inline-muted">No graph context.</div></div>
+      </div>
+    </div>
+    <pre id="llmSummary" style="margin-top:12px;">Loading summary...</pre>
+    <div class="running-cost">Running cost for this row: <strong id="runningCost">$0.000</strong></div>
+  </section>
+
+<section class="panel snapshot-panel">
+  <h3 style="margin:0 0 6px;">Decision Snapshot</h3>
+    <div class="snapshot-grid">
+      <div class="snapshot-card">
+        <div class="snapshot-title">Recommended Action</div>
+        <div class="snapshot-value" id="decisionAction">--</div>
+        <div class="inline-muted" id="decisionRationale">Waiting for artifact...</div>
+        <div class="snapshot-actions">
+          <button class="btn btn-primary" onclick="markEscalated()">Escalate</button>
+          <button class="btn" onclick="markFalsePositive()">Deprioritize</button>
+        </div>
+      </div>
+      <div class="snapshot-card">
+        <div class="snapshot-title">Risk & Correlation</div>
+        <div class="snapshot-value" id="decisionRisk">--</div>
+        <div class="inline-muted" id="decisionCorr">Correlation: --</div>
+      </div>
+      <div class="snapshot-card">
+        <div class="snapshot-title">Key Drivers</div>
+        <div class="inline-muted" id="decisionDrivers">No data</div>
+      </div>
+    </div>
+</section>
+
+  <section class="panel" id="tier2Panel" style="display:none;">
+    <h3 style="margin:0 0 8px;">Tier 2 Investigation Summary</h3>
+    <div class="tier2-grid">
+      <div class="tier2-card">
+        <div class="snapshot-title">Executive Summary</div>
+        <div class="snapshot-value" id="tier2ExecAction">--</div>
+        <div class="inline-muted" id="tier2ExecDetails">Run Tier 2 to populate.</div>
+      </div>
+      <div class="tier2-card">
+        <div class="snapshot-title">Threat Level</div>
+        <div class="snapshot-value" id="tier2ThreatLevel">--</div>
+        <div class="inline-muted" id="tier2ThreatNotes">No data.</div>
+      </div>
+      <div class="tier2-card">
+        <div class="snapshot-title">Knowledge Gaps</div>
+        <div class="inline-muted" id="tier2Gaps">No data.</div>
+      </div>
+    </div>
+    <div class="tier2-grid" style="margin-top:16px;">
+      <div class="tier2-card" style="grid-column:1/-1;">
+        <div class="snapshot-title">Supporting Evidence</div>
+        <div id="tier2Evidence" class="inline-muted">Awaiting Tier 2 generation.</div>
+      </div>
+      <div class="tier2-card">
+        <div class="snapshot-title">Investigation Tasks</div>
+        <div id="tier2Tasks" class="inline-muted">No tasks generated.</div>
+      </div>
+      <div class="tier2-card">
+        <div class="snapshot-title">Alternative Hypotheses</div>
+        <div id="tier2Alternatives" class="inline-muted">No alternatives provided.</div>
+      </div>
+    </div>
+    <div class="tier2-card" style="margin-top:16px;">
+      <div class="snapshot-title">Entity Graph</div>
+      <ul id="tier2Entities" class="entity-list" style="margin:8px 0 0 18px; padding:0;"></ul>
+    </div>
+    <div class="tier2-card" style="margin-top:16px;">
+      <div class="snapshot-title">Correlation Highlights</div>
+      <div id="tier2Correlation" class="inline-muted">No correlation insight available.</div>
+    </div>
+    <div class="tier2-card" style="margin-top:16px;">
+      <div class="snapshot-title">Evidence Timeline</div>
+      <div id="tier2Timeline" class="inline-muted">No timeline data.</div>
+    </div>
+    <div class="tier2-card" style="margin-top:16px;">
+      <div class="snapshot-title">Ready-to-run Queries</div>
+      <div id="tier2Queries" class="inline-muted">No queries returned.</div>
+    </div>
+    <div class="tier2-card" style="margin-top:16px;">
+      <div class="snapshot-title">Threat Intel Evidence</div>
+      <div id="tier2ThreatIntel" class="inline-muted">No threat intel hits.</div>
+    </div>
+    <div class="tier2-card" id="tier2RecommendationsCard" style="margin-top:16px; display:none;">
+      <div class="snapshot-title">Recommendation Catalog</div>
+      <div id="tier2Recommendations" class="inline-muted">No catalog entries surfaced.</div>
+    </div>
+    <div class="tier2-card" id="tier2TtlCard" style="margin-top:16px; display:none;">
+      <div class="snapshot-title">TTL & Dependency Health</div>
+      <div id="tier2TtlInfo" class="inline-muted">TTL countdown unavailable.</div>
+    </div>
+    <div style="display:flex; gap:8px; margin-top:8px; align-items:center;">
+      <button class="btn btn-ghost" id="tier2TelemetryBtn" type="button">Show FP history</button>
+      <div class="inline-muted" id="tier2TelemetryStatus"></div>
+    </div>
+    <div class="tier2-card" id="tier2TelemetryDrawer" style="margin-top:8px; display:none;">
+      <div id="tier2TelemetryContent" class="inline-muted">Load telemetry to view contributing factor history.</div>
+    </div>
+  </section>
+
+  <section class="panel ai-panel">
+    <h3 style="margin:0 0 8px;">AI-Powered Insights (On-Demand)</h3>
+    <p class="inline-muted" style="margin:0 0 12px;">Each button calls the LLM only when needed. Costs are added to the running total.</p>
+    <div class="insight-row" style="flex-direction:column; align-items:flex-start; border:2px solid var(--accent); border-radius:8px; padding:12px; margin-bottom:12px;">
+      <div style="width:100%;">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+          <div>
+            <div style="font-weight:600;">Tier 2: Deep Investigation</div>
+            <div class="inline-muted" style="margin-top:4px;">Generates a 60-100 line domain-aware investigation (endpoint/network/generic) and caches the result for one hour.</div>
+          </div>
+          <label style="display:inline-flex; align-items:center; gap:6px;">
+            Model
+            <select id="tier2ModelSelect" class="btn" style="padding:4px 8px;">
+              <option value="">Server default</option>
+              <option value="llama3:8b" selected>llama3:8b (balanced)</option>
+              <option value="llama3:3b">llama3:3b (fast)</option>
+            </select>
+          </label>
+        </div>
+        <div class="cost-pill" style="margin-top:6px;">Latest cost: <span id="tier2Cost">$0.0150</span> | Model: <span id="tier2Model">server default</span></div>
+        <div class="inline-muted" style="margin-top:4px;">Domain gating: <span id="tier2DomainHint">auto</span></div>
+      </div>
+      <div style="width:100%; margin-top:10px;">
+        <button class="btn btn-primary" id="tier2Btn" onclick="generateTier2Investigation()">Generate T2 Investigation</button>
+      </div>
+      <div id="tier2Output" class="insight-output" style="width:100%; margin-top:12px; display:none;">
+        <div class="tier2-summary-bar">
+          <div class="summary-meta" id="tier2SummaryMeta">
+            <span class="summary-pill">Tier 2</span>
+            <span class="inline-muted">No AI narrative generated yet.</span>
+          </div>
+          <button class="btn btn-ghost" id="tier2RawToggle" type="button" onclick="toggleTier2Raw()" style="display:none;">Show raw text</button>
+        </div>
+        <div id="tier2SummaryRich" class="tier2-summary-grid" data-has-content="false" style="display:none;"></div>
+        <pre id="tier2SummaryPre" class="tier2-summary-raw" style="display:none;"></pre>
+      </div>
+    </div>
+    <div class="insight-row">
+      <div>
+        <div>Generate Detailed DREAD Scenarios</div>
+        <div class="cost-pill">$0.001 per run</div>
+        <div class="inline-muted">Last run cost: <span id="dreadCost">$0.0000</span></div>
+      </div>
+      <button class="btn" id="dreadBtn" data-insight="dread" onclick="generateInsight('dread')">Generate</button>
+    </div>
+    <div class="insight-output" id="dreadOutput"></div>
+
+    <div class="insight-row">
+      <div>
+        <div>Generate Collection Playbook for Missing Logs</div>
+        <div class="cost-pill">$0.0000 per run (rule-based)</div>
+        <div class="inline-muted">Last run cost: <span id="playbookCost">$0.0000</span></div>
+      </div>
+      <button class="btn" id="playbookBtn" data-insight="playbook" onclick="generateInsight('playbook')">Generate</button>
+    </div>
+    <div class="insight-output" id="playbookOutput"></div>
+
+    <div class="insight-row">
+      <div>
+        <div>Generate Lateral Movement Hunt Query</div>
+        <div class="cost-pill">$0.0008 per run</div>
+        <div class="inline-muted">Last run cost: <span id="huntCost">$0.0000</span></div>
+      </div>
+      <button class="btn" id="huntBtn" data-insight="hunt" onclick="generateInsight('hunt')">Generate</button>
+    </div>
+    <div class="insight-output" id="huntOutput"></div>
+
+    <div class="insight-row">
+      <div>
+        <div>Generate Executive Summary (CISO)</div>
+        <div class="cost-pill">$0.0005 per run</div>
+        <div class="inline-muted">Last run cost: <span id="executiveCost">$0.0000</span></div>
+      </div>
+      <button class="btn" id="executiveBtn" data-insight="executive" onclick="generateInsight('executive')">Generate</button>
+    </div>
+    <div class="insight-output" id="executiveOutput"></div>
+  </section>
+
+  <section class="panel filter-panel">
+    <h3 style="margin:0 0 6px;">Quick Filter</h3>
+    <input id="quickFilter" placeholder="Search host, user, MITRE technique, factor..." type="search" />
+    <div class="filter-results" id="filterResults">Type to surface matches from this artifact.</div>
+  </section>
+
+  <section class="panel">
+    <h3 style="margin:0 0 6px;">Historical Context</h3>
+    <div id="historicalContext" class="inline-muted">No similar incidents recorded.</div>
+  </section>
+
+  <section class="panel">
+    <h3 style="margin:0 0 6px;">Semantic Log Search (RAG)</h3>
+    <div class="inline-muted">Paste suspicious log lines, enter an analyst question, and run semantic search.</div>
+    <textarea id="semanticLogs" class="semantic-input" placeholder="Paste logs or leave blank to reuse previous run."></textarea>
+    <input id="semanticQuery" class="btn" style="width:100%; margin-top:8px; padding:8px 10px;" placeholder="e.g. show credential dumping attempts" />
+    <div class="snapshot-actions" style="margin-top:8px;">
+      <button class="btn btn-primary" onclick="semanticSearch()">Search</button>
+    </div>
+    <div id="semanticResults" class="inline-muted" style="margin-top:8px;">Awaiting query.</div>
+  </section>
+
+  <section class="panel collapsible">
+    <button class="section-header" type="button" onclick="toggleSection('rawSection')">
+      <span>Raw Artifact Data</span><span class="inline-muted">Toggle</span>
+    </button>
+    <div class="section-body" id="rawSection">
+      <pre id="rawData">No artifact loaded.</pre>
+    </div>
+  </section>
+
+  <section class="panel collapsible">
+    <button class="section-header" type="button" onclick="toggleSection('pipelineSection')">
+      <span>21-Stage Pipeline Results</span><span class="inline-muted">Toggle</span>
+    </button>
+    <div class="section-body" id="pipelineSection">
+      <div id="pipelineResults" class="inline-muted">No pipeline data available.</div>
+    </div>
+  </section>
+
+  <section class="panel collapsible">
+    <button class="section-header" type="button" onclick="toggleSection('mitreSection')">
+      <span>MITRE / Mapping Highlights</span><span class="inline-muted">Toggle</span>
+    </button>
+    <div class="section-body" id="mitreSection">
+      <div id="mitreMapping" class="inline-muted">No MITRE mapping available.</div>
+    </div>
+  </section>
+
+  <section class="panel collapsible">
+    <button class="section-header" type="button" onclick="toggleSection('graphSection')">
+      <span>Correlation & Graph Context</span><span class="inline-muted">Toggle</span>
+    </button>
+    <div class="section-body" id="graphSection">
+      <div id="graphContext" class="inline-muted">No graph context provided.</div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h3 style="margin:0 0 8px;">Attack Graph Reconstruction</h3>
+    <div>
+      <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:8px;">
+        <button class="btn" onclick="loadAttackGraph()">Refresh</button>
+        <label style="display:inline-flex; align-items:center; gap:6px;">
+          Time window
+          <select id="graphTimeWindow" class="btn" style="padding:4px 8px;">
+            <option value="1">1h</option>
+            <option value="24" selected>24h</option>
+            <option value="168">7d</option>
+          </select>
+        </label>
+        <label style="display:inline-flex; align-items:center; gap:6px;">
+          Hops
+          <select id="graphHops" class="btn" style="padding:4px 8px;">
+            <option value="2">2</option>
+            <option value="3" selected>3</option>
+            <option value="4">4</option>
+          </select>
+        </label>
+        <span class="inline-muted">Correlation: <strong id="corrScore">0.00</strong></span>
+      </div>
+      <div id="graphCanvas" style="width:100%; height:420px; border:1px solid var(--border-color); border-radius:8px;"></div>
+      <div class="snapshot-actions" style="margin-top:12px;">
+        <button class="btn" onclick="showTimeline()">Timeline</button>
+        <button class="btn" onclick="toggleCorrExplanation()">Correlation Explanation</button>
+      </div>
+      <div id="timelineView" style="display:none; margin-top:12px;"></div>
+      <pre id="corrExplanation" style="display:none; margin-top:12px; white-space:pre-wrap; font-size:12px;"></pre>
+    </div>
+  </section>
+
+  <section class="panel notes-panel">
+    <h3 style="margin:0 0 8px;">Analyst Notes</h3>
+    <textarea id="analystNotes" placeholder="Document findings, containment steps, or escalations..."></textarea>
+    <div class="inline-muted" style="margin-top:6px;">Analyst: <span id="analystUser">unknown</span> | Timestamp: <span id="noteTimestamp">--</span></div>
+    <div class="note-actions">
+      <button class="btn btn-primary" onclick="saveNotes()">Save Notes</button>
+      <button class="btn" onclick="markEscalated()">Mark as Escalated</button>
+      <button class="btn" onclick="markFalsePositive()">Mark as False Positive</button>
+      <button class="btn" onclick="exportPDF()">Export PDF</button>
+    </div>
+  </section>
+
+  <script src="https://d3js.org/d3.v7.min.js"></script>
   <script>
-    function computeDreadBreakdown(factors){
-      var map = {
-        rare_process:       {D:3, R:1, E:1, A:1, Di:1},
-        rare_signed_binary: {D:2, R:1, E:1, A:0, Di:1},
-        unsigned_sensitive_path: {D:3, R:1, E:1, A:0, Di:2},
-        repeat_hash:        {D:2, R:2, E:1, A:1, Di:1},
-        multi_host_path:    {D:2, R:1, E:1, A:2, Di:1},
-        novel_global:       {D:3, R:1, E:1, A:2, Di:1},
-        wmi_activity:       {D:1, R:1, E:2, A:0, Di:1},
-        service_creation:   {D:3, R:1, E:1, A:0, Di:1},
-        psremoting:         {D:1, R:1, E:2, A:0, Di:1},
-        scheduled_tasks:    {D:1, R:1, E:1, A:0, Di:1},
-        lolbin:             {D:3, R:1, E:3, A:0, Di:1}
+    (function(){
+      const authHeaders = () => {
+        try { return { 'x-api-key': localStorage.getItem('apiKey') || 'devkey123' }; }
+        catch(_) { return { 'x-api-key': 'devkey123' }; }
       };
-      var comps = {D:0, R:0, E:0, A:0, Di:0};
-      var maxPerComp = {D:0, R:0, E:0, A:0, Di:0};
-      Object.keys(map).forEach(function(k){ var t=map[k]; Object.keys(t).forEach(function(c){ maxPerComp[c]+=t[c]; }); });
-      (factors||[]).forEach(function(f){ var s=String(f||'').toLowerCase(); Object.keys(map).forEach(function(tok){ if(s.includes(tok.replace(/_/g,' '))||s.includes(tok)){ var t=map[tok]; Object.keys(t).forEach(function(c){ comps[c]+=t[c]; }); } }); });
-      var normalized={}; Object.keys(comps).forEach(function(k){ var raw=maxPerComp[k]?(comps[k]/maxPerComp[k])*10:0; normalized[k]=Math.min(10, Math.round(raw*10)/10); });
-      var overall=Math.min(10, Math.round(((normalized.D+normalized.R+normalized.E+normalized.A+normalized.Di)/5)*10)/10);
-      var level= overall<=3? 'low' : (overall<=6? 'medium':'high');
-      return { score: overall, level: level, breakdown: { Damage: normalized.D, Repro: normalized.R, Exploitability: normalized.E, Affected: normalized.A, Discoverability: normalized.Di } };
-    }
 
-    function mitreHints(f){
-      try{
-        if(!f||!f.length) return [];
-        var map=[
-          {match:/process create|process_create|processcreate|processcreate/i, tech:'T1059'},
-          {match:/service|service_creation|service install/i, tech:'T1543.003'},
-          {match:/wmi|wmic|wmiregister/i, tech:'T1047'},
-          {match:/scheduled|task|schtask/i, tech:'T1053'},
-          {match:/credential|kerberos|tgs|tgt/i, tech:'T1558'},
-          {match:/lolbin|regsvr32|rundll32|mshta|bitsadmin/i, tech:'T1218'},
-          {match:/repeat_hash|multi_host|novel_global|rare_process/i, tech:'T1602'}
-        ];
-        var found=new Set();
-        f.forEach(function(s){ var t=String(s||''); map.forEach(function(m){ if(m.match.test(t)) found.add(m.tech); }); });
-        return Array.from(found);
-      }catch(_){ return []; }
-    }
+      const defaultInsightCosts = { dread: 0.001, playbook: 0.0, hunt: 0.0008, executive: 0.0005 };
 
-    function strideFromFactors(f){
-      var map={
-        rare_process:['Repudiation','Tampering'],
-        lolbin:['Elevation of Privilege','Execution'],
-        service_creation:['Elevation of Privilege'],
-        wmi_activity:['Elevation of Privilege','Tampering'],
-        scheduled_tasks:['Persistence'],
-        repeat_hash:['Information Disclosure','Persistence'],
-        unsigned_sensitive_path:['Tampering'],
-        novel_global:['Spoofing','Information Disclosure']
-      };
-      var out=new Set();
-      (f||[]).forEach(function(s){ var k=String(s||'').toLowerCase().replace(/\s+/g,'_'); (map[k]||[]).forEach(function(v){ out.add(v); }); });
-      return Array.from(out);
-    }
+      function tier2CacheKey(){
+        if(!currentRow) return null;
+        const idx = currentRow.row_index ?? currentRow.index ?? 0;
+        const hash = currentRow.hash_sha256 || currentRow.sha256 || currentRow.hash || 'na';
+        return `tier2_${idx}_${hash}`;
+      }
 
-    function pastaStages(f){
-      var map={
-        lolbin:['Stage 5: Vulnerability & Attack Analysis','Stage 6: Risk Analysis'],
-        service_creation:['Stage 6: Risk Analysis'],
-        wmi_activity:['Stage 5: Vulnerability & Attack Analysis'],
-        scheduled_tasks:['Stage 5: Vulnerability & Attack Analysis'],
-        repeat_hash:['Stage 7: Risk Management'],
-        novel_global:['Stage 4: Attack Enumeration']
-      };
-      var out=new Set(); (f||[]).forEach(function(s){ var k=String(s||'').toLowerCase().replace(/\s+/g,'_'); (map[k]||[]).forEach(function(v){ out.add(v); }); }); return Array.from(out);
-    }
-
-    function cvssEstimate(dread){
-      try{ var s=(dread&&dread.score)||0; var sev = s>=8? 'Critical' : (s>=6? 'High' : (s>=4? 'Medium' : (s>0? 'Low':'None'))); return sev+' (~'+s.toFixed(1)+')'; }catch(_){ return 'N/A'; }
-    }
-
-    function complianceFromFactors(f){
-      var map={
-        lolbin:['NIST SI-7 (Software, Firmware, and Information Integrity)','CIS 8 v8 10.6 (Script Control)'],
-        repeat_hash:['NIST IR-5 (Incident Monitoring)','ISO 27001 A.12.4 (Logging and monitoring)'],
-        unsigned_sensitive_path:['CIS 8 v8 2.3 (Secure Configurations)']
-      };
-      var set=new Set(); (f||[]).forEach(function(s){ var k=String(s||'').toLowerCase().replace(/\s+/g,'_'); (map[k]||[]).forEach(function(v){ set.add(v); }); });
-      return Array.from(set);
-    }
-
-    function render(){
-      var list=[]; try{ list = JSON.parse(localStorage.getItem('csv_last_results')||'[]'); }catch(_){ }
-      var idx = 0; try{ idx = parseInt(localStorage.getItem('csv_deep_row')||'0',10)||0; }catch(_){ }
-      var rec = list[idx] || list[0] || null;
-      var sum = document.getElementById('summary');
-      if(!rec){ sum.innerHTML = '<div class="muted">No analysis input found. Return to CSV Analyzer and click Deep Analyze.</div>'; return; }
-      var f = Array.from(new Set(rec.factors||[]));
-      var dread = rec._dread || computeDreadBreakdown(f);
-      sum.innerHTML = '<div><span class="pill">'+(rec.verdict||'')+'</span> '+(rec.process_name||'')+' on '+(rec.host||'')+'</div>'
-        + '<div class="muted">'+(rec.file_path||'')+' • '+(rec.sha256||'')+'</div>'
-        + '<div class="muted">Signals: '+(f.join(', ')||'(none)')+'</div>';
-      var d = document.getElementById('dread');
-      d.innerHTML = '<div><strong>Score:</strong> '+dread.score+' ('+dread.level+')</div>'
-        + '<table><tbody>'
-        + '<tr><td>Damage</td><td>'+dread.breakdown.Damage+'</td></tr>'
-        + '<tr><td>Reproducibility</td><td>'+dread.breakdown.Repro+'</td></tr>'
-        + '<tr><td>Exploitability</td><td>'+dread.breakdown.Exploitability+'</td></tr>'
-        + '<tr><td>Affected Users</td><td>'+dread.breakdown.Affected+'</td></tr>'
-        + '<tr><td>Discoverability</td><td>'+dread.breakdown.Discoverability+'</td></tr>'
-        + '</tbody></table>';
-      var m = document.getElementById('mitre');
-      var mit = mitreHints(f); m.innerHTML = mit.length? ('Techniques: '+mit.join(', ')) : '<span class="muted">No direct hints</span>';
-      var s = document.getElementById('stride'); var st = strideFromFactors(f); s.innerHTML = st.length? st.map(function(x){return '<span class="badge">'+x+'</span>';}).join(' ') : '<span class="muted">No STRIDE mapping</span>';
-      var p = document.getElementById('pasta'); var ps = pastaStages(f); p.innerHTML = ps.length? ('Stages: '+ps.join(', ')) : '<span class="muted">No PASTA mapping</span>';
-      var cv = document.getElementById('cvss'); cv.innerHTML = cvssEstimate(dread);
-      var c = document.getElementById('compliance'); var cc = complianceFromFactors(f); c.innerHTML = cc.length? ('<ul>'+cc.map(function(x){return '<li>'+x+'</li>';}).join('')+'</ul>') : '<span class="muted">No compliance control mapping available</span>';
-      // Risk ablation (server)
-      try{
-        var eid = rec && rec.raw && (rec.raw.event_id||rec.raw.EventID);
-        if(eid){
-          fetch('/api/v1/risk/'+encodeURIComponent(eid)+'/explain?include_ablation=1', { headers: Object.assign({'Accept':'application/json'}, (function(){ try{ return {'x-api-key': (localStorage.getItem('apiKey')||'devkey123')}; }catch(_){ return {'x-api-key':'devkey123'} } })()) })
-          .then(r=> r.ok? r.json(): null).then(j=>{
-            try{
-              const abl = Array.isArray(j && j.ablation)? j.ablation: [];
-              if(abl.length){
-                const host = document.createElement('div'); host.className='panel';
-                host.innerHTML = '<h3 style="margin:0 0 6px">Risk Ablation (server)</h3>'+
-                  '<table><thead><tr><th>Factor</th><th>Δscore</th><th>New Score</th></tr></thead><tbody>'+
-                  abl.slice(0,8).map(a=> '<tr><td>'+String(a.factor||'')+'</td><td>'+Number(a.delta||0).toFixed(3)+'</td><td>'+Number(a.new_score||0).toFixed(3)+'</td></tr>').join('')+
-                  '</tbody></table>';
-                document.body.appendChild(host);
-              }
-            }catch(_){ }
-          }).catch(()=>{});
+      function updateTier2DomainHint(info){
+        const span = document.getElementById('tier2DomainHint');
+        if(!span) return;
+        if(!info){
+          span.textContent = 'auto';
+          return;
         }
-      }catch(_){ }
-      var rationales = {
-        'lolbin': 'Living-off-the-land binary used for scriptable execution — often bypasses application controls.',
-        'service_creation': 'New or modified service may indicate persistence or privilege elevation.',
-        'wmi_activity': 'Remote execution or system management activity — confirm source and intent.',
-        'scheduled_tasks': 'Task scheduling can be used for persistence or delayed execution.',
-        'repeat_hash': 'Known suspicious hash repeating across hosts suggests lateral movement or propagation.',
-        'unsigned_sensitive_path': 'Unsigned binary executed from sensitive Windows path.'
-      };
-      var rdiv = document.getElementById('rationales');
-      var rs = f.map(function(x){ return '<li><strong>'+x+'</strong>: '+(rationales[x]||'No rationale available')+'</li>'; }).join('');
-      rdiv.innerHTML = rs? ('<ul>'+rs+'</ul>') : '<span class="muted">No factors to explain</span>';
-      var pb = document.getElementById('playbooks');
-      var items = [];
-      if(f.includes('service_creation')||f.includes('unsigned_sensitive_path')) items.push({t:'Isolate Host', href:'/static/janusec-platform-complete-LIVE.html'});
-      if(f.includes('lolbin')||f.includes('wmi_activity')||f.includes('scheduled_tasks')) items.push({t:'Contain Execution (Script Control)', href:'/static/approvals.html'});
-      if(mit.length) items.push({t:'Block C2 / Egress Filter', href:'/static/integrations.html'});
-      if(!items.length) items.push({t:'Open LIVE Console', href:'/static/janusec-platform-complete-LIVE.html'});
-      pb.innerHTML = items.map(function(i){ return '<li><a target="_blank" rel="noopener" href="'+i.href+'">'+i.t+'</a></li>'; }).join('');
+        span.textContent = `${info.domain.toUpperCase()} (${info.confidence.toFixed(2)})`;
+      }
+
+      function detectDomainProfile(row){
+        const facs = new Set((row && row.factors) || []);
+        const domainInfo = { domain: 'generic', confidence: 0.3 };
+        const endpointHigh = ['process_injection','dll_hijack','credential_dumping','privilege_escalation','parent_child_anomaly'];
+        const networkHigh = ['beaconing','dns_tunneling','lateral_movement_smb','malicious_ip','tor_exit_node','data_exfiltration'];
+        let endpointScore = 0;
+        let networkScore = 0;
+        endpointHigh.forEach(f => { if(facs.has(f)) endpointScore += 0.3; });
+        networkHigh.forEach(f => { if(facs.has(f)) networkScore += 0.3; });
+        if(row && (row.process_name || row.file_path)) endpointScore += 0.1;
+        if(row && (row.src_ip || row.dst_ip || row.domain)) networkScore += 0.1;
+        if(networkScore > endpointScore && networkScore >= 0.5){
+          domainInfo.domain = 'network';
+          domainInfo.confidence = Math.min(1.0, networkScore);
+        } else if(endpointScore > networkScore && endpointScore >= 0.5){
+          domainInfo.domain = 'endpoint';
+          domainInfo.confidence = Math.min(1.0, endpointScore);
+        }
+        return domainInfo;
+      }
+
+      function loadCachedTier2(){
+        const cacheKey = tier2CacheKey();
+        if(!cacheKey) return;
+        try{
+          const cached = localStorage.getItem(cacheKey);
+          if(!cached) return;
+          const parsed = JSON.parse(cached);
+          const ageMinutes = Math.floor((Date.now() - (parsed.timestamp || 0)) / 60000);
+          if(ageMinutes > 60){
+            localStorage.removeItem(cacheKey);
+            return;
+          }
+          if(parsed.summary){
+            renderTier2SummaryView(parsed.summary, {
+              domain: parsed.domain || 'generic',
+              confidence: parsed.domain_confidence,
+              model: parsed.model,
+              cost: parsed.cost,
+              cachedAgo: ageMinutes,
+              status: 'Re-using cached Tier 2 narrative'
+            });
+          } else {
+            setTier2SummaryMessage('Cached Tier 2 run had no summary.', { cachedAgo: ageMinutes });
+          }
+          if(parsed.cost && document.getElementById('tier2Cost')){
+            document.getElementById('tier2Cost').textContent = `$${Number(parsed.cost).toFixed(4)}`;
+          }
+          if(parsed.model && document.getElementById('tier2Model')){
+            document.getElementById('tier2Model').textContent = parsed.model;
+          }
+          if(parsed.domain){
+            updateTier2DomainHint({ domain: parsed.domain, confidence: parsed.domain_confidence || 0.5 });
+          }
+          if(parsed.payload){
+            currentRow._tier2_payload = parsed.payload;
+            renderTier2Payload(parsed.payload);
+          }
+        }catch(_){}
+      }
+
+      async function generateTier2Investigation(){
+        if(!currentRow){
+          alert('No row loaded. Return to CSV Analyzer and open a row first.');
+          return;
+        }
+        const btn = document.getElementById('tier2Btn');
+        const output = document.getElementById('tier2Output');
+        const modelSelect = document.getElementById('tier2ModelSelect');
+        if(btn){
+          btn.disabled = true;
+          btn.textContent = 'Generating...';
+        }
+        if(output){
+          output.style.display = 'block';
+        }
+        setTier2SummaryMessage('Calling Tier 2 endpoint... this may take a few seconds.', { status: 'Generating Tier 2 investigation...' });
+        try{
+          const payload = {
+            row: currentRow,
+            assessment_id: currentRow._assessment_id || currentRow.assessment_id || null,
+            session_id: currentRow._session_id || currentRow.session_id || null,
+            org: localStorage.getItem('tenant_id') || 'demo',
+            model: modelSelect && modelSelect.value ? modelSelect.value : undefined,
+            pipeline_context: currentRow.pipeline_context || currentRow._pipeline_context || null
+          };
+          const resp = await fetch('/api/v1/csv/tier2_investigate', {
+            method: 'POST',
+            headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders()),
+            body: JSON.stringify(payload)
+          });
+          if(!resp.ok){
+            throw new Error(`HTTP ${resp.status} ${resp.statusText}`);
+          }
+          const data = await resp.json();
+          if(data.status === 'error'){
+            throw new Error(data.error || 'Tier 2 generation failed');
+          }
+          const meta = {
+            domain: data.domain || 'generic',
+            confidence: Number(data.domain_confidence || 0),
+            model: data.model || (modelSelect && modelSelect.value) || 'server default',
+            cost: Number(data.cost || 0),
+            status: 'Freshly generated',
+            timestamp: 'Generated '+new Date().toLocaleTimeString()
+          };
+          if(data.tier2_summary){
+            renderTier2SummaryView(data.tier2_summary, meta);
+          } else {
+            setTier2SummaryMessage('Tier 2 returned no summary.', meta);
+          }
+          if(data.payload){
+            currentRow._tier2_payload = data.payload;
+            renderTier2Payload(data.payload);
+          }
+          if(document.getElementById('tier2Cost')){
+            document.getElementById('tier2Cost').textContent = `$${Number(data.cost || 0).toFixed(4)}`;
+          }
+          if(document.getElementById('tier2Model')){
+            document.getElementById('tier2Model').textContent = data.model || (modelSelect && modelSelect.value) || 'server default';
+          }
+          runningCost += Number(data.cost || 0);
+          updateCostDisplay();
+          const cacheKey = tier2CacheKey();
+          if(cacheKey){
+            localStorage.setItem(cacheKey, JSON.stringify({
+              summary: data.tier2_summary || '',
+              cost: Number(data.cost || 0),
+              model: data.model || '',
+              domain: data.domain || 'generic',
+              domain_confidence: data.domain_confidence || 0,
+              timestamp: Date.now(),
+              payload: data.payload || null
+            }));
+          }
+          if(data.domain){
+            updateTier2DomainHint({ domain: data.domain, confidence: Number(data.domain_confidence || 0) });
+          }
+        }catch(err){
+          setTier2SummaryMessage(`Tier 2 request failed: ${err.message}`, { status: 'Unable to generate summary' });
+        }finally{
+          if(btn){
+            btn.disabled = false;
+            btn.textContent = 'Generate T2 Investigation';
+          }
+      }
     }
 
-    if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', render); else render();
+    async function ensureFactorTelemetryCache(){
+      const cached = (typeof window !== 'undefined' && window.FACTOR_TELEMETRY_CACHE) ? window.FACTOR_TELEMETRY_CACHE : null;
+      if(cached && (Date.now() - (cached._ts || 0)) < 60000){
+        return cached;
+      }
+      const resp = await fetch('/api/v1/admin/factors/telemetry', { headers: authHeaders() });
+      if(!resp.ok){
+        throw new Error('telemetry_http_'+resp.status);
+      }
+      const payload = await resp.json().catch(()=>({}));
+      const tel = payload.telemetry || {};
+      const historyMap = {};
+      if(Array.isArray(tel.factor_history)){
+        tel.factor_history.forEach(function(entry){
+          if(entry && entry.factor){
+            historyMap[String(entry.factor).toLowerCase()] = entry;
+          }
+        });
+      }
+      tel.__historyMap = historyMap;
+      tel._ts = Date.now();
+      if(typeof window !== 'undefined'){
+        window.FACTOR_TELEMETRY_CACHE = tel;
+      }
+      return tel;
+    }
+
+    function renderTier2TelemetryDetails(row, telemetry){
+      const insights = []
+        .concat(row && row.correlation_insights || [])
+        .concat(row && row.correlationInsights || [])
+        .filter(Boolean);
+      const synth = insights.find(function(ins){
+        const typ = String(ins.type || '').toLowerCase();
+        return typ === 'factor_synthesis' || ins.factor === 'factor_synthesis' || ins.factor_synthesis;
+      });
+      if(!synth){
+        return '<div class="inline-muted">No factor synthesis insight available.</div>';
+      }
+      const payload = synth.factor_synthesis || synth.synthesis || synth;
+      const contributions = Array.isArray(payload.contributing_factors) ? payload.contributing_factors : [];
+      if(!contributions.length){
+        return '<div class="inline-muted">No contributing factors recorded.</div>';
+      }
+      const historyMap = (telemetry && telemetry.__historyMap) || {};
+      const rows = contributions.slice(0,6).map(function(pair){
+        const name = Array.isArray(pair) ? pair[0] : '';
+        const value = Array.isArray(pair) ? pair[1] : '';
+        const hist = name ? historyMap[String(name).toLowerCase()] : null;
+        const fp = hist && (hist.fp_rate != null ? Number(hist.fp_rate) : (hist.fp_ratio != null ? Number(hist.fp_ratio) : null));
+        const counts = hist ? `TP ${hist.tp || 0} / FP ${hist.fp || 0}` : 'No history';
+        return '<tr><td>'+escapeHtml(String(name || 'factor'))+'</td><td>'+Number(value || 0).toFixed(2)+'</td><td>'+(fp != null ? Number(fp).toFixed(2) : 'n/a')+'</td><td>'+escapeHtml(counts)+'</td></tr>';
+      }).join('');
+      return '<table class="summary-table"><thead><tr><th>Factor</th><th>Contribution</th><th>FP rate</th><th>Observations</th></tr></thead><tbody>'+rows+'</tbody></table>';
+    }
+
+    async function loadTier2Telemetry(){
+      const statusEl = document.getElementById('tier2TelemetryStatus');
+      const drawer = document.getElementById('tier2TelemetryDrawer');
+      const content = document.getElementById('tier2TelemetryContent');
+      if(!drawer || !content){
+        return;
+      }
+      if(statusEl){
+        statusEl.textContent = 'Loading telemetry...';
+      }
+      try{
+        const telemetry = await ensureFactorTelemetryCache();
+        const html = renderTier2TelemetryDetails(currentRow, telemetry);
+        content.innerHTML = html || '<div class="inline-muted">No factor telemetry surfaced.</div>';
+        drawer.style.display = 'block';
+        if(statusEl){
+          statusEl.textContent = '';
+        }
+      }catch(err){
+        if(statusEl){
+          statusEl.textContent = 'Telemetry error: '+(err && err.message ? err.message : err);
+        }
+      }
+    }
+
+      window.generateTier2Investigation = generateTier2Investigation;
+      window.toggleTier2Raw = toggleTier2Raw;
+      let runningCost = 0.0;
+      let currentRow = null;
+      let rowIndex = 0;
+      let graphData = null;
+      let tier2RawVisible = false;
+      let mappingSummary = null;
+      let mappingScore = null;
+
+      function updateMappingSummaryLine(){
+        const el = document.getElementById('mappingSummaryLine');
+        if(!el){
+          return;
+        }
+        if(mappingSummary){
+          const hv = (mappingSummary.high_value_present || []).join(', ') || 'none';
+          const sup = (mappingSummary.support_present || []).join(', ') || 'none';
+          const scoreText = (typeof mappingScore === 'number') ? mappingScore.toFixed(3) : 'n/a';
+          el.textContent = `Mapping: high=${hv} | support=${sup} | semantics=${scoreText}`;
+        } else {
+          el.textContent = '';
+        }
+      }
+
+      function getRawRow(){
+        if(!currentRow) return null;
+        return currentRow.raw || currentRow._raw || currentRow;
+      }
+
+      function persistUpdatedRow(updated){
+        try{
+          const stored = JSON.parse(localStorage.getItem('csv_last_results')||'[]');
+          if(stored[rowIndex]){
+            stored[rowIndex] = updated;
+            localStorage.setItem('csv_last_results', JSON.stringify(stored));
+          }
+        }catch(_){ }
+      }
+
+      async function reIngestCurrentRow(mappingOverride){
+        if(!currentRow || !window.csvIngest || typeof window.csvIngest.ingestRows !== 'function'){
+          alert('Shared ingestion helper unavailable. Refresh to reload scripts.');
+          return;
+        }
+        const raw = getRawRow();
+        if(!raw || !Object.keys(raw).length){
+          alert('Raw row payload unavailable for remapping.');
+          return;
+        }
+        try{
+          const resp = await window.csvIngest.ingestRows({
+            rows: [raw],
+            mapping: mappingOverride || currentRow.mapping || currentRow._mapping || {},
+            source: 'csv_deep',
+            limit: 1
+          });
+          if(resp && Array.isArray(resp.results) && resp.results.length){
+            const normalized = Object.assign({}, resp.results[0]);
+            normalized.raw = resp.results[0].raw || raw;
+            currentRow = normalized;
+            mappingSummary = resp.mapping_summary || null;
+            mappingScore = resp.mapping_semantics_score;
+            persistUpdatedRow(normalized);
+            hydrateSummary();
+          } else {
+            alert('Re-ingest returned no rows.');
+          }
+        }catch(err){
+          alert('Mapping ingest failed: '+(err.message||err));
+        }
+      }
+
+      function editMappingForCurrentRow(){
+        if(!currentRow){
+          alert('No row context available.');
+          return;
+        }
+        if(!window.csvIngest || typeof window.csvIngest.openMappingEditor !== 'function'){
+          alert('Shared mapping editor unavailable.');
+          return;
+        }
+        const raw = getRawRow();
+        const headers = raw ? Object.keys(raw) : [];
+        if(!headers.length){
+          alert('No headers available for mapping.');
+          return;
+        }
+        const existing = currentRow.mapping || currentRow._mapping || {};
+        window.csvIngest.openMappingEditor({
+          headers,
+          mapping: existing,
+          onSave: function(mapping){
+            reIngestCurrentRow(mapping || {});
+          }
+        });
+      }
+
+      function formatConfidencePercent(value){
+        if(value === null || typeof value === 'undefined'){
+          return '';
+        }
+        const num = typeof value === 'number' ? value : parseFloat(value);
+        if(isNaN(num)){
+          return '';
+        }
+        if(num <= 1 && num >= 0){
+          return Math.round(num * 100) + '%';
+        }
+        if(num >= 0 && num <= 100){
+          return Math.round(num) + '%';
+        }
+        return num.toFixed(2);
+      }
+
+      function normalizeEvidenceList(raw){
+        const items = [];
+        if(!raw){
+          return items;
+        }
+        const source = Array.isArray(raw) ? raw : [raw];
+        source.forEach(entry => {
+          if(!entry){
+            return;
+          }
+          if(typeof entry === 'string'){
+            const trimmed = entry.trim();
+            if(trimmed){
+              items.push(trimmed);
+            }
+            return;
+          }
+          if(typeof entry === 'object'){
+            const obs = entry.observation || entry.note || entry.summary || entry.text;
+            const sig = entry.significance || entry.impact;
+            const src = entry.source || entry.detector;
+            const conf = formatConfidencePercent(entry.confidence);
+            let line = obs ? String(obs) : JSON.stringify(entry);
+            const qualifiers = [];
+            if(sig){
+              qualifiers.push(sig);
+            }
+            if(src){
+              qualifiers.push('Source '+src);
+            }
+            if(conf){
+              qualifiers.push('Confidence '+conf);
+            }
+            if(qualifiers.length){
+              line += ' ('+qualifiers.join(' | ')+')';
+            }
+            items.push(line);
+          }
+        });
+        return items;
+      }
+
+      function normalizeTaskList(raw){
+        const tasks = [];
+        if(!raw){
+          return tasks;
+        }
+        const list = Array.isArray(raw) ? raw : [raw];
+        list.forEach(entry => {
+          if(!entry){
+            return;
+          }
+          if(typeof entry === 'string'){
+            const trimmed = entry.trim();
+            if(trimmed){
+              tasks.push(trimmed);
+            }
+            return;
+          }
+          if(typeof entry === 'object'){
+            const title = entry.task || entry.title || entry.summary || 'Investigation task';
+            const priority = entry.priority ? '['+String(entry.priority).toUpperCase()+'] ' : '';
+            const tool = entry.tool ? ' via '+entry.tool : '';
+            const owner = entry.owner ? ' ('+entry.owner+')' : '';
+            tasks.push(priority+title+tool+owner);
+          }
+        });
+        return tasks;
+      }
+
+      function buildPipelineInsightSections(){
+        if(!currentRow){
+          return [];
+        }
+        const sections = [];
+        const verdict = currentRow._pipeline_verdict || currentRow.verdict || currentRow.decision;
+        const confidence = formatConfidencePercent(typeof currentRow._pipeline_confidence !== 'undefined' ? currentRow._pipeline_confidence : currentRow.confidence);
+        const dreadScore = currentRow._dread && currentRow._dread.score;
+        if(verdict || confidence || dreadScore){
+          const lines = [];
+          if(verdict){
+            lines.push('<p><strong>'+escapeHtml(String(verdict))+'</strong> from 21-step pipeline.</p>');
+          }
+          if(confidence){
+            lines.push('<p class="inline-muted">Confidence '+confidence+'</p>');
+          }
+          if(dreadScore){
+            lines.push('<p class="inline-muted">DREAD '+escapeHtml(String(dreadScore))+'</p>');
+          }
+          sections.push({ prefix: 'PV', heading: 'Pipeline Verdict', bodyHtml: lines.join('') || '<p class="inline-muted">Pipeline verdict not recorded.</p>' });
+        }
+        const evidenceItems = normalizeEvidenceList(currentRow._pipeline_evidence);
+        const uncertainty = Array.isArray(currentRow._uncertaintyFlags) ? currentRow._uncertaintyFlags.filter(Boolean) : [];
+        if(evidenceItems.length || uncertainty.length){
+          let evidenceBody = '';
+          if(uncertainty.length){
+            evidenceBody += '<p class="inline-muted">Missing telemetry</p>'+renderSummaryList(uncertainty);
+          }
+          if(evidenceItems.length){
+            evidenceBody += '<p class="inline-muted">Evidence cues</p><ul>'+evidenceItems.slice(0,5).map(item => '<li>'+escapeHtml(item)+'</li>').join('')+'</ul>';
+          } else if(!uncertainty.length){
+            evidenceBody += '<p class="inline-muted">No supporting evidence captured.</p>';
+          }
+          sections.push({
+            prefix: 'EV',
+            heading: 'Evidence & Gaps',
+            bodyHtml: evidenceBody
+          });
+        }
+        const tasks = normalizeTaskList(currentRow._pipeline_tasks);
+        if(tasks.length){
+          sections.push({
+            prefix: 'TA',
+            heading: 'Pipeline Tasks',
+            bodyHtml: renderSummaryList(tasks.slice(0,6))
+          });
+        }
+        return sections;
+      }
+
+      function formatCost(value){
+        return '$' + (Math.max(value, 0)).toFixed(4);
+      }
+
+      function escapeHtml(str){
+        return String(str || '').replace(/[&<>"']/g, function(ch){
+          return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]);
+        });
+      }
+
+      function renderSectionList(list, fallback){
+        if(!Array.isArray(list) || !list.length){
+          return '<span class="inline-muted">'+fallback+'</span>';
+        }
+        return '<ul>'+list.map(item => '<li>'+escapeHtml(item)+'</li>').join('')+'</ul>';
+      }
+
+      function deriveUncertaintyFlags(row){
+        const missing = [];
+        if(!row){
+          return missing;
+        }
+        if(!(row.host || row.hostname)){
+          missing.push('host');
+        }
+        if(!(row.user || row.username)){
+          missing.push('user');
+        }
+        if(!(row.signer || (row.raw && (row.raw.signer_subject || row.raw.signature_subject)))){
+          missing.push('signer');
+        }
+        return missing;
+      }
+
+      function tier2SpeculativeMeta(){
+        if(!currentRow){
+          return {};
+        }
+        const flags = currentRow._uncertaintyFlags || [];
+        if(!flags.length){
+          return {};
+        }
+        return {
+          speculative: true,
+          speculativeFlags: flags,
+          statusFallback: 'Telemetry gaps: '+flags.join(', ')
+        };
+      }
+
+      function updateTier2SummaryMeta(meta){
+        const el = document.getElementById('tier2SummaryMeta');
+        if(!el){
+          return;
+        }
+        const info = Object.assign({}, meta);
+        const chips = ['<span class="summary-pill">Tier 2</span>'];
+        if(info.domain){
+          chips.push('<span class="summary-chip">Domain: '+escapeHtml(info.domain)+'</span>');
+        }
+        if(typeof info.confidence === 'number' && !isNaN(info.confidence)){
+          chips.push('<span class="summary-chip">Confidence: '+Math.round(Math.max(info.confidence, 0)*100)+'%</span>');
+        }
+        if(info.model){
+          chips.push('<span class="summary-chip">Model: '+escapeHtml(info.model)+'</span>');
+        }
+        if(typeof info.cost === 'number' && !isNaN(info.cost)){
+          chips.push('<span class="summary-chip">Cost: '+formatCost(info.cost)+'</span>');
+        }
+        if(typeof info.cachedAgo === 'number' && info.cachedAgo >= 0){
+          chips.push('<span class="summary-chip">Cached '+info.cachedAgo+'m ago</span>');
+        } else if(info.timestamp){
+          chips.push('<span class="summary-chip">'+escapeHtml(info.timestamp)+'</span>');
+        }
+        if(info.speculative && Array.isArray(info.speculativeFlags) && info.speculativeFlags.length){
+          chips.push('<span class="summary-chip warning">Needs enrichment: '+escapeHtml(info.speculativeFlags.join(', '))+'</span>');
+        }
+        const statusText = info.status || info.statusFallback;
+        if(statusText){
+          chips.push('<span class="inline-muted">'+escapeHtml(statusText)+'</span>');
+        }
+        el.innerHTML = chips.join(' ');
+      }
+
+      function setTier2SummaryMessage(message, meta){
+        const output = document.getElementById('tier2Output');
+        const rich = document.getElementById('tier2SummaryRich');
+        const pre = document.getElementById('tier2SummaryPre');
+        const toggle = document.getElementById('tier2RawToggle');
+        if(output){
+          output.style.display = message ? 'block' : 'none';
+        }
+        if(rich){
+          rich.innerHTML = '';
+          rich.dataset.hasContent = 'false';
+          rich.style.display = 'none';
+        }
+        if(pre){
+          pre.textContent = message || '';
+          pre.style.display = message ? 'block' : 'none';
+        }
+        if(toggle){
+          toggle.style.display = 'none';
+        }
+        tier2RawVisible = false;
+        applyTier2RawVisibility();
+        const baseMeta = Object.assign({}, tier2SpeculativeMeta(), meta || {});
+        if(message && !baseMeta.status){
+          baseMeta.status = message;
+        }
+        updateTier2SummaryMeta(baseMeta);
+      }
+
+      function sectionPrefixMeta(section){
+        const prefix = (section && section.prefix) ? section.prefix.toUpperCase() : 'AI';
+        let tone = 'default';
+        if(prefix === 'PV') tone = 'pipeline';
+        else if(prefix === 'EV') tone = 'evidence';
+        else if(prefix === 'TA') tone = 'action';
+        return { prefix, tone };
+      }
+
+      function renderSummaryRow(section){
+        const meta = sectionPrefixMeta(section);
+        const heading = section.heading || (meta.prefix === 'AI' ? 'AI Insight' : 'Details');
+        const body = section.bodyHtml || '<p class="inline-muted">No additional context provided.</p>';
+        const toneClass = meta.tone ? ' '+meta.tone : '';
+        return '<div class="summary-row"><div class="summary-prefix'+toneClass+'">'+escapeHtml(meta.prefix)+'</div><div class="summary-content"><div class="summary-heading-text">'+escapeHtml(heading)+'</div><div class="summary-body">'+body+'</div></div></div>';
+      }
+
+      function renderTier2SummaryView(text, meta){
+        const output = document.getElementById('tier2Output');
+        const rich = document.getElementById('tier2SummaryRich');
+        const pre = document.getElementById('tier2SummaryPre');
+        if(!output || !rich || !pre){
+          return;
+        }
+        const mergedMeta = Object.assign({}, tier2SpeculativeMeta(), meta || {});
+        output.style.display = 'block';
+        pre.textContent = text || '';
+        const pipelineSections = buildPipelineInsightSections();
+        const parsedSummary = tryParseSummaryJson(text);
+        const llmSections = parsedSummary ? buildTier2StructuredSections(parsedSummary) : (text ? buildTier2SummarySections(text) : []);
+        const sections = pipelineSections.concat(llmSections);
+        if(sections.length){
+          rich.innerHTML = sections.map(renderSummaryRow).join('');
+          rich.dataset.hasContent = 'true';
+          rich.style.display = tier2RawVisible ? 'none' : 'flex';
+        } else {
+          if(!text){
+            setTier2SummaryMessage('No Tier 2 insights available yet.', mergedMeta);
+            return;
+          }
+          rich.innerHTML = '<div class="summary-section"><div class="summary-heading"><span class="summary-icon default">AI</span><span>Investigation Notes</span></div><div class="summary-body"><p>'+escapeHtml(text).replace(/\n/g, '<br>')+'</p></div></div>';
+          rich.dataset.hasContent = 'true';
+        }
+
+        tier2RawVisible = false;
+        applyTier2RawVisibility();
+        updateTier2SummaryMeta(mergedMeta);
+      }
+
+      function tryParseSummaryJson(text){
+        if(!text || typeof text !== 'string'){
+          return null;
+        }
+        const trimmed = text.trim();
+        if(!trimmed || (trimmed[0] !== '{' && trimmed[0] !== '[')){
+          return null;
+        }
+        try{
+          return JSON.parse(trimmed);
+        }catch(_){
+          return null;
+        }
+      }
+
+      function renderSummaryTable(rows){
+        if(!Array.isArray(rows) || !rows.length){
+          return '';
+        }
+        const valid = rows.filter(row => row && row.label && row.value !== undefined && row.value !== null && row.value !== '');
+        if(!valid.length){
+          return '';
+        }
+        return '<table class="summary-table"><tbody>'+valid.map(row => {
+          const displayValue = String(row.value || '').trim();
+          const valueHtml = displayValue ? '<span style="color:#f2f5ff;font-weight:600;">'+escapeHtml(displayValue)+'</span>' : '<span style="color:var(--text-muted);font-style:italic;">(not provided)</span>';
+          return '<tr><td>'+escapeHtml(row.label)+':</td><td>'+valueHtml+'</td></tr>';
+        }).join('')+'</tbody></table>';
+      }
+
+      function renderSummaryList(items){
+        const list = (items || []).filter(Boolean);
+        if(!list.length){
+      return '';
+    }
+    return '<ul>'+list.map(item => '<li>'+escapeHtml(String(item))+'</li>').join('')+'</ul>';
+  }
+
+  function formatTier2Ttl(seconds){
+    if(!Number.isFinite(seconds)){
+      return 'unknown';
+    }
+    var sec = Math.max(0, Math.floor(Number(seconds)));
+    if(sec >= 3600){
+      var hrs = Math.floor(sec / 3600);
+      var mins = Math.floor((sec % 3600) / 60);
+      return hrs+'h '+mins+'m';
+    }
+    if(sec >= 60){
+      return Math.floor(sec / 60)+'m '+(sec % 60)+'s';
+    }
+    return sec+'s';
+  }
+
+  function formatTier2Relative(seconds){
+    if(!Number.isFinite(seconds)){
+      return 'unknown';
+    }
+    var sec = Math.max(0, Number(seconds));
+    if(sec >= 3600){
+      return (sec/3600).toFixed(1)+'h ago';
+    }
+    if(sec >= 60){
+      return Math.round(sec/60)+'m ago';
+    }
+    return Math.round(sec)+'s ago';
+  }
+
+  function buildTier2StructuredSections(raw){
+    if(!raw || typeof raw !== 'object'){
+      return [];
+        }
+        const data = (raw.payload && typeof raw.payload === 'object') ? raw.payload : raw;
+        const sections = [];
+        if(data.executive_summary){
+          sections.push({
+            prefix: 'AI',
+            heading: 'Executive Summary',
+            bodyHtml: renderSummaryTable([
+              { label: 'One-liner', value: data.executive_summary.one_liner },
+              { label: 'Threat level', value: data.executive_summary.threat_level },
+              { label: 'Recommended action', value: data.executive_summary.recommended_action }
+            ])
+          });
+        }
+        if(data.ai_reasoning){
+          let bodyParts = [];
+
+          // Main AI reasoning table
+          bodyParts.push(renderSummaryTable([
+            { label: 'Primary hypothesis', value: data.ai_reasoning.primary_hypothesis },
+            { label: 'Knowledge gaps', value: Array.isArray(data.ai_reasoning.knowledge_gaps) ? data.ai_reasoning.knowledge_gaps.join(', ') : '' },
+            { label: 'Confidence level', value: data.ai_reasoning.confidence_level }
+          ]));
+
+          // Supporting evidence as table
+          if(Array.isArray(data.ai_reasoning.supporting_evidence) && data.ai_reasoning.supporting_evidence.length){
+            bodyParts.push('<p class="inline-muted" style="margin-top:10px;margin-bottom:4px;">Supporting Evidence</p>');
+            bodyParts.push('<table class="summary-table"><tbody>');
+            data.ai_reasoning.supporting_evidence.slice(0,5).forEach((ev, idx) => {
+              if(!ev) return;
+              const obs = ev.observation || 'Observation '+(idx+1);
+              const sig = ev.significance ? '<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">'+escapeHtml(ev.significance)+'</div>' : '';
+              const conf = typeof ev.confidence === 'number' ? '<div style="font-size:11px;color:var(--text-muted);">Confidence: '+Math.round(ev.confidence*100)+'%</div>' : '';
+              bodyParts.push('<tr><td style="width:auto;vertical-align:top;">'+(idx+1)+'.</td><td><span style="color:#f2f5ff;">'+escapeHtml(obs)+'</span>'+sig+conf+'</td></tr>');
+            });
+            bodyParts.push('</tbody></table>');
+          }
+
+          // Alternative hypotheses as table
+          if(Array.isArray(data.ai_reasoning.alternative_hypotheses) && data.ai_reasoning.alternative_hypotheses.length){
+            bodyParts.push('<p class="inline-muted" style="margin-top:10px;margin-bottom:4px;">Alternative Hypotheses</p>');
+            bodyParts.push('<table class="summary-table"><tbody>');
+            data.ai_reasoning.alternative_hypotheses.slice(0,3).forEach((h, idx) => {
+              if(!h) return;
+              const hyp = h.hypothesis || 'Alternative '+(idx+1);
+              const pct = typeof h.probability === 'number' ? Math.round(h.probability*100)+'%' : 'n/a';
+              const evidence = h.evidence_needed ? '<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">Needs: '+escapeHtml(h.evidence_needed)+'</div>' : '';
+              bodyParts.push('<tr><td style="width:60px;"><span style="color:#ffd7a4;font-weight:600;">'+pct+'</span></td><td><span style="color:#f2f5ff;">'+escapeHtml(hyp)+'</span>'+evidence+'</td></tr>');
+            });
+            bodyParts.push('</tbody></table>');
+          }
+
+          sections.push({
+            prefix: 'AI',
+            heading: 'AI Reasoning',
+            bodyHtml: bodyParts.join('')
+          });
+        }
+        if(Array.isArray(data.investigation_tasks)){
+          sections.push({
+            prefix: 'AI',
+            heading: 'Investigation Tasks',
+            bodyHtml: renderSummaryList(data.investigation_tasks.map(task => {
+              if(typeof task === 'string') return task;
+              const base = task.task || 'Task';
+              const tool = task.tool ? ' via '+task.tool : '';
+              const priority = task.priority ? ' ['+task.priority+']' : '';
+              return base+tool+priority;
+            }))
+          });
+        }
+        if(data.siem_queries){
+          const queries = Array.isArray(data.siem_queries) ? data.siem_queries : [data.siem_queries];
+          sections.push({
+            prefix: 'AI',
+            heading: 'SIEM Queries',
+            bodyHtml: queries.length ? queries.map(q => {
+              const header = '<strong>'+escapeHtml(q.name || 'Query')+'</strong> ('+escapeHtml(q.platform || 'Unknown platform')+')';
+              const body = q.query ? '<pre>'+escapeHtml(q.query)+'</pre>' : '';
+              return '<div class="query-card">'+header+body+'</div>';
+            }).join('') : '<p class="inline-muted">No queries provided.</p>'
+          });
+        }
+        if(data.mitre_mapping){
+          sections.push({
+            prefix: 'AI',
+            heading: 'MITRE Mapping',
+            bodyHtml: renderSummaryTable([
+              { label: 'Techniques', value: Array.isArray(data.mitre_mapping.techniques) ? data.mitre_mapping.techniques.join(', ') : '' },
+              { label: 'Kill chain', value: data.mitre_mapping.kill_chain_phase }
+            ])
+          });
+        }
+        if(data.entity_graph && data.entity_graph.primary_entity){
+          sections.push({
+            prefix: 'AI',
+            heading: 'Entity Graph',
+            bodyHtml: renderSummaryTable([
+              { label: 'Primary entity', value: data.entity_graph.primary_entity.identifier || data.entity_graph.primary_entity.type },
+              { label: 'Relationships', value: Array.isArray(data.entity_graph.related_entities) ? data.entity_graph.related_entities.map(e => (e.relationship || 'linked')+' → '+(e.identifier || e.type || 'entity')).join(', ') : '' }
+            ])
+          });
+        }
+        if(data.evidence_timeline && Array.isArray(data.evidence_timeline.events)){
+          sections.push({
+            prefix: 'AI',
+            heading: 'Evidence Timeline',
+            bodyHtml: renderSummaryList(data.evidence_timeline.events.map(ev => {
+              const ts = ev.timestamp ? ev.timestamp+' — ' : '';
+              const desc = ev.description || ev.event_type || 'Event';
+              return ts+desc;
+            }))
+          });
+        }
+        if(data.threat_intel){
+          const intelRows = Object.keys(data.threat_intel).map(key => ({ label: key.replace(/_/g,' '), value: data.threat_intel[key] }));
+          sections.push({
+            prefix: 'AI',
+            heading: 'Threat Intel',
+            bodyHtml: renderSummaryTable(intelRows)
+          });
+        }
+        if(data.analyst_notes){
+          const notes = Array.isArray(data.analyst_notes.notes) ? data.analyst_notes.notes.map(note => note.note || note).filter(Boolean) : [];
+          const tags = Array.isArray(data.analyst_notes.tags) ? data.analyst_notes.tags : [];
+          sections.push({
+            prefix: 'AI',
+            heading: 'Analyst Notes',
+            bodyHtml: (notes.length ? renderSummaryList(notes) : '') + (tags.length ? '<div class="summary-chip-list">'+tags.map(tag => '<span class="summary-chip">'+escapeHtml(tag)+'</span>').join('')+'</div>' : '')
+          });
+        }
+        return sections.filter(section => section.bodyHtml && section.bodyHtml.trim());
+      }
+
+      function buildTier2SummarySections(text){
+        const cleaned = (text || '').replace(/\r/g, '').trim();
+        if(!cleaned){
+          return [];
+        }
+        const defaults = ['Executive Summary','Key Signals','Supporting Evidence','Investigation Tasks','Response Guidance','Intel Notes'];
+        const knownHeaders = ['Executive Summary','Key Findings','Key Signals','Key Drivers','Observations','Supporting Evidence','Evidence','Investigation Tasks','Tasks','Next Steps','Response Actions','Recommended Actions','Threat Intel','Intel','Gaps','Knowledge Gaps','Hypotheses','Kill Chain','Detection','Domain','Confidence','Pivot Ideas'];
+        const chunks = cleaned.split(/\n{2,}/).map(chunk => chunk.trim()).filter(Boolean);
+        return chunks.map((chunk, idx) => {
+          const lines = chunk.split('\n');
+          let heading = '';
+          let bodyLines = lines.slice();
+          const firstLine = (lines[0] || '').trim().replace(/^#{1,3}\s*/, '');
+          const lowerFirst = firstLine.toLowerCase();
+          const knownMatch = knownHeaders.find(h => lowerFirst.startsWith(h.toLowerCase()));
+          if(knownMatch){
+            heading = knownMatch;
+            if(lines.length > 1){
+              bodyLines = lines.slice(1);
+            } else if(firstLine.includes(':')){
+              bodyLines = [firstLine.split(/:\s*/).slice(1).join(': ').trim()];
+            } else {
+              bodyLines = [];
+            }
+          } else if(lines.length > 1 && (/[.:]$/.test(firstLine) || firstLine.length <= 48)){
+            heading = firstLine.replace(/[:.]+$/, '');
+            bodyLines = lines.slice(1);
+          } else if(firstLine.includes(':')){
+            const sectionParts = firstLine.split(/:\s*/);
+            if(sectionParts.length > 1 && sectionParts[0].length < 64){
+              heading = sectionParts[0];
+              const remainder = sectionParts.slice(1).join(': ').trim();
+              bodyLines = remainder ? [remainder].concat(lines.slice(1)) : lines.slice(1);
+            }
+          }
+          const bodyText = bodyLines.join('\n').trim() || chunk;
+          return {
+            prefix: 'AI',
+            heading: heading || defaults[idx] || `Section ${idx + 1}`,
+            bodyHtml: formatTier2Body(bodyText)
+          };
+        });
+      }
+
+      function formatTier2Body(text){
+        const normalized = (text || '').trim();
+        if(!normalized){
+          return '<p class="inline-muted">No additional context supplied.</p>';
+        }
+        const lines = normalized.split('\n').map(line => line.trim()).filter(Boolean);
+        if(!lines.length){
+          return '<p class="inline-muted">No additional context supplied.</p>';
+        }
+        const bulletCount = lines.filter(line => /^[-*•]|^\d+[\.)]/.test(line)).length;
+        if(bulletCount && bulletCount >= lines.length - 1){
+          return '<ul>'+lines.map(line => {
+            const cleaned = line.replace(/^[-*•]\s*/, '').replace(/^\d+[\.)]\s*/, '');
+            return '<li>'+escapeHtml(cleaned)+'</li>';
+          }).join('')+'</ul>';
+        }
+        return '<p>'+lines.map(line => escapeHtml(line)).join('<br>')+'</p>';
+      }
+
+      function applyTier2RawVisibility(){
+        const pre = document.getElementById('tier2SummaryPre');
+        const rich = document.getElementById('tier2SummaryRich');
+        const toggle = document.getElementById('tier2RawToggle');
+        if(!pre || !rich){
+          return;
+        }
+        const hasRich = rich.dataset.hasContent === 'true';
+        if(!hasRich){
+          pre.style.display = pre.textContent ? 'block' : 'none';
+          rich.style.display = 'none';
+          if(toggle){
+            toggle.style.display = 'none';
+          }
+          return;
+        }
+        pre.style.display = tier2RawVisible ? 'block' : 'none';
+        rich.style.display = tier2RawVisible ? 'none' : 'flex';
+        if(toggle){
+          toggle.style.display = 'inline-flex';
+          toggle.textContent = tier2RawVisible ? 'Hide raw text' : 'Show raw text';
+        }
+      }
+
+      function toggleTier2Raw(){
+        tier2RawVisible = !tier2RawVisible;
+        applyTier2RawVisibility();
+      }
+
+      function hydrateSummary(){
+        const stored = localStorage.getItem('csv_last_results');
+        if(!stored){
+          document.getElementById('llmSummary').textContent = 'No cached rows found. Return to CSV Analyzer and run Deep Analyze.';
+          return;
+        }
+        const rows = JSON.parse(stored || '[]');
+        rowIndex = parseInt(localStorage.getItem('csv_deep_row') || '0', 10) || 0;
+        currentRow = rows[rowIndex] || rows[0] || null;
+        if(!currentRow){
+          document.getElementById('llmSummary').textContent = 'No row context available.';
+          return;
+        }
+        currentRow._uncertaintyFlags = deriveUncertaintyFlags(currentRow);
+        mappingSummary = currentRow.mapping_summary || currentRow._mapping_summary || null;
+        mappingScore = (typeof currentRow.mapping_semantics_score === 'number') ? currentRow.mapping_semantics_score : (typeof currentRow._mapping_score === 'number' ? currentRow._mapping_score : null);
+        updateMappingSummaryLine();
+        setTier2SummaryMessage('', Object.assign({ status: 'Run Tier 2 for AI insights when ready.' }, tier2SpeculativeMeta()));
+
+        const title = (currentRow.process_name || currentRow.name || 'Artifact') + ' on ' + (currentRow.host || 'unknown host');
+        document.getElementById('rowTitle').textContent = title;
+        document.getElementById('rowMeta').textContent = 'Row '+rowIndex;
+        const verdict = String(currentRow.verdict || currentRow.decision || 'Unknown').toUpperCase();
+        const pill = document.getElementById('verdictPill');
+        pill.textContent = verdict;
+        pill.style.background = (verdict === 'CRITICAL' || verdict === 'HIGH') ? '#c53939' : (verdict === 'SUSPICIOUS' ? '#e38b29' : varAccent());
+
+        const summary = currentRow.llm_summary || currentRow.summary || 'No LLM summary generated. Use the CSV analyzer to run Auto-LLM.';
+        document.getElementById('llmSummary').textContent = summary;
+
+        runningCost = parseFloat(currentRow._llm_cost || 0.003) || 0.0;
+        updateCostDisplay();
+
+        document.getElementById('rawData').textContent = JSON.stringify(currentRow, null, 2);
+
+        const stages = currentRow._pipeline_stages || currentRow.pipeline_context || currentRow.stage_status;
+        if(Array.isArray(stages) && stages.length){
+          const html = stages.map(function(stage){
+            const name = stage.stage || stage.name || 'Stage';
+            const status = stage.status || 'unknown';
+            const extra = stage.result ? ' – '+escapeHtml(JSON.stringify(stage.result)) : '';
+            return '<div><strong>'+escapeHtml(name)+'</strong> • '+escapeHtml(status)+extra+'</div>';
+          }).join('');
+          document.getElementById('pipelineResults').innerHTML = html;
+        }
+
+        const mitre = currentRow.mitre_tags || currentRow.mitre || [];
+        document.getElementById('mitreMapping').innerHTML = renderSectionList(mitre, 'No MITRE mapping available.');
+
+        const graph = currentRow.graph_summary || currentRow.graph_context || currentRow._graph_context;
+        if(graph){
+          document.getElementById('graphContext').textContent = typeof graph === 'string' ? graph : JSON.stringify(graph, null, 2);
+        }
+
+        const analyst = localStorage.getItem('analyst_user') || 'unknown';
+        document.getElementById('analystUser').textContent = analyst;
+        document.getElementById('noteTimestamp').textContent = new Date().toISOString();
+        updateHopgraphTeaser();
+        renderDecisionSnapshot();
+        applyQuickFilter();
+        renderHistoricalContext();
+        updateTier2DomainHint(detectDomainProfile(currentRow));
+        loadCachedTier2();
+        renderTier2Payload(currentRow._tier2_payload);
+        loadAttackGraph();
+      }
+      async function generateLongSummary(){
+        if(!currentRow){
+          alert('No row context available. Open a row from CSV Analyzer.');
+          return;
+        }
+        const modelSel = document.getElementById('llmLongModel');
+        const pre = document.getElementById('llmSummary');
+        pre.textContent = 'Generating 60–120 line summary...';
+        try{
+          const payload = {
+            row: currentRow,
+            domain: detectDomainProfile(currentRow).domain,
+            model: (modelSel && modelSel.value) || undefined,
+            max_lines: 120,
+            include_mapping_semantics: true,
+            include_diversity_weighting: true
+          };
+          const resp = await fetch('/api/v1/csv/long_summary', {
+            method: 'POST',
+            headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders()),
+            body: JSON.stringify(payload)
+          });
+          if(!resp.ok) throw new Error('HTTP '+resp.status+' '+resp.statusText);
+          const data = await resp.json();
+          const text = data.summary || data.text || 'No long summary returned.';
+          pre.textContent = text;
+          runningCost += Number(data.cost || 0);
+          updateCostDisplay();
+        }catch(err){
+          pre.textContent = 'Long summary error: '+err.message;
+        }
+      }
+
+      async function verifyDecision(){
+        if(!currentRow){
+          alert('No row loaded to verify.');
+          return;
+        }
+        const pre = document.getElementById('llmSummary');
+        const domainInfo = detectDomainProfile(currentRow);
+        pre.textContent = '[Verifying] Routing evidence to HopGraph...';
+        try{
+          const payload = {
+            row: currentRow,
+            domain: domainInfo.domain,
+            mapping: currentRow.mapping || currentRow._mapping || null,
+            use_vector: true,
+            use_history: true,
+            adaptive_ewma: true
+          };
+          const aid = currentRow._assessment_id || currentRow.assessment_id || localStorage.getItem('csv_last_assessment_id');
+          if(!aid){
+            throw new Error('missing assessment_id for verification');
+          }
+          const resp = await fetch(`/api/v1/assessments/${encodeURIComponent(aid)}/llm/verify`, {
+            method: 'POST',
+            headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders()),
+            body: JSON.stringify(payload)
+          });
+          if(!resp.ok) throw new Error('HTTP '+resp.status+' '+resp.statusText);
+          const data = await resp.json();
+          const flags = [];
+          if(data.missing_evidence_from_database) flags.push('missing DB/vector');
+          const perEv = Array.isArray(data.per_evidence) ? data.per_evidence.map(r => {
+            const ev = r.evidence || {};
+            return `• ${ev.path || ev.stage || ev.id || 'evidence'} — ${(r.verified? 'verified':'unverified')}`;
+          }).join('\n') : 'No per-evidence results.';
+          const overall = `Verification: ${String(data.overall || 'unknown').toUpperCase()}${flags.length? ' ['+flags.join(', ')+']' : ''}`;
+          const enriched = `${overall}\n\n${perEv}\n\nFactors: ${(data.factors||[]).join(', ') || 'n/a'}\nConfidence: ${data.confidence != null ? (Math.round(data.confidence*100)/100) : 'n/a'}`;
+          pre.textContent = enriched + '\n\n' + (pre.textContent || '');
+        }catch(err){
+          pre.textContent = 'Verification error: '+err.message;
+        }
+      }
+
+      window.generateLongSummary = generateLongSummary;
+      window.verifyDecision = verifyDecision;
+      window.showTab = function(id){
+        const all = ['tabEvidence','tabReasoning','tabTimeline','tabActions','tabIntel','tabPipeline','tabGraph'];
+        all.forEach(t => {
+          const el = document.getElementById(t);
+          if(el) el.style.display = (t === id) ? 'block' : 'none';
+        });
+      };
+
+      async function runTier2SchemaFlow(){
+        if(!currentRow){ alert('No row context loaded.'); return; }
+        const planPayload = { row: currentRow, domain: detectDomainProfile(currentRow).domain };
+        try{
+          const planResp = await fetch('/api/v1/csv/tier2_plan', {
+            method: 'POST', headers: Object.assign({'Content-Type':'application/json'}, authHeaders()), body: JSON.stringify(planPayload)
+          });
+          if(!planResp.ok) throw new Error('Plan failed');
+          const planData = await planResp.json();
+          const plan = (planData && planData.plan) || {};
+          const sumResp = await fetch('/api/v1/csv/tier2_summarize', {
+            method: 'POST', headers: Object.assign({'Content-Type':'application/json'}, authHeaders()), body: JSON.stringify({ plan })
+          });
+          if(!sumResp.ok) throw new Error('Summarize failed');
+          const sumData = await sumResp.json();
+          const summary = (sumData && sumData.summary) || {};
+          // Above-the-fold
+          const af = summary.above_the_fold || {};
+          document.getElementById('afVerdict').textContent = (af.verdict && af.verdict.classification) || 'UNKNOWN';
+          const conf = (af.verdict && typeof af.verdict.confidence_percent === 'number') ? af.verdict.confidence_percent : null;
+          document.getElementById('afConfidence').textContent = 'Confidence: ' + (conf!=null? conf+'%' : '--');
+          const rec = summary.above_the_fold && summary.above_the_fold.recommended_action || {};
+          document.getElementById('afAction').textContent = rec.primary_action || rec.urgency || '--';
+          const one = summary.above_the_fold && summary.above_the_fold.one_liner;
+          document.getElementById('afOneLiner').textContent = (one && one.text) || 'No one-liner.';
+          // Tabs
+          const ev = summary.evidence || {}; const evItems = ev.items || [];
+          document.getElementById('tabEvidenceBody').innerHTML = evItems.length ? '<ul>'+evItems.map(e => `<li>${escapeHtml(e.type||'evidence')}: ${escapeHtml(e.value||'')}</li>`).join('')+'</ul>' : 'No evidence.';
+          const reasoning = summary.reasoning || {};
+          document.getElementById('tabReasoningBody').textContent = JSON.stringify(reasoning, null, 2);
+          const timeline = summary.timeline || {};
+          document.getElementById('tabTimelineBody').textContent = JSON.stringify(timeline, null, 2);
+          const actions = summary.actions || {};
+          document.getElementById('tabActionsBody').textContent = JSON.stringify(actions, null, 2);
+          const intel = summary.threat_intel || {};
+          document.getElementById('tabIntelBody').textContent = JSON.stringify(intel, null, 2);
+          const pipe = summary.pipeline_summary || {};
+          document.getElementById('tabPipelineBody').textContent = JSON.stringify(pipe, null, 2);
+          const gctx = summary.graph_context || {};
+          document.getElementById('tabGraphBody').textContent = JSON.stringify(gctx, null, 2);
+        }catch(err){
+          alert('Tier2 schema flow error: '+err.message);
+        }
+      }
+
+      async function runTier2VerifyFlow(){
+        try{
+          const evHtml = document.getElementById('tabEvidenceBody').innerHTML || '';
+          // Build a trivial summary object from current tabs for the verify endpoint
+          const fakeSummary = {
+            evidence: { items: (evHtml.includes('<li>') ? [] : []) }
+          };
+          const resp = await fetch('/api/v1/csv/tier2_verify', {
+            method: 'POST', headers: Object.assign({'Content-Type':'application/json'}, authHeaders()), body: JSON.stringify({ summary: fakeSummary })
+          });
+          if(!resp.ok) throw new Error('Verify failed');
+          const data = await resp.json();
+          const v = data.verification || {};
+          const pct = (typeof v.evidence_coverage_percent === 'number') ? v.evidence_coverage_percent : 0;
+          document.getElementById('afCoverage').textContent = (Math.round(pct*10)/10)+'%';
+          document.getElementById('afCoverageNotes').textContent = 'Claims with evidence: '+(v.claims_with_evidence_refs||0)+' • without: '+(v.claims_without_evidence_refs||0);
+        }catch(err){
+          alert('Verify flow error: '+err.message);
+        }
+      }
+
+      window.runTier2SchemaFlow = runTier2SchemaFlow;
+      window.runTier2VerifyFlow = runTier2VerifyFlow;
+
+
+      function varAccent(){
+        try{
+          return getComputedStyle(document.documentElement).getPropertyValue('--accent') || '#4A63E7';
+        }catch(_){
+          return '#4A63E7';
+        }
+      }
+
+      function updateCostDisplay(){
+        document.getElementById('runningCost').textContent = formatCost(runningCost);
+      }
+
+      function updateHopgraphTeaser(){
+        const score = Number(
+          (currentRow && currentRow._correlation && currentRow._correlation.score) ||
+          (currentRow && currentRow.correlation && currentRow.correlation.score) ||
+          (currentRow && currentRow.correlation_score) ||
+          0
+        );
+        const safeScore = Number.isFinite(score) ? score : 0;
+        const scoreEl = document.getElementById('corrScore');
+        if(scoreEl){
+          scoreEl.textContent = safeScore.toFixed(2);
+        }
+        // Show small diagnostics if present
+        const diagEl = document.getElementById('graphContext');
+        if(diagEl && currentRow && currentRow._graph_context && currentRow._graph_context.observability){
+          const ob = currentRow._graph_context.observability;
+          const msg = `Graph diag — nodes: ${ob.nodes||0}, edges: ${ob.edges||0}, nonzero pairs: ${ob.nonzero_pairs||0}`;
+          diagEl.textContent = msg;
+        }
+      }
+
+      function renderDecisionSnapshot(){
+        if(!currentRow){
+          return;
+        }
+        const dread = Number((currentRow._dread && currentRow._dread.score) || (currentRow.dread && currentRow.dread.score) || 0);
+        const verdict = String(currentRow.verdict || currentRow.classification || 'Unknown').toUpperCase();
+        const corr = Number(
+          (currentRow._correlation && currentRow._correlation.score) ||
+          (currentRow.correlation && currentRow.correlation.score) ||
+          currentRow.correlation_score ||
+          0
+        );
+        let action = 'Monitor';
+        let rationale = 'Low severity indicators detected.';
+        if (verdict === 'CRITICAL' || verdict === 'HIGH' || dread >= 7 || corr >= 0.7) {
+          action = 'Escalate';
+          rationale = 'High verdict, DREAD, or correlation score exceeds safe limits.';
+        } else if (verdict === 'SUSPICIOUS' || dread >= 4 || corr >= 0.5) {
+          action = 'Investigate';
+          rationale = 'Suspicious indicators merit deeper investigation.';
+        }
+        const drivers = []
+          .concat(currentRow.factors || [])
+          .concat((currentRow.mitre_tags || []).map(t => `MITRE ${t}`))
+          .slice(0, 4)
+          .join(', ') || 'No factor metadata present.';
+        document.getElementById('decisionAction').textContent = action;
+        document.getElementById('decisionRationale').textContent = rationale;
+        document.getElementById('decisionRisk').textContent = `DREAD ${dread.toFixed(1)} · Verdict ${verdict}`;
+        document.getElementById('decisionCorr').textContent = `Correlation: ${corr.toFixed(2)}`;
+        document.getElementById('decisionDrivers').textContent = drivers;
+      }
+
+      function renderCorrelationContextBlock(ctx){
+        try{
+          if(window.renderCorrelationHighlights){
+            return window.renderCorrelationHighlights(ctx);
+          }
+          var badges = [];
+          if(typeof ctx.mappingScore === 'number'){
+            badges.push('Mapping '+ctx.mappingScore.toFixed(2));
+          }
+          if(typeof ctx.domainScore === 'number'){
+            badges.push('Domain '+ctx.domainScore.toFixed(2));
+          }
+          if(typeof ctx.pathScore === 'number'){
+            badges.push('Path '+(ctx.pathLabel||'score')+' '+ctx.pathScore.toFixed(2));
+          }
+          var badgeLine = badges.length ? '<div class="inline-muted">'+badges.join(' · ')+'</div>' : '';
+          var insightLine = (ctx.insights && ctx.insights.length)
+            ? '<div style="margin-top:6px;"><strong>'+escapeHtml(String(ctx.insights[0].title))+'</strong><div class="inline-muted">'+escapeHtml(ctx.insights[0].explanation || '')+'</div></div>'
+            : '<div class="inline-muted">No correlation insight available.</div>';
+          return badgeLine + insightLine;
+        }catch(_){
+          return '<div class="inline-muted">No correlation insight available.</div>';
+        }
+      }
+
+      function applyQuickFilter(){
+        const input = document.getElementById('quickFilter');
+        const host = (currentRow && (currentRow.host || currentRow.hostname) || '').toString();
+        if(!input || !currentRow){
+          return;
+        }
+        const query = input.value.trim().toLowerCase();
+        const resultsEl = document.getElementById('filterResults');
+        if(!query){
+          resultsEl.textContent = 'Type to surface matches from this artifact.';
+          return;
+        }
+        const matches = [];
+        if(host.toLowerCase().includes(query)){
+          matches.push(`Host: ${host}`);
+        }
+        const user = (currentRow.user || '').toString();
+        if(user && user.toLowerCase().includes(query)){
+          matches.push(`User: ${user}`);
+        }
+        (currentRow.mitre_tags || []).forEach(tag => {
+          if(String(tag).toLowerCase().includes(query)){
+            matches.push(`MITRE: ${tag}`);
+          }
+        });
+        (currentRow.factors || []).forEach(f => {
+          if(String(f).toLowerCase().includes(query)){
+            matches.push(`Factor: ${f}`);
+          }
+        });
+        const summary = (currentRow.llm_summary || '').toLowerCase();
+        if(summary.includes(query)){
+          matches.push('LLM summary contains the term.');
+        }
+        if(!matches.length){
+          resultsEl.textContent = 'No matches found in factors, MITRE tags, or metadata.';
+        } else {
+          resultsEl.innerHTML = '<ul>' + matches.map(m => `<li>${m}</li>`).join('') + '</ul>';
+        }
+      }
+
+      function renderHistoricalContext(){
+        const host = document.getElementById('historicalContext');
+        if(!host){
+          return;
+        }
+        const ctx = currentRow && currentRow.historical_context;
+        if(!ctx || !ctx.match_count){
+          host.textContent = 'No similar incidents recorded in the last 120 days.';
+          return;
+        }
+        const list = Array.isArray(ctx.matches) ? ctx.matches : [];
+        const items = list.map(match => {
+          const when = match.last_seen_at || match.first_seen_at || 'unknown date';
+          const proc = match.process_name || '';
+          const hostName = match.host || 'host';
+          const outcome = match.outcome || 'unknown';
+          return `<li>${proc} on ${hostName} · Outcome ${outcome} (last seen ${when})</li>`;
+        }).join('');
+        host.innerHTML = `<strong>${ctx.match_count} related incident(s).</strong><ul>${items}</ul>`;
+      }
+
+      function renderTier2Payload(payload){
+        var panel = document.getElementById('tier2Panel');
+        if(!panel){
+          return;
+        }
+        if(!payload){
+          panel.style.display='none';
+          return;
+        }
+        panel.style.display='block';
+        var exec = payload.executive_summary || {};
+        document.getElementById('tier2ExecAction').textContent = exec.recommended_action || 'Review';
+        document.getElementById('tier2ExecDetails').textContent = exec.one_liner || 'No executive summary provided.';
+        document.getElementById('tier2ThreatLevel').textContent = exec.threat_level || 'UNKNOWN';
+        document.getElementById('tier2ThreatNotes').textContent = 'Kill chain: '+((payload.mitre_mapping && payload.mitre_mapping.kill_chain_phase) || 'n/a');
+        var gaps = (payload.ai_reasoning && payload.ai_reasoning.knowledge_gaps) || [];
+        if((!gaps || !gaps.length) && Array.isArray(currentRow && currentRow._uncertaintyFlags)){
+          gaps = currentRow._uncertaintyFlags.filter(Boolean);
+        }
+        document.getElementById('tier2Gaps').innerHTML = gaps.length ? '<ul>'+gaps.map(function(g){ return '<li>'+escapeHtml(g)+'</li>'; }).join('')+'</ul>' : 'No knowledge gaps listed.';
+        var evidenceArr = Array.isArray(payload.ai_reasoning && payload.ai_reasoning.supporting_evidence) ? payload.ai_reasoning.supporting_evidence : [];
+        if(evidenceArr.length){
+          document.getElementById('tier2Evidence').innerHTML = '<ul>'+evidenceArr.map(function(ev){ return '<li><strong>'+escapeHtml(ev.observation||'')+'</strong><div class="inline-muted">'+escapeHtml(ev.significance||'')+' &mdash; Confidence '+(ev.confidence!=null?Math.round(ev.confidence*100)+'%':'n/a')+'</div></li>'; }).join('')+'</ul>';
+        } else {
+          var fallbackEvidence = normalizeEvidenceList(currentRow && currentRow._pipeline_evidence);
+          document.getElementById('tier2Evidence').innerHTML = fallbackEvidence.length ? '<ul>'+fallbackEvidence.map(function(ev){ return '<li>'+escapeHtml(ev)+'</li>'; }).join('')+'</ul>' : 'No supporting evidence.';
+        }
+        var tasksArr = Array.isArray(payload.investigation_tasks) ? payload.investigation_tasks : [];
+        if(tasksArr.length){
+          document.getElementById('tier2Tasks').innerHTML = '<ul>'+tasksArr.map(function(task){ return '<li>'+escapeHtml(task.task||'Task')+' &mdash; '+escapeHtml(task.tool||'Tool')+' ('+escapeHtml(task.priority||'medium')+')</li>'; }).join('')+'</ul>';
+        } else {
+          var fallbackTasks = normalizeTaskList(currentRow && currentRow._pipeline_tasks);
+          document.getElementById('tier2Tasks').innerHTML = fallbackTasks.length ? '<ul>'+fallbackTasks.map(function(task){ return '<li>'+escapeHtml(task)+'</li>'; }).join('')+'</ul>' : 'No tasks returned.';
+        }
+        var alt = (payload.ai_reasoning && payload.ai_reasoning.alternative_hypotheses) || [];
+        document.getElementById('tier2Alternatives').innerHTML = alt.length ? '<ul>'+alt.map(function(h){ return '<li>'+escapeHtml(h.hypothesis||'Alternative')+' ('+(h.probability!=null?Math.round(h.probability*100)+'%':'n/a')+') &mdash; '+escapeHtml(h.evidence_needed||'Needs evidence')+'</li>'; }).join('')+'</ul>' : 'No alternative hypotheses.';
+        var entities = document.getElementById('tier2Entities');
+        if(entities){
+          var primary = payload.entity_graph && payload.entity_graph.primary_entity;
+          var related = (payload.entity_graph && payload.entity_graph.related_entities) || [];
+          var html = [];
+          if(primary){
+            html.push('<li><strong>'+escapeHtml(primary.type||'entity')+'</strong>: '+escapeHtml(primary.identifier||'n/a')+'</li>');
+          }
+          related.forEach(function(rel){
+            html.push('<li>'+escapeHtml(rel.relationship||'related')+' &rarr; <strong>'+escapeHtml(rel.type||'entity')+'</strong> '+escapeHtml(rel.identifier||'')+'</li>');
+          });
+          entities.innerHTML = html.length ? html.join('') : '<li>No entity data.</li>';
+        }
+        var timelineHost = document.getElementById('tier2Timeline');
+        var events = (payload.evidence_timeline && payload.evidence_timeline.events) || [];
+        if(events.length){
+          timelineHost.innerHTML = events.map(function(ev){
+            var sev = (ev.severity||'medium').toLowerCase();
+            var cls = sev === 'high' ? 'severity-high' : 'severity-medium';
+            return '<div class="timeline-event '+cls+'"><span class="event-time">'+escapeHtml(ev.timestamp||'')+'</span><span class="event-desc">'+escapeHtml(ev.description||ev.event_type||'')+'</span><span class="event-severity">'+escapeHtml(sev.toUpperCase())+'</span></div>';
+          }).join('');
+        } else {
+          timelineHost.textContent = 'No timeline events available.';
+        }
+        var queriesEl = document.getElementById('tier2Queries');
+        var queries = payload.siem_queries || [];
+        if(queries.length){
+          queriesEl.innerHTML = queries.map(function(query){
+            var txt = query.query || '';
+            return '<div class="query-card"><div><strong>'+escapeHtml(query.name||'Query')+'</strong> ('+escapeHtml(query.platform||'generic')+')</div><pre>'+escapeHtml(txt)+'</pre><button class="btn" type="button" data-query="'+encodeURIComponent(txt)+'">Copy</button></div>';
+          }).join('');
+          queriesEl.querySelectorAll('button').forEach(function(btn){
+            btn.addEventListener('click', function(){
+              var text = decodeURIComponent(btn.getAttribute('data-query')||'');
+              navigator.clipboard.writeText(text).then(function(){
+                alert('Query copied to clipboard.');
+              }).catch(function(){ alert('Unable to copy query.'); });
+            });
+          });
+        } else {
+          queriesEl.textContent = 'No SIEM queries returned.';
+        }
+        var tiEl = document.getElementById('tier2ThreatIntel');
+        var corrEl = document.getElementById('tier2Correlation');
+        if(corrEl){
+          var corrCtx = (payload && payload.correlation_context) || (currentRow && currentRow._correlation_context) || null;
+          corrEl.innerHTML = corrCtx ? renderCorrelationContextBlock(corrCtx) : 'No correlation insight available.';
+        }
+        if(tiEl){
+          var tiData = payload.threat_intel;
+          if(!tiData || (typeof tiData === 'object' && !Object.keys(tiData).length)){
+            tiEl.textContent = 'No threat intel evidence surfaced.';
+          } else if(typeof tiData === 'string'){
+            tiEl.textContent = tiData;
+          } else {
+            var list = [];
+            var pushItem = function(source, value){
+              if(value === null || typeof value === 'undefined'){
+                return;
+              }
+              if(Array.isArray(value)){
+                value.forEach(function(v){
+                  pushItem(source, v);
+                });
+                return;
+              }
+              var textValue;
+              if(typeof value === 'object'){
+                textValue = escapeHtml(JSON.stringify(value));
+              } else {
+                textValue = escapeHtml(String(value));
+              }
+              list.push('<li><strong>'+escapeHtml(source)+':</strong> '+textValue+'</li>');
+            };
+            if(Array.isArray(tiData)){
+              tiData.forEach(function(entry, idx){
+                if(typeof entry === 'object' && entry){
+                  var src = entry.source || entry.kind || ('entry '+(idx+1));
+                  var val = entry.value || entry.observation || entry;
+                  pushItem(src, val);
+                } else {
+                  pushItem('indicator', entry);
+                }
+              });
+            } else {
+              Object.keys(tiData || {}).forEach(function(key){
+                pushItem(key, tiData[key]);
+              });
+            }
+            tiEl.innerHTML = list.length ? '<ul>'+list.join('')+'</ul>' : 'Threat intel context available but empty.';
+          }
+        }
+        var recCard = document.getElementById('tier2RecommendationsCard');
+        var recContainer = document.getElementById('tier2Recommendations');
+        if(recCard && recContainer){
+          var catalog = [];
+          if(currentRow && Array.isArray(currentRow.recommendation_catalog)){
+            catalog = currentRow.recommendation_catalog.slice();
+          } else if(Array.isArray(payload.recommendation_catalog)){
+            catalog = payload.recommendation_catalog.slice();
+          }
+          var stateMap = {};
+          var stateList = []
+            .concat(currentRow && currentRow.recommendation_actions || [])
+            .concat(payload.recommendation_actions || [])
+            .filter(Boolean);
+          stateList.forEach(function(action){
+            var actionId = action.id || ((action.domain || 'multi')+'|'+(action.action || ''));
+            stateMap[actionId] = action;
+          });
+          if(catalog.length){
+            recCard.style.display = 'block';
+            recContainer.innerHTML = '<ul>'+catalog.slice(0,8).map(function(entry){
+              var actionId = entry.id || ((entry.domain || 'multi')+'|'+(entry.action || ''));
+              var state = (stateMap[actionId] && stateMap[actionId].status) || 'pending';
+              var updated = stateMap[actionId] && stateMap[actionId].updated_ts ? new Date(stateMap[actionId].updated_ts * 1000).toLocaleTimeString() : '';
+              var badgeClass = state === 'completed' ? 'pill-safe' : (state === 'acknowledged' ? 'pill-info' : 'pill-warn');
+              return '<li><span class="pill '+badgeClass+'">'+escapeHtml(state)+'</span> '
+                + escapeHtml(entry.action || '')
+                + (entry.priority ? ' <span class="inline-muted">'+escapeHtml(entry.priority)+'</span>' : '')
+                + (updated ? ' <span class="inline-muted">('+escapeHtml(updated)+')</span>' : '')
+                + '</li>';
+            }).join('')+'</ul>';
+          } else {
+            recCard.style.display = 'none';
+            recContainer.textContent = 'No catalog entries surfaced.';
+          }
+        }
+        var ttlCard = document.getElementById('tier2TtlCard');
+        var ttlInfo = document.getElementById('tier2TtlInfo');
+        if(ttlCard && ttlInfo){
+          var ttlSeconds = null;
+          if(currentRow && typeof currentRow.ttl_seconds === 'number'){
+            ttlSeconds = Number(currentRow.ttl_seconds);
+          } else if(currentRow && typeof currentRow.expires_at === 'number'){
+            ttlSeconds = Number(currentRow.expires_at) - (Date.now()/1000);
+          } else if(typeof payload.ttl_seconds === 'number'){
+            ttlSeconds = Number(payload.ttl_seconds);
+          }
+          var ttlLabel = Number.isFinite(ttlSeconds) ? 'Chain TTL: '+formatTier2Ttl(ttlSeconds) : 'Chain TTL unknown.';
+          var dep = (currentRow && currentRow.dependency_status) || payload.dependency_status || (typeof window !== 'undefined' && window.__lastDependencyStatus) || null;
+          var depNotes = [];
+          if(dep && dep.hopgraph){
+            if(dep.hopgraph.available === false){
+              depNotes.push('HopGraph offline; narratives fall back to cached insights.');
+            } else if(Number.isFinite(dep.hopgraph.seconds_since_ok)){
+              depNotes.push('HopGraph healthy '+formatTier2Relative(dep.hopgraph.seconds_since_ok)+'.');
+            } else if(dep.hopgraph.stale){
+              depNotes.push('HopGraph snapshot stale.');
+            }
+          }
+          if(dep && dep.redis){
+            if(dep.redis.available === false){
+              depNotes.push('Redis unavailable; factor batches queued.');
+            } else if(Number.isFinite(dep.redis.seconds_since_ok)){
+              depNotes.push('Redis healthy '+formatTier2Relative(dep.redis.seconds_since_ok)+'.');
+            }
+          }
+          if(dep && dep.queued_factor_batches){
+            depNotes.push(`${dep.queued_factor_batches} queued batches awaiting replay.`);
+          }
+          ttlCard.style.display = 'block';
+          ttlInfo.innerHTML = '<div>'+ttlLabel+'</div>' + (depNotes.length ? '<div class="inline-muted">'+depNotes.join(' ')+'</div>' : '');
+        }
+      }
+
+
+      async function semanticSearch(){
+        const queryInput = document.getElementById('semanticQuery');
+        const logsInput = document.getElementById('semanticLogs');
+        const resultsEl = document.getElementById('semanticResults');
+        if(!queryInput || !resultsEl){
+          return;
+        }
+        const query = (queryInput.value || '').trim();
+        if(!query){
+          alert('Enter a query before running semantic search.');
+          return;
+        }
+        const rawLogs = (logsInput && logsInput.value || '').trim().split(/\n/).filter(Boolean);
+        const payload = { query, logs: rawLogs.map((line, idx) => ({ id: `log-${idx}`, message: line })) };
+        resultsEl.textContent = 'Searching...';
+        try{
+          const resp = await fetch('/api/v1/assessments/semantic_logs/search', {
+            method: 'POST',
+            headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders()),
+            body: JSON.stringify(payload)
+          });
+          if(!resp.ok){
+            throw new Error('Request failed');
+          }
+          const data = await resp.json();
+          if(!data.results || !data.results.length){
+            resultsEl.textContent = 'No similar logs surfaced.';
+            return;
+          }
+          const html = data.results.map(res => `<li>${res.message || ''}</li>`).join('');
+          resultsEl.innerHTML = `<ul>${html}</ul>`;
+        }catch(err){
+          resultsEl.textContent = 'Semantic search error: ' + err.message;
+        }
+      }
+
+      async function loadAttackGraph(){
+        const canvas = document.getElementById('graphCanvas');
+        if(!canvas){
+          return;
+        }
+        canvas.innerHTML = 'Loading attack graph...';
+        if(!currentRow){
+          canvas.textContent = 'No artifact loaded.';
+          return;
+        }
+        const body = {
+          row: currentRow,
+          max_hops: parseInt(document.getElementById('graphHops').value, 10) || 3,
+          time_window_hours: parseInt(document.getElementById('graphTimeWindow').value, 10) || 24
+        };
+        try{
+          const resp = await fetch('/api/v1/graph/attack_reconstruction', {
+            method: 'POST',
+            headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders()),
+            body: JSON.stringify(body)
+          });
+          if(!resp.ok){
+            throw new Error('Graph request failed');
+          }
+          graphData = await resp.json();
+          renderGraph(graphData);
+          renderCorrelationExplanation(graphData.correlation_explanation || '');
+          renderTimeline(graphData.timeline || []);
+        }catch(err){
+          canvas.textContent = 'Unable to load HopGraph: ' + err.message;
+        }
+      }
+
+      function renderGraph(data){
+        const container = document.getElementById('graphCanvas');
+        if(!container || !data){
+          return;
+        }
+        container.innerHTML = '';
+        const width = container.clientWidth;
+        const height = container.clientHeight || 420;
+        const svg = d3.select(container).append('svg')
+          .attr('width', width)
+          .attr('height', height);
+
+        const links = data.edges.map(e => Object.assign({}, e));
+        const nodes = data.nodes.map(n => Object.assign({}, n));
+        const color = d3.scaleOrdinal(d3.schemeCategory10);
+
+        const simulation = d3.forceSimulation(nodes)
+          .force('link', d3.forceLink(links).id(d => d.id).distance(140))
+          .force('charge', d3.forceManyBody().strength(-300))
+          .force('center', d3.forceCenter(width / 2, height / 2));
+
+        const link = svg.append('g')
+          .attr('stroke', '#999')
+          .attr('stroke-opacity', 0.6)
+          .selectAll('line')
+          .data(links)
+          .enter().append('line')
+          .attr('stroke-width', 2);
+
+        const node = svg.append('g')
+          .attr('stroke', '#fff')
+          .attr('stroke-width', 1.5)
+          .selectAll('circle')
+          .data(nodes)
+          .enter().append('circle')
+          .attr('r', 12)
+          .attr('fill', d => color(d.type || 'artifact'))
+          .call(d3.drag()
+            .on('start', dragstarted)
+            .on('drag', dragged)
+            .on('end', dragended));
+
+        const label = svg.append('g')
+          .selectAll('text')
+          .data(nodes)
+          .enter().append('text')
+          .text(d => d.label || d.id)
+          .attr('font-size', 11)
+          .attr('fill', '#fff')
+          .attr('stroke', 'none');
+
+        node.append('title').text(d => `${d.label || d.id}\n${d.type || 'artifact'}`);
+        link.append('title').text(d => d.type || 'related');
+
+        simulation.on('tick', () => {
+          link
+            .attr('x1', d => d.source.x)
+            .attr('y1', d => d.source.y)
+            .attr('x2', d => d.target.x)
+            .attr('y2', d => d.target.y);
+
+          node
+            .attr('cx', d => d.x)
+            .attr('cy', d => d.y);
+
+          label
+            .attr('x', d => d.x + 12)
+            .attr('y', d => d.y + 4);
+        });
+
+        function dragstarted(event, d){
+          if(!event.active) simulation.alphaTarget(0.3).restart();
+          d.fx = d.x;
+          d.fy = d.y;
+        }
+        function dragged(event, d){
+          d.fx = event.x;
+          d.fy = event.y;
+        }
+        function dragended(event, d){
+          if(!event.active) simulation.alphaTarget(0);
+          d.fx = null;
+          d.fy = null;
+        }
+      }
+
+      function renderTimeline(events){
+        const host = document.getElementById('timelineView');
+        if(!host){
+          return;
+        }
+        if(!events || !events.length){
+          host.style.display = 'none';
+          host.innerHTML = '';
+          return;
+        }
+        const items = events.map(ev => {
+          const severity = ev.severity ? 'severity-high' : 'severity-medium';
+          return `<div class="timeline-event ${severity}">
+            <span class="event-time">${ev.timestamp || ''}</span>
+            <span class="event-desc">${ev.event || ''}</span>
+            <span class="event-severity">${ev.severity ? 'HIGH' : 'MED'}</span>
+          </div>`;
+        }).join('');
+        host.innerHTML = items;
+      }
+
+      function renderCorrelationExplanation(text){
+        const el = document.getElementById('corrExplanation');
+        if(el){
+          el.textContent = text || '';
+          el.style.display = text ? 'block' : 'none';
+        }
+      }
+
+      window.showTimeline = function(){
+        const el = document.getElementById('timelineView');
+        if(el){
+          el.style.display = el.style.display === 'none' ? 'block' : 'none';
+        }
+      };
+
+      window.toggleCorrExplanation = function(){
+        const el = document.getElementById('corrExplanation');
+        if(!el){
+          return;
+        }
+        const vis = el.style.display !== 'none';
+        el.style.display = vis ? 'none' : 'block';
+      };
+
+      window.toggleSection = function(id){
+        const el = document.getElementById(id);
+        if(!el) return;
+        el.classList.toggle('collapsed');
+      };
+
+      window.generateInsight = async function(type){
+        if(!currentRow){
+          alert('No row context loaded.');
+          return;
+        }
+        const buttonId = type + 'Btn';
+        const outputId = type + 'Output';
+        const costId = type + 'Cost';
+        const target = document.getElementById(outputId);
+        const btn = document.getElementById(buttonId);
+        const costSpan = document.getElementById(costId);
+        if(btn) btn.disabled = true;
+        if(target){
+          target.style.display = 'block';
+          target.textContent = 'Generating...';
+        }
+        try{
+          const payload = {
+            insight_type: type,
+            row: currentRow,
+            pipeline_context: currentRow && (currentRow.pipeline_context || currentRow._pipeline_context) || null
+          };
+          const resp = await fetch('/api/v1/insights/generate', {
+            method: 'POST',
+            headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders()),
+            body: JSON.stringify(payload)
+          });
+          if(!resp.ok) throw new Error('Request failed ('+resp.status+')');
+          const data = await resp.json();
+          const insight = data.text || data.insight || 'No content returned.';
+          if(target){
+            target.innerHTML = '<pre>'+escapeHtml(insight)+'</pre>';
+          }
+          const delta = (typeof data.estimated_cost === 'number') ? data.estimated_cost : (defaultInsightCosts[type] || 0);
+          runningCost += delta;
+          updateCostDisplay();
+          if(costSpan){
+            costSpan.textContent = formatCost(delta);
+          }
+        }catch(err){
+          if(target) target.textContent = 'Error: '+err.message;
+        }finally{
+          if(btn) btn.disabled = false;
+        }
+      };
+
+      window.copySummary = function(){
+        const text = document.getElementById('llmSummary').textContent;
+        navigator.clipboard.writeText(text).then(function(){
+          alert('Summary copied to clipboard.');
+        }).catch(function(){ alert('Unable to copy summary.'); });
+      };
+
+      window.saveNotes = function(){
+        const notes = document.getElementById('analystNotes').value;
+        localStorage.setItem('csv_deep_notes_'+rowIndex, notes);
+        alert('Notes saved locally.');
+      };
+
+      window.markEscalated = function(){
+        alert('Marked as escalated (demo placeholder).');
+      };
+
+      window.markFalsePositive = function(){
+        alert('Marked as false positive (demo placeholder).');
+      };
+
+      window.exportPDF = function(){
+        window.print();
+      };
+
+      const quickFilterInput = document.getElementById('quickFilter');
+      if(quickFilterInput){
+        quickFilterInput.addEventListener('input', applyQuickFilter);
+      }
+      const graphWindowSel = document.getElementById('graphTimeWindow');
+      const graphHopSel = document.getElementById('graphHops');
+      if(graphWindowSel){ graphWindowSel.addEventListener('change', loadAttackGraph); }
+      if(graphHopSel){ graphHopSel.addEventListener('change', loadAttackGraph); }
+      window.semanticSearch = semanticSearch;
+
+      const mappingBtn = document.getElementById('btnDeepEditMapping');
+      if(mappingBtn){
+        mappingBtn.addEventListener('click', editMappingForCurrentRow);
+      }
+      const telBtn = document.getElementById('tier2TelemetryBtn');
+      if(telBtn){
+        telBtn.addEventListener('click', loadTier2Telemetry);
+      }
+      hydrateSummary();
+    })();
   </script>
 </body>
 </html>

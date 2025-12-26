@@ -31,7 +31,7 @@
   <script>
     async function refresh(){
       try{
-        const r = await fetch('/api/v1/isms/evidence', { headers: authHeaders() });
+        const r = await (window.safeFetch || fetch)('/api/v1/isms/evidence', { headers: authHeaders() });
         const j = await r.json();
         document.getElementById('counts').innerText = `Evidence count: ${j.count}`;
         const list = document.getElementById('evidenceList'); list.innerHTML = '';
@@ -42,7 +42,7 @@
     document.getElementById('download').addEventListener('click', async ()=>{
       const secret = document.getElementById('secret').value || '';
       const url = `/api/v1/isms/report/download${secret?('?hmac_secret='+encodeURIComponent(secret)) : ''}`;
-      const r = await fetch(url, { headers: authHeaders() });
+      const r = await (window.safeFetch || fetch)(url, { headers: authHeaders() });
       if (!r.ok) { alert('download failed'); return; }
       const blob = await r.blob();
       const urlb = URL.createObjectURL(blob);

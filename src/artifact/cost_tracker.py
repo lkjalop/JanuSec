@@ -1,10 +1,14 @@
 from __future__ import annotations
-import os, time
-from typing import Dict, Any
+
+import os
+import time
+from typing import Any, Dict
+import json
+from pathlib import Path
 
 # Centralized cost tracking state to avoid circular imports with server.
 
-COST_STATE: Dict[str, Any] = {
+COST_STATE: dict[str, Any] = {
     'embedding_calls': 0,
     'embedding_ms': 0.0,
     'reputation_queries': 0,
@@ -13,7 +17,7 @@ COST_STATE: Dict[str, Any] = {
     'daily_rollups': []  # list of {day, estimated_usd}
 }
 
-def prices() -> Dict[str,float]:
+def prices() -> dict[str,float]:
     return {
         'embedding_call': float(os.getenv('COST_PER_EMBED_CALL','0.0005')),
         'reputation_query': float(os.getenv('COST_PER_REPUTATION_QUERY','0.002')),
@@ -43,7 +47,7 @@ def day_estimate() -> float:
         COST_STATE['artifacts_processed'] * p['artifact_base']
     )
 
-def summary() -> Dict[str,Any]:
+def summary() -> dict[str,Any]:
     day = time.strftime('%Y-%m-%d', time.gmtime())
     month_prefix = day[:7]
     est_day = day_estimate()
@@ -61,3 +65,28 @@ def summary() -> Dict[str,Any]:
         'estimated_usd_month_to_date': round(month_total,6),
         'unit_prices': prices()
     }
+
+def snapshot_path() -> Path:
+    return Path(os.getenv('FINOPS_DAILY_SNAPSHOT','artifacts/metrics/daily_cost.json'))
+
+def save_snapshot() -> bool:
+    try:
+        p = snapshot_path()
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps(COST_STATE), encoding='utf-8')
+        return True
+    except Exception:
+        return False
+
+def load_snapshot() -> bool:
+    try:
+        p = snapshot_path()
+        if not p.exists():
+            return False
+        data = json.loads(p.read_text(encoding='utf-8'))
+        if isinstance(data, dict):
+            COST_STATE.update(data)
+            return True
+        return False
+    except Exception:
+        return False

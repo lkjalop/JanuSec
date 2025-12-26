@@ -27,10 +27,16 @@ Extensibility:
 - Future: enrich, ticket, containment actions; conditional expressions; rollback semantics.
 """
 from __future__ import annotations
-import yaml, json, os, time, re
-from pathlib import Path
+
+import json
+import os
+import re
+import time
 from dataclasses import dataclass
-from typing import List, Dict, Any, Optional
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+import yaml
 
 try:
     from prometheus_client import Counter
@@ -43,8 +49,8 @@ ACTION_LOG_ROOT = Path('action_log')
 class PlayStep:
     id: str
     action: str
-    params: Dict[str, Any]
-    depends_on: List[str]
+    params: dict[str, Any]
+    depends_on: list[str]
 
 class PlaybookExecutor:
     def __init__(self, slack_notifier=None, ai_provider=None):
@@ -62,9 +68,9 @@ class PlaybookExecutor:
                 pass
         self.__class__._init = True
 
-    def load_yaml(self, path: str | Path) -> List[PlayStep]:
+    def load_yaml(self, path: str | Path) -> list[PlayStep]:
         data = yaml.safe_load(Path(path).read_text(encoding='utf-8'))
-        steps: List[PlayStep] = []
+        steps: list[PlayStep] = []
         if not isinstance(data, list):
             raise ValueError('Playbook YAML must be a list of steps')
         for entry in data:
@@ -95,17 +101,17 @@ class PlaybookExecutor:
                     pass
         return done
 
-    def _write_record(self, log_path: Path, record: Dict[str, Any]):
+    def _write_record(self, log_path: Path, record: dict[str, Any]):
         with log_path.open('a', encoding='utf-8') as f:
             f.write(json.dumps(record) + '\n')
 
-    def _template(self, text: str, context: Dict[str, Any]) -> str:
+    def _template(self, text: str, context: dict[str, Any]) -> str:
         def repl(m):
             key = m.group(1).strip()
             return str(context.get(key,''))
         return re.sub(r'\{\{([^}]+)\}\}', repl, text)
 
-    async def execute(self, execution_id: str, steps: List[PlayStep], context: Dict[str, Any]) -> Dict[str, Any]:
+    async def execute(self, execution_id: str, steps: list[PlayStep], context: dict[str, Any]) -> dict[str, Any]:
         log_path = self._log_path(execution_id)
         completed = self._load_completed(log_path)
         summary = {'execution_id': execution_id, 'steps': []}
@@ -117,7 +123,7 @@ class PlaybookExecutor:
                 summary['steps'].append({'id': step.id, 'action': step.action, 'skipped': 'dependency_pending'})
                 continue
             status = 'success'
-            detail: Dict[str, Any] = {}
+            detail: dict[str, Any] = {}
             try:
                 # Conditional gating by required factor presence
                 required_factor = step.params.get('require_factor')
@@ -154,7 +160,8 @@ class PlaybookExecutor:
                         detail['reason'] = 'no_ai_provider'
                 elif step.action == 'ticket':
                     # Write ticket JSONL stub to tickets/<date>.log
-                    import time, json
+                    import json
+                    import time
                     from pathlib import Path
                     troot = Path('tickets')
                     troot.mkdir(exist_ok=True)
@@ -178,7 +185,20 @@ class PlaybookExecutor:
             self._write_record(log_path, record)
             if getattr(self.__class__, 'pb_actions_total', None):
                 try:
-                    self.__class__.pb_actions_total.labels(action=step.action, status=status).inc()
+                    try:
+                        from src.api.metrics_tenant_helper import emit_labels_with_guard
+                        from src.api.server import get_server_runtime_state as _get_rt
+                        labels = emit_labels_with_guard(_get_rt(None), {'action': step.action, 'status': status}, None)
+                        if 'action' not in labels:
+                            labels['action'] = step.action
+                        if 'status' not in labels:
+                            labels['status'] = status
+                        self.__class__.pb_actions_total.labels(**labels).inc()
+                    except Exception:
+                        try:
+                            self.__class__.pb_actions_total.labels(action=step.action, status=status).inc()
+                        except Exception:
+                            pass
                 except Exception:
                     pass
             summary['steps'].append(record)

@@ -21,8 +21,12 @@ Configuration via env (optional):
 Returns list of factor strings.
 """
 from __future__ import annotations
-import os, statistics, math
-from typing import List, Dict, Any, Tuple
+
+import math
+import os
+import statistics
+from typing import Any, Dict, List, Tuple
+
 
 class PacketSummarizer:
     def __init__(self):
@@ -30,13 +34,13 @@ class PacketSummarizer:
         self.beacon_jitter_thresh = float(os.getenv('PACKET_SUMMARY_BEACON_THRESHOLD_JITTER','0.15'))
         self.large_outbound_bytes = int(os.getenv('PACKET_SUMMARY_LARGE_OUTBOUND_BYTES','5000000'))
 
-    def summarize(self, event: Dict[str, Any]) -> List[str]:
+    def summarize(self, event: dict[str, Any]) -> list[str]:
         details = event.get('details') or {}
-        flows: List[Dict[str, Any]] = details.get('network') or []
+        flows: list[dict[str, Any]] = details.get('network') or []
         if not isinstance(flows, list) or not flows:
             return []
         flows = flows[:self.max_flows]
-        factors: List[str] = []
+        factors: list[str] = []
         # Basic aggregations
         outbound = [f for f in flows if f.get('direction') == 'outbound']
         total_out = sum(int(f.get('bytes',0)) for f in outbound)
@@ -86,7 +90,7 @@ class PacketSummarizer:
 
 _default = PacketSummarizer()
 
-def summarize_packet_event(event: Dict[str, Any]) -> List[str]:
+def summarize_packet_event(event: dict[str, Any]) -> list[str]:
     try:
         return _default.summarize(event)
     except Exception:

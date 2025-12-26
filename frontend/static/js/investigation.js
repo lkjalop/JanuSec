@@ -1,6 +1,6 @@
 // Extracted investigation modal logic (Phase 1 + threat_model/controls/graph)
 (function(){
-    async function openInvestigationDetails(eventId){
+    async function openInvestigationDetails(eventId, options){
         try{
             const overlay = document.getElementById('investigationModal');
             const content = document.getElementById('invDetailsContent');
@@ -10,10 +10,50 @@
             if (eid) eid.textContent = eventId;
             if (overlay) overlay.style.display = 'flex';
             if (content) content.innerHTML = '<div class="evidence-item">Loading investigation details…</div>';
+            const triggeredInsights = (options && options.correlation_insights) || null;
 
-            const exR = await fetch(`/api/v1/decisions/${encodeURIComponent(eventId)}/explain`, { headers: authHeaders() });
+            const fetcher = window.safeFetch || fetch;
+            const exR = await fetcher(`/api/v1/decisions/${encodeURIComponent(eventId)}/explain`, { headers: authHeaders() });
             const explain = exR && exR.ok ? await exR.json() : null;
             if (badge) badge.textContent = `Verdict: ${explain && explain.verdict ? explain.verdict : 'UNKNOWN'}`;
+            try{
+                const summary = explain?.narrative || explain?.narrative_text || explain?.summary || '';
+                const graph = explain?.graph_summary || explain?.hopgraph_summary || null;
+                const binaryMeta = (explain?.binary || explain?.artifact || {});
+                const liveInsights = triggeredInsights || explain?.correlation_insights || null;
+                window.__activeInvestigationContext = {
+                    eventId,
+                    verdict: explain?.verdict || 'unknown',
+                    summary: typeof summary === 'string' && summary.trim() ? summary : JSON.stringify({ verdict: explain?.verdict, mitre: explain?.mitre, factors: explain?.factors?.slice?.(0,5) }, null, 2),
+                    explain,
+                    graph,
+                    binary: binaryMeta,
+                    playbook_preview: explain?.playbook_preview || null,
+                    evidence_summary: explain?.evidence_summary || null,
+                    correlation_insights: liveInsights || [],
+                };
+                try{
+                    if(window.renderCorrelationInsightPanel){
+                        window.renderCorrelationInsightPanel(liveInsights);
+                    }
+                }catch(_err){ }
+            }catch(_err){
+                window.__activeInvestigationContext = {
+                    eventId,
+                    explain,
+                    playbook_preview: explain?.playbook_preview || null,
+                    evidence_summary: explain?.evidence_summary || null,
+                    correlation_insights: triggeredInsights || [],
+                };
+                try{
+                    if(window.renderCorrelationInsightPanel){
+                        window.renderCorrelationInsightPanel(triggeredInsights);
+                    }
+                }catch(_inner){}
+            }
+            try{
+                window.dispatchEvent(new CustomEvent('investigation-context', { detail: { context: window.__activeInvestigationContext } }));
+            }catch(_){}
             // Populate factor selection panel
             try {
                 if (factorPanel) {
@@ -56,7 +96,7 @@
                                 btn.classList.toggle('selected');
                                 const fname = btn.getAttribute('data-factor');
                                 // Fetch weight history sparkline (best-effort)
-                                fetch(`/api/v1/factors/history/${encodeURIComponent(fname)}`, {headers: authHeaders()})
+                                (window.safeFetch || fetch)(`/api/v1/factors/history/${encodeURIComponent(fname)}`, {headers: authHeaders()})
                                     .then(r=>r.ok? r.json():null)
                                     .then(j=>{
                                         if(!j||!Array.isArray(j.history)||!j.history.length) return;
@@ -162,7 +202,7 @@
             // Risk ablation (optional)
             let risk = null;
             try {
-                const rR = await fetch(`/api/v1/risk/${encodeURIComponent(eventId)}/explain?include_ablation=1`, { headers: authHeaders() });
+                const rR = await (window.safeFetch || fetch)(`/api/v1/risk/${encodeURIComponent(eventId)}/explain?include_ablation=1`, { headers: authHeaders() });
                 risk = rR && rR.ok ? await rR.json() : null;
             } catch(_err) { risk = null; }
             let abTbl = '';
@@ -300,7 +340,7 @@
             // Attempt batch endpoint first
             try{
                 const batchItems = queue.map(it=>({ decision_id: it.id, label: it.label || label, apply_calibration: true, factors: perItemFactors[it.id] && perItemFactors[it.id].length ? perItemFactors[it.id] : undefined }));
-                const r = await fetch('/api/v1/feedback/decisions/batch', { method:'POST', headers:{ 'Content-Type':'application/json', ...authHeaders() }, body: JSON.stringify({ items: batchItems }) });
+                        const r = await (window.safeFetch || fetch)('/api/v1/feedback/decisions/batch', { method:'POST', headers:{ 'Content-Type':'application/json', ...authHeaders() }, body: JSON.stringify({ items: batchItems }) });
                 if(r.ok){
                     const j = await r.json().catch(()=>({}));
                     const resArr = j && j.results || [];
@@ -314,7 +354,7 @@
                 for(const item of queue.slice()){
                     const payload = { decision_id: item.id, label: item.label || label, apply_calibration:true, factors: perItemFactors[item.id] && perItemFactors[item.id].length ? perItemFactors[item.id] : undefined };
                     try{
-                        const r = await fetch('/api/v1/feedback/decision', { method:'POST', headers:{ 'Content-Type':'application/json', ...authHeaders() }, body: JSON.stringify(payload) });
+                        const r = await (window.safeFetch || fetch)('/api/v1/feedback/decision', { method:'POST', headers:{ 'Content-Type':'application/json', ...authHeaders() }, body: JSON.stringify(payload) });
                         let j={}; try{ j = await r.json().catch(()=>({})); }catch(_){ }
                         if(!r.ok){ results.failed.push({ id: item.id, detail: j && (j.detail||j.error) || ('HTTP '+r.status) }); }
                         else { results.success.push(item.id); }
@@ -388,7 +428,7 @@
                             (async ()=>{
                                 const payload = { decision_id: id, label: (document.getElementById('batchLabelSelect') && document.getElementById('batchLabelSelect').value) || 'false_positive', apply_calibration:true, factors: perItemFactors[id] };
                                 try{
-                                    const r = await fetch('/api/v1/feedback/decision', { method:'POST', headers:{ 'Content-Type':'application/json', ...authHeaders() }, body: JSON.stringify(payload) });
+                                    const r = await (window.safeFetch || fetch)('/api/v1/feedback/decision', { method:'POST', headers:{ 'Content-Type':'application/json', ...authHeaders() }, body: JSON.stringify(payload) });
                                     if(!r.ok){ const j = await r.json().catch(()=>({})); showNotification('Retry failed: '+(j && (j.detail||j.error) || r.status),'error'); }
                                     else { showNotification('Retry success: '+id,'success'); removeFromQueue(id); }
                                 }catch(e){ showNotification('Retry error: '+(e.message||e),'error'); }
@@ -402,5 +442,3 @@
                 modal.style.display = 'flex';
             }catch(e){ console.error('showFailureModal failed', e); }
         }
-
-

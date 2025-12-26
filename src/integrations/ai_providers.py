@@ -6,11 +6,19 @@ Provides unified interface for external AI enrichment tiers with:
 - Cost ledger integration hook
 """
 from __future__ import annotations
-import time, random
+
+import random
+import time
 from dataclasses import dataclass
-from typing import Dict, Any, Optional
-from core.metrics.cost_ledger import get_cost_ledger
+from typing import Any, Dict, Optional
+
+try:
+    # Prefer unified import path with tests to ensure singleton consistency
+    from src.core.metrics.cost_ledger import get_cost_ledger  # type: ignore
+except Exception:  # fallback to legacy path
+    from core.metrics.cost_ledger import get_cost_ledger  # type: ignore
 from core.policy.external_budget import get_budget_manager
+
 
 @dataclass
 class ProviderConfig:
@@ -25,14 +33,14 @@ class AIProviderBase:
         self.cfg = cfg
         self._idx = 0
 
-    def _next_key(self) -> Optional[str]:
+    def _next_key(self) -> str | None:
         if not self.cfg.api_keys:
             return None
         key = self.cfg.api_keys[self._idx % len(self.cfg.api_keys)]
         self._idx += 1
         return key
 
-    async def analyze(self, payload: Dict[str, Any]) -> Dict[str, Any]:  # pragma: no cover - network placeholder
+    async def analyze(self, payload: dict[str, Any]) -> dict[str, Any]:  # pragma: no cover - network placeholder
         start = time.perf_counter()
         if self.cfg.mock:
             # Simulate latency & result
@@ -69,7 +77,13 @@ class AIProviderBase:
             res['latency_ms'] = dur_ms
             return res
         bm.commit(tenant, tokens)
-        get_cost_ledger().record("external_ai", cost_units=tokens, meta={'model': self.cfg.model, 'ms': dur_ms, 'tenant': tenant, 'budget_reason': reason})
+        # Record to the unified cost ledger using the expected signature:
+        # record(tier: str, path: str, start: float, tokens: int = 0, ...)
+        try:
+            get_cost_ledger().record("external_ai", self.cfg.model or 'external', start, tokens=tokens, cached=False, success=True, tenant=tenant)
+        except Exception:
+            # Best-effort: don't fail the provider call if ledger recording has issues
+            pass
         res['latency_ms'] = dur_ms
         return res
 

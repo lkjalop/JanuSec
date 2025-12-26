@@ -1,4 +1,6 @@
-# Threat Sifter Platform - Risk Register (Initial Draft)
+# JanuSec Platform - Risk Register (Initial Draft)
+
+_Originally authored under the Threat Sifter name; historical context retained._
 
 | ID | Risk Description | Category | Impact | Likelihood | Inherent Risk | Key Mitigations | Residual Risk | Owner | Notes |
 |----|------------------|----------|--------|------------|---------------|-----------------|---------------|-------|-------|

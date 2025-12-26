@@ -5,8 +5,10 @@ available, similarity queries are delegated to Postgres using cosine distance.
 Otherwise falls back to loading a sample into memory and computing cosine in Python.
 """
 from __future__ import annotations
+
 import json
-from typing import List, Dict, Any, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
+
 from db.database import execute, fetch, with_retry
 
 INSERT = """
@@ -51,7 +53,7 @@ async def _pgvector_available() -> bool:
     except Exception:
         return False
 
-async def insert_embedding(event_id: str, factor: str, embedding: List[float], tenant_id: str | None):
+async def insert_embedding(event_id: str, factor: str, embedding: list[float], tenant_id: str | None):
     """Insert embedding (vector + json fallback). If pgvector not available, only JSON stored."""
     async def _do():
         if await _pgvector_available():
@@ -66,7 +68,7 @@ async def load_sample(limit: int = 2000, tenant_id: str | None = None):
     rows = await fetch(SELECT_SAMPLE, tenant_id, limit)
     return [dict(r) for r in rows]
 
-def _cosine(a: List[float], b: List[float]) -> float:
+def _cosine(a: list[float], b: list[float]) -> float:
     if not a or not b:
         return 0.0
     n = min(len(a), len(b))
@@ -77,7 +79,7 @@ def _cosine(a: List[float], b: List[float]) -> float:
         return 0.0
     return num/(da*db)
 
-async def similarity_search(query_embedding: List[float], limit: int = 10, tenant_id: str | None = None) -> List[Dict[str, Any]]:
+async def similarity_search(query_embedding: list[float], limit: int = 10, tenant_id: str | None = None) -> list[dict[str, Any]]:
     """Return similarity results using pgvector if present, else fallback in Python."""
     if await _pgvector_available():
         try:
@@ -90,7 +92,7 @@ async def similarity_search(query_embedding: List[float], limit: int = 10, tenan
             pass  # fallback below
     # Fallback path
     sample = await load_sample(limit=2000, tenant_id=tenant_id)
-    scored: List[Tuple[float, Dict[str, Any]]] = []
+    scored: list[tuple[float, dict[str, Any]]] = []
     for r in sample:
         emb = r.get('embedding_json')
         if isinstance(emb, list):

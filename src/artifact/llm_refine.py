@@ -1,6 +1,10 @@
 from __future__ import annotations
-from typing import Dict, Any, Optional
-import os, json, time, random
+
+import json
+import os
+import random
+import time
+from typing import Any, Dict, Optional
 
 try:
     import httpx
@@ -16,7 +20,7 @@ class LLMRefiner:
         self.max_tokens = int(os.getenv('ARTIFACT_LLM_MAX_TOKENS','512'))
         self.risk_delta_cap = float(os.getenv('ARTIFACT_LLM_RISK_DELTA_CAP','0.08'))
 
-    def refine(self, artifact_summary: Dict[str,Any]) -> Dict[str,Any]:
+    def refine(self, artifact_summary: dict[str,Any]) -> dict[str,Any]:
         if not self.enabled:
             return {'enabled': False}
         # Compose prompt
@@ -31,7 +35,12 @@ class LLMRefiner:
                     'max_tokens': self.max_tokens,
                 }
                 headers={'Authorization': f'Bearer {self.api_key}'}
-                r = httpx.post(self.endpoint, json=payload, headers=headers, timeout=30)
+                try:
+                    with httpx.Client(timeout=30) as _c:
+                        r = _c.post(self.endpoint, json=payload, headers=headers)
+                except TypeError:
+                    with httpx.Client() as _c:
+                        r = _c.post(self.endpoint, json=payload, headers=headers, timeout=30)
                 if r.status_code == 200:
                     txt = r.json().get('choices',[{}])[0].get('message',{}).get('content','')
                     # Try parse JSON inside content
@@ -61,7 +70,7 @@ class LLMRefiner:
             'mitre_add': mitre_add
         }
 
-    def _build_prompt(self, s: Dict[str,Any]) -> str:
+    def _build_prompt(self, s: dict[str,Any]) -> str:
         factors = ','.join(s.get('factors',[])[:25])
         return (
             f"Artifact Type: {s.get('artifact_type')}\nName: {s.get('name')}\nPath: {s.get('path')}\n"
@@ -69,7 +78,7 @@ class LLMRefiner:
             "Return JSON: {\"risk_delta\": <float -0.05..0.1>, \"mitre_add\": [""], \"narrative\": "" }"
         )
 
-    def _extract_json(self, txt: str) -> Optional[Dict[str,Any]]:
+    def _extract_json(self, txt: str) -> dict[str, Any] | None:
         # naive extraction
         start = txt.find('{'); end = txt.rfind('}')
         if start == -1 or end == -1 or end <= start:

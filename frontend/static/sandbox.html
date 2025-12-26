@@ -24,7 +24,7 @@
       const form = new FormData();
       if(url) form.append('url', url);
       if(file) form.append('file', file, file.name);
-      const res = await fetch('/api/v1/sandbox/submit', { method:'POST', headers: H(), body: form });
+      const res = await (window.safeFetch || fetch)('/api/v1/sandbox/submit', { method:'POST', headers: H(), body: form });
       const j = await res.json();
       if(!res.ok){ try{ if(window.showNotification) showNotification('Submit failed: '+(j.detail||res.status),'error'); else if(window.notifications) window.notifications.showNotification('Submit failed: '+(j.detail||res.status),'error'); }catch(_){} return; }
       addTaskRow(j.task_id, 'queued');
@@ -39,7 +39,7 @@
     }
     async function pollResult(taskId){
       try{
-        const res = await fetch('/api/v1/sandbox/result?task_id='+encodeURIComponent(taskId), { headers: H() });
+        const res = await (window.safeFetch || fetch)('/api/v1/sandbox/result?task_id='+encodeURIComponent(taskId), { headers: H() });
         const j = await res.json();
         document.getElementById('st-'+taskId).textContent = j.status;
         if(j.status !== 'completed'){

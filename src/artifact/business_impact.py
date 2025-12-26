@@ -1,11 +1,13 @@
 from __future__ import annotations
-from typing import Dict, Any, List
-import math, time
+
+import math
+import time
+from typing import Any, Dict, List
 
 RISK_HIGH_THRESHOLD = 0.55  # align with SUSPICIOUS boundary
 RISK_CRITICAL_THRESHOLD = 0.75
 
-def generate_business_summary(report: Dict[str,Any]) -> Dict[str,Any]:
+def generate_business_summary(report: dict[str,Any]) -> dict[str,Any]:
     """Produce an executive/business impact summary from a single artifact report.
     Logic:
       - If no suspicious/malicious artifacts -> low/no immediate risk message.
@@ -37,7 +39,7 @@ def generate_business_summary(report: Dict[str,Any]) -> Dict[str,Any]:
     # Exposure surfaces: count artifact types among risky list
     exposure = {}
     for a in top_risky:
-        v = a.get('verdict'); r = a.get('risk',0)
+        v = a.get('verdict'); a.get('risk',0)
         if v in ('SUSPICIOUS','MALICIOUS','PUA'):
             t = a.get('type','unknown')
             exposure[t] = exposure.get(t,0)+1

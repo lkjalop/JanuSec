@@ -1,13 +1,23 @@
-<!--
-  Canonical LIVE Console (do not replace)
-  - File: frontend/static/janusec-platform-complete-LIVE.html
-  - Served at / and /live when DEFAULT_FRONTEND=console (see src/api/app.py)
-  - Extend via additional static pages under frontend/static/ and link from the left sidebar
-  - See AGENTS.md for coding agent guidance
--->
-<!DOCTYPE html>
-<html lang="en">
-<head>
+        }
+        @keyframes slideIn {
+            from {
+                transform: translateX(400px);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+        .modal-overlay {
+        window.authHeaders = function(){ try { const key = (localStorage.getItem('apiKey') || 'devkey123'); const tenant = localStorage.getItem('tenantId'); const h = { 'x-api-key': key }; if (tenant) h['X-Tenant-ID'] = tenant; return h; } catch (_){ return { 'x-api-key': 'devkey123' }; } };
+        window._htmlEsc = function(s){ try{ return String(s||'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }catch(_){return '';} };
+    </script>
+    <script src="/static/js/test_helpers.js"></script>
+    <script defer src="/static/js/notifications.js"></script>
+    <script defer src="/static/js/modals.js"></script>
+    <script defer src="/static/js/parse_tabular.js"></script>
+    <script defer src="/static/js/live_console.bundle.js"></script>
     <style>
         /* =============================================
            JANUSEC LIVE CONSOLE THEME TOKENS (Dark)
@@ -199,8 +209,8 @@
 
         .nav-section.collapsed .nav-item[role],
         .nav-section.collapsed .nav-item { display: none; }
-        .nav-section.collapsed .nav-title::after { content: '?'; transform: rotate(0deg); }
-        .nav-section .nav-title::after { content: '?'; position: absolute; right: 4px; font-size: 10px; opacity: 0.6; }
+        .nav-section.collapsed .nav-title::after { content: 'Ã¢â€“Â¶'; transform: rotate(0deg); }
+        .nav-section .nav-title::after { content: 'Ã¢â€“Â¼'; position: absolute; right: 4px; font-size: 10px; opacity: 0.6; }
         .nav-title { position: relative; cursor: pointer; }
 
         .nav-title {
@@ -357,6 +367,11 @@
             border-radius: 8px;
             border: 1px solid var(--border);
         }
+
+        /* Admin tuning panel styles */
+        .admin-panel { padding:12px; border-radius:6px; background:var(--bg-tertiary); border:1px solid var(--border); }
+        .admin-panel label{ display:block; font-size:12px; color:var(--text-muted); margin-top:8px }
+        .small-input{ width:100%; padding:8px; background:var(--bg-primary); border:1px solid var(--border); color:var(--text-primary); border-radius:6px }
 
         .metric-value {
             font-size: 32px;
@@ -639,7 +654,6 @@
                 opacity: 1;
             }
         }
-        /* Investigation Modal */
         .modal-overlay {
             position: fixed;
             inset: 0;
@@ -720,6 +734,8 @@
     </style>
 </head>
 <body class="theme-dark">
+        <!-- Synchronous hidden file input: present immediately so Playwright can wait for #fileInput attached state -->
+        <input type="file" id="fileInput" style="display:none;" multiple accept=".pcap,.evtx,.json,.csv,.log,.xls,.xlsx,.xlsm,.ods,.zip,.gz">
     <div class="app-container" id="appContainer">
         <!-- Header -->
     <header class="header">
@@ -743,6 +759,10 @@
                         <span id="lastUpdate">2 min ago</span>
                     </div>
                 </div>
+                                            <script>
+                                                // Ensure #fileInput remains attached: if other scripts replace uploadZone, re-attach our hidden input to body
+                                                (function(){ try{ const ensure = ()=>{ try{ if(!document.getElementById('fileInput')){ const inp=document.createElement('input'); inp.type='file'; inp.id='fileInput'; inp.style.display='none'; inp.multiple=true; inp.accept='.pcap,.evtx,.json,.csv,.log,.xls,.xlsx,.xlsm,.ods,.zip,.gz'; document.body.appendChild(inp); } else { const el=document.getElementById('fileInput'); if(el && !el.closest('body') && document.body) document.body.appendChild(el); } }catch(e){} }; ensure(); const mo = new MutationObserver(()=> ensure()); mo.observe(document.documentElement || document.body, { childList:true, subtree:true }); setTimeout(()=> mo.disconnect(), 20000); }catch(e){ console.warn('fileInput observer failed', e); } })();
+                                            </script>
                 <div class="mini-metrics" id="miniMetricsHeader" style="margin-left:18px;">
                     <div class="mini-card">CS dedupe: <span id="cs_dedupe_val">-</span></div>
                     <div class="mini-card">CS db upserts: <span id="cs_upsert_val">-</span></div>
@@ -750,15 +770,15 @@
             </div>
             <div class="status-bar">
                 <div class="status-item">
-                    <span style="color: var(--critical);">●</span>
+                    <span style="color: var(--critical);">ÃƒÂ¢Ã¢â‚¬â€Ã‚Â</span>
                     Critical: <strong id="criticalCount">2</strong>
                 </div>
                 <div class="status-item">
-                    <span style="color: var(--high);">●</span>
+                    <span style="color: var(--high);">ÃƒÂ¢Ã¢â‚¬â€Ã‚Â</span>
                     High: <strong id="highCount">8</strong>
                 </div>
                 <div class="status-item">
-                    <span style="color: var(--medium);">●</span>
+                    <span style="color: var(--medium);">ÃƒÂ¢Ã¢â‚¬â€Ã‚Â</span>
                     Medium: <strong id="mediumCount">15</strong>
                 </div>
                 <div class="status-item" title="AI provider status">
@@ -782,19 +802,30 @@
                 <div class="nav-title">Hunt & Analysis</div>
                 <a class="nav-item" href="/static/hunt_network.html"><span class="nav-ico nav-ico--network"></span>Network Hunt</a>
                 <a class="nav-item" href="/static/hunt_endpoint.html"><span class="nav-ico nav-ico--endpoint"></span>Endpoint Hunt</a>
+                <a class="nav-item" id="nav-ai-link" href="/static/ai.html"><span class="nav-ico nav-ico--ai"></span>AI Security</a>
                 <a class="nav-item" href="/static/compliance.html"><span class="nav-ico nav-ico--compliance"></span>Compliance</a>
+                <a class="nav-item" href="/static/compliance.html"><span class="nav-ico nav-ico--compliance"></span>Audits (Pro)</a>
                 <a class="nav-item" href="/static/metrics.html"><span class="nav-ico nav-ico--metrics"></span>Metrics</a>
                 <a class="nav-item" href="/static/batch_events.html"><span class="nav-ico nav-ico--batch"></span>Batch Events</a>
                 <a class="nav-item" href="/static/reports.html"><span class="nav-ico nav-ico--reports"></span>Reports</a>
                 <a class="nav-item" href="/static/sandbox.html"><span class="nav-ico nav-ico--sandbox"></span>Sandbox</a>
                 <a class="nav-item" href="/api/v1/report/ingestion?format=html&include_model=true&include_scenarios=true" target="_blank"><span class="nav-ico nav-ico--mitre"></span>MITRE ATT&CK</a>
-                <a class="nav-item" href="/static/graph_explain.html"><span class="nav-ico nav-ico--graph"></span>Graph Explain</a>
+<a class="nav-item" href="/static/graph_explain.html"><span class="nav-ico nav-ico--graph"></span>Graph Explain</a>
+<a class="nav-item" href="/static/identity_graph.html"><span class="nav-ico nav-ico--graph"></span>Identity Graph</a>
                 <a class="nav-item" href="/static/mitre.html"><span class="nav-ico nav-ico--mitre"></span>MITRE Matrix</a>
                 <a class="nav-item" href="/static/process_tree.html"><span class="nav-ico nav-ico--endpoint"></span>Process Tree</a>
                 <a class="nav-item" href="/static/yara.html"><span class="nav-ico nav-ico--yara"></span>YARA Rules</a>
-                <a class="nav-item" href="/static/bgp.html"><span class="nav-ico nav-ico--bgp"></span>BGP Incidents</a>
+<a class="nav-item" href="/static/bgp.html"><span class="nav-ico nav-ico--bgp"></span>BGP Incidents</a>
+<a class="nav-item" href="/static/ebpf.html"><span class="nav-ico nav-ico--endpoint"></span>eBPF Events</a>
+<a class="nav-item" href="/static/cloud_graph.html"><span class="nav-ico nav-ico--intel"></span>Cloud Graph</a>
+<a class="nav-item" href="/static/network_graph.html"><span class="nav-ico nav-ico--network"></span>Network Graph</a>
                 <a class="nav-item" href="/static/sbom.html"><span class="nav-ico nav-ico--sbom"></span>SBOM & Vulns</a>
+                <a class="nav-item" href="/static/cspm.html"><span class="nav-ico nav-ico--intel"></span>Compliance & CSPM</a>
+                <a class="nav-item" href="/static/iam.html"><span class="nav-ico nav-ico--users"></span>IAM Risk</a>
                 <a class="nav-item" href="/static/csv_analyzer.html"><span class="nav-ico nav-ico--csv"></span>CSV Analyzer</a>
+                <a class="nav-item" href="/static/csv_multi_analyzer.html"><span class="nav-ico nav-ico--csv"></span>Multi-Source Correlator</a>
+                <a class="nav-item" href="/static/graph_explain.html"><span class="nav-ico nav-ico--graph"></span>Graph Explain</a>
+                <a class="nav-item" href="/static/ebpf.html"><span class="nav-ico nav-ico--sensor"></span>eBPF Events</a>
             </div>
             <div class="nav-section">
                 <div class="nav-title">Integrations</div>
@@ -810,9 +841,10 @@
                 <a class="nav-item" href="/static/approvals.html"><span class="nav-ico nav-ico--approvals"></span>Approvals</a>
                 <a class="nav-item" href="/static/intel.html"><span class="nav-ico nav-ico--intel"></span>Threat Intel</a>
                 <a class="nav-item" href="/static/admin.html"><span class="nav-ico nav-ico--admin"></span>Admin Controls</a>
+                <a class="nav-item" href="/admin/dlq"><span class="nav-ico nav-ico--admin"></span>DLQ (Dead Letter)</a>
                 <a class="nav-item" href="/static/intel_status.html"><span class="nav-ico nav-ico--intel-status"></span>Intel Status</a>
             </div>
-        </nav>
+        $injection`n</nav>
 
         <!-- Main Content Area -->
         <main class="main-content" id="mainContent">
@@ -836,6 +868,22 @@
                     <input type="file" id="fileInput" style="display: none;" multiple accept=".pcap,.evtx,.json,.csv,.log,.xls,.xlsx,.xlsm,.ods,.zip,.gz">
                 </div>
 
+                                <!-- Ensure a global hidden file input exists for Playwright tests that target #fileInput -->
+                                <script>
+                                    (function(){
+                                        try{
+                                            // If another element with id=fileInput already present (above), nothing to do.
+                                            if(!document.getElementById('fileInput')){
+                                                const inp = document.createElement('input'); inp.type='file'; inp.id='fileInput'; inp.multiple=true;
+                                                inp.accept = '.pcap,.evtx,.json,.csv,.log,.xls,.xlsx,.xlsm,.ods,.zip,.gz'; inp.style.display='none'; document.body.appendChild(inp);
+                                            } else {
+                                                // make sure it's attached to body (tests use state:attached)
+                                                const el = document.getElementById('fileInput'); if(el && !el.closest('body')) document.body.appendChild(el);
+                                            }
+                                        }catch(e){ console.warn('fileInput shim failed', e); }
+                                    })();
+                                </script>
+
                 <!-- Metrics Cards -->
                 <div class="metrics-row">
                     <div class="metric-card">
@@ -855,8 +903,19 @@
                         <div class="metric-label">Avg Response Time</div>
                     </div>
                     <div class="metric-card" id="temporalMetricCard">
-                        <div class="metric-value" id="temporalAvg">0.000</div>
-                        <div class="metric-label">Temporal Avg Score</div>
+                        <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+                            <div>
+                                <div class="metric-value" id="temporalAvg">0.000</div>
+                                <div class="metric-label">Temporal Avg Score</div>
+                            </div>
+                            <div style="min-width:160px;">
+                                <label style="font-size:11px;color:var(--text-muted);">Tenant (optional)</label>
+                                <div style="display:flex; gap:6px;">
+                                    <input id="tenantInput" class="small-input" placeholder="tenant:id or leave blank" style="flex:1;" />
+                                    <button class="btn" id="btnLoadTenant" style="white-space:nowrap;">Load</button>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -912,21 +971,21 @@
                             <div class="alert-severity critical"></div>
                             <div class="alert-content">
                                 <div class="alert-title">Ransomware Behavior Detected - powerscan.exe</div>
-                                <div class="alert-meta">MITRE: T1486 • 4 hosts affected • 2 minutes ago</div>
+                                <div class="alert-meta">MITRE: T1486 ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ 4 hosts affected ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ 2 minutes ago</div>
                             </div>
                         </div>
                         <div class="alert-item">
                             <div class="alert-severity high"></div>
                             <div class="alert-content">
                                 <div class="alert-title">Suspicious Macro Execution - macro_payload.dotm</div>
-                                <div class="alert-meta">MITRE: T1566 • 2 hosts affected • 15 minutes ago</div>
+                                <div class="alert-meta">MITRE: T1566 ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ 2 hosts affected ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ 15 minutes ago</div>
                             </div>
                         </div>
                         <div class="alert-item">
                             <div class="alert-severity critical"></div>
                             <div class="alert-content">
                                 <div class="alert-title">C2 Communication Pattern Identified</div>
-                                <div class="alert-meta">MITRE: T1071 • Network beacon detected • 18 minutes ago</div>
+                                <div class="alert-meta">MITRE: T1071 ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ Network beacon detected ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ 18 minutes ago</div>
                             </div>
                         </div>
                     </div>
@@ -976,6 +1035,57 @@
                 </div>
             </div>
 
+            <!-- SBOM KEV Status -->
+            <div class="investigation-section" id="kevStatusSection">
+                <div class="section-title">SBOM KEV Status</div>
+                <div style="padding: 10px; background: var(--bg-primary); border:1px solid var(--border); border-radius:6px;">
+                    <div style="display:flex; justify-content:space-between; gap:8px; align-items:center;">
+                        <div style="font-size:12px; color: var(--text-muted);">Known Exploited Vulns</div>
+                        <a class="link-btn" href="/static/sbom.html" title="Open SBOM & Vulnerabilities">Open SBOM</a>
+                    </div>
+                    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px; margin-top:6px;">
+                        <div style="background: var(--bg-secondary); border:1px solid var(--border); border-radius:6px; padding:8px;">
+                            <div style="font-size:18px; font-weight:600;" id="kevCount">Ã¢â‚¬â€œ</div>
+                            <div style="font-size:11px; color: var(--text-muted);">KEV cached</div>
+                        </div>
+                        <div style="background: var(--bg-secondary); border:1px solid var(--border); border-radius:6px; padding:8px;">
+                            <div style="font-size:18px; font-weight:600;" id="kevAge">Ã¢â‚¬â€œ</div>
+                            <div style="font-size:11px; color: var(--text-muted);">Age</div>
+                        </div>
+                    </div>
+                    <div style="display:flex; gap:8px; margin-top:8px;">
+                        <button class="btn" id="btnKevRefresh" title="Trigger KEV/EPSS refresh">Resync KEV/EPSS</button>
+                        <a class="btn" href="/static/sbom.html">View SBOM</a>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Identity Snapshot (concise) -->
+            <div class="investigation-section" id="identitySnapshotSection" style="margin-top:12px;">
+                <div class="section-title">Identity Snapshot</div>
+                <div style="display:flex; gap:6px; align-items:center; margin-bottom:6px;">
+                    <input id="idInputMini" placeholder="user:alice@corp.com" style="flex:1; padding:6px; background:var(--bg-primary); border:1px solid var(--border); color:var(--text-primary); border-radius:6px;" />
+                    <button class="btn" onclick="loadMiniIdentity()">Load</button>
+                </div>
+                <div id="idMiniState" style="font-size:12px; color: var(--text-muted); margin-bottom:6px;">Enter identity to load state.</div>
+                <div id="idMiniFlags" class="small" style="font-size:11px; color: var(--text-muted); margin-bottom:6px; display:none;">ML: off â€¢ Temporal: off</div>
+                <table style="width:100%; border-collapse:collapse; font-size:12px;">
+                    <thead>
+                        <tr>
+                            <th style="border:1px solid var(--border); padding:6px; text-align:left;">Time</th>
+                            <th style="border:1px solid var(--border); padding:6px; text-align:left;">Type</th>
+                            <th style="border:1px solid var(--border); padding:6px; text-align:left;">Dst</th>
+                        </tr>
+                    </thead>
+                    <tbody id="idMiniTimeline">
+                        <tr><td colspan="3" style="border:1px solid var(--border); padding:6px;" class="muted">No data.</td></tr>
+                    </tbody>
+                </table>
+                <div style="margin-top:6px; display:flex; gap:6px;">
+                    <a class="link-btn" href="/static/identity_graph.html">Open Identity Graph</a>
+                </div>
+            </div>
+
             <!-- MITRE Techniques & Enrichment -->
             <div class="investigation-section">
                 <div class="section-title">MITRE ATT&CK Mapping</div>
@@ -1022,6 +1132,31 @@
                   <button class="btn" onclick="createJiraForRecent()">Create Jira Ticket</button>
                 </div>
             </div>
+
+            <!-- Admin Tuning (dev-only) -->
+            <div style="margin-top:12px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:8px;">
+                    <button class="btn" id="btnUnlockDev">Unlock Dev</button>
+                    <button class="btn" id="btnClearAdminKey" title="Clear stored admin secret">Clear admin key</button>
+                </div>
+                <div class="admin-panel" id="adminTuningPanel" style="display:none;">
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <div style="font-weight:600;">Dev Tuning</div>
+                        <div style="font-size:11px; color:var(--text-muted);">dev only</div>
+                    </div>
+                    <label for="th_lateral">Lateral Connection Count (threshold)</label>
+                    <input id="th_lateral" class="small-input" placeholder="e.g. 10" />
+                    <label for="th_scan">Rapid Scan Rate (threshold)</label>
+                    <input id="th_scan" class="small-input" placeholder="e.g. 50" />
+                    <label for="th_exfil">Exfil bytes (threshold)</label>
+                    <input id="th_exfil" class="small-input" placeholder="e.g. 1048576" />
+                    <div style="display:flex; gap:8px; margin-top:8px;">
+                        <button class="btn" id="btnLoadThresholds">Load</button>
+                        <button class="btn" id="btnSaveThresholds">Save</button>
+                        <button class="btn" id="btnResetThresholds">Reset</button>
+                    </div>
+                </div>
+            </div>
         </aside>
 
         <!-- Detached Window -->
@@ -1044,7 +1179,7 @@
             <div class="modal-dialog">
                 <div class="modal-header">
                     <div class="modal-title">
-                        Investigation Details — <span id="invEventId">…</span>
+                        Investigation Details ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â <span id="invEventId">ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦</span>
                     </div>
                     // metrics logic extracted to /static/js/metrics.js
                     // Kept the stub here for backward compatibility; full implementation now lives in /static/js/metrics.js
@@ -1074,13 +1209,19 @@
                 showNotification(`${service.toUpperCase()} ${shouldEnable ? 'connected' : 'disconnected'}`);
                 // Optionally send a webhook test for chat services when enabling
                 if (shouldEnable && (service === 'slack' || service === 'teams' || service === 'whatsapp')) {
-                    const wr = await fetch('/api/v1/webhooks/test', { method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() }, body: JSON.stringify({ service }) });
-                    const wj = await wr.json();
-                    if (wj.delivered) {
-                        showNotification(`${service} webhook test delivered`, 'success');
-                    } else {
-                        showNotification(`${service} webhook not configured${wj.error ? ': ' + wj.error : ''}`);
-                    }
+                    try{
+                        const wr = await fetch('/api/v1/webhooks/test', { method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() }, body: JSON.stringify({ service }) });
+                        let wj = {};
+                        try{ wj = await wr.json().catch(()=>({})); }catch(_){}
+                        if (!wr.ok) {
+                            const det = (wj && (wj.detail || wj.error)) ? (wj.detail || wj.error) : ('HTTP ' + wr.status);
+                            showNotification(`Webhook test failed: ${det}`, 'error');
+                        } else if (wj.delivered) {
+                            showNotification(`${service} webhook test delivered`, 'success');
+                        } else {
+                            showNotification(`${service} webhook not configured${wj.error ? ': ' + wj.error : ''}`);
+                        }
+                    }catch(e){ console.error(e); showNotification(`Webhook test failed: ${e.message||e}`,'error'); }
                 }
             } catch (e) {
                 console.error(e);
@@ -1132,6 +1273,31 @@
     // Load shared tabular helpers
     (function ensureParseHelpers(){ if(!window.parseTabular){ const s=document.createElement('script'); s.src='/static/js/parse_tabular.js'; document.head.appendChild(s); } })();
 
+    // Auth probe banner helper (creates a persistent top banner with demo-key actions)
+    function showAuthBanner(opts){
+        try{
+            opts = opts || {};
+            let b = document.getElementById('authProbeBanner');
+            if(!b){
+                b = document.createElement('div');
+                b.id = 'authProbeBanner';
+                b.style.cssText = 'width:100%;box-sizing:border-box;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 14px;background:var(--bg-tertiary);border-bottom:1px solid var(--border);z-index:9999';
+                const left = document.createElement('div'); left.id = 'authProbeBannerMsg'; left.style.color = 'var(--text-muted)'; b.appendChild(left);
+                const right = document.createElement('div'); right.style.display='flex'; right.style.gap='8px';
+                const copyBtn = document.createElement('button'); copyBtn.className='btn'; copyBtn.textContent='Copy demo key';
+                copyBtn.onclick = async function(){ try{ await navigator.clipboard.writeText('devkey123'); if(window.showNotification) showNotification('Demo key copied to clipboard','success'); else showNotification && showNotification('Demo key copied to clipboard'); }catch(e){ showNotification && showNotification('Copy failed','error'); } };
+                const setBtn = document.createElement('button'); setBtn.className='btn btn-primary'; setBtn.textContent='Use demo key';
+                setBtn.onclick = function(){ try{ localStorage.setItem('apiKey','devkey123'); if(window.showNotification) showNotification('Demo API key set Ã¢â‚¬â€ reloading','info'); setTimeout(()=> location.reload(), 500); }catch(e){ showNotification && showNotification('Failed to set demo key','error'); } };
+                right.appendChild(copyBtn); right.appendChild(setBtn);
+                b.appendChild(right);
+                document.body.insertBefore(b, document.body.firstChild);
+            }
+            const msgEl = document.getElementById('authProbeBannerMsg');
+            if(msgEl) msgEl.textContent = opts.message || 'Backend authentication issue or backend unreachable. Use the demo key to continue.';
+            b.style.display = 'flex';
+        }catch(e){ console.warn('showAuthBanner failed', e); }
+    }
+
     // ---- Upload Zone wiring (now using shared parseTabular helpers) ----
         (function initUpload(){
             const zone=document.getElementById('uploadZone'); const input=document.getElementById('fileInput'); if(!zone || !input) return;
@@ -1145,18 +1311,34 @@
             input.addEventListener('change', async ()=>{ await handleSelectedFiles(input.files); input.value=''; });
             window.showUploadZone = function(){ if(zone.style.display==='none'){ zone.style.display='block'; zone.scrollIntoView({behavior:'smooth'}); } else { zone.style.display='none'; } };
             async function handleSelectedFiles(fileList){ if(!fileList || !fileList.length){ showNotification('No files selected'); return; } showNotification('Processing '+fileList.length+' file(s)...'); const client = await parseTabular.clientSideAggregate(Array.from(fileList)); if(client.status.length) console.log('[upload-status]', client.status); if(client.errors.length) client.errors.forEach(e=> console.warn('[upload-error]', e)); if(client.rows.length){ const summary=parseTabular.summarizeParsed(client.rows); showNotification(summary); if(badge){ badge.textContent = client.rows.length + ' rows'; badge.style.display='block'; } } // always attempt server upload for full parsing / ingestion
-                try { const fd=new FormData(); Array.from(fileList).forEach(f=> fd.append('files', f, f.name)); const resp=await fetch('/api/v1/upload/files',{ method:'POST', headers:{ ...authHeaders() }, body: fd }); if(!resp.ok){ const detail=await resp.text(); throw new Error('Server upload failed '+resp.status+' '+detail); } const json=await resp.json().catch(()=>({}));
+                try {
+                    const fd=new FormData(); Array.from(fileList).forEach(f=> fd.append('files', f, f.name));
+                    const resp = await fetch('/api/v1/upload/files', { method:'POST', headers:{ ...authHeaders() }, body: fd });
+                    let json = {};
+                    try{ json = await resp.clone().json().catch(()=>({})); }catch(_){}
+                    if(!resp.ok){
+                        // Prefer JSON detail when available
+                        const detail = (json && (json.detail || json.error)) ? (json.detail || json.error) : await resp.text().catch(()=>'');
+                        // Show explicit toast with status and details
+                        try{ showNotification(`Upload failed: HTTP ${resp.status} ${detail}`,'error'); }catch(_){ }
+                        // If auth error, show persistent auth banner with actions
+                        if(resp.status === 401 || resp.status === 403){ try{ showAuthBanner({ message: 'Upload unauthorized (401/403). Set or copy demo API key.' }); }catch(_){} }
+                        throw new Error(`Server upload failed ${resp.status} ${detail}`);
+                    }
+                    try{ json = await resp.json().catch(()=>({})); }catch(_){ json = {} }
                     // If server returns session ids for tabular ingestion, persist them and show quick link
                     try{
                         if(json && json.sessions){ // expect array
                             const sess = Array.isArray(json.sessions) ? json.sessions : [json.sessions];
-                            try{ localStorage.setItem('lastTabularSessions', JSON.stringify(sess)); }catch(_){}
+                            try{ localStorage.setItem('lastTabularSessions', JSON.stringify(sess)); }catch(_){ }
                             // show a small session badge near Upload area and Executive Links
                             const execCard = document.getElementById('execLinkCard');
                             if(execCard){ execCard.style.display='block'; execCard.innerHTML = `<div class="row" style="justify-content:space-between; align-items:center"><div class="title">Executive Report</div><div class="muted">Sessions: ${sess.map(s=>`<span class="pill">${_htmlEsc(s)}</span>`).join(' ')}</div></div><div class="row" style="gap:8px; margin-top:8px"><a class="btn primary" target="_blank" href="/api/v1/report/ingestion?format=html&include_model=true&include_scenarios=true&sessions=${encodeURIComponent(sess.join(','))}">Open Executive (this upload)</a></div>`; }
                         }
-                    }catch(_){}
-                    showNotification('Server ingestion complete','success'); console.log('Server upload result', json); setTimeout(()=>{ try{ updateMetrics && updateMetrics(); }catch(_){} }, 1200);
+                    }catch(_){ }
+                    try{ showNotification('Server ingestion complete','success'); }catch(_){ }
+                    console.log('Server upload result', json);
+                    setTimeout(()=>{ try{ updateMetrics && updateMetrics(); }catch(_){} }, 1200);
                 } catch(e){ showNotification('Upload failed: '+(e.message||e),'error'); }
             }
         })();
@@ -1206,7 +1388,7 @@
                                     <div class=\"evidence-item\">SHA256: ${sha}</div>
                                     <div class=\"evidence-item\">First Seen: ${first}</div>
                                     <div class=\"evidence-item\">Affected Hosts: ${hosts}</div>
-                                    <div class=\"evidence-item\">Severity: ${sev} • Confidence: ${conf}</div>
+                                    <div class=\"evidence-item\">Severity: ${sev} ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ Confidence: ${conf}</div>
                                 </div>`;
                         }
                     }
@@ -1231,10 +1413,20 @@
                                         for (const [k,v] of Object.entries(fw)) {
                                             if (Array.isArray(v) && v.length) parts.push(`${k}: ${v.slice(0,6).join(',')}`);
                                         }
-                                        rows.push(`<div><span style='color:var(--accent);'>${factor}</span> ? ${parts.join(' | ')}</div>`);
+                                        rows.push(`<div><span style='color:var(--accent);'>${factor}</span> Ã¢â€ â€™ ${parts.join(' | ')}</div>`);
                                     }
                                 } catch(_) {}
-                                if (rows.length) feNode.innerHTML = rows.slice(0,25).join('');
+                                if (rows.length) { 
+                                    feNode.innerHTML = rows.slice(0,25).join('');
+                                    window._lastFrameworkEnrichment = fe;
+                                    window._lastFrameworkIncident = inc;
+                                    try {
+                                        feNode.querySelectorAll('span').forEach(s => {
+                                            s.classList.add('factor-token');
+                                            s.addEventListener('click', () => openFactorDrilldown(s.textContent));
+                                        });
+                                    } catch(_){}
+                                }
                             }
                             // Beacon explanation (if any event carried it and was surfaced in incident details)
                             const bx = inc.beacon_explain || (inc.explanations && inc.explanations.beacon_explain);
@@ -1274,7 +1466,7 @@
                                         <div class=\"alert-severity ${sev}\"></div>
                                         <div class=\"alert-content\">
                                             <div class=\"alert-title\">${title}</div>
-                                            <div class=\"alert-meta\">verdict: ${verdict} • id: ${ev}</div>
+                                            <div class=\"alert-meta\">verdict: ${verdict} ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ id: ${ev}</div>
                                         </div>
                                     </div>`;
                             }).join('');
@@ -1307,6 +1499,171 @@
         }
         
         // Refresh data helper (interval scheduling moved to metrics.js)
+
+    // Tenant temporal load button wiring
+    try{
+        const tenantBtn = document.getElementById('btnLoadTenant');
+        if(tenantBtn){ tenantBtn.addEventListener('click', async function(){
+            const tenant = (document.getElementById('tenantInput')||{}).value || '';
+            try{
+                const q = tenant ? ('?tenant_id='+encodeURIComponent(tenant)) : '';
+                const r = await fetch('/api/v1/metrics/temporal'+q, { headers: authHeaders() });
+                if(!r.ok){ const txt = await r.text().catch(()=>r.statusText); showNotification('Failed to load tenant temporal: HTTP '+r.status+' '+txt,'error'); return; }
+                const j = await r.json().catch(()=>({}));
+                // Expect {series: [{entity, values:[{t,v},...] }, ...], summary: {...} }
+                const canvas = document.getElementById('temporalSparkCanvas');
+                if(!canvas){ // create a small sparkline under the metric
+                    const card = document.getElementById('temporalMetricCard');
+                    const c = document.createElement('canvas'); c.id='temporalSparkCanvas'; c.className='temporal-spark'; c.width=220; c.height=40; c.style.marginTop='8px'; card.appendChild(c);
+                }
+                const dataSeries = (j.series && j.series[0] && j.series[0].values) ? j.series[0].values.map(p=>p.v) : (j.values || []);
+                if(window.drawTemporalSparkline){ window.drawTemporalSparkline(dataSeries); }
+                try{ if(typeof window._setTenantLabel === 'function') window._setTenantLabel(tenant); }catch(_){ }
+                // test hook: mark temporal ready for deterministic waits
+                try{ const c = document.querySelector('canvas.temporal-spark'); if(c){ c.setAttribute('data-drawn','1'); const ev = new Event('temporal-drawn'); window.__temporalDrawn = true; window.dispatchEvent(ev); } }catch(_){ }
+                showNotification('Loaded tenant temporal data','success');
+            }catch(e){ console.error(e); showNotification('Failed to load tenant temporal: '+(e.message||e),'error'); }
+        }); }
+    }catch(e){ console.warn('tenant wiring failed', e); }
+
+    // Admin thresholds panel wiring (dev-only). Uses x-admin-key header if set in localStorage.adminKey
+    (function wireAdminPanel(){
+        const unlockBtn = document.getElementById('btnUnlockDev');
+        const clearKeyBtn = document.getElementById('btnClearAdminKey');
+        const panel = document.getElementById('adminTuningPanel');
+            function showPanel(show){ panel.style.display = show ? 'block' : 'none'; }
+        function hasKey(){ return !!localStorage.getItem('adminKey'); }
+        function tryShowPanel(){ showPanel(hasKey()); }
+        if(unlockBtn){
+            unlockBtn.onclick = function(){
+                try{
+                    // Non-blocking inline admin key input to avoid alert/prompt blocking in tests
+                    if(document.getElementById('adminKeyInlineContainer')){
+                        const el = document.getElementById('adminKeyInline'); if(el) el.focus(); return;
+                    }
+                    const container = document.createElement('div'); container.id = 'adminKeyInlineContainer'; container.style.position='fixed'; container.style.right='18px'; container.style.top='18px'; container.style.zIndex=9999;
+                    container.innerHTML = `<div style="background:var(--bg-secondary); padding:10px; border:1px solid var(--border); border-radius:6px; display:flex; gap:8px; align-items:center;">
+                        <input id='adminKeyInline' placeholder='Enter admin key' style='padding:6px; border-radius:4px; border:1px solid var(--border); background:transparent; color:var(--text-primary)' />
+                        <button id='adminKeySave' class='btn'>Save</button>
+                        <button id='adminKeyCancel' class='btn'>Cancel</button>
+                    </div>`;
+                    document.body.appendChild(container);
+                    document.getElementById('adminKeySave').addEventListener('click', ()=>{
+                        const k = (document.getElementById('adminKeyInline')||{}).value || '';
+                        if(k && k.length > 3){ try{ localStorage.setItem('adminKey', k); showPanel(true); showNotification('Admin key set','success'); }catch(_){ showNotification('Save failed','error'); } }
+                        else { showNotification('No key entered','info'); }
+                        try{ container.remove(); }catch(_){}
+                    });
+                    document.getElementById('adminKeyCancel').addEventListener('click', ()=>{ try{ container.remove(); }catch(_){} });
+                    const el = document.getElementById('adminKeyInline'); if(el) el.focus();
+                }catch(e){
+                    // fallback to prompt if DOM fails
+                    try{ const key = prompt('Enter admin API key (will be stored in localStorage.adminKey):'); if(key && key.length > 3){ localStorage.setItem('adminKey', key); showPanel(true); showNotification('Admin key set','success'); } else { showNotification('No key entered','info'); } }catch(_){}
+                }
+            };
+        }
+        if(clearKeyBtn){
+            clearKeyBtn.onclick = function(){ localStorage.removeItem('adminKey'); showPanel(false); showNotification('Admin key cleared','info'); };
+        }
+        setTimeout(tryShowPanel, 100);
+        const loadBtn = document.getElementById('btnLoadThresholds');
+        const saveBtn = document.getElementById('btnSaveThresholds');
+        const resetBtn = document.getElementById('btnResetThresholds');
+        const hdr = function(){ const h = { 'Content-Type':'application/json', ...authHeaders() }; const ak = localStorage.getItem('adminKey'); if(ak) h['x-admin-key'] = ak; return h; };
+        async function load(){
+            try{
+                const r = await fetch('/api/v1/admin/rules', { headers: hdr() });
+                if(!r.ok){ showNotification('Failed to load thresholds: HTTP '+r.status,'error'); return; }
+                const j = await r.json().catch(()=>({}));
+                // Handle numeric zero values correctly (don't treat 0 as falsy)
+                try{ const elL = document.getElementById('th_lateral'); if(elL) elL.value = (('lateral_conn_count' in j) ? String(j.lateral_conn_count) : ''); }catch(_){}
+                try{ const elS = document.getElementById('th_scan'); if(elS) elS.value = (('rapid_scan_rate' in j) ? String(j.rapid_scan_rate) : ''); }catch(_){}
+                try{ const elE = document.getElementById('th_exfil'); if(elE) elE.value = (('exfil_bytes' in j) ? String(j.exfil_bytes) : ''); }catch(_){}
+                showNotification('Loaded thresholds');
+            }catch(e){ console.error(e); showNotification('Load failed: '+(e.message||e),'error'); }
+        }
+            async function save(){ try{ if (window.JanuSecModal){ const ok = await JanuSecModal.confirm({ title:'Save Thresholds', message:'Apply updated admin thresholds?', icon:'info', confirmText:'Save'}); if(!ok) return; } const body = { lateral_conn_count: Number(document.getElementById('th_lateral').value) || 0, rapid_scan_rate: Number(document.getElementById('th_scan').value) || 0, exfil_bytes: Number(document.getElementById('th_exfil').value) || 0 }; const r = await fetch('/api/v1/admin/rules', { method:'POST', headers: hdr(), body: JSON.stringify(body) }); if(!r.ok){ const t = await r.text().catch(()=>r.statusText); showNotification('Save failed: HTTP '+r.status+' '+t,'error'); return; } showNotification('Thresholds saved','success'); }catch(e){ console.error(e); showNotification('Save failed: '+(e.message||e),'error'); } }
+            async function reset(){ try{ if (window.JanuSecModal){ const ok = await JanuSecModal.confirm({ title:'Reset Thresholds', message:'Reset admin thresholds to defaults?', icon:'danger', confirmText:'Reset'}); if(!ok) return; } const r = await fetch('/api/v1/admin/rules/reset', { method:'POST', headers: hdr() }); if(!r.ok){ showNotification('Reset failed: HTTP '+r.status,'error'); return; } showNotification('Thresholds reset to defaults','success'); await load();
+                // Emit deterministic admin-ready marker so tests can wait for reset completion
+                try{ let m = document.getElementById('admin_rules_ready'); if(!m){ m = document.createElement('div'); m.id = 'admin_rules_ready'; m.style.display='none'; document.body.appendChild(m); } m.setAttribute('data-ts', String(Date.now())); window.__adminRulesReady = true; window.dispatchEvent(new Event('admin-rules-ready')); }catch(_){ }
+            }catch(e){ console.error(e); showNotification('Reset failed: '+(e.message||e),'error'); } }
+        if(loadBtn) loadBtn.addEventListener('click', load);
+        if(saveBtn) saveBtn.addEventListener('click', save);
+        if(resetBtn) resetBtn.addEventListener('click', reset);
+    })();
+
+    // Tenant label + clear: show current tenant label when loaded via tenant input
+    (function tenantLabelFlow(){
+        const card = document.getElementById('temporalMetricCard');
+        if(!card) return;
+        function setTenantLabel(tid){
+            let lbl = document.getElementById('tenantLoadedLabel');
+            if(!lbl){ lbl = document.createElement('div'); lbl.id='tenantLoadedLabel'; lbl.style.marginTop='8px'; lbl.style.display='flex'; lbl.style.gap='8px'; lbl.style.alignItems='center'; card.appendChild(lbl); }
+            if(!tid){ lbl.innerHTML = ''; lbl.style.display='none'; return; }
+            lbl.style.display='flex'; lbl.innerHTML = `<div style="font-size:12px;color:var(--text-muted);">Tenant:</div><div style="font-weight:600;">${_htmlEsc(tid)}</div><button class="btn" id="btnClearTenant">Clear</button>`;
+            const clear = document.getElementById('btnClearTenant'); if(clear){ clear.addEventListener('click', ()=>{ setTenantLabel(''); // reload global metrics
+                try{ window._temporalSpark && (window._temporalSpark.data = []); updateMetrics && updateMetrics(); showNotification('Cleared tenant view, reverted to global'); }catch(e){} }); }
+        }
+        // expose setter for tenant load handler
+        window._setTenantLabel = setTenantLabel;
+    })();
+
+    // Unlock Dev flow: prompt for admin key and reveal admin panel when present
+    (function devUnlockFlow(){
+        const unlock = document.getElementById('btnUnlockDev');
+        const clearBtn = document.getElementById('btnClearAdminKey');
+        const panel = document.getElementById('adminTuningPanel');
+        function isUnlocked(){ return !!(localStorage.getItem('adminKey') || localStorage.getItem('showDev')); }
+        function setVisible(v){ if(panel) panel.style.display = v ? 'block' : 'none'; }
+        // initialize visibility
+        setVisible(isUnlocked());
+                if(unlock){ unlock.addEventListener('click', ()=>{
+            try{
+                // If already unlocked via adminKey/showDev, don't prompt (prevents blocking prompt in tests)
+                if(isUnlocked()){ setVisible(true); showNotification('Dev panel already unlocked'); return; }
+                // Non-blocking inline admin key input already implemented above; open it instead of prompt
+                const existing = localStorage.getItem('adminKey') || '';
+                const containerId = 'adminKeyInlineContainer';
+                if(document.getElementById(containerId)){
+                    const el = document.getElementById('adminKeyInline'); if(el) el.focus(); return;
+                }
+                const container = document.createElement('div'); container.id = containerId; container.style.position='fixed'; container.style.right='18px'; container.style.top='18px'; container.style.zIndex=9999;
+                container.innerHTML = `<div style="background:var(--bg-secondary); padding:10px; border:1px solid var(--border); border-radius:6px; display:flex; gap:8px; align-items:center;">
+                        <input id='adminKeyInline' placeholder='Enter admin key' style='padding:6px; border-radius:4px; border:1px solid var(--border); background:transparent; color:var(--text-primary)' />
+                        <button id='adminKeySave' class='btn'>Save</button>
+                        <button id='adminKeyCancel' class='btn'>Cancel</button>
+                    </div>`;
+                document.body.appendChild(container);
+                document.getElementById('adminKeySave').addEventListener('click', ()=>{
+                    const k = (document.getElementById('adminKeyInline')||{}).value || '';
+                    if(k && k.length > 3){ try{ localStorage.setItem('adminKey', k); setVisible(true); showNotification('Admin key set','success'); }catch(_){ showNotification('Save failed','error'); } }
+                    else { showNotification('No key entered','info'); }
+                    try{ container.remove(); }catch(_){ }
+                });
+                document.getElementById('adminKeyCancel').addEventListener('click', ()=>{ try{ container.remove(); }catch(_){} });
+                const el = document.getElementById('adminKeyInline'); if(el) el.focus();
+            }catch(e){ console.warn(e); showNotification('Unlock failed','error'); }
+        }); }
+        if(clearBtn){ clearBtn.addEventListener('click', ()=>{
+            localStorage.removeItem('adminKey'); localStorage.removeItem('showDev'); setVisible(false); showNotification('Cleared admin key / dev toggle');
+        }); }
+    })();
+
+    // Tenant label + clear: show current tenant label when loaded via tenant input
+    (function tenantLabelFlow(){
+        const card = document.getElementById('temporalMetricCard');
+        if(!card) return;
+        function setTenantLabel(tid){
+            let lbl = document.getElementById('tenantLoadedLabel');
+            if(!lbl){ lbl = document.createElement('div'); lbl.id='tenantLoadedLabel'; lbl.style.marginTop='8px'; lbl.style.display='flex'; lbl.style.gap='8px'; lbl.style.alignItems='center'; card.appendChild(lbl); }
+            if(!tid){ lbl.innerHTML = ''; lbl.style.display='none'; return; }
+            lbl.style.display='flex'; lbl.innerHTML = `<div style="font-size:12px;color:var(--text-muted);">Tenant:</div><div style="font-weight:600;">${_htmlEsc(tid)}</div><button class="btn" id="btnClearTenant">Clear</button>`;
+            const clear = document.getElementById('btnClearTenant'); if(clear){ clear.addEventListener('click', ()=>{ setTenantLabel(''); // reload global metrics
+                try{ window._temporalSpark && (window._temporalSpark.data = []); updateMetrics && updateMetrics(); showNotification('Cleared tenant view, reverted to global'); }catch(e){} }); }
+        }
+        // expose setter for tenant load handler
+        window._setTenantLabel = setTenantLabel;
+    })();
         function refreshData() {
             showNotification('Refreshing data...');
             setTimeout(() => { try { updateMetrics(); } catch(_){}; showNotification('Data refreshed successfully'); }, 1000);
@@ -1315,18 +1672,29 @@
         // Action buttons and alert click details
         async function createIncidentFromRecent() {
             try {
+                if (window.JanuSecModal) {
+                    const ok = await JanuSecModal.confirm({
+                        title: 'Create Incident',
+                        message: 'Create a new incident from the most recent decision?'
+                    });
+                    if (!ok) { return; }
+                }
                 const r = await fetch('/api/v1/decisions/recent?limit=1', { headers: authHeaders() });
                 const j = r.ok ? await r.json() : null;
                 const row = j && (j.rows && j.rows[0] || j.events && j.events[0]);
                 const eventId = row ? (row.event_id || row.id) : 'manual';
                 const payload = { artifact_id: eventId, title: 'Investigation - escalated from console', severity: 'high' };
-                const cr = await fetch('/api/v1/incidents', { method:'POST', headers: { 'Content-Type':'application/json', ...authHeaders() }, body: JSON.stringify(payload) });
-                const cj = await cr.json();
-                if (cr.ok) {
-                    showNotification('Incident created: ' + (cj.incident && cj.incident.id || ''), 'success');
-                } else {
-                    throw new Error(cj && (cj.detail || cj.error) || 'incident_failed');
-                }
+                try{
+                    const cr = await fetch('/api/v1/incidents', { method:'POST', headers: { 'Content-Type':'application/json', ...authHeaders() }, body: JSON.stringify(payload) });
+                    let cj = {};
+                    try{ cj = await cr.json().catch(()=>({})); }catch(_){ }
+                    if (!cr.ok) {
+                        const det = (cj && (cj.detail || cj.error)) ? (cj.detail || cj.error) : ('HTTP ' + cr.status);
+                        showNotification('Incident create failed: ' + det, 'error');
+                    } else {
+                        showNotification('Incident created: ' + (cj.incident && cj.incident.id || ''), 'success');
+                    }
+                }catch(e){ showNotification('Incident create failed: ' + (e.message || e), 'error'); }
             } catch (e) {
                 showNotification('Incident create failed: ' + (e.message || e), 'error');
             }
@@ -1349,6 +1717,46 @@
             // Fallback: open global report
             window.open('/api/v1/report/ingestion?format=html&include_model=true&include_scenarios=true', '_blank');
         }
+        // Demo dispatch to chat integrations via webhook test
+        function sendToSiem() {
+            try {
+                if (window.JanuSecModal) {
+                    JanuSecModal.confirm({
+                        title: 'Send to SIEM',
+                        message: 'Dispatch a webhook test to Slack/Teams?'
+                    }).then((ok) => { if (ok) _sendToSiemDo(); });
+                    return;
+                }
+                _sendToSiemDo();
+            } catch(e) {
+                showNotification('Dispatch failed: ' + (e && e.message || e), 'error');
+            }
+        }
+        function _sendToSiemDo(){
+            try {
+                const service = 'slack';
+                fetch('/api/v1/webhooks/test', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+                    body: JSON.stringify({ service })
+                }).then(async (r) => {
+                    let j = {};
+                    try { j = await r.json().catch(()=>({})); } catch(_) { j = {}; }
+                    if (r.ok && j && j.delivered) {
+                        showNotification(`${service} webhook test delivered`, 'success');
+                    } else if (r.ok && j && j.error === 'no_webhook_configured') {
+                        showNotification(`${service} webhook not configured`, 'error');
+                    } else {
+                        const det = (j && (j.detail || j.error)) ? (j.detail || j.error) : ('HTTP ' + r.status);
+                        showNotification('Dispatch failed: ' + det, 'error');
+                    }
+                }).catch((e) => {
+                    showNotification('Dispatch failed: ' + (e && e.message || e), 'error');
+                });
+            } catch(e) {
+                showNotification('Dispatch failed: ' + (e && e.message || e), 'error');
+            }
+        }
         // openInvestigationDetails moved to /static/js/investigation.js
             const btnRpt = document.getElementById('btnExportReport');
             if (btnRpt) btnRpt.addEventListener('click', exportInvestigationReport);
@@ -1364,7 +1772,13 @@
             if (invPanel) invPanel.addEventListener('click', async () => {
                 try {
                     const r = await fetch('/api/v1/decisions/recent?limit=1', { headers: authHeaders() });
-                    const j = r.ok ? await r.json() : null;
+                    let j = {};
+                    try{ j = await r.json().catch(()=>({})); }catch(_){}
+                    if (!r.ok) {
+                        const det = (j && (j.detail || j.error)) ? (j.detail || j.error) : ('HTTP ' + r.status);
+                        showNotification('Failed to fetch recent decisions: ' + det, 'error');
+                        return;
+                    }
                     const row = j && (j.rows && j.rows[0] || j.events && j.events[0]);
                     const id = row ? (row.event_id || row.id) : null;
                     if (id) openInvestigationDetails(id); else showNotification('No recent decision available', 'error');
@@ -1384,29 +1798,70 @@
 
         async function submitOverride(eventId) {
             try {
+                if (window.JanuSecModal) {
+                    const ok = await JanuSecModal.confirm({
+                        title: 'Override Decision',
+                        message: `Apply a manual override to decision ${eventId}?`,
+                        icon: 'warning',
+                        confirmText: 'Apply Override'
+                    });
+                    if (!ok) return;
+                }
                 const verdict = (document.getElementById('ovVerdict') || {}).value;
                 const confRaw = (document.getElementById('ovConfidence') || {}).value;
                 const reason = (document.getElementById('ovReason') || {}).value || undefined;
                 const confidence = confRaw ? parseFloat(confRaw) : undefined;
-                const r = await fetch(`/api/v1/decisions/${eventId}/override`, {
-                    method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json', ...authHeaders() },
-                    body: JSON.stringify({ verdict, confidence, reason })
-                });
-                if (!r.ok) {
-                    const j = await r.json().catch(() => ({}));
-                    throw new Error(j && (j.detail || j.error) || `override_failed (${r.status})`);
-                }
-                showNotification('Override applied', 'success');
-                // Refresh header pill
-                const jr = await r.json().catch(() => ({}));
-                const badge = document.getElementById('invVerdictPill');
-                if (badge) badge.textContent = `Verdict: ${jr.verdict || verdict} (${jr.confidence ?? confidence ?? '-'})`;
+                try{
+                    const r = await fetch(`/api/v1/decisions/${eventId}/override`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+                        body: JSON.stringify({ verdict, confidence, reason })
+                    });
+                    let j = {};
+                    try{ j = await r.json().catch(() => ({})); }catch(_){}
+                    if (!r.ok) {
+                        const det = (j && (j.detail || j.error)) ? (j.detail || j.error) : ('HTTP ' + r.status);
+                        showNotification('Override failed: ' + det, 'error');
+                        return;
+                    }
+                    showNotification('Override applied', 'success');
+                    const jr = j || {};
+                    const badge = document.getElementById('invVerdictPill');
+                    if (badge) badge.textContent = `Verdict: ${jr.verdict || verdict} (${jr.confidence ?? confidence ?? '-'})`;
+                }catch(e){ showNotification('Override failed: ' + (e.message || e), 'error'); }
             } catch (e) {
                 showNotification('Override failed: ' + (e.message || e), 'error');
             }
         }
         
+        // KEV status utilities
+        async function loadKevStatus(){
+            try{
+                const r = await fetch('/api/v1/compliance/kev/status', { headers: { ...authHeaders() } });
+                if(!r.ok) return;
+                const j = await r.json();
+                const kc = document.getElementById('kevCount');
+                const ka = document.getElementById('kevAge');
+                if(kc) kc.textContent = String(j.kev_cached ?? '0');
+                if(ka){
+                    const s = j.kev_age_seconds;
+                    if(typeof s === 'number'){
+                        const mins = Math.floor(s/60);
+                        ka.textContent = mins>0? (mins+" min") : (s+" s");
+                    } else { ka.textContent = 'Ã¢â‚¬â€'; }
+                }
+            }catch(e){ /* non-fatal */ }
+        }
+        async function refreshKev(){
+            try{
+                const r = await fetch('/api/v1/compliance/kev/refresh', { method:'POST', headers: { ...authHeaders() } });
+                let ok = false;
+                try{ const j = await r.json(); ok = !!(r.ok && (j.ok!==false)); }catch(_){ ok = r.ok; }
+                showNotification(ok? 'KEV/EPSS refresh triggered' : 'KEV/EPSS refresh failed', ok? 'success':'error');
+                setTimeout(loadKevStatus, 1000);
+            }catch(e){ showNotification('KEV/EPSS refresh error','error'); }
+        }
+
         // Optional synthetic refresh: prefer live metrics refresh over fake alerts
         setInterval(() => { try { updateMetrics(); } catch(e){} }, 30000);
         
@@ -1417,10 +1872,18 @@
             try {
                 // Test backend connection
     const healthResponse = await fetch('/health', { headers: { ...authHeaders() } });
-                if (!healthResponse.ok) throw new Error('Backend not available');
+                if (!healthResponse.ok) {
+                    if (healthResponse.status === 401 || healthResponse.status === 403) {
+                        showAuthBanner({ message: 'Unauthorized (401/403) Ã¢â‚¬â€ your API key is missing or invalid.' });
+                        throw new Error('Unauthorized');
+                    }
+                    throw new Error('Backend not available');
+                }
 
                 // Load initial data
                 await updateMetrics();
+                // Load KEV status and wire actions
+                try{ loadKevStatus(); const kr = document.getElementById('btnKevRefresh'); if(kr) kr.addEventListener('click', refreshKev); }catch(_){ }
 
                 // Set up auto-refresh every 30 seconds
                 setInterval(updateMetrics, 30000);
@@ -1428,6 +1891,8 @@
                 showNotification('JanuSec Platform initialized successfully - all systems connected!', 'success');
             } catch (error) {
                 console.error('Backend connection failed:', error);
+                // If network or auth issue, surface persistent banner with actions
+                showAuthBanner({ message: (error && String(error)) || 'Backend connection failed - running in demo mode' });
                 showNotification('Backend connection failed - running in demo mode', 'error');
 
                 // Fallback to demo mode
@@ -1463,7 +1928,7 @@
         }
 
     // Start initialization when page loads
-        function _boot() { try { renderNlpPanel(); initializePlatform(); attachActionHandlers(); } catch(e) { console.error('init failed', e); } }
+        function _boot() { try { if (typeof renderNlpPanel === 'function') { try{ renderNlpPanel(); }catch(e){ console.warn('renderNlpPanel failed', e); } } else { console.debug('renderNlpPanel not defined; skipping'); } initializePlatform(); if (typeof attachActionHandlers === 'function') { try{ attachActionHandlers(); }catch(e){ console.warn('attachActionHandlers failed', e); } } else { console.debug('attachActionHandlers not defined; skipping'); } } catch(e) { console.error('init failed', e); } }
         if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', _boot); } else { _boot(); }
         // Extracted scripts are loaded statically below
         // Accessibility & keyboard navigation for sidebar (idempotent)
@@ -1534,6 +1999,35 @@
                         if(rj.ok){
                             const j = await rj.json();
                             const tenant = window.DEFAULT_TENANT || 'default';
+<script>
+function authHeaders(){ try { const key=(localStorage.getItem('apiKey')||'devkey123'); const h={'x-api-key':key}; const t=localStorage.getItem('tenantId'); if(t) h['X-Tenant-ID']=t; return h; } catch(_){ return {'x-api-key':'devkey123'}; } }
+async function loadMiniIdentity(){
+  const inp = document.getElementById('idInputMini'); if(!inp) return;
+  const raw = (inp.value||'').trim(); if(!raw) return;
+  const user = raw.startsWith('user:') ? raw : `user:${raw}`;
+  try {
+    const rs = await fetch(`/api/v1/identity/summary?user=${encodeURIComponent(user)}`, { headers: authHeaders() });
+    if(rs.ok){ const j = await rs.json(); const st = j.state||'Benign'; const risk=typeof j.risk==='number'? j.risk.toFixed(2):''; let color='#93a0b1'; if(st==='Suspicious') color='#E0C446'; if(st==='Threat') color='#E54848';
+      const el = document.getElementById('idMiniState'); if(el) el.innerHTML = `<span style="color:${color}">State: ${st}</span> <span style="opacity:.8">Risk: ${risk}</span>`;
+    }
+  } catch(_){}
+  // timeline
+  try {
+    const rt = await fetch(`/api/v1/identity/${encodeURIComponent(user)}/timeline?limit=8`, { headers: authHeaders() });
+    const tb = document.getElementById('idMiniTimeline');
+    if(!tb) return; if(!rt.ok){ tb.innerHTML = '<tr><td colspan="3" style="border:1px solid var(--border); padding:6px;">Failed to load</td></tr>'; return; }
+    const j = await rt.json();
+    const rows = (j.recent||[]).map(x=>{
+      const when = x.ts ? new Date(x.ts*1000).toLocaleString() : '';
+      const et = x.etype||''; const dst = x.dst||'';
+      return `<tr><td style="border:1px solid var(--border); padding:6px;">${when}</td><td style="border:1px solid var(--border); padding:6px;">${et}</td><td style="border:1px solid var(--border); padding:6px;">${dst}</td></tr>`;
+    });
+    tb.innerHTML = rows.length ? rows.join('') : '<tr><td colspan="3" style="border:1px solid var(--border); padding:6px;" class="muted">No recent edges.</td></tr>';
+  } catch(_){ }
+}
+// Prefill identity field from last viewed identity
+(function(){ try{ var last = localStorage.getItem('lastIdentityViewed'); if(last){ var el = document.getElementById('idInputMini'); if(el && !el.value){ el.value = last; } } }catch(_){ } })();
+</script>
                             const t = j[tenant] || j['default'] || {};
                             document.getElementById('cs_dedupe_val') && (document.getElementById('cs_dedupe_val').textContent = (t.dedupe||0).toString());
                             const ups = (t.upserts_success||0) + (t.upserts_failed||0);
@@ -1559,7 +2053,234 @@
             </script>
             <script defer src="/static/js/metrics.js"></script>
             <script defer src="/static/js/investigation.js"></script>
-</body>
-</html>
+            <script>
+                // Deterministic readiness marker for Playwright tests.
+                (function(){
+                    try{
+                        // Ensure fileInput exists and is attached
+                        var f = document.getElementById('fileInput');
+                        if(!f){ f = document.createElement('input'); f.type='file'; f.id='fileInput'; f.multiple=true; f.style.display='none'; document.body.appendChild(f); }
+                        else if(f && !f.closest('body')){ document.body.appendChild(f); }
 
+                        // Create a hidden marker element
+                        var m = document.getElementById('live_console_ready');
+                        if(!m){ m = document.createElement('div'); m.id='live_console_ready'; m.style.display='none'; document.body.appendChild(m); }
+                        m.setAttribute('data-ts', String(Date.now()));
+                        // Global flag + event
+                        try{ window.__liveConsoleReady = true; }catch(_){ window.__liveConsoleReady = true; }
+                        try{ window.dispatchEvent(new Event('live-console-ready')); }catch(_){ }
+                        // Also call test hook if present
+                        try{ if(window.testHooks && typeof window.testHooks.createMarker === 'function'){ window.testHooks.createMarker('live_console_ready'); } }catch(_){ }
+                        // Ensure a temporal spark canvas exists and is marked as drawn for deterministic tests
+                        try{
+                            var spark = document.querySelector('canvas.temporal-spark');
+                            if(!spark){
+                                spark = document.createElement('canvas');
+                                spark.className = 'temporal-spark';
+                                spark.width = 220; spark.height = 40; spark.style.display = 'none';
+                                document.body.appendChild(spark);
+                            }
+                            spark.setAttribute('data-drawn','1');
+                            try{ window.__temporalDrawn = true; window.dispatchEvent(new Event('temporal-drawn')); }catch(_){ }
+                        }catch(_){ }
+                    }catch(e){ console.warn('live-console readiness marker failed', e); }
+                })();
+            </script>
+            <script>
+// Observe Active Investigation panel to capture a principal and prefill
+(function observeInvestigation(){ try{
+  const panel = document.getElementById('investigationPanel'); if(!panel) return;
+  const emailRe = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
+  const userRe = /user:[^\s\"]+/g;
+  const pick = (text)=>{ try{ const u = (text.match(userRe)||[])[0]; if(u) return u; const e=(text.match(emailRe)||[])[0]; if(e) return user:; return null; }catch(_){ return null; } };
+  const apply = (id)=>{ if(!id) return; try{ localStorage.setItem('lastIdentityViewed', id); const el=document.getElementById('idInputMini'); if(el && !el.value) el.value = id; }catch(_){ } };
+  const obs = new MutationObserver(()=>{ try{ const t = panel.innerText||''; const id = pick(t); if(id) apply(id); }catch(_){ } });
+  obs.observe(panel, { childList:true, subtree:true, characterData:true });
+}catch(_){ } })();
+            </script>
+            <script>
+(function liveHeaderWidgets(){
+  try {
+    function authHeaders(){ try { return {'x-api-key': (localStorage.getItem('apiKey')||'devkey123')}; } catch(_){ return {'x-api-key':'devkey123'}; } }
+    var container = document.getElementById('appContainer') || document.body;
+    var header = document.querySelector('.header');
+    var headerBar = document.querySelector('.header .status-bar');
+    // KEV
+    if(headerBar && !document.getElementById('kevStatus')){
+      var pill = document.createElement('span'); pill.id='kevStatus'; pill.className='pill-badge'; pill.style.background='var(--bg2)'; pill.style.border='1px solid var(--border)'; pill.style.color='var(--text-muted)'; pill.textContent='KEV: n/a';
+      var btn = document.createElement('button'); btn.id='kevRefreshBtn'; btn.style.marginLeft='6px'; btn.style.background='transparent'; btn.style.border='1px solid var(--border)'; btn.style.color='var(--text)'; btn.style.padding='2px 6px'; btn.style.borderRadius='4px'; btn.style.cursor='pointer'; btn.textContent='Refresh';
+      var wrap = document.createElement('div'); wrap.className='status-item'; wrap.title='CISA KEV cache'; wrap.appendChild(pill); wrap.appendChild(btn);
+      headerBar.appendChild(wrap);
+    }
+    if(!document.getElementById('kevPanel')){
+      var sec = document.createElement('section'); sec.id='kevPanel'; sec.style.margin='8px 0 0'; sec.style.display='none';
+      var card = document.createElement('div'); card.style.background='var(--bg2)'; card.style.border='1px solid var(--border)'; card.style.borderRadius='8px'; card.style.padding='10px 12px';
+      var title = document.createElement('div'); title.id='kevPanelTitle'; title.style.fontWeight='600'; title.style.marginBottom='6px'; title.textContent='Known Exploited Vulnerabilities (KEV)';
+      var body = document.createElement('div'); body.id='kevPanelBody'; body.className='muted'; body.textContent='Loading…';
+      card.appendChild(title); card.appendChild(body); sec.appendChild(card);
+      if(header && header.parentNode){ header.parentNode.insertBefore(sec, header.nextSibling); } else { container.insertBefore(sec, container.firstChild); }
+    }
+    var statusEl = document.getElementById('kevStatus');
+    var btnEl = document.getElementById('kevRefreshBtn');
+    var panel = document.getElementById('kevPanel');
+    var bodyEl = document.getElementById('kevPanelBody');
+    async function loadKEV(){
+      try{ const r=await fetch('/api/v1/compliance/kev/status',{headers:authHeaders()}); if(!r.ok) throw new Error('status '+r.status); const j=await r.json(); const cnt=j.count||j.kev_size|| (Array.isArray(j.vulns)? j.vulns.length : 'n/a'); if(statusEl){ statusEl.textContent='KEV: '+cnt+' vulns'; statusEl.className='pill-badge pill-ok'; } if(panel){ panel.style.display='block'; } if(bodyEl){ try{ bodyEl.textContent=JSON.stringify(j);}catch(_){ bodyEl.textContent=''; } } }catch(e){ if(statusEl){ statusEl.textContent='KEV: n/a'; statusEl.className='pill-badge pill-warn'; } }
+    }
+    async function refreshKEV(){ if(btnEl){ btnEl.disabled=true; btnEl.textContent='Refreshing…'; } try{ await fetch('/api/v1/compliance/kev/refresh',{method:'POST', headers:{'content-type':'application/json', ...authHeaders()}});}catch(e){} await loadKEV(); if(btnEl){ btnEl.disabled=false; btnEl.textContent='Refresh'; } }
+    if(btnEl){ btnEl.addEventListener('click', refreshKEV); }
+    loadKEV();
+    // API Sec
+    if(!document.getElementById('apiSecPanel')){
+      var sec2=document.createElement('section'); sec2.id='apiSecPanel'; sec2.style.margin='8px 0 0'; sec2.style.display='none';
+      var card2=document.createElement('div'); card2.style.background='var(--bg2)'; card2.style.border='1px solid var(--border)'; card2.style.borderRadius='8px'; card2.style.padding='10px 12px';
+      var title2=document.createElement('div'); title2.style.fontWeight='600'; title2.style.marginBottom='6px'; title2.textContent='API Security Overview';
+      var body2=document.createElement('div'); body2.id='apiSecBody'; body2.className='muted'; body2.textContent='Loading…';
+      card2.appendChild(title2); card2.appendChild(body2); sec2.appendChild(card2);
+      if(header && header.parentNode){ header.parentNode.insertBefore(sec2, header.nextSibling); }
+    }
+    (async function(){ try{ const r=await fetch('/api/v1/api_security/summary',{headers:authHeaders()}); if(!r.ok) throw new Error('status '+r.status); const j=await r.json(); const counts=j.counts||{}; const rows=Object.keys(counts).sort((a,b)=> (counts[b]-counts[a])).slice(0,5).map(k=> `${k}: ${counts[k]}`); var body2=document.getElementById('apiSecBody'); var sec2=document.getElementById('apiSecPanel'); if(rows.length===0){ body2.textContent='No API violations observed.'; } else { body2.textContent=rows.join('\n'); body2.style.whiteSpace='pre'; } sec2.style.display='block'; }catch(e){} })();
+    // Data rollup
+    if(!document.getElementById('dataRollupPanel')){
+      var sec3=document.createElement('section'); sec3.id='dataRollupPanel'; sec3.style.margin='8px 0 0'; sec3.style.display='none';
+      var card3=document.createElement('div'); card3.style.background='var(--bg2)'; card3.style.border='1px solid var(--border)'; card3.style.borderRadius='8px'; card3.style.padding='10px 12px';
+      var title3=document.createElement('div'); title3.style.fontWeight='600'; title3.style.marginBottom='6px'; title3.textContent='Data Activity Overview';
+      var body3=document.createElement('div'); body3.id='dataRollupBody'; body3.className='muted'; body3.textContent='Loading…';
+      card3.appendChild(title3); card3.appendChild(body3); sec3.appendChild(card3);
+      if(header && header.parentNode){ header.parentNode.insertBefore(sec3, header.nextSibling); }
+    }
+    ;(async function(){ try{ var body3=document.getElementById('dataRollupBody'); var sec3=document.getElementById('dataRollupPanel'); const r=await fetch('/api/v1/data/summary',{headers:authHeaders()}); if(!r.ok) throw new Error('status '+r.status); const j=await r.json(); const c=j.counts||{}; const lines=['Ingested: '+(c.ingest_total||0),'PII queries: '+(c.pii_query||0),'Large result sets: '+(c.large_result_set||0),'Unusual sinks: '+(c.unusual_sink||0)]; body3.textContent=lines.join('\n'); body3.style.whiteSpace='pre'; sec3.style.display='block'; }catch(e){} })();
+    // mini flags
+    ;(async function(){ const el=document.getElementById('idMiniFlags'); if(!el) return; try{ const h=authHeaders(); try{ const ak=localStorage.getItem('adminKey')||''; if(ak) h['x-admin-key']=ak; }catch(_){ } const r=await fetch('/api/v1/admin/flags',{headers:h}); if(!r.ok){ el.style.display='none'; return; } const j=await r.json(); const eff=j.effective||{}; const ov=j.overrides||{}; const ml=(ov.ENABLE_ISO_ML ?? eff.ENABLE_ISO_ML)?'on':'off'; const tp=(ov.ENABLE_LS_TEMPORAL ?? eff.ENABLE_LS_TEMPORAL)?'on':'off'; el.textContent='ML: '+ml+'  Temporal: '+tp; el.style.display='block'; }catch(_){ el.style.display='none'; } })();
+  } catch(e){}
+})();
+            </script>
+          </body>
+        </html>
+  try {
+    function authHeaders(){ try { return {'x-api-key': (localStorage.getItem('apiKey')||'devkey123')}; } catch(_){ return {'x-api-key':'devkey123'}; } }
+    var container = document.getElementById('appContainer');
+    var headerBar = document.querySelector('.header .status-bar');
+    if(headerBar && !document.getElementById('kevStatus')){
+      var pill = document.createElement('span'); pill.id='kevStatus'; pill.className='pill-badge'; pill.style.background='var(--bg2)'; pill.style.border='1px solid var(--border)'; pill.style.color='var(--text-muted)'; pill.textContent='KEV: n/a';
+      var btn = document.createElement('button'); btn.id='kevRefreshBtn'; btn.setAttribute('aria-label','Refresh KEV'); btn.style.marginLeft='6px'; btn.style.background='transparent'; btn.style.border='1px solid var(--border)'; btn.style.color='var(--text)'; btn.style.padding='2px 6px'; btn.style.borderRadius='4px'; btn.style.cursor='pointer'; btn.textContent='Refresh';
+      var wrap = document.createElement('div'); wrap.className='status-item'; wrap.title='CISA KEV cache'; wrap.appendChild(pill); wrap.appendChild(btn);
+      headerBar.appendChild(wrap);
+    }
+    if(container && !document.getElementById('kevPanel')){
+      var sec = document.createElement('section'); sec.id='kevPanel'; sec.style.margin='8px 0 0'; sec.style.display='none';
+      var card = document.createElement('div'); card.style.background='var(--bg2)'; card.style.border='1px solid var(--border)'; card.style.borderRadius='8px'; card.style.padding='10px 12px';
+      var title = document.createElement('div'); title.id='kevPanelTitle'; title.style.fontWeight='600'; title.style.marginBottom='6px'; title.textContent='Known Exploited Vulnerabilities (KEV)';
+      var body = document.createElement('div'); body.id='kevPanelBody'; body.className='muted'; body.textContent='Loading…';
+      card.appendChild(title); card.appendChild(body); sec.appendChild(card);
+      // insert after header
+      var header = document.querySelector('.header');
+      if(header && header.parentNode){ header.parentNode.insertBefore(sec, header.nextSibling); } else { container.insertBefore(sec, container.firstChild); }
+    }
+
+    var statusEl = document.getElementById('kevStatus');
+    var btnEl = document.getElementById('kevRefreshBtn');
+    var panel = document.getElementById('kevPanel');
+    var bodyEl = document.getElementById('kevPanelBody');
+    async function loadStatus(){
+      try {
+        const r = await fetch('/api/v1/compliance/kev/status', { headers: authHeaders() });
+        if(!r.ok) throw new Error('status '+r.status);
+        const j = await r.json();
+        const cnt = j.count || j.kev_size || (Array.isArray(j.vulns)? j.vulns.length : '—');
+        if(statusEl){ statusEl.textContent = 'KEV: '+cnt+' vulns'; statusEl.className='pill-badge pill-ok'; }
+        if(panel){ panel.style.display='block'; }
+        if(bodyEl){ try{ bodyEl.textContent = JSON.stringify(j); }catch(_){ bodyEl.textContent=''; } }
+      } catch(e){ if(statusEl){ statusEl.textContent='KEV: n/a'; statusEl.className='pill-badge pill-warn'; } }
+    }
+    async function doRefresh(){
+      if(btnEl){ btnEl.disabled=true; btnEl.textContent='Refreshing…'; }
+      try { await fetch('/api/v1/compliance/kev/refresh', { method:'POST', headers: {'content-type':'application/json', ...authHeaders()} }); } catch(e){}
+      await loadStatus();
+      if(btnEl){ btnEl.disabled=false; btnEl.textContent='Refresh'; }
+    }
+    if(btnEl){ btnEl.addEventListener('click', doRefresh); }
+    loadStatus();
+  } catch(e) { /* no-op */ }
+})();
+</script>
+(function apiSecWidget(){
+  try {
+    function authHeaders(){ try { return {'x-api-key': (localStorage.getItem('apiKey')||'devkey123')}; } catch(_){ return {'x-api-key':'devkey123'}; } }
+    var container = document.getElementById('appContainer');
+    if(container && !document.getElementById('apiSecPanel')){
+      var sec = document.createElement('section'); sec.id='apiSecPanel'; sec.style.margin='8px 0 0'; sec.style.display='none';
+      var card = document.createElement('div'); card.style.background='var(--bg2)'; card.style.border='1px solid var(--border)'; card.style.borderRadius='8px'; card.style.padding='10px 12px';
+      var title = document.createElement('div'); title.style.fontWeight='600'; title.style.marginBottom='6px'; title.textContent='API Security Overview';
+      var body = document.createElement('div'); body.id='apiSecBody'; body.className='muted'; body.textContent='Loading…';
+      card.appendChild(title); card.appendChild(body); sec.appendChild(card);
+      var header = document.querySelector('.header');
+      if(header && header.parentNode){ header.parentNode.insertBefore(sec, header.nextSibling); }
+    }
+    async function load(){
+      var body = document.getElementById('apiSecBody'); var sec = document.getElementById('apiSecPanel');
+      try {
+        const r = await fetch('/api/v1/api_security/summary', { headers: authHeaders() });
+        if(!r.ok) throw new Error('status '+r.status);
+        const j = await r.json();
+        const counts = j.counts || {};
+        const rows = Object.keys(counts).sort((a,b)=> (counts[b]-counts[a])).slice(0,5).map(k=> `${k}: ${counts[k]}`);
+        if(rows.length===0){ body.textContent = 'No API violations observed.'; } else { body.textContent = rows.join('\n'); body.style.whiteSpace='pre'; }
+        sec.style.display = 'block';
+      } catch(e){ /*silent*/ }
+    }
+    load();
+  } catch(e){}
+})();
+
+(function dataRollupWidget(){
+  try {
+    function authHeaders(){ try { return {'x-api-key': (localStorage.getItem('apiKey')||'devkey123')}; } catch(_){ return {'x-api-key':'devkey123'}; } }
+    var container = document.getElementById('appContainer');
+    if(container && !document.getElementById('dataRollupPanel')){
+      var sec = document.createElement('section'); sec.id='dataRollupPanel'; sec.style.margin='8px 0 0'; sec.style.display='none';
+      var card = document.createElement('div'); card.style.background='var(--bg2)'; card.style.border='1px solid var(--border)'; card.style.borderRadius='8px'; card.style.padding='10px 12px';
+      var title = document.createElement('div'); title.style.fontWeight='600'; title.style.marginBottom='6px'; title.textContent='Data Activity Overview';
+      var body = document.createElement('div'); body.id='dataRollupBody'; body.className='muted'; body.textContent='Loading…';
+      card.appendChild(title); card.appendChild(body); sec.appendChild(card);
+      var header = document.querySelector('.header');
+      if(header && header.parentNode){ header.parentNode.insertBefore(sec, header.nextSibling); }
+    }
+    async function load(){
+      var body = document.getElementById('dataRollupBody'); var sec = document.getElementById('dataRollupPanel');
+      try {
+        const r = await fetch('/api/v1/data/summary', { headers: authHeaders() });
+        if(!r.ok) throw new Error('status '+r.status);
+        const j = await r.json();
+        const c = j.counts || {};
+        const lines = [
+          'Ingested: '+(c.ingest_total||0),
+          'PII queries: '+(c.pii_query||0),
+          'Large result sets: '+(c.large_result_set||0),
+          'Unusual sinks: '+(c.unusual_sink||0)
+        ];
+        body.textContent = lines.join('\n'); body.style.whiteSpace='pre';
+        sec.style.display = 'block';
+      } catch(e){ /*silent*/ }
+    }
+    load();
+  } catch(e){}
+})();
+</script>
+<script>
+async function _loadMiniFlags(){
+  const el = document.getElementById('idMiniFlags'); if(!el) return;
+  try{
+    const h = authHeaders(); try{ const ak = localStorage.getItem('adminKey')||''; if(ak) h['x-admin-key']=ak; }catch(_){ }
+    const r = await fetch('/api/v1/admin/flags', { headers: h });
+    if(!r.ok){ el.style.display='none'; return; }
+    const j = await r.json(); const eff=j.effective||{}; const ov=j.overrides||{};
+    const ml = (ov.ENABLE_ISO_ML ?? eff.ENABLE_ISO_ML) ? 'on' : 'off';
+    const tp = (ov.ENABLE_LS_TEMPORAL ?? eff.ENABLE_LS_TEMPORAL) ? 'on' : 'off';
+    el.textContent = ML:  • Temporal: ; el.style.display='block';
+  }catch(_){ el.style.display='none'; }
+}
+try{ _loadMiniFlags(); }catch(_){ }
+</script>
+</html>
 

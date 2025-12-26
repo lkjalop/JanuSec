@@ -254,7 +254,7 @@
         const apiKey = localStorage.getItem('apiKey') || 'devkey123';
         // In test mode, request a deterministic canned chain (backend already falls back when hopgraph unavailable)
         const explainUrl = `/api/v1/graph/explain?node=${encodeURIComponent(node)}${TEST_MODE ? '&deterministic=1' : ''}`;
-        const r = await fetch(explainUrl, { headers: { 'x-api-key': apiKey } });
+        const r = await (window.safeFetch || fetch)(explainUrl, { headers: { 'x-api-key': apiKey } });
         const j = await r.json();
         document.getElementById('output').textContent = JSON.stringify(j, null, 2);
         status.textContent = r.ok ? 'OK' : 'Error';

@@ -62,13 +62,13 @@
         'opencti': '/api/v1/integrations/opencti/sync'
       };
       const path = map[name];
-      const r = await fetch(path, { method:'POST', headers: {...h()} });
+      const r = await (window.safeFetch || fetch)(path, { method:'POST', headers: {...h()} });
       const j = await r.json();
       document.getElementById('syncResult').textContent = r.ok ? JSON.stringify(j) : (j.detail || 'sync failed');
       refreshStatus();
     }
     async function refreshStatus(){
-      const r = await fetch('/api/v1/integrations/intel/status', { headers: {...h()} });
+      const r = await (window.safeFetch || fetch)('/api/v1/integrations/intel/status', { headers: {...h()} });
       const j = await r.json();
       const kvs = document.getElementById('statusKvs');
       const rows = [

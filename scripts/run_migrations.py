@@ -1,7 +1,7 @@
 """Lightweight migration runner.
 
 Usage (PowerShell):
-  $env:APP_DB_DSN='postgresql://user:pass@localhost:5432/threatsifter'
+    $env:APP_DB_DSN='postgresql://user:pass@localhost:5432/janusec'  # legacy schema name 'threatsifter' still supported
   python scripts/run_migrations.py
 
 Applies migrations in lexicographic order once. Creates a migrations table
@@ -51,7 +51,7 @@ async def run(dry_run: bool = False):
         port = os.getenv('DB_PORT', '5432')
         user = os.getenv('DB_USER', 'postgres')
         password = os.getenv('DB_PASSWORD', 'postgres')
-        database = os.getenv('DB_NAME', 'threatsifter')
+        database = os.getenv('DB_NAME', 'janusec')  # legacy: threatsifter
         dsn = f"postgresql://{user}:{password}@{host}:{port}/{database}"
     conn = await asyncpg.connect(dsn=dsn)
     try:

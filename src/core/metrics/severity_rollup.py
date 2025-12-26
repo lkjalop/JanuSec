@@ -5,15 +5,16 @@ imports from core.metrics.severity_rollup succeed during test collection even
 if a richer implementation is pending.
 """
 from __future__ import annotations
-from typing import Dict, Any
+
 import time
+from typing import Any, Dict
 
 _DEF_BASE = {
     'buckets': {'low':0,'medium':0,'high':0,'critical':0},
     'updated_ts': lambda: int(time.time())
 }
 
-_last: Dict[str, Any] | None = None
+_last: dict[str, Any] | None = None
 
 def observe(severity: float | int):  # simplistic bucket accounting
     global _last
@@ -28,7 +29,7 @@ def observe(severity: float | int):  # simplistic bucket accounting
     _last['updated_ts'] = int(time.time())
 
 
-def snapshot() -> Dict[str, Any]:
+def snapshot() -> dict[str, Any]:
     global _last
     if _last is None:
         return { 'buckets': {'low':0,'medium':0,'high':0,'critical':0}, 'updated_ts': int(time.time()) }

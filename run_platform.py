@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
 Development startup script for the Pragmatic Security Threat Sifting Platform
 Author: Security Engineering Team
@@ -16,12 +16,14 @@ project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root / "src"))
 
 # Configure logging
+log_dir = project_root / 'logs'
+log_dir.mkdir(exist_ok=True)
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler('logs/platform.log', mode='a')
+        logging.FileHandler(str(log_dir / 'platform.log'), mode='a')
     ]
 )
 

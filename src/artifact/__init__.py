@@ -1,2 +1,2 @@
-from .models import ArtifactObservation, ArtifactType, Verdict
 from .analyze import ArtifactPipeline
+from .models import ArtifactObservation, ArtifactType, Verdict

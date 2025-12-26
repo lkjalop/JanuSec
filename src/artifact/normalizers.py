@@ -1,5 +1,7 @@
 from __future__ import annotations
-from typing import Dict, Any
+
+from typing import Any, Dict
+
 from .models import ArtifactObservation, ArtifactType, stable_artifact_id
 
 EXEC_EXT = {'.exe','.dll','.sys','.ocx'}
@@ -7,9 +9,9 @@ SCRIPT_EXT = {'.ps1','.vbs','.js','.bat','.cmd','.wsf'}
 DOC_EXT = {'.docm','.xlsm','.docx','.xlsx','.pptm','.pptx','.rtf','.pdf'}
 EXTN_EXT = {'.crx','.xpi'}
 
-def detect_type(raw: Dict[str, Any]) -> ArtifactType:
+def detect_type(raw: dict[str, Any]) -> ArtifactType:
     ext = (raw.get('extension') or raw.get('ext') or '').lower()
-    path = (raw.get('path') or '').lower()
+    (raw.get('path') or '').lower()
     if ext in EXEC_EXT:
         return ArtifactType.DRIVER if ext == '.sys' else ArtifactType.EXECUTABLE
     if ext in SCRIPT_EXT:
@@ -39,8 +41,8 @@ BOOL_LIKE = {'true':True,'false':False,'1':True,'0':False,'yes':True,'no':False}
 
 SAFE_FIELDS = {'path','name','sha256','size','host','zone','download_origin','extension'}
 
-def normalize(raw: Dict[str, Any]) -> ArtifactObservation:
-    norm: Dict[str, Any] = {}
+def normalize(raw: dict[str, Any]) -> ArtifactObservation:
+    norm: dict[str, Any] = {}
     for k,v in list(raw.items()):
         if k is None: continue
         lk = str(k).strip().lower()

@@ -1,5 +1,7 @@
 from __future__ import annotations
-from typing import List, Dict, Any
+
+from typing import Any, Dict, List
+
 from .models import ArtifactObservation, map_risk_to_verdict
 
 # Weight allocations (can be tuned)
@@ -16,9 +18,10 @@ COMP_WEIGHTS = {
 # For now we approximate component contributions from factor category aggregation
 from .factors import FACTOR_WEIGHTS
 
+
 def synthesize(obs: ArtifactObservation):
-    category_scores: Dict[str, float] = {}
-    per_factor: List[Dict[str, Any]] = []
+    category_scores: dict[str, float] = {}
+    per_factor: list[dict[str, Any]] = []
     for f in obs.factors:
         meta = FACTOR_WEIGHTS.get(f)
         if not meta: continue
@@ -38,7 +41,7 @@ def synthesize(obs: ArtifactObservation):
         'persistence':'behavior', 'relational':'relational', 'temporal':'origin',
         'reputation':'reputation'
     }
-    risk_components: List[Dict[str, Any]] = []
+    risk_components: list[dict[str, Any]] = []
     total = 0.0
     for cat, raw_score in category_scores.items():
         comp_key = comp_map.get(cat)
@@ -62,4 +65,16 @@ def synthesize(obs: ArtifactObservation):
         if obs.final_risk < 0.75:
             obs.final_risk = 0.86
     obs.verdict = map_risk_to_verdict(obs.final_risk)
+    # Guardrail: avoid premature MALICIOUS if factor diversity is low
+    try:
+        if str(obs.verdict).upper() == 'MALICIOUS':
+            cats = {c.get('category') for c in getattr(obs, 'factor_contributions', []) if isinstance(c, dict) and c.get('category')}
+            high_value = {'static','behavior','origin','relational','reputation'}
+            diversity = len(cats.intersection(high_value))
+            if diversity < 3 and obs.final_risk < 0.95:
+                # Downgrade to SUSPICIOUS to reduce overclassification
+                from .models import Verdict
+                obs.verdict = Verdict.SUSPICIOUS
+    except Exception:
+        pass
     return obs

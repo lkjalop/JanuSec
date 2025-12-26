@@ -2,8 +2,15 @@
 Tracks first-seen timestamps per domain and emits new_domain_seen for recent first observation.
 """
 from __future__ import annotations
+
+import hashlib
+import hmac
+import json
+import os
+import threading
+import time
 from typing import Dict
-import threading, time, json, os, hashlib, hmac
+
 
 class DomainTracker:
     """Per-tenant domain novelty tracker with partitioned persistence.
@@ -18,7 +25,7 @@ class DomainTracker:
         self._lock = threading.Lock()
         self._base_dir = base_dir
         # tenant -> {domain: ts}
-        self._first_seen: Dict[str, Dict[str,float]] = {}
+        self._first_seen: dict[str, dict[str,float]] = {}
         self._dirty: set[str] = set()
         self._load_all()
 
@@ -61,7 +68,7 @@ class DomainTracker:
                 if not os.path.exists(path):
                     continue
                 try:
-                    with open(path,'r',encoding='utf-8') as f:
+                    with open(path,encoding='utf-8') as f:
                         wrapper = json.load(f)
                     data = wrapper.get('payload', wrapper)
                     raw = json.dumps(data, sort_keys=True).encode('utf-8')

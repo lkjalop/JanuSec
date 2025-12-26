@@ -201,7 +201,7 @@ function safeNotify(msg, level){ try{ if(window.showNotification) return window.
 function H(){ try{ const k=localStorage.getItem('apiKey')||'devkey123'; return {'x-api-key':k}; }catch(_){return {'x-api-key':'devkey123'} } }
 async function loadPosture(){
   try{
-    const r = await fetch('/api/v1/compliance/posture', { headers: { ...H() } });
+    const r = await (window.safeFetch || fetch)('/api/v1/compliance/posture', { headers: { ...H() } });
     if(!r.ok) return;
     const j = await r.json();
     const pc = document.getElementById('postureCard');
@@ -217,7 +217,7 @@ async function loadFrameworks(){
   const sel = document.getElementById('framework');
   function setDefault(){ sel.innerHTML = '<option value="ISO27001" selected>ISO/IEC 27001:2022</option>'; }
   try{
-    const r = await fetch('/api/v1/compliance/frameworks', { headers: H() });
+    const r = await (window.safeFetch || fetch)('/api/v1/compliance/frameworks', { headers: H() });
     let j = {}; try{ j = await r.json(); }catch(_){ }
     const arr = Array.isArray(j.frameworks)? j.frameworks : [];
     if(!arr.length){ setDefault(); return; }
@@ -261,8 +261,8 @@ async function loadSignals(){
     const headers = { ...H() };
     // Dashboard metrics/status endpoints
     const [mRes, sRes] = await Promise.all([
-      fetch('/api/v1/dashboard/metrics', { headers }),
-      fetch('/api/v1/dashboard/status', { headers })
+      (window.safeFetch || fetch)('/api/v1/dashboard/metrics', { headers }),
+      (window.safeFetch || fetch)('/api/v1/dashboard/status', { headers })
     ]);
     let m = {}; try{ m = await mRes.json(); }catch(_){ }
     let s = {}; try{ s = await sRes.json(); }catch(_){ }
@@ -287,7 +287,7 @@ async function assess(){
   for(const f of inp.files) fd.append('files', f);
   const bg = document.getElementById('bgChk').checked;
   const url = '/api/v1/compliance/assess/files?framework='+encodeURIComponent(fw)+'&external='+(mode==='external')+'&background='+bg;
-  const r = await fetch(url,{ method:'POST', headers: H(), body: fd });
+  const r = await (window.safeFetch || fetch)(url,{ method:'POST', headers: H(), body: fd });
   const j = await r.json();
   if(!r.ok){ safeNotify('Assess failed: '+(j.detail||j.error||r.status),'error'); return; }
   // External queued job path
@@ -372,7 +372,7 @@ async function assess(){
 
 async function refreshJob(){
   const job = window.__CMP_JOB; if(!job) return;
-  const r = await fetch('/api/v1/compliance/job/'+encodeURIComponent(job), { headers: H() });
+  const r = await (window.safeFetch || fetch)('/api/v1/compliance/job/'+encodeURIComponent(job), { headers: H() });
   const j = await r.json();
   if(!r.ok){ safeNotify('Job fetch failed: '+(j.detail||j.error||r.status),'error'); return; }
   const st = document.getElementById('jobStatus');
@@ -446,7 +446,7 @@ document.getElementById('filterRisk').onchange = applyFilters;
         documents: docs.length? docs : [{ filename: 'placeholder.txt', text: 'Assessment context placeholder' }],
         organization_context: {}
       };
-      const r = await fetch('/api/v1/compliance/report/titanai/advanced', { method:'POST', headers: { ...H(), 'Content-Type':'application/json' }, body: JSON.stringify(body) });
+      const r = await (window.safeFetch || fetch)('/api/v1/compliance/report/titanai/advanced', { method:'POST', headers: { ...H(), 'Content-Type':'application/json' }, body: JSON.stringify(body) });
       if(!r.ok){ const t = await r.text(); safeNotify('Advanced Pro is unavailable: '+t,'warn'); return; }
       const blob = await r.blob(); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download='janusec_advanced_pro_report.pdf'; a.click(); URL.revokeObjectURL(a.href);
     }catch(e){ safeNotify('Advanced Pro error: '+(e.message||e),'error'); }
@@ -460,7 +460,7 @@ document.getElementById('filterRisk').onchange = applyFilters;
         const j = window.__CMP_LAST||{}; const high = (j.control_results||[]).filter(c=>c.risk_tier==='High').slice(0,10);
         src = 'Summarize high-risk control gaps and actions:\n'+high.map(c=>`${c.control_id} ${c.title||''} score=${c.score}`).join('\n');
       }
-      const r = await fetch('/api/v1/compliance/summarize', { method:'POST', headers: { ...H(), 'Content-Type':'application/json' }, body: JSON.stringify({ text: src }) });
+      const r = await (window.safeFetch || fetch)('/api/v1/compliance/summarize', { method:'POST', headers: { ...H(), 'Content-Type':'application/json' }, body: JSON.stringify({ text: src }) });
       const j = await r.json();
       if(!r.ok){ safeNotify('AI summarize failed: '+(j.detail||r.status),'error'); return; }
       const out = (j.summary||'').trim();
@@ -517,7 +517,7 @@ loadPosture();
 // Crossmap view
 async function loadCrossmap(){
   try{
-    const r = await fetch('/api/v1/compliance/crossmap', { headers: H() });
+    const r = await (window.safeFetch || fetch)('/api/v1/compliance/crossmap', { headers: H() });
     if(!r.ok) return;
     const j = await r.json();
     const tbl = document.getElementById('crossmapTable');
@@ -543,7 +543,7 @@ async function downloadProPdf(){
       executive_summary: document.getElementById('execEdit').value||undefined,
       ai_insights: insightsRaw.length? insightsRaw : undefined
     };
-    const r = await fetch('/api/v1/compliance/report/titanai', { method:'POST', headers: { ...H(), 'Content-Type':'application/json' }, body: JSON.stringify(body) });
+    const r = await (window.safeFetch || fetch)('/api/v1/compliance/report/titanai', { method:'POST', headers: { ...H(), 'Content-Type':'application/json' }, body: JSON.stringify(body) });
     if(!r.ok){ const t = await r.text(); safeNotify('Pro PDF failed: '+t,'error'); return; }
     const blob = await r.blob();
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'janusec_pro_report.pdf'; a.click(); URL.revokeObjectURL(a.href);
@@ -571,8 +571,8 @@ async function loadEUAct(){
   try{
     const h = H();
     const [r9,r10] = await Promise.all([
-      fetch('/api/v1/compliance/eu-ai-act/article-9', { headers: h }),
-      fetch('/api/v1/compliance/eu-ai-act/article-10', { headers: h })
+      (window.safeFetch || fetch)('/api/v1/compliance/eu-ai-act/article-9', { headers: h }),
+      (window.safeFetch || fetch)('/api/v1/compliance/eu-ai-act/article-10', { headers: h })
     ]);
     if(!r9.ok || !r10.ok) return;
     const j9 = await r9.json();
@@ -636,7 +636,7 @@ function openEvidenceFor(controlId){
 // Remediation UI
 async function loadRemediations(){
   try{
-    const r = await fetch('/api/v1/compliance/remediation/list', { headers: H() });
+    const r = await (window.safeFetch || fetch)('/api/v1/compliance/remediation/list', { headers: H() });
     if(!r.ok) return;
     const j = await r.json();
     const rows = (j.items||[]).map(it=>{
@@ -648,7 +648,7 @@ async function loadRemediations(){
     el.querySelectorAll('button[data-rem]').forEach(btn=>{
       btn.onclick = async ()=>{
         const id = btn.getAttribute('data-rem');
-        const r2 = await fetch(`/api/v1/compliance/remediation/${id}/status`, { method:'PATCH', headers:{...H(), 'Content-Type':'application/json'}, body: JSON.stringify({ status:'completed' }) });
+        const r2 = await (window.safeFetch || fetch)(`/api/v1/compliance/remediation/${id}/status`, { method:'PATCH', headers:{...H(), 'Content-Type':'application/json'}, body: JSON.stringify({ status:'completed' }) });
         if(!r2.ok){ const t = await r2.text(); safeNotify('Update failed: '+t,'error'); return; }
         await loadRemediations();
       };
@@ -667,7 +667,7 @@ if(_btnRemCreate){ _btnRemCreate.onclick = async ()=>{
       assigned_to: document.getElementById('remAssignee').value||'',
       due_date: document.getElementById('remDue').value||''
     };
-    const r = await fetch('/api/v1/compliance/remediation/create', { method:'POST', headers:{...H(), 'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    const r = await (window.safeFetch || fetch)('/api/v1/compliance/remediation/create', { method:'POST', headers:{...H(), 'Content-Type':'application/json'}, body: JSON.stringify(body) });
     if(!r.ok){ const t = await r.text(); safeNotify('Create remediation failed: '+t,'error'); return; }
     await loadRemediations();
   }catch(e){ safeNotify('Create remediation error','error'); }
@@ -687,7 +687,7 @@ async function loadBias(){
     const winSel = document.getElementById('biasWindow');
     const win = winSel && winSel.value ? ('&window_seconds='+encodeURIComponent(winSel.value)) : '';
     const url = '/api/v1/compliance/bias/report?attr='+encodeURIComponent(attr)+'&include_suspicious='+(inc?'1':'0')+win;
-    const r = await fetch(url, { headers: H() });
+    const r = await (window.safeFetch || fetch)(url, { headers: H() });
     if(!r.ok) return;
     const j = await r.json();
     document.getElementById('biasDir').textContent = (j.dir!=null)? j.dir : 'â€“';
@@ -704,7 +704,7 @@ loadBias();
 // AI Incident Plan
 async function generateAIPlan(){
   try{
-    const r = await fetch('/api/v1/compliance/ai-incident-plan', { method:'POST', headers: H() });
+    const r = await (window.safeFetch || fetch)('/api/v1/compliance/ai-incident-plan', { method:'POST', headers: H() });
     if(!r.ok) return;
     const j = await r.json();
     const plan = j.plan||{};
@@ -727,7 +727,7 @@ document.getElementById('aiPlanCard').style.display='block';
 // Metrics validation
 async function loadMetricsValidation(){
   try{
-    const r = await fetch('/api/v1/compliance/metrics/validate', { headers: H() });
+    const r = await (window.safeFetch || fetch)('/api/v1/compliance/metrics/validate', { headers: H() });
     if(!r.ok) return;
     const j = await r.json();
     // Inject a small card if registry exists
@@ -738,4 +738,3 @@ async function loadMetricsValidation(){
   }catch(e){}
 }
 loadMetricsValidation();
-

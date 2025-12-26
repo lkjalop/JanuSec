@@ -4,16 +4,17 @@ Groups events by sorted factor signature (excluding timings) and emits cluster m
 This reduces analyst fatigue by marking duplicates.
 """
 from __future__ import annotations
-from typing import List, Dict, Tuple
-from collections import defaultdict
+
 import hashlib
+from collections import defaultdict
+from typing import Dict, List, Tuple
 
 # In-memory signature cache (rolling)
-_seen: Dict[str,int] = defaultdict(int)
+_seen: dict[str,int] = defaultdict(int)
 
 EXCLUDE_PREFIXES = ('timings:',)
 
-def cluster_mark(factors: List[str]) -> List[str]:
+def cluster_mark(factors: list[str]) -> list[str]:
     core = [f for f in factors if not f.startswith(EXCLUDE_PREFIXES)]
     if not core:
         return []

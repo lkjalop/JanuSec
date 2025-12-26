@@ -5,9 +5,10 @@ Version: 1.0.0
 """
 
 import asyncio
-import aiohttp
 import logging
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
+
+import aiohttp
 
 
 class EclipseXDRConnector:
@@ -28,7 +29,7 @@ class EclipseXDRConnector:
         self.enabled = xdr_config.get('enabled', False)
         
         # HTTP session
-        self.session: Optional[aiohttp.ClientSession] = None
+        self.session: aiohttp.ClientSession | None = None
     
     async def initialize(self):
         """Initialize XDR connector"""

@@ -1,0 +1,7 @@
+{
+  "subject": "Invoice from supplier",
+  "from": "accounts@vendorcorp.com",
+  "reply_to": "vendor.confirmation@gmail.com",
+  "links": [{"url":"https://vendor.verify/payment","domain":"vendor.verify"}],
+  "indicators": {"new_sender_domain": true, "reply_to_mismatch": true}
+}

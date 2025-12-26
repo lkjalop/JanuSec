@@ -34,7 +34,7 @@
         if(!btn) return;
         const shouldEnable = !btn.classList.contains('connected');
         try{
-            const r = await fetch('/api/v1/integrations/'+encodeURIComponent(service)+'/toggle?enabled='+String(shouldEnable), { method: 'POST', headers: Object.assign({'Content-Type':'application/json'}, (window.authHeaders?window.authHeaders():{})) });
+            const r = await (window.safeFetch || fetch)('/api/v1/integrations/'+encodeURIComponent(service)+'/toggle?enabled='+String(shouldEnable), { method: 'POST', headers: Object.assign({'Content-Type':'application/json'}, (window.authHeaders?window.authHeaders():{})) });
             let data = {};
             try{ data = await r.json(); }catch(_err){ data = {}; }
             if(!r.ok || data.error) throw new Error(data.error || 'toggle_failed');
@@ -42,7 +42,7 @@
             if(window.showNotification) window.showNotification(service.toUpperCase()+' '+(shouldEnable? 'connected':'disconnected'));
             if(shouldEnable && (service === 'slack' || service === 'teams' || service === 'whatsapp')){
                 try{
-                    const wr = await fetch('/api/v1/webhooks/test', { method:'POST', headers: Object.assign({'Content-Type':'application/json'}, (window.authHeaders?window.authHeaders():{})), body: JSON.stringify({service:service}) });
+                    const wr = await (window.safeFetch || fetch)('/api/v1/webhooks/test', { method:'POST', headers: Object.assign({'Content-Type':'application/json'}, (window.authHeaders?window.authHeaders():{})), body: JSON.stringify({service:service}) });
                     let wj = {};
                     try{ wj = await wr.json(); }catch(_err){ wj = {}; }
                     if(!wr.ok){ const det = (wj && (wj.detail||wj.error)) ? (wj.detail||wj.error) : ('HTTP '+wr.status); if(window.showNotification) window.showNotification('Webhook test failed: '+det,'error'); }
@@ -51,9 +51,37 @@
         }catch(e){ console.error(e); if(window.showNotification) window.showNotification('Failed to toggle '+service+': '+(e.message||e)); }
     }
 
+    // IAM admin helpers: get/set weight overrides and fetch recent evals
+    async function iamGetWeightOverrides(){
+        try{
+            const r = await (window.safeFetch||fetch)('/api/v1/iam/admin/get_weight_overrides', { headers: window.authHeaders() });
+            if(!r.ok) return null;
+            return await r.json().catch(()=>null);
+        }catch(_){ return null; }
+    }
+
+    async function iamSetWeightOverrides(overrides){
+        try{
+            const r = await (window.safeFetch||fetch)('/api/v1/iam/admin/weights', { method:'POST', headers: Object.assign({'Content-Type':'application/json'}, window.authHeaders()), body: JSON.stringify({overrides}) });
+            return r.ok;
+        }catch(_){ return false; }
+    }
+
+    async function iamGetRecentEvals(){
+        try{
+            const r = await (window.safeFetch||fetch)('/api/v1/iam/admin/evals', { headers: window.authHeaders() });
+            if(!r.ok) return [];
+            const j = await r.json().catch(()=>({}));
+            return j.evals || j || [];
+        }catch(_){ return []; }
+    }
+
     // Expose helpers
     window.liveConsoleExtra = window.liveConsoleExtra || {};
     window.liveConsoleExtra.renderFactors = renderFactors;
+    window.liveConsoleExtra.iamGetWeightOverrides = iamGetWeightOverrides;
+    window.liveConsoleExtra.iamSetWeightOverrides = iamSetWeightOverrides;
+    window.liveConsoleExtra.iamGetRecentEvals = iamGetRecentEvals;
     window.toggleIntegration = toggleIntegration;
     // small escape util (used by some inline handlers)
     window._htmlEsc = _htmlEsc;

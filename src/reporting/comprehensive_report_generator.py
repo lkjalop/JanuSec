@@ -84,6 +84,86 @@ def build_report_html(payload):
     sections.append('<h3>Summary</h3>')
     summary = payload.get('summary') or {'rows': len(rows)}
     sections.append('<div><pre>'+escape(json.dumps(summary, indent=2))+'</pre></div>')
+    severity = summary.get('severity_distribution') if isinstance(summary, dict) else None
+    if severity:
+        try:
+            dist = ', '.join(f"{escape(str(k))}: {escape(str(v))}" for k, v in severity.items())
+        except Exception:
+            dist = ''
+        if dist:
+            sections.append('<div style="margin-top:6px;"><strong>Severity Distribution</strong></div>')
+            sections.append(f'<div>{dist}</div>')
+    sections.append('<div style="margin-top:6px;"><strong>Top MITRE Techniques</strong></div>')
+    top_mitre = payload.get('top_mitre') or []
+    if top_mitre:
+        mitre_text = ', '.join(f"{escape(str(item.get('technique')))} ({escape(str(item.get('count')))}x)" for item in top_mitre[:10])
+        sections.append(f'<div>{mitre_text}</div>')
+    else:
+        sections.append('<div>No MITRE techniques reported for this window.</div>')
+    highlights = payload.get('network_highlights') or {}
+    if highlights:
+        sections.append('<h3>Network Highlights</h3>')
+        sections.append('<div style="border:1px solid #1f2a38;padding:12px;border-radius:6px;background:#0e141d;margin-bottom:12px">')
+        window = highlights.get('window_seconds')
+        if window:
+            try:
+                minutes = round(float(window)/60, 1)
+                sections.append(f'<div><strong>Observation Window:</strong> last {minutes} minutes</div>')
+            except Exception:
+                pass
+        if highlights.get('narrative'):
+            sections.append('<ul style="margin:8px 0 12px 16px;">' + ''.join([f'<li>{escape(str(n))}</li>' for n in highlights.get('narrative')]) + '</ul>')
+        if highlights.get('top_talkers'):
+            sections.append('<div style="margin-top:6px;margin-bottom:6px;"><strong>Top Talkers</strong></div>')
+            sections.append('<table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:8px;">')
+            sections.append('<thead><tr><th style="text-align:left;padding:4px;border-bottom:1px solid #243144;">IP</th><th style="text-align:right;padding:4px;border-bottom:1px solid #243144;">Flows</th><th style="text-align:left;padding:4px;border-bottom:1px solid #243144;">Kill Chain</th></tr></thead>')
+            sections.append('<tbody>')
+            for talker in highlights.get('top_talkers', [])[:5]:
+                sections.append(
+                    '<tr>'
+                    f"<td style='padding:4px;border-bottom:1px solid #18202c'>{escape(str(talker.get('ip')))}</td>"
+                    f"<td style='padding:4px;border-bottom:1px solid #18202c;text-align:right'>{escape(str(talker.get('count')))}</td>"
+                    f"<td style='padding:4px;border-bottom:1px solid #18202c'>{escape(str(talker.get('stage')))}</td>"
+                    '</tr>'
+                )
+            sections.append('</tbody></table>')
+        if highlights.get('beacon_findings'):
+            sections.append('<div style="margin-top:6px;margin-bottom:6px;"><strong>Beacon Findings</strong></div>')
+            sections.append('<table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:8px;">')
+            sections.append('<thead><tr><th style="text-align:left;padding:4px;border-bottom:1px solid #243144;">Source</th><th style="text-align:left;padding:4px;border-bottom:1px solid #243144;">Destination</th><th style="text-align:right;padding:4px;border-bottom:1px solid #243144;">Score</th></tr></thead>')
+            sections.append('<tbody>')
+            for beacon in highlights.get('beacon_findings', [])[:5]:
+                sections.append(
+                    '<tr>'
+                    f"<td style='padding:4px;border-bottom:1px solid #18202c'>{escape(str(beacon.get('src_ip')))}</td>"
+                    f"<td style='padding:4px;border-bottom:1px solid #18202c'>{escape(str(beacon.get('dst_ip')))}</td>"
+                    f"<td style='padding:4px;border-bottom:1px solid #18202c;text-align:right'>{escape(str(beacon.get('score')))}</td>"
+                    '</tr>'
+                )
+            sections.append('</tbody></table>')
+        if highlights.get('suspicious_asn'):
+            sections.append('<div style="margin-top:6px;"><strong>New ASN Activity</strong></div>')
+            sections.append('<ul style="margin:4px 0 8px 16px;">' + ''.join([
+                f"<li>{escape(str(entry.get('asn')))} observed ({escape(str(entry.get('src_ip') or ''))} → {escape(str(entry.get('dst_ip') or ''))})</li>"
+                for entry in highlights.get('suspicious_asn', [])[:5]
+            ]) + '</ul>')
+        kill_chain = highlights.get('kill_chain') or {}
+        if kill_chain.get('dominant_stage'):
+            sections.append(f"<div><strong>Dominant Kill Chain Stage:</strong> {escape(str(kill_chain.get('dominant_stage')))}</div>")
+        pasta = highlights.get('pasta')
+        if pasta:
+            stage_label = pasta.get('stage') or pasta.get('note')
+            if stage_label:
+                sections.append(f"<div><strong>PASTA Stage Indicator:</strong> {escape(str(stage_label))}</div>")
+        dread = highlights.get('dread')
+        if dread and dread.get('score') is not None:
+            sections.append(f"<div><strong>DREAD Score:</strong> {escape(str(dread.get('score')))} / 10</div>")
+        missing_log = highlights.get('missing_log')
+        if missing_log and missing_log.get('flag'):
+            idle = missing_log.get('idle_seconds')
+            idle_txt = f"{idle} seconds" if idle else "last interval"
+            sections.append(f"<div style='color:#f4c27a;margin-top:6px;'>Telemetry gap detected ({escape(str(idle_txt))}).</div>")
+        sections.append('</div>')
     if rows:
         sections.append('<h3>Rows</h3>')
         for i,r in enumerate(rows[:200]):

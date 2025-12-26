@@ -25,7 +25,7 @@
             const invPanel = document.getElementById('investigationPanel');
             if (invPanel) invPanel.addEventListener('click', async () => {
                 try {
-                    const r = await fetch('/api/v1/decisions/recent?limit=1', { headers: authHeaders() });
+                    const r = await (window.safeFetch || fetch)('/api/v1/decisions/recent?limit=1', { headers: authHeaders() });
                     let j = {};
                     try{ j = await r.json().catch(()=>({})); }catch(_){ }
                     if (!r.ok) {
@@ -40,6 +40,10 @@
                     showNotification('Failed to open investigation details', 'error');
                 }
             });
+            const loopIncident = document.getElementById('btnLoopIncident');
+            const loopSbom = document.getElementById('btnLoopSbom');
+            if(loopIncident) loopIncident.addEventListener('click', pushIncidentFromInvestigation);
+            if(loopSbom) loopSbom.addEventListener('click', pushSbomFromInvestigation);
         } catch (e) { console.warn('attachActionHandlers failed', e); }
     };
 
@@ -49,11 +53,144 @@
     // Expose refreshData used by header buttons
     window.refreshData = function(){ showNotification('Refreshing data...'); setTimeout(()=>{ try{ if(window.updateMetrics) updateMetrics(); }catch(_){ } showNotification('Data refreshed successfully'); }, 1000); };
 
+    function loopStatus(message, tone){
+        const el = document.getElementById('loopClosureStatus');
+        if(!el) return;
+        el.style.color = tone === 'error' ? 'var(--critical)' : 'var(--text-muted)';
+        el.textContent = message;
+    }
+
+    function renderLoopCoverage(ctx){
+        const el = document.getElementById('loopCoverageHint');
+        if(!el) return;
+        if(!ctx || !ctx.evidence_summary){
+            el.textContent = 'Evidence coverage target pending.';
+            el.style.color = 'var(--text-muted)';
+            return;
+        }
+        const summary = ctx.evidence_summary;
+        const pct = Math.round((summary.coverage || summary.coverage_percent/100 || 0) * 100) / 1;
+        const target = Math.round(((summary.policy && summary.policy.target) || summary.target || 0) * 100);
+        el.textContent = `Evidence coverage ${pct}% (target ${target}%)`;
+        const status = summary.status || (summary.meets_target ? 'ok' : 'gap');
+        if(status === 'critical'){
+            el.style.color = 'var(--critical)';
+        } else if(status === 'warn' || status === 'gap'){
+            el.style.color = 'var(--high)';
+        } else {
+            el.style.color = 'var(--text-muted)';
+        }
+    }
+
+    function renderLoopPlaybook(ctx){
+        const el = document.getElementById('loopPlaybookPreview');
+        if(!el) return;
+        if(!ctx || !ctx.playbook_preview){
+            el.innerHTML = '<div class="small">Open an investigation to preview SOAR steps.</div>';
+            return;
+        }
+        const pb = ctx.playbook_preview;
+        const esc = window._htmlEsc || function(v){ return v; };
+        const steps = (pb.steps || []).slice(0,3).map(step=>`<div style="margin-bottom:4px">• ${esc(step)}</div>`).join('') || '<div style="color:var(--text-muted)">Steps not provided.</div>';
+        const domain = pb.domain ? `Domain: ${pb.domain.toUpperCase()}` : '';
+        el.innerHTML = `
+            <div style="font-weight:600;margin-bottom:4px">${esc(pb.summary || 'Playbook preview')}</div>
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px">${esc(domain)}</div>
+            ${steps}
+        `;
+    }
+
+    window.addEventListener('investigation-context', function(ev){
+        const ctx = ev && ev.detail ? ev.detail.context : null;
+        renderLoopPlaybook(ctx);
+        renderLoopCoverage(ctx);
+    });
+    if(window.__activeInvestigationContext){
+        renderLoopPlaybook(window.__activeInvestigationContext);
+        renderLoopCoverage(window.__activeInvestigationContext);
+    }
+
+    async function pushIncidentFromInvestigation(){
+        const ctx = window.__activeInvestigationContext;
+        if(!ctx || !ctx.eventId){
+            loopStatus('Open an investigation first.', 'error');
+            showNotification('Select an investigation before pushing incident','warn');
+            return;
+        }
+        loopStatus('Sending incident...', 'info');
+        const payload = {
+            artifact_id: ctx.eventId,
+            title: `Investigation ${ctx.eventId}`,
+            severity: ctx.verdict && ctx.verdict !== 'unknown' ? ctx.verdict.toLowerCase() : 'medium',
+            description: (ctx.summary || '').slice(0, 2000) || 'Investigation summary unavailable.',
+            attack_subgraph: ctx.graph || ctx.explain?.graph_summary || null
+        };
+        try{
+            const resp = await (window.safeFetch || fetch)('/api/v1/incidents', {
+                method: 'POST',
+                headers: Object.assign({'Content-Type':'application/json'}, authHeaders()),
+                body: JSON.stringify(payload)
+            });
+            if(!resp.ok){
+                const detail = await resp.json().catch(()=>({}));
+                loopStatus(`Incident failed: ${detail.detail || resp.status}`, 'error');
+                showNotification('Incident push failed','error');
+                return;
+            }
+            loopStatus('Incident created.', 'success');
+            showNotification('Incident pushed to /api/v1/incidents','success');
+        }catch(err){
+            console.error(err);
+            loopStatus('Incident error: '+(err.message||err), 'error');
+            showNotification('Incident push exception','error');
+        }
+    }
+
+    async function pushSbomFromInvestigation(){
+        const ctx = window.__activeInvestigationContext;
+        if(!ctx || !ctx.eventId){
+            loopStatus('Open an investigation first.', 'error');
+            showNotification('Select an investigation before publishing SBOM delta','warn');
+            return;
+        }
+        loopStatus('Publishing SBOM delta...', 'info');
+        const component = {
+            name: ctx.binary?.name || ctx.eventId,
+            version: ctx.binary?.version || ctx.explain?.artifact_version || 'latest',
+            hash: ctx.binary?.sha256 || ctx.explain?.sha256 || ctx.explain?.file_hash || '',
+            verdict: ctx.verdict || 'unknown',
+            tags: ctx.explain?.mapping_tags || undefined
+        };
+        const payload = { components: [component] };
+        try{
+            const resp = await (window.safeFetch || fetch)('/api/v1/sbom/upload', {
+                method: 'POST',
+                headers: Object.assign({'Content-Type':'application/json'}, authHeaders()),
+                body: JSON.stringify(payload)
+            });
+            if(!resp.ok){
+                const detail = await resp.json().catch(()=>({}));
+                loopStatus(`SBOM push failed: ${detail.detail || resp.status}`, 'error');
+                showNotification('SBOM delta failed','error');
+                return;
+            }
+            loopStatus('SBOM delta published.', 'success');
+            showNotification('SBOM delta submitted','success');
+        }catch(err){
+            console.error(err);
+            loopStatus('SBOM error: '+(err.message||err), 'error');
+            showNotification('SBOM delta exception','error');
+        }
+    }
+
+    window.pushIncidentFromInvestigation = pushIncidentFromInvestigation;
+    window.pushSbomFromInvestigation = pushSbomFromInvestigation;
+
     // Initialize platform - similar to original but tolerant of demo mode
     window.initializePlatform = async function(){
         try{
             showNotification('JanuSec Platform connecting to backend...', 'info');
-            const healthResponse = await fetch('/health', { headers: { ...authHeaders() } });
+            const healthResponse = await (window.safeFetch || fetch)('/health', { headers: { ...authHeaders() } });
             if (!healthResponse.ok) {
                 if (healthResponse.status === 401 || healthResponse.status === 403) {
                     showAuthBanner({ message: 'Unauthorized (401/403) — your API key is missing or invalid.' });

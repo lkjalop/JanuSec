@@ -4,8 +4,12 @@ Posts block actions back to Eclipse.XDR if outbound URL configured.
 Failure is logged and swallowed for resilience.
 """
 from __future__ import annotations
-import os, logging
+
+import logging
+import os
+
 from .models import ActionDecision
+
 try:
     import httpx
 except Exception:  # pragma: no cover
