@@ -1,0 +1,10 @@
+title: KAPE Execution - Suspicious Parent
+description: Detects execution of KAPE binaries with unusual parent processes.
+severity: high
+fields:
+  - process_name
+  - parent_process
+  - cmdline
+condition: |
+  process_name in ['kape.exe','gkape.exe'] and parent_process not in ['explorer.exe','cmd.exe','powershell.exe']
+action: alert

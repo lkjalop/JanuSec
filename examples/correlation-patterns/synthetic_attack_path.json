@@ -1,0 +1,13 @@
+{
+  "nodes": [
+    {"id": "host-001", "type": "host"},
+    {"id": "user-A", "type": "user"},
+    {"id": "process-X", "type": "process"},
+    {"id": "file-Y", "type": "file"}
+  ],
+  "edges": [
+    ["user-A","executed_on","host-001"],
+    ["process-X","spawned_by","user-A"],
+    ["process-X","dropped","file-Y"]
+  ]
+}

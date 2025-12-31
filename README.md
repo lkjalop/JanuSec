@@ -1,3 +1,29 @@
+# JanuSec (Public Project Showcase)
+
+This repository contains public, sanitized documentation and example artifacts for JanuSec — an AI-powered XDR triage platform. The goal of this repo is to demonstrate architecture, design decisions, and reproducible examples without exposing proprietary detection logic or customer data.
+
+See `docs/` for architecture and deployment details, `examples/` for synthetic detection rule templates and correlation patterns, and `tools/` for a synthetic event generator used in demos and benchmarks.
+
+For maintainers: keep private IP, real rules, and production telemetry out of this repository.
+
+## Quickstart
+
+Generate 10 synthetic events for demos:
+
+```bash
+python tools/data-ingestion-simulator/generate_events.py --count 10
+```
+
+## Structure
+
+- docs/: Architecture & deployment guides
+- examples/: Sanitized rule templates and sample configs
+- tools/: Synthetic data and benchmark scripts
+- images/: Diagrams
+- whitepapers/: Executive & technical briefs
+
+## License
+See LICENSE
 # JanuSec Adaptive Threat Decision Platform
 
 > Version: **0.9.0-pre (Pre-Production Validation Update – 2025-09-22)**  
@@ -1232,6 +1258,115 @@ Repository rebranded to **JanuSec** on 2025-09-21. Legacy identifiers still acce
 See `BRANDING_CHANGE.md` for migration guidance & compatibility notes.
 
 **Built with pragmatic engineering principles – reduce noise, preserve signal, stay adaptive.**
+
+## ASCII Architecture & Userflows (Public, Sanitized)
+
+Below are ASCII diagrams and step-by-step userflows for three core interactions: the Pipeline flow, HopGraph attack reconstruction, and Manual Log Analysis. These are high-level, non-proprietary, and safe for public distribution.
+
+1) Pipeline Userflow (Ingress → Triage → Decision)
+
+```
+    +--------------------+
+    |   External Feeds   |  <-- Cloud CSPM / EDR / Network / Mail / SBOM
+    +---------+----------+
+        |
+        v
+    +--------------------+
+    |     Ingestor       |  (validation, dedupe, custody hash)
+    +---------+----------+
+        |
+        v
+    +--------------------+
+    |  Orchestrator /    |  (lane routing, parallel lanes, module registry)
+    |  Pipeline Runner   |
+    +---------+----------+
+        |
+      +-------------------+-------------------+
+      |                   |                   |
+      v                   v                   v
+  Lightweight         Enrichment          Heavy Stages
+  (baseline/regex)  (intel/identity/sbom) (e.g., binary_payload, beacon, egress)
+      |                   |                   |
+      +---------+---------+---------+---------+
+        |
+        v
+    +--------------------+
+    |  Correlation (Hop) |  (HopGraph joins, temporal windows, PMI co-occurrence)
+    +---------+----------+
+        |
+        v
+    +--------------------+
+    |  Composer / Scorer |  (factor fusion, calibration, persona routing)
+    +---------+----------+
+        |
+      +-------------+--------------+
+      |                            |
+      v                            v
+   Decision Store (DB)           Analyst UI / API (T1/T2 reports, SSE)
+   (persisted custody)           (playbook suggestions, evidence cards)
+```
+
+Pipeline notes (public):
+- Ingest performs basic validation and produces a custody chain hash at each stage.
+- Lightweight stages always run; heavy stages are gated by configurable confidence thresholds to save compute.
+- Enrichment layers add context (geo, sbom, threat intel) and are optional fallbacks.
+- Correlation joins partial evidence across domains into a HopGraph for attack reconstruction and scoring.
+
+2) HopGraph Attack Reconstruction Userflow
+
+```
+  Analyst triggers investigation -> select root entity (e.g., host-123 or event-evt-999)
+    |
+    v
+  Load session -> Build local HopGraph view (N hops) using persisted edges/nodes
+    |
+    v
+  Visualize graph: nodes (host,user,process,file,ip,domain) and edges (executed_on,connected_to,downloaded)
+    |
+    v
+  Automated path-finding: find high-confidence paths from initial access -> lateral movement -> exfil
+    |
+    v
+  Emit a walkthrough report: timeline of events, key factors per hop, recommended playbook steps
+    |
+    v
+  Analyst accepts/annotates: feedback stored to factor feedback table → future weight updates
+```
+
+HopGraph notes (public):
+- The public repo includes a sanitized `examples/correlation-patterns/` file showing synthetic nodes/edges.
+- Reconstruction is follow-the-evidence: HopGraph is a join surface, not a deterministic oracle — analysts review suggested chains.
+- Explainability: each edge and node includes provenance (source feed, timestamp, confidence delta) so the chain can be audited.
+
+3) Manual Log Analysis Userflow (Analyst-driven)
+
+```
+  Upload / Paste Logs -> CSV/Excel Analyzer (header auto-detect)
+    |
+    v
+  Field mapping UI -> map sheet headers to canonical fields (user, host, ip, process, ts)
+    |
+    v
+  Run local correlation preview -> show matching HopGraph candidates & suggested joins
+    |
+    v
+  Generate evidence card -> include extracted artefacts, suggested factors, and recommended next steps
+    |
+    v
+  Export to incident (create incident + attach artifacts) or re-ingest into pipeline for automated correlation
+```
+
+Manual Log Analysis notes:
+- The analyzer supports client-side parsing; if dependencies are missing it falls back to server-side parsing.
+- Example configs and a synthetic CSV are included under `examples/` to reproduce the flow without real data.
+
+Security & Privacy reminder
+- Do not upload real customer logs or PII to public demos. Use the included synthetic generators and examples to create representative datasets.
+
+---
+
+End of public architecture & userflows.
+
 ## Canonical Frontend & API (for Copilot/Claude)
 
 - React source lives in `frontend/react`; build output is `frontend/react/dist`.

@@ -1,0 +1,10 @@
+title: Rare Token/Login Pattern
+description: Flags logins using a token or credential format that is rare within the organization.
+severity: medium
+fields:
+  - user
+  - token_type
+  - historical_frequency
+condition: |
+  historical_frequency < 0.01 and token_type in ['api_key','service_token']
+action: investigate

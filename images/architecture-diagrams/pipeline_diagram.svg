@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="200">
+  <rect x="10" y="10" width="780" height="180" fill="#1f2937" rx="8"/>
+  <text x="30" y="40" fill="#ffffff" font-size="16">JanuSec Pipeline (Sanitized Diagram)</text>
+  <text x="30" y="70" fill="#9ca3af" font-size="12">Ingest → Enrich → Correlate (HopGraph) → Triage (T1/T2)</text>
+</svg>
