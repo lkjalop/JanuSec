@@ -154,3 +154,62 @@ Closing note
 ------------
 
 This public deep dive is intended to provide reviewers and potential partners with a clear architectural overview and reproducible demos while protecting sensitive detection content. For private technical collaborations, contact the maintainers and we can arrange an NDA and deeper technical exchanges.
+
+Appendix A — Example sanitized factor schema
+-------------------------------------------
+
+The following is an illustrative, sanitized example of a factor object attached to an event (fields shortened for public release):
+
+```
+{
+	"factor_id": "rare_token_001",
+	"stage": "rare_token",
+	"value": 0.87,
+	"description": "Login token rarely seen in historical data",
+	"provenance": {
+		"source_event_id": "evt-12345",
+		"timestamp": "2025-12-26T14:32:17Z",
+		"inputs": ["user","token_type","historical_frequency"]
+	}
+}
+```
+
+Appendix B — Sample sanitized HopGraph JSON snippet
+--------------------------------------------------
+
+This synthetic snippet shows how nodes and edges might be represented for visualization or API consumption.
+
+```
+{
+	"nodes": [
+		{"id":"host-001","type":"host","meta":{"os":"linux"}},
+		{"id":"user-A","type":"user","meta":{}},
+		{"id":"process-4523","type":"process","meta":{"cmd":"/usr/bin/bash -c ..."}}
+	],
+	"edges": [
+		{"src":"user-A","type":"executed_on","dst":"host-001","ts":"2025-12-26T14:31:50Z"},
+		{"src":"process-4523","type":"spawned_by","dst":"user-A","ts":"2025-12-26T14:32:10Z"}
+	]
+}
+```
+
+Appendix C — Implementation checklist for production readiness
+-----------------------------------------------------------
+
+- Confirm connector resilience (retries, DLQ) for each cloud/EDR connector
+- Enable Prometheus metrics in production; deploy Grafana dashboards
+- Harden storage and evidence access; implement tenant-based quotas and legal-hold APIs
+- Add EDR snapshot orchestration under strict RBAC and consent rules
+
+References
+----------
+
+- Public research on graph-based attack reconstruction: [link placeholder]
+- MITRE ATT&CK: https://attack.mitre.org/
+- EU AI Act / GDPR requirements (public guidance): [link placeholder]
+
+Acknowledgements
+----------------
+
+This public document was prepared by the JanuSec engineering and product team. For private follow-ups, please reach out to the repository maintainers.
+
