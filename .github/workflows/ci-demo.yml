@@ -1,0 +1,25 @@
+name: CI - Demo Validation
+
+on:
+  pull_request:
+    branches: [ main, master ]
+  push:
+    branches: [ public-readme-update ]
+
+jobs:
+  demo-run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install --no-deps -r requirements.txt || true
+      - name: Run demo generator and matcher
+        run: |
+          python tools/data-ingestion-simulator/generate_events.py --count 50 > events.jsonl
+          python tools/data-ingestion-simulator/demo_matcher.py < events.jsonl
