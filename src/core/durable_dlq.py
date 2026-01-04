@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 
 SQS_URL = os.getenv('DLQ_SQS_URL')
 S3_BUCKET = os.getenv('DLQ_S3_BUCKET')
+DLQ_S3_RETENTION_DAYS = os.getenv('DLQ_S3_RETENTION_DAYS')
 DLQ_ARCHIVE_ON_SUCCESS = os.getenv('DLQ_ARCHIVE_ON_SUCCESS', '0') in ('1', 'true', 'True')
 DLQ_ARCHIVE_PREFIX = os.getenv('DLQ_ARCHIVE_PREFIX', 'archive/')
 
@@ -67,6 +68,14 @@ def enqueue(payload: Dict[str, Any]) -> None:
             body = json.dumps(payload, default=str)
             key = f"dlq/{int(__import__('time').time())}-{hashlib.sha256(body.encode('utf-8')).hexdigest()}.json"
             put_kwargs = {'Bucket': S3_BUCKET, 'Key': key, 'Body': body.encode('utf-8')}
+            # Optionally tag S3 object for retention TTL, terraform lifecycle rules can filter by tag
+            retention_days = DLQ_S3_RETENTION_DAYS or os.getenv('DLQ_ARCHIVE_RETENTION_DAYS')
+            if retention_days:
+                try:
+                    int_days = int(retention_days)
+                    put_kwargs['Tagging'] = f"retention_days={int_days}"
+                except Exception:
+                    pass
             # Optional server-side encryption via KMS
             kms_key = os.getenv('DLQ_S3_SSE_KMS_KEY')
             if kms_key:
@@ -232,6 +241,22 @@ def drain_s3(limit: int = 100) -> List[Dict[str, Any]]:
     except Exception:
         logger.exception('Failed to list DLQ S3 objects')
     return out
+
+
+def set_retention_tag_for_key(key: str, days: int) -> bool:
+    """Set a retention_days tag on an existing S3 object in the DLQ bucket.
+
+    Returns True on success, False otherwise. This is useful for programmatic TTL/retention updates.
+    """
+    if not (_has_aws and S3_BUCKET):
+        return False
+    try:
+        s3 = boto3.client('s3')
+        s3.put_object_tagging(Bucket=S3_BUCKET, Key=key, Tagging={'TagSet': [{'Key': 'retention_days', 'Value': str(int(days))}]})
+        return True
+    except Exception:
+        logger.exception('Failed to set retention tag on DLQ S3 object')
+        return False
 
 
 def file_drain(limit: int = 100) -> List[Dict[str, Any]]:
