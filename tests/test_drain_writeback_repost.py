@@ -7,9 +7,14 @@ def test_attempt_repost_success(monkeypatch, tmp_path):
     class FakeResp:
         def read(self):
             return b'ok'
+    class FakeCtx:
+        def __enter__(self):
+            return FakeResp()
+        def __exit__(self, exc_type, exc, tb):
+            return False
 
     def fake_urlopen(req, timeout=10):
-        return FakeResp()
+        return FakeCtx()
 
     monkeypatch.setattr('urllib.request.urlopen', fake_urlopen)
     res = drain_writeback_dlq.attempt_repost(item)
