@@ -44,3 +44,22 @@ jobs:
       - name: Run Python unit tests
         run: |
           python -m pytest -q tests/test_ebpf_correlation.py tests/test_falco_adapter.py
+  integration-moto:
+    runs-on: ubuntu-latest
+    needs: validate
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - name: Install test deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt || true
+          pip install moto boto3 pytest
+      - name: Run moto-backed integration tests
+        env:
+          AWS_REGION: us-east-1
+        run: |
+          python -m pytest -q tests/test_durable_dlq.py tests/test_durable_dlq_moto.py tests/test_durable_dlq_integration.py tests/test_drain_writeback_repost.py
