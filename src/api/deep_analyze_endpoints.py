@@ -6,8 +6,15 @@ import asyncio
 import json
 import os
 import logging
+import sys
 from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import JSONResponse, Response
+
+try:
+    if __name__ in sys.modules and 'api.deep_analyze_endpoints' not in sys.modules:
+        sys.modules['api.deep_analyze_endpoints'] = sys.modules[__name__]
+except Exception:
+    pass
 
 from src.api.metrics_init import ensure_metrics, _safe_hist, _safe_counter, _safe_gauge
 _METRICS_INITIALIZED = False
@@ -76,7 +83,7 @@ def _get_llm_client():
         _LLM_CLIENT = None
     return _LLM_CLIENT
 from src.reporting.prompt_templates import PERSONA_TEMPLATES as CENTRAL_PERSONA_TEMPLATES, build_persona_prompt
-from src.reporting.llm_helper import cached_generate as cached_llm_generate
+from src.reporting import llm_helper
 from src.reporting.persona_parser import parse_persona_text, validate_parsed_persona
 from src.reporting.feedback_capture import persist_feedback
 from src.analysis.cost_tracker import EXTERNAL_TRACKER, LOCAL_TRACKER
@@ -126,6 +133,27 @@ csv_router = APIRouter(prefix='/api/v1')
 REPORT_STORE: dict[str, dict] = {}
 PARENT_CHILD_INDEX: dict[str, list[str]] = {}
 logger = logging.getLogger(__name__)
+
+# Simple in-memory SSE broadcaster per-assessment
+_SSE_BROADCASTERS: dict[str, list] = {}
+
+def publish_llm_event(assessment_id: str, event: dict):
+    """Publish an event dict to any connected SSE listeners for assessment_id.
+    Listeners are simple async generators that will be fed events.
+    """
+    try:
+        listeners = _SSE_BROADCASTERS.get(assessment_id) or []
+        for q in list(listeners):
+            try:
+                q.append(event)
+            except Exception:
+                try:
+                    listeners.remove(q)
+                except Exception:
+                    pass
+        _SSE_BROADCASTERS[assessment_id] = listeners
+    except Exception:
+        pass
 
 
 class StageBase:
@@ -187,6 +215,61 @@ class LLMSummaryStage(StageBase):
                 'elapsed_ms': (time.time() - start) * 1000.0,
                 'result': {'llm_summary': {'text': 'Auto-LLM queued; Tier 1 summaries will stream in as rows are processed.'}},
             }
+        # Enrich context with mitre tags and playbook guidance when helpful
+        try:
+            # map_to_mitre is available from imports above; derive tags from rows/factors
+            mitre_tags = []
+            try:
+                mitre_tags = map_to_mitre(context.get('rows') or [], context.get('factors') or []) or []
+            except Exception:
+                # fallback: look for mitre_tags in context
+                mitre_tags = context.get('mitre_tags') or []
+            context['mitre_tags'] = mitre_tags
+            # include artifact context for command templating
+            artifact_context = context.get('artifact_context') or {}
+            # decide whether to include missing logs/playbook guidance
+            include_playbook = False
+            try:
+                include_playbook = _should_include_missing_logs(context.get('rows', [{}])[0] if isinstance(context.get('rows'), list) and context.get('rows') else {}, context.get('assessment') or {})
+            except Exception:
+                include_playbook = False
+            if include_playbook:
+                try:
+                    pb_md = build_collection_playbook(context.get('domain') or 'endpoint', mitre_tags or [], artifact_context or {})
+                    context['playbook_markdown'] = pb_md
+                except Exception:
+                    context['playbook_markdown'] = ''
+        except Exception:
+            pass
+        # Ensure mitre_tags and playbook guidance are available to the prompt
+        try:
+            # derive MITRE tags from signals if not already present
+            if not context.get('mitre_tags'):
+                try:
+                    rows = context.get('rows') or []
+                    # map_to_mitre expects rows/factors; use existing helper
+                    mapped = map_to_mitre({'rows': rows}) if callable(map_to_mitre) else None
+                    if isinstance(mapped, dict):
+                        context['mitre_tags'] = mapped.get('techniques') or []
+                except Exception:
+                    context['mitre_tags'] = context.get('mitre_tags') or []
+            # include artifact_context for templating commands
+            artifact_ctx = context.get('artifact_context') or {}
+            # Add playbook markdown when missing logs heuristic suggests it
+            try:
+                include_pb = False
+                if isinstance(context.get('rows'), list) and context.get('stage_status'):
+                    include_pb = _should_include_missing_logs(context.get('rows')[0] if context.get('rows') else {}, {'stage_status': context.get('stage_status')})
+                if include_pb and callable(build_collection_playbook):
+                    domain = context.get('domain') or 'endpoint'
+                    pb_md = build_collection_playbook(domain, context.get('mitre_tags') or [], artifact_ctx)
+                    context['playbook_markdown'] = pb_md
+                else:
+                    context['playbook_markdown'] = context.get('playbook_markdown') or ''
+            except Exception:
+                context['playbook_markdown'] = context.get('playbook_markdown') or ''
+        except Exception:
+            pass
         prompt = llm_prompts.compose_prompt(context)
         summary = {'text': 'LLM summary unavailable'}
         try:
@@ -246,15 +329,18 @@ async def _run_stage(stage: StageBase, ctx: dict) -> dict:
     t0 = time.time()
     try:
         res = await stage.run(ctx)
-    except Exception as e:
-        res = {'stage': stage.name, 'status': 'error', 'error': str(e), 'elapsed_ms': (time.time()-t0)*1000.0}
-    try:
-        _ensure_deep_metrics()
-        if csv_stage_latency is not None:
-            csv_stage_latency.labels(stage=stage.name).observe(res.get('elapsed_ms', 0.0))
-    except Exception:
-        pass
-    return res
+        return res
+    except Exception as exc:
+        try:
+            elapsed = (time.time() - t0) * 1000.0
+        except Exception:
+            elapsed = 0.0
+        # Best-effort metric increment and logging; avoid referencing outer-scope variables
+        try:
+            logger.exception('Stage %s failed: %s', getattr(stage, 'name', 'unknown'), exc)
+        except Exception:
+            pass
+        return {'stage': getattr(stage, 'name', 'unknown'), 'status': 'error', 'elapsed_ms': elapsed, 'result': {}, 'error': str(exc)}
 
 
 def _should_include_missing_logs(row: dict, assessment: dict) -> bool:
@@ -530,6 +616,7 @@ def _build_playbook_preview(row: dict | None, assessment: dict | None) -> dict |
         'dst_ip': row.get('dst_ip') or row.get('ip_dst'),
         'host': row.get('host') or row.get('hostname') or '',
         'user': row.get('user') or row.get('account') or '',
+        'factors': list(row.get('factors') or []),
     }
     tools = []
     try:
@@ -687,7 +774,7 @@ def _augment_llm_row(llm_row: dict, assessment: dict) -> dict:
                 status = entry.get('status') if isinstance(entry, dict) else None
                 if not txt and status in (None, 'pending'):
                     try:
-                        cache_resp = cached_llm_generate(persona=pk, incident=llm_row, temperature=0.6)
+                        cache_resp = llm_helper.cached_generate(persona=pk, incident=llm_row, temperature=0.6)
                         if isinstance(cache_resp, dict):
                             resp_text = cache_resp.get('response') or cache_resp.get('text') or str(cache_resp)
                         else:
@@ -1846,7 +1933,7 @@ async def generate_llm_summaries(request: Request):
     return JSONResponse({'assessment_id': assessment_id, 'rows': updated_rows, 'count': len(updated_rows), 'total_llm_rows': len(merged), 'aggregate_cost': round(total_cost,6)})
 
 
-@router.post('/generate_insight')
+@router.post('/generate_insight', operation_id='assessments_generate_insight')
 async def generate_insight(request: Request):
     """Generate on-demand investigation insights for Deep Dive UI."""
     try:
@@ -2097,7 +2184,7 @@ async def generate_persona(request: Request):
                 _overrides = None
         # Attempt cached generation first
         try:
-            cache_resp = cached_llm_generate(persona=persona, incident=target, temperature=0.6)
+            cache_resp = llm_helper.cached_generate(persona=persona, incident=target, temperature=0.6)
             if isinstance(cache_resp, dict):
                 text = cache_resp.get('response') or cache_resp.get('text') or str(cache_resp)
             else:
@@ -2501,6 +2588,11 @@ def _build_lite_assessment(payload: dict, persist: bool = True) -> dict:
         }
         for idx, r in enumerate(rows)
     ]
+    # Provide a canonical `processed` count for compatibility with callers/tests
+    try:
+        fallback['processed'] = len(fallback.get('results') or [])
+    except Exception:
+        fallback['processed'] = int(fallback.get('rows_processed') or fallback.get('accepted_rows') or 0)
     mappings = {}
     try:
         mappings['mitre'] = map_to_mitre(fallback['canonical']) or ['lite_mode']
@@ -2554,8 +2646,8 @@ def _build_lite_assessment(payload: dict, persist: bool = True) -> dict:
     return fallback
 
 
-@router.post('/deep_analyze')
-@csv_router.post('/deep_analyze')
+@router.post('/deep_analyze', operation_id='assessments_deep_analyze')
+@csv_router.post('/deep_analyze', operation_id='deep_analyze')
 async def deep_analyze(request: Request):
     try:
         payload = await request.json()
@@ -2571,8 +2663,8 @@ async def deep_analyze(request: Request):
         return JSONResponse(fallback)
 
 
-@router.post('/csv/deep_analyze')
-@csv_router.post('/csv/deep_analyze')
+@router.post('/csv/deep_analyze', operation_id='assessments_csv_deep_analyze')
+@csv_router.post('/csv/deep_analyze', operation_id='csv_deep_analyze_alias')
 async def csv_deep_analyze(request: Request):
     try:
         payload = await request.json()
@@ -3049,6 +3141,7 @@ def _build_insight_payload(
         'dst_ip': row.get('dst_ip') or row.get('ip_dst'),
         'host': row.get('host') or row.get('hostname') or '',
         'user': row.get('user') or row.get('account') or '',
+        'factors': list(row.get('factors') or []),
     }
     dread_score = _extract_dread_score(row)
     risk_level = row.get('risk_level') or {}
@@ -3967,14 +4060,16 @@ def _start_llm_background_worker(app, interval_seconds: int = 2):
 
                     # Process up to `batch_size` queue items per assessment per loop
                     processed = 0
-                    while queue and processed < batch_size:
+                    # Batch up to `batch_size` prompts for this assessment
+                    batch_ids = []
+                    prompts = []
+                    row_map = {}
+                    while queue and len(batch_ids) < batch_size:
                         try:
                             row_idx = queue.pop(0)
                         except Exception:
-                            row_idx = None
-                        if row_idx is None:
                             break
-                        # find the row object
+                        # locate row
                         target = None
                         for r in llm_rows:
                             try:
@@ -3987,16 +4082,12 @@ def _start_llm_background_worker(app, interval_seconds: int = 2):
                                     break
                         if target is None:
                             modified = True
-                            processed += 1
                             continue
-
-                        # skip if already succeeded
+                        # Skip unsuitable rows
                         if target.get('_llm_status') == 'succeeded':
                             target['llm_skipped_reason'] = target.get('llm_skipped_reason') or 'already_succeeded'
                             modified = True
-                            processed += 1
                             continue
-
                         try:
                             _ensure_triage_on_row(target, assess)
                         except Exception:
@@ -4009,52 +4100,116 @@ def _start_llm_background_worker(app, interval_seconds: int = 2):
                             target['_llm_status'] = 'skipped'
                             target['llm_skipped_reason'] = f'triage_below_threshold:{tri:.3f}'
                             modified = True
-                            processed += 1
                             continue
 
-                        # mark processing and attempt generation
+                        # prepare prompt and mark as processing
                         target['_llm_status'] = 'processing'
                         target['_llm_worker_started'] = int(time.time())
-                        modified = True
                         attempt = int(target.get('_llm_attempts') or 0) + 1
                         target['_llm_attempts'] = attempt
-                        backoff = min(30, (2 ** max(0, attempt - 1)))
+                        row_prompt = llm_prompts.compose_prompt({'rows': [target], 'options': assess.get('options') or {}})
+                        batch_ids.append(target.get('row_index'))
+                        prompts.append(row_prompt)
+                        row_map[target.get('row_index')] = {'row': target, 'attempt': attempt}
+                        modified = True
+                    # If we have a batch, call generate_batch when possible
+                    if prompts:
                         try:
-                            prompt = llm_prompts.compose_prompt({'rows': [target], 'options': assess.get('options') or {}})
                             _overrides = assess.get('options', {}).get('overrides') or (assess.get('overrides') if isinstance(assess.get('overrides'), dict) else None)
                             if not _overrides and isinstance(assess.get('_request_overrides'), dict):
                                 _overrides = assess.get('_request_overrides')
                             if not _overrides:
                                 _overrides = (REPORT_STORE.get(aid) or {}).get('options', {}).get('overrides') or (REPORT_STORE.get(aid) or {}).get('overrides')
-                            if _overrides:
-                                resp = LLM_CLIENT.generate(prompt, max_tokens=512, tenant_id=(assess.get('org') or None), overrides=_overrides)
+                            # Use batch API if available, falling back to serial generate
+                            if hasattr(LLM_CLIENT, 'generate_batch'):
+                                responses = LLM_CLIENT.generate_batch(prompts, max_tokens=512, tenant_id=(assess.get('org') or None), overrides=_overrides)
                             else:
-                                resp = LLM_CLIENT.generate(prompt, max_tokens=512, tenant_id=(assess.get('org') or None))
-                            text = ''
-                            meta = {}
-                            if isinstance(resp, dict):
-                                text = resp.get('text') or (resp.get('meta') or {}).get('text') or ''
-                                meta = resp.get('meta') or {}
-                            else:
-                                text = str(resp)
-                            target['llm_summary'] = text
-                            target['llm_meta'] = meta
-                            _augment_llm_row(target, assess)
-                            target['_llm_status'] = 'succeeded'
-                            target['_llm_timestamp'] = int(time.time())
-                            modified = True
+                                responses = []
+                                for p in prompts:
+                                    try:
+                                        if _overrides:
+                                            responses.append(LLM_CLIENT.generate(p, max_tokens=512, tenant_id=(assess.get('org') or None), overrides=_overrides))
+                                        else:
+                                            responses.append(LLM_CLIENT.generate(p, max_tokens=512, tenant_id=(assess.get('org') or None)))
+                                    except Exception as gen_exc:
+                                        responses.append({'error': str(gen_exc)})
+                            # map responses back to rows in order
+                            for idx, rid in enumerate(batch_ids):
+                                target_info = row_map.get(rid)
+                                if not target_info:
+                                    continue
+                                target = target_info['row']
+                                attempt = target_info['attempt']
+                                resp = responses[idx] if idx < len(responses) else {'error': 'no_response'}
+                                if isinstance(resp, dict) and resp.get('error'):
+                                    # treat as failure
+                                    tb = assess.setdefault('telemetry', {})
+                                    fail_count = int(tb.get('llm_provider_failures', 0)) + 1
+                                    tb['llm_provider_failures'] = fail_count
+                                    logger.warning('LLM generation failed for assessment %s row %s attempt %s: %s', aid, rid, attempt, resp.get('error'))
+                                    if fail_count >= int(os.getenv('LLM_PROVIDER_FAIL_THRESHOLD', '3')):
+                                        tb['llm_provider_down'] = True
+                                        target['llm_summary'] = 'Fallback summary: LLM provider unavailable; use deterministic heuristics.'
+                                        target['llm_meta'] = {'fallback': True, 'error': resp.get('error')}
+                                        target['_llm_status'] = 'succeeded'
+                                        target['_llm_timestamp'] = int(time.time())
+                                        modified = True
+                                        continue
+                                    else:
+                                        # schedule retry
+                                        backoff = min(30, (2 ** max(0, attempt - 1)))
+                                        target['_llm_status'] = 'queued'
+                                        target['_llm_next_attempt_at'] = int(time.time()) + backoff
+                                        queue.append(rid)
+                                        modified = True
+                                        continue
+                                try:
+                                    text = resp.get('text') or (resp.get('meta') or {}).get('text') or '' if isinstance(resp, dict) else str(resp)
+                                    meta = resp.get('meta') or {} if isinstance(resp, dict) else {}
+                                    target['llm_summary'] = text
+                                    target['llm_meta'] = meta
+                                    _augment_llm_row(target, assess)
+                                    target['_llm_status'] = 'succeeded'
+                                    target['_llm_timestamp'] = int(time.time())
+                                    modified = True
+                                    # publish SSE event for UI listeners
+                                    try:
+                                        publish_llm_event(aid, {'type': 'row_succeeded', 'row_index': rid, 'summary': text, 'meta': meta})
+                                    except Exception:
+                                        pass
+                                except Exception as e:
+                                    if attempt >= int(os.getenv('LLM_MAX_ATTEMPTS', '3')):
+                                        target['_llm_status'] = 'failed'
+                                        target['_llm_error'] = str(e)
+                                        modified = True
+                                    else:
+                                        backoff = min(30, (2 ** max(0, attempt - 1)))
+                                        target['_llm_status'] = 'queued'
+                                        target['_llm_next_attempt_at'] = int(time.time()) + backoff
+                                        queue.append(rid)
+                                        modified = True
                         except Exception as e:
-                            if attempt >= int(os.getenv('LLM_MAX_ATTEMPTS', '3')):
-                                target['_llm_status'] = 'failed'
-                                target['_llm_error'] = str(e)
-                                modified = True
-                            else:
-                                target['_llm_status'] = 'queued'
-                                target['_llm_next_attempt_at'] = int(time.time()) + backoff
-                                # re-enqueue for later attempts
-                                queue.append(row_idx)
-                                modified = True
-                        processed += 1
+                            # If batch call failed entirely, re-enqueue items with backoff
+                            logger.exception('Batch LLM generation failed for assessment %s: %s', aid, e)
+                            for rid in batch_ids:
+                                try:
+                                    # increment attempt on each and requeue
+                                    target = next((r for r in llm_rows if r.get('row_index') == rid), None)
+                                    if not target:
+                                        continue
+                                    attempt = int(target.get('_llm_attempts') or 0)
+                                    if attempt >= int(os.getenv('LLM_MAX_ATTEMPTS', '3')):
+                                        target['_llm_status'] = 'failed'
+                                        target['_llm_error'] = str(e)
+                                    else:
+                                        backoff = min(30, (2 ** max(0, attempt - 1)))
+                                        target['_llm_status'] = 'queued'
+                                        target['_llm_next_attempt_at'] = int(time.time()) + backoff
+                                        queue.append(rid)
+                                    modified = True
+                                except Exception:
+                                    continue
+                    processed += len(batch_ids)
 
                     # keep queue bounded
                     try:
@@ -4116,6 +4271,45 @@ async def deep_analyze_stream(request: Request):
             yield f"event: stage\ndata: {json.dumps({'stage': s, 'status': 'done'})}\n\n"
             await asyncio.sleep(0.01)
         yield f"event: done\ndata: {json.dumps({'status':'done'})}\n\n"
+
+    return Response(gen(), media_type='text/event-stream')
+
+
+@router.get('/{assessment_id}/llm/stream')
+async def llm_event_stream(request: Request, assessment_id: str):
+    async def gen():
+        # Create a lightweight list to act as a queue for this connection
+        q: list = []
+        listeners = _SSE_BROADCASTERS.get(assessment_id) or []
+        listeners.append(q)
+        _SSE_BROADCASTERS[assessment_id] = listeners
+        try:
+            # Send initial connected event
+            yield f"event: connected\ndata: {json.dumps({'status':'connected','assessment_id':assessment_id})}\n\n"
+            # Loop until client disconnects
+            while True:
+                if await request.is_disconnected():
+                    break
+                # drain queued events
+                while q:
+                    ev = q.pop(0)
+                    try:
+                        yield f"event: {ev.get('type','message')}\ndata: {json.dumps(ev)}\n\n"
+                    except Exception:
+                        try:
+                            yield f"event: message\ndata: {json.dumps({'error':'event_serialize_error'})}\n\n"
+                        except Exception:
+                            pass
+                await asyncio.sleep(0.2)
+        finally:
+            # remove listener
+            try:
+                listeners = _SSE_BROADCASTERS.get(assessment_id) or []
+                if q in listeners:
+                    listeners.remove(q)
+                _SSE_BROADCASTERS[assessment_id] = listeners
+            except Exception:
+                pass
 
     return Response(gen(), media_type='text/event-stream')
 
