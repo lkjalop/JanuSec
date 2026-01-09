@@ -2,26 +2,31 @@ name: LLM Row Regression
 
 on:
   push:
-    branches:
-      - '**'
+    branches: [ main, 'fix/**' ]
   pull_request:
-    branches:
-      - '**'
+    branches: [ main ]
 
 jobs:
   test-llm-row:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [3.10, 3.11]
     steps:
       - uses: actions/checkout@v4
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.11'
+          python-version: ${{ matrix.python-version }}
+      - name: Show Python
+        run: python --version
       - name: Cache pip
         uses: actions/cache@v4
         with:
           path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          key: ${{ runner.os }}-pip-${{ matrix.python-version }}-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-${{ matrix.python-version }}-
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -33,7 +38,10 @@ jobs:
           path: |
             .pytest_cache
             .venv
-          key: ${{ runner.os }}-pytest-${{ github.sha }}
-      - name: Run focused pytest for LLM regression and unit tests
+          key: ${{ runner.os }}-pytest-${{ matrix.python-version }}-${{ hashFiles('**/pytest.ini') }}
+          restore-keys: |
+            ${{ runner.os }}-pytest-${{ matrix.python-version }}-
+      - name: Run focused + deep_analyze tests
         run: |
-          python -m pytest -q tests/test_llm_row_handling_regression.py tests/test_augment_llm_row_unit.py
+          set -e
+          python -m pytest -q tests/test_llm_row_handling_regression.py tests/test_augment_llm_row_unit.py tests/test_deep_analyze* -q
