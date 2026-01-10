@@ -1,0 +1,22 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: llm-prewarm
+spec:
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+      - name: prewarm
+        image: python:3.11-slim
+        command: ["python","/workdir/scripts/prewarm_llm.py","--host","http://my-service:8080","--tokens","8"]
+        env:
+        - name: API_KEY
+          value: "devkey123"
+        volumeMounts:
+        - name: app
+          mountPath: /workdir
+      volumes:
+      - name: app
+        hostPath:
+          path: /opt/app

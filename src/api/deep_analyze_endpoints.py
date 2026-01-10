@@ -1880,7 +1880,10 @@ async def generate_llm_summaries(request: Request):
         pending = prioritize_rows_for_llm(original_rows, processed_indexes, queue_indexes, limit)
 
     if not pending:
-        return JSONResponse({'assessment_id': assessment_id, 'rows': [], 'count': 0, 'message': 'no_pending_rows'})
+        # Provide aggregate cost/count info even when there are no newly enqueued rows
+        merged_rows = assessment.get('llm_rows') or assessment.get('rows') or []
+        total_cost = sum((r.get('_llm_cost') or 0.0) for r in merged_rows)
+        return JSONResponse({'assessment_id': assessment_id, 'rows': [], 'count': 0, 'message': 'no_pending_rows', 'total_llm_rows': len(merged_rows), 'aggregate_cost': round(total_cost, 6)})
 
     updated_rows = []
     from src.analysis.auto_llm import build_llm_row  # local import to avoid circularities
