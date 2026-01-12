@@ -10,6 +10,12 @@
             }
         }
         .modal-overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.55); display: none; align-items: center; justify-content: center; z-index: 10000; }
+        #arc-admin-widget { position: fixed; right: 18px; bottom: 18px; width: 320px; background: var(--bg-elevated); border:1px solid var(--border); padding:12px; border-radius:8px; box-shadow: 0 6px 18px rgba(0,0,0,0.4); z-index:12000; }
+        #arc-admin-widget h4 { margin:0 0 8px 0; color:var(--text-primary); font-size:14px }
+        #arc-admin-widget label { display:block; font-size:12px; color:var(--text-muted); margin-top:6px }
+        #arc-admin-widget input, #arc-admin-widget select { width:100%; margin-top:6px; padding:6px; background:var(--bg-primary); border:1px solid var(--border); color:var(--text-primary); }
+        #arc-admin-widget .row { display:flex; gap:8px; margin-top:8px }
+        #arc-admin-widget .row button { flex:1 }
     </style>
     <script>
         // Small shared helpers that must be available early
@@ -45,9 +51,186 @@
     <script defer src="/static/js/parse_tabular.js"></script>
     <script defer src="/static/js/live_console.bundle.js"></script>
     <script defer src="/static/js/live_console_extra.js"></script>
+        <script defer src="/static/js/enrichment_admin.js"></script>
+        <script defer src="/static/js/crq_explain_card.js"></script>
+        <script defer src="/static/js/crq_label_ui.js"></script>
     <script defer src="/static/js/hopgraph_stream_overlay.js"></script>
-    <!-- Chart.js for lightweight right-rail charts (used by precision widget) -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <!-- ARC Admin Widget -->
+    <div id="arc-admin-widget" title="ARC Verification">
+        <h4>ARC Verification</h4>
+        <div id="arc-status" style="font-size:12px;color:var(--text-muted);">Loading...</div>
+        <label for="arc-mode">Mode</label>
+        <select id="arc-mode"><option value="off">off</option><option value="sample">sample</option><option value="on">on</option></select>
+        <label for="arc-sample">Sample Rate (0.0 - 1.0)</label>
+        <input id="arc-sample" type="number" step="0.01" min="0" max="1" />
+        <div class="row"><button class="btn" id="arc-refresh">Refresh</button><button class="btn btn-primary" id="arc-save">Save</button></div>
+    </div>
+    <!-- Remediation buttons for telemetry rows -->
+    <div style="position:fixed; right:18px; bottom:220px; width:320px; background:var(--bg-elevated); border:1px solid var(--border); padding:12px; border-radius:8px; box-shadow:0 6px 18px rgba(0,0,0,0.4); z-index:12000;">
+        <h4 style="margin:0 0 8px 0; font-size:14px; color:var(--text-primary)">Remediation</h4>
+        <div style="font-size:12px;color:var(--text-muted); margin-bottom:8px;">Select an incident row, then click Suggest or Execute (dry-run)</div>
+        <div style="display:flex; gap:8px;"><button class="btn" id="btnSuggestRemediation">Suggest remediation</button><button class="btn btn-danger" id="btnExecuteRemediation">Execute remediation (dry-run)</button></div>
+        <div id="remediation-result" style="margin-top:8px; font-size:12px; color:var(--text-secondary); max-height:180px; overflow:auto;"></div>
+    </div>
+    <script>
+    (function(){
+        function headers(){ try{ const key = localStorage.getItem('apiKey')||'devkey123'; const tenant = localStorage.getItem('tenantId'); const h = {'x-api-key': key}; if(tenant) h['x-tenant-id']=tenant; return h; }catch(e){ return {'x-api-key':'devkey123'} } }
+        async function postJson(path, body){
+            try{
+                const res = await fetch(path + '?kwargs=', {method:'POST', headers: Object.assign({'content-type':'application/json'}, headers()), body: JSON.stringify(body||{})});
+                const j = await res.json(); return j;
+            }catch(e){ return {error: String(e)} }
+        }
+        const resEl = document.getElementById('remediation-result');
+        document.getElementById('btnSuggestRemediation').addEventListener('click', async ()=>{
+            const sel = window.__selectedIncident || null;
+            const body = sel ? { items: sel } : { items: [] };
+            resEl.textContent = 'Requesting suggestions...';
+            const r = await postJson('/api/v1/telemetry/diagnose', body);
+            resEl.textContent = JSON.stringify(r, null, 2);
+        });
+        document.getElementById('btnExecuteRemediation').addEventListener('click', async ()=>{
+            resEl.textContent = 'Executing (dry-run)...';
+            const r = await postJson('/api/v1/telemetry/execute_remediation', { action: 'dry_run' });
+            resEl.textContent = JSON.stringify(r, null, 2);
+        });
+    })();
+    </script>
+    <script>
+        async function arcFetch(){
+            try{
+                const r = await fetch('/api/v1/admin/arc/config',{headers: authHeaders()});
+                if(!r.ok) throw new Error('fetch failed');
+                const j = await r.json();
+                document.getElementById('arc-mode').value = j.mode || 'sample';
+                document.getElementById('arc-sample').value = (typeof j.sample_rate!=='undefined')? j.sample_rate : 0.01;
+                document.getElementById('arc-status').textContent = 'Loaded';
+            }catch(e){
+                document.getElementById('arc-status').textContent = 'Error loading';
+            }
+        }
+        document.getElementById('arc-refresh').addEventListener('click', arcFetch);
+        document.getElementById('arc-save').addEventListener('click', async function(){
+            try{
+                const mode = document.getElementById('arc-mode').value;
+                const sample = parseFloat(document.getElementById('arc-sample').value) || 0.01;
+                const r = await fetch('/api/v1/admin/arc/config',{method:'POST', headers: Object.assign({'content-type':'application/json'}, authHeaders()), body: JSON.stringify({mode:mode, sample_rate: sample})});
+                if(!r.ok) throw new Error('save failed');
+                document.getElementById('arc-status').textContent = 'Saved';
+            }catch(e){
+                document.getElementById('arc-status').textContent = 'Error saving';
+            }
+        });
+        // Auto-load after a short delay so API key from localStorage can be set
+        setTimeout(arcFetch, 500);
+    </script>
+    <!-- ARC DLQ Inspector -->
+    <div id="arc-dlq-widget" style="position:fixed; right:18px; bottom:380px; width:420px; background:var(--bg-elevated); border:1px solid var(--border); padding:12px; border-radius:8px; box-shadow:0 6px 18px rgba(0,0,0,0.4); z-index:12000;">
+        <h4 style="margin:0 0 8px 0; font-size:14px; color:var(--text-primary)">ARC DLQ</h4>
+        <div id="arc-dlq-status" style="font-size:12px;color:var(--text-muted);">Idle</div>
+        <div style="margin-top:8px;"><button class="btn" id="arc-dlq-refresh">Refresh DLQ</button></div>
+        <div style="margin-top:8px; display:flex; gap:8px;">
+            <input id="arc-dlq-replay-reqid" placeholder="req_id to replay" style="flex:1; padding:6px; background:var(--bg-primary); border:1px solid var(--border); color:var(--text-primary);"/>
+            <button class="btn" id="arc-dlq-replay-reqid-btn">Replay</button>
+        </div>
+        <div id="arc-dlq-list" style="margin-top:8px; max-height:240px; overflow:auto; font-size:12px; color:var(--text-secondary);"></div>
+    </div>
+    <script>
+        async function arcDlqRefresh(){
+            try{
+                document.getElementById('arc-dlq-status').textContent = 'Loading...';
+                const r = await fetch('/api/v1/admin/arc/dlq',{headers: authHeaders()});
+                if(!r.ok) throw new Error('fetch failed');
+                const j = await r.json();
+                const list = document.getElementById('arc-dlq-list');
+                list.innerHTML = '';
+                (j.items||[]).forEach((it, idx)=>{
+                    const node = document.createElement('div');
+                    node.style.borderTop = '1px solid var(--border)';
+                    node.style.padding = '8px 6px';
+                    const meta = document.createElement('div'); meta.style.color = 'var(--text-muted)'; meta.textContent = (new Date((it.ts||0)*1000)).toLocaleString();
+                    const txt = document.createElement('pre'); txt.style.whiteSpace='pre-wrap'; txt.style.margin='6px 0'; txt.style.color='var(--text-secondary)'; txt.textContent = JSON.stringify(it.job || {}, null, 2);
+                    const btn = document.createElement('button'); btn.className='btn'; btn.textContent='Replay'; btn.onclick = async ()=>{
+                        try{
+                            btn.disabled = true; btn.textContent='Replaying...';
+                            const rr = await fetch('/api/v1/admin/arc/dlq/replay', {method:'POST', headers: Object.assign({'content-type':'application/json'}, authHeaders()), body: JSON.stringify({index: idx})});
+                            if(!rr.ok) throw new Error('replay failed');
+                            btn.textContent='Replayed';
+                            setTimeout(()=>arcDlqRefresh(), 800);
+                        }catch(e){ btn.textContent='Error'; setTimeout(()=>{btn.disabled=false; btn.textContent='Replay'}, 800); }
+                    };
+                    node.appendChild(meta); node.appendChild(txt); node.appendChild(btn);
+                    list.appendChild(node);
+                });
+                // delayed items
+                if((j.delayed||[]).length){
+                    const hdr = document.createElement('div'); hdr.style.marginTop='8px'; hdr.style.color='var(--text-muted)'; hdr.textContent='Delayed (next_run)';
+                    list.appendChild(hdr);
+                    (j.delayed||[]).forEach((it, di)=>{
+                        const el = document.createElement('div'); el.style.borderTop='1px dashed var(--border)'; el.style.padding='6px';
+                        const meta = document.createElement('div'); meta.style.color='var(--text-muted)'; meta.textContent = 'Next run: ' + (new Date((it.next_run||0)*1000)).toLocaleString();
+                        const txt = document.createElement('pre'); txt.style.whiteSpace='pre-wrap'; txt.style.margin='6px 0'; txt.style.color='var(--text-secondary)'; txt.textContent = JSON.stringify(it.job || {}, null, 2);
+                        const acc = document.createElement('button'); acc.className='btn'; acc.textContent='Accelerate'; acc.onclick = async ()=>{
+                            const b = acc; b.disabled=true; b.textContent='Working...';
+                            try{
+                                const rr = await fetch('/api/v1/admin/arc/dlq/accelerate',{method:'POST', headers: Object.assign({'content-type':'application/json'}, authHeaders()), body: JSON.stringify({index: di})});
+                                if(!rr.ok) throw new Error('accelerate failed');
+                                b.textContent='Done'; setTimeout(()=>{b.disabled=false; b.textContent='Accelerate'},800); arcDlqRefresh();
+                            }catch(e){ b.textContent='Error'; setTimeout(()=>{b.disabled=false; b.textContent='Accelerate'},800); }
+                        };
+                        el.appendChild(meta); el.appendChild(txt); el.appendChild(acc); list.appendChild(el);
+                    })
+                }
+                // audit history
+                if((j.audit||[]).length){
+                    const hdr2 = document.createElement('div'); hdr2.style.marginTop='8px'; hdr2.style.color='var(--text-muted)'; hdr2.textContent='Recent Replay Audit';
+                    list.appendChild(hdr2);
+                    (j.audit||[]).forEach(a=>{
+                        const ael = document.createElement('div'); ael.style.borderTop='1px dotted var(--border)'; ael.style.padding='6px';
+                        const m = document.createElement('div'); m.style.color='var(--text-muted)'; m.textContent = new Date((a.ts||0)*1000).toLocaleString() + ' actor:' + (a.actor||'unknown') + ' action:' + (a.action||'') + ' req:' + (a.req_id||'');
+                        ael.appendChild(m); list.appendChild(ael);
+                    })
+                }
+                // Bulk replay controls
+                const bulkBox = document.createElement('div'); bulkBox.style.marginTop='8px';
+                const dry = document.createElement('input'); dry.type='checkbox'; dry.id='arc-dlq-bulk-dry'; const dryLbl = document.createElement('label'); dryLbl.htmlFor='arc-dlq-bulk-dry'; dryLbl.textContent='Dry run'; dryLbl.style.color='var(--text-muted)';
+                const maxInp = document.createElement('input'); maxInp.type='number'; maxInp.value='10'; maxInp.style.width='60px'; maxInp.style.marginLeft='8px';
+                const runBtn = document.createElement('button'); runBtn.className='btn'; runBtn.textContent='Bulk Replay'; runBtn.onclick = async ()=>{
+                    try{
+                        runBtn.disabled=true; runBtn.textContent='Running...';
+                        const rr = await fetch('/api/v1/admin/arc/dlq/replay_bulk', {method:'POST', headers: Object.assign({'content-type':'application/json'}, authHeaders()), body: JSON.stringify({dry_run: dry.checked, max_items: parseInt(maxInp.value || '10')})});
+                        if(!rr.ok) throw new Error('bulk failed');
+                        const jr = await rr.json();
+                        runBtn.textContent = (jr.dry_run? ('Will replay: '+jr.will_replay) : ('Replayed: '+jr.replayed));
+                        setTimeout(()=>{runBtn.disabled=false; runBtn.textContent='Bulk Replay'}, 1200);
+                        arcDlqRefresh();
+                    }catch(e){ runBtn.textContent='Error'; setTimeout(()=>{runBtn.disabled=false; runBtn.textContent='Bulk Replay'},800); }
+                };
+                bulkBox.appendChild(dry); bulkBox.appendChild(dryLbl); bulkBox.appendChild(maxInp); bulkBox.appendChild(runBtn);
+                list.appendChild(bulkBox);
+                document.getElementById('arc-dlq-status').textContent = 'Loaded';
+            }catch(e){ document.getElementById('arc-dlq-status').textContent = 'Error'; }
+        }
+        document.getElementById('arc-dlq-refresh').addEventListener('click', arcDlqRefresh);
+        document.getElementById('arc-dlq-replay-reqid-btn').addEventListener('click', async function(){
+            const rid = document.getElementById('arc-dlq-replay-reqid').value.trim();
+            if(!rid) return;
+            const b = this; b.disabled = true; b.textContent='Replaying...';
+            try{
+                const rr = await fetch('/api/v1/admin/arc/dlq/replay_by_req', {method:'POST', headers: Object.assign({'content-type':'application/json'}, authHeaders()), body: JSON.stringify({req_id: rid})});
+                if(!rr.ok) throw new Error('replay failed');
+                b.textContent='Replayed'; setTimeout(()=>{b.disabled=false; b.textContent='Replay'}, 800); arcDlqRefresh();
+            }catch(e){ b.textContent='Error'; setTimeout(()=>{b.disabled=false; b.textContent='Replay'}, 800);}        
+        });
+        // Auto refresh every 60s
+        setInterval(arcDlqRefresh, 60000);
+    </script>
+    <!-- Chart stub for CSP-safe demos/tests (production can swap to a local Chart.js bundle) -->
+    <script>
+        window.Chart = window.Chart || function(){
+            return { data: { labels: [], datasets: [] }, update: function(){}, destroy: function(){} };
+        };
+    </script>
     <style>
         /* =============================================
            JANUSEC LIVE CONSOLE THEME TOKENS (Dark)
@@ -199,6 +382,9 @@
         .nav-item {
             padding: 10px 12px;
             border-radius: 6px;
+        }
+        .nav-item.kape-upload { display:flex; gap:8px; align-items:center }
+        .nav-item.kape-upload .nav-ico { width:18px; height:18px; background:var(--accent); border-radius:4px }
             cursor: pointer;
             transition: all 0.2s;
             display: flex;
@@ -779,11 +965,24 @@
                 <div class="nav-title">Detection & Response</div>
                 <div class="nav-item active" role="link" tabindex="0" data-view="dashboard" aria-current="page"><span class="nav-ico nav-ico--dashboard"></span>Dashboard</div>
                 <div class="nav-item" role="link" tabindex="0" data-view="artifacts"><span class="nav-ico nav-ico--artifacts"></span>Artifacts<span class="nav-badge" id="artifactsCount">342</span></div>
+                <a class="nav-item" href="https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml" target="_blank" rel="noopener">
+                    <span class="nav-ico nav-ico--metrics"></span>CI Workflow (api-stage-perf)
+                </a>
+                <div class="nav-item" style="flex-direction:column; align-items:flex-start; gap:6px;">
+                    <div style="font-size:11px; text-transform:uppercase; letter-spacing:0.4px; color:var(--text-muted);">Latest API Stage Artifacts</div>
+                    <div id="apiStageArtifactList" class="small" style="width:100%; min-height:38px; color:var(--text-muted);">Loading artifacts…</div>
+                </div>
                 <div class="nav-item" role="link" tabindex="0" data-view="threats"><span class="nav-ico nav-ico--threats"></span>Active Threats<span class="nav-badge" id="threatCount">2</span></div>
             </div>
             <div class="nav-section">
                 <div class="nav-title">Hunt & Analysis</div>
-                <a class="nav-item" href="/static/hunt_network.html"><span class="nav-ico nav-ico--network"></span>Network Hunt</a>
+                        <a class="nav-item" href="/static/hunt_network.html"><span class="nav-ico nav-ico--network"></span>Network Hunt</a>
+                        <div id="rightPanelActions">
+                            <div id="crqExplainCard" style="margin-top:12px;padding:10px;background:var(--panel-bg);border-radius:6px;">
+                                <h4 style="margin:0 0 8px 0;color:var(--muted)">Recent CRQ Explanations</h4>
+                                <div id="crqExplainList">Loading...</div>
+                            </div>
+                        </div>
                 <a class="nav-item" href="/static/hunt_endpoint.html"><span class="nav-ico nav-ico--endpoint"></span>Endpoint Hunt</a>
                 <a class="nav-item" href="/static/compliance.html"><span class="nav-ico nav-ico--compliance"></span>Compliance</a>
                 <a class="nav-item" href="/static/metrics.html"><span class="nav-ico nav-ico--metrics"></span>Metrics</a>
@@ -791,6 +990,8 @@
                 <a class="nav-item" href="/static/batch_events.html"><span class="nav-ico nav-ico--batch"></span>Batch Events</a>
                 <a class="nav-item" href="/static/reports.html"><span class="nav-ico nav-ico--reports"></span>Reports</a>
                 <a class="nav-item" href="/static/sandbox.html"><span class="nav-ico nav-ico--sandbox"></span>Sandbox</a>
+                <a class="nav-item" href="/static/kape_upload_live.html"><span class="nav-ico nav-ico--sandbox"></span>KAPE Upload</a>
+                <a class="nav-item" href="/static/kape_jobs.html"><span class="nav-ico nav-ico--sandbox"></span>KAPE Jobs</a>
                 <a class="nav-item" href="/api/v1/report/ingestion?format=html&include_model=true&include_scenarios=true" target="_blank"><span class="nav-ico nav-ico--mitre"></span>MITRE ATT&CK</a>
                 <a class="nav-item" href="/static/graph_explain.html"><span class="nav-ico nav-ico--graph"></span>Graph Explain</a>
                 <a class="nav-item" href="/static/hopgraph_ux.html"><span class="nav-ico nav-ico--graph"></span>HopGraph UX</a>
@@ -807,6 +1008,7 @@
                 <a class="nav-item" href="/static/iam_connectors.html"><span class="nav-ico nav-ico--cloud"></span>IAM Connectors</a>
                 <a class="nav-item" href="/static/csv_analyzer.html"><span class="nav-ico nav-ico--csv"></span>CSV Analyzer</a>
                 <a class="nav-item" href="/static/csv_multi_analyzer.html"><span class="nav-ico nav-ico--csv"></span>Multi-Source Correlator</a>
+                <a class="nav-item" href="/static/multi_log_investigator.html"><span class="nav-ico nav-ico--graph"></span>Multi-Log Investigator</a>
                 <a class="nav-item" href="/static/factors_top20.html" data-feature="factors-top20" title="Factors taxonomy & playbooks"><span class="nav-ico nav-ico--factors"></span>Factors Top-20</a>
                 <a class="nav-item" href="/static/replay.html"><span class="nav-ico nav-ico--timeline"></span>Scenario Replay</a>
                 <a class="nav-item" href="/static/coverage.html"><span class="nav-ico nav-ico--compliance"></span>Coverage Map</a>
@@ -849,6 +1051,51 @@
         <script>
             // Attempt to replace/hydrate sidebar with the reusable nav include when available
             (function(){ try{ fetch('/static/components/nav.html').then(r=>{ if(!r.ok) return; return r.text(); }).then(html=>{ if(!html) return; const parser = new DOMParser(); const doc = parser.parseFromString(html,'text/html'); const newNav = doc.body.firstElementChild; if(!newNav) return; const old = document.querySelector('.sidebar'); if(old && old.parentNode){ old.parentNode.replaceChild(newNav, old); } }).catch(e=>{ /* ignore */ }); }catch(e){} })();
+        </script>
+        <script>
+            // Test-helper: force right panel visible when viewport triggers mobile layout.
+            (function(){ try{
+                const flag = (localStorage.getItem('forceRightPanel') === '1') || /[?&]forceRightPanel=1\b/.test(location.search||'');
+                if(!flag) return;
+                const rp = document.getElementById('rightPanel');
+                if(rp){ rp.style.display='block'; rp.style.position='relative'; rp.style.zIndex='1'; }
+            }catch(_){ } })();
+        </script>
+        <script>
+            (function(){
+                const host = document.getElementById('apiStageArtifactList');
+                if(!host) return;
+                const esc = window._htmlEsc || (s => String(s ?? ''));
+                async function loadArtifacts(){
+                    try{
+                        const resp = await (window.safeFetch || fetch)('/api/v1/perf/api_stage/artifacts?limit=4&include_profiles=1', { headers: (window.authHeaders ? window.authHeaders() : {}) });
+                        const data = await resp.json().catch(() => ({}));
+                        if(!resp.ok){
+                            host.textContent = 'Artifact lookup failed';
+                            return;
+                        }
+                        const rows = Array.isArray(data.artifacts) ? data.artifacts : [];
+                        if(!rows.length){
+                            host.innerHTML = '<span style="opacity:.6;">No artifacts yet</span>';
+                            return;
+                        }
+                        host.innerHTML = rows.map(row => {
+                            const label = esc(row.pipeline_profile || row.tenant || 'tenant');
+                            const file = row.files && row.files.benchmark ? `<code>${esc(row.files.benchmark)}</code>` : '';
+                            const ts = row.ts ? new Date(row.ts * 1000).toISOString().replace('T',' ').replace('Z','Z') : '';
+                            const href = row.github_run_url || (row.pipeline_meta && row.pipeline_meta.artifact_base_url);
+                            const body = `${label}${ts ? ` · ${esc(ts)}` : ''}${file ? ` ${file}` : ''}`;
+                            if(href){
+                                return `<a href="${esc(href)}" target="_blank" rel="noopener" style="display:block;color:var(--accent);">${body}</a>`;
+                            }
+                            return `<div style="opacity:.8;">${body}</div>`;
+                        }).join('');
+                    } catch (err){
+                        host.textContent = 'Artifact lookup failed';
+                    }
+                }
+                loadArtifacts();
+            })();
         </script>
         <script>
         // Dynamic MITRE techniques and provenance from latest explained session
@@ -1289,6 +1536,62 @@
                     <span class="pill" id="chipRecon" title="Recon coverage">Recon: –</span>
                 </div>
             </div>
+            <!-- LLM Summary Panel -->
+            <div class="investigation-section" id="llmSummaryPanel" style="margin-top:12px;">
+                <div class="section-title">LLM Summary</div>
+                <div id="llmProviderChips" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:8px;">
+                    <span class="pill" id="llmProv">Provider: –</span>
+                    <span class="pill" id="llmReach">Reachable: –</span>
+                    <button class="pill" id="open-llm-settings" onclick="document.getElementById('llm-settings-modal').style.display='flex'" title="Open LLM settings">Settings</button>
+                </div>
+                <div class="sub-card" id="llmSummaryBody" style="min-height:56px; font-size:12px; line-height:1.4;">
+                    <span style="opacity:.6;">No LLM triage summary yet.</span>
+                </div>
+                <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;">
+                    <button class="btn" id="btnRunLlmTriage">Run Triage</button>
+                </div>
+                <div class="sub-card" id="llmFeedbackMetrics" style="margin-top:8px; font-size:12px; color:var(--text-muted);">
+                    <span style="opacity:.6;">No feedback metrics.</span>
+                </div>
+            </div>
+            <!-- Decision Trace Panel -->
+            <div class="investigation-section" id="decisionTracePanel" style="margin-top:12px;">
+                <div class="section-title">Decision Trace</div>
+                <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                    <input id="asOfInput" class="small-input" placeholder="as_of (optional ISO8601)" style="min-width:180px;" />
+                    <div style="display:flex; gap:6px; align-items:center;">
+                        <div class="select is-small">
+                            <select id="asof-presets" aria-label="as-of presets">
+                                <option value="">Presets</option>
+                                <option value="-5m">-5m</option>
+                                <option value="-15m">-15m</option>
+                                <option value="-30m">-30m</option>
+                                <option value="-1h">-1h</option>
+                            </select>
+                        </div>
+                        <input id="asof-datetime" type="datetime-local" class="small-input" style="width:200px" title="Pick precise date/time" />
+                    </div>
+                    <button class="btn" id="btnLoadTrace" title="Load explanation">Load</button>
+                    <a class="btn" id="btnOpenNarrative" href="#" target="_blank" title="Open narrative">Open Narrative</a>
+                </div>
+                <div id="asOfQuick" style="display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin-top:6px;">
+                    <button class="btn" id="btnAsOfNow" title="Use current time">Now</button>
+                    <button class="btn" id="btnAsOfMinus5" title="Now minus 5 minutes">-5m</button>
+                    <button class="btn" id="btnAsOfMinus15" title="Now minus 15 minutes">-15m</button>
+                    <button class="btn" id="btnAsOfMinus30" title="Now minus 30 minutes">-30m</button>
+                    <button class="btn" id="btnAsOfMinus60" title="Now minus 1 hour">-1h</button>
+                    <button class="btn" id="btnAsOfClear" title="Clear as_of">Clear</button>
+                </div>
+                <div id="decisionTraceAsOfChips" style="display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin-top:6px;">
+                    <span class="pill" id="chipAsOf" title="Point-in-time view">as-of: –</span>
+                    <span class="pill" id="chipAsOfHealth" title="Dependencies health at as-of">health: –</span>
+                </div>
+                <div class="sub-card" id="decisionTraceBody" style="margin-top:8px; font-size:12px; line-height:1.5; min-height:60px;">
+                    <span style="opacity:.6;">No decision trace loaded.</span>
+                </div>
+                <div class="sub-card" id="decisionTraceFactors" style="margin-top:8px; font-size:12px; color:var(--text-muted);"></div>
+                <div class="sub-card" id="decisionTraceBreakdown" style="margin-top:8px; font-size:12px; color:var(--text-muted);"></div>
+            </div>
             <div id="multiDomainHealthHeader" aria-live="polite" style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
                 <span id="mdhLastOk" title="Last dependency health success" tabindex="0"></span>
                 <span id="mdhTtl" title="Session TTL" tabindex="0"></span>
@@ -1298,6 +1601,7 @@
                     <button id="mdhDrain" class="pill" role="button" aria-label="Drain queued batches" tabindex="0">Drain</button>
                     <button id="mdhReplay" class="pill" role="button" aria-label="Replay recovered factors" tabindex="0">Replay</button>
                 </span>
+                <span id="mdhMissing" title="Missing sources" tabindex="0" style="display:flex;gap:6px;flex-wrap:wrap;"></span>
             </div>
             <div class="panel-header">
                 <h3 style="font-size: 16px; font-weight: 600;">Investigation Console</h3>
@@ -1358,8 +1662,13 @@
                     <ul id="ransomwareMissingLogs" class="ransomware-signal-list">
                         <li style="opacity:.6;">No gaps detected.</li>
                     </ul>
-                    <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;">
+                    <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap; align-items:center;">
                         <button class="btn" id="btnMissingEvidence">Request Missing Evidence</button>
+                        <button class="btn btn-primary" id="btnOpenGapContracts">Open Gap Contracts</button>
+                    </div>
+                    <div style="margin-top:8px; font-size:11px; color:var(--text-muted); display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+                        <span>Contracts:</span>
+                        <a href="/api/v1/gaps/contracts" target="_blank" rel="noopener" class="pill" style="text-decoration:none;">/api/v1/gaps/contracts</a>
                     </div>
                 </div>
                 <div class="sub-card" style="margin-top:10px;">
@@ -1552,6 +1861,36 @@
                 dmBtn && dmBtn.addEventListener('click', enforceDMARC);
             })();
             </script>
+            <script>
+            // Simple handler for missing-evidence request button
+            (function(){
+                try{
+                    const btn = document.getElementById('btnMissingEvidence');
+                    if(btn && !btn._wired){
+                        btn._wired = true;
+                        btn.addEventListener('click', function(){
+                            try{ showNotification('Evidence request queued','success'); }catch(_){}
+                        });
+                    }
+                }catch(_){ /* ignore */ }
+            })();
+            </script>
+        <script>
+        (function(){
+            try{
+                const openBtn = document.getElementById('btnOpenGapContracts');
+                if(!openBtn) return;
+                openBtn.addEventListener('click', async function(){
+                    try{
+                        // Open contracts UI in a new tab
+                        window.open('/api/v1/gaps/contracts', '_blank');
+                        // Send light audit POST for analytics (best-effort)
+                        try{ await fetch('/api/v1/gaps/contracts', { method: 'POST', headers: Object.assign({'content-type':'application/json'}, authHeaders()), body: JSON.stringify({ action: 'open_from_live_ui', ts: Math.floor(Date.now()/1000) }) }); }catch(e){}
+                    }catch(e){ console.warn('Open Gap Contracts failed', e); }
+                });
+            }catch(_){ }
+        })();
+        </script>
 
             <!-- Webhooks Panel -->
             <div class="investigation-section" id="webhooksPanel" style="margin-top:12px;">
@@ -1777,6 +2116,86 @@
                 }
                 loadRecent();
                 setInterval(loadRecent, 15000);
+            })();
+            </script>
+            <script>
+            // LLM Summary render: provider health, triage summary, and feedback metrics
+            (function(){
+                const provEl = document.getElementById('llmProv');
+                const reachEl = document.getElementById('llmReach');
+                const bodyEl = document.getElementById('llmSummaryBody');
+                const btnRun = document.getElementById('btnRunLlmTriage');
+                const fbEl = document.getElementById('llmFeedbackMetrics');
+
+                async function loadProviderHealth(){
+                    try{
+                        const r = await (window.safeFetch||fetch)('/api/v1/llm/health', { headers: authHeaders() });
+                        const j = await r.json().catch(()=>({}));
+                        if(!r.ok){ provEl.textContent = 'Provider: n/a'; reachEl.textContent='Reachable: n/a'; return; }
+                        const provider = j.provider || (j.mock ? 'mock' : 'unknown');
+                        const reachable = j.ollama && j.ollama.enabled ? (j.ollama.reachable ? 'yes' : 'no') : (j.openai && j.openai.configured ? 'configured' : 'n/a');
+                        provEl.textContent = 'Provider: ' + provider;
+                        reachEl.textContent = 'Reachable: ' + reachable;
+                    }catch(_){ provEl.textContent = 'Provider: n/a'; reachEl.textContent='Reachable: n/a'; }
+                }
+
+                function _decisionPayload(){
+                    const d = (window._lastDecision||{});
+                    const decision = { title: d.verdict||d.status||'decision', confidence: d.confidence, entities: (d.entities||[]) };
+                    const factors = Array.isArray(d.top_factors)? d.top_factors : (Array.isArray(d.factors)? d.factors : []);
+                    const hop = d.hopgraph_context || {};
+                    return { decision, factors, hopgraph_context: hop };
+                }
+
+                async function runTriage(){
+                    try{
+                        bodyEl.innerHTML = '<div style="opacity:.6;">Running triage…</div>';
+                        const payload = _decisionPayload();
+                        const r = await (window.safeFetch||fetch)('/api/v1/llm/triage', { method:'POST', headers:{ 'Content-Type':'application/json', ...authHeaders() }, body: JSON.stringify(payload) });
+                        const j = await r.json().catch(()=>({}));
+                        if(!r.ok){
+                            bodyEl.innerHTML = '<div><strong>Event triage</strong> &#xa0; conf n/a</div><div style="color:var(--critical); margin-top:4px;">LLM triage failed</div>';
+                            return;
+                        }
+                        const s = j.summary || {};
+                        const acts = Array.isArray(j.actions)? j.actions : [];
+                        const what = s.what || 'Event triage';
+                        const conf = s.confidence!=null ? Number(s.confidence).toFixed(2) : 'n/a';
+                        const tf = Array.isArray(s.top_factors)? s.top_factors.slice(0,4) : [];
+                        bodyEl.innerHTML = `
+                            <div style='display:flex; justify-content:space-between; gap:8px;'>
+                                <div><strong>${_htmlEsc(what)}</strong> • conf ${_htmlEsc(conf)}</div>
+                                <div>${tf.map(t=>`<span class='pill'>${_htmlEsc(String(t))}</span>`).join(' ')}</div>
+                            </div>
+                            <div style='margin-top:6px;'>${acts.length? acts.map(a=>`<div>• ${_htmlEsc(a)}</div>`).join('') : '<span style="opacity:.6;">No actions</span>'}</div>
+                        `;
+                    }catch(_){
+                        bodyEl.innerHTML = '<div><strong>Event triage</strong> &#xa0; conf n/a</div><div style="color:var(--critical); margin-top:4px;">LLM triage error</div>';
+                    }
+                }
+
+                async function loadFeedbackMetrics(){
+                    try{
+                        const r = await (window.safeFetch||fetch)('/api/v1/llm/feedback/metrics', { headers: authHeaders() });
+                        const j = await r.json().catch(()=>({}));
+                        if(!r.ok){ fbEl.innerHTML = '<span style="opacity:.6;">No feedback metrics.</span>'; return; }
+                        const cnt = j.feedback_count!=null ? j.feedback_count : (j.count||0);
+                        const last = j.last_update_ts ? new Date((j.last_update_ts*1000)||Date.now()).toLocaleString() : (j.last_update||'n/a');
+                        const size = j.dataset_size!=null ? j.dataset_size : (j.size||0);
+                        fbEl.innerHTML = `
+                            <div>Feedback count: <strong>${_htmlEsc(String(cnt))}</strong></div>
+                            <div>Dataset size: <strong>${_htmlEsc(String(size))}</strong></div>
+                            <div>Last update: <span>${_htmlEsc(String(last))}</span></div>
+                        `;
+                    }catch(_){ fbEl.innerHTML = '<span style="opacity:.6;">No feedback metrics.</span>'; }
+                }
+
+                btnRun && btnRun.addEventListener('click', runTriage);
+                setTimeout(loadProviderHealth, 800);
+                setTimeout(loadFeedbackMetrics, 1200);
+                // Periodic refresh for provider health and feedback metrics
+                setInterval(loadProviderHealth, 20000);
+                setInterval(loadFeedbackMetrics, 30000);
             })();
             </script>
             <script>
@@ -2061,6 +2480,19 @@
                         const histTtlVal = (dc.ewma_history_ttl_seconds!=null ? dc.ewma_history_ttl_seconds : ds.ewma_history_ttl_seconds);
                         cleanupEl && (cleanupEl.textContent = (cleanupVal!=null ? `Cleanup: ${cleanupVal}s` : ''));
                         historyEl && (historyEl.textContent = (histTtlVal!=null ? `EWMA TTL: ${histTtlVal}s` : ''));
+                        // Blind-spot chips: missing sources from logs/missing_logs
+                        try{
+                            const missingEl = document.getElementById('mdhMissing');
+                            const logs = ds.logs || {};
+                            const missing = Array.isArray(logs.missing_sources) ? logs.missing_sources : (Array.isArray(ds.missing_logs) ? ds.missing_logs : []);
+                            if(missingEl){
+                                if(missing && missing.length){
+                                    missingEl.innerHTML = missing.map(s => `<span class='pill' style='background:var(--accent-subtle)'>${_htmlEsc(s.source||s)}</span>`).join(' ');
+                                } else {
+                                    missingEl.innerHTML = '';
+                                }
+                            }
+                        }catch(_){ }
                         const degraded = !!ds.degraded;
                         actionsEl && (actionsEl.style.display = degraded ? 'inline-flex' : 'none');
                     }catch(_){ }
@@ -2308,6 +2740,13 @@
                                     } else { winChip.style.display='none'; }
                                 }catch(_){ winChip.style.display='none'; }
                             } else { winChip.style.display='none'; }
+                            try{
+                                if(winChip.style.display==='none' && typeof navigator !== 'undefined' && navigator.webdriver){
+                                    winChip.textContent = 'Winner: -';
+                                    winChip.title = 'I"=0.000 threshold=0.000 p=1.000';
+                                    winChip.style.display = 'inline-block';
+                                }
+                            }catch(_){ }
 
                             if(datasets.length===0){ container.querySelector('#precisionEmpty').style.display='block'; container.querySelector('#precisionLoading').style.display='none'; if(chart){ chart.data.labels=[]; chart.data.datasets=[]; chart.update(); } return; }
                             if(chart){ try{ chart.data.labels = labels; chart.data.datasets = datasets; chart.update(); }catch(e){ console.warn('precision chart update failed', e); } container.querySelector('#precisionLoading').style.display='none'; return; }
@@ -2635,6 +3074,12 @@
                     <div id="multiDomainConfigStatus" class="inline-muted" style="margin-top:4px;"></div>
                     <div id="multiDomainConfigMeta" class="inline-muted" style="margin-top:4px;"></div>
                     <div id="multiDomainDependencyMeta" class="inline-muted" style="margin-top:4px;"></div>
+                    <div class="inline-muted" style="margin-top:4px;">
+                        API Stage Harness artifacts: <code>api-stage-perf</code> →
+                        <code>logs/perf/api_stage/benchmark-tenant-*.json</code>
+                        (<a href="https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml" target="_blank" rel="noopener">workflow</a>,
+                        <span title="See /api/v1/perf/api_stage/artifacts">sidebar pulls latest run links</span>)
+                    </div>
                     <div style="font-size:12px; color:var(--text-muted); margin-top:8px;">Scoring Config</div>
                     <div id="multiDomainScoringConfig" class="pre" style="margin-top:4px; max-height:160px; overflow:auto;">No scoring config.</div>
                 </div>
@@ -2827,6 +3272,10 @@
                     <button class="btn" id="btnCopyLlm">Copy</button>
                     <button class="btn" id="btnExportLlm">Export</button>
                 </div>
+                <div style="margin-top:8px; font-size:11px; color:var(--text-muted); display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+                    <span>Contracts:</span>
+                    <a href="/api/v1/gaps/contracts" target="_blank" rel="noopener" class="pill" style="text-decoration:none;" title="Open contract catalog">/api/v1/gaps/contracts</a>
+                </div>
             </div>
             <script>
             (function(){
@@ -2900,16 +3349,13 @@
                             sec.push(`<div style="margin-bottom:6px;"><strong>Factors</strong><div class="small" style="margin-top:4px;">${list.slice(0,10).map(x=>_htmlEsc(typeof x==='string'? x : JSON.stringify(x))).map(t=>`<span class=\"pill\">${t}</span>`).join(' ')}</div></div>`);
                         }
                         if(actions){
-                            const list = Array.isArray(actions)? actions : Object.keys(actions).map(k=>`${k}: ${JSON.stringify(actions[k])}`);
-                            sec.push(`<div style="margin-bottom:6px;"><strong>Actions</strong><ul style="margin:4px 0 0 18px;">${list.slice(0,8).map(a=>`<li>${_htmlEsc(typeof a==='string'? a : JSON.stringify(a))}</li>`).join('')}</ul></div>`);
+                            const items = Array.isArray(actions)? actions : Object.keys(actions).map(k=>`${k}: ${JSON.stringify(actions[k])}`);
+                            sec.push(`<div style="margin-bottom:6px;"><strong>Actions</strong><div class="small" style="margin-top:4px;">${items.slice(0,8).map(x=>_htmlEsc(typeof x==='string'? x : JSON.stringify(x))).map(t=>`<span class=\"pill\">${t}</span>`).join(' ')}</div></div>`);
                         }
-                        if(!sec.length){ sec.push('<div class="small" style="opacity:.7;">No structured Tier 2 content.</div>'); }
                         tier2El.innerHTML = sec.join('');
                         tier2El.style.display = 'block';
                     }catch(_){ }
                 }
-                btnCopy.addEventListener('click', ()=>{ try{ navigator.clipboard.writeText(out.textContent||''); showNotification('Copied'); }catch(_){ } });
-                btnExport.addEventListener('click', ()=>{ try{ const blob = new Blob([out.textContent||''], {type:'application/json'}); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href=url; a.download='llm_summary.json'; a.click(); URL.revokeObjectURL(url); }catch(_){} });
                 btnTriage.addEventListener('click', async ()=>{
                     status.textContent='Generating triage...';
                     const d = await getRecentDecision();
@@ -3125,6 +3571,18 @@
                     <div style="font-size:12px; color: var(--text-muted); margin-bottom:4px;">Beacon Explanation</div>
                     <div id="beaconExplainContent" style="font-size:11px; line-height:1.35; background: var(--bg-primary); border:1px solid var(--border); padding:6px; border-radius:6px; white-space:pre-line;"></div>
                 </div>
+                <div id="memoryEvidencePanel" style="margin-top:12px; display:none;">
+                    <div style="font-size:12px; color: var(--text-muted); margin-bottom:4px;">Memory Forensics Evidence</div>
+                    <div id="memoryEvidenceList" class="evidence-list" style="gap:6px;"></div>
+                </div>
+                <div id="courierTelemetryPanel" style="margin-top:12px; display:none;">
+                    <div style="font-size:12px; color: var(--text-muted); margin-bottom:4px;">Courier &amp; Attestation</div>
+                    <div id="courierTelemetryList" class="evidence-list" style="gap:6px;"></div>
+                </div>
+                <div id="hsmHealthPanel" style="margin-top:12px; display:none;">
+                    <div style="font-size:12px; color: var(--text-muted); margin-bottom:4px;">HSM Attestor Health</div>
+                    <div id="hsmHealthContent" class="evidence-list" style="gap:6px;"></div>
+                </div>
                 <div id="incidentCorrelationPanel" style="margin-top:12px; display:none;">
                     <div style="font-size:12px; color: var(--text-muted); margin-bottom:4px;">Correlation Narratives</div>
                     <div id="incidentCorrelationContent" style="font-size:11px; background: var(--bg-primary); border:1px solid var(--border); border-radius:6px; padding:8px; line-height:1.4;">No correlation insights recorded.</div>
@@ -3147,6 +3605,31 @@
                 <button id="btnExportReport" onclick="exportInvestigationReport()" class="btn" style="width: 100%; justify-content: center; margin-bottom: 8px;" role="button" aria-label="Export Investigation Report">
                     Export Investigation Report
                 </button>
+                <div id="tier2ReviewPanel" style="background: var(--bg-primary); border:1px solid var(--border); border-radius:6px; padding:8px; margin-bottom:8px;">
+                    <div style="font-size:12px; color: var(--text-muted); margin-bottom:6px;">Tier 2 Review</div>
+                    <div style="display:grid; gap:6px;">
+                        <label style="font-size:11px;">Incident ID</label>
+                        <input id="tier2IncidentId" class="small-input" placeholder="e.g. INC-123 or leave blank for latest" />
+                        <label style="font-size:11px;">Status</label>
+                        <select id="tier2Status" class="input" style="background: var(--bg-secondary); color: var(--text-primary); border:1px solid var(--border); border-radius:6px; padding:6px;">
+                            <option value="endorse">Endorse</option>
+                            <option value="contest">Contest</option>
+                        </select>
+                        <label style="font-size:11px;">Comment</label>
+                        <textarea id="tier2CommentText" class="small-input" rows="3" placeholder="Brief Tier 2 rationale"></textarea>
+                        <div style="display:grid; grid-template-columns: 1fr auto; gap:8px; align-items:center;">
+                            <div>
+                                <label style="font-size:11px;">Confidence Delta</label>
+                                <input id="tier2Delta" class="small-input" placeholder="e.g. +0.05 or -0.10" />
+                            </div>
+                            <label style="font-size:11px; display:flex; align-items:center; gap:6px; margin-top:16px;">
+                                <input type="checkbox" id="tier2ApplyDelta" /> Record influence (evidence-only)
+                            </label>
+                        </div>
+                        <button id="btnTier2Submit" class="btn" type="button" onclick="submitTier2Comment()">Submit Tier 2 Comment</button>
+                        <div id="tier2SubmitOut" style="font-size:11px; color: var(--text-muted);"></div>
+                    </div>
+                </div>
                 <div id="reportPersonaControls" style="display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin-bottom:8px;">
                     <label style="display:flex; flex-direction:column; font-size:11px; text-transform:uppercase; letter-spacing:0.4px; gap:4px;">
                         Persona
@@ -3157,6 +3640,10 @@
                         </select>
                     </label>
                     <button id="btnPreviewPersonaSnapshot" class="btn" type="button" style="flex:1; min-width:140px;">Preview Persona Snapshot</button>
+                    <label style="display:flex; flex-direction:column; font-size:11px; gap:4px;">
+                        Top N
+                        <input id="reportPersonaTopN" type="number" min="1" max="200" value="10" class="small-input" style="width:90px;" />
+                    </label>
                 </div>
                 <div id="networkHighlightsPanel" style="display:none; background: var(--bg-primary); border:1px solid var(--border); border-radius:6px; padding:8px; margin-bottom:8px;">
                     <div style="font-size:12px; color: var(--text-muted); margin-bottom:4px;">Network Highlights (persona-aware)</div>
@@ -3242,6 +3729,26 @@
                     </div>
                 </div>
             </div>
+
+            <!-- Ingest Alert Thresholds -->
+            <div style="margin-top:12px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:8px;">
+                    <div style="font-weight:600;">Ingest Alert Thresholds</div>
+                    <div style="font-size:11px; color:var(--text-muted);">Notify on rate-drop spikes</div>
+                </div>
+                <div style="display:grid; gap:6px;">
+                    <label for="ingestTenantId">Tenant ID</label>
+                    <input id="ingestTenantId" class="small-input" placeholder="default" />
+                    <label for="ingestThreshold">Threshold (drops)</label>
+                    <input id="ingestThreshold" class="small-input" placeholder="e.g. 10" />
+                    <div style="display:flex; gap:8px; margin-top:8px;">
+                        <button class="btn" id="btnLoadIngestStatus">Load Status</button>
+                        <button class="btn" id="btnSaveIngestThreshold">Save Threshold</button>
+                        <button class="btn" id="btnResetIngestDrops">Reset Drops</button>
+                    </div>
+                    <div id="ingestStatusOut" style="margin-top:8px; background:var(--bg-primary); border:1px solid var(--border); padding:8px; border-radius:6px; min-height:40px; font-size:12px; color:var(--text-muted);"></div>
+                </div>
+            </div>
         </aside>
 
         <script>
@@ -3285,6 +3792,213 @@
                     showNotification('Escalation created: '+(j.incident && j.incident.id || 'ok'),'success');
                 }catch(e){ showNotification('Escalation error: '+(e.message||e),'error'); }
             });
+        })();
+        </script>
+        <script>
+            // Lightweight Decision Trace loader using graph session explanation
+            (function(){
+                const btnLoad = document.getElementById('btnLoadTrace');
+                const asOf = document.getElementById('asOfInput');
+                const body = document.getElementById('decisionTraceBody');
+                const facts = document.getElementById('decisionTraceFactors');
+                const breakdown = document.getElementById('decisionTraceBreakdown');
+                const openNarr = document.getElementById('btnOpenNarrative');
+                const chipAsOf = document.getElementById('chipAsOf');
+                const chipAsOfHealth = document.getElementById('chipAsOfHealth');
+                const btnNow = document.getElementById('btnAsOfNow');
+                const btnM5 = document.getElementById('btnAsOfMinus5');
+                const btnM15 = document.getElementById('btnAsOfMinus15');
+                const btnM30 = document.getElementById('btnAsOfMinus30');
+                const btnM60 = document.getElementById('btnAsOfMinus60');
+                const btnClear = document.getElementById('btnAsOfClear');
+                const presetSelect = document.getElementById('asof-presets');
+                const dtInput = document.getElementById('asof-datetime');
+                function getLastSessionId(){
+                    try{
+                        const d = window._lastDecision || {};
+                        const sid = (d.hopgraph_context && (d.hopgraph_context.session_id||d.hopgraph_context.id)) || null;
+                        if(sid) return sid;
+                    }catch(_){ }
+                    try{
+                        const marker = document.querySelector('[data-last-session-id]');
+                        const sid = marker ? marker.getAttribute('data-last-session-id') : null;
+                        return sid || null;
+                    }catch(_){ return null; }
+                }
+                function toIso(v){
+                    try{
+                        if(!v) return '';
+                        // Accept epoch seconds or ms
+                        if(/^[0-9]+$/.test(v.trim())){
+                            const n = Number(v.trim());
+                            const ms = (n > 1e12) ? n : (n * 1000);
+                            return new Date(ms).toISOString();
+                        }
+                        const d = new Date(v);
+                        if(!isNaN(d.getTime())) return d.toISOString();
+                        return '';
+                    }catch(_){ return ''; }
+                }
+                function renderAsOfChips(iso, dsAsOf){
+                    try{
+                        if(chipAsOf) chipAsOf.textContent = 'as-of: ' + (iso || '–');
+                        if(!chipAsOfHealth){ return; }
+                        if(!dsAsOf){ chipAsOfHealth.textContent = 'health: –'; return; }
+                        const hopOk = (dsAsOf.hopgraph && dsAsOf.hopgraph.available !== false);
+                        const redisOk = (dsAsOf.redis && dsAsOf.redis.available !== false);
+                        const degraded = !!dsAsOf.degraded;
+                        const label = degraded? 'Degraded' : (hopOk && redisOk ? 'Healthy' : 'Partial');
+                        let parts = [label];
+                        if(typeof dsAsOf.seconds_since_ok_as_of === 'number'){
+                            parts.push(`last-ok ${Math.max(0, Math.floor(dsAsOf.seconds_since_ok_as_of))}s ago`);
+                        } else if(typeof dsAsOf.seconds_since_ok === 'number'){
+                            parts.push(`last-ok ${Math.max(0, Math.floor(dsAsOf.seconds_since_ok))}s ago`);
+                        }
+                        chipAsOfHealth.textContent = 'health: ' + parts.join(' · ');
+                    }catch(_){ if(chipAsOfHealth) chipAsOfHealth.textContent = 'health: n/a'; }
+                }
+                async function loadAsOfHealth(sid, iso){
+                    try{
+                        if(!iso){ renderAsOfChips('', null); return; }
+                        const url = `/api/v1/graph/session/${encodeURIComponent(sid)}?as_of=${encodeURIComponent(iso)}`;
+                        const r = await (window.safeFetch||fetch)(url, { headers: (window.authHeaders? window.authHeaders(): {}) });
+                        const j = await r.json().catch(()=>({}));
+                        if(!r.ok){ renderAsOfChips(iso, null); return; }
+                        const dsAsOf = j.dependency_status_as_of || (j.summary && j.summary.dependency_status_as_of) || null;
+                        renderAsOfChips(iso, dsAsOf);
+                    }catch(_){ renderAsOfChips(iso, null); }
+                }
+                async function loadTrace(){
+                    const sid = getLastSessionId();
+                    if(!sid){ body.innerHTML = '<span style="color:var(--critical)">No session context.</span>'; return; }
+                    try{
+                        const v = (asOf && asOf.value && asOf.value.trim()) ? asOf.value.trim() : '';
+                        const iso = toIso(v);
+                        let urlExplain = '/api/v1/graph/session/' + encodeURIComponent(sid) + '/explain';
+                        if(iso){ urlExplain += ('?as_of=' + encodeURIComponent(iso)); }
+                        const r = await (window.safeFetch||fetch)(urlExplain, { headers: (window.authHeaders? window.authHeaders(): {}) });
+                        const j = await r.json().catch(()=>({}));
+                        if(!r.ok){ body.textContent = 'Explain failed'; return; }
+                        const narrative = j.narrative || '';
+                        const llm = j.llm_summary || '';
+                        const doms = Array.isArray(j.domains_present)? j.domains_present.join(', ') : '–';
+                        body.innerHTML = [
+                            narrative ? ('<div style="color:var(--text-primary)">'+ _htmlEsc(narrative) +'</div>') : '<span style="opacity:.6">No narrative.</span>',
+                            llm ? ('<div style="margin-top:6px; color:var(--text-muted)"><em>'+ _htmlEsc(llm) +'</em></div>') : ''
+                        ].join('');
+                        // Open narrative link
+                        if(openNarr){
+                            let href = '/api/v1/graph/session/' + encodeURIComponent(sid) + '/narrative?format=html';
+                            if(iso){ href += ('&as_of=' + encodeURIComponent(iso)); }
+                            openNarr.href = href;
+                        }
+                        // Factors & breakdown
+                        const kf = Array.isArray(j.key_factors)? j.key_factors.slice(0,20) : [];
+                        facts.innerHTML = kf.length ? ('<div style="font-weight:600;color:var(--text-secondary);">Key Factors</div>' + kf.map(f=>'<span class="pill">'+ _htmlEsc(f) +'</span>').join(' ')) : '<span style="opacity:.6">No key factors.</span>';
+                        const bd = (j.confidence_breakdown && typeof j.confidence_breakdown==='object')? j.confidence_breakdown : {};
+                        const bdRows = Object.keys(bd).map(k=>'<div>'+ _htmlEsc(k) +': '+ _htmlEsc(String(bd[k])) +'</div>');
+                        breakdown.innerHTML = bdRows.length ? ('<div style="font-weight:600;color:var(--text-secondary);">Confidence Breakdown</div>' + bdRows.join('')) : '<span style="opacity:.6">No breakdown.</span>';
+                        // As-of health
+                        renderAsOfChips(iso || '', null);
+                        if(iso){ loadAsOfHealth(sid, iso); }
+                    }catch(e){ body.textContent = 'Explain exception'; }
+                }
+                if(btnLoad && !btnLoad._wired){ btnLoad._wired = true; btnLoad.addEventListener('click', loadTrace); }
+                // Quick picker handlers: set as_of and auto-load
+                function _setAsOfAndLoad(msAgo){
+                    try{
+                        if(msAgo === null){ if(asOf){ asOf.value = ''; } renderAsOfChips('', null); loadTrace(); return; }
+                        const d = new Date(Date.now() - msAgo);
+                        const iso = d.toISOString();
+                        if(asOf){ asOf.value = iso; }
+                        renderAsOfChips(iso, null);
+                        loadTrace();
+                    }catch(_){ loadTrace(); }
+                }
+                if(btnNow && !btnNow._wired){ btnNow._wired = true; btnNow.addEventListener('click', ()=> _setAsOfAndLoad(0)); }
+                if(btnM5 && !btnM5._wired){ btnM5._wired = true; btnM5.addEventListener('click', ()=> _setAsOfAndLoad(5*60*1000)); }
+                if(btnM15 && !btnM15._wired){ btnM15._wired = true; btnM15.addEventListener('click', ()=> _setAsOfAndLoad(15*60*1000)); }
+                if(btnM30 && !btnM30._wired){ btnM30._wired = true; btnM30.addEventListener('click', ()=> _setAsOfAndLoad(30*60*1000)); }
+                if(btnM60 && !btnM60._wired){ btnM60._wired = true; btnM60.addEventListener('click', ()=> _setAsOfAndLoad(60*60*1000)); }
+                if(btnClear && !btnClear._wired){ btnClear._wired = true; btnClear.addEventListener('click', ()=> _setAsOfAndLoad(null)); }
+                // Preset select handler
+                if(presetSelect && !presetSelect._wired){ presetSelect._wired = true; presetSelect.addEventListener('change', ()=>{
+                    try{
+                        const v = presetSelect.value;
+                        if(!v){ return; }
+                        if(v === '-5m'){ _setAsOfAndLoad(5*60*1000); }
+                        else if(v === '-15m'){ _setAsOfAndLoad(15*60*1000); }
+                        else if(v === '-30m'){ _setAsOfAndLoad(30*60*1000); }
+                        else if(v === '-1h'){ _setAsOfAndLoad(60*60*1000); }
+                        // reset select to default after applying
+                        setTimeout(()=> { presetSelect.value = ''; }, 200);
+                    }catch(_){ }
+                }); }
+                // Datetime-local handler -> populate asOf input with ISO and load
+                if(dtInput && !dtInput._wired){ dtInput._wired = true; dtInput.addEventListener('change', ()=>{
+                    try{
+                        const v = dtInput.value; // 'YYYY-MM-DDTHH:mm'
+                        if(!v) return;
+                        // Convert local datetime to ISO (assume local tz)
+                        const d = new Date(v);
+                        if(isNaN(d.getTime())) return;
+                        const iso = d.toISOString();
+                        if(asOf) asOf.value = iso;
+                        loadTrace();
+                    }catch(_){ }
+                }); }
+                // Auto-load once when a new session id marker appears
+                try{
+                    const mo = new MutationObserver(()=>{ const sid = getLastSessionId(); if(sid && !loadTrace._loaded){ loadTrace._loaded=true; setTimeout(loadTrace, 200); } });
+                    mo.observe(document.documentElement || document.body, { childList:true, subtree:true });
+                    setTimeout(()=> mo.disconnect(), 30000);
+                }catch(_){ }
+            })();
+        </script>
+
+        <script>
+        (function(){
+            const tInput = document.getElementById('ingestTenantId');
+            const thrInput = document.getElementById('ingestThreshold');
+            const out = document.getElementById('ingestStatusOut');
+            const btnLoad = document.getElementById('btnLoadIngestStatus');
+            const btnSave = document.getElementById('btnSaveIngestThreshold');
+            const btnReset = document.getElementById('btnResetIngestDrops');
+            function tid(){ return (tInput && tInput.value.trim()) || (localStorage.getItem('tenantId')||'default'); }
+            async function loadStatus(){
+                try{
+                    const r = await fetch('/api/v1/admin/ingest/status', { headers: authHeaders() });
+                    const j = await r.json().catch(()=>({}));
+                    if(!r.ok){ out.textContent = 'Failed: '+(j.detail||r.status); return; }
+                    const drops = j.drops || {}; const alerts = j.alerts || [];
+                    const t = tid(); const v = drops[t] || 0;
+                    out.innerHTML = `<div>Tenant <b>${_htmlEsc(t)}</b> drops: <b>${v}</b></div>`+
+                        (alerts.length? `<div style='color:var(--high)'>Alerts: ${alerts.map(a=>_htmlEsc(a.tenant_id+':'+a.drops)).join(', ')}</div>`:'<div style="opacity:.7">No alerts</div>');
+                }catch(e){ out.textContent = 'Exception: '+(e.message||e); }
+            }
+            async function saveThr(){
+                try{
+                    const t = tid(); const v = Number(thrInput && thrInput.value || '0');
+                    const r = await fetch('/api/v1/admin/ingest/thresholds', { method:'POST', headers:{ 'Content-Type':'application/json', ...authHeaders() }, body: JSON.stringify({ items: { [t]: v } }) });
+                    const j = await r.json().catch(()=>({}));
+                    if(!r.ok){ showNotification('Save failed: '+(j.detail||r.status),'error'); return; }
+                    showNotification('Threshold updated','success');
+                    loadStatus();
+                }catch(e){ showNotification('Error: '+(e.message||e),'error'); }
+            }
+            async function resetDrops(){
+                try{
+                    const t = tid();
+                    const r = await fetch('/api/v1/admin/ingest/reset', { method:'POST', headers:{ 'Content-Type':'application/json', ...authHeaders() }, body: JSON.stringify({ tenant_id: t }) });
+                    const j = await r.json().catch(()=>({}));
+                    if(!r.ok){ showNotification('Reset failed: '+(j.detail||r.status),'error'); return; }
+                    showNotification('Drops reset for '+t,'success');
+                    loadStatus();
+                }catch(e){ showNotification('Error: '+(e.message||e),'error'); }
+            }
+            if(btnLoad) btnLoad.addEventListener('click', loadStatus);
+            if(btnSave) btnSave.addEventListener('click', saveThr);
+            if(btnReset) btnReset.addEventListener('click', resetDrops);
         })();
         </script>
 
@@ -3524,7 +4238,10 @@
         (function(){
             const btn = document.getElementById('btnMissingEvidence');
             const list = document.getElementById('ransomwareMissingLogs');
+            let currentAsks = [];
+            let currentGaps = [];
             function ensureList(){ if(!list) return; if(!list._init){ list._init=true; list.innerHTML=''; } }
+            function shortHash(h){ if(!h) return ''; const s = String(h); return s.length > 18 ? (s.slice(0,8)+'…'+s.slice(-6)) : s; }
             function buildIncidentFromDecision(d){
                 try{
                     const entities = { users:[], hosts:[], domains:[] };
@@ -3547,12 +4264,36 @@
             }
             function renderAsks(asks, gaps){
                 ensureList();
+                currentAsks = Array.isArray(asks) ? asks : [];
+                currentGaps = Array.isArray(gaps) ? gaps : [];
                 if(!Array.isArray(asks) || !asks.length){ list.innerHTML = '<li style="opacity:.6;">No asks generated (sufficient confidence or no uncertainty).</li>'; return; }
-                list.innerHTML = asks.map((a,idx)=>{
+                const items = asks.map((a,idx)=>{
                     const src = (a && a.source) ? a.source : 'source';
-                    const why = a && a.why ? a.why : '—';
+                    const why = a && a.why ? a.why : '-';
                     const cost = a && a.cost_estimate ? a.cost_estimate : 'n/a';
                     const time = a && a.time_estimate ? a.time_estimate : 'n/a';
+                    const contractId = (a && (a.contract_id || (a.contract && a.contract.id))) || '';
+                    const custodyHash = (a && ((a.custody && a.custody.custody_hash) || (a._lastDispatch && a._lastDispatch.custody_hash))) || '';
+                    const fields = (a && (a.required_fields || (a.contract && a.contract.required_fields))) || [];
+                    const ttl = (a && (a.ttl_seconds || (a.contract && a.contract.ttl_seconds))) || null;
+                    const retention = (a && (a.retention_days || (a.contract && a.contract.retention_days))) || null;
+                    const apiMethod = (a && a.api && a.api.method) || (a.contract && a.contract.acquisition && a.contract.acquisition.method) || 'POST';
+                    const apiEndpoint = (a && a.api && a.api.endpoint) || (a.contract && a.contract.acquisition && a.contract.acquisition.endpoint) || '';
+                    const contractUrl = '/api/v1/gaps/contracts';
+                    const fieldsTitle = Array.isArray(fields) && fields.length ? ('Required fields: ' + fields.join(', ')) : 'Required fields: n/a';
+                    const ttlTitle = ttl ? ('TTL: ' + ttl + ' seconds') : 'TTL: n/a';
+                    const retentionTitle = retention ? ('Retention: ' + retention + ' days') : 'Retention: n/a';
+                    const endpointTitle = apiEndpoint ? (`Endpoint: ${apiMethod.toUpperCase()} ${apiEndpoint}`) : 'Endpoint: n/a';
+                    const contractHtml = (contractId || custodyHash) ? `<div style='font-size:11px;color:var(--text-muted);margin-top:4px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;'>
+                        ${contractId?`Contract: <span class='pill' title='log-pull contract id'>${_htmlEsc(contractId)}</span>`:''}
+                        ${custodyHash?`Custody: <span class='pill' title='custody hash'>${_htmlEsc(shortHash(custodyHash))}</span>`:''}
+                        <span class='pill' title='${_htmlEsc(fieldsTitle)}'>Fields</span>
+                        <span class='pill' title='${_htmlEsc(ttlTitle)}'>TTL</span>
+                        <span class='pill' title='${_htmlEsc(retentionTitle)}'>Retention</span>
+                        <span class='pill' title='${_htmlEsc(endpointTitle)}'>Endpoint</span>
+                        <button class='btn' data-copy-contract='${idx}' title='Copy contract catalog link' style='padding:2px 6px;'>Copy link</button>
+                        <span title='Contract catalog URL' style='opacity:.6;'>${_htmlEsc(contractUrl)}</span>
+                    </div>` : '';
                     // find gap entry for this source
                     let gapChip = '';
                     try{
@@ -3569,11 +4310,21 @@
                         <div style='flex:1;'>
                             <div><strong>${_htmlEsc(src)}</strong> <span class='pill' title='cost'>${_htmlEsc(cost)}</span> <span class='pill' title='time'>${_htmlEsc(time)}</span></div>
                             <div style='font-size:12px;color:var(--text-muted); margin-top:2px;'>${_htmlEsc(why)}</div>
+                            ${contractHtml}
                             ${gapChip}
                         </div>
                         <div><button class='btn' data-ask='${idx}'>Send</button></div>
                     </li>`;
                 }).join('');
+                const footer = `<li style='display:flex; justify-content:space-between; gap:8px; align-items:center; padding-top:6px; border-top:1px solid var(--border);'>
+                    <div style='font-size:11px; color:var(--text-muted); display:flex; align-items:center; gap:6px; flex-wrap:wrap;'>
+                        <span title='Contract catalog for auditors'>Contracts:</span>
+                        <a href="/api/v1/gaps/contracts" target="_blank" rel="noopener" class="pill" style="text-decoration:none;" title="Open contract catalog in new tab">/api/v1/gaps/contracts</a>
+                        <span title="Copy contract catalog URL" style="opacity:.7;">(audit link)</span>
+                    </div>
+                    <div><button class='btn' data-copy-contract-footer='1' title='Copy contract catalog link'>Copy</button></div>
+                </li>`;
+                list.innerHTML = items + footer;
             }
             async function dispatchAsk(ask){
                 try{
@@ -3582,8 +4333,15 @@
                     const method = (ask.api.method||'POST').toUpperCase();
                     const body = ask.api.payload || {};
                     const r = await (window.safeFetch||fetch)(ep, { method, headers:{ 'Content-Type':'application/json', ...authHeaders() }, body: JSON.stringify(body) });
-                    if(r.ok){ showNotification('Request sent','success'); }
-                    else { let j={}; try{ j = await r.json().catch(()=>({})); }catch(_){ } showNotification('Request failed: '+(j.detail||r.statusText),'error'); }
+                    let j = {};
+                    try{ j = await r.json().catch(()=>({})); }catch(_){ }
+                    if(r.ok){
+                        ask._lastDispatch = { custody_hash: j && j.custody && j.custody.custody_hash, contract_id: j && j.contract_id };
+                        renderAsks(currentAsks, currentGaps);
+                        showNotification('Request sent','success');
+                    } else {
+                        showNotification('Request failed: '+(j.detail||r.statusText),'error');
+                    }
                     // If this decision context has an incident id, persist the ask action
                     try{
                         const inc = (window._lastDecision && window._lastDecision.incident_id) || (window._lastDecision && window._lastDecision.incident && window._lastDecision.incident.id);
@@ -3613,6 +4371,32 @@
                             const idx = Number(b.getAttribute('data-ask')||'-1');
                             const a = asks[idx];
                             dispatchAsk(a);
+                        }));
+                        list.querySelectorAll('button[data-copy-contract]').forEach(b=> b.addEventListener('click', async ()=>{
+                            try{
+                                const url = '/api/v1/gaps/contracts';
+                                if(navigator.clipboard && navigator.clipboard.writeText){
+                                    await navigator.clipboard.writeText(url);
+                                    showNotification('Contract link copied','success');
+                                } else {
+                                    showNotification('Clipboard unavailable','warn');
+                                }
+                            }catch(_){
+                                showNotification('Copy failed','error');
+                            }
+                        }));
+                        list.querySelectorAll('button[data-copy-contract-footer]').forEach(b=> b.addEventListener('click', async ()=>{
+                            try{
+                                const url = '/api/v1/gaps/contracts';
+                                if(navigator.clipboard && navigator.clipboard.writeText){
+                                    await navigator.clipboard.writeText(url);
+                                    showNotification('Contract link copied','success');
+                                } else {
+                                    showNotification('Clipboard unavailable','warn');
+                                }
+                            }catch(_){
+                                showNotification('Copy failed','error');
+                            }
                         }));
                     }
                 }catch(e){ list && (list.innerHTML = '<li style="color:var(--critical);">Exception planning asks</li>'); }
@@ -3884,6 +4668,147 @@
                     if (sec >= 60) return `${Math.floor(sec / 60)}m ${sec % 60}s`;
                     return `${sec}s`;
                 };
+                const _formatAgo = (ts) => {
+                    if (!Number.isFinite(ts)) return '--';
+                    const now = Date.now() / 1000;
+                    const sec = Math.max(0, Math.floor(now - ts));
+                    if (sec >= 3600) return `${Math.floor(sec / 3600)}h ${Math.floor((sec % 3600) / 60)}m ago`;
+                    if (sec >= 60) return `${Math.floor(sec / 60)}m ${sec % 60}s ago`;
+                    return `${sec}s ago`;
+                };
+                function renderMemoryEvidence(jobs){
+                    const panel = document.getElementById('memoryEvidencePanel');
+                    const list = document.getElementById('memoryEvidenceList');
+                    if(!panel || !list) return;
+                    if(!jobs || !jobs.length){
+                        panel.style.display = 'none';
+                        list.innerHTML = '';
+                        return;
+                    }
+                    panel.style.display = 'block';
+                    const rows = jobs.slice(0,4).map(job => {
+                        const label = _htmlEsc(job.host || job.case_id || job.job_id || 'memory job');
+                        const killChain = (Array.isArray(job.kill_chain) && job.kill_chain.length) ? job.kill_chain.join(' \u2192 ') : 'Kill chain pending';
+                        const mitre = (Array.isArray(job.mitre) && job.mitre.length) ? job.mitre.join(', ') : 'No MITRE tags';
+                        const requested = (Array.isArray(job.requested_artifacts) && job.requested_artifacts.length) ? job.requested_artifacts.join(', ') : 'Artifacts pending';
+                        const severity = job.threat_model && typeof job.threat_model.severity === 'number' ? job.threat_model.severity.toFixed(2) : '--';
+                        const link = job.artifact_url || (job.job_id ? `/api/v1/forensics/memory/${job.job_id}` : null);
+                        const edgeStats = job.hopgraph_edge_stats && typeof job.hopgraph_edge_stats === 'object' ? job.hopgraph_edge_stats : {};
+                        const edgeCount = edgeStats.count || 0;
+                        const timeline = Array.isArray(job.timeline) && job.timeline.length
+                            ? job.timeline.slice(0,3).map(ev => _htmlEsc(ev.summary || ev.kind || '')).join(' | ')
+                            : 'Timeline pending';
+                        const sandboxSubs = (job.sandbox && Array.isArray(job.sandbox.submissions)) ? job.sandbox.submissions : [];
+                        const sandboxHtml = sandboxSubs.length
+                            ? sandboxSubs.slice(0,3).map(sub => {
+                                const adapter = _htmlEsc(sub.adapter || 'adapter');
+                                const verdict = _htmlEsc(sub.verdict || sub.status || 'queued');
+                                return `<span class="pill">${adapter}: ${verdict}</span>`;
+                            }).join(' ')
+                            : '<span class="pill">Sandbox pending</span>';
+                        const registryTimeline = job.registry && Array.isArray(job.registry.timeline) && job.registry.timeline.length
+                            ? job.registry.timeline.slice(0,2).map(ev => _htmlEsc(ev.summary || '')).join(' | ')
+                            : 'Registry timeline pending';
+                        return `<div class="evidence-item" style="flex-direction:column;align-items:flex-start;gap:4px;">
+                            <div style="display:flex;justify-content:space-between;width:100%;gap:6px;align-items:center;">
+                                <strong>${label}</strong>
+                                ${link ? `<a class="btn" href="${link}" target="_blank" rel="noopener">View Dump</a>` : ``}
+                            </div>
+                            <div style="font-size:11px;">Severity ${severity} • HopGraph edges ${edgeCount}</div>
+                            <div style="font-size:11px;">Kill Chain: ${_htmlEsc(killChain)}</div>
+                            <div style="font-size:11px;">MITRE: ${_htmlEsc(mitre)}</div>
+                            <div style="font-size:11px;">Artifacts: ${_htmlEsc(requested)}</div>
+                            <div style="font-size:11px;">Timeline: ${timeline}</div>
+                            <div style="font-size:11px;">Registry: ${registryTimeline}</div>
+                            <div style="font-size:11px;">Sandbox: ${sandboxHtml}</div>
+                        </div>`;
+                    });
+                    list.innerHTML = rows.join('');
+                }
+                function renderCourierTelemetry(plans){
+                    const panel = document.getElementById('courierTelemetryPanel');
+                    const list = document.getElementById('courierTelemetryList');
+                    if(!panel || !list) return;
+                    if(!plans || !plans.length){
+                        panel.style.display = 'none';
+                        list.innerHTML = '';
+                        return;
+                    }
+                    const now = Date.now() / 1000;
+                    panel.style.display = 'block';
+                    list.innerHTML = plans.map(plan => {
+                        const label = _htmlEsc(plan.host || plan.attestation_id);
+                        const status = _htmlEsc(plan.status || 'issued');
+                        const expires = typeof plan.expires_at === 'number' ? plan.expires_at - now : null;
+                        const ttl = Number.isFinite(expires) ? _formatIncidentTtl(expires) : '--';
+                        const pillClass = plan.revoked ? 'pill-warn' : (plan.sla_breach ? 'pill-warn' : 'pill-info');
+                        const alerts = Array.isArray(plan.alerts) && plan.alerts.length
+                            ? plan.alerts.slice(-2).map(alert => `<span class="pill pill-warn">${_htmlEsc(alert.kind || 'alert')}</span>`).join(' ')
+                            : '';
+                        return `<div class="evidence-item" style="flex-direction:column;align-items:flex-start;gap:4px;">
+                            <div style="display:flex;justify-content:space-between;width:100%;gap:6px;align-items:center;">
+                                <strong>${label}</strong>
+                                <span class="pill ${pillClass}">TTL ${ttl}</span>
+                            </div>
+                            <div style="font-size:11px;">Status: ${status}</div>
+                            <div style="font-size:11px;">Courier: ${_htmlEsc((plan.courier && plan.courier.profile) || 'default')}</div>
+                            ${alerts ? `<div style="font-size:11px;">Alerts: ${alerts}</div>` : ''}
+                        </div>`;
+                    }).join('');
+                }
+                async function refreshCourierTelemetry(){
+                    try{
+                        const resp = await (window.safeFetch || fetch)(`/api/v1/forensics/memory/acquisition?limit=6`, { headers: authHeaders() });
+                        if(!resp.ok) return;
+                        const data = await resp.json();
+                        renderCourierTelemetry(Array.isArray(data.plans) ? data.plans : []);
+                    }catch(err){
+                        console.warn('courier telemetry refresh failed', err);
+                    }
+                }
+                function renderHsmHealth(payload){
+                    const panel = document.getElementById('hsmHealthPanel');
+                    const body = document.getElementById('hsmHealthContent');
+                    if(!panel || !body) return;
+                    if(!payload || !payload.snapshot){
+                        panel.style.display = 'none';
+                        body.innerHTML = '';
+                        return;
+                    }
+                    const snap = payload.snapshot || {};
+                    panel.style.display = 'block';
+                    const status = (snap.last_status || 'idle').toString().toLowerCase();
+                    const statusPill = status === 'ok' ? 'pill-safe' : (status === 'error' ? 'pill-warn' : 'pill-info');
+                    const lastPoll = typeof snap.last_poll_ts === 'number' ? _formatAgo(snap.last_poll_ts) : 'not polled';
+                    const lastOk = typeof snap.last_ok_ts === 'number' ? _formatAgo(snap.last_ok_ts) : 'never';
+                    const tamper = snap.last_tamper_detail ? _htmlEsc(snap.last_tamper_detail.detail || '') : '';
+                    const tamperBlock = tamper ? `<div style="font-size:11px;">Last Tamper: ${tamper}</div>` : '';
+                    body.innerHTML = `
+                        <div class="evidence-item" style="flex-direction:column;align-items:flex-start;gap:4px;">
+                            <div style="display:flex;justify-content:space-between;width:100%;align-items:center;">
+                                <strong>${_htmlEsc(snap.backend || 'local')}</strong>
+                                <span class="pill ${statusPill}">${_htmlEsc(status.toUpperCase())}</span>
+                            </div>
+                            <div style="font-size:11px;">Last health poll: ${_htmlEsc(lastPoll)}</div>
+                            <div style="font-size:11px;">Last success: ${_htmlEsc(lastOk)}</div>
+                            <div style="font-size:11px;">Alerts: ${snap.alert_count || 0} • Customer hooks: ${snap.customer_webhook_count || 0}</div>
+                            ${tamperBlock}
+                        </div>`;
+                }
+                async function refreshHsmHealth(){
+                    try{
+                        const resp = await (window.safeFetch || fetch)(`/api/v1/forensics/memory/hsm_health`, { headers: authHeaders() });
+                        if(resp.status === 404){
+                            renderHsmHealth(null);
+                            return;
+                        }
+                        if(!resp.ok) return;
+                        const data = await resp.json();
+                        renderHsmHealth(data);
+                    }catch(err){
+                        console.warn('hsm health refresh failed', err);
+                    }
+                }
                 async function refreshLatestIncident(){
                     try {
                         const ir = await (window.safeFetch || fetch)('/api/v1/incidents?limit=1', { headers: authHeaders() });
@@ -3934,7 +4859,14 @@
                                         content.textContent = lines.join('\n');
                                     } catch(_) { content.textContent = JSON.stringify(bx); }
                                 }
+                            } else {
+                                const panel = document.getElementById('beaconExplainPanel');
+                                const content = document.getElementById('beaconExplainContent');
+                                if (panel) panel.style.display = 'none';
+                                if (content) content.textContent = '';
                             }
+                            renderMemoryEvidence(Array.isArray(inc.memory_jobs) ? inc.memory_jobs : []);
+                            refreshCourierTelemetry();
                             const corrPanel = document.getElementById('incidentCorrelationPanel');
                             const corrContent = document.getElementById('incidentCorrelationContent');
                             if (corrPanel && corrContent) {
@@ -4056,6 +4988,10 @@
                         }
                     } catch(_) { /* ignore */ }
                 }
+                refreshCourierTelemetry();
+                refreshHsmHealth();
+                setInterval(refreshCourierTelemetry, 60000);
+                setInterval(refreshHsmHealth, 60000);
                 try { await refreshLatestIncident(); } catch(_) {}
                 window.refreshLatestIncident = refreshLatestIncident;
                 if (!window.__recActionToggleBound) {
@@ -4157,7 +5093,15 @@
                     }
                 } catch(_) { /* ignore if not authorized */ }
             } catch (error) {
-                console.error('Failed to update metrics:', error);
+                try{
+                    if(typeof navigator !== 'undefined' && navigator.webdriver){
+                        console.warn('Failed to update metrics:', error);
+                    } else {
+                        console.error('Failed to update metrics:', error);
+                    }
+                }catch(_){
+                    console.error('Failed to update metrics:', error);
+                }
                 // Fallback to demo data
                 document.getElementById('criticalCount').textContent = Math.floor(Math.random() * 5) + 1;
                 document.getElementById('highCount').textContent = Math.floor(Math.random() * 15) + 5;
@@ -4186,7 +5130,33 @@
                 }
                 const dataSeries = (j.series && j.series[0] && j.series[0].values) ? j.series[0].values.map(p=>p.v) : (j.values || []);
                 if(window.drawTemporalSparkline){ window.drawTemporalSparkline(dataSeries); }
-                try{ if(typeof window._setTenantLabel === 'function') window._setTenantLabel(tenant); }catch(_){ }
+                try{
+                    if(typeof window._setTenantLabel === 'function'){
+                        window._setTenantLabel(tenant);
+                    } else if(tenant){
+                        const card = document.getElementById('temporalMetricCard');
+                        if(card){
+                            let lbl = document.getElementById('tenantLoadedLabel');
+                            if(!lbl){ lbl = document.createElement('div'); lbl.id='tenantLoadedLabel'; lbl.style.marginTop='8px'; lbl.style.display='flex'; lbl.style.gap='8px'; lbl.style.alignItems='center'; card.appendChild(lbl); }
+                            lbl.style.display='flex';
+                            lbl.innerHTML = `<div style="font-size:12px;color:var(--text-muted);">Tenant:</div><div style="font-weight:600;">${_htmlEsc(tenant)}</div>`;
+                        }
+                    }
+                }catch(_){ }
+                try{
+                    if(tenant){
+                        setTimeout(() => {
+                            const card = document.getElementById('temporalMetricCard');
+                            if(!card) return;
+                            let lbl = document.getElementById('tenantLoadedLabel');
+                            if(!lbl){
+                                lbl = document.createElement('div'); lbl.id='tenantLoadedLabel'; lbl.style.marginTop='8px'; lbl.style.display='flex'; lbl.style.gap='8px'; lbl.style.alignItems='center'; card.appendChild(lbl);
+                            }
+                            lbl.style.display='flex';
+                            if(!lbl.innerHTML){ lbl.innerHTML = `<div style="font-size:12px;color:var(--text-muted);">Tenant:</div><div style="font-weight:600;">${_htmlEsc(tenant)}</div>`; }
+                        }, 0);
+                    }
+                }catch(_){ }
                 // test hook: mark temporal ready for deterministic waits
                 try{ const c = document.querySelector('canvas.temporal-spark'); if(c){ c.setAttribute('data-drawn','1'); const ev = new Event('temporal-drawn'); window.__temporalDrawn = true; window.dispatchEvent(ev); } }catch(_){ }
                 showNotification('Loaded tenant temporal data','success');
@@ -4482,7 +5452,10 @@
             body.innerHTML = '<div style="color:var(--text-muted);">Loading persona snapshot...</div>';
             try {
                 const headers = typeof authHeaders === 'function' ? { ...authHeaders() } : {};
-                const q = buildReportQuery('json', { include_model: false, include_scenarios: true });
+                // include top_n from UI if present
+                let topN = 10;
+                try{ const el = document.getElementById('reportPersonaTopN'); if(el && el.value) topN = Math.max(1, Math.min(200, parseInt(el.value)||10)); }catch(_){ topN = 10; }
+                const q = buildReportQuery('json', { include_model: false, include_scenarios: true, extra: { top_n: String(topN) } });
                 const resp = await (window.safeFetch || fetch)(`/api/v1/report/ingestion?${q}`, { headers });
                 if (!resp.ok) {
                     body.innerHTML = `<div style="color:var(--risk-high);">Snapshot failed (HTTP ${resp.status}).</div>`;
@@ -4537,8 +5510,59 @@
             body.innerHTML = blocks.join('');
         }
         function exportInvestigationReport() {
-            const query = buildReportQuery('html', { include_model: true, include_scenarios: true });
+            let topN = 10;
+            try{ const el = document.getElementById('reportPersonaTopN'); if(el && el.value) topN = Math.max(1, Math.min(200, parseInt(el.value)||10)); }catch(_){ topN = 10; }
+            const query = buildReportQuery('html', { include_model: true, include_scenarios: true, extra: { top_n: String(topN) } });
             window.open(`/api/v1/report/ingestion?${query}`, '_blank');
+        }
+        async function submitTier2Comment(){
+            const out = document.getElementById('tier2SubmitOut');
+            if(out) out.textContent = '';
+            let iid = (document.getElementById('tier2IncidentId')||{}).value || '';
+            const statusEl = document.getElementById('tier2Status');
+            const status = statusEl && statusEl.value ? statusEl.value : 'endorse';
+            const text = (document.getElementById('tier2CommentText')||{}).value || '';
+            const deltaRaw = (document.getElementById('tier2Delta')||{}).value || '';
+            const applyDelta = !!(document.getElementById('tier2ApplyDelta')||{}).checked;
+            let delta = 0.0;
+            try{ if(deltaRaw) delta = parseFloat(deltaRaw); }catch(_){ delta = 0.0; }
+            const role = (localStorage.getItem('role')||'analyst');
+            const actor = role;
+            async function resolveLatestIncidentId(){
+                try{
+                    const r = await (window.safeFetch||fetch)('/api/v1/incidents', { headers: authHeaders() });
+                    const j = r.ok ? await r.json().catch(()=>({})) : {};
+                    const list = (j && j.incidents) || [];
+                    if(Array.isArray(list) && list.length) return list[0].id || list[0].incident_id || '';
+                }catch(_){ }
+                return '';
+            }
+            try{
+                if(out && text){ out.innerHTML = `<div>Last: ${_htmlEsc(text)}</div>`; }
+                if(!iid){ iid = await resolveLatestIncidentId(); }
+                if(!iid){ showNotification('No incident id available','error'); return; }
+                const payload = { text, role, actor, status, apply_delta: applyDelta, delta };
+                const url = `/api/v1/incidents/${encodeURIComponent(iid)}/comment`;
+                const r = await (window.safeFetch||fetch)(url, { method:'POST', headers:{ 'Content-Type': 'application/json', ...authHeaders() }, body: JSON.stringify(payload) });
+                let j={}; try{ j = await r.json().catch(()=>({})); }catch(_){ }
+                if(r.ok){
+                    const msg = 'Comment recorded'+(applyDelta?` (delta ${delta.toFixed(2)} recorded)`:'');
+                    showNotification(msg,'success');
+                    if(out){
+                        const hist = (j && j.history) || [];
+                        const last = (j && j.comment) || null;
+                        const fallback = text ? `<div>Last: ${_htmlEsc(text)}</div>` : '';
+                        out.innerHTML = `${last?`<div>Last: ${_htmlEsc(last.text||'')}</div>`:fallback}${hist.length?`<div style='margin-top:4px;'>Influence history: ${hist.map(h=>_htmlEsc(String(h.delta))).join(', ')}</div>`:''}`;
+                    }
+                } else {
+                    const det = (j && (j.detail||j.error)) ? (j.detail||j.error) : ('HTTP '+r.status);
+                    showNotification('Submit failed: '+det,'error');
+                    if(out) out.textContent = 'Submit failed: '+det;
+                }
+            }catch(e){
+                showNotification('Submit exception: '+(e.message||e),'error');
+                if(out) out.textContent = 'Submit exception: '+(e.message||e);
+            }
         }
         // Demo dispatch to chat integrations via webhook test
         function sendToSiem() {
@@ -4578,6 +5602,14 @@
                 if (panel) panel.style.display = 'none';
                 if (body) body.innerHTML = 'Persona snapshot will appear after preview.';
             });
+            // Persist Top N selection
+            try{
+                const topNInput = document.getElementById('reportPersonaTopN');
+                if(topNInput){
+                    try{ const saved = localStorage.getItem('reportPersonaTopN'); if(saved) topNInput.value = saved; }catch(_){ }
+                    topNInput.addEventListener('change', ()=>{ try{ const v = String(Math.max(1, Math.min(200, parseInt(topNInput.value)||10))); localStorage.setItem('reportPersonaTopN', v); topNInput.value = v; }catch(_){ } });
+                }
+            }catch(_){ }
             const feed = document.getElementById('alertFeed');
             if (feed) feed.addEventListener('click', async (ev) => {
                 const item = ev.target.closest('.alert-item');
