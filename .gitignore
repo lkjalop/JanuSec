@@ -1,2 +1,45 @@
-node_modules
-node_modules
+node_modules/
+
+# Python virtual environments
+.venv/
+.venv-ci/
+
+# Playwright traces
+.playwright_trace_tmp/
+*.trace
+*.stacks
+*.network
+
+# Transient tmp
+.tmp/
+.tmp_*
+*_tmp.py
+
+# Local generated sessions/data (dev)
+data/sessions/
+
+# Misc cache
+__pycache__/
+*.pyc
+*.log
+*.sqlite
+*.db
+server*.log
+server_*.log
+uvicorn*.log
+playwright-report/
+playwright-report/**
+tests/test_*.log
+.vscode/
+.idea/
+/.DS_Store
+npm-debug.log*
+package-lock.json
+yarn-debug.log*
+coverage/
+coverage.*
+reports/
+report_demo.py
+dist/
+build/
+frontend/static/vendor/
