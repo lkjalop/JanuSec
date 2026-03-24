@@ -25,8 +25,8 @@
   "bec_vendor_spoof_chain_enriched": ["tests/data/email_bec_vendor_spoof_chain_event.json"],
   "bec_invoice_fraud_pattern_enriched": ["tests/data/email_bec_invoice_fraud_event.json"],
   "cloud_access_key_creation_no_rotation_cross_account": ["tests/data/cloud_access_key_creation_no_rotation_cross_account_event.json"],
-  "bec_supplier_portal_takeover_enriched": ["tests/data/email_supplier_portal_takeover_event.json"]
-  ,"cloud_excessive_trust_policy_edges": ["tests/data/cloud_excessive_trust_policy_edges_event.json"],
+  "bec_supplier_portal_takeover_enriched": ["tests/data/email_supplier_portal_takeover_event.json"],
+  "cloud_excessive_trust_policy_edges": ["tests/data/cloud_excessive_trust_policy_edges_event.json"],
   "cloud_oidc_provider_anomaly": ["tests/data/cloud_oidc_provider_anomaly_event.json"],
   "cloud_access_key_creation_atypical_geo": ["tests/data/cloud_access_key_creation_atypical_geo_event.json"],
   "email_oauth_brand_spoof_enriched": ["tests/data/email_oauth_brand_spoof_event.json"],

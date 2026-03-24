@@ -34,11 +34,12 @@
 (function(){
   window.authHeaders = function(){
     try{
-      var key = localStorage.getItem('apiKey') || 'devkey123';
+      var key = localStorage.getItem('apiKey') || '';
       var tenant = localStorage.getItem('tenantId');
-      var headers = { 'x-api-key': key };
+      var headers = {};
+      if(key) headers['x-api-key'] = key;
       if(tenant) headers['X-Tenant-ID'] = tenant;
       return headers;
-    }catch(_){ return { 'x-api-key': 'devkey123' }; }
+    }catch(_){ return {}; }
   };
 })();

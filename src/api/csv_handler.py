@@ -408,13 +408,14 @@ def forward_rows(rows: List[Dict[str, str]], kind: str, post_func: Callable, bat
 async def async_forward_rows(rows: List[Dict[str, str]], kind: str, base_url: str = 'http://localhost:8080', batch_size: int = 8, concurrency: int = 8) -> dict:
     """Async forward using httpx AsyncClient. Returns a summary dict.
 
-    Adds an `x-api-key` header (from env CSV_FORWARD_API_KEY or 'devkey123') so
-    that forwarding does not fail with 401/403 outside in-proc tests.
+    Adds an `x-api-key` header from env when configured so forwarding works
+    in authenticated live environments.
     """
     summary = {'forwarded': 0, 'failed': 0, 'errors': []}
     import os as _os
-    _api_key = _os.getenv('CSV_FORWARD_API_KEY') or 'devkey123'
-    async with httpx.AsyncClient(base_url=base_url, timeout=10.0, headers={'x-api-key': _api_key}) as client:
+    _api_key = _os.getenv('CSV_FORWARD_API_KEY') or _os.getenv('API_KEY') or ''
+    headers = {'x-api-key': _api_key} if _api_key else {}
+    async with httpx.AsyncClient(base_url=base_url, timeout=10.0, headers=headers) as client:
         sem = asyncio.Semaphore(concurrency)
 
         async def _post_row(r):
@@ -967,6 +968,24 @@ class CSVProcessor:
                 artifacts.append(artifact)
         results = await self._analyze_batch(artifacts)
         mapping_summary, score = self._mapping_summary(inferred_mapping)
+        # Normalize mapping_summary for UI consumption: booleans and score
+        try:
+            # If high_value_present/support_present are lists, convert to booleans
+            if isinstance(mapping_summary.get('high_value_present'), list):
+                mapping_summary['high_value_present'] = bool(mapping_summary['high_value_present'])
+            else:
+                mapping_summary['high_value_present'] = bool(mapping_summary.get('high_value_present'))
+        except Exception:
+            mapping_summary['high_value_present'] = False
+        try:
+            if isinstance(mapping_summary.get('support_present'), list):
+                mapping_summary['support_present'] = bool(mapping_summary['support_present'])
+            else:
+                mapping_summary['support_present'] = bool(mapping_summary.get('support_present'))
+        except Exception:
+            mapping_summary['support_present'] = False
+        mapping_summary['semantics_score'] = float(score)
+
         return {
             'status': 'processed',
             'results': results,

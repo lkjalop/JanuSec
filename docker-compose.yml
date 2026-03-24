@@ -1,37 +1,111 @@
-version: '3.9'
 services:
   db:
     image: postgres:15
     environment:
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_USER: postgres
-      POSTGRES_DB: janusec  # legacy: threatsifter
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-janusec}
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./migrations:/docker-entrypoint-initdb.d:ro
-    ports:
-      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-janusec}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   app:
     build: .
     volumes:
       - ./data/assessments:/app/data/assessments
+      - sessiondata:/app/data/sessions
+      - ./artifacts:/app/artifacts
     environment:
-      APP_DB_DSN: postgresql://postgres:postgres@db:5432/janusec  # set DB_NAME=threatsifter to reuse legacy schema
-      API_KEYS_JSON: '[{"key":"devkey123","scopes":["nlp.query","factors.search","feedback.write"]}]'
-      ACCESS_LOG_SAMPLE_RATE: 0.5
-      DEFAULT_FRONTEND: console
-      TEST_HELPERS_ENABLED: "1"
-      SESSION_PERSIST_DIR: /app/data/assessments
+      ENV: "${ENV:-staging}"
+      APP_ENV: "${APP_ENV:-staging}"
+      APP_DB_DSN: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-janusec}"
+      REDIS_URL: "${REDIS_URL:-redis://redis:6379/0}"
+      API_KEYS_JSON: "${API_KEYS_JSON:-[]}"
+      ACCESS_LOG_SAMPLE_RATE: "0.5"
+      DEFAULT_FRONTEND: "console"
+      DEFAULT_TENANT: "${DEFAULT_TENANT:-default}"
+      API_KEY: "${API_KEY:-janusec-staging-local-20260324}"
+      TEST_HELPERS_ENABLED: "0"
+      PLATFORM_LITE_INIT: "0"
+      FAST_TEST_MODE: "0"
+      DISABLE_DB: "0"
+      LOAD_FULL_ROUTES: "1"
+      STRICT_API_KEY_ENFORCEMENT: "1"
+      SESSION_PERSIST_DIR: "/app/data/sessions"
+      GRAPH_SESSION_SNAPSHOT_DIR: "/app/data/sessions/graph_snapshots"
+      HOPGRAPH_PERSISTENCE_ENABLED: "1"
+      HOPGRAPH_DB_PATH: "/app/data/sessions/hopgraph.db"
       EVIDENCE_COVERAGE_TARGET: "0.7"
       EVIDENCE_COVERAGE_WARN: "0.5"
       EVIDENCE_COVERAGE_CRITICAL: "0.3"
-      OLLAMA_HOST: ${OLLAMA_HOST:-http://host.docker.internal:11434}
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3:8b}
+      OLLAMA_HOST: "${OLLAMA_HOST:-http://host.docker.internal:11434}"
+      OLLAMA_MODEL: "${OLLAMA_MODEL:-llama3:8b}"
+      LLM_PROVIDER: "${LLM_PROVIDER:-ollama}"
+      LLM_STRICT_PROVIDER: "1"
+      LLM_ALLOW_LOCAL_DETERMINISTIC: "0"
+      OLLAMA_PREWARM_ON_STARTUP: "0"
+      ENABLE_JOB_WORKER: "${ENABLE_JOB_WORKER:-0}"
     depends_on:
-      - db
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     ports:
       - "8080:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/ready', timeout=5).read()\""]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    stop_grace_period: 20s
+
+  worker:
+    build: .
+    command: ["python", "-m", "src.workers.llm_worker", "--redis", "redis://redis:6379/0"]
+    environment:
+      ENV: "${ENV:-staging}"
+      APP_ENV: "${APP_ENV:-staging}"
+      REDIS_URL: "${REDIS_URL:-redis://redis:6379/0}"
+      APP_DB_DSN: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-janusec}"
+      API_KEY: "${API_KEY:-janusec-staging-local-20260324}"
+      DEFAULT_TENANT: "${DEFAULT_TENANT:-default}"
+      LOAD_FULL_ROUTES: "1"
+      LLM_PROVIDER: "${LLM_PROVIDER:-ollama}"
+      LLM_STRICT_PROVIDER: "1"
+      LLM_ALLOW_LOCAL_DETERMINISTIC: "0"
+      TEST_HELPERS_ENABLED: "0"
+      PLATFORM_LITE_INIT: "0"
+      FAST_TEST_MODE: "0"
+      DISABLE_DB: "0"
+      OLLAMA_HOST: "${OLLAMA_HOST:-http://host.docker.internal:11434}"
+      OLLAMA_MODEL: "${OLLAMA_MODEL:-llama3:8b}"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "print('worker-ok')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
   prometheus:
     image: prom/prometheus:latest
@@ -58,4 +132,6 @@ services:
 
 volumes:
   pgdata:
+  redisdata:
   grafana_data:
+  sessiondata:

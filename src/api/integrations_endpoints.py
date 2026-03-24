@@ -1,9 +1,10 @@
 from __future__ import annotations
 import json, time
 from typing import Any, Dict
-from fastapi import APIRouter, HTTPException, Body
+from fastapi import APIRouter, HTTPException, Body, Request
 from .dependencies import get_platform_state
 import os
+from .tenant_helpers import resolve_tenant_id
 try:
     import psycopg2
 except Exception:
@@ -20,8 +21,8 @@ def _get_conn():
 
 
 @router.post('/{name}/config')
-def save_integration_config(name: str, payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
-    tenant = payload.get('tenant_id') or 'default'
+def save_integration_config(name: str, payload: Dict[str, Any] = Body(...), request: Request = None) -> Dict[str, Any]:
+    tenant = resolve_tenant_id(request, payload.get('tenant_id')) or payload.get('tenant_id') or 'default'
     cfg = payload.get('config') or {}
     try:
         conn = _get_conn()
@@ -35,9 +36,9 @@ def save_integration_config(name: str, payload: Dict[str, Any] = Body(...)) -> D
 
 
 @router.get('/{name}/config/test')
-def test_integration_config(name: str, tenant_id: str | None = None):
+def test_integration_config(name: str, tenant_id: str | None = None, request: Request = None):
     # Simple test: load config and perform superficial validation (e.g., try connect for DB/Neo4j)
-    t = tenant_id or 'default'
+    t = resolve_tenant_id(request, tenant_id) or tenant_id or 'default'
     try:
         conn = _get_conn()
         conn.close()
@@ -69,6 +70,7 @@ from typing import Any, Deque, Dict, List, Optional, Tuple, NoReturn
 
 import httpx
 from fastapi import APIRouter, HTTPException, Query, Request, Depends
+from .tenant_helpers import resolve_tenant_id
 from pathlib import Path
 import socket
 import ipaddress
@@ -583,34 +585,49 @@ async def _xdr_worker() -> None:
                 except Exception:
                     _ds_mod = None
             for ev in item.get('events', []):
-                # Also ingest into GLOBAL_HOPGRAPH for reconstruction/testing.
+                # Ingest into GLOBAL_HOPGRAPH for reconstruction/testing and record recent ids.
                 try:
                     if GLOBAL_HOPGRAPH is not None:
-                        GLOBAL_HOPGRAPH.ingest_event(ev, source='xdr')
-                        # Record recent ingestion id for test hooks
                         try:
-                            _RECENT_INGEST.append(ev.get('id') or f"xdr-{int(time.time()*1000)}")
+                            from src.core.graph.hopgraph_utils import safe_upsert_node
                         except Exception:
-                            pass
-                        # Increment ingest events counter
+                            safe_upsert_node = None
+                        fh = ev.get('file_hash') or ev.get('hash') or None
                         try:
-                            from .metrics_init import ensure_metrics, ingest_events_counter, ingest_events_tenant_counter
-                            ensure_metrics()
+                            if fh and safe_upsert_node is not None:
+                                safe_upsert_node(GLOBAL_HOPGRAPH, 'file_hash', fh, attrs=ev.get('attrs') or {}, source='xdr')
+                            else:
+                                try:
+                                    GLOBAL_HOPGRAPH.ingest_event(ev, source='xdr')
+                                except Exception:
+                                    pass
+                        except Exception:
                             try:
-                                ingest_events_counter.labels(source='xdr').inc()
+                                GLOBAL_HOPGRAPH.ingest_event(ev, source='xdr')
                             except Exception:
                                 pass
-                            try:
-                                # Use tenant_id field if present in event; else fall back to integrator id
-                                _tenant_id = ev.get('tenant_id') or item.get('integrator_id') or 'unknown'
-                                if ingest_events_tenant_counter:
-                                    ingest_events_tenant_counter.labels(tenant_id=str(_tenant_id), source='xdr').inc()
-                            except Exception:
-                                pass
-                        except Exception:
-                            pass
+                    try:
+                        _RECENT_INGEST.append(ev.get('id') or f"xdr-{int(time.time()*1000)}")
+                    except Exception:
+                        pass
                 except Exception:
                     # Don't let ingestion failures stop decision publishing
+                    pass
+                # Increment ingest events counter (best-effort)
+                try:
+                    from .metrics_init import ensure_metrics, ingest_events_counter, ingest_events_tenant_counter
+                    ensure_metrics()
+                    try:
+                        ingest_events_counter.labels(source='xdr').inc()
+                    except Exception:
+                        pass
+                    try:
+                        _tenant_id = ev.get('tenant_id') or item.get('integrator_id') or 'unknown'
+                        if ingest_events_tenant_counter:
+                            ingest_events_tenant_counter.labels(tenant_id=str(_tenant_id), source='xdr').inc()
+                    except Exception:
+                        pass
+                except Exception:
                     pass
                 raw_id = ev.get('id') or f"xdr-{int(time.time()*1000)}"
                 verdict = 'OBSERVE'
@@ -714,7 +731,7 @@ def _timestamp_fresh(ts: str) -> bool:
     return abs(now - val) <= _XDR_REPLAY_WINDOW_SECONDS
 
 @router.post('/api/v1/integrations/xdr/register')  # type: ignore[misc]
-async def xdr_register(integrator_id: str, secret: str | None = None) -> dict[str, Any]:
+async def xdr_register(integrator_id: str, secret: str | None = None, auth=Depends(require_scopes('admin'))) -> dict[str, Any]:
     if not integrator_id:
         _error(400,'invalid_integrator')
     if secret is None:
@@ -725,7 +742,7 @@ async def xdr_register(integrator_id: str, secret: str | None = None) -> dict[st
     return {'registered': True, 'integrator_id': integrator_id, 'secret': secret}
 
 @router.post('/api/v1/integrations/xdr/rotate')  # type: ignore[misc]
-async def xdr_rotate(integrator_id: str, new_secret: str | None = None) -> dict[str, Any]:
+async def xdr_rotate(integrator_id: str, new_secret: str | None = None, auth=Depends(require_scopes('admin'))) -> dict[str, Any]:
     recs = _load_secret_records(integrator_id)
     if not recs:
         _error(404,'unknown_integrator')
@@ -812,10 +829,50 @@ async def xdr_webhook(request: Request) -> dict[str, Any]:
                 for ev in events:
                     try:
                         if GLOBAL_HOPGRAPH is not None:
-                            res = GLOBAL_HOPGRAPH.ingest_event(ev, source='xdr')
-                            # if ingest_event is coroutine, await it
-                            if asyncio.iscoroutine(res):
-                                import asyncio as _a; _a.get_event_loop().run_until_complete(res)
+                            try:
+                                from src.core.graph.hopgraph_utils import safe_upsert_node
+                                fh = ev.get('file_hash') or ev.get('hash') or None
+                                if fh:
+                                    safe_upsert_node(GLOBAL_HOPGRAPH, 'file_hash', fh, attrs=ev.get('attrs') or {}, source='xdr')
+                                else:
+                                    try:
+                                        from src.core.graph.hopgraph_utils import safe_upsert_node
+                                    except Exception:
+                                        safe_upsert_node = None
+                                    try:
+                                        if safe_upsert_node is not None and ev.get('type') == 'file_hash' and ev.get('id'):
+                                            safe_upsert_node(GLOBAL_HOPGRAPH, 'file_hash', ev.get('id'), attrs=ev.get('attrs') or {}, source='xdr')
+                                            res = {'status': 'ok'}
+                                        else:
+                                            res = GLOBAL_HOPGRAPH.ingest_event(ev, source='xdr')
+                                    except Exception:
+                                        try:
+                                            res = GLOBAL_HOPGRAPH.ingest_event(ev, source='xdr')
+                                        except Exception:
+                                            res = {'status': 'error'}
+                                    if asyncio.iscoroutine(res):
+                                        import asyncio as _a; _a.get_event_loop().run_until_complete(res)
+                            except Exception:
+                                try:
+                                    try:
+                                        from src.core.graph.hopgraph_utils import safe_upsert_node
+                                    except Exception:
+                                        safe_upsert_node = None
+                                    try:
+                                        if safe_upsert_node is not None and ev.get('type') == 'file_hash' and ev.get('id'):
+                                            safe_upsert_node(GLOBAL_HOPGRAPH, 'file_hash', ev.get('id'), attrs=ev.get('attrs') or {}, source='xdr')
+                                            res = {'status': 'ok'}
+                                        else:
+                                            res = GLOBAL_HOPGRAPH.ingest_event(ev, source='xdr')
+                                    except Exception:
+                                        try:
+                                            res = GLOBAL_HOPGRAPH.ingest_event(ev, source='xdr')
+                                        except Exception:
+                                            res = {'status': 'error'}
+                                    if asyncio.iscoroutine(res):
+                                        import asyncio as _a; _a.get_event_loop().run_until_complete(res)
+                                except Exception:
+                                    pass
                             try:
                                 _RECENT_INGEST.append(ev.get('id') or f"xdr-{int(time.time()*1000)}")
                             except Exception:
@@ -870,7 +927,7 @@ async def integrations_toggle(name: str, enabled: bool = Query(...), request: Re
         api_key = None
         authz = None
     # If demo or a recognized dev demo key is present, allow the toggle without admin scope.
-    dev_key = os.getenv('DEV_DEMO_API_KEY','devkey123')
+    dev_key = os.getenv('DEV_DEMO_API_KEY') or os.getenv('API_KEY')
     if not demo_env and not (api_key and api_key in (dev_key, 'testkey123')):
         # Enforce admin scope at request-time
         try:
@@ -1022,7 +1079,8 @@ async def integrations_sync(name: str, request: Request) -> dict[str, Any]:
     except Exception:
         demo_env = False
     api_key = request.headers.get('x-api-key') or request.headers.get('X-Api-Key')
-    if demo_env or (api_key and api_key == os.getenv('DEV_DEMO_API_KEY','devkey123')):
+    dev_demo_key = os.getenv('DEV_DEMO_API_KEY') or os.getenv('API_KEY')
+    if demo_env or (dev_demo_key and api_key and api_key == dev_demo_key):
         return {'created': [], 'ok': True}
     raise HTTPException(status_code=404, detail='sync_not_supported')
 
@@ -1171,6 +1229,25 @@ async def ai_test(provider: str = 'ollama') -> dict[str, Any]:
     dt = int((time.time() - t0) * 1000)
     return {'provider': provider, 'ok': ok, 'latency_ms': dt, 'error': err}
 
+# ---------------- Debug: Webhook Guard Stats (test-only) ----------------
+
+@router.get('/api/v1/integrations/webhooks/guard_stats')  # type: ignore[misc]
+async def webhook_guard_stats(request: Request, auth=Depends(require_scopes('admin'))) -> dict[str, Any]:
+    """Return WebhookGuardMiddleware counters for debugging.
+
+    Enabled only when TEST_HELPERS_ENABLED=1 to prevent exposure in prod.
+    """
+    if os.getenv('TEST_HELPERS_ENABLED', '0').lower() not in {'1','true','yes'}:
+        raise HTTPException(status_code=403, detail='forbidden')
+    try:
+        stats = getattr(request.app.state, 'webhook_guard_stats', {})
+        if not isinstance(stats, dict):
+            stats = {}
+        # return a shallow copy to avoid leaking the live dict
+        return {'stats': dict(stats)}
+    except Exception:
+        return {'stats': {}}
+
 # ---------------- Dev: Force External AI Analysis ----------------
 
 @router.post('/api/v1/ai/force_external')  # type: ignore[misc]
@@ -1260,6 +1337,70 @@ async def generic_webhook(vendor: str, request: Request) -> dict[str, Any]:
     performed in middleware. It accepts arbitrary JSON and enqueues a minimal
     decision summary for observability.
     """
+    # Fallback: perform minimal HMAC + replay guard here as a safety net
+    # in environments where middleware ordering or test harness behavior
+    # might bypass the middleware unexpectedly. Allow disabling via env.
+    try:
+        import os, time, hmac, hashlib
+        from src.core.replay_cache import replay_add as _replay_add, replay_exists as _replay_exists  # type: ignore
+        from src.audit.logger import audit as _audit
+        # Env gate: set WEBHOOK_ROUTE_FALLBACK=0 to disable this in-route guard
+        _route_fb = os.getenv('WEBHOOK_ROUTE_FALLBACK', '1').lower() in {'1','true','yes'}
+        if not _route_fb:
+            raise RuntimeError('route_fallback_disabled')
+        hdr_signature = os.getenv('WEBHOOK_HEADER_SIGNATURE', 'X-Signature')
+        hdr_timestamp = os.getenv('WEBHOOK_HEADER_TIMESTAMP', 'X-Timestamp')
+        ts = request.headers.get(hdr_timestamp)
+        sig = request.headers.get(hdr_signature)
+        if not (ts and sig):
+            try:
+                _audit('webhook_missing_headers', vendor=vendor, path=f'/api/v1/webhooks/{vendor}')
+            finally:
+                raise HTTPException(status_code=400, detail='missing_headers')
+        try:
+            val_ts = int(ts)
+        except Exception:
+            try:
+                _audit('webhook_stale_timestamp', vendor=vendor, path=f'/api/v1/webhooks/{vendor}')
+            finally:
+                raise HTTPException(status_code=401, detail='stale_timestamp')
+        window = int(os.getenv('WEBHOOK_TS_WINDOW', '300'))
+        if abs(int(time.time()) - val_ts) > window:
+            try:
+                _audit('webhook_stale_timestamp', vendor=vendor, path=f'/api/v1/webhooks/{vendor}', ts=val_ts)
+            finally:
+                raise HTTPException(status_code=401, detail='stale_timestamp')
+        secret = os.getenv(f'SECRET_{vendor.upper()}') or os.getenv('GENERIC_WEBHOOK_SECRET')
+        if not secret:
+            try:
+                _audit('webhook_not_configured', vendor=vendor, path=f'/api/v1/webhooks/{vendor}')
+            finally:
+                raise HTTPException(status_code=403, detail='webhook_not_configured')
+        body_bytes = await request.body()
+        max_bytes = int(os.getenv('WEBHOOK_MAX_BYTES', '1048576'))  # default 1MB
+        if len(body_bytes) > max_bytes:
+            try:
+                _audit('webhook_too_large', vendor=vendor, path=f'/api/v1/webhooks/{vendor}', size=len(body_bytes))
+            finally:
+                raise HTTPException(status_code=413, detail='payload_too_large')
+        expected = hmac.new(secret.encode('utf-8'), msg=str(ts).encode('utf-8') + b'.' + body_bytes, digestmod=hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(expected, sig):
+            try:
+                _audit('webhook_bad_signature', vendor=vendor, path=f'/api/v1/webhooks/{vendor}', ts=val_ts)
+            finally:
+                raise HTTPException(status_code=401, detail='bad_signature')
+        _k = f"{vendor}|{ts}|{sig}"
+        if _replay_exists(_k):
+            try:
+                _audit('webhook_replay_detected', vendor=vendor, path=f'/api/v1/webhooks/{vendor}', ts=val_ts)
+            finally:
+                raise HTTPException(status_code=409, detail='replay_detected')
+        _replay_add(_k)
+    except HTTPException:
+        raise
+    except Exception:
+        # Safety: do not block on guard failure here; fall through to existing behavior
+        pass
     # Reserved vendor names with dedicated handlers should delegate to their
     # specific implementations to avoid the catch-all route shadowing them.
     if vendor in {'dispatch','test'}:
@@ -1283,7 +1424,7 @@ async def generic_webhook(vendor: str, request: Request) -> dict[str, Any]:
             raise
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f'delegate_failed:{exc}')
-    tenant_id = request.headers.get('X-Tenant-ID') or request.headers.get('x-tenant-id') or 'default'
+    tenant_id = resolve_tenant_id(request, request.headers.get('X-Tenant-ID') or request.headers.get('x-tenant-id')) or 'default'
     body = await request.body()
     if _vendor_is_duplicate(tenant_id, body):
         return {'vendor': vendor, 'duplicate': True, 'received': False}
@@ -1441,7 +1582,7 @@ def _audit_vendor(vendor: str, payload: dict[str, Any]) -> None:
 
 @router.post('/api/v1/webhooks/slack')  # type: ignore[misc]
 async def slack_webhook(request: Request) -> dict[str, Any]:
-    tenant_id = request.headers.get('X-Tenant-ID') or request.headers.get('x-tenant-id') or 'default'
+    tenant_id = resolve_tenant_id(request, request.headers.get('X-Tenant-ID') or request.headers.get('x-tenant-id')) or 'default'
     body = await request.body()
     if _vendor_is_duplicate(tenant_id, body):
         return {'vendor': 'slack', 'duplicate': True, 'received': False}
@@ -1459,7 +1600,7 @@ async def slack_webhook(request: Request) -> dict[str, Any]:
 
 @router.post('/api/v1/webhooks/teams')  # type: ignore[misc]
 async def teams_webhook(request: Request) -> dict[str, Any]:
-    tenant_id = request.headers.get('X-Tenant-ID') or request.headers.get('x-tenant-id') or 'default'
+    tenant_id = resolve_tenant_id(request, request.headers.get('X-Tenant-ID') or request.headers.get('x-tenant-id')) or 'default'
     body = await request.body()
     if _vendor_is_duplicate(tenant_id, body):
         return {'vendor': 'teams', 'duplicate': True, 'received': False}
@@ -1476,7 +1617,7 @@ async def teams_webhook(request: Request) -> dict[str, Any]:
 
 @router.post('/api/v1/webhooks/github')  # type: ignore[misc]
 async def github_webhook(request: Request) -> dict[str, Any]:
-    tenant_id = request.headers.get('X-Tenant-ID') or request.headers.get('x-tenant-id') or 'default'
+    tenant_id = resolve_tenant_id(request, request.headers.get('X-Tenant-ID') or request.headers.get('x-tenant-id')) or 'default'
     body = await request.body()
     if _vendor_is_duplicate(tenant_id, body):
         return {'vendor': 'github', 'duplicate': True, 'received': False}
@@ -1494,7 +1635,7 @@ async def github_webhook(request: Request) -> dict[str, Any]:
 
 @router.post('/api/v1/webhooks/gitlab')  # type: ignore[misc]
 async def gitlab_webhook(request: Request) -> dict[str, Any]:
-    tenant_id = request.headers.get('X-Tenant-ID') or request.headers.get('x-tenant-id') or 'default'
+    tenant_id = resolve_tenant_id(request, request.headers.get('X-Tenant-ID') or request.headers.get('x-tenant-id')) or 'default'
     body = await request.body()
     if _vendor_is_duplicate(tenant_id, body):
         return {'vendor': 'gitlab', 'duplicate': True, 'received': False}
@@ -1511,7 +1652,7 @@ async def gitlab_webhook(request: Request) -> dict[str, Any]:
 
 
 @router.get('/api/v1/integrations/webhooks/audit')  # type: ignore[misc]
-async def webhook_audit_summary(vendor: str | None = None) -> dict[str, Any]:
+async def webhook_audit_summary(vendor: str | None = None, auth=Depends(require_scopes('admin'))) -> dict[str, Any]:
     """Return a small summary of webhook audit lines for a vendor.
 
     Reads the jsonl audit file and returns count and last timestamp. If vendor
@@ -1737,7 +1878,7 @@ async def otx_sync() -> dict[str, Any]:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get('/api/v1/integrations/intel/status')  # type: ignore[misc]
+@router.get('/api/v1/integrations/intel/status', operation_id='integrations_intel_status')  # type: ignore[misc]
 async def intel_status() -> dict[str, Any]:
     try:
         from integrations.threat_intel_client import CLIENT

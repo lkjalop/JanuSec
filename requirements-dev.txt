@@ -1,0 +1,21 @@
+# Development & Test Extras (installed alongside requirements.txt)
+pytest
+pytest-asyncio
+pytest-cov
+pytest-mock
+pytest-timeout
+httpx
+PyYAML
+prometheus-client
+fakeredis
+tenacity
+lark
+aiohttp
+cryptography
+scikit-learn
+boto3
+bleach
+alembic>=1.10.0
+SQLAlchemy>=2.0.0
+dkimpy>=1.1.0
+dnspython
