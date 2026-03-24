@@ -926,9 +926,11 @@ async def integrations_toggle(name: str, enabled: bool = Query(...), request: Re
     except Exception:
         api_key = None
         authz = None
-    # If demo or a recognized dev demo key is present, allow the toggle without admin scope.
+    # If demo mode is active, allow the toggle without admin scope. Otherwise require
+    # an explicitly configured key or admin scope; do not inherit legacy demo defaults.
     dev_key = os.getenv('DEV_DEMO_API_KEY') or os.getenv('API_KEY')
-    if not demo_env and not (api_key and api_key in (dev_key, 'testkey123')):
+    allowed_demo_keys = {token for token in (dev_key,) if token}
+    if not demo_env and not (api_key and api_key in allowed_demo_keys):
         # Enforce admin scope at request-time
         try:
             from security.auth import auth_dependency

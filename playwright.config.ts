@@ -1,0 +1,39 @@
+import { defineConfig, devices } from '@playwright/test';
+
+export default defineConfig({
+  testDir: 'tests/playwright',
+  timeout: 60_000,
+  expect: { timeout: 5000 },
+  fullyParallel: false,
+  retries: process.env.CI ? 1 : 0,
+  reporter: [['list'], ['html', { open: 'never' }]],
+  use: {
+    headless: true,
+    viewport: { width: 1280, height: 800 },
+    actionTimeout: 30_000,
+    // Default to the demo app server port (uvicorn) used by the webServer block
+    baseURL: process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:8080',
+    trace: 'on-first-retry'
+  },
+  projects: [
+    { name: 'chromium', use: { ...devices['Desktop Chrome'] } }
+  ],
+  // Only start the demo app server when PLAYWRIGHT_BASE_URL is not provided.
+  // This lets CI or local runs point tests at a deterministic static shim.
+  ...(process.env.PLAYWRIGHT_BASE_URL ? {} : {
+    webServer: {
+      command: 'python -m uvicorn src.api.app:app --host 0.0.0.0 --port 8080',
+      port: 8080,
+      timeout: 120_000,
+      reuseExistingServer: !process.env.CI,
+      env: {
+        DEFAULT_FRONTEND: 'console',
+        TEST_HELPERS_ENABLED: '0',
+        FAST_TEST_MODE: '0',
+        PLATFORM_LITE_INIT: '0',
+        ENV: 'staging',
+        API_KEYS_JSON: '[{"key":"janusec-playwright-local","scopes":["*"]}]'
+      }
+    }
+  })
+});

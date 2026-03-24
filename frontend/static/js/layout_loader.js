@@ -1,14 +1,14 @@
 // Layout loader: inject page content into #contentWrapper, set auth state, env switching.
 (function(){
   function detectApiKey(){
-    try{ return localStorage.getItem('apiKey') || 'devkey123'; }catch(_){ return 'devkey123'; }
+    try{ return localStorage.getItem('apiKey') || ''; }catch(_){ return ''; }
   }
   function updateAuthState(){
     const el = document.getElementById('authState');
     if(!el) return;
     const key = detectApiKey();
-    const masked = key.length > 8 ? key.slice(0,4)+'…'+key.slice(-3) : key;
-    el.textContent = 'auth: '+masked;
+    const masked = key.length > 8 ? key.slice(0,4)+'...'+key.slice(-3) : key;
+    el.textContent = key ? ('auth: '+masked) : 'auth: not set';
   }
   function wireEnvSelect(){
     const sel = document.getElementById('envSelect');
@@ -20,7 +20,6 @@
     });
   }
 
-  // Feature flags UI: modal settings panel
   function initFeatureFlags(){
     try{
       window.featureFlags = window.featureFlags || {};
@@ -36,7 +35,6 @@
       };
       container.appendChild(fbtn);
 
-      // modal builder
       function openFlagsModal(){
         if(document.getElementById('flagsModal')) return;
         const modal = document.createElement('div'); modal.id='flagsModal'; modal.style.position='fixed'; modal.style.inset='0'; modal.style.display='flex'; modal.style.alignItems='center'; modal.style.justifyContent='center'; modal.style.background='rgba(0,0,0,0.45)'; modal.style.zIndex=99999;
@@ -68,13 +66,12 @@
       }
     }catch(_){ }
   }
-  // Basic content injection: if page has a main content container `.page-root`, move it inside layout wrapper.
+
   function adoptContent(){
     const wrap = document.getElementById('contentWrapper');
     if(!wrap) return;
     const pageRoot = document.querySelector('.page-root');
     if(pageRoot){ wrap.appendChild(pageRoot); return; }
-    // Fallback: gather body children except layout shell, re-parent
     const shellIds = new Set(['globalBanner','topBar','toastContainer','contentWrapper']);
     const fr = document.createDocumentFragment();
     Array.from(document.body.children).forEach(ch=>{ if(!shellIds.has(ch.id)) fr.appendChild(ch); });
@@ -86,30 +83,24 @@
     adoptContent();
     document.body.classList.add('with-topbar');
     initFeatureFlags();
-    // Telemetry UI: show queued count if telemetry is present
     try{
       const tbadge = document.createElement('span'); tbadge.id='telemetryBadge'; tbadge.style.marginLeft='8px'; tbadge.style.color='var(--text-muted)';
       const top = document.getElementById('topBar') || document.body; top.appendChild(tbadge);
       const refreshBadge = ()=>{ try{ const q= (window.__janusec_telemetry && window.__janusec_telemetry._queueCount) ? window.__janusec_telemetry._queueCount() : 0; tbadge.textContent = 'telemetry: '+(q||0); }catch(_){ } };
       setInterval(refreshBadge, 1500); refreshBadge();
     }catch(_){ }
-    // Attempt to load telemetry client if available
     try{
       if(!document.querySelector('script[src="/static/js/telemetry.js"]')){
         const s = document.createElement('script'); s.src='/static/js/telemetry.js'; s.async=true; document.head.appendChild(s);
       }
     }catch(_){ }
-    // global error capture to enqueue telemetry
     try{ window.addEventListener('error', (ev)=>{ try{ if(window.__janusec_telemetry && window.__janusec_telemetry.enqueue) window.__janusec_telemetry.enqueue({ level:'error', msg: ev.message || String(ev), src: ev.filename || '' }); }catch(_){ } }); }catch(_){ }
-    // Accessibility: focus main wrapper
     setTimeout(()=>{ const wrap = document.getElementById('contentWrapper'); if(wrap) wrap.focus(); }, 50);
-    // Service worker registration (optional) + update message handling
     try{
       if('serviceWorker' in navigator){
         navigator.serviceWorker.register('/static/service-worker.js').then(()=>{
           console.info('service worker registered');
         }).catch(()=>{});
-        // Listen for postMessage from SW about updates
         navigator.serviceWorker.addEventListener('message', (ev)=>{
           try{
             const msg = ev.data || {};

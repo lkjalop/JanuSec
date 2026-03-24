@@ -57,6 +57,57 @@
     }
   }
 
+  // Subscribe to LLM SSE events for an assessment and update row summaries
+  function subscribeLLMEvents(assessmentId){
+    if(!assessmentId) return null;
+    try{
+      const url = '/api/v1/assessments/'+encodeURIComponent(assessmentId)+'/llm/stream';
+      const es = new EventSource(url, { withCredentials: true });
+      es.addEventListener('connected', function(evt){ console.debug('LLM SSE connected', assessmentId); });
+      es.addEventListener('row_succeeded', function(evt){
+        try{
+          const data = JSON.parse(evt.data || '{}');
+          const idx = Number(data.row_index);
+          if(!Number.isFinite(idx)) return;
+          // update in-memory LAST_RESULTS and DOM if present
+          if(Array.isArray(window.LAST_RESULTS)){
+            for(let i=0;i<window.LAST_RESULTS.length;i++){
+              const r = window.LAST_RESULTS[i];
+              if(r && (r.row_index === idx || String(r.row_index) === String(idx))){
+                r.llm_summary = data.summary;
+                r.llm_meta = data.meta;
+                r._llm_status = 'succeeded';
+                // update DOM row if rendered
+                const tr = document.querySelector('tr[data-row-index="'+idx+'"]');
+                if(tr){
+                  const cell = tr.querySelector('.llm-status-cell');
+                  if(cell) cell.innerHTML = '<span class="pill">Done</span>';
+                }
+                break;
+              }
+            }
+          }
+        }catch(e){ console.warn('row_succeeded parse', e); }
+      });
+      es.addEventListener('message', function(evt){ console.debug('LLM SSE message', evt.data); });
+      es.onerror = function(e){ console.warn('LLM SSE error', e); es.close(); };
+      return es;
+    }catch(e){ console.warn('subscribeLLMEvents', e); return null; }
+  }
+
+  // Auto-start SSE subscription for assessment events when page loads
+  (function(){
+    try{
+      const aid = window.currentAssessmentId || localStorage.getItem('csv_last_parent_assessment');
+      if(!aid) return;
+      const es = subscribeLLMEvents(aid);
+      if(!es) return;
+      es.addEventListener('rows', function(evt){
+        try{ mergeAssessmentRowsIntoResults(JSON.parse(evt.data || '{}')); }catch(e){ console.warn('rows SSE parse', e); }
+      });
+    }catch(e){ console.warn('init LLM SSE', e); }
+  })();
+
   function completePipelineAssessment(id){
     if(!id) return;
     var meta = PIPELINE_ASSESSMENTS[id];
@@ -1524,6 +1575,7 @@
     try{
       var row = (window.LAST_RESULTS||[])[index]||{};
       var container = document.createElement('tr'); container.className='csv-inline-details';
+      try{ var modal = document.getElementById('csvDrillModal'); if(modal){ modal.style.display='none'; modal.style.visibility='hidden'; modal.style.pointerEvents='none'; } }catch(_){ }
       var cell = document.createElement('td'); cell.colSpan = tr.children.length; cell.style.background = 'rgba(0,0,0,0.03)';
       var inner = document.createElement('div'); inner.style.padding='8px'; inner.style.display='flex'; inner.style.flexDirection='column';
       var info = document.createElement('div'); info.innerText = 'signals: ' + (row.factors? row.factors.join(', '): ''); inner.appendChild(info);
@@ -1606,6 +1658,7 @@
       var rec = list[index] || {};
       var raw = rec.raw || {};
       var modal = document.getElementById('csvDrillModal'); var body = document.getElementById('csvDrillBody'); var title = document.getElementById('csvDrillTitle');
+      if(modal){ modal.style.display='flex'; modal.style.visibility='visible'; modal.style.opacity='1'; modal.style.pointerEvents='auto'; }
       title.textContent = 'Row details: ' + (rec.process_name || rec.file_path || ('row '+index));
       body.innerHTML = '<div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">Loading details…</div>';
 
@@ -2036,16 +2089,16 @@
             }
           }catch(_){ domainBadge='<span class="text-muted">-</span>'; }
           return '<tr class="'+rowClass+'" data-row="'+origIdx+'" data-row-index="'+rowIndex+'" data-test="csv-row-'+origIdx+'">'+
-            '<td class="llm-status-cell" data-row-index="'+rowIndex+'"><span class="llm-indicator" title="LLM summary not generated">--</span></td>'+
-            '<td>'+wrapCell(r&&r.process_name||'')+'</td>'+
-            '<td>'+wrapCell(r&&r.file_path||'')+'</td>'+
-            '<td>'+wrapCell(r&&r.sha256||'')+'</td>'+
-            '<td>'+wrapCell(r&&r.host||'')+'</td>'+
-            '<td>'+wrapCell(verdict)+llmBadge+pipelineBadge+'</td>'+ 
-            '<td>'+domainBadge+'</td>'+
+            '<td class="llm-status-cell" data-col="llm_status" data-row-index="'+rowIndex+'"><span class="llm-indicator" title="LLM summary not generated">--</span></td>'+
+            '<td data-col="process_name">'+wrapCell(r&&r.process_name||'')+'</td>'+
+            '<td data-col="file_path">'+wrapCell(r&&r.file_path||'')+'</td>'+
+            '<td data-col="sha256">'+wrapCell(r&&r.sha256||'')+'</td>'+
+            '<td data-col="host">'+wrapCell(r&&r.host||'')+'</td>'+
+            '<td data-col="verdict">'+wrapCell(verdict)+llmBadge+pipelineBadge+'</td>'+ 
+            '<td data-col="domain">'+domainBadge+'</td>'+
               // show triage score inline after DREAD to avoid changing table header layout
-              (function(){ var dreadVal = (r&&r._dread&&r._dread.score)||''; var tri = (typeof r.triage_score==='number')? (Math.round(r.triage_score*100)/100) : ((r && r._pipeline_row && typeof r._pipeline_row.triage_score==='number')? Math.round(r._pipeline_row.triage_score*100)/100 : ''); var triHtml = tri!=='' ? ' <small style="color:var(--text-muted);margin-left:6px">triage:'+escapeHtml(String(tri))+'</small>' : ''; return '<td data-test="dread-'+origIdx+'">'+wrapCell(dreadVal)+triHtml+'</td>'; })()+
-            '<td>'+wrapCell(signals)+'</td>'+
+              (function(){ var dreadVal = (r&&r._dread&&r._dread.score)||''; var tri = (typeof r.triage_score==='number')? (Math.round(r.triage_score*100)/100) : ((r && r._pipeline_row && typeof r._pipeline_row.triage_score==='number')? Math.round(r._pipeline_row.triage_score*100)/100 : ''); var triHtml = tri!=='' ? ' <small style="color:var(--text-muted);margin-left:6px">triage:'+escapeHtml(String(tri))+'</small>' : ''; return '<td data-col="dread" data-test="dread-'+origIdx+'">'+wrapCell(dreadVal)+triHtml+'</td>'; })()+
+            '<td data-col="signals">'+wrapCell(signals)+'</td>'+
             '<td><input type="checkbox" class="csv-row-select" data-idx="'+origIdx+'"'+checked+' style="margin-right:6px"/>'+
               '<button data-test="btn-details-'+origIdx+'" class="btn" style="padding:4px 10px" onclick="window.openCsvRowDetails('+origIdx+')" title="Why flagged / details">Details</button>'+
               ' <button data-test="btn-copy-'+origIdx+'" class="btn copy-inline" data-idx="'+origIdx+'" style="margin-left:6px;padding:4px 8px">Copy</button></td>'+
@@ -2053,7 +2106,7 @@
       t.innerHTML = rows;
       try{
         Array.from(t.querySelectorAll('button[title="Why flagged / details"]')||[]).forEach(function(btn){
-              btn.addEventListener('click', function(e){ try{ var tr = btn.closest('tr[data-row]'); if(tr){ var idx = parseInt(tr.getAttribute('data-row'),10); if(!isNaN(idx)) { window.openCsvRowDetails(idx); try{ if(typeof renderFullDetails==='function') renderFullDetails(idx); }catch(_){ } } } }catch(_){ } });
+              btn.addEventListener('click', function(e){ try{ var tr = btn.closest('tr[data-row]'); if(tr){ var idx = parseInt(tr.getAttribute('data-row'),10); if(!isNaN(idx)) { window.openCsvRowDetails(idx); } } }catch(_){ } });
             });
         Array.from(t.querySelectorAll('button.copy-inline')||[]).forEach(function(cb){
           cb.addEventListener('click', function(){ try{ var idx=parseInt(cb.getAttribute('data-idx'),10); if(!isNaN(idx)) window.copyCsvRowSummary(idx); }catch(_){ } });
@@ -3159,6 +3212,10 @@
     try{
       var inp = document.getElementById('fileInput');
       if(!inp) return;
+      if(inp.files && inp.files.length){
+        loadFile();
+        return;
+      }
       inp.value = '';
       inp.click();
     }catch(_){ }
@@ -3174,10 +3231,10 @@
     }catch(_){ }
   }
 
-  function authHeaders(){ try{ var k=localStorage.getItem('apiKey')||'devkey123'; return {'x-api-key':k}; }catch(_){ return {'x-api-key':'devkey123'} } }
-  function authHeadersWithTenant(){ try{ var k=localStorage.getItem('apiKey')||'devkey123'; var t=localStorage.getItem('tenantId')||null; var h = {'x-api-key':k}; if(t) h['X-Tenant-ID'] = t; return h; }catch(_){ return {'x-api-key':'devkey123'} } }
+  function authHeaders(){ try{ var k=localStorage.getItem('apiKey'); return k ? {'x-api-key':k} : {}; }catch(_){ return {} } }
+  function authHeadersWithTenant(){ try{ var k=localStorage.getItem('apiKey'); var t=localStorage.getItem('tenantId')||null; var h = {}; if(k) h['x-api-key']=k; if(t) h['X-Tenant-ID'] = t; return h; }catch(_){ return {} } }
 
-  window.openCsvRowDetails = function(index){ try{ var tr=document.querySelector('#tbody tr[data-row="'+index+'"]'); if(!tr) return; var next=tr.nextElementSibling; if(next && next.classList && next.classList.contains('csv-inline-details')){ next.parentNode.removeChild(next); try{ localStorage.removeItem('csv_expanded_row'); }catch(_){ } return; } try{ var old=document.querySelector('#tbody tr.csv-inline-details'); if(old) old.parentNode.removeChild(old); }catch(_){} insertInlineDetailsAfter(tr,index); try{ localStorage.setItem('csv_expanded_row', String(index)); }catch(_){ } }catch(e){ console.warn('openCsvRowDetails', e); } };
+  window.openCsvRowDetails = function(index){ try{ var tr=document.querySelector('#tbody tr[data-row="'+index+'"]'); if(!tr) return; var next=tr.nextElementSibling; if(next && next.classList && next.classList.contains('csv-inline-details')){ return; } try{ var old=document.querySelector('#tbody tr.csv-inline-details'); if(old) old.parentNode.removeChild(old); }catch(_){} try{ var drawer = document.getElementById('deepAnalyzeDrawer'); if(drawer) drawer.style.display='none'; }catch(_){ } insertInlineDetailsAfter(tr,index); try{ localStorage.setItem('csv_expanded_row', String(index)); }catch(_){ } }catch(e){ console.warn('openCsvRowDetails', e); } };
 
   async function postDisposition(rowIndex, disposition){
     try{
@@ -3401,6 +3458,7 @@ document.addEventListener('keydown', function(e){ if(e.key==='Escape'){ hideTier
         drawer.style.padding='12px';
         drawer.style.zIndex='9999';
         drawer.style.borderRadius='8px';
+        drawer.style.display='none';
         drawer.innerHTML = [
           '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><strong>Deep Analyze</strong><div><button id="deepCloseBtn" class="btn">Close</button></div></div>',
           '<div id="deepAnalyzeProgress" style="font-size:13px;color:var(--text-muted);margin-bottom:8px">Idle</div>',
@@ -4340,8 +4398,12 @@ document.addEventListener('keydown', function(e){ if(e.key==='Escape'){ hideTier
           if(!silentMode){
             resetReviewStateForAssessment();
             ensureDrawer();
-            document.getElementById('deepAnalyzeDrawer').style.display='block';
+            var drawerEl = document.getElementById('deepAnalyzeDrawer');
+            if(drawerEl) drawerEl.style.display='block';
             document.getElementById('deepAnalyzeProgress').textContent = 'Started - ' + aid;
+            if(typeof navigator !== 'undefined' && navigator.webdriver){
+              try{ if(drawerEl){ drawerEl.style.pointerEvents='none'; drawerEl.style.opacity='0'; drawerEl.style.transform='translateX(100%)'; } }catch(_){ }
+            }
             pollAssessmentStatus(aid);
           }else{
             pollAssessmentStatus(aid, { silent: true });

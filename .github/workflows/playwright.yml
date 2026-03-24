@@ -1,0 +1,78 @@
+name: Playwright LIVE Smoke
+
+on:
+  push:
+    branches: [ main, feature/** ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  live-console-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Python deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Install Node deps
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps
+
+      - name: Start test server
+        shell: bash
+        run: |
+          pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/start_test_server.ps1 &
+        env:
+          DEFAULT_FRONTEND: console
+          TEST_HELPERS_ENABLED: "0"
+          PLATFORM_LITE_INIT: "0"
+          ENV: staging
+          API_KEYS_JSON: '[{"key":"janusec-ci-smoke","scopes":["*"]}]'
+
+      - name: Wait for server
+        run: |
+          for i in `seq 1 60`; do
+            if curl -sSf http://localhost:8080/ >/dev/null 2>&1; then
+              echo "server up"; break
+            fi
+            sleep 2
+          done
+
+      - name: Run LIVE console smoke
+        run: npx playwright test tests/playwright/live_console_smoke.spec.js --config=playwright.config.ts --reporter=list
+        env:
+          PLAYWRIGHT_BASE_URL: http://localhost:8080
+          PLAYWRIGHT_API_KEY: janusec-ci-smoke
+
+      - name: Upload Playwright HTML report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-live-smoke-report
+          path: playwright-report
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Upload Playwright artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-live-smoke-artifacts
+          path: test-results
+          if-no-files-found: ignore
+          retention-days: 7

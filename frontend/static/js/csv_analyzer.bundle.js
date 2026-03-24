@@ -59,8 +59,8 @@ async function setPolicy(val) {
 (function(){ const el=document.getElementById('orgNeverAutoClear'); if(el){ el.addEventListener('change', (ev)=> setPolicy(!!ev.target.checked)); } refreshPolicy(); })();
 
 // ---- Basic helpers ----
-function authHeaders(){ try{ const k=localStorage.getItem('apiKey')||'devkey123'; return {'x-api-key':k}; }catch(_){ return {'x-api-key':'devkey123'} } }
-(function(){ try{ const b=document.getElementById('apiBanner'); const k=localStorage.getItem('apiKey'); if(!k || k==='devkey123'){ b.style.display='block'; b.innerHTML = `Tip: set an API key to avoid 401s. Paste in console: localStorage.apiKey = '<YOUR_KEY>' &nbsp; <button class="btn" id="setDemoKey">Use demo key</button>`; const btn=b.querySelector('#setDemoKey'); if(btn){ btn.addEventListener('click', ()=>{ try{ localStorage.setItem('apiKey','devkey123'); _toast('Demo API key set (devkey123). Reloading...',2500); setTimeout(()=> location.reload(), 800); }catch(_){ _toast('Failed to set demo key',2500); } }); } } }catch(_){ } })();
+function authHeaders(){ try{ const k=localStorage.getItem('apiKey'); return k ? {'x-api-key':k} : {}; }catch(_){ return {} } }
+(function(){ try{ const b=document.getElementById('apiBanner'); const k=localStorage.getItem('apiKey'); if(!k){ b.style.display='block'; b.textContent = `Tip: set an API key to avoid 401s. Paste in console: localStorage.apiKey = '<YOUR_KEY>'`; } }catch(_){ } })();
 
 function _htmlEsc(s){ return String(s==null?'':s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;'); }
 function verdictPassFail(v){

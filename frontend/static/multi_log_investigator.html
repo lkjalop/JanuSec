@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Multi-Log Investigator</title>
+<style>
+  :root { --bg-primary:#0B0E14; --bg-secondary:#141A24; --bg-tertiary:#1D2531; --text-primary:#E8EBF0; --text-secondary:#C2CBD6; --text-muted:#93A0B1; --border:#2C3746; --accent:#4A63E7; --accent-hover:#5C74F2; --critical:#E54848; --safe:#2DB67C; }
+  body { margin:0; font-family: Inter, Segoe UI, system-ui, sans-serif; background: var(--bg-primary); color: var(--text-primary); }
+  header { padding:16px 22px; background: var(--bg-secondary); border-bottom:1px solid var(--border); }
+  main { max-width:1200px; margin:0 auto; padding:20px; }
+  .section { background: var(--bg-secondary); border:1px solid var(--border); border-radius:8px; padding:16px; margin-bottom:22px; }
+  h1 { margin:0; font-size:20px; }
+  h2 { margin:0 0 12px 0; font-size:16px; }
+  .small { font-size:12px; color: var(--text-muted); }
+  .grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  .grid-3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:14px; }
+  .input, select, textarea { background: var(--bg-tertiary); border:1px solid var(--border); color: var(--text-primary); border-radius:6px; padding:8px; font-size:14px; width:100%; }
+  .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  .btn { background: var(--bg-tertiary); color: var(--text-primary); border:1px solid var(--border); border-radius:6px; padding:8px 14px; font-size:13px; cursor:pointer; display:inline-flex; align-items:center; gap:6px; }
+  .btn:hover { background: var(--bg-secondary); }
+  .btn-primary { background: var(--accent); border-color: var(--accent); color:#fff; }
+  .btn-primary:hover { background: var(--accent-hover); }
+  .pill { padding:4px 10px; border-radius:16px; font-size:11px; background: var(--bg-tertiary); border:1px solid var(--border); margin:2px 4px 2px 0; display:inline-block; }
+  .code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:12px; white-space:pre-wrap; background: var(--bg-tertiary); border:1px solid var(--border); border-radius:6px; padding:10px; }
+  table { width:100%; border-collapse: collapse; font-size:12px; }
+  th, td { padding:6px 8px; border:1px solid var(--border); text-align:left; }
+  .muted { color: var(--text-muted); }
+</style>
+<script>
+  window.authHeaders = window.authHeaders || function(){ try{ const k=localStorage.getItem('apiKey'); const h={}; const t=localStorage.getItem('tenantId'); if(k) h['x-api-key']=k; if(t) h['X-Tenant-ID']=t; return h; }catch(e){ return {}; } };
+</script>
+</head>
+<body>
+<header>
+  <h1>Multi-Log Investigator</h1>
+  <div class="small">Submit a suspicion-driven investigation request and review correlation evidence, next-best steps, and optional capture suggestions (eBPF/PCAP).</div>
+</header>
+<main>
+  <div class="section">
+    <h2>Request</h2>
+    <div class="grid-2">
+      <div>
+        <label class="small">Reason</label>
+        <input id="reason" class="input" placeholder="e.g., suspicious admin login with child PowerShell" />
+      </div>
+      <div>
+        <label class="small">Scope</label>
+        <select id="scope" class="input">
+          <option value="">auto</option>
+          <option value="endpoint">endpoint</option>
+          <option value="network">network</option>
+          <option value="identity">identity</option>
+          <option value="cloud">cloud</option>
+          <option value="k8s">k8s</option>
+          <option value="all">all</option>
+        </select>
+      </div>
+    </div>
+    <div class="grid-3" style="margin-top:10px;">
+      <div>
+        <label class="small">User</label>
+        <input id="e_user" class="input" placeholder="user@corp" />
+      </div>
+      <div>
+        <label class="small">Host</label>
+        <input id="e_host" class="input" placeholder="host123" />
+      </div>
+      <div>
+        <label class="small">Process</label>
+        <input id="e_process" class="input" placeholder="powershell.exe" />
+      </div>
+      <div>
+        <label class="small">IP</label>
+        <input id="e_ip" class="input" placeholder="10.1.2.3" />
+      </div>
+      <div>
+        <label class="small">Domain</label>
+        <input id="e_domain" class="input" placeholder="c2.example.com" />
+      </div>
+      <div>
+        <label class="small">File Hash</label>
+        <input id="e_filehash" class="input" placeholder="sha256..." />
+      </div>
+    </div>
+    <div class="grid-2" style="margin-top:10px;">
+      <div>
+        <label class="small">Suspected Tactics (comma-separated)</label>
+        <input id="tactics" class="input" placeholder="T1059,T1105" />
+      </div>
+      <div>
+        <label class="small">Assets/Scopes (comma-separated)</label>
+        <input id="assets" class="input" placeholder="prod-subnet-1, k8s-ns:payments" />
+      </div>
+    </div>
+    <div class="grid-3" style="margin-top:10px;">
+      <div>
+        <label class="small">Time Window (last)</label>
+        <input id="tw_last" class="input" placeholder="-15m, -1h" />
+      </div>
+      <div>
+        <label class="small">EWMA Alpha (optional)</label>
+        <input id="ewma_alpha" class="input" placeholder="0.6" />
+      </div>
+      <div>
+        <label class="small">EWMA</label>
+        <select id="ewma" class="input"><option value="true" selected>enabled</option><option value="false">disabled</option></select>
+      </div>
+    </div>
+    <div class="row" style="margin-top:12px;">
+      <button id="btnSubmit" class="btn btn-primary">Run Investigation</button>
+      <span id="status" class="small muted">Idle</span>
+    </div>
+  </div>
+
+  <div class="section" id="summarySection" style="display:none;">
+    <h2>Summary</h2>
+    <div class="row" id="summaryPills"></div>
+    <div id="overlapBlock" class="code" style="margin-top:8px;"></div>
+  </div>
+
+  <div class="section" id="evidenceSection" style="display:none;">
+    <h2>Ranked Evidence</h2>
+    <table id="evidenceTable">
+      <thead><tr><th>Entity</th><th>Degree</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <div class="section" id="nextBestSection" style="display:none;">
+    <h2>Next-Best Evidence</h2>
+    <table id="nextBestTable">
+      <thead><tr><th>Field</th><th>Suggestion</th><th>Priority</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <div class="section" id="actionsSection" style="display:none;">
+    <h2>Capture Suggestions</h2>
+    <div id="captureChips" class="row"></div>
+    <div class="grid-2" style="margin-top:10px;">
+      <div>
+        <div class="small" style="font-weight:600;">Expected Costs</div>
+        <div id="costsBlock" class="code"></div>
+      </div>
+      <div>
+        <div class="small" style="font-weight:600;">Privacy Notes</div>
+        <div id="privacyBlock" class="code"></div>
+      </div>
+    </div>
+    <div class="row" style="margin-top:12px;">
+      <button id="btnTier2" class="btn">Tier‑2 LLM Summary (fallback ticket)</button>
+      <span class="small muted">Sends a Slack webhook when LLM unavailable</span>
+    </div>
+  </div>
+
+  <div class="section" id="tier2Section" style="display:none;">
+    <h2>Tier‑2 Summary</h2>
+    <div id="tier2Output" class="code"></div>
+  </div>
+
+  <div class="section" id="guardrailsSection">
+    <h2>Scoring Guardrails</h2>
+    <div class="grid-3">
+      <div>
+        <label class="small">Path Weight</label>
+        <input id="w_path" class="input" placeholder="0.25" />
+      </div>
+      <div>
+        <label class="small">Mapping Weight</label>
+        <input id="w_mapping" class="input" placeholder="0.45" />
+      </div>
+      <div>
+        <label class="small">Diversity Weight</label>
+        <input id="w_diversity" class="input" placeholder="0.07" />
+      </div>
+    </div>
+    <div class="row" style="margin-top:12px;">
+      <button id="btnSaveWeights" class="btn btn-primary">Apply Guardrails</button>
+      <span id="weightsStatus" class="small muted">Not applied</span>
+    </div>
+  </div>
+
+  <div class="section" id="graphSection" style="display:none;">
+    <h2>Correlation (Raw)</h2>
+    <div id="graphRaw" class="code"></div>
+  </div>
+</main>
+<script>
+(function(){
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s ?? '');
+  function headers(){ return window.authHeaders ? window.authHeaders() : {}; }
+  function setStatus(t){ const el = $('status'); if(el) el.textContent = t; }
+  function parseList(val){ return (val||'').split(',').map(s=>s.trim()).filter(Boolean); }
+
+  function buildPayload(){
+    const entities = {
+      user: $('e_user').value.trim() || undefined,
+      host: $('e_host').value.trim() || undefined,
+      process: $('e_process').value.trim() || undefined,
+      ip: $('e_ip').value.trim() || undefined,
+      domain: $('e_domain').value.trim() || undefined,
+      file_hash: $('e_filehash').value.trim() || undefined,
+    };
+    // drop empties
+    Object.keys(entities).forEach(k=>{ if(!entities[k]) delete entities[k]; });
+    const tw = { last: $('tw_last').value.trim() || undefined };
+    if(!tw.last) delete tw.last;
+    const alphaRaw = $('ewma_alpha').value.trim();
+    const ewma_alpha = alphaRaw ? Number(alphaRaw) : undefined;
+    return {
+      reason: $('reason').value.trim() || undefined,
+      scope: $('scope').value || undefined,
+      entities: Object.keys(entities).length ? entities : undefined,
+      suspected_tactics: parseList($('tactics').value),
+      assets: parseList($('assets').value),
+      time_window: (tw.last ? tw : undefined),
+      ewma: $('ewma').value !== 'false',
+      ewma_alpha: ewma_alpha
+    };
+  }
+
+  function renderSummary(s){
+    $('summarySection').style.display = 'block';
+    const pills = $('summaryPills');
+    pills.innerHTML = '';
+    const conf = s?.summary?.confidence;
+    const verd = s?.summary?.verdict || 'info';
+    const cons = s?.summary?.consensus || {};
+    const overlap = s?.summary?.overlap || {};
+    const chip = (t) => { const span = document.createElement('span'); span.className = 'pill'; span.textContent = t; return span; };
+    pills.append(chip(`Verdict: ${verd}`));
+    pills.append(chip(`Confidence: ${typeof conf==='number'? conf.toFixed(2): esc(conf)}`));
+    pills.append(chip(`Consensus: ${cons.meets_consensus ? 'meets' : 'insufficient'}`));
+    pills.append(chip(`Domains: ${cons.domains_present ?? 'n/a'}`));
+    $('overlapBlock').textContent = JSON.stringify(overlap || {}, null, 2);
+  }
+
+  function renderEvidence(s){
+    const rows = Array.isArray(s?.ranked_evidence) ? s.ranked_evidence : [];
+    const tbody = $('evidenceTable').querySelector('tbody');
+    $('evidenceSection').style.display = 'block';
+    tbody.innerHTML = rows.map(r => `<tr><td>${esc(r.entity)}</td><td>${esc(r.degree)}</td></tr>`).join('');
+  }
+
+  function renderNextBest(s){
+    const rows = Array.isArray(s?.next_best_evidence) ? s.next_best_evidence : [];
+    const tbody = $('nextBestTable').querySelector('tbody');
+    $('nextBestSection').style.display = 'block';
+    tbody.innerHTML = rows.map(r => {
+      const field = r.missing || r.weak || '-';
+      return `<tr><td>${esc(field)}</td><td>${esc(r.suggest)}</td><td>${esc(r.priority)}</td></tr>`;
+    }).join('');
+  }
+
+  function renderActions(s){
+    const sug = Array.isArray(s?.capture_suggestions) ? s.capture_suggestions : [];
+    const host = $('captureChips'); host.innerHTML = '';
+    $('actionsSection').style.display = 'block';
+    sug.forEach(x => {
+      const pill = document.createElement('span');
+      const type = x.type || x.action || 'capture';
+      const dur = x.duration_seconds || x.duration || '-';
+      const cost = x.cost || '-';
+      const priv = x.privacy || '-';
+      pill.className = 'pill';
+      pill.title = `duration_seconds: ${dur} — cost: ${cost} — privacy: ${priv}`;
+      pill.textContent = `${type} (${dur}s)`;
+      host.appendChild(pill);
+    });
+    $('costsBlock').textContent = JSON.stringify(s?.expected_costs || {}, null, 2);
+    $('privacyBlock').textContent = JSON.stringify(s?.privacy_notes || {}, null, 2);
+  }
+
+  function renderGraph(s){
+    $('graphSection').style.display = 'block';
+    $('graphRaw').textContent = JSON.stringify(s?.graph || {}, null, 2);
+  }
+
+  async function submit(){
+    try{
+      setStatus('Submitting...');
+      const body = buildPayload();
+      const r = await fetch('/api/v1/investigations/request', { method:'POST', headers: { 'Content-Type':'application/json', ...headers() }, body: JSON.stringify(body) });
+      const j = await r.json().catch(()=>({}));
+      if(!r.ok){ setStatus('Error'); alert('Request failed'); return; }
+      setStatus('OK');
+      renderSummary(j);
+      renderEvidence(j);
+      renderNextBest(j);
+      renderActions(j);
+      renderGraph(j);
+      // scroll to summary
+      window.scrollTo({ top: document.getElementById('summarySection').offsetTop - 12, behavior: 'smooth' });
+    }catch(e){ setStatus('Exception'); }
+  }
+
+  document.getElementById('btnSubmit').addEventListener('click', submit);
+  document.getElementById('btnTier2').addEventListener('click', async function(){
+    try{
+      setStatus('Dispatching Tier‑2...');
+      // Prefer autogen trigger if available; fallback to webhook test
+      let ok = false;
+      try{
+        const r1 = await fetch('/api/v1/admin/autogen/trigger', { method:'POST', headers: { 'Content-Type':'application/json', ...headers() }, body: JSON.stringify({ reason: $('reason').value || 'investigation-summary', scope: $('scope').value || 'auto' }) });
+        const j1 = await r1.json().catch(()=>({}));
+        ok = r1.ok;
+        if(ok){
+          $('tier2Section').style.display = 'block';
+          $('tier2Output').textContent = JSON.stringify(j1 || {}, null, 2);
+        }
+      }catch(e){ ok = false; }
+      if(!ok){
+        const r = await fetch('/api/v1/webhooks/test', { method:'POST', headers: { 'Content-Type':'application/json', ...headers() }, body: JSON.stringify({ service:'slack' }) });
+        const j = await r.json().catch(()=>({status:'sent'}));
+        ok = r.ok;
+        $('tier2Section').style.display = 'block';
+        $('tier2Output').textContent = JSON.stringify({ fallback: 'webhook', result: j }, null, 2);
+      }
+      if(!ok){ setStatus('Tier‑2 failed'); alert('Tier‑2 dispatch failed'); return; }
+      setStatus('Tier‑2 dispatched');
+      alert('Tier‑2 summary request sent (Slack webhook)');
+    }catch(e){ setStatus('Tier‑2 exception'); }
+  });
+
+  document.getElementById('btnSaveWeights').addEventListener('click', async function(){
+    try{
+      const pathW = parseFloat(($('w_path').value||'').trim())
+      const mapW = parseFloat(($('w_mapping').value||'').trim())
+      const divW = parseFloat(($('w_diversity').value||'').trim())
+      const body = { path: isFinite(pathW)?pathW:undefined, mapping: isFinite(mapW)?mapW:undefined, diversity: isFinite(divW)?divW:undefined }
+      const r = await fetch('/api/v1/admin/scoring/weights', { method:'POST', headers: { 'Content-Type':'application/json', ...headers() }, body: JSON.stringify(body) })
+      if(!r.ok){ $('weightsStatus').textContent = 'Apply failed'; return; }
+      $('weightsStatus').textContent = 'Applied';
+    }catch(e){ $('weightsStatus').textContent = 'Exception'; }
+  });
+})();
+</script>
+</body>
+</html>

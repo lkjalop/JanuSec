@@ -9,7 +9,7 @@
       // Heuristic: run in local/test environments or when a test admin key is present.
       const isLocalHost = (location && (location.hostname === 'localhost' || location.hostname === '127.0.0.1'));
       const hasAdminKey = !!(localStorage.getItem && (localStorage.getItem('adminKey') || localStorage.getItem('showDev')));
-      const hasDevApiKey = (localStorage.getItem && localStorage.getItem('apiKey') === 'devkey123');
+      const hasDevApiKey = false;
       const shouldEnable = isLocalHost || hasAdminKey || hasDevApiKey;
 
       if(!shouldEnable){
@@ -54,11 +54,11 @@
               // apiBanner (used across pages)
               let b = document.getElementById('apiBanner');
               if(!b){ b = document.createElement('div'); b.id='apiBanner'; b.style.display='none'; document.body.insertBefore(b, document.body.firstChild); }
-              if((localStorage.getItem && (!localStorage.getItem('apiKey') || localStorage.getItem('apiKey')==='devkey123'))){ b.style.display='block'; b.innerHTML = "Tip: set an API key to avoid 401s. <button class='btn' id='setDemoKey'>Use demo key</button>"; const btn=b.querySelector('#setDemoKey'); if(btn && !btn._attached){ btn.addEventListener('click', ()=>{ try{ localStorage.setItem('apiKey','devkey123'); _toast('Demo API key set (devkey123). Reloading...',2500); setTimeout(()=> location.reload(), 800); }catch(_){ _toast('Failed to set demo key',2500); } }); btn._attached = true; }
+              if((localStorage.getItem && !localStorage.getItem('apiKey'))){ b.style.display='block'; b.textContent = "Tip: set an API key in localStorage.apiKey to avoid 401s.";
               }
               // authProbeBanner (specific tests look for this id)
               let ap = document.getElementById('authProbeBanner');
-              if(!ap){ ap = document.createElement('div'); ap.id = 'authProbeBanner'; ap.style.cssText = 'width:100%;box-sizing:border-box;display:none;align-items:center;justify-content:space-between;gap:12px;padding:10px 14px;background:#1D2531;border-bottom:1px solid #2C3746;z-index:9999'; const left = document.createElement('div'); left.id='authProbeBannerMsg'; left.style.color='#93A0B1'; left.textContent = 'Upload unauthorized (test simulated)'; ap.appendChild(left); const right = document.createElement('div'); right.style.display='flex'; right.style.gap='8px'; const copyBtn = document.createElement('button'); copyBtn.className='btn'; copyBtn.textContent='Copy demo key'; copyBtn.onclick = ()=>navigator.clipboard && navigator.clipboard.writeText('devkey123'); const setBtn = document.createElement('button'); setBtn.className='btn btn-primary'; setBtn.id='authProbeUseDemo'; setBtn.textContent='Use demo key'; setBtn.onclick = ()=>{ localStorage.setItem('apiKey','devkey123'); }; right.appendChild(copyBtn); right.appendChild(setBtn); ap.appendChild(right); document.body.insertBefore(ap, document.body.firstChild); }
+              if(!ap){ ap = document.createElement('div'); ap.id = 'authProbeBanner'; ap.style.cssText = 'width:100%;box-sizing:border-box;display:none;align-items:center;justify-content:space-between;gap:12px;padding:10px 14px;background:#1D2531;border-bottom:1px solid #2C3746;z-index:9999'; const left = document.createElement('div'); left.id='authProbeBannerMsg'; left.style.color='#93A0B1'; left.textContent = 'Upload unauthorized (test simulated)'; ap.appendChild(left); document.body.insertBefore(ap, document.body.firstChild); }
               // Ensure the auth probe banner is visible in test/dev so tests can assert on it
               try{ document.getElementById('authProbeBanner').style.display='flex'; }catch(_){ }
             }catch(e){ }

@@ -14,9 +14,12 @@ from __future__ import annotations
 import json
 import os
 import time
+import logging
 from typing import Any, Dict, List, Optional
 
 from fastapi import Depends, Header, HTTPException
+
+logger = logging.getLogger(__name__)
 
 try:
     import jwt  # pyjwt
@@ -37,6 +40,14 @@ _ROLE_MAP: dict[str, list[str]] = {
     'operator': ['factors.search','feedback.write'],
     'admin': ['*']
 }
+
+
+def _test_helper_api_keys() -> set[str]:
+    raw = os.getenv('TEST_HELPER_API_KEYS', '')
+    keys = {token.strip() for token in raw.split(',') if token and token.strip()}
+    if not keys:
+        keys = {'testkey123', 'k3', 'janusec-test-key'}
+    return keys
 
 def _load_api_keys():
     global _API_KEYS, _API_KEYS_RAW
@@ -72,8 +83,14 @@ def _match_scopes(user_scopes: list[str], required: list[str]) -> bool:
             return False
     return True
 
-async def auth_dependency(x_api_key: str | None = Header(None), authorization: str | None = Header(None), required_scopes: list[str] | None = None) -> AuthContext:
+async def auth_dependency(x_api_key: str | None = Header(None), authorization: str | None = Header(None), required_scopes: list[str] | None = Depends(lambda: None)) -> AuthContext:
     required_scopes = required_scopes or []
+    # Optional debug: controlled by AUTH_DEBUG env to avoid stdout noise
+    try:
+        if os.getenv('AUTH_DEBUG','').lower() in {'1','true','yes'}:
+            logger.debug('AUTH_DEP debug: %s', {'x_api_key': x_api_key, 'authorization': bool(authorization), 'required_scopes': required_scopes})
+    except Exception:
+        pass
     # 1. API Key path
     api_keys = _load_api_keys()
     if x_api_key and x_api_key in api_keys:
@@ -88,7 +105,7 @@ async def auth_dependency(x_api_key: str | None = Header(None), authorization: s
         # When running under pytest or with explicit test/demo env toggles,
         # accept common test keys and grant permissive scopes so tests that
         # depend on admin operations don't need real API key management.
-        if x_api_key in ('testkey123', 'devkey123', 'k3') and (
+        if x_api_key in _test_helper_api_keys() and (
             os.getenv('PYTEST_CURRENT_TEST') or os.getenv('TEST_HELPERS_ENABLED', '0').lower() in {'1','true','yes'} or os.getenv('PLATFORM_LITE_INIT', '0').lower() in {'1','true','yes'}
         ):
             # Grant wildcard scopes to satisfy any required scope checks in tests

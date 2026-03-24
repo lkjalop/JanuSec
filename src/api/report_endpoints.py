@@ -1,8 +1,73 @@
+from __future__ import annotations
+
+import io
+import time
+import tempfile
+import os
+from fastapi import APIRouter, Request, Query, HTTPException
+from fastapi.responses import StreamingResponse, HTMLResponse, JSONResponse
+from src.reporting.comprehensive_report_generator import build_report_html
+from .tenant_helpers import resolve_tenant_id
+
+router = APIRouter(prefix="/api/v1/report", tags=["report"])
+
+
+@router.post('/generate')
+async def generate_report(req: Request, format: str = Query('html'), include_model: bool = Query(False)):
+    payload = await req.json()
+    try:
+        resolve_tenant_id(req, payload.get('tenant_id') or payload.get('tenant'))
+    except Exception:
+        # tenant mismatch should surface consistently
+        raise
+    html = build_report_html(payload)
+    if format == 'html':
+        return HTMLResponse(html)
+    return HTMLResponse(html)
+
+
+@router.post('/generate_pdf')
+async def generate_pdf(req: Request, include_model: bool = Query(False)):
+    payload = await req.json()
+    try:
+        resolve_tenant_id(req, payload.get('tenant_id') or payload.get('tenant'))
+    except Exception:
+        raise
+    html = build_report_html(payload)
+
+    # Try to use WeasyPrint if available
+    try:
+        from weasyprint import HTML
+    except Exception:
+        # fallback: return HTML with error indicating missing dependency
+        return JSONResponse({'error': 'WeasyPrint not installed on server. Install weasyprint to enable PDF generation.'}, status_code=501)
+
+    # Create temporary HTML file for base_url resolution
+    try:
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.html', delete=False, encoding='utf-8') as tmp:
+            tmp.write(html)
+            tmp_path = tmp.name
+
+        pdf_bytes = HTML(filename=tmp_path).write_pdf()
+        # remove temp file
+        try:
+            os.unlink(tmp_path)
+        except Exception:
+            pass
+
+        return StreamingResponse(io.BytesIO(pdf_bytes), media_type='application/pdf', headers={
+            'Content-Disposition': f'attachment; filename="janusec_report_{int(time.time())}.pdf"'
+        })
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f'PDF generation failed: {e}')
 from fastapi import APIRouter, Request, Query, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse, PlainTextResponse
+from fastapi.encoders import jsonable_encoder
 from html import escape
 from typing import Any
 import json
+import time
+import hashlib
 try:
     from src.reporting.email_summaries import tier1_summary, tier2_summary
 except Exception:
@@ -255,11 +320,12 @@ async def report_ingestion(
     persona: str | None = Query(None),
     recipients: str | None = Query(None),
     tenant: str | None = Query(None),
+    persist: bool = Query(True),
 ) -> Any:
     fmt = (format or 'html').strip().lower()
     session_ids = _parse_sessions_param(sessions)
     persona_selected = _persona_from_variant(variant, persona)
-    tenant_id = tenant or request.headers.get('X-Tenant-ID') or request.headers.get('x-tenant-id')
+    tenant_id = resolve_tenant_id(request, tenant or request.headers.get('X-Tenant-ID') or request.headers.get('x-tenant-id'))
     state = get_platform_state()
     report = build_ingestion_report(
         session_ids,
@@ -285,6 +351,14 @@ async def report_ingestion(
     meta['persona'] = persona_selected
     meta['variant'] = (variant or '').strip().lower() or meta.get('variant')
     meta['format'] = fmt
+    if _should_persist_reports(persist):
+        report = _persist_report_snapshot(
+            report,
+            tenant_id,
+            title='Ingestion Report',
+            source_type='ingestion',
+            source_id=','.join(session_ids) if session_ids else None,
+        )
 
     if fmt == 'json':
         return JSONResponse(report)
@@ -302,6 +376,10 @@ async def report_ingestion(
                 if hasattr(llm_resp, '__await__'):
                     llm_resp = await llm_resp
                 model_text = llm_resp.get('text') if isinstance(llm_resp, dict) else str(llm_resp)
+                try:
+                    prompt_hash = hashlib.sha256(prompt.encode('utf-8')).hexdigest()
+                except Exception:
+                    prompt_hash = None
                 model_html = '<div style="padding:12px;background:#071021;color:#e6eef8;border-radius:6px"><h3>Model Executive Summary</h3><div>' + escape(str(model_text or '')) + '</div></div>'
                 try:
                     if _HAS_BLEACH:
@@ -310,11 +388,14 @@ async def report_ingestion(
                         model_html = _simple_sanitize(model_html)
                 except Exception:
                     pass
-                html = model_html + '\n' + html
+                # prepend model HTML and persist model meta into a small injected comment for provenance
+                meta_comment = f"<!-- model_prompt_hash:{prompt_hash} generated_at:{int(time.time())} -->\n"
+                html = meta_comment + model_html + '\n' + html
             except Exception:
                 # non-fatal; return HTML without model summary
                 pass
-        return HTMLResponse(content=html)
+        headers = {'X-Report-Id': str(report.get('report_id') or '')} if report.get('report_id') else None
+        return HTMLResponse(content=html, headers=headers)
     if fmt == 'pdf':
         return JSONResponse({'detail': 'pdf_generation_not_enabled'}, status_code=501)
     raise HTTPException(status_code=400, detail='unsupported_format')
@@ -328,6 +409,10 @@ async def generate_pdf_report(req: Request, include_model: bool = Query(False)):
     with `text/html` so the frontend can fall back to downloading HTML.
     """
     payload = await req.json()
+    try:
+        resolve_tenant_id(req, payload.get('tenant_id') or payload.get('tenant'))
+    except Exception:
+        raise
     html = build_report_html(payload)
     # Optionally include model summary into HTML
     if include_model:
@@ -364,12 +449,17 @@ async def generate_pdf_report(req: Request, include_model: bool = Query(False)):
 
 
 @router.post('/api/v1/report/generate')
-async def generate_report(req: Request, format: str = Query('html'), include_model: bool = Query(False), include_scenarios: bool = Query(False)):
+async def generate_report(req: Request, format: str = Query('html'), include_model: bool = Query(False), include_scenarios: bool = Query(False), persist: bool = Query(True)):
     payload = await req.json()
+    try:
+        resolve_tenant_id(req, payload.get('tenant_id') or payload.get('tenant'))
+    except Exception:
+        raise
     # payload may include: session_id, rows (list), summary
     # Build the HTML or JSON output
     html = build_report_html(payload)
     result = {'html': html}
+    tenant_id = payload.get('tenant_id') or payload.get('tenant')
 
     # Optionally request an LLM summary and attach provenance
     if include_model:
@@ -383,11 +473,15 @@ async def generate_report(req: Request, format: str = Query('html'), include_mod
                 llm_resp = await llm_resp
             # Attach provenance metadata into result
             model_text = llm_resp.get('text') if isinstance(llm_resp, dict) else str(llm_resp)
+            try:
+                prompt_hash = hashlib.sha256(prompt.encode('utf-8')).hexdigest()
+            except Exception:
+                prompt_hash = None
             result['model_summary'] = {
                 'text': model_text,
                 'model': llm_resp.get('model') if isinstance(llm_resp, dict) else None,
                 'meta': llm_resp.get('meta') if isinstance(llm_resp, dict) else None,
-                'provenance': {}
+                'provenance': {'prompt_hash': prompt_hash, 'generated_at': int(time.time())}
             }
             # Attempt to parse structured JSON summary from model text
             try:
@@ -420,15 +514,33 @@ async def generate_report(req: Request, format: str = Query('html'), include_mod
     except Exception:
         pass
 
+    persisted_payload = dict(payload or {})
+    if _should_persist_reports(persist):
+        summary = payload.get('summary')
+        summary_title = summary.get('title') if isinstance(summary, dict) else None
+        persisted_payload = _persist_report_snapshot(
+            persisted_payload,
+            tenant_id,
+            title=str(summary_title or payload.get('title') or 'Generated Report'),
+            source_type='generate',
+            source_id=payload.get('session_id'),
+        )
+        result['report_id'] = persisted_payload.get('report_id')
+        result['artifact'] = {
+            'report_id': persisted_payload.get('report_id'),
+            'available_formats': ['json', 'html'],
+        }
+
     if format == 'html':
         # If include_model requested, return JSON (avoid embedding raw model text into HTML)
         if include_model:
             return JSONResponse(result)
         # Stream large HTML responses to avoid memory pressure
         buf = safe_html.encode('utf-8')
+        headers = {'X-Report-Id': str(persisted_payload.get('report_id') or '')} if persisted_payload.get('report_id') else None
         if len(buf) > _STREAM_THRESHOLD:
-            return StreamingResponse(io.BytesIO(buf), media_type='text/html')
-        return HTMLResponse(content=safe_html, status_code=200)
+            return StreamingResponse(io.BytesIO(buf), media_type='text/html', headers=headers)
+        return HTMLResponse(content=safe_html, status_code=200, headers=headers)
     else:
         return JSONResponse(result)
 
@@ -436,12 +548,15 @@ async def generate_report(req: Request, format: str = Query('html'), include_mod
 # ---------------- Persona View Endpoints -----------------
 try:
     # Snapshot loader for stored ingestion/executive reports
-    from src.repositories.report_snapshots_repo import load_snapshot
+    from src.repositories.report_snapshots_repo import load_snapshot, load_snapshot_meta, list_snapshots, save_snapshot
 except Exception:
     try:
-        from ..repositories.report_snapshots_repo import load_snapshot
+        from ..repositories.report_snapshots_repo import load_snapshot, load_snapshot_meta, list_snapshots, save_snapshot
     except Exception:
         load_snapshot = None  # type: ignore
+        load_snapshot_meta = None  # type: ignore
+        list_snapshots = None  # type: ignore
+        save_snapshot = None  # type: ignore
 try:
     from src.reporting.persona_views import generate_persona_view
 except Exception:
@@ -469,6 +584,117 @@ except Exception:
 
 _SNAP_BASE = Path('reports') / 'snapshots'
 
+try:
+    from src.core.storage.report_store import report_store
+except Exception:
+    try:
+        from ..core.storage.report_store import report_store
+    except Exception:
+        report_store = None  # type: ignore
+
+
+def _should_persist_reports(explicit: bool | None = None) -> bool:
+    if explicit is not None:
+        return bool(explicit)
+    return os.getenv('REPORT_PERSIST_DEFAULT', '1').lower() not in {'0', 'false', 'no'}
+
+
+def _persist_report_snapshot(
+    payload: dict[str, Any],
+    tenant_id: str | None,
+    *,
+    title: str | None = None,
+    notes: str | None = None,
+    source_type: str | None = None,
+    source_id: str | None = None,
+) -> dict[str, Any]:
+    report_payload = dict(payload or {})
+    report_payload.setdefault('generated_at', time.time())
+    report_payload.setdefault('tenant_id', tenant_id)
+    report_id = report_payload.get('report_id')
+    if not report_id:
+        digest = hashlib.sha256(json.dumps(report_payload, sort_keys=True, default=str).encode('utf-8')).hexdigest()[:8]
+        report_id = f"rep-{int(report_payload['generated_at'])}-{digest}"
+        report_payload['report_id'] = report_id
+    report_payload.setdefault('meta', {})
+    report_payload['meta'].setdefault('tenant_id', tenant_id)
+    if save_snapshot is not None:
+        meta = save_snapshot(
+            report_payload,
+            tenant_id=tenant_id,
+            title=title,
+            notes=notes,
+            report_id=report_id,
+            artifact_type='report_snapshot',
+            source_type=source_type,
+            source_id=source_id,
+            available_formats=['json', 'html', 'csv'],
+        )
+        report_payload['meta']['snapshot_meta'] = {
+            'report_id': meta.report_id,
+            'generated_at': meta.generated_at,
+            'sha256': meta.sha256,
+            'artifact_type': meta.artifact_type,
+            'source_type': meta.source_type,
+            'source_id': meta.source_id,
+            'available_formats': meta.available_formats or ['json', 'html', 'csv'],
+        }
+    if report_store is not None:
+        try:
+            report_store.save(str(report_id), report_payload)
+        except Exception:
+            pass
+    return report_payload
+
+
+def _render_persisted_report_html(report: dict[str, Any]) -> str:
+    meta = report.get('meta') or {}
+    if 'flagged_events' in report or 'alerts' in report:
+        payload = _build_html_payload(
+            report,
+            meta.get('sessions') or [],
+            meta.get('recipients') or [],
+        )
+        return build_report_html(payload)
+    return build_report_html(report)
+
+
+def _load_snapshot_payload(
+    report_id: str,
+    request: Request | None,
+    tenant_hint: str | None = None,
+) -> tuple[dict[str, Any], str | None]:
+    tenant_id: str | None = None
+    if request is not None:
+        tenant_id = resolve_tenant_id(request, tenant_hint)
+    elif tenant_hint:
+        tenant_id = tenant_hint
+
+    meta = None
+    payload = None
+    if load_snapshot_meta is not None:
+        meta = load_snapshot_meta(report_id)
+    if load_snapshot is not None:
+        payload = load_snapshot(report_id)
+
+    if not payload:
+        p = _SNAP_BASE / f"{report_id}.json"
+        if p.exists():
+            try:
+                data = json.loads(p.read_text(encoding='utf-8'))
+                meta = meta or (data.get('meta') if isinstance(data.get('meta'), dict) else None)
+                payload = data.get('payload')
+            except Exception:
+                payload = None
+
+    if not payload:
+        raise HTTPException(status_code=404, detail='report_not_found')
+
+    if tenant_id and meta and meta.get('tenant_id') and meta.get('tenant_id') != tenant_id:
+        raise HTTPException(status_code=403, detail='tenant_mismatch')
+
+    return payload, tenant_id
+
 from src.reporting.attention_queue import categorize_reports
 try:
     # Reuse centralized persona parser/validator when persona-like text is present
@@ -476,6 +702,22 @@ try:
 except Exception:
     parse_persona_text = None  # type: ignore
     validate_parsed_persona = None  # type: ignore
+
+try:
+    from src.core.enrichment.email_combiners import combine_email_signals
+except Exception:
+    combine_email_signals = None
+
+try:
+    from src.core.scoring.dread_engine import compute_dread, severity_from_dread
+except Exception:
+    compute_dread = None
+    severity_from_dread = None
+    try:
+        from src.core.scoring.dread_engine import compute_dread, severity_from_dread
+    except Exception:
+        compute_dread = None
+        severity_from_dread = None
 
 
 def _compute_attention_score(rpt: dict) -> float:
@@ -499,30 +741,37 @@ def _compute_attention_score(rpt: dict) -> float:
 
 
 @router.get('/api/v1/reports/attention')
-async def reports_attention(limit: int = Query(50)):
+async def reports_attention(request: Request, limit: int = Query(50)):
     """Return attention buckets and a triage scoreboard (top-N by attention score).
 
     For demo mode this scans snapshots in `reports/snapshots` and computes buckets.
     """
     # Load snapshots from disk (best-effort); prefer snapshot loader when available
     snaps = []
+    tenant_id = resolve_tenant_id(request, request.headers.get('X-Tenant-ID') or request.headers.get('x-tenant-id'))
     try:
-        if load_snapshot:
-            # When DB-backed snapshots exist, list via the repo (fallback to file scan)
+        if load_snapshot and list_snapshots:
             try:
-                from src.repositories.report_snapshots_repo import list_snapshots, load_snapshot as _ls
-                meta = list_snapshots(limit=limit)
+                meta = list_snapshots(tenant_id=tenant_id, limit=limit)
                 for m in meta:
-                    p = _ls(m.get('report_id'))
+                    rid = m.get('report_id') if isinstance(m, dict) else None
+                    if not rid:
+                        continue
+                    try:
+                        p, _ = _load_snapshot_payload(rid, request, tenant_id)
+                    except Exception:
+                        p = None
                     if p:
                         snaps.append(p)
             except Exception:
                 pass
-        # fallback: scan reports/snapshots
         for p in _SNAP_BASE.glob('*.json'):
             try:
                 import json
                 data = json.loads(p.read_text(encoding='utf-8'))
+                meta = data.get('meta') if isinstance(data.get('meta'), dict) else {}
+                if tenant_id and meta.get('tenant_id') and meta.get('tenant_id') != tenant_id:
+                    continue
                 payload = data.get('payload')
                 if payload:
                     snaps.append(payload)
@@ -547,6 +796,37 @@ async def reports_attention(limit: int = Query(50)):
     return JSONResponse({'buckets': buckets, 'triage_scoreboard': triage})
 
 
+@router.get('/api/v1/reports')
+async def list_report_artifacts(request: Request, limit: int = Query(50, ge=1, le=200)):
+    tenant_id = resolve_tenant_id(request, request.headers.get('X-Tenant-ID') or request.headers.get('x-tenant-id'))
+    items = list_snapshots(tenant_id=tenant_id, limit=limit) if list_snapshots is not None else []
+    return JSONResponse({'reports': items, 'count': len(items)})
+
+
+@router.get('/api/v1/reports/{report_id}')
+async def get_report_artifact(report_id: str, request: Request):
+    payload, tenant_id = _load_snapshot_payload(report_id, request, request.headers.get('X-Tenant-ID') or request.headers.get('x-tenant-id'))
+    meta = load_snapshot_meta(report_id) if load_snapshot_meta is not None else None
+    return JSONResponse({'report_id': report_id, 'tenant_id': tenant_id, 'meta': meta or {}, 'payload': payload})
+
+
+@router.get('/api/v1/reports/{report_id}/artifact')
+async def get_report_artifact_render(
+    report_id: str,
+    request: Request,
+    format: str = Query('json'),
+):
+    payload, _ = _load_snapshot_payload(report_id, request, request.headers.get('X-Tenant-ID') or request.headers.get('x-tenant-id'))
+    fmt = (format or 'json').strip().lower()
+    if fmt == 'json':
+        return JSONResponse(payload)
+    if fmt == 'csv':
+        return PlainTextResponse(content=_report_to_csv(payload), media_type='text/csv')
+    if fmt == 'html':
+        return HTMLResponse(_render_persisted_report_html(payload), headers={'X-Report-Id': report_id})
+    raise HTTPException(status_code=400, detail='unsupported_format')
+
+
 @router.post('/api/v1/reports/{report_id}/route')
 async def route_report(report_id: str, payload: dict, request: Request, persona: str = Query('executive'), disclosure_level: int = Query(2)):
     """Route a stored report to one or more personas and persist an audit entry.
@@ -558,20 +838,8 @@ async def route_report(report_id: str, payload: dict, request: Request, persona:
     # Best-effort: allow when running in lite/demo mode
     if not api_key and os.getenv('PLATFORM_LITE_INIT','0').lower() not in {'1','true','yes'}:
         raise HTTPException(status_code=401, detail='api_key_required')
-    # load snapshot
-    snap = None
-    if load_snapshot:
-        snap = load_snapshot(report_id)
-    else:
-        p = _SNAP_BASE / f"{report_id}.json"
-        if p.exists():
-            try:
-                import json
-                snap = json.loads(p.read_text(encoding='utf-8')).get('payload')
-            except Exception:
-                snap = None
-    if not snap:
-        raise HTTPException(status_code=404, detail='report_not_found')
+    tenant_hint = payload.get('tenant_id') or payload.get('tenant')
+    snap, _ = _load_snapshot_payload(report_id, request, tenant_hint)
     recipients = payload.get('recipients') or []
     note = payload.get('note')
     # Enforce risk appetite rules
@@ -634,7 +902,7 @@ async def route_report(report_id: str, payload: dict, request: Request, persona:
     return JSONResponse(resp)
 
 
-@router.post('/api/v1/reports/{report_id}/send')
+@router.post('/api/v1/reports/{report_id}/send', operation_id='reports_send_report')
 async def send_report(report_id: str, payload: dict, request: Request):
     """Automated sender: generate report HTML/JSON and POST to recipient endpoints.
 
@@ -644,20 +912,8 @@ async def send_report(report_id: str, payload: dict, request: Request):
     api_key = request.headers.get('x-api-key') or request.headers.get('X-API-Key')
     if not api_key and os.getenv('PLATFORM_LITE_INIT','0').lower() not in {'1','true','yes'}:
         raise HTTPException(status_code=401, detail='api_key_required')
-    # load snapshot (reuse logic)
-    snap = None
-    if load_snapshot:
-        snap = load_snapshot(report_id)
-    else:
-        p = _SNAP_BASE / f"{report_id}.json"
-        if p.exists():
-            try:
-                import json
-                snap = json.loads(p.read_text(encoding='utf-8')).get('payload')
-            except Exception:
-                snap = None
-    if not snap:
-        raise HTTPException(status_code=404, detail='report_not_found')
+    tenant_hint = payload.get('tenant_id') or payload.get('tenant')
+    snap, _ = _load_snapshot_payload(report_id, request, tenant_hint)
 
     # Build the report via the existing generate_report route function (call locally)
     try:
@@ -751,11 +1007,14 @@ except Exception:
 
 
 @router.post('/api/v1/actions/isolate')
-async def action_isolate(payload: dict):
+async def action_isolate(payload: dict, request: Request):
     # payload: {host, reason, report_id}
     # For demo, we record an audit and return an action_id
     try:
-        audit = {'report_id': payload.get('report_id'), 'action': 'isolate', 'target': payload.get('host'), 'ts': int(time.time())}
+        report_id = payload.get('report_id')
+        if report_id:
+            _load_snapshot_payload(report_id, request, payload.get('tenant_id') or payload.get('tenant'))
+        audit = {'report_id': report_id, 'action': 'isolate', 'target': payload.get('host'), 'ts': int(time.time())}
         aid = None
         if insert_audit:
             aid = insert_audit(audit)
@@ -765,10 +1024,13 @@ async def action_isolate(payload: dict):
 
 
 @router.post('/api/v1/actions/block')
-async def action_block(payload: dict):
+async def action_block(payload: dict, request: Request):
     # payload: {ioc, type, report_id}
     try:
-        audit = {'report_id': payload.get('report_id'), 'action': 'block', 'target': payload.get('ioc'), 'ts': int(time.time())}
+        report_id = payload.get('report_id')
+        if report_id:
+            _load_snapshot_payload(report_id, request, payload.get('tenant_id') or payload.get('tenant'))
+        audit = {'report_id': report_id, 'action': 'block', 'target': payload.get('ioc'), 'ts': int(time.time())}
         aid = None
         if insert_audit:
             aid = insert_audit(audit)
@@ -778,12 +1040,15 @@ async def action_block(payload: dict):
 
 
 @router.post('/api/v1/actions/create_ticket')
-async def action_create_ticket(payload: dict):
+async def action_create_ticket(payload: dict, request: Request):
     # payload: {title, description, report_id, priority}
     try:
+        report_id = payload.get('report_id')
+        if report_id:
+            _load_snapshot_payload(report_id, request, payload.get('tenant_id') or payload.get('tenant'))
         # Demo: return a fake ticket id and persist audit
         ticket_id = f"TKT-{int(time.time())}"
-        audit = {'report_id': payload.get('report_id'), 'action': 'create_ticket', 'ticket_id': ticket_id, 'ts': int(time.time())}
+        audit = {'report_id': report_id, 'action': 'create_ticket', 'ticket_id': ticket_id, 'ts': int(time.time())}
         aid = None
         if insert_audit:
             aid = insert_audit(audit)
@@ -793,13 +1058,14 @@ async def action_create_ticket(payload: dict):
 
 
 @router.post('/api/v1/actions/export_intel')
-async def action_export_intel(payload: dict):
+async def action_export_intel(payload: dict, request: Request):
     # payload: {report_id, recipients}
     try:
         # For demo, call send_report to export to recipients
         report_id = payload.get('report_id')
         recipients = payload.get('recipients') or []
-        resp = await send_report(report_id, {'recipients': recipients, 'format': 'json', 'include_model': False}, None)
+        _load_snapshot_payload(report_id, request, payload.get('tenant_id') or payload.get('tenant'))
+        resp = await send_report(report_id, {'recipients': recipients, 'format': 'json', 'include_model': False}, request)
         return resp
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -813,6 +1079,8 @@ async def capture_report_feedback(report_id: str, payload: dict, request: Reques
     Expected payload: {row_id, accurate: bool, comment, reviewer}
     Also supports factor-level voting via {factor, vote, comment}
     """
+    tenant_hint = payload.get('tenant_id') or payload.get('tenant')
+    _load_snapshot_payload(report_id, request, tenant_hint)
     # allow anonymous in lite mode
     reviewer = payload.get('reviewer') or request.headers.get('x-user') or 'unknown'
     # row-level feedback
@@ -845,7 +1113,7 @@ async def capture_report_feedback(report_id: str, payload: dict, request: Reques
 
 
 @router.get('/api/v1/reports/{report_id}/persona_view')
-async def get_persona_view(report_id: str, persona: str = Query('executive'), disclosure_level: int = Query(2)):
+async def get_persona_view(request: Request, report_id: str, persona: str = Query('executive'), disclosure_level: int = Query(2), top_n: int = Query(10, ge=1, le=100)):
     """Return a persona-specific view for a stored report snapshot.
 
     Loads the report payload via the snapshots repo and composes a concise
@@ -853,11 +1121,9 @@ async def get_persona_view(report_id: str, persona: str = Query('executive'), di
     """
     if load_snapshot is None:
         raise HTTPException(status_code=503, detail='snapshot_loader_unavailable')
-    payload = load_snapshot(report_id)
-    if not payload:
-        raise HTTPException(status_code=404, detail='report_not_found')
+    payload, _ = _load_snapshot_payload(report_id, request, request.headers.get('X-Tenant-ID') or request.headers.get('x-tenant-id'))
     try:
-        view = generate_persona_view(payload, persona=persona, disclosure_level=int(disclosure_level))
+        view = generate_persona_view(payload, persona=persona, disclosure_level=int(disclosure_level), top_n=int(top_n))
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f'persona_build_failed:{exc}')
     # Defensive: if view contains persona-like free text blocks, validate
@@ -902,11 +1168,11 @@ async def get_persona_view(report_id: str, persona: str = Query('executive'), di
     except Exception:
         # Non-fatal; continue returning the persona view
         pass
-    return JSONResponse(view)
+    return JSONResponse(content=jsonable_encoder(view))
 
 
 @router.post('/api/v1/reports/persona_view')
-async def post_persona_view(req: Request, persona: str = Query('executive'), disclosure_level: int = Query(2)):
+async def post_persona_view(req: Request, persona: str = Query('executive'), disclosure_level: int = Query(2), top_n: int = Query(10, ge=1, le=100)):
     """Build a persona view from an inline report payload.
 
     Accepts a JSON body containing the report structure and returns a
@@ -918,7 +1184,7 @@ async def post_persona_view(req: Request, persona: str = Query('executive'), dis
     except Exception:
         raise HTTPException(status_code=400, detail='invalid_json')
     try:
-        view = generate_persona_view(payload, persona=persona, disclosure_level=int(disclosure_level))
+        view = generate_persona_view(payload, persona=persona, disclosure_level=int(disclosure_level), top_n=int(top_n))
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f'persona_build_failed:{exc}')
     # Defensive persona text validation as above
@@ -953,4 +1219,161 @@ async def post_persona_view(req: Request, persona: str = Query('executive'), dis
                 view['validation'].setdefault('persona_text_checks', validations)
     except Exception:
         pass
-    return JSONResponse(view)
+    return JSONResponse(content=jsonable_encoder(view))
+
+
+@router.post('/api/v1/enrichment/email/combine')
+async def post_combine_email(req: Request):
+    """Combine email auth signals, headers, envelope metadata and reputations.
+
+    Accepts JSON: {auth: {...}, headers: {...}, envelope: {...}, reputations: {...}}
+    Returns combined enrichment payload with multiplier, why and evidence.
+    """
+    try:
+        payload = await req.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail='invalid_json')
+    if combine_email_signals is None:
+        raise HTTPException(status_code=503, detail='enricher_unavailable')
+    auth = payload.get('auth') or {}
+    headers = payload.get('headers') or {}
+    envelope = payload.get('envelope') or {}
+    reputations = payload.get('reputations') or {}
+    try:
+        out = combine_email_signals(auth=auth, headers=headers, envelope=envelope, reputations=reputations)
+        return JSONResponse(content=jsonable_encoder(out))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f'enrich_failed:{e}')
+
+
+@router.post('/api/v1/enrichment/llm/prewarm')
+async def post_prewarm_llm(req: Request):
+    """Attempt to prewarm a local LLM (best-effort). Returns provenance info.
+
+    Payload: {model: str}
+    """
+    try:
+        payload = await req.json()
+    except Exception:
+        payload = {}
+    model = (payload.get('model') or 'llama3:8b')
+    # Best-effort ping to local Ollama or similar; non-fatal
+    resp = {'model': model, 'ok': False, 'note': 'prewarm_attempted'}
+    try:
+        import requests
+        # Local Ollama default
+        url = os.getenv('LLM_PREWARM_URL', 'http://localhost:11434/api/generate')
+        data = {'model': model, 'prompt': 'prewarm ping', 'max_tokens': 1}
+        r = requests.post(url, json=data, timeout=2.0)
+        if r.status_code == 200:
+            resp['ok'] = True
+            try:
+                resp['meta'] = r.json()
+            except Exception:
+                resp['meta'] = {'status_code': r.status_code}
+        else:
+            resp['status_code'] = r.status_code
+    except Exception as e:
+        resp['error'] = str(e)
+    return JSONResponse(content=jsonable_encoder(resp))
+
+
+@router.post('/api/v1/enrichment/dread/score')
+async def post_dread_score(req: Request):
+    """Compute DREAD sub-scores for an artifact and return breakdown + severity."""
+    try:
+        payload = await req.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail='invalid_json')
+    if compute_dread is None:
+        raise HTTPException(status_code=503, detail='dread_unavailable')
+    artifact = payload.get('artifact') or {}
+    factors = payload.get('factors') or []
+    try:
+        res = compute_dread(artifact, factors)
+        sev = severity_from_dread(res.get('composite')) if severity_from_dread else 'unknown'
+        out = {'breakdown': res, 'severity': sev}
+        return JSONResponse(content=jsonable_encoder(out))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f'dread_failed:{e}')
+
+
+@router.post('/api/v1/reports/bulk_triage')
+async def post_bulk_triage(payload: dict, request: Request):
+    """Apply triage actions to many reports in one request (rate-limited demo).
+
+    Payload: {rows: [{report_id, action}]}
+    Requires admin API key in demo mode.
+    """
+    api_key = request.headers.get('x-api-key') or request.headers.get('X-API-Key')
+    if not api_key and os.getenv('PLATFORM_LITE_INIT','0').lower() not in {'1','true','yes'}:
+        raise HTTPException(status_code=401, detail='api_key_required')
+    tenant_id = resolve_tenant_id(request, request.headers.get('X-Tenant-ID') or request.headers.get('x-tenant-id'))
+    rows = payload.get('rows') or []
+    applied = []
+    for r in rows:
+        rid = r.get('report_id')
+        action = r.get('action')
+        if not rid:
+            applied.append({'report_id': rid, 'action': action, 'ok': False, 'reason': 'missing_report_id'})
+            continue
+        try:
+            _load_snapshot_payload(rid, request, tenant_id)
+        except HTTPException as exc:
+            applied.append({'report_id': rid, 'action': action, 'ok': False, 'reason': exc.detail})
+            continue
+        # For demo, persist a small audit entry per action
+        audit = {'report_id': rid, 'action': action, 'ts': int(time.time())}
+        try:
+            if insert_audit:
+                insert_audit(audit)
+            applied.append({'report_id': rid, 'action': action, 'ok': True})
+        except Exception:
+            applied.append({'report_id': rid, 'action': action, 'ok': False})
+    return JSONResponse(content=jsonable_encoder({'ok': True, 'applied': applied}))
+
+
+@router.post('/api/v1/reports/{report_id}/ask_for_logs')
+async def ask_for_logs(report_id: str, payload: dict, request: Request):
+    """Trigger an 'ask for logs' workflow: create an audit entry and return a prefilled message.
+
+    Payload may include `recipient` and `reason`. Returns {ok, audit_id, message}
+    """
+    api_key = request.headers.get('x-api-key') or request.headers.get('X-API-Key')
+    # allow when running in lite/demo for now
+    if not api_key and os.getenv('PLATFORM_LITE_INIT','0').lower() not in {'1','true','yes'}:
+        raise HTTPException(status_code=401, detail='api_key_required')
+    tenant_hint = payload.get('tenant_id') or payload.get('tenant')
+    # Best-effort snapshot lookup; do not fail if snapshot missing.
+    # Only enforce tenant mismatch when a snapshot exists and indicates a different tenant.
+    try:
+        _load_snapshot_payload(report_id, request, tenant_hint)
+    except HTTPException as exc:
+        if exc.status_code == 403:
+            raise  # enforce tenant mismatch
+        # tolerate missing report snapshots (404) and continue
+        # any other errors are treated as missing for demo/test flows
+        pass
+    recipient = payload.get('recipient') or payload.get('email') or 'security@example.com'
+    reason = payload.get('reason') or 'Please provide forensic logs and timeline for further triage.'
+    # Build prefilled message / playbook
+    message = {
+        'to': recipient,
+        'subject': f"Request for additional logs: report {report_id}",
+        'body': f"Hello,\n\nWe are investigating report {report_id}. Please provide the following logs and context:\n- Mail server logs (timestamps +/- 15m)\n- Web proxy logs for linked URLs\n- Endpoint telemetry for recipient hosts\n\nReason: {reason}\n\nThanks,\nSecurity Team",
+    }
+    audit = {'report_id': report_id, 'action': 'ask_for_logs', 'recipient': recipient, 'reason': reason, 'ts': int(time.time())}
+    aid = None
+    try:
+        if insert_audit:
+            aid = insert_audit(audit)
+        else:
+            # fallback file
+            ad = Path('reports') / 'audits'
+            ad.mkdir(parents=True, exist_ok=True)
+            fname = ad / f"asklogs_{report_id}_{int(time.time())}.json"
+            fname.write_text(json.dumps(audit), encoding='utf-8')
+    except Exception:
+        pass
+    resp = {'ok': True, 'audit_id': aid, 'message': message}
+    return JSONResponse(content=jsonable_encoder(resp))

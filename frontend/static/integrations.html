@@ -81,6 +81,39 @@
         <pre id="status"></pre>
       </div>
     </div>
+    <div class="panel" id="connectorPoliciesPanel">
+      <div class="panel-header"><h3 class="mt-0">Connector Policies</h3></div>
+      <div class="panel-body">
+        <div id="policiesTable"></div>
+        <div class="actions-row"><button class="btn" id="refreshPolicies">Refresh Policies</button></div>
+      </div>
+    </div>
+      <div class="panel" id="connectorConfigPanel">
+        <div class="panel-header"><h3 class="mt-0">Connector Config</h3></div>
+        <div class="panel-body">
+          <div style="display:flex; gap:var(--space-2); margin-bottom:var(--space-2)">
+            <input class="input" id="cfgName" placeholder="connector name (eg: purview)" />
+            <button class="btn" id="cfgLoad">Load</button>
+            <button class="btn" id="cfgSave">Save</button>
+          </div>
+          <label for="cfgJson">Config (JSON)</label>
+          <textarea id="cfgJson" style="width:100%;height:160px"></textarea>
+        </div>
+      </div>
+
+      <div class="panel" id="connectorSecretsPanel">
+        <div class="panel-header"><h3 class="mt-0">Connector Secrets</h3></div>
+        <div class="panel-body">
+          <div style="display:flex; gap:var(--space-2); margin-bottom:var(--space-2)">
+            <input class="input" id="secName" placeholder="connector name (eg: purview)" />
+            <button class="btn" id="secLoad">Load</button>
+            <button class="btn" id="secSave">Save</button>
+          </div>
+          <label for="secJson">Secrets (JSON)</label>
+          <textarea id="secJson" style="width:100%;height:120px" placeholder='{"api_key":"...","tenant":"..."}'></textarea>
+          <div style="margin-top:8px"><small>Note: Secrets are stored encrypted when available; GET will show redacted values.</small></div>
+        </div>
+      </div>
     <div class="panel" id="smokePanel">
       <div class="panel-header"><h3 class="mt-0">Connectivity Smoke</h3></div>
       <div class="panel-body">
@@ -95,7 +128,7 @@
     </div>
   </div>
   <script>
-    function authHeaders(){ try{ const k=localStorage.getItem('apiKey')||'devkey123'; return {'x-api-key':k,'Content-Type':'application/json'}; }catch(_){ return {'x-api-key':'devkey123','Content-Type':'application/json'}; } }
+    function authHeaders(){ try{ const k=localStorage.getItem('apiKey'); return k ? {'x-api-key':k,'Content-Type':'application/json'} : {'Content-Type':'application/json'}; }catch(_){ return {'Content-Type':'application/json'}; } }
     function toast(msg,d=3500){ try{ if(window.showToast) showToast(msg,d); else if(window.notifications) window.notifications.showToast(msg,d); else console.log('toast:',msg); }catch(e){ console.log('toast err',e); } }
     async function save(name,val){
       try{
@@ -114,6 +147,53 @@
     async function octiSync(){ try{ const r= await safeFetch('/api/v1/integrations/opencti/sync',{method:'POST',headers:authHeaders()}); const j=await r.json(); if(!r.ok){ toast('OpenCTI sync failed: '+(j.detail||j.status||j.error),4000); return;} toast('OpenCTI sync: '+JSON.stringify(j),3500); await refresh(); }catch(e){ toast('OpenCTI sync failed: '+(e.message||e),4000); } }
     function v(id){ return document.getElementById(id).value; }
     async function refresh(){ try{ const r= await safeFetch('/api/v1/dashboard/integrations/status',{headers:authHeaders()}); const j= r.ok? await r.json():{}; document.getElementById('status').textContent = JSON.stringify(j,null,2); }catch(e){ document.getElementById('status').textContent='Status fetch failed: '+(e.message||e); } }
+    async function refreshPolicies(){
+      try{
+        const k=localStorage.getItem('apiKey');
+        const r = await fetch('/api/v1/admin/connectors/policies', { headers: {'x-api-key': k} });
+        const j = r.ok? await r.json(): {error: await r.text()};
+        if(!r.ok){ document.getElementById('policiesTable').innerHTML = `<pre>${j.error}</pre>`; return; }
+        const policies = j.policies||{};
+        const rows = Object.entries(policies).map(([name, pol])=>{
+          const enabled = !!(pol.enabled ?? true);
+          const rps = (pol.rate_limit && pol.rate_limit.rate_per_second) ?? '';
+          const burst = (pol.rate_limit && pol.rate_limit.burst) ?? '';
+          const cost = pol.cost_cap_usd ?? '';
+          const allow = (pol.allow_hosts||[]).join(',');
+          return `<div class="row" style="gap: var(--space-2); align-items:center;">
+            <div style="min-width:140px;"><strong>${name}</strong></div>
+            <label><input type="checkbox" data-name="${name}" data-field="enabled" ${enabled?'checked':''}/> Enabled</label>
+            <input class="input" style="width:120px" placeholder="RPS" value="${rps}" data-name="${name}" data-field="rps"/>
+            <input class="input" style="width:120px" placeholder="Burst" value="${burst}" data-name="${name}" data-field="burst"/>
+            <input class="input" style="width:140px" placeholder="Cost Cap (USD)" value="${cost}" data-name="${name}" data-field="cost"/>
+            <input class="input" style="flex:1" placeholder="Allow Hosts (csv)" value="${allow}" data-name="${name}" data-field="allow"/>
+            <button class="btn" data-name="${name}" data-action="save">Save</button>
+          </div>`;
+        }).join('');
+        document.getElementById('policiesTable').innerHTML = rows || '<em>No policies configured.</em>';
+        // Bind save buttons
+        document.querySelectorAll('#policiesTable button[data-action="save"]').forEach(btn=>{
+          btn.addEventListener('click', async (ev)=>{
+            const name = btn.getAttribute('data-name');
+            const getVal = (field)=>{
+              const el = document.querySelector(`#policiesTable [data-name="${name}"][data-field="${field}"]`);
+              if(!el) return '';
+              if(el.type === 'checkbox') return el.checked;
+              return el.value;
+            };
+            const payload = {
+              enabled: !!getVal('enabled'),
+              rate_limit: { rate_per_second: parseFloat(getVal('rps')||'0')||0, burst: parseFloat(getVal('burst')||'0')||0 },
+              cost_cap_usd: parseFloat(getVal('cost')||'')||null,
+              allow_hosts: (getVal('allow')||'').split(',').map(s=>s.trim()).filter(Boolean)
+            };
+            const k=localStorage.getItem('apiKey');
+            const resp = await fetch(`/api/v1/admin/connectors/policies/${name}`, { method:'POST', headers:{'x-api-key':k,'Content-Type':'application/json'}, body: JSON.stringify(payload)});
+            if(resp.ok){ toast(`Policy saved: ${name}`); } else { const t = await resp.text(); toast(`Save failed: ${t}`); }
+          });
+        });
+      }catch(e){ document.getElementById('policiesTable').innerHTML = `<pre>${e.message||e}</pre>`; }
+    }
     document.addEventListener('DOMContentLoaded',()=>{
       try{
         g('saveSlack').onclick = ()=> save('slack', v('slack'));
@@ -122,9 +202,47 @@
         g('saveJira').onclick = ()=> save('jira', v('jira'));
         g('mispSave').onclick = mispSave; g('mispSync').onclick = mispSync;
         g('octiSave').onclick = octiSave; g('octiSync').onclick = octiSync;
+        g('refreshPolicies').onclick = refreshPolicies;
+        // Connector Config panel
+        g('cfgLoad').onclick = async ()=>{
+          const name = g('cfgName').value.trim(); if(!name) return toast('Enter connector name');
+          const k=localStorage.getItem('apiKey');
+          const r = await fetch(`/api/v1/admin/connectors/config/${encodeURIComponent(name)}`, { headers: {'x-api-key': k} });
+          const j = r.ok? await r.json(): {error: await r.text()};
+          if(!r.ok){ toast('Load failed: '+(j.error||j.detail||j)); return; }
+          g('cfgJson').value = JSON.stringify(j.config||{}, null, 2);
+          toast('Config loaded',1200);
+        };
+        g('cfgSave').onclick = async ()=>{
+          const name = g('cfgName').value.trim(); if(!name) return toast('Enter connector name');
+          let cfg = {};
+          try{ cfg = JSON.parse(g('cfgJson').value || '{}'); }catch(e){ toast('Invalid JSON'); return; }
+          const k=localStorage.getItem('apiKey');
+          const r = await fetch(`/api/v1/admin/connectors/config/${encodeURIComponent(name)}`, { method:'POST', headers:{'x-api-key':k,'Content-Type':'application/json'}, body: JSON.stringify({config: cfg}) });
+          if(r.ok){ toast('Config saved'); } else { const t = await r.text(); toast('Save failed: '+t); }
+        };
+
+        // Connector Secrets panel
+        g('secLoad').onclick = async ()=>{
+          const name = g('secName').value.trim(); if(!name) return toast('Enter connector name');
+          const k=localStorage.getItem('apiKey');
+          const r = await fetch(`/api/v1/admin/connectors/secrets/${encodeURIComponent(name)}`, { headers: {'x-api-key': k} });
+          const j = r.ok? await r.json(): {error: await r.text()};
+          if(!r.ok){ toast('Load failed: '+(j.error||j.detail||j)); return; }
+          g('secJson').value = JSON.stringify(j.secrets||{}, null, 2);
+          toast('Secrets loaded (redacted)',1200);
+        };
+        g('secSave').onclick = async ()=>{
+          const name = g('secName').value.trim(); if(!name) return toast('Enter connector name');
+          let vals = {};
+          try{ vals = JSON.parse(g('secJson').value || '{}'); }catch(e){ toast('Invalid JSON'); return; }
+          const k=localStorage.getItem('apiKey');
+          const r = await fetch(`/api/v1/admin/connectors/secrets/${encodeURIComponent(name)}`, { method:'POST', headers:{'x-api-key':k,'Content-Type':'application/json'}, body: JSON.stringify({values: vals}) });
+          if(r.ok){ toast('Secrets saved'); } else { const t = await r.text(); toast('Save failed: '+t); }
+        };
         // Smoke sample buttons
         const API = (path) => `${location.origin}${path}`;
-        const apiKey = localStorage.apiKey || 'devkey123';
+        const apiKey = localStorage.apiKey || '';
         const tenantId = localStorage.tenantId || 'demo';
         async function postJSON(url, body) {
           const r = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json','x-api-key':apiKey,'x-tenant-id':tenantId}, body: JSON.stringify(body)});
@@ -141,6 +259,7 @@
         g('smokeSysmon').onclick = () => smoke(API('/api/v1/ingest/sysmon'), {UtcTime:new Date().toISOString(),Computer:'host1',Image:'C:\\Windows\\System32\\powershell.exe',ProcessId:4321,Hashes:'SHA256=...'});
         g('smokeCloudTrail').onclick = () => smoke(API('/api/v1/ingest/cloudtrail'), {events:[{eventTime:new Date().toISOString(),eventName:'CreateUser',eventSource:'iam.amazonaws.com',sourceIPAddress:'1.2.3.4',recipientAccountId:'123456789012',userIdentity:{userName:'alice'}}]});
         refresh();
+        refreshPolicies();
       }catch(e){ console.warn('integrations wiring failed',e); }
     });
     function g(id){ return document.getElementById(id); }

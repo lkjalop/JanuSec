@@ -26,7 +26,14 @@
       checkDegraded();
     }, POLL_INTERVAL);
   }
-  function authHeaders(){ try{ const k=localStorage.getItem('apiKey')||'devkey123'; return {'x-api-key':k}; }catch{ return {'x-api-key':'devkey123'}; } }
+  function authHeaders(){
+    try{
+      const k = localStorage.getItem('apiKey');
+      return k ? {'x-api-key':k} : {};
+    }catch{
+      return {};
+    }
+  }
 
   function createStreamClient(url){
     try{

@@ -10,8 +10,8 @@ router = APIRouter(prefix='/api/v1/dev')
 @router.get('/info')
 async def dev_info():
     """Return a small object that indicates demo/dev mode and provides the demo API key when safe."""
-    # Only surface demo key when running in a local/demo environment
-    demo_key = os.getenv('DEV_DEMO_API_KEY', 'devkey123')
+    # Only surface an explicitly configured demo key when running in a local/demo environment
+    demo_key = os.getenv('DEV_DEMO_API_KEY')
     is_dev = os.getenv('JANUSEC_DEV_MODE', '1').lower() in {'1','true','yes'}
     return {'dev': bool(is_dev), 'demo_key': demo_key}
 

@@ -77,7 +77,7 @@
       }catch(e){ console.log('notify-fail', e, msg); }
     }
 
-    function authHeaders() { try { const k=localStorage.getItem('apiKey')||'devkey123'; return {'x-api-key':k}; } catch(_) { return {'x-api-key':'devkey123'} } }
+    function authHeaders() { try { const k=localStorage.getItem('apiKey'); return k ? {'x-api-key':k} : {}; } catch(_) { return {}; } }
     async function loadRecent(){
       const r = await (window.safeFetch || fetch)('/api/v1/decisions/recent?limit=50',{headers: authHeaders()});
       if(!r.ok){ return }

@@ -52,8 +52,8 @@
 			}
 
 			function H(){
-				try{ const k = localStorage.getItem('apiKey') || 'devkey123'; return {'x-api-key': k}; }
-				catch(_){ return {'x-api-key': 'devkey123'}; }
+				try{ const k = localStorage.getItem('apiKey'); return k ? {'x-api-key': k} : {}; }
+				catch(_){ return {}; }
 			}
 
 			async function recent(){

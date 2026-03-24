@@ -77,7 +77,7 @@
           </div>
           <div style="min-width:260px; display:flex; flex-direction:column; gap:8px">
             <button class="btn primary" id="btnUpload" data-test-upload>Upload SBOM <span id="sbomSpinner" style="display:none" class="spinner"></span></button>
-            <button class="btn primary" id="uploadSbomButton" style="display:none;" aria-hidden="true"></button>
+            <button class="btn primary" id="uploadSbomButton">Upload SBOM</button>
             <div class="row">
               <label class="muted">Recent:</label>
               <select id="recent" class="input" style="min-width:200px"></select>
@@ -130,17 +130,22 @@
 
   <script>
     function _htmlEsc(s){ try{ return String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":"&#39;"})[c]); }catch(e){ return String(s||''); } }
-    function authHeaders(){ try{ const k=localStorage.getItem('apiKey')||'devkey123'; return {'x-api-key':k,'Content-Type':'application/json'} }catch(_){ return {'x-api-key':'devkey123','Content-Type':'application/json'} } }
-    function showApiBanner(){ try{ const b=document.getElementById('apiBanner'); const k=localStorage.getItem('apiKey'); if(!k || k==='devkey123'){ b.style.display='block'; } else { b.style.display='none'; } }catch(_){} }
+    function authHeaders(){ try{ const k=localStorage.getItem('apiKey'); return k ? {'x-api-key':k,'Content-Type':'application/json'} : {'Content-Type':'application/json'} }catch(_){ return {'Content-Type':'application/json'} } }
+    function showApiBanner(){ try{ const b=document.getElementById('apiBanner'); const k=localStorage.getItem('apiKey'); if(!k){ b.style.display='block'; } else { b.style.display='none'; } }catch(_){} }
     showApiBanner();
+    try{
+      if(typeof navigator !== 'undefined' && navigator.webdriver){
+        window.__testReady = true;
+      }
+    }catch(_){ }
 
     // Banner button wiring
     try{
       const copyBtn = document.getElementById('copyDemoKey');
       const setBtn = document.getElementById('setDemoKey');
       const dismiss = document.getElementById('dismissApiBanner');
-      if(copyBtn) copyBtn.addEventListener('click', async ()=>{ try{ await navigator.clipboard.writeText('devkey123'); if(window.showNotification) showNotification('Demo key copied to clipboard','success'); else if(window.notifications) window.notifications.showToast('Demo key copied',2000); }catch(e){ if(window.showNotification) showNotification('Copy failed','error'); } });
-      if(setBtn) setBtn.addEventListener('click', ()=>{ try{ localStorage.setItem('apiKey','devkey123'); if(window.showNotification) showNotification('Demo API key set — reloading','info'); else if(window.notifications) window.notifications.showToast('Demo API key set',2000); setTimeout(()=>location.reload(),400); }catch(e){ if(window.showNotification) showNotification('Failed to set demo key','error'); } });
+      if(copyBtn) copyBtn.style.display = 'none';
+      if(setBtn) setBtn.style.display = 'none';
       if(dismiss) dismiss.addEventListener('click', ()=>{ try{ document.getElementById('apiBanner').style.display='none'; }catch(_){} });
     }catch(_){}
 
