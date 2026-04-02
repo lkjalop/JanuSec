@@ -1,0 +1,13 @@
+{
+  "tenant_id": "contoso-export",
+  "provider": "azure",
+  "files": [
+    { "path": "../../cloud_exports/azure_entra_signin_export.json", "source_kind": "entra_signin", "labels": ["identity"] },
+    { "path": "../../cloud_exports/azure_entra_audit_export.json", "source_kind": "entra_audit", "labels": ["identity"] },
+    { "path": "../../cloud_exports/azure_conditional_access_export.json", "source_kind": "conditional_access", "labels": ["identity"] },
+    { "path": "../../cloud_exports/azure_identity_protection_export.json", "source_kind": "identity_protection", "labels": ["identity"] },
+    { "path": "../../cloud_exports/azure_defender_incidents_export.json", "source_kind": "defender_incident", "labels": ["cloud"] },
+    { "path": "../../cloud_exports/azure_activity_log_export.json", "source_kind": "activity_log", "labels": ["cloud"] },
+    { "path": "../../cloud_exports/azure_nsg_flow_export.json", "source_kind": "nsg_flow", "labels": ["network"] }
+  ]
+}

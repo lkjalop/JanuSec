@@ -76,17 +76,23 @@ def generate_persona_view(report: Dict[str, Any], persona: str, disclosure_level
     if p == "executive":
         base["headline"] = _one_liner(report)
         base["business_impact"] = _business_impact(report)
+        base["operational_next_step"] = _operational_next_step(report)
+        base["control_posture"] = _control_posture(report)
         # Include tier metadata when available
         base['tier_metadata'] = report.get('tier_metadata', {})
     elif p == "soc_analyst":
         base["timeline"] = report.get("attack_timeline", [])
         base["iocs"] = base["summary_signals"]["iocs"]
+        base["triage_focus"] = _triage_focus(report)
+        base["corroboration_targets"] = _corroboration_targets(report)
     elif p == "compliance":
         base["audit_trail"] = _audit_trail(report)
         base["framework_mappings"] = report.get("framework_mappings", [])
+        base["control_posture"] = _control_posture(report)
     elif p == "threat_hunter":
         base["factor_analysis"] = report.get("verdict", {}).get("all_factors", [])
         base["statistical"] = _statistical(report)
+        base["corroboration_targets"] = _corroboration_targets(report)
     elif p == "mssp":
         base["client"] = {"tenant_id": report.get("tenant_id")}
         base["sla"] = {"target_minutes": 15}
@@ -116,6 +122,7 @@ def generate_persona_view(report: Dict[str, Any], persona: str, disclosure_level
             "tenant_id": report.get("tenant_id"),
             "artifact_count": len(base["evidence_sources"]),
         }
+        base["corroboration_targets"] = _corroboration_targets(report)
 
     # Progressive disclosure: level 1 = one-liner + top action, level 2 = timeline+IOCs+gates, level 3 = full
     try:
@@ -148,15 +155,12 @@ def generate_persona_view(report: Dict[str, Any], persona: str, disclosure_level
                 mid['timeline'] = [{k: v for k, v in e.items() if k not in ('raw_evidence','raw_payload')} for e in mid.get('timeline', [])]
             except Exception:
                 pass
-        return mid
         # Enrich report explainability for persona-level human readable fields
         try:
-            # map disclosure_level 1->MINIMAL,2->SUMMARY,3->DETAILED
-            lvl_enum = int(disclosure_level or 2)
-            # call enrichment to attach `all_factors_enriched`
             enrich_report_explainability(report, None)
         except Exception:
             pass
+        return mid
 
     return base
 
@@ -165,18 +169,67 @@ def generate_persona_view(report: Dict[str, Any], persona: str, disclosure_level
 def _one_liner(report: Dict[str, Any]) -> str:
     verdict = report.get("verdict", {})
     rq = report.get("risk_quantification", {})
+    impact = report.get("impact_metadata", {})
+    identities = len(impact.get("affected_identities") or [])
+    hosts = len(impact.get("affected_hosts") or [])
+    scope = []
+    if identities:
+        scope.append(f"{identities} identity{'ies' if identities != 1 else ''}")
+    if hosts:
+        scope.append(f"{hosts} host{'s' if hosts != 1 else ''}")
+    scope_text = f"; scope {', '.join(scope)}" if scope else ""
     return (
         f"{verdict.get('final_verdict', 'REVIEW')} at {verdict.get('final_confidence', 0.0):.0%} "
-        f"(severity {rq.get('severity', 'LOW')})"
+        f"(severity {rq.get('severity', 'LOW')}{scope_text})"
     )
 
 
 def _business_impact(report: Dict[str, Any]) -> Dict[str, Any]:
     rq = report.get("risk_quantification", {})
-    return {
+    impact: Dict[str, Any] = {
         "estimated_loss_range": rq.get("impact_range_usd"),
         "likelihood": rq.get("likelihood_percent"),
         "expected_loss": rq.get("expected_loss_usd"),
+    }
+
+    # Enrich with AssetContext when available — enables "production payment processor" language
+    raw_ctx = (
+        report.get("asset_context")
+        or (report.get("verdict") or {}).get("asset_context")
+        or (report.get("artifact") or {}).get("asset_context")
+    )
+    if raw_ctx:
+        try:
+            from src.reporting.schemas import AssetContext
+            ctx = AssetContext(**raw_ctx) if isinstance(raw_ctx, dict) else raw_ctx
+            impact["asset_label"] = ctx.impact_label()
+            impact["environment"] = ctx.environment
+            impact["business_tier"] = ctx.business_tier
+            impact["data_classification"] = ctx.data_classification
+            impact["regulatory_scope"] = ctx.regulatory_scope
+            impact["asset_criticality"] = ctx.asset_criticality
+            if ctx.estimated_annual_revenue_impact_usd:
+                impact["revenue_exposure_usd"] = ctx.estimated_annual_revenue_impact_usd
+        except Exception:
+            pass
+
+    return impact
+
+
+def _operational_next_step(report: Dict[str, Any]) -> str | None:
+    actions = report.get("recommended_actions") or []
+    if actions:
+        top = actions[0]
+        return top.get("primary_action") or top.get("action")
+    return None
+
+
+def _control_posture(report: Dict[str, Any]) -> Dict[str, Any]:
+    impact = report.get("impact_metadata") or {}
+    return {
+        "control_objectives": impact.get("control_objectives") or [],
+        "approval_required": ((report.get("decision_record") or {}).get("approval_state") or {}).get("required"),
+        "approval_state": ((report.get("decision_record") or {}).get("approval_state") or {}).get("status"),
     }
 
 
@@ -197,3 +250,33 @@ def _statistical(report: Dict[str, Any]) -> Dict[str, Any]:
         "posterior": v.get("bayesian_posterior"),
         "likelihood_ratio": v.get("likelihood_ratio"),
     }
+
+
+def _triage_focus(report: Dict[str, Any]) -> list[str]:
+    findings = report.get("findings") or []
+    focus: list[str] = []
+    for finding in findings[:5]:
+        title = finding.get("title")
+        if title:
+            focus.append(str(title))
+    return focus
+
+
+def _corroboration_targets(report: Dict[str, Any]) -> list[str]:
+    verdict = report.get("verdict") or {}
+    prioritized = (verdict.get("semantic_top_factors") or verdict.get("top_contributing_factors") or [])
+    factors = [str(entry.get("factor_name") or entry) for entry in prioritized]
+    targets: list[str] = []
+    if any("email:" in factor for factor in factors):
+        targets.append("Pull mailbox delivery traces, URL click telemetry, and attachment detonation evidence.")
+    if any("endpoint:" in factor for factor in factors):
+        targets.append("Collect process lineage, signed binary metadata, persistence artifacts, and memory snapshots.")
+    if any("network:" in factor for factor in factors):
+        targets.append("Review DNS, proxy, firewall, and east-west flow telemetry for corroborating pivots.")
+    if any("identity:" in factor for factor in factors):
+        targets.append("Pull Entra sign-in, Conditional Access, and Identity Protection events for the implicated principals.")
+    if any("cloud:" in factor for factor in factors):
+        targets.append("Corroborate with control-plane activity, Defender or GuardDuty findings, and target-resource access logs.")
+    if any("corr:" in factor for factor in factors):
+        targets.append("Pivot across identity, endpoint, and network timelines to validate the multi-stage chain.")
+    return targets

@@ -1,0 +1,11 @@
+{
+  "tenant_id": "acme-export",
+  "provider": "aws",
+  "files": [
+    { "path": "../../cloud_exports/aws_cloudtrail_export.json", "source_kind": "cloudtrail", "labels": ["cloud"] },
+    { "path": "../../cloud_exports/aws_guardduty_export.json", "source_kind": "guardduty", "labels": ["cloud"] },
+    { "path": "../../cloud_exports/aws_securityhub_export.json", "source_kind": "securityhub", "labels": ["cloud"] },
+    { "path": "../../cloud_exports/aws_config_export.json", "source_kind": "config", "labels": ["cloud"] },
+    { "path": "../../cloud_exports/aws_vpc_flow_export.json", "source_kind": "vpc_flow", "labels": ["network"] }
+  ]
+}

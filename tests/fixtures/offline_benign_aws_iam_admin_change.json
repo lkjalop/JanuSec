@@ -1,0 +1,13 @@
+[
+  {
+    "eventTime": "2026-03-22T02:10:00Z",
+    "eventName": "AttachRolePolicy",
+    "eventSource": "iam.amazonaws.com",
+    "sourceIPAddress": "10.0.0.15",
+    "recipientAccountId": "123456789012",
+    "userIdentity": { "arn": "arn:aws:iam::123456789012:user/admin-ops" },
+    "approved_change": true,
+    "change_ticket": "CAB-1042",
+    "maintenance_window": true
+  }
+]

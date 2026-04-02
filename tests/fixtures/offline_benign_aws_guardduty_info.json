@@ -1,0 +1,11 @@
+[
+  {
+    "id": "gd-info-1",
+    "type": "Recon:EC2/PortProbeUnprotectedPort",
+    "severity": 2.0,
+    "accountId": "123456789012",
+    "service": { "eventFirstSeen": "2026-03-22T03:00:00Z" },
+    "workflow": { "status": "SUPPRESSED" },
+    "approved_change": true
+  }
+]

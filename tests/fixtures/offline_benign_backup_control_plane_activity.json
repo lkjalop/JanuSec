@@ -1,0 +1,30 @@
+[
+  {
+    "row_index": 0,
+    "sheet": "AWSCloudTrail",
+    "eventTime": "2026-03-20T05:05:00Z",
+    "eventSource": "backup.amazonaws.com",
+    "eventName": "StartBackupJob",
+    "sourceIPAddress": "10.20.10.5",
+    "userIdentity": {"arn": "arn:aws:iam::123456789012:role/BackupServiceRole"},
+    "awsRegion": "ap-southeast-2",
+    "host": "backup-control-01",
+    "known_backup_activity": true,
+    "approved_change": true,
+    "change_ticket": "OPS-2026-1210"
+  },
+  {
+    "row_index": 1,
+    "sheet": "AWSVPCFlow",
+    "start": "2026-03-20T05:06:00Z",
+    "srcaddr": "10.20.10.5",
+    "dstaddr": "10.20.20.15",
+    "dstport": 443,
+    "action": "ACCEPT",
+    "bytes": 81920,
+    "host": "backup-control-01",
+    "known_backup_activity": true,
+    "approved_change": true,
+    "change_ticket": "OPS-2026-1210"
+  }
+]
