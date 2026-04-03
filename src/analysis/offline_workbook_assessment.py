@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ipaddress
+import hashlib
 import json
 import math
 import os
@@ -41,6 +42,20 @@ _PHISHING_MARKERS = (
     "update required",
     "urgent",
     "password",
+)
+_SUPPLIER_PAYMENT_MARKERS = (
+    "bank details",
+    "banking details",
+    "payment details",
+    "payment procedure",
+    "payment procedures",
+    "wire transfer",
+    "remittance",
+    "updated bank",
+    "change payment",
+    "supplier details",
+    "vendor details",
+    "invoice attached",
 )
 _IOC_PATTERN = re.compile(r"(https?://[^\s]+|[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})", re.IGNORECASE)
 _TOKEN_PATTERN = re.compile(r"[a-zA-Z0-9_.:-]{3,}")
@@ -91,13 +106,21 @@ _FACTOR_WEIGHTS = {
     "identity:cloud_signin_external": 0.06,
     "identity:cloud_signin_risk": 0.12,
     "email:phishing_lure": 0.14,
-    "cloud:privilege_change": 0.14,
-    "cloud:access_key_creation": 0.13,
+    "email:supplier_payment_change": 0.16,
+    "email:vendor_impersonation": 0.15,
+    "email:auth_alignment_fail": 0.14,
+    "attachment:macro_enabled_office": 0.16,
+    "attachment:autoexec_macro": 0.15,
+    "attachment:pdf_embedded_js": 0.15,
+    "attachment:malicious_detonation": 0.17,
+    "email:vendor_master_drift": 0.15,
+    "cloud:privilege_change": 0.16,
+    "cloud:access_key_creation": 0.15,
     "cloud:defender_high_severity": 0.16,
     "cloud:guardduty_high_severity": 0.16,
-    "cloud:securityhub_high": 0.13,
+    "cloud:securityhub_high": 0.15,
     "cloud:resource_admin_write": 0.12,
-    "cloud:config_drift": 0.1,
+    "cloud:config_drift": 0.13,
     "identity:conditional_access_failure": 0.11,
     "identity:identity_protection_risk": 0.14,
     "network:vpc_external_flow": 0.08,
@@ -113,6 +136,7 @@ _FACTOR_WEIGHTS = {
 }
 _FACTOR_PRIORITY = {
     "email": 7,
+    "attachment": 7,
     "cloud": 7,
     "identity": 6,
     "network": 6,
@@ -124,7 +148,32 @@ _FACTOR_PRIORITY = {
     "stats": 2,
     "context": 1,
 }
-_SEMANTIC_FACTOR_CATEGORIES = {"email", "cloud", "identity", "network", "endpoint", "corr", "sequence"}
+_FACTOR_AUTHORITY = {
+    "cloud:defender_high_severity": 1.0,
+    "cloud:guardduty_high_severity": 1.0,
+    "cloud:securityhub_high": 0.96,
+    "email:supplier_payment_change": 0.9,
+    "email:vendor_impersonation": 0.88,
+    "email:auth_alignment_fail": 0.92,
+    "attachment:macro_enabled_office": 0.9,
+    "attachment:autoexec_macro": 0.95,
+    "attachment:pdf_embedded_js": 0.95,
+    "attachment:malicious_detonation": 0.98,
+    "email:vendor_master_drift": 0.93,
+    "identity:identity_protection_risk": 0.94,
+    "identity:conditional_access_failure": 0.92,
+    "cloud:privilege_change": 0.95,
+    "cloud:access_key_creation": 0.97,
+    "cloud:resource_admin_write": 0.9,
+    "cloud:config_drift": 0.92,
+    "identity:cloud_signin_risk": 0.82,
+    "identity:cloud_signin_external": 0.76,
+    "network:vpc_external_flow": 0.62,
+    "network:suspicious_external_ip": 0.58,
+    "corr:cross_sheet_indicator_pivot": 0.2,
+    "sequence:kill_chain_progression": 0.45,
+}
+_SEMANTIC_FACTOR_CATEGORIES = {"email", "attachment", "cloud", "identity", "network", "endpoint", "corr", "sequence"}
 _SUPPORTING_FACTOR_CATEGORIES = {"graph", "ml", "stats", "context"}
 _MICROSOFT_SIGNERS = {
     "microsoft corporation",
@@ -254,7 +303,7 @@ def _tokenize_feature_family(row: Dict[str, Any], family: str) -> list[str]:
         "path": ("process_path", "path", "image_path"),
         "process": ("process", "process_name", "parent_process"),
         "command": ("command_line", "cmdline", "command"),
-        "email": ("subject", "body", "from", "to"),
+        "email": ("subject", "body", "from", "to", "reply_to", "sender_display_name", "attachment_name"),
         "cloud_action": ("event_type", "action", "operation", "app", "resource"),
     }.get(family, ())
     values = [_text(row.get(field)) for field in fields if row.get(field) is not None]
@@ -264,10 +313,25 @@ def _tokenize_feature_family(row: Dict[str, Any], family: str) -> list[str]:
     return tokens[:256]
 
 
+def _is_email_evidence_row(row: Dict[str, Any], domain_family: str) -> bool:
+    source = _lower(row.get("export_source") or row.get("provider") or row.get("cloud_export_kind") or row.get("source_file"))
+    if domain_family == "email":
+        return True
+    if any(marker in source for marker in ("email", "exchange", "mail", "proofpoint", "mimecast", "gmail", "o365")):
+        return True
+    email_fields = ("subject", "body", "from", "to", "sender", "recipient", "message_id", "attachment_name")
+    if any(row.get(field) for field in email_fields):
+        return True
+    return False
+
+
 def _domain_family(row: Dict[str, Any]) -> str:
     hinted = _lower(row.get("domain_hint"))
     if hinted:
         return hinted
+    source = _lower(row.get("export_source") or row.get("provider") or row.get("cloud_export_kind") or row.get("source_file"))
+    if any(marker in source for marker in ("email", "mailbox", "proofpoint", "mimecast", "gmail", "exchange", "attachment", "supplier_baseline", "vendor_master", "detonation")):
+        return "email"
     sheet = _sheet_name(row).lower()
     if "email" in sheet:
         return "email"
@@ -280,6 +344,104 @@ def _domain_family(row: Dict[str, Any]) -> str:
     if any(row.get(key) for key in ("user", "username", "tenant_id", "app", "resource", "service_principal")):
         return "identity"
     return "other"
+
+
+def _attachment_extension(name: str) -> str:
+    return Path(name or "").suffix.lower()
+
+
+def _read_local_attachment_bytes(row: Dict[str, Any]) -> bytes | None:
+    path_value = row.get("attachment_path") or row.get("artifact_path") or row.get("local_path")
+    if not path_value:
+        return None
+    try:
+        path = Path(str(path_value))
+        if path.exists() and path.is_file():
+            return path.read_bytes()
+    except Exception:
+        return None
+    return None
+
+
+def _read_local_text(path_value: Any) -> str:
+    if not path_value:
+        return ""
+    try:
+        path = Path(str(path_value))
+        if path.exists() and path.is_file():
+            return path.read_text(encoding="utf-8", errors="ignore")
+    except Exception:
+        return ""
+    return ""
+
+
+def _attachment_sha256(row: Dict[str, Any], data: bytes | None) -> str | None:
+    explicit = _lower(row.get("sha256") or row.get("file_hash") or row.get("attachment_sha256"))
+    if explicit:
+        return explicit
+    if not data:
+        return None
+    try:
+        return hashlib.sha256(data).hexdigest()
+    except Exception:
+        return None
+
+
+def _email_sender_domain(row: Dict[str, Any]) -> str:
+    sender = _lower(row.get("from") or row.get("sender") or row.get("from_addr"))
+    if "@" in sender:
+        return sender.split("@", 1)[1]
+    return _lower(row.get("sender_domain"))
+
+
+def _email_reply_domain(row: Dict[str, Any]) -> str:
+    reply_to = _lower(row.get("reply_to") or row.get("replyTo"))
+    if "@" in reply_to:
+        return reply_to.split("@", 1)[1]
+    return _lower(row.get("reply_to_domain"))
+
+
+def _email_baseline_domain(row: Dict[str, Any]) -> str:
+    for key in ("trusted_supplier_domain", "supplier_domain", "baseline_sender_domain", "vendor_domain"):
+        value = _lower(row.get(key))
+        if value:
+            return value
+    return ""
+
+
+def _email_auth_fail(row: Dict[str, Any]) -> bool:
+    signals = (
+        _lower(row.get("spf_result")),
+        _lower(row.get("dkim_result")),
+        _lower(row.get("dmarc_result")),
+    )
+    return any(value in {"fail", "softfail", "temperror", "permerror", "reject"} for value in signals if value)
+
+
+def _attachment_forensics(row: Dict[str, Any]) -> tuple[list[str], list[str], dict[str, Any]]:
+    factors: list[str] = []
+    evidence: list[str] = []
+    meta: dict[str, Any] = {}
+    name = _text(row.get("attachment_name") or row.get("filename") or row.get("file_name"))
+    ext = _attachment_extension(name)
+    data = _read_local_attachment_bytes(row)
+    file_hash = _attachment_sha256(row, data)
+    if file_hash:
+        meta["file_hash"] = file_hash
+    if ext in {".xlsm", ".docm", ".pptm"}:
+        factors.append("attachment:macro_enabled_office")
+        evidence.append(f"macro-capable office attachment {name}")
+    vba_text = _read_local_text(row.get("vba_source_path")) or _lower(_text(row.get("vba_source")))
+    if "sub auto_open" in _lower(vba_text) or "sub workbook_open" in _lower(vba_text):
+        factors.append("attachment:autoexec_macro")
+        evidence.append("auto-executing VBA trigger present")
+    pdf_text = ""
+    if ext == ".pdf":
+        pdf_text = (data or b"").decode("latin1", errors="ignore")
+    if pdf_text and any(marker in pdf_text for marker in ("/OpenAction", "/JavaScript", "/JS")):
+        factors.append("attachment:pdf_embedded_js")
+        evidence.append("pdf contains open-action or embedded javascript markers")
+    return factors, evidence, meta
 
 
 def _mad_outlier_score(values: list[float]) -> list[float]:
@@ -480,9 +642,28 @@ def _rank_factor_entries(ranked_factors: list[tuple[str, int]], total_rows: int)
             "contribution_score": round(count / max(total_rows, 1), 3),
             "evidence_count": count,
             "factor_category": ("stats" if factor == "network:adaptive_ewma_regular_cadence" else factor.split(":", 1)[0]),
+            "authority_score": round(_FACTOR_AUTHORITY.get(factor, 0.35), 3),
         }
         for factor, count in ranked_factors
     ]
+
+
+def _sort_semantic_entries(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    substantive_present = any(
+        entry["factor_name"].startswith(("cloud:", "identity:", "email:", "endpoint:"))
+        for entry in entries
+    )
+    return sorted(
+        entries,
+        key=lambda entry: (
+            -(entry.get("authority_score") or 0.0),
+            -_FACTOR_PRIORITY.get(str(entry.get("factor_category") or ""), 0),
+            -(entry.get("evidence_count") or 0),
+            -(entry.get("contribution_score") or 0.0),
+            1 if substantive_present and str(entry.get("factor_name") or "").startswith("corr:") else 0,
+            str(entry.get("factor_name") or ""),
+        ),
+    )
 
 
 def _split_factor_views(
@@ -494,12 +675,14 @@ def _split_factor_views(
     ranked_entries = _rank_factor_entries(ranked_factors, total_rows)
     semantic_entries = [entry for entry in ranked_entries if entry["factor_category"] in _SEMANTIC_FACTOR_CATEGORIES]
     supporting_entries = [entry for entry in ranked_entries if entry["factor_category"] in _SUPPORTING_FACTOR_CATEGORIES]
+    semantic_entries = _sort_semantic_entries(semantic_entries)
     if graph_anomaly_score >= 0.5:
         graph_entry = {
             "factor_name": "graph:anomalous_edge_chain" if graph_anomaly_score >= 0.6 else "graph:anomalous_path",
             "contribution_score": round(graph_anomaly_score, 3),
             "evidence_count": max(1, len(corroborating_domains)),
             "factor_category": "graph",
+            "authority_score": 0.28,
         }
         supporting_entries = [graph_entry] + [entry for entry in supporting_entries if entry["factor_name"] != graph_entry["factor_name"]]
     top_semantic = semantic_entries[:6]
@@ -508,6 +691,221 @@ def _split_factor_views(
     if not top_contributing:
         top_contributing = ranked_entries[:8]
     return top_contributing, top_semantic, top_supporting
+
+
+def _factor_plain_label(factor_name: str) -> str:
+    mapping = {
+        "email:supplier_payment_change": "supplier payment-change request",
+        "email:vendor_impersonation": "supplier or vendor impersonation",
+        "email:auth_alignment_fail": "email trust-control failure",
+        "cloud:defender_high_severity": "cloud-native threat detection",
+        "cloud:guardduty_high_severity": "cloud-native threat detection",
+        "cloud:securityhub_high": "aggregated cloud security finding",
+        "attachment:macro_enabled_office": "macro-enabled office attachment",
+        "attachment:autoexec_macro": "auto-executing office macro",
+        "attachment:pdf_embedded_js": "pdf attachment with embedded javascript markers",
+        "attachment:malicious_detonation": "sandbox detonation matched malicious behavior",
+        "email:vendor_master_drift": "supplier baseline or vendor master drift",
+        "cloud:privilege_change": "privileged access change",
+        "cloud:access_key_creation": "new cloud credential creation",
+        "cloud:resource_admin_write": "high-impact cloud control change",
+        "cloud:config_drift": "unexpected cloud configuration drift",
+        "identity:identity_protection_risk": "high-risk identity behavior",
+        "identity:conditional_access_failure": "failed access-control enforcement",
+        "identity:cloud_signin_risk": "risky cloud sign-in",
+        "identity:cloud_signin_external": "unexpected external sign-in",
+        "network:vpc_external_flow": "outbound network activity",
+        "network:suspicious_external_ip": "contact with a suspicious external address",
+        "endpoint:suspicious_process_path": "suspicious process execution path",
+        "email:phishing_lure": "phishing-style email content",
+        "corr:cross_sheet_indicator_pivot": "cross-source evidence linkage",
+        "sequence:kill_chain_progression": "multi-step attack progression",
+    }
+    return mapping.get(factor_name, factor_name.replace(":", " ").replace("_", " "))
+
+
+def _build_corroboration_summary(
+    suspicious_rows: list[dict[str, Any]],
+    corroborating_domains: list[str],
+) -> dict[str, Any]:
+    evidence_sources: dict[str, set[str]] = defaultdict(set)
+    evidence_units: set[str] = set()
+    pivot_sources: dict[str, set[str]] = defaultdict(set)
+    source_categories: set[str] = set()
+    for item in suspicious_rows:
+        row = item.get("row") or {}
+        source = _lower(row.get("export_source") or row.get("provider") or row.get("cloud_export_kind") or row.get("source_file") or row.get("sheet"))
+        if not source:
+            continue
+        source_categories.add(source)
+        sheet_name = _sheet_name(row)
+        evidence_sources[source].add(sheet_name)
+        if row.get("export_source") or row.get("provider") or row.get("cloud_export_kind"):
+            evidence_units.add(source)
+        else:
+            evidence_units.add(f"sheet:{sheet_name}")
+        for pivot_value in (
+            _safe_ip(row.get("src_ip") or row.get("ip")),
+            _safe_ip(row.get("dst_ip")),
+            _lower(row.get("user") or row.get("username") or row.get("userPrincipalName") or row.get("actor") or row.get("caller")),
+            _lower(row.get("resource") or row.get("resourceDisplayName") or row.get("target_resource")),
+        ):
+            if pivot_value:
+                pivot_sources[pivot_value].add(source)
+    shared_pivots = [
+        {"pivot": pivot, "sources": sorted(list(sources))}
+        for pivot, sources in pivot_sources.items()
+        if len(sources) >= 2
+    ]
+    evidence_source_count = max(len(evidence_units), len(corroborating_domains))
+    return {
+        "count": evidence_source_count,
+        "evidence_source_count": evidence_source_count,
+        "corroborating_domain_count": len(corroborating_domains),
+        "evidence_sources": sorted(list(evidence_units or source_categories)),
+        "shared_pivots": shared_pivots[:10],
+    }
+
+
+def _plain_language_summary(
+    final_verdict: str,
+    confidence: float,
+    semantic_top_factors: list[dict[str, Any]],
+    corroboration_summary: dict[str, Any],
+) -> str:
+    factor_names = [entry.get("factor_name") for entry in semantic_top_factors if entry.get("factor_name")]
+    email_compromise = any(str(name).startswith("email:") for name in factor_names)
+    suspicious_attachment = any(str(name).startswith("attachment:") for name in factor_names)
+    suspicious_access = any(name in {"identity:cloud_signin_external", "identity:cloud_signin_risk", "identity:conditional_access_failure", "identity:identity_protection_risk"} for name in factor_names)
+    privilege_change = any(name in {"cloud:privilege_change", "cloud:access_key_creation", "cloud:resource_admin_write"} for name in factor_names)
+    native_detection = any(name in {"cloud:defender_high_severity", "cloud:guardduty_high_severity", "cloud:securityhub_high"} for name in factor_names)
+    outbound = any(name in {"network:suspicious_external_ip", "network:vpc_external_flow"} for name in factor_names)
+    actions: list[str] = []
+    if email_compromise:
+        actions.append("a likely supplier-payment diversion or malicious email request")
+    if suspicious_attachment:
+        actions.append("suspicious attachments requiring attachment forensics")
+    if suspicious_access:
+        actions.append("unusual access to a cloud identity")
+    if privilege_change:
+        actions.append("privileged or control-plane changes")
+    if native_detection:
+        actions.append("cloud-native detections confirming the activity")
+    if outbound:
+        actions.append("follow-on outbound network activity")
+    if not actions:
+        actions.append("multiple suspicious cloud events")
+    corroboration = int(corroboration_summary.get("count") or 0)
+    if email_compromise:
+        review_text = (
+            "Do not pay, reply, or change supplier details until callback verification and attachment review are complete."
+            if final_verdict in {"THREAT", "SUSPICIOUS"}
+            else "Continue monitoring and preserve the message, headers, and attachment evidence."
+        )
+        return (
+            f"A likely email-led compromise or supplier payment-diversion attempt was identified with {', '.join(actions[:3])}. "
+            f"{corroboration} independent evidence sources support this finding. "
+            f"Confidence is {confidence:.0%}. {review_text}"
+        )
+    review_text = "Human review is required before any containment action." if final_verdict in {"THREAT", "SUSPICIOUS"} else "Continue monitoring and evidence collection."
+    return (
+        f"A likely cloud attack chain was identified with {', '.join(actions[:3])}. "
+        f"{corroboration} independent evidence sources support this finding. "
+        f"Confidence is {confidence:.0%}. {review_text}"
+    )
+
+
+def _evidence_layers(
+    semantic_top_factors: list[dict[str, Any]],
+    corroboration_summary: dict[str, Any],
+    highlighted_findings: list[dict[str, Any]],
+    missing_evidence: list[str],
+    recommended_actions: list[dict[str, Any]],
+    suspicious_rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    confirmed = []
+    for entry in semantic_top_factors[:5]:
+        confirmed.append({
+            "finding": _factor_plain_label(str(entry.get("factor_name") or "")),
+            "evidence_count": int(entry.get("evidence_count") or 0),
+        })
+    next_steps = [action.get("primary_action") for action in recommended_actions[:4] if action.get("primary_action")]
+    attachment_drilldown: list[dict[str, Any]] = []
+    mailbox_drilldown: list[dict[str, Any]] = []
+    click_drilldown: list[dict[str, Any]] = []
+    vendor_history: list[dict[str, Any]] = []
+    sandbox_findings: list[dict[str, Any]] = []
+    for item in suspicious_rows[:24]:
+        row = item.get("row") or {}
+        source_kind = _lower(row.get("export_source") or row.get("provider") or row.get("sheet"))
+        if source_kind == "attachment_forensics":
+            attachment_drilldown.append(
+                {
+                    "attachment_name": row.get("attachment_name"),
+                    "file_hash": row.get("file_hash"),
+                    "vba_source_path": row.get("vba_source_path"),
+                    "markers": list((row.get("_attachment_forensics") or {}).get("factors") or [])[:6],
+                }
+            )
+        elif source_kind == "attachment_detonation":
+            sandbox_findings.append(
+                {
+                    "attachment_name": row.get("attachment_name"),
+                    "verdict": row.get("sandbox_verdict") or row.get("verdict"),
+                    "engine": row.get("sandbox_engine") or row.get("engine"),
+                    "behaviors": list(row.get("sandbox_behaviors") or row.get("behaviors") or [])[:6],
+                    "contacted_domains": list(row.get("contacted_domains") or [])[:5],
+                }
+            )
+        elif source_kind == "mailbox_trace":
+            mailbox_drilldown.append(
+                {
+                    "message_id": row.get("message_id"),
+                    "recipient": row.get("to") or row.get("user"),
+                    "delivery_action": row.get("delivery_action") or row.get("action"),
+                    "mailbox_folder": row.get("mailbox_folder"),
+                    "timestamp": row.get("timestamp") or row.get("event_ts"),
+                }
+            )
+        elif source_kind == "click_telemetry":
+            click_drilldown.append(
+                {
+                    "message_id": row.get("message_id"),
+                    "clicked_url": row.get("clicked_url"),
+                    "user": row.get("user"),
+                    "timestamp": row.get("timestamp") or row.get("event_ts"),
+                    "result": row.get("result") or row.get("action"),
+                }
+            )
+        elif source_kind in {"vendor_master_history", "supplier_baseline"}:
+            vendor_history.append(
+                {
+                    "supplier_name": row.get("supplier_name"),
+                    "trusted_supplier_domain": row.get("trusted_supplier_domain"),
+                    "known_bank_account": row.get("known_bank_account"),
+                    "pending_change_ticket": row.get("pending_change_ticket"),
+                    "last_verified_ts": row.get("last_verified_ts"),
+                    "recent_change_ts": row.get("recent_change_ts") or row.get("timestamp"),
+                    "approved_change": row.get("approved_change"),
+                }
+            )
+    return {
+        "plain_language": {
+            "confirmed_evidence": confirmed,
+            "confidence_note": f"{int(corroboration_summary.get('count') or 0)} sources corroborate the chain.",
+            "missing_evidence": sorted(set(missing_evidence))[:8],
+            "next_steps": next_steps,
+        },
+        "drilldown": {
+            "highlighted_findings": highlighted_findings,
+            "corroboration": corroboration_summary,
+            "attachments": attachment_drilldown[:6],
+            "sandbox": sandbox_findings[:4],
+            "mailbox_trace": mailbox_drilldown[:8],
+            "click_telemetry": click_drilldown[:8],
+            "vendor_history": vendor_history[:6],
+        },
+    }
 
 
 def _adaptive_ewma_alpha(values: list[float], base: float = 0.6, min_alpha: float = 0.3, max_alpha: float = 0.85, scale: float = 0.4) -> float:
@@ -745,16 +1143,138 @@ def _collect_indicator_maps(rows: list[Dict[str, Any]]) -> tuple[dict[str, set[s
     return ip_to_sheets, domain_to_sheets, hash_to_sheets, user_to_sheets, resource_to_sheets
 
 
+def _normalize_email_replay_row(row: Dict[str, Any], tenant_id: str) -> Dict[str, Any] | None:
+    source_kind = _lower(row.get("export_source") or row.get("source_kind"))
+    if source_kind not in {
+        "email_message",
+        "email_gateway",
+        "mailbox_trace",
+        "click_telemetry",
+        "attachment_forensics",
+        "attachment_detonation",
+        "supplier_baseline",
+        "vendor_master_history",
+    }:
+        return None
+    normalized = dict(row)
+    normalized.setdefault("tenant_id", tenant_id)
+    normalized["provider"] = normalized.get("provider") or "email"
+    normalized["domain_hint"] = "email"
+    sender = _text(normalized.get("from") or normalized.get("sender") or normalized.get("from_addr"))
+    recipient = _text(normalized.get("to") or normalized.get("recipient") or normalized.get("to_addr"))
+    if source_kind in {"email_message", "email_gateway"}:
+        normalized.update(
+            {
+                "sheet": normalized.get("sheet") or "EmailMessage",
+                "event_type": normalized.get("event_type") or "email_message",
+                "action": normalized.get("action") or "email_delivery",
+                "user": recipient,
+                "resource": normalized.get("subject") or normalized.get("message_id") or "email_message",
+                "event_ts": normalized.get("received_at") or normalized.get("timestamp") or normalized.get("createdDateTime"),
+                "ts": _coerce_timestamp(normalized.get("received_at") or normalized.get("timestamp") or normalized.get("createdDateTime")),
+            }
+        )
+    elif source_kind == "mailbox_trace":
+        normalized.update(
+            {
+                "sheet": normalized.get("sheet") or "MailboxTrace",
+                "event_type": normalized.get("event_type") or "mailbox_trace",
+                "action": normalized.get("delivery_action") or normalized.get("action") or "mailbox_trace",
+                "user": recipient,
+                "resource": normalized.get("message_id") or normalized.get("subject") or "mailbox_trace",
+                "event_ts": normalized.get("timestamp"),
+                "ts": _coerce_timestamp(normalized.get("timestamp")),
+            }
+        )
+    elif source_kind == "click_telemetry":
+        normalized.update(
+            {
+                "sheet": normalized.get("sheet") or "EmailClickTelemetry",
+                "event_type": normalized.get("event_type") or "click_telemetry",
+                "action": normalized.get("action") or "url_click",
+                "user": recipient or normalized.get("user"),
+                "resource": normalized.get("clicked_url") or normalized.get("message_id") or "click_telemetry",
+                "event_ts": normalized.get("timestamp"),
+                "ts": _coerce_timestamp(normalized.get("timestamp")),
+                "src_ip": normalized.get("src_ip") or normalized.get("ip"),
+                "ip": normalized.get("ip") or normalized.get("src_ip"),
+            }
+        )
+    elif source_kind == "attachment_forensics":
+        normalized.update(
+            {
+                "sheet": normalized.get("sheet") or "EmailAttachment",
+                "event_type": normalized.get("event_type") or "attachment_analysis",
+                "action": normalized.get("action") or "attachment_analysis",
+                "user": recipient,
+                "resource": normalized.get("attachment_name") or normalized.get("message_id") or "attachment",
+                "event_ts": normalized.get("timestamp"),
+                "ts": _coerce_timestamp(normalized.get("timestamp")),
+            }
+        )
+        attachment_meta = _attachment_forensics(normalized)
+        normalized["_attachment_forensics"] = {
+            "factors": attachment_meta[0],
+            "evidence": attachment_meta[1],
+            "meta": attachment_meta[2],
+        }
+        if attachment_meta[2].get("file_hash"):
+            normalized.setdefault("file_hash", attachment_meta[2]["file_hash"])
+    elif source_kind == "supplier_baseline":
+        normalized.update(
+            {
+                "sheet": normalized.get("sheet") or "SupplierBaseline",
+                "event_type": normalized.get("event_type") or "supplier_baseline",
+                "action": normalized.get("action") or "supplier_baseline",
+                "user": recipient,
+                "resource": normalized.get("supplier_name") or normalized.get("trusted_supplier_domain") or "supplier_baseline",
+                "event_ts": normalized.get("timestamp"),
+                "ts": _coerce_timestamp(normalized.get("timestamp")),
+            }
+        )
+    elif source_kind == "vendor_master_history":
+        normalized.update(
+            {
+                "sheet": normalized.get("sheet") or "VendorMasterHistory",
+                "event_type": normalized.get("event_type") or "vendor_master_history",
+                "action": normalized.get("action") or "vendor_master_history",
+                "user": recipient,
+                "resource": normalized.get("supplier_name") or normalized.get("trusted_supplier_domain") or "vendor_master_history",
+                "event_ts": normalized.get("timestamp") or normalized.get("recent_change_ts"),
+                "ts": _coerce_timestamp(normalized.get("timestamp") or normalized.get("recent_change_ts")),
+            }
+        )
+    elif source_kind == "attachment_detonation":
+        normalized.update(
+            {
+                "sheet": normalized.get("sheet") or "AttachmentDetonation",
+                "event_type": normalized.get("event_type") or "attachment_detonation",
+                "action": normalized.get("action") or "attachment_detonation",
+                "user": recipient,
+                "resource": normalized.get("attachment_name") or normalized.get("message_id") or "attachment_detonation",
+                "event_ts": normalized.get("timestamp"),
+                "ts": _coerce_timestamp(normalized.get("timestamp")),
+            }
+        )
+        if normalized.get("file_hash"):
+            normalized.setdefault("sha256", normalized.get("file_hash"))
+    normalized.setdefault("sender_domain", _email_sender_domain(normalized))
+    normalized.setdefault("reply_to_domain", _email_reply_domain(normalized))
+    return normalized
+
+
 def _classify_cloud_export_row(row: Dict[str, Any]) -> str | None:
     if row.get("policyName") and row.get("result") is not None:
         return "azure_conditional_access_export"
-    if row.get("riskType") and row.get("riskLevel") and row.get("userPrincipalName"):
+    if row.get("appliedPolicies") and row.get("overallResult") is not None and row.get("userPrincipalName"):
+        return "azure_conditional_access_export"
+    if (row.get("riskType") or row.get("riskEventType")) and row.get("riskLevel") and row.get("userPrincipalName"):
         return "azure_identity_protection_export"
     if row.get("createdDateTime") and row.get("userPrincipalName") and row.get("appDisplayName"):
         return "azure_entra_signin_export"
     if row.get("activityDisplayName") and row.get("initiatedBy"):
         return "azure_entra_audit_export"
-    if row.get("incidentId") and row.get("alerts") is not None:
+    if (row.get("incidentId") or row.get("id")) and row.get("alerts") is not None:
         return "azure_defender_incident_export"
     if row.get("operationName") and row.get("caller"):
         return "azure_activity_log_export"
@@ -766,17 +1286,277 @@ def _classify_cloud_export_row(row: Dict[str, Any]) -> str | None:
         return "aws_config_export"
     if row.get("srcaddr") and row.get("dstaddr"):
         return "aws_vpc_flow_export"
-    if row.get("type") and row.get("severity") is not None and row.get("accountId"):
+    if (row.get("type") or row.get("Type")) and (row.get("severity") is not None or row.get("Severity") is not None) and (row.get("accountId") or row.get("AccountId")):
         return "aws_guardduty_export"
     if row.get("Id") and row.get("Severity") and row.get("Resources"):
         return "aws_securityhub_export"
     return None
 
 
+_ATTACK_TECHNIQUE_NAMES = {
+    "T1078": "Valid Accounts",
+    "T1078.004": "Valid Accounts: Cloud Accounts",
+    "T1090": "Proxy",
+    "T1098": "Account Manipulation",
+    "T1098.001": "Account Manipulation: Additional Cloud Credentials",
+    "T1041": "Exfiltration Over C2 Channel",
+    "T1537": "Transfer Data to Cloud Account",
+    "T1484": "Domain or Tenant Policy Modification",
+}
+
+_AWS_EVENT_TO_MITRE = {
+    "assumerole": [("T1078.004", "aws_cloudtrail_event")],
+    "attachrolepolicy": [("T1098.001", "aws_cloudtrail_event")],
+    "attachuserpolicy": [("T1098.001", "aws_cloudtrail_event")],
+    "putbucketpolicy": [("T1537", "aws_cloudtrail_event")],
+    "putbucketacl": [("T1537", "aws_cloudtrail_event")],
+}
+
+_AWS_FINDING_TO_MITRE = {
+    "recon:iamuser/toripcaller": [("T1078.004", "aws_guardduty_type"), ("T1090", "aws_guardduty_type")],
+    "policy:s3/bucketpublicaccessgranted": [("T1537", "aws_guardduty_type")],
+    "vpc_flow": [("T1041", "aws_vpc_flow")],
+}
+
+_THIRD_PARTY_DOMAIN_HINTS = {
+    "okta": ("identity_access", "identity"),
+    "sailpoint": ("identity_access", "identity"),
+    "palo_alto": ("network_security", "network"),
+    "checkpoint": ("network_security", "network"),
+    "suricata": ("network_security", "network"),
+    "wazuh": ("endpoint_security", "endpoint"),
+    "cisco": ("network_security", "network"),
+    "juniper": ("network_security", "network"),
+    "island": ("browser_security", "endpoint"),
+}
+
+
+def _extract_replay_label(row: Dict[str, Any]) -> str:
+    direct = row.get("_janusec_label")
+    if direct:
+        return str(direct)
+    alerts = row.get("alerts") or []
+    for alert in alerts:
+        if isinstance(alert, dict) and alert.get("_janusec_label"):
+            return str(alert.get("_janusec_label"))
+    return ""
+
+
+def _seed_replay_review_state(label: Any) -> str:
+    text = _lower(label)
+    if not text:
+        return "unknown"
+    if "malicious" in text:
+        return "confirmed_malicious"
+    if "benign" in text or "background" in text:
+        return "reviewed_benign"
+    return "unknown"
+
+
+def _extract_framework_mappings_from_row(row: Dict[str, Any]) -> list[dict[str, Any]]:
+    mappings: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    def _append_mapping(entry: dict[str, Any]) -> None:
+        marker = json.dumps(entry, sort_keys=True)
+        if marker in seen:
+            return
+        seen.add(marker)
+        mappings.append(entry)
+
+    existing = row.get("framework_mappings") or []
+    for entry in existing:
+        if isinstance(entry, dict):
+            _append_mapping(dict(entry))
+
+    alerts = row.get("alerts") or []
+    for alert in alerts:
+        if not isinstance(alert, dict):
+            continue
+        tactic = alert.get("category") or row.get("determination") or row.get("title")
+        for technique_id in alert.get("mitreTechniques") or []:
+            technique = str(technique_id or "").strip().upper()
+            if not technique:
+                continue
+            _append_mapping(
+                {
+                    "framework": "mitre_attack",
+                    "id": technique,
+                    "name": _ATTACK_TECHNIQUE_NAMES.get(technique, technique),
+                    "tactic": tactic,
+                    "source": "azure_defender_alert",
+                }
+            )
+
+    for technique_id in row.get("mitre") or []:
+        technique = str(technique_id or "").strip().upper()
+        if technique:
+            _append_mapping(
+                {
+                    "framework": "mitre_attack",
+                    "id": technique,
+                    "name": _ATTACK_TECHNIQUE_NAMES.get(technique, technique),
+                    "source": "row_mitre",
+                }
+            )
+
+    provider = _lower(row.get("provider") or row.get("source_kind") or row.get("export_source"))
+    event_name = _lower(row.get("eventName") or row.get("event_type") or row.get("action"))
+    finding_type = _lower(row.get("type") or row.get("Type") or row.get("Title"))
+
+    if provider == "aws_cloudtrail":
+        for technique, source in _AWS_EVENT_TO_MITRE.get(event_name, []):
+            _append_mapping(
+                {
+                    "framework": "mitre_attack",
+                    "id": technique,
+                    "name": _ATTACK_TECHNIQUE_NAMES.get(technique, technique),
+                    "source": source,
+                }
+            )
+    if provider == "aws_guardduty":
+        for technique, source in _AWS_FINDING_TO_MITRE.get(finding_type, []):
+            _append_mapping(
+                {
+                    "framework": "mitre_attack",
+                    "id": technique,
+                    "name": _ATTACK_TECHNIQUE_NAMES.get(technique, technique),
+                    "source": source,
+                }
+            )
+    if provider == "aws_securityhub":
+        types = row.get("Types") or []
+        for item in types:
+            text = _lower(item)
+            if "privilege escalation" in text:
+                for technique in ("T1078.004", "T1098.001"):
+                    _append_mapping(
+                        {
+                            "framework": "mitre_attack",
+                            "id": technique,
+                            "name": _ATTACK_TECHNIQUE_NAMES.get(technique, technique),
+                            "source": "aws_securityhub_types",
+                        }
+                    )
+        description = _lower(row.get("Description"))
+        if "outbound transfer" in description or "vpc flow" in description:
+            _append_mapping(
+                {
+                    "framework": "mitre_attack",
+                    "id": "T1041",
+                    "name": _ATTACK_TECHNIQUE_NAMES.get("T1041", "T1041"),
+                    "source": "aws_securityhub_description",
+                }
+            )
+    if provider == "aws_vpc_flow":
+        for technique, source in _AWS_FINDING_TO_MITRE.get("vpc_flow", []):
+            _append_mapping(
+                {
+                    "framework": "mitre_attack",
+                    "id": technique,
+                    "name": _ATTACK_TECHNIQUE_NAMES.get(technique, technique),
+                    "source": source,
+                }
+            )
+    return mappings
+
+
+def _infer_business_criticality(row: Dict[str, Any]) -> dict[str, Any]:
+    resource = _lower(
+        row.get("resource")
+        or row.get("resourceId")
+        or row.get("resourceDisplayName")
+        or row.get("target_resource")
+        or row.get("id")
+        or ""
+    )
+    provider = _lower(row.get("provider") or row.get("source_kind") or row.get("export_source"))
+    env = _lower(row.get("environment") or row.get("env") or row.get("subscription_name") or row.get("resourceGroup") or "")
+    tags = " ".join(
+        _lower(row.get(key))
+        for key in ("classification", "data_classification", "tag", "tags", "business_service", "owner_team")
+        if row.get(key) is not None
+    )
+    label = "standard"
+    score = 0.35
+    reasons: list[str] = []
+    if any(token in resource for token in ("prod", "production", "payments", "finance", "customer", "identity", "secrets", "vault", "admin", "directory", "warehouse")):
+        label = "high"
+        score = max(score, 0.82)
+        reasons.append("resource naming suggests production or sensitive control/data-plane use")
+    if any(token in resource for token in ("bucket", "vault", "secret", "key", "directory", "iam", "role", "policy", "subscription", "resourcegroups", "vpc", "subnet")):
+        if label != "high":
+            label = "elevated"
+        score = max(score, 0.74)
+        reasons.append("resource type is security-sensitive or infrastructure-significant")
+    if any(token in env for token in ("prod", "production")):
+        label = "high"
+        score = max(score, 0.8)
+        reasons.append("environment markers indicate production use")
+    if any(token in tags for token in ("pci", "pii", "customer", "confidential", "restricted")):
+        label = "high"
+        score = max(score, 0.88)
+        reasons.append("classification tags indicate regulated or customer-sensitive data")
+    if provider in {"aws_vpc_flow", "azure_activity", "aws_cloudtrail"} and any(token in resource for token in ("vpc", "subnet", "subscription", "role", "policy")):
+        score = max(score, 0.76)
+        if label != "high":
+            label = "elevated"
+        reasons.append("control-plane or network-boundary resource may expand blast radius")
+    return {
+        "label": label,
+        "score": round(score, 2),
+        "reason": reasons[0] if reasons else "no explicit business-criticality evidence was present in the source row",
+    }
+
+
+def _extract_analyst_workflow_fields(row: Dict[str, Any]) -> dict[str, Any]:
+    change_ticket = row.get("change_ticket") or row.get("pending_change_ticket") or row.get("ticket_id")
+    return {
+        "user_contacted": bool(row.get("user_contacted")),
+        "change_ticket_found": bool(row.get("change_ticket_found")) or bool(change_ticket),
+        "owner_confirmed": bool(row.get("owner_confirmed")),
+        "change_ticket": change_ticket,
+    }
+
+
+def _seed_vendor_family_fields(row: Dict[str, Any]) -> None:
+    source_text = _lower(row.get("provider") or row.get("source_kind") or row.get("export_source") or row.get("sheet"))
+    for token, (family, domain) in _THIRD_PARTY_DOMAIN_HINTS.items():
+        if token in source_text:
+            row.setdefault("provider_family", family)
+            row.setdefault("domain_hint", domain)
+            return
+
+
 def _normalize_cloud_export_row(row: Dict[str, Any], tenant_id: str) -> Dict[str, Any]:
+    email_row = _normalize_email_replay_row(row, tenant_id)
+    if email_row is not None:
+        return email_row
     kind = _classify_cloud_export_row(row)
     if not kind:
-        return dict(row)
+        source_kind = _lower(row.get("export_source"))
+        kind = {
+            "azure_entra_signin": "azure_entra_signin_export",
+            "azure_entra_audit": "azure_entra_audit_export",
+            "azure_conditional_access": "azure_conditional_access_export",
+            "azure_identity_protection": "azure_identity_protection_export",
+            "azure_defender_incidents": "azure_defender_incident_export",
+            "azure_activity_log": "azure_activity_log_export",
+            "azure_nsg_flow": "azure_nsg_flow_export",
+            "aws_cloudtrail": "aws_cloudtrail_export",
+            "aws_guardduty": "aws_guardduty_export",
+            "aws_securityhub": "aws_securityhub_export",
+            "aws_config": "aws_config_export",
+            "aws_vpc_flow": "aws_vpc_flow_export",
+        }.get(source_kind)
+    if not kind:
+        normalized = dict(row)
+        normalized.setdefault("review_state", _seed_replay_review_state(_extract_replay_label(normalized)))
+        normalized.setdefault("framework_mappings", _extract_framework_mappings_from_row(normalized))
+        normalized.setdefault("business_criticality", _infer_business_criticality(normalized))
+        normalized.update(_extract_analyst_workflow_fields(normalized))
+        _seed_vendor_family_fields(normalized)
+        return normalized
     normalized = dict(row)
     normalized.setdefault("tenant_id", tenant_id)
     normalized["cloud_export_kind"] = kind
@@ -825,17 +1605,22 @@ def _normalize_cloud_export_row(row: Dict[str, Any], tenant_id: str) -> Dict[str
             for alert in (normalized.get("alerts") or [])
             if isinstance(alert, dict) and alert.get("serviceSource")
         ]
+        mitre_techniques = []
+        for alert in (normalized.get("alerts") or []):
+            if isinstance(alert, dict):
+                mitre_techniques.extend([str(v).strip().upper() for v in (alert.get("mitreTechniques") or []) if str(v).strip()])
         normalized.update(
             {
                 "sheet": normalized.get("sheet") or "AzureDefender",
                 "provider": "azure_defender",
                 "event_type": "defender_incident",
-                "action": normalized.get("title") or "defender_incident",
-                "resource": normalized.get("incidentId"),
+                "action": normalized.get("title") or normalized.get("displayName") or "defender_incident",
+                "resource": normalized.get("incidentId") or normalized.get("id"),
                 "severity_label": severity,
-                "event_ts": normalized.get("createdDateTime") or normalized.get("updatedTime") or normalized.get("firstActivity"),
-                "ts": _coerce_timestamp(normalized.get("createdDateTime") or normalized.get("updatedTime") or normalized.get("firstActivity")),
+                "event_ts": normalized.get("createdDateTime") or normalized.get("lastUpdateDateTime") or normalized.get("updatedTime") or normalized.get("firstActivity"),
+                "ts": _coerce_timestamp(normalized.get("createdDateTime") or normalized.get("lastUpdateDateTime") or normalized.get("updatedTime") or normalized.get("firstActivity")),
                 "alert_source": ",".join(alert_sources),
+                "mitre": sorted(set(mitre_techniques)),
                 "domain_hint": "cloud",
             }
         )
@@ -878,17 +1663,25 @@ def _normalize_cloud_export_row(row: Dict[str, Any], tenant_id: str) -> Dict[str
             }
         )
     elif kind == "azure_conditional_access_export":
+        policy_name = normalized.get("policyName")
+        if not policy_name and isinstance(normalized.get("appliedPolicies"), list) and normalized.get("appliedPolicies"):
+            policy_name = (normalized.get("appliedPolicies") or [{}])[0].get("displayName")
+        result = normalized.get("result")
+        if result is None:
+            result = normalized.get("overallResult")
         normalized.update(
             {
                 "sheet": normalized.get("sheet") or "AzureConditionalAccess",
                 "provider": "azure_conditional_access",
                 "event_type": "conditional_access",
-                "action": normalized.get("policyName") or "conditional_access",
+                "action": policy_name or "conditional_access",
                 "user": normalized.get("userPrincipalName"),
-                "resource": normalized.get("appDisplayName") or normalized.get("policyName"),
-                "result": normalized.get("result"),
-                "event_ts": normalized.get("createdDateTime"),
-                "ts": _coerce_timestamp(normalized.get("createdDateTime")),
+                "resource": normalized.get("appDisplayName") or policy_name,
+                "result": result,
+                "event_ts": normalized.get("createdDateTime") or normalized.get("signInDateTime"),
+                "ts": _coerce_timestamp(normalized.get("createdDateTime") or normalized.get("signInDateTime")),
+                "ip": normalized.get("ipAddress"),
+                "src_ip": normalized.get("ipAddress"),
                 "domain_hint": "identity",
             }
         )
@@ -898,12 +1691,14 @@ def _normalize_cloud_export_row(row: Dict[str, Any], tenant_id: str) -> Dict[str
                 "sheet": normalized.get("sheet") or "AzureIdentityProtection",
                 "provider": "azure_identity_protection",
                 "event_type": "identity_protection",
-                "action": normalized.get("riskType") or "identity_protection",
+                "action": normalized.get("riskType") or normalized.get("riskEventType") or "identity_protection",
                 "user": normalized.get("userPrincipalName"),
                 "resource": normalized.get("riskEventType") or normalized.get("riskType"),
                 "severity_label": _lower(normalized.get("riskLevel")),
                 "event_ts": normalized.get("detectedDateTime") or normalized.get("createdDateTime"),
                 "ts": _coerce_timestamp(normalized.get("detectedDateTime") or normalized.get("createdDateTime")),
+                "ip": normalized.get("ipAddress"),
+                "src_ip": normalized.get("ipAddress"),
                 "domain_hint": "identity",
             }
         )
@@ -928,19 +1723,23 @@ def _normalize_cloud_export_row(row: Dict[str, Any], tenant_id: str) -> Dict[str
             }
         )
     elif kind == "aws_guardduty_export":
-        severity = float(_as_float(normalized.get("severity")) or 0.0)
+        severity = float(_as_float(normalized.get("severity") or normalized.get("Severity")) or 0.0)
         service = normalized.get("service") if isinstance(normalized.get("service"), dict) else {}
+        if not service and isinstance(normalized.get("Service"), dict):
+            service = normalized.get("Service")
         normalized.update(
             {
                 "sheet": normalized.get("sheet") or "AWSGuardDuty",
                 "provider": "aws_guardduty",
-                "event_type": normalized.get("type") or "guardduty",
-                "action": normalized.get("type") or "guardduty",
-                "resource": normalized.get("id"),
+                "event_type": normalized.get("type") or normalized.get("Type") or "guardduty",
+                "action": normalized.get("type") or normalized.get("Type") or normalized.get("Title") or "guardduty",
+                "resource": normalized.get("id") or normalized.get("Id"),
                 "severity_score": severity,
-                "account_id": normalized.get("accountId"),
-                "event_ts": service.get("eventFirstSeen") or normalized.get("updatedAt"),
-                "ts": _coerce_timestamp(service.get("eventFirstSeen") or normalized.get("updatedAt")),
+                "account_id": normalized.get("accountId") or normalized.get("AccountId"),
+                "event_ts": service.get("eventFirstSeen") or service.get("EventFirstSeen") or normalized.get("updatedAt") or normalized.get("UpdatedAt"),
+                "ts": _coerce_timestamp(service.get("eventFirstSeen") or service.get("EventFirstSeen") or normalized.get("updatedAt") or normalized.get("UpdatedAt")),
+                "ip": (((service.get("Action") or {}).get("AwsApiCallAction") or {}).get("RemoteIpDetails") or {}).get("IpAddressV4") if isinstance(service, dict) else None,
+                "src_ip": (((service.get("Action") or {}).get("AwsApiCallAction") or {}).get("RemoteIpDetails") or {}).get("IpAddressV4") if isinstance(service, dict) else None,
                 "domain_hint": "cloud",
             }
         )
@@ -994,6 +1793,11 @@ def _normalize_cloud_export_row(row: Dict[str, Any], tenant_id: str) -> Dict[str
                 "domain_hint": "network",
             }
         )
+    normalized.setdefault("review_state", _seed_replay_review_state(_extract_replay_label(normalized)))
+    normalized["framework_mappings"] = _extract_framework_mappings_from_row(normalized)
+    normalized["business_criticality"] = _infer_business_criticality(normalized)
+    normalized.update(_extract_analyst_workflow_fields(normalized))
+    _seed_vendor_family_fields(normalized)
     return normalized
 
 
@@ -1082,6 +1886,21 @@ def build_offline_workbook_assessment(rows: list[Dict[str, Any]], *, assessment_
     attack_timeline: list[dict[str, Any]] = []
     factor_counter: Counter[str] = Counter()
     recommended_actions: list[dict[str, Any]] = []
+    aggregated_framework_mappings: list[dict[str, Any]] = []
+    framework_seen: set[str] = set()
+    analyst_workflow = {
+        "user_contacted": False,
+        "change_ticket_found": False,
+        "owner_confirmed": False,
+        "change_tickets": [],
+    }
+
+    def _append_framework_mapping(entry: dict[str, Any]) -> None:
+        marker = json.dumps(entry, sort_keys=True)
+        if marker in framework_seen:
+            return
+        framework_seen.add(marker)
+        aggregated_framework_mappings.append(entry)
 
     for idx, row in enumerate(rows):
         factors: list[str] = []
@@ -1102,6 +1921,18 @@ def build_offline_workbook_assessment(rows: list[Dict[str, Any]], *, assessment_
         event_type = _lower(row.get("event_type") or row.get("action"))
         resource = _lower(row.get("resource") or row.get("resourceDisplayName") or row.get("target_resource"))
         user = _lower(row.get("user") or row.get("username") or row.get("userPrincipalName") or row.get("actor") or row.get("caller"))
+        for framework_entry in row.get("framework_mappings") or []:
+            if isinstance(framework_entry, dict):
+                _append_framework_mapping(dict(framework_entry))
+        if row.get("user_contacted"):
+            analyst_workflow["user_contacted"] = True
+        if row.get("change_ticket_found"):
+            analyst_workflow["change_ticket_found"] = True
+        if row.get("owner_confirmed"):
+            analyst_workflow["owner_confirmed"] = True
+        ticket = _text(row.get("change_ticket"))
+        if ticket and ticket not in analyst_workflow["change_tickets"]:
+            analyst_workflow["change_tickets"].append(ticket)
         tfidf_rarity = tfidf.get_rarity_score(row_tokens[idx])
         tenant_domain_rarity = tenant_domain_profiles.get((org, domain), tfidf).get_rarity_score(row_tokens[idx])
         family_rarity_scores = {
@@ -1140,12 +1971,55 @@ def build_offline_workbook_assessment(rows: list[Dict[str, Any]], *, assessment_
             evidence.append(_text(row.get("process_path") or row.get("path") or row.get("process") or row.get("process_name")))
         if repeated_hash:
             factors.append("endpoint:repeated_hash")
-        if malicious_links or phishing_keywords:
+        if _is_email_evidence_row(row, domain) and (malicious_links or phishing_keywords):
             factors.append("email:phishing_lure")
             if urls:
                 evidence.append(f"embedded links {', '.join(url_domains[:2] or urls[:2])}")
             if phishing_keywords:
                 evidence.append(f"phishing keywords {phishing_keywords}")
+        if domain == "email" and any(marker in subject or marker in body for marker in _SUPPLIER_PAYMENT_MARKERS):
+            factors.append("email:supplier_payment_change")
+            evidence.append("email requests bank, payment, remittance, or supplier-detail changes")
+        sender_domain = _email_sender_domain(row)
+        baseline_domain = _email_baseline_domain(row)
+        reply_domain = _email_reply_domain(row)
+        if domain == "email" and (
+            (baseline_domain and sender_domain and baseline_domain != sender_domain)
+            or (reply_domain and sender_domain and reply_domain != sender_domain)
+            or (row.get("supplier_name") and row.get("sender_display_name") and _lower(row.get("supplier_name")) not in _lower(row.get("sender_display_name")))
+        ):
+            factors.append("email:vendor_impersonation")
+            evidence.append(f"sender trust mismatch sender={sender_domain or 'unknown'} baseline={baseline_domain or 'unknown'} reply_to={reply_domain or 'unknown'}")
+        if domain == "email" and _email_auth_fail(row):
+            factors.append("email:auth_alignment_fail")
+            evidence.append(
+                "email authentication failed "
+                f"(spf={_text(row.get('spf_result')) or 'unknown'}, dkim={_text(row.get('dkim_result')) or 'unknown'}, dmarc={_text(row.get('dmarc_result')) or 'unknown'})"
+            )
+        if domain == "email" and _lower(row.get("export_source")) == "vendor_master_history":
+            recent_change_ts = _coerce_timestamp(row.get("recent_change_ts") or row.get("timestamp"))
+            pending_ticket = bool(_text(row.get("pending_change_ticket")))
+            approved_vendor_change = bool(row.get("approved_change"))
+            if (recent_change_ts and recent_change_ts >= (now - 86400 * 45)) or pending_ticket:
+                factors.append("email:vendor_master_drift")
+                evidence.append(
+                    "vendor master or supplier baseline drift "
+                    f"(approved_change={approved_vendor_change}, pending_change_ticket={_text(row.get('pending_change_ticket')) or 'none'})"
+                )
+        attachment_forensics = row.get("_attachment_forensics") if isinstance(row.get("_attachment_forensics"), dict) else {}
+        for attachment_factor in attachment_forensics.get("factors") or []:
+            factors.append(str(attachment_factor))
+        for attachment_evidence in attachment_forensics.get("evidence") or []:
+            evidence.append(str(attachment_evidence))
+        if _lower(row.get("export_source")) == "attachment_detonation":
+            sandbox_verdict = _lower(row.get("sandbox_verdict") or row.get("verdict"))
+            sandbox_behaviors = [str(v) for v in (row.get("sandbox_behaviors") or row.get("behaviors") or [])]
+            if sandbox_verdict in {"malicious", "suspicious"} or sandbox_behaviors:
+                factors.append("attachment:malicious_detonation")
+                evidence.append(
+                    "sandbox detonation "
+                    f"verdict={sandbox_verdict or 'unknown'} behaviors={', '.join(sandbox_behaviors[:3]) or 'none'}"
+                )
         for ip in ([] if suppress_backup_pivots else list(filter(None, [src_ip, dst_ip]))):
             other_ip_sheets = {name for name in ip_to_sheets.get(ip, set()) if name != sheet}
             if other_ip_sheets:
@@ -1225,18 +2099,22 @@ def build_offline_workbook_assessment(rows: list[Dict[str, Any]], *, assessment_
         severity_label = _lower(row.get("severity_label") or row.get("severity"))
         severity_score = float(_as_float(row.get("severity_score") or row.get("severity")) or 0.0)
         if provider == "azure_defender" and (severity_label in {"high", "critical"} or "impossible travel" in _lower(row.get("title"))):
-            factors.append("cloud:defender_high_severity")
-            evidence.append(f"defender incident {row.get('title') or row.get('incidentId')}")
+                factors.append("cloud:defender_high_severity")
+                evidence.append(f"defender incident {row.get('title') or row.get('incidentId')}")
         if provider == "azure_conditional_access" and _lower(row.get("result")) not in {"success", "allow", "notapplied"}:
             factors.append("identity:conditional_access_failure")
             evidence.append(f"conditional access result {row.get('result')}")
         if provider == "azure_identity_protection" and severity_label in {"medium", "high", "critical"}:
             factors.append("identity:identity_protection_risk")
             evidence.append(f"identity protection risk {row.get('riskType') or row.get('action')}")
-        if (not approved_change) and provider == "aws_cloudtrail" and any(token in event_type for token in ("createaccesskey", "attachuserpolicy", "putrolepolicy", "putuserpolicy", "addusertogroup")):
-            factors.append("cloud:access_key_creation" if "createaccesskey" in event_type else "cloud:privilege_change")
+        if (not approved_change) and provider == "aws_cloudtrail" and any(token in event_type for token in ("createaccesskey", "attachuserpolicy", "putrolepolicy", "putuserpolicy", "addusertogroup", "assumerole", "attachrolepolicy", "putbucketpolicy")):
+            response_creds = (((row.get("responseElements") or {}).get("credentials") or {}).get("accessKeyId")) if isinstance(row.get("responseElements"), dict) else None
+            if "createaccesskey" in event_type or ("assumerole" in event_type and response_creds):
+                factors.append("cloud:access_key_creation")
+            else:
+                factors.append("cloud:privilege_change")
             evidence.append(f"cloudtrail event {row.get('eventName') or row.get('action')}")
-        if provider == "aws_config" and severity_label in {"non_compliant", "failed"}:
+        if provider == "aws_config" and (severity_label in {"non_compliant", "failed"} or _lower(row.get("annotation"))):
             factors.append("cloud:config_drift")
             evidence.append(f"aws config compliance {row.get('complianceType')}")
         if provider == "aws_vpc_flow" and dst_ip and _is_external_ip(dst_ip) and "known_backup_activity" not in benign_tags:
@@ -1374,6 +2252,12 @@ def build_offline_workbook_assessment(rows: list[Dict[str, Any]], *, assessment_
                     "factors": factors,
                     "evidence": evidence[:4],
                     "benign_context": item.get("benign_tags") or [],
+                    "mitre": [
+                        entry.get("id")
+                        for entry in (row.get("framework_mappings") or [])
+                        if isinstance(entry, dict) and entry.get("framework") == "mitre_attack" and entry.get("id")
+                    ],
+                    "framework_mappings": [dict(entry) for entry in (row.get("framework_mappings") or []) if isinstance(entry, dict)],
                 }
             )
         row_iocs = {
@@ -1469,7 +2353,12 @@ def build_offline_workbook_assessment(rows: list[Dict[str, Any]], *, assessment_
     ranked_factors = sorted(
         factor_counter.items(),
         key=lambda item: (
-            -((math.sqrt(item[1]) * max(_FACTOR_WEIGHTS.get(item[0], 0.04), 0.04)) + (_FACTOR_PRIORITY.get(item[0].split(":", 1)[0], 0) * 0.05)),
+            -(
+                (math.sqrt(item[1]) * max(_FACTOR_WEIGHTS.get(item[0], 0.04), 0.04))
+                + (_FACTOR_PRIORITY.get(item[0].split(":", 1)[0], 0) * 0.05)
+                + (_FACTOR_AUTHORITY.get(item[0], 0.35) * 0.12)
+            ),
+            -_FACTOR_AUTHORITY.get(item[0], 0.35),
             -_FACTOR_PRIORITY.get(item[0].split(":", 1)[0], 0),
             -item[1],
             -_FACTOR_WEIGHTS.get(item[0], 0.0),
@@ -1483,17 +2372,39 @@ def build_offline_workbook_assessment(rows: list[Dict[str, Any]], *, assessment_
         corroborating_domains,
     )
 
-    corroboration_count = len(corroborating_domains)
+    corroboration_summary = _build_corroboration_summary(suspicious_rows, corroborating_domains)
+    corroboration_count = int(corroboration_summary.get("count") or 0)
     missing_evidence: list[str] = []
+    provider_markers = {
+        _lower(item.get("row", {}).get("provider") or item.get("row", {}).get("cloud_export_kind"))
+        for item in suspicious_rows
+    }
+    has_azure = any("azure" in marker for marker in provider_markers if marker)
+    has_aws = any("aws" in marker for marker in provider_markers if marker)
     if any(f.startswith("email:") for f in factor_counter):
-        action = {
-            "primary_action": "Request mailbox trace, click telemetry, and attachment detonation evidence",
-            "urgency": "urgent",
-            "persona": "soc_analyst",
-            "requires": {"confidence_threshold": 0.45, "corroborating_domain_count": 1, "approval_state": "not_required"},
-        }
-        recommended_actions.append(action)
-        missing_evidence.extend(["mailbox_trace", "click_telemetry"])
+        recommended_actions.extend(
+            [
+                {
+                    "primary_action": "Hold payment or supplier detail changes linked to this message",
+                    "urgency": "immediate",
+                    "persona": "leadership",
+                    "requires": {"confidence_threshold": 0.35, "corroborating_domain_count": 1, "approval_state": "not_required"},
+                },
+                {
+                    "primary_action": "Verify the request through an approved callback channel and compare supplier details against the trusted baseline",
+                    "urgency": "immediate",
+                    "persona": "soc_analyst",
+                    "requires": {"confidence_threshold": 0.45, "corroborating_domain_count": 1, "approval_state": "not_required"},
+                },
+                {
+                    "primary_action": "Quarantine the email and attachments, then collect mailbox trace, click telemetry, and attachment detonation evidence",
+                    "urgency": "urgent",
+                    "persona": "soc_analyst",
+                    "requires": {"confidence_threshold": 0.45, "corroborating_domain_count": 1, "approval_state": "not_required"},
+                },
+            ]
+        )
+        missing_evidence.extend(["mailbox_trace", "click_telemetry", "attachment_detonation", "supplier_baseline", "vendor_master_change_history"])
     if any(f.startswith("network:") for f in factor_counter):
         recommended_actions.append({
             "primary_action": "Pull DNS, proxy, firewall, and east-west flow telemetry for the implicated destinations",
@@ -1511,21 +2422,34 @@ def build_offline_workbook_assessment(rows: list[Dict[str, Any]], *, assessment_
         })
         missing_evidence.extend(["process_lineage", "signer_metadata", "memory_capture"])
     if any(f.startswith("identity:") for f in factor_counter) or any(item.get("row", {}).get("resource") for item in suspicious_rows):
+        identity_action = "Request Entra audit logs, Conditional Access results, Defender incident context, and target-resource activity"
+        identity_missing = ["entra_audit", "conditional_access", "defender_incident"]
+        if has_aws and not has_azure:
+            identity_action = "Request CloudTrail identity history, IAM role and policy change history, GuardDuty detail, and target-resource activity"
+            identity_missing = ["cloudtrail_identity_history", "iam_role_history", "guardduty_detail"]
         recommended_actions.append({
-            "primary_action": "Request Entra audit logs, Conditional Access results, Defender incident context, and target-resource activity",
+            "primary_action": identity_action,
             "urgency": "immediate",
             "persona": "soc_analyst",
             "requires": {"confidence_threshold": 0.52, "corroborating_domain_count": 2, "approval_state": "not_required"},
         })
-        missing_evidence.extend(["entra_audit", "conditional_access", "defender_incident"])
+        missing_evidence.extend(identity_missing)
     if any(f.startswith("cloud:") for f in factor_counter):
+        cloud_action = "Pull Azure Activity Logs, CloudTrail, GuardDuty, Security Hub, and resource access telemetry to confirm cloud control-plane abuse"
+        cloud_missing = ["activity_log", "cloudtrail", "guardduty", "securityhub"]
+        if has_azure and not has_aws:
+            cloud_action = "Pull Azure Activity Logs, Key Vault access records, Defender alert details, and resource access telemetry to confirm cloud control-plane abuse"
+            cloud_missing = ["activity_log", "keyvault_access", "defender_alert_detail", "resource_access"]
+        elif has_aws and not has_azure:
+            cloud_action = "Pull fuller CloudTrail, IAM policy and role history, Security Hub and GuardDuty detail, and impacted resource access logs"
+            cloud_missing = ["cloudtrail", "iam_policy_history", "securityhub", "guardduty", "resource_access"]
         recommended_actions.append({
-            "primary_action": "Pull Azure Activity Logs, CloudTrail, GuardDuty, Security Hub, and resource access telemetry to confirm cloud control-plane abuse",
+            "primary_action": cloud_action,
             "urgency": "immediate",
             "persona": "soc_analyst",
             "requires": {"confidence_threshold": 0.58, "corroborating_domain_count": 2, "approval_state": "not_required"},
         })
-        missing_evidence.extend(["activity_log", "cloudtrail", "guardduty", "securityhub"])
+        missing_evidence.extend(cloud_missing)
     if any(f.startswith("corr:") for f in factor_counter) or sequence_score >= 0.66:
         recommended_actions.append({
             "primary_action": "Escalate the corroborated multi-stage chain for analyst review and controlled containment planning",
@@ -1555,6 +2479,16 @@ def build_offline_workbook_assessment(rows: list[Dict[str, Any]], *, assessment_
     }
     high_entity_count = len(affected_identities | affected_hosts | {item["entity"] for item in suspicious_rows if item["entity"]})
     critical_asset_count = len([item for item in suspicious_rows if any(f.startswith("corr:") or f.startswith("endpoint:") for f in item["factors"])])
+    criticality_rows = [item["row"] for item in suspicious_rows if isinstance(item.get("row"), dict)]
+    highest_business_criticality = sorted(
+        (
+            row.get("business_criticality")
+            for row in criticality_rows
+            if isinstance(row.get("business_criticality"), dict)
+        ),
+        key=lambda item: float(item.get("score") or 0.0),
+        reverse=True,
+    )
     expected_loss = _estimate_expected_loss(severity, max(1, len(affected_identities) or len(affected_hosts) or high_entity_count), len(suspicious_rows), critical_asset_count)
     risk_quantification = {
         "severity": severity,
@@ -1598,13 +2532,48 @@ def build_offline_workbook_assessment(rows: list[Dict[str, Any]], *, assessment_
             }
         )
 
+    provenance_by_file = Counter()
+    provenance_by_source_kind = Counter()
+    parser_warnings: list[str] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        file_name = row.get("file_name")
+        source_kind = row.get("source_kind")
+        if file_name:
+            provenance_by_file[str(file_name)] += 1
+        if source_kind:
+            provenance_by_source_kind[str(source_kind)] += 1
+        warning = row.get("parser_warning") or row.get("_parser_warning")
+        if warning:
+            parser_warnings.append(str(warning))
+
     highlighted_findings = findings[:5]
+    plain_summary = _plain_language_summary(final_verdict, max_confidence, semantic_top_factors, corroboration_summary)
+    evidence_layers = _evidence_layers(
+        semantic_top_factors,
+        corroboration_summary,
+        highlighted_findings,
+        missing_evidence,
+        recommended_actions,
+        suspicious_rows,
+    )
     canonical = {
-        "llm_summary": (
-            f"{final_verdict} with {len(suspicious_rows)} suspicious rows across "
-            f"{len({item['sheet'] for item in suspicious_rows}) or 1} workbook sheets. "
-            f"Top factors: {', '.join([entry['factor_name'] for entry in (semantic_top_factors or top_factors)[:4]]) or 'none'}."
-        ),
+        "llm_summary": plain_summary,
+        "layered_summary": {
+            "top_layer": {
+                "what_happened": plain_summary,
+                "why_it_matters": (
+                    "The activity suggests a supplier-payment diversion or malicious attachment path that could lead to fraud or follow-on compromise."
+                    if any(f.startswith("email:") or f.startswith("attachment:") for f in factor_counter)
+                    else "The activity suggests a multi-step cloud attack rather than a single isolated alert."
+                ),
+                "how_sure": f"Confidence {max_confidence:.0%} with {corroboration_count} independent evidence sources.",
+                "what_to_do_next": [action.get("primary_action") for action in recommended_actions[:3] if action.get("primary_action")],
+            },
+            "evidence_layer": evidence_layers["plain_language"],
+            "drilldown": evidence_layers["drilldown"],
+        },
         "highlights": highlighted_findings,
         "sheet_count": len({_sheet_name(row) for row in rows}),
         "suspicious_row_count": len(suspicious_rows),
@@ -1614,7 +2583,9 @@ def build_offline_workbook_assessment(rows: list[Dict[str, Any]], *, assessment_
         "benign_context_rows": len([item for item in base_rows if item.get("benign_tags")]),
         "corroborating_domains": corroborating_domains,
         "corroboration_count": corroboration_count,
+        "corroboration_summary": corroboration_summary,
         "sequence_score": round(sequence_score, 2),
+        "framework_mappings": aggregated_framework_mappings,
     }
     updated_pairs: dict[str, list[float]] = {}
     for (pair_kind, pair_a, pair_b), timestamps in entity_pair_groups.items():
@@ -1675,13 +2646,29 @@ def build_offline_workbook_assessment(rows: list[Dict[str, Any]], *, assessment_
         "seen_suppressors": dict(Counter(tag for item in base_rows for tag in (item.get("suppressors") or []))),
         "updated_ts": now,
     }
+    connected_evidence = corroboration_count >= 2 or len(corroborating_domains) >= 2 or bool(graph_edges)
+    upload_provenance = {
+        "tenant": org,
+        "ingest_time": now,
+        "file_counts": dict(sorted(provenance_by_file.items())),
+        "source_kind_counts": dict(sorted(provenance_by_source_kind.items())),
+        "accepted_rows": len(rows),
+        "rejected_rows": 0,
+        "parser_warnings": sorted(set(parser_warnings))[:20],
+    }
     _save_persisted_baseline(org, persisted_payload)
 
     return {
         "assessment_id": assessment_id,
         "report_id": assessment_id,
         "status": "completed",
+        "final_verdict": final_verdict,
+        "final_confidence": round(max_confidence, 2),
+        "severity": risk_quantification.get("severity"),
+        "semantic_top_factors": semantic_top_factors,
+        "supporting_model_factors": supporting_top_factors,
         "accepted_rows": len(rows),
+        "rejected_rows": 0,
         "rows_processed": len(rows),
         "processed": len(rows),
         "auto_llm": auto_llm,
@@ -1691,10 +2678,24 @@ def build_offline_workbook_assessment(rows: list[Dict[str, Any]], *, assessment_
         "llm_rows": llm_rows,
         "results": results,
         "canonical": canonical,
+        "framework_mappings": aggregated_framework_mappings,
+        "mappings": {
+            "framework_mappings": aggregated_framework_mappings,
+            "mitre": [
+                {
+                    "id": entry.get("id"),
+                    "name": entry.get("name"),
+                    "tactic": entry.get("tactic"),
+                }
+                for entry in aggregated_framework_mappings
+                if entry.get("framework") == "mitre_attack" and entry.get("id")
+            ],
+        },
         "findings": findings,
         "evidence_items": evidence_items,
         "attack_timeline": attack_timeline,
         "recommended_actions": recommended_actions,
+        "upload_provenance": upload_provenance,
         "impact_metadata": {
             "affected_identities": sorted(x for x in affected_identities if x)[:12],
             "affected_hosts": sorted(x for x in affected_hosts if x)[:12],
@@ -1705,6 +2706,20 @@ def build_offline_workbook_assessment(rows: list[Dict[str, Any]], *, assessment_
             ],
             "corroborating_domains": corroborating_domains,
             "missing_evidence": sorted(set(missing_evidence)),
+            "corroboration_summary": corroboration_summary,
+            "analyst_workflow": {
+                **analyst_workflow,
+                "change_tickets": analyst_workflow["change_tickets"][:5],
+            },
+            "business_criticality": {
+                "highest": highest_business_criticality[0] if highest_business_criticality else None,
+                "sensitive_resource_count": len(
+                    [
+                        row for row in criticality_rows
+                        if float((((row.get("business_criticality") or {}).get("score")) or 0.0)) >= 0.74
+                    ]
+                ),
+            },
         },
         "risk_quantification": risk_quantification,
         "verdict": {
@@ -1747,10 +2762,14 @@ def build_offline_workbook_assessment(rows: list[Dict[str, Any]], *, assessment_
                 "sheet_count": len({_sheet_name(row) for row in rows}),
                 "suspicious_row_count": len(suspicious_rows),
                 "corroborating_domains": corroborating_domains,
+                "corroboration_count": corroboration_count,
+                "corroboration_summary": corroboration_summary,
                 "sequence_score": round(sequence_score, 2),
                 "graph_anomaly_score": round(graph_anomaly_score, 2),
                 "graph_path_score": round(graph_path_score, 2),
                 "path_signature": graph_path,
+                "connected_evidence": connected_evidence,
+                "connection_status": "connected" if connected_evidence else "isolated",
                 "factor_views": {
                     "semantic_top_factors": [entry["factor_name"] for entry in semantic_top_factors[:5]],
                     "supporting_model_factors": [entry["factor_name"] for entry in supporting_top_factors[:4]],
@@ -1770,6 +2789,8 @@ def build_offline_workbook_assessment(rows: list[Dict[str, Any]], *, assessment_
             },
             "evidence_summary": {
                 "summary": canonical["llm_summary"],
+                "plain_language": evidence_layers["plain_language"],
+                "drilldown": evidence_layers["drilldown"],
                 "items": highlighted_findings,
             },
             "recommendation_actions": recommended_actions[:4],

@@ -5,6 +5,7 @@ optionally applies calibration votes to factors using weights_calibrator.
 """
 from __future__ import annotations
 
+import json
 from typing import Any, List
 from fastapi import APIRouter, HTTPException, Header, Request
 from .tenant_helpers import resolve_tenant_id
@@ -39,6 +40,7 @@ class DecisionLabelPayload(BaseModel):  # type: ignore[misc]
     factors: List[str] | None = None  # explicit factors (if not stored)
     evidence: str | None = None
     query_template: str | None = None
+    workflow: dict[str, Any] | None = None
     apply_calibration: bool = True
     calibration_mode: str | None = None  # optional future extension (e.g., 'logistic')
 
@@ -49,6 +51,18 @@ class BatchDecisionPayload(BaseModel):  # type: ignore[misc]
 
 def _is_authorized(x_api_key: str | None) -> bool:
     return bool(x_api_key)
+
+
+def _serialize_feedback_evidence(evidence: str | None, workflow: dict[str, Any] | None) -> str | None:
+    if not workflow:
+        return evidence
+    payload: dict[str, Any] = {"workflow": workflow}
+    if evidence:
+        payload["note"] = evidence
+    try:
+        return json.dumps(payload, sort_keys=True)
+    except Exception:
+        return evidence
 
 @router.post('/decision', summary='Label a decision and update factor weights', operation_id='feedback_label_decision')
 async def label_decision(payload: DecisionLabelPayload, request: Request, x_api_key: str | None = Header(None), x_ab_test_id: str | None = Header(None, alias='X-AB-Test-Id'), x_ab_variant: str | None = Header(None, alias='X-AB-Variant')) -> dict[str, Any]:
@@ -127,7 +141,7 @@ async def label_decision(payload: DecisionLabelPayload, request: Request, x_api_
             except Exception:
                 tenant = None
             try:
-                evidence = payload.evidence if hasattr(payload, 'evidence') else None
+                evidence = _serialize_feedback_evidence(payload.evidence if hasattr(payload, 'evidence') else None, payload.workflow if hasattr(payload, 'workflow') else None)
                 query_template = payload.query_template if hasattr(payload, 'query_template') else None
                 await decision_labels_repo.insert_label(event_id or decision_id, decision_id, label, tenant, x_ab_test_id or test_id, x_ab_variant or variant, evidence, query_template)
                 # increment label received metric
