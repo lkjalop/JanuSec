@@ -51,6 +51,13 @@ try:
 except Exception:
     from ..reporting.llm_prompts import build_summary_prompt, parse_structured_summary
 try:
+    from src.reporting.prompt_templates import build_incident_prompt as _build_incident_prompt
+except Exception:
+    try:
+        from ..reporting.prompt_templates import build_incident_prompt as _build_incident_prompt  # type: ignore
+    except Exception:
+        _build_incident_prompt = None  # type: ignore
+try:
     import bleach
     _HAS_BLEACH = True
 except Exception:
@@ -320,7 +327,15 @@ async def report_ingestion(
         # Optionally include model summary into HTML (sanitized)
         if include_model:
             try:
-                prompt = build_summary_prompt(payload.get('summary') or {}, len(payload.get('rows') or []))
+                try:
+                    if _build_incident_prompt is not None:
+                        _pd = _build_incident_prompt(persona_selected, payload.get('summary') or {})
+                        _msgs = _pd.get('messages') or []
+                        prompt = '\n'.join(m.get('content', '') for m in _msgs if isinstance(m, dict) and m.get('content'))
+                    else:
+                        raise ValueError('unavailable')
+                except Exception:
+                    prompt = build_summary_prompt(payload.get('summary') or {}, len(payload.get('rows') or []))
                 llm_resp = generate_summary(prompt, max_tokens=512)
                 if hasattr(llm_resp, '__await__'):
                     llm_resp = await llm_resp
@@ -329,7 +344,8 @@ async def report_ingestion(
                     prompt_hash = hashlib.sha256(prompt.encode('utf-8')).hexdigest()
                 except Exception:
                     prompt_hash = None
-                model_html = '<div style="padding:12px;background:#071021;color:#e6eef8;border-radius:6px"><h3>Model Executive Summary</h3><div>' + escape(str(model_text or '')) + '</div></div>'
+                _persona_label = persona_selected.replace('_', ' ').title()
+                model_html = '<div style="padding:12px;background:#071021;color:#e6eef8;border-radius:6px"><h3>' + escape(_persona_label) + ' Model Summary</h3><div>' + escape(str(model_text or '')) + '</div></div>'
                 try:
                     if _HAS_BLEACH:
                         model_html = bleach.clean(model_html, tags=bleach.sanitizer.ALLOWED_TAGS + ['div','h3','pre','code','span'], attributes=bleach.sanitizer.ALLOWED_ATTRIBUTES, strip=True)
@@ -346,7 +362,27 @@ async def report_ingestion(
         headers = {'X-Report-Id': str(report.get('report_id') or '')} if report.get('report_id') else None
         return HTMLResponse(content=html, headers=headers)
     if fmt == 'pdf':
-        return JSONResponse({'detail': 'pdf_generation_not_enabled'}, status_code=501)
+        payload = _build_html_payload(report, session_ids, recipients_list)
+        html = build_report_html(payload)
+        try:
+            from src.reporting.export import export_pdf_bytes_from_html as _epdf
+            pdf_bytes = _epdf(html)
+            if pdf_bytes:
+                report_id = str(report.get('report_id') or '')
+                fname = f'report_{report_id or int(time.time())}.pdf'
+                return StreamingResponse(
+                    io.BytesIO(pdf_bytes),
+                    media_type='application/pdf',
+                    headers={'Content-Disposition': f'attachment; filename="{fname}"'},
+                )
+        except Exception:
+            pass
+        # Fallback: serve as HTML download
+        return StreamingResponse(
+            io.BytesIO(html.encode('utf-8')),
+            media_type='text/html',
+            headers={'Content-Disposition': f'attachment; filename="report_{int(time.time())}.html"'},
+        )
     raise HTTPException(status_code=400, detail='unsupported_format')
 
 
@@ -366,13 +402,23 @@ async def generate_pdf_report(req: Request, include_model: bool = Query(False)):
     # Optionally include model summary into HTML
     if include_model:
         try:
-            prompt = build_summary_prompt(payload.get('summary') or {}, len(payload.get('rows') or []))
+            _pdf_persona = payload.get('persona') or 'soc_analyst'
+            try:
+                if _build_incident_prompt is not None:
+                    _pd = _build_incident_prompt(_pdf_persona, payload.get('summary') or {})
+                    _msgs = _pd.get('messages') or []
+                    prompt = '\n'.join(m.get('content', '') for m in _msgs if isinstance(m, dict) and m.get('content'))
+                else:
+                    raise ValueError('unavailable')
+            except Exception:
+                prompt = build_summary_prompt(payload.get('summary') or {}, len(payload.get('rows') or []))
             llm_resp = generate_summary(prompt, max_tokens=512)
             if hasattr(llm_resp, '__await__'):
                 llm_resp = await llm_resp
             model_text = llm_resp.get('text') if isinstance(llm_resp, dict) else str(llm_resp)
             # simple injection
-            model_html = '<div style="padding:12px;background:#071021;color:#e6eef8;border-radius:6px"><h3>Model Executive Summary</h3><div>' + escape(str(model_text or '')) + '</div></div>'
+            _pdf_label = _pdf_persona.replace('_', ' ').title()
+            model_html = '<div style="padding:12px;background:#071021;color:#e6eef8;border-radius:6px"><h3>' + escape(_pdf_label) + ' Model Summary</h3><div>' + escape(str(model_text or '')) + '</div></div>'
             html = model_html + '\n' + html
         except Exception:
             # continue without model
@@ -445,10 +491,18 @@ async def generate_report(req: Request, format: str = Query('html'), include_mod
 
     # Optionally request an LLM summary and attach provenance
     if include_model:
-        prompt = f"Summarize the following report: {payload.get('summary') or ''}\nContext rows: {len(payload.get('rows') or [])}"
+        _gen_persona = payload.get('persona') or 'soc_analyst'
         try:
-            # build a structured prompt
+            if _build_incident_prompt is not None:
+                _pd = _build_incident_prompt(_gen_persona, payload.get('summary') or {})
+                _msgs = _pd.get('messages') or []
+                prompt = '\n'.join(m.get('content', '') for m in _msgs if isinstance(m, dict) and m.get('content'))
+            else:
+                raise ValueError('unavailable')
+        except Exception:
             prompt = build_summary_prompt(payload.get('summary') or {}, len(payload.get('rows') or []))
+        try:
+            # prompt already built above; generate via LLM client
             # generate_summary may be sync; allow both sync and async returns
             llm_resp = generate_summary(prompt, max_tokens=512)
             if hasattr(llm_resp, '__await__'):

@@ -25,6 +25,14 @@ _FACTOR_LABELS = {
     'smb_lateral_movement':       'SMB Lateral Movement (port 445)',
     'wmi_lateral_movement':       'WMI Lateral Movement',
     'windows_update':             'Windows Update Artefact (benign)',
+    # Assessment / pipeline factors
+    'external_connection':        'External Network Connection',
+    'c2_port':                    'Known C2 Port (443/8080/etc.)',
+    'malicious_process':          'Malicious Process Execution',
+    'process_execution':          'Process Execution Event',
+    'phishing_subject':           'Phishing Subject Line Detected',
+    'email_received':             'Email Received',
+    'unclassified_event':         'Unclassified Event',
 }
 
 # ── MITRE technique display helpers ─────────────────────────────────────────
@@ -57,6 +65,15 @@ _MITRE_NAMES = {
     'T1486':     'Data Encrypted for Impact',
     'T1190':     'Exploit Public-Facing Application',
     'T1566':     'Phishing',
+    'T1041':     'Exfiltration Over C2 Channel',
+    'T1055':     'Process Injection',
+    'T1547':     'Boot or Logon Autostart Execution',
+    'T1543':     'Create or Modify System Process',
+    'T1053':     'Scheduled Task/Job',
+    'T1133':     'External Remote Services',
+    'T1048':     'Exfiltration Over Alternative Protocol',
+    'T1102':     'Web Service (C2)',
+    'T1095':     'Non-Application Layer Protocol',
 }
 
 # ── persona "what to do next" playbook ───────────────────────────────────────
@@ -133,12 +150,17 @@ def _render_row_preview(r):
 
 
 def _derive_severity_dist(rows: list) -> dict:
-    """Derive severity distribution from risk_score / confidence on each row."""
+    """Derive severity distribution from risk_score / confidence / severity on each row."""
     dist = {'critical': 0, 'high': 0, 'medium': 0, 'low': 0, 'info': 0}
     for r in rows:
+        # Prefer explicit severity label from assessment rows
+        explicit_sev = str(r.get('severity') or '').lower()
+        if explicit_sev in dist:
+            dist[explicit_sev] += 1
+            continue
         risk = 0.0
         try:
-            risk = float(r.get('risk_score') or r.get('confidence') or 0)
+            risk = float(r.get('risk_score') or r.get('confidence') or r.get('dread_score') or 0)
         except Exception:
             pass
         dist[_sev_from_risk(risk)] += 1
@@ -146,7 +168,7 @@ def _derive_severity_dist(rows: list) -> dict:
 
 
 def _collect_mitre(rows: list) -> list:
-    """Collect MITRE techniques from row factors."""
+    """Collect MITRE techniques from row factors and mitre_techniques field."""
     counts: dict = {}
     try:
         from src.core.mappings.factor_to_mitre import get_all_mappings
@@ -154,16 +176,23 @@ def _collect_mitre(rows: list) -> list:
         try:
             from ..core.mappings.factor_to_mitre import get_all_mappings  # type: ignore
         except Exception:
-            return []
+            get_all_mappings = None  # type: ignore
     for row in rows:
+        # Direct mitre_techniques from assessment rows (e.g. "T1041: Exfiltration…")
+        for m in (row.get('mitre_techniques') or []):
+            tid = str(m).split(':')[0].strip()
+            if tid:
+                counts[tid] = counts.get(tid, 0) + 1
+        # Factor-derived MITRE via mappings
         factors = row.get('factors') or []
         if isinstance(factors, list):
             factor_names = [f.get('name') if isinstance(f, dict) else str(f) for f in factors]
         else:
             factor_names = []
-        mapping = get_all_mappings(factor_names)
-        for t in mapping.get('mitre', []):
-            counts[t] = counts.get(t, 0) + 1
+        if get_all_mappings and factor_names:
+            mapping = get_all_mappings(factor_names)
+            for t in mapping.get('mitre', []):
+                counts[t] = counts.get(t, 0) + 1
     return sorted(counts.items(), key=lambda x: x[1], reverse=True)
 
 
@@ -187,7 +216,10 @@ def _render_persona_section(payload: dict, persona: str) -> str:
     all_factors = _collect_all_factors(rows)
     mitre_hits = _collect_mitre(rows)
     n_rows = len(rows)
-    n_flagged = sum(1 for r in rows if float(r.get('risk_score') or r.get('confidence') or 0) > 0.05)
+    n_flagged = sum(1 for r in rows
+                    if float(r.get('risk_score') or r.get('confidence') or r.get('dread_score') or 0) > 0.05
+                    or str(r.get('verdict') or '').lower() in ('malicious', 'suspicious', 'review', 'escalate')
+                    or str(r.get('severity') or '').lower() in ('critical', 'high', 'medium'))
 
     BLOCK = 'margin-top:18px;padding:14px;background:#0c1520;border-left:4px solid {clr};border-radius:6px'
     HEAD  = 'color:{clr};font-size:15px;font-weight:600;margin-bottom:8px'
@@ -211,8 +243,13 @@ def _render_persona_section(payload: dict, persona: str) -> str:
             secs.append('<ul style="margin:4px 0 8px 18px">')
             risk_map = {
                 'c2_beacon':          'Active command-and-control channel — attacker may have persistent access to your network.',
+                'c2_port':            'Traffic on known C2 port (443/8080) to external IP — potential data exfiltration or implant callback.',
+                'external_connection':'External network connections detected to suspicious IPs — outbound traffic requires investigation.',
                 'suspicious_process': 'Malicious processes executed — potential malware infection on one or more endpoints.',
+                'malicious_process':  'Confirmed malicious process execution — immediate endpoint containment required.',
+                'process_execution':  'Process execution events detected — verify parent/child process ancestry for anomalies.',
                 'macro_lure':         'Phishing campaign via macro-enabled documents — credential theft or malware delivery likely attempted.',
+                'phishing_subject':   'Phishing email detected by subject line analysis — social engineering attack targeting staff.',
                 'smb_lateral_movement': 'Lateral movement across file shares — attacker may be traversing the internal network.',
                 'rdp_lateral_movement': 'Remote desktop lateral movement — attacker may be moving to higher-value systems.',
                 'wmi_lateral_movement': 'Remote execution via WMI — could indicate hands-on-keyboard attacker behaviour.',
@@ -279,15 +316,15 @@ def _render_persona_section(payload: dict, persona: str) -> str:
         secs.append(f'<div style="{HEAD.format(clr=clr)}">Threat Hunter — Kill Chain & Hypotheses</div>')
         # Kill chain stage inference
         stages = []
-        if any(f in all_factors for f in ('macro_lure','phishing_link','phishing_lure','email_malicious_url')):
+        if any(f in all_factors for f in ('macro_lure','phishing_link','phishing_lure','email_malicious_url','phishing_subject')):
             stages.append(('Initial Access', 'Phishing / malicious email with macro lure', 'T1566.001'))
-        if any(f in all_factors for f in ('powershell_execution','encoded_command','office_child_process')):
-            stages.append(('Execution', 'Scripted execution via PowerShell or Office macro', 'T1059.001'))
+        if any(f in all_factors for f in ('powershell_execution','encoded_command','office_child_process','malicious_process','process_execution')):
+            stages.append(('Execution', 'Scripted execution via PowerShell or malicious process', 'T1059.001'))
         if any(f in all_factors for f in ('suspicious_process','lolbin','temp_execution')):
             stages.append(('Defense Evasion', 'LOLBin or temp-path execution bypassing AV', 'T1218/T1036.005'))
         if any(f in all_factors for f in ('wmi_lateral_movement','rdp_lateral_movement','smb_lateral_movement')):
             stages.append(('Lateral Movement', 'Remote execution or admin-share access', 'T1021'))
-        if any(f in all_factors for f in ('c2_beacon','network_beacon')):
+        if any(f in all_factors for f in ('c2_beacon','network_beacon','c2_port','external_connection')):
             stages.append(('Command & Control', 'Outbound beacon to known-bad IP — likely implant callback', 'T1071.001'))
         if any(f in all_factors for f in ('credential_access','account_discovery')):
             stages.append(('Credential Access', 'OS credential dump or account enumeration', 'T1003/T1087'))
@@ -458,7 +495,10 @@ def build_report_html(payload):
     )
 
     # ── Key Stats bar ────────────────────────────────────────────────────────
-    n_flagged = sum(1 for r in rows if float(r.get('risk_score') or r.get('confidence') or 0) > 0.05)
+    n_flagged = sum(1 for r in rows
+                    if float(r.get('risk_score') or r.get('confidence') or r.get('dread_score') or 0) > 0.05
+                    or str(r.get('verdict') or '').lower() in ('malicious', 'suspicious', 'review', 'escalate')
+                    or str(r.get('severity') or '').lower() in ('critical', 'high', 'medium'))
     sev_labels = {'critical': ('#c0392b', '⛔'), 'high': ('#e67e22', '🔴'),
                   'medium': ('#f1c40f', '🟡'), 'low': ('#2980b9', '🟢'), 'info': ('#555', 'ℹ')}
     sections.append('<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">')
@@ -499,7 +539,10 @@ def build_report_html(payload):
         sections.append('</tbody></table>')
 
     # ── Flagged Events table ─────────────────────────────────────────────────
-    flagged_rows = [r for r in rows if float(r.get('risk_score') or r.get('confidence') or 0) > 0.05]
+    flagged_rows = [r for r in rows
+                     if float(r.get('risk_score') or r.get('confidence') or r.get('dread_score') or 0) > 0.05
+                     or str(r.get('verdict') or '').lower() in ('malicious', 'suspicious', 'review', 'escalate')
+                     or str(r.get('severity') or '').lower() in ('critical', 'high', 'medium')]
     if flagged_rows:
         sections.append('<h3 style="margin-top:16px">Flagged Events</h3>')
         sections.append('<table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:14px">')
@@ -510,8 +553,9 @@ def build_report_html(payload):
                         '<th style="text-align:left;padding:4px 8px;border-bottom:1px solid #243144">Factors</th>'
                         '</tr></thead><tbody>')
         for r in flagged_rows[:50]:
-            risk = float(r.get('risk_score') or r.get('confidence') or 0)
-            sev = _sev_from_risk(risk)
+            risk = float(r.get('risk_score') or r.get('confidence') or r.get('dread_score') or 0)
+            explicit_sev = str(r.get('severity') or '').lower()
+            sev = explicit_sev if explicit_sev in _SEV_COLORS else _sev_from_risk(risk)
             sev_color = _SEV_COLORS.get(sev, '#555')
             identifier = (r.get('process') or r.get('process_name') or r.get('path') or
                           r.get('file_path') or r.get('src_ip') or r.get('host') or

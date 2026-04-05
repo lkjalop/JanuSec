@@ -950,6 +950,109 @@ def _scenario_summary(decisions: dict[str,Any]) -> dict[str,Any]:
         'top': scenarios_list[0] if scenarios_list else None
     }
 
+
+def _load_assessment_rows(session_ids: list[str]) -> dict[str, Any] | None:
+    """Load assessment rows from disk when session_ids match an assessment ID pattern.
+
+    Returns a dict shaped like aggregate_decisions() output: verdict_counts,
+    severity_distribution, top_mitre, flagged_events, autoblocked_samples, total.
+    Returns None if no matching assessment file is found.
+    """
+    import glob
+    from pathlib import Path
+
+    base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'assessments'))
+    if not os.path.isdir(base_dir):
+        return None
+
+    for sid in (session_ids or []):
+        if not sid:
+            continue
+        # Try direct assessment ID match
+        aid = sid
+        # Also try stripping common prefixes
+        for prefix in ('session-', ''):
+            candidate = sid[len(prefix):] if sid.startswith(prefix) and prefix else sid
+            pattern = os.path.join(base_dir, '**', f'{candidate}.json')
+            matches = glob.glob(pattern, recursive=True)
+            if matches:
+                try:
+                    with open(matches[0], 'r', encoding='utf-8') as fh:
+                        assessment = json.load(fh)
+                except Exception:
+                    continue
+                rows = assessment.get('rows') or []
+                if not rows:
+                    continue
+
+                verdict_counts: dict[str, int] = {}
+                severity_counts: dict[str, int] = {'critical': 0, 'high': 0, 'medium': 0, 'low': 0}
+                top_mitre: dict[str, int] = {}
+                flagged: list[dict[str, Any]] = []
+                autoblocked: list[dict[str, Any]] = []
+
+                for r in rows:
+                    verdict = str(r.get('verdict') or 'unknown').lower()
+                    verdict_counts[verdict] = verdict_counts.get(verdict, 0) + 1
+                    sev = str(r.get('severity') or 'low').lower()
+                    if sev in severity_counts:
+                        severity_counts[sev] += 1
+                    else:
+                        severity_counts['low'] += 1
+
+                    factors = list(r.get('factors') or [])
+                    mitre_raw = list(r.get('mitre_techniques') or [])
+                    for m in mitre_raw:
+                        tid = str(m).split(':')[0].strip()
+                        if tid:
+                            top_mitre[tid] = top_mitre.get(tid, 0) + 1
+                    try:
+                        mapped = get_all_mappings(factors).get('mitre', [])
+                        for t in (mapped or []):
+                            if isinstance(t, str) and t:
+                                top_mitre[t] = top_mitre.get(t, 0) + 1
+                    except Exception:
+                        pass
+
+                    rec = {
+                        'event_id': r.get('_evidence_code') or f"row-{r.get('row_index', 0)}",
+                        'verdict': r.get('verdict'),
+                        'confidence': float(r.get('dread_score') or 0.0),
+                        'factors': factors[:10],
+                        'severity': sev,
+                        'dread_score': float(r.get('dread_score') or 0.0),
+                        'mitre_techniques': mitre_raw,
+                        'llm_summary': r.get('llm_summary'),
+                        'host': r.get('host') or r.get('hostname'),
+                        'process': r.get('process') or r.get('process_name'),
+                        'src_ip': r.get('src_ip'),
+                        'dst_ip': r.get('dst_ip'),
+                        'user': r.get('user') or r.get('to') or r.get('from'),
+                        '_sheet': r.get('_sheet'),
+                        'ts': r.get('ts') or r.get('timestamp'),
+                    }
+                    if verdict in ('malicious', 'block', 'escalate'):
+                        if len(autoblocked) < 25:
+                            autoblocked.append(rec)
+                    if verdict in ('suspicious', 'review', 'malicious', 'escalate'):
+                        if len(flagged) < 50:
+                            flagged.append(rec)
+
+                top_mitre_sorted = sorted(top_mitre.items(), key=lambda kv: kv[1], reverse=True)[:15]
+
+                return {
+                    'total': len(rows),
+                    'verdict_counts': verdict_counts,
+                    'severity_distribution': severity_counts,
+                    'top_mitre': [{'technique': t, 'count': c} for t, c in top_mitre_sorted],
+                    'flagged_events': flagged,
+                    'autoblocked_samples': autoblocked,
+                    '_assessment_source': matches[0],
+                    '_assessment_id': assessment.get('assessment_id'),
+                }
+    return None
+
+
 def build_ingestion_report(
     session_ids: list[str],
     include_alerts: bool,
@@ -1001,6 +1104,12 @@ def build_ingestion_report(
         return cached['report']
 
     decisions = _apply_tenant(aggregate_decisions(), tenant_id)
+    # Fallback: if DECISION_CACHE has no flagged events but session_ids reference
+    # an assessment file on disk, load the rich per-row data from the assessment.
+    if not decisions.get('flagged_events') and not decisions.get('autoblocked_samples') and session_ids:
+        assessment_data = _load_assessment_rows(session_ids)
+        if assessment_data:
+            decisions = assessment_data
     flagged_filtered = _filter_by_persona(decisions.get('flagged_events', []), persona_norm)
     auto_filtered = _filter_by_persona(decisions.get('autoblocked_samples', []), persona_norm)
     decisions['flagged_events'] = flagged_filtered
