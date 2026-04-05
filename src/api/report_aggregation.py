@@ -1014,20 +1014,37 @@ def _load_assessment_rows(session_ids: list[str]) -> dict[str, Any] | None:
                     except Exception:
                         pass
 
+                    # Build human-readable identifier for the event
+                    _ident = (r.get('process') or r.get('process_name') or r.get('src_ip')
+                              or r.get('host') or r.get('hostname') or r.get('subject')
+                              or r.get('from') or r.get('to') or '')
+                    _event_id = r.get('_evidence_code') or (_ident if _ident else f"row-{r.get('row_index', 0)}")
+
                     rec = {
-                        'event_id': r.get('_evidence_code') or f"row-{r.get('row_index', 0)}",
+                        'event_id': _event_id,
                         'verdict': r.get('verdict'),
                         'confidence': float(r.get('dread_score') or 0.0),
                         'factors': factors[:10],
                         'severity': sev,
                         'dread_score': float(r.get('dread_score') or 0.0),
+                        'dread_components': r.get('dread_components') or {},
+                        'stride_tags': r.get('stride_tags') or [],
                         'mitre_techniques': mitre_raw,
                         'llm_summary': r.get('llm_summary'),
                         'host': r.get('host') or r.get('hostname'),
                         'process': r.get('process') or r.get('process_name'),
                         'src_ip': r.get('src_ip'),
                         'dst_ip': r.get('dst_ip'),
+                        'dst_port': r.get('dst_port'),
                         'user': r.get('user') or r.get('to') or r.get('from'),
+                        'from': r.get('from'),
+                        'to': r.get('to'),
+                        'subject': r.get('subject'),
+                        'message_id': r.get('message_id'),
+                        'cmdline': r.get('cmdline'),
+                        'event_type': r.get('event_type'),
+                        'sha256': r.get('sha256'),
+                        'payload_len': r.get('payload_len'),
                         '_sheet': r.get('_sheet'),
                         'ts': r.get('ts') or r.get('timestamp'),
                     }
@@ -1040,6 +1057,9 @@ def _load_assessment_rows(session_ids: list[str]) -> dict[str, Any] | None:
 
                 top_mitre_sorted = sorted(top_mitre.items(), key=lambda kv: kv[1], reverse=True)[:15]
 
+                # Load threat models if stored in assessment
+                threat_models = assessment.get('threat_models') or {}
+
                 return {
                     'total': len(rows),
                     'verdict_counts': verdict_counts,
@@ -1047,6 +1067,7 @@ def _load_assessment_rows(session_ids: list[str]) -> dict[str, Any] | None:
                     'top_mitre': [{'technique': t, 'count': c} for t, c in top_mitre_sorted],
                     'flagged_events': flagged,
                     'autoblocked_samples': autoblocked,
+                    'threat_models': threat_models,
                     '_assessment_source': matches[0],
                     '_assessment_id': assessment.get('assessment_id'),
                 }
@@ -1286,6 +1307,9 @@ def build_ingestion_report(
             'variant': variant_norm,
          }
      }
+    # Propagate threat_models from assessment data into the report
+    if decisions.get('threat_models'):
+        report['threat_models'] = decisions['threat_models']
     report['network_highlights'] = network_snapshot
     # Cross-framework rollups
     top_stride = []
