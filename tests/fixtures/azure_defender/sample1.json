@@ -1,0 +1,7 @@
+{
+  "id": "/subscriptions/1111/resourceGroups/rg1/providers/Microsoft.Storage/storageAccounts/sa1/providers/Microsoft.Security/assessments/abcd",
+  "category": "SecurityGroupOpen",
+  "resourceId": "/subscriptions/1111/resourceGroups/rg1/providers/Microsoft.Network/networkSecurityGroups/nsg1",
+  "severity": "High",
+  "eventTime": "2024-05-01T12:00:00Z"
+}

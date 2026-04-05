@@ -1,0 +1,11 @@
+[
+  {
+    "time": "2026-03-20T01:30:00Z",
+    "srcIp": "10.10.1.4",
+    "destIp": "203.0.113.45",
+    "destPort": 443,
+    "protocol": "T",
+    "flowState": "A",
+    "bytes": 24576
+  }
+]

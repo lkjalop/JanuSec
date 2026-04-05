@@ -1,0 +1,10 @@
+[
+  {
+    "time": "2026-03-20T01:25:00Z",
+    "resourceGroupName": "rg-prod-identity",
+    "operationName": {"value": "Microsoft.Authorization/roleAssignments/write"},
+    "caller": "admin.ops@contoso.com",
+    "correlationId": "corr-2001",
+    "category": {"value": "Administrative"}
+  }
+]

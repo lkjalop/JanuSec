@@ -1,0 +1,43 @@
+{
+  "cases": [
+    {
+      "name": "bravo_business_flow_anomaly",
+      "ok": true,
+      "duration_ms": 41.311,
+      "missing_factors": [],
+      "reported_factors": [
+        "api:business_flow_anomaly",
+        "api:business_flow_policy_gap",
+        "api:inventory_route_unknown"
+      ]
+    },
+    {
+      "name": "bravo_runbook_abuse",
+      "ok": true,
+      "duration_ms": 78.941,
+      "missing_factors": [],
+      "reported_factors": [
+        "api:automation_runbook_abuse",
+        "api:inventory_route_unknown"
+      ]
+    },
+    {
+      "name": "bravo_phish_bulk",
+      "ok": true,
+      "duration_ms": 41.444,
+      "missing_factors": [],
+      "reported_factors": [
+        "api:business_flow_policy_gap",
+        "api:inventory_route_unknown",
+        "api:phish_campaign_bulk_send"
+      ]
+    }
+  ],
+  "metrics": {
+    "count": 3,
+    "avg_ms": 53.899,
+    "p95_ms": 41.444
+  },
+  "tenant": "tenant-bravo",
+  "pipeline_profile": "customer-bravo"
+}

@@ -1,0 +1,3 @@
+{
+  "actions": {"action_list": ["Isolate host","Block domain"], "priority": "high"}
+}

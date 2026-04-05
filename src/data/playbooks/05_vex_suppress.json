@@ -1,0 +1,7 @@
+{
+  "name": "vex_suppress",
+  "steps": [
+    {"type": "sbom.vex.add", "inputs": {"component": "${component}", "version": "${version}", "status": "not_affected"}},
+    {"type": "notify.teams", "inputs": {"title": "VEX updated", "text": "${component} ${version}"}}
+  ]
+}

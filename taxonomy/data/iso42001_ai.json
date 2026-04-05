@@ -1,0 +1,10 @@
+[
+  {"framework": "ISO42001", "control_id": "AI.5.1", "title": "AI Governance Framework", "keywords": ["governance","policy","roles"]},
+  {"framework": "ISO42001", "control_id": "AI.6.1", "title": "Risk Management for AI Systems", "keywords": ["risk","impact","likelihood","hazard"]},
+  {"framework": "ISO42001", "control_id": "AI.7.3", "title": "Lifecycle Controls", "keywords": ["design","development","deployment","operations"]},
+  {"framework": "ISO42001", "control_id": "AI.8.2", "title": "Technical Robustness and Safety", "keywords": ["robustness","safety","fail-safe"]},
+  {"framework": "ISO42001", "control_id": "AI.9.4", "title": "Monitoring and Logging", "keywords": ["monitoring","logging","traceability"]},
+  {"framework": "ISO42001", "control_id": "AI.10.2", "title": "Data and Model Management", "keywords": ["dataset","data governance","model registry"]},
+  {"framework": "ISO42001", "control_id": "AI.11.1", "title": "Transparency and Explainability", "keywords": ["explainability","transparency","documentation"]}
+]
+

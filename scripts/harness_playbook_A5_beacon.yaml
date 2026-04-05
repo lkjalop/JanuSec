@@ -1,0 +1,32 @@
+id: A5_jittered_beacon
+version: 1
+scenario: "Jittered outbound small beacon with rare JA3"
+tenant: demo
+stages:
+  - t: 0s
+    event_type: net
+    id: a5-net-1
+    src_host: hostF
+    dst_ip: 198.51.100.77
+    ja3: rareja3abcd11
+    bytes_out: 850
+  - t: 37s
+    event_type: net
+    id: a5-net-2
+    src_host: hostF
+    dst_ip: 198.51.100.77
+    ja3: rareja3abcd11
+    bytes_out: 910
+  - t: 73s
+    event_type: net
+    id: a5-net-3
+    src_host: hostF
+    dst_ip: 198.51.100.77
+    ja3: rareja3abcd11
+    bytes_out: 780
+labels:
+  expected_factors:
+    - lane_ja3_rare
+  optional_correlation: []
+sla:
+  first_detection_within: 60s

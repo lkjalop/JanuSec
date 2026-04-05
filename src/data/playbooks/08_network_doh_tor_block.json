@@ -1,0 +1,11 @@
+{
+  "name": "network-doh-tor-egress-block",
+  "trigger": {"factor_any": ["net:doh_tunnel_candidate", "net:tor_outbound_contact"]},
+  "dry_run": true,
+  "steps": [
+    {"type": "open_case", "params": {"title": "DoH/Tor egress block"}},
+    {"type": "block_ip", "params": {"ip": "203.0.113.10"}},
+    {"type": "block_ip", "params": {"ip": "198.51.100.20"}},
+    {"type": "notify", "params": {"webhook_url": "https://example.invalid/webhook", "msg": "Applied temporary egress blocks for DoH/Tor"}}
+  ]
+}

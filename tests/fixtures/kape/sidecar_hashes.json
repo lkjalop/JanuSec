@@ -1,0 +1,5 @@
+{
+  "evil.exe": {"sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+  "good.dll": {"md5": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
+  "tool.exe": {"sha1": "cccccccccccccccccccccccccccccccccccccccc"}
+}

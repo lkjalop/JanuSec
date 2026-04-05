@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>CSV Analyzer</title>
+  <!-- Production CSV Analyzer page (dark themed) | DO NOT DELETE.
+       Test-only deterministic shim lives at /static/test_shims/csv_analyzer_shim.html.
+       Shared tokens imported from /static/css/theme.css for DRY. -->
+  <link rel="stylesheet" href="/static/css/theme.css" />
+    <script defer src="/static/js/theme.js"></script>
+  <style>
+    html, body { margin:0; }
+    h2 { margin-top:0; }
+    .wrapper { padding:20px 28px; max-width:1500px; margin:0 auto; }
+    .panel { background:var(--bg-secondary); border:1px solid var(--border); border-radius:8px; padding:16px 20px; box-shadow:0 2px 6px rgba(0,0,0,.35); }
+    .controls { display:flex; flex-wrap:wrap; gap:12px; margin-bottom:16px; }
+    .btn { padding:8px 16px; border-radius:6px; font-size:13px; cursor:pointer; border:1px solid var(--border); background:var(--bg-tertiary); color:var(--text-primary); display:inline-flex; gap:6px; align-items:center; }
+    .btn:hover { background:var(--bg-hover); }
+    .btn-primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+    .btn-primary:hover { background:var(--accent-hover); }
+    .table-wrapper { width:100%; overflow:auto; }
+    table { width:100%; border-collapse:collapse; font-size:13px; min-width:900px; }
+    td, th { padding:8px 10px; border:1px solid var(--border); vertical-align:middle; }
+    td .cell-text { display:block; max-width:380px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    td .cell-text.break { white-space:normal; word-break:break-word; }
+    th { background:var(--bg-tertiary); text-align:left; font-weight:500; }
+    th[data-sort]::after { content: ''; display:inline-block; margin-left:8px; width:0; height:0; border-left:6px solid transparent; border-right:6px solid transparent; }
+    th[data-sort="asc"]::after { border-bottom:8px solid var(--text-primary); }
+    th[data-sort="desc"]::after { border-top:8px solid var(--text-primary); }
+    tbody tr:hover { background:var(--bg-hover); }
+    .pill { background:var(--accent); color:#fff; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:600; }
+    #pipelineBadge { margin-left:8px; }
+    #csvDrillModal { position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,.55); display:none; align-items:center; justify-content:center; padding:40px; }
+    #csvDrillModal .inner { background:var(--bg-secondary); border:1px solid var(--border); border-radius:10px; width:420px; max-width:90%; padding:24px 20px; box-shadow:0 4px 16px rgba(0,0,0,.6); animation:fadeIn .25s; }
+    #csvDrillBody div { margin-bottom:6px; font-size:13px; }
+    .csv-modal-close { margin-top:8px; }
+    @keyframes fadeIn { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:translateY(0); } }
+    .status-line { font-size:12px; color:var(--text-muted); margin-bottom:14px; }
+    .inline-info { font-size:11px; color:var(--text-muted); margin-left:6px; }
+    .empty-hint { color:var(--text-muted); font-size:13px; padding:12px 4px; }
+    .small { font-size:11px; color:var(--text-muted); }
+    /* Verdict visual helpers */
+    tr.verdict-pass { box-shadow: inset 4px 0 0 0 #27ae60; }
+    tr.verdict-medium { box-shadow: inset 4px 0 0 0 #f39c12; }
+    tr.verdict-fail { box-shadow: inset 4px 0 0 0 #e74c3c; }
+  </style>
+</head>
+<body>
+  <div class="wrapper">
+    <h2 id="csv_title">CSV Analyzer</h2>
+    <div class="status-line">Upload CSV or XLSX to parse hundreds of rows client-side. Use filters to view Suspicious vs Passed. Deep Analyze opens richer frameworks view.</div>
+    <div class="panel" id="raSignalsPanel" style="display:none; margin-bottom:16px;">
+      <h3 style="margin:0 0 6px; font-size:15px;">Remote Access Signals</h3>
+      <div id="raSignalsSummary" style="font-family:Consolas,monospace; font-size:11px; background:var(--bg-tertiary); padding:8px; border:1px solid var(--border); border-radius:6px; white-space:pre; overflow:auto; max-height:220px;">No remote access signals detected.</div>
+    </div>
+    <div class="controls">
+      <input id="fileInput" data-test="csv-file-input" type="file" class="btn" />
+      <button id="btnLoad" data-test="csv-btn-load" class="btn btn-primary">Load</button>
+      <button id="btnExplain" data-test="csv-btn-explain" class="btn">Fetch Explain</button>
+      <label style="display:inline-flex; align-items:center; gap:8px;">
+        <span class="small">Graph</span>
+        <select id="graphSelector" class="btn" style="padding:6px 10px;">
+          <option value="identity">Identity</option>
+          <option value="cloud">Cloud</option>
+          <option value="network">Network</option>
+        </select>
+      </label>
+      <button id="btnAnalyzePipeline" data-test="csv-btn-deep-analyze" class="btn">Deep Analyze</button>
+      <button id="btnSendIdentity" class="btn" title="Post selected rows as identity events">Send to Identity Graph</button>
+      <button id="btnSendCloud" class="btn" title="Post selected rows as cloud resources">Send to Cloud Graph</button>
+      <button id="btnSendNetwork" class="btn" title="Post selected rows as network flows">Send to Network Graph</button>
+      <button id="btnCorrelateHopGraph" class="btn" style="background:#2b3443" title="Upload selected rows and build correlation session">Correlate (HopGraph)</button>
+      <div id="pipelineBadge" style="display:inline-block"><span class="pill" style="display:none">pipeline</span></div>
+      <button class="btn" id="btnThemeToggle" type="button">Toggle Theme</button>
+    </div>
+    <div class="controls" style="margin-top:-6px">
+      <span class="small">Filter:</span>
+      <button id="btnFilterAll" class="btn btn-primary">All</button>
+      <button id="btnFilterSuspicious" class="btn">Suspicious</button>
+      <button id="btnFilterPassed" class="btn">Passed</button>
+      <label style="margin-left:12px; display:inline-flex; align-items:center; gap:8px; font-size:13px;">
+        <input type="checkbox" id="explainToggle" />
+        <span style="font-size:12px">Show ranking explanation</span>
+      </label>
+      <input id="csvSearch" placeholder="Quick search (process/path/host)" style="margin-left:12px; padding:6px 10px; border-radius:6px; border:1px solid var(--border); background:var(--bg-tertiary); color:var(--text-primary);" />
+      <span id="rowsSummary" class="inline-info"></span>
+    </div>
+    <div id="csv_results_ready" data-test="csv-results-ready" style="display:none"></div>
+    <div class="panel">
+      <div id="csv_status_live" role="status" aria-live="polite" style="font-size:12px; color:var(--text-muted); margin-bottom:8px;"></div>
+      <div id="bulkBar" class="controls" style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
+        <span class="small">Selected: <span id="selCount">0</span></span>
+        <button class="btn" id="bulkGood" disabled>Mark Good</button>
+        <button class="btn" id="bulkReview" disabled>Mark Review</button>
+        <button class="btn" id="bulkThreat" disabled>Mark Threat</button>
+        <button class="btn" id="bulkSelectAll">Select All (visible)</button>
+        <button class="btn" id="bulkClear">Clear</button>
+      </div>
+      <div class="table-wrapper">
+        <table id="results" role="table" aria-label="CSV results"><thead><tr>
+          <th data-col="process_name" role="columnheader" aria-sort="none">Process</th>
+          <th data-col="file_path" role="columnheader" aria-sort="none">Path</th>
+          <th data-col="sha256" role="columnheader" aria-sort="none">SHA256</th>
+          <th data-col="host" role="columnheader" aria-sort="none">Host</th>
+          <th data-col="verdict" role="columnheader" aria-sort="none">Verdict</th>
+          <th data-col="dread" role="columnheader" aria-sort="none">DREAD</th>
+          <th data-col="signals" role="columnheader" aria-sort="none">Signals</th>
+          <th role="columnheader">Details</th>
+        </tr></thead><tbody id="tbody"><tr class="initial"><td colspan="8" class="empty-hint">No rows loaded yet.</td></tr></tbody></table>
+      </div>
+      <div class="small">Tip: Client parsing supports large files; showing up to 1000 rows. Deep Analyze merges signals and opens the deep frameworks page.</div>
+    </div>
+  </div>
+  <!-- Correlation Results Panel (hidden until built) -->
+  <div class="panel" id="correlationPanel" style="display:none; margin:18px 28px;">
+    <h3 style="margin:0 0 8px; font-size:15px;">HopGraph Correlation (Single Source Upload)</h3>
+    <div class="small" style="margin-bottom:6px;">Selected rows were packaged & uploaded; session built with canonical mapping guess. Use Multi-Source Correlator for heterogeneous sets.</div>
+    <div id="corrSummary" class="pre" style="font-size:11px; max-height:220px; overflow:auto;">No session yet.</div>
+    <h4 style="margin:12px 0 6px; font-size:13px;">Mini Attack Chain</h4>
+    <div id="corrMiniChain" class="pre" style="font-size:11px; max-height:140px; overflow:auto;">—</div>
+    <h4 style="margin:12px 0 6px; font-size:13px;">Top Path Scores</h4>
+    <div id="corrPathScores" class="pre" style="font-size:11px; max-height:160px; overflow:auto;">—</div>
+    <h4 style="margin:12px 0 6px; font-size:13px;">Risk Rankings (Shared)</h4>
+    <div id="corrRiskRank" class="pre" style="font-size:11px; max-height:160px; overflow:auto;">—</div>
+    <h4 style="margin:12px 0 6px; font-size:13px;">Remediation Hints</h4>
+    <div id="corrRemediation" class="pre" style="font-size:11px; max-height:140px; overflow:auto;">—</div>
+    <h4 style="margin:12px 0 6px; font-size:13px;">On-Demand Remediation</h4>
+    <div id="corrRemLookup" class="pre" style="font-size:11px; max-height:140px; overflow:auto;">Click a path score below to fetch targeted remediation actions.</div>
+  </div>
+  <!-- Modal (unified with LIVE console modal-overlay pattern) -->
+  <div id="csvDrillModal" class="modal-overlay" style="display:none" onclick="if(event.target===this) document.getElementById('csvDrillModal').style.display='none'">
+    <div class="modal" style="background:var(--bg-secondary); border:1px solid var(--border); border-radius:10px; width:420px; max-width:90%; padding:24px 20px; box-shadow:0 4px 16px rgba(0,0,0,.6);">
+      <div id="csvDrillBody"></div>
+      <a id="csvExplainAnchor" style="display:block; margin-top:8px; font-size:12px; color:var(--accent);"></a>
+      <button class="btn csv-modal-close">Close</button>
+    </div>
+  </div>
+
+  <script defer src="/static/js/parse_tabular.js"></script>
+  <script defer src="/static/js/notifications.js"></script>
+  <script defer src="/static/js/csv_analyzer.js"></script>
+  <script src="/static/js/threat_ranking.js"></script>
+  <script>
+    // Small accessibility: toggle explain checkbox persists
+    document.addEventListener('DOMContentLoaded', function(){ try{ var el=document.getElementById('explainToggle'); var v=localStorage.getItem('csv_explain_toggle')||'1'; if(el) { el.checked = (v!=='0'); el.addEventListener('change', function(){ try{ localStorage.setItem('csv_explain_toggle', el.checked?'1':'0'); window.dispatchEvent(new Event('csv-explain-toggle-changed')); }catch(_){ } }); } }catch(_){ } });
+
+    // Identity dispatch minimal wiring (depends on csv_analyzer.js selection helpers)
+    function _authHeaders(){ try { const key = (localStorage.getItem('apiKey')||'devkey123'); const h={'x-api-key':key}; const t=localStorage.getItem('tenantId'); if(t) h['X-Tenant-ID']=t; return h; } catch(_){ return {'x-api-key':'devkey123'}; } }
+    async function _postIdentityEvent(ev){
+      try { await fetch('/api/v1/graph/identity/ingest',{ method:'POST', headers: { 'content-type':'application/json', ..._authHeaders() }, body: JSON.stringify(ev) }); } catch(_){ }
+    }
+    function _rowToIdentity(row){
+      // Try to map common field names present in the parsed CSV rows
+      const user = row.user || row.username || row['User'] || row['Username'] || row['account'] || '';
+      const src_host = row.src_host || row.source_host || row['Source Host'] || row['src'] || '';
+      const dest_host = row.dest_host || row.host || row.hostname || row['Dest Host'] || row['host'] || '';
+      const action = row.action || row['Action'] || row['Event'] || '';
+      const event_type = row.event_type || row['Event Type'] || 'login';
+      const new_role = row.new_role || row.target_role || row['Role'] || '';
+      const ts = row.ts || row.timestamp || Date.now()/1000;
+      return { user, src_host, dest_host, action, event_type, new_role, ts };
+    }
+    (function identityBulk(){ try{
+      const btn = document.getElementById('btnSendIdentity'); if(!btn) return;
+      btn.addEventListener('click', async function(){
+        try{
+          // csv_analyzer.js should expose window.csvSelectedRows or similar;
+          // fall back to first 50 rows in tbody if not available
+          const rows = (window.csvSelectedRows && window.csvSelectedRows.length? window.csvSelectedRows : (window._csvRows||[])).slice(0,200);
+          if(!rows || !rows.length){ notifications && notifications.toast && notifications.toast('No rows selected','warn'); return; }
+          let sent=0; for(const r of rows){ const ev=_rowToIdentity(r); if(ev.user){ await _postIdentityEvent(ev); sent++; } }
+          if(window.notifications && notifications.toast){ notifications.toast(`Posted ${sent} identity events`, 'success'); }
+        }catch(e){ if(window.notifications && notifications.toast){ notifications.toast('Failed to send identity events','error'); } }
+      });
+    }catch(_){ } })();
+
+    // Cloud Graph helpers
+    async function _postCloudResources(resources){
+      try { await fetch('/api/v1/graph/cloud/ingest',{ method:'POST', headers: { 'content-type':'application/json', ..._authHeaders() }, body: JSON.stringify(resources) }); } catch(_){ }
+    }
+    function _rowToCloudResource(row){
+      const id = row.arn || row.resource || row.cloud_resource || row.bucket || row.id || '';
+      const principals = Array.isArray(row.principals)? row.principals : (row.principals ? String(row.principals).split(/[;,\s]+/).filter(Boolean) : []);
+      const destinations = Array.isArray(row.destinations)? row.destinations : (row.destinations ? String(row.destinations).split(/[;,\s]+/).filter(Boolean) : []);
+      const publicFlag = !!(row.public || row.isPublic || row.internet_exposed);
+      if(!id) return null;
+      return { id, principals, destinations, public: publicFlag };
+    }
+    (function cloudBulk(){ try{
+      const btn = document.getElementById('btnSendCloud'); if(!btn) return;
+      btn.addEventListener('click', async function(){
+        try{
+          const rows = (window.csvSelectedRows && window.csvSelectedRows.length? window.csvSelectedRows : (window._csvRows||[])).slice(0,200);
+          if(!rows || !rows.length){ notifications && notifications.toast && notifications.toast('No rows selected','warn'); return; }
+          const payload=[]; for(const r of rows){ const cr=_rowToCloudResource(r); if(cr){ payload.push(cr); } }
+          if(payload.length){ await _postCloudResources(payload); if(window.notifications && notifications.toast){ notifications.toast(`Posted ${payload.length} cloud resources`, 'success'); } }
+        }catch(e){ if(window.notifications && notifications.toast){ notifications.toast('Failed to send cloud resources','error'); } }
+      });
+    }catch(_){ } })();
+
+    // Network Graph helpers
+    async function _postNetworkFlows(flows){
+      try { await fetch('/api/v1/graph/network/ingest',{ method:'POST', headers: { 'content-type':'application/json', ..._authHeaders() }, body: JSON.stringify(flows) }); } catch(_){ }
+    }
+    function _rowToNetworkFlow(row){
+      const src = row.src || row.source || row.src_ip || row.client || '';
+      const dst = row.dst || row.destination || row.dst_ip || row.server || '';
+      if(!src || !dst) return null;
+      const port = parseInt(row.port || row.dport || row.dst_port || 0, 10) || 0;
+      const proto = (row.proto || row.protocol || '').toString();
+      const bytes = parseInt(row.bytes || row.size || row.len || 0, 10) || 0;
+      const src_subnet = row.src_subnet || '';
+      const dst_subnet = row.dst_subnet || '';
+      return { src, dst, port, proto, bytes, src_subnet, dst_subnet };
+    }
+    (function networkBulk(){ try{
+      const btn = document.getElementById('btnSendNetwork'); if(!btn) return;
+      btn.addEventListener('click', async function(){
+        try{
+          const rows = (window.csvSelectedRows && window.csvSelectedRows.length? window.csvSelectedRows : (window._csvRows||[])).slice(0,200);
+          if(!rows || !rows.length){ notifications && notifications.toast && notifications.toast('No rows selected','warn'); return; }
+          const payload=[]; for(const r of rows){ const f=_rowToNetworkFlow(r); if(f){ payload.push(f); } }
+          if(payload.length){ await _postNetworkFlows(payload); if(window.notifications && notifications.toast){ notifications.toast(`Posted ${payload.length} network flows`, 'success'); } }
+        }catch(e){ if(window.notifications && notifications.toast){ notifications.toast('Failed to send network flows','error'); } }
+      });
+    }catch(_){ } })();
+
+    // Preview / Explain wiring
+    (function previewExplain(){ try{
+      const btn = document.getElementById('btnExplain'); if(!btn) return;
+      const modal = document.getElementById('csvDrillModal'); const body = document.getElementById('csvDrillBody'); const anchor = document.getElementById('csvExplainAnchor');
+      function renderExplain(obj){
+        try{
+          body.innerHTML = '';
+          const addSection = (title, content) => {
+            const h = document.createElement('div'); h.style.marginTop='8px'; h.innerHTML = `<strong>${title}</strong>`;
+            const pre = document.createElement('pre'); pre.style.maxHeight='220px'; pre.style.overflow='auto'; pre.style.background='var(--bg-tertiary)'; pre.style.padding='8px'; pre.style.borderRadius='6px'; pre.textContent = JSON.stringify(content, null, 2);
+            body.appendChild(h); body.appendChild(pre);
+          };
+          if(obj.scoring){
+            const s = obj.scoring;
+            const wrap = document.createElement('div'); wrap.style.marginTop='8px';
+            wrap.innerHTML = '<strong>Scoring</strong>';
+            const comp = document.createElement('div'); comp.style.display='flex'; comp.style.flexDirection='column'; comp.style.gap='6px'; comp.style.marginTop='6px';
+            for(const [k,v] of Object.entries(s.components||{})){
+              const row = document.createElement('div'); row.style.display='flex'; row.style.alignItems='center'; row.style.gap='8px';
+              const label = document.createElement('div'); label.style.width='160px'; label.style.fontSize='12px'; label.textContent = k;
+              const barWrap = document.createElement('div'); barWrap.style.flex='1'; barWrap.style.background='var(--bg-tertiary)'; barWrap.style.borderRadius='6px'; barWrap.style.height='14px';
+              const bar = document.createElement('div'); bar.style.height='100%'; bar.style.width = Math.round((v||0)*100) + '%'; bar.style.background = 'linear-gradient(90deg,#ff6b6b,#ffb86b)'; bar.style.borderRadius='6px';
+              barWrap.appendChild(bar);
+              const pct = document.createElement('div'); pct.style.width='46px'; pct.style.fontSize='12px'; pct.textContent = Math.round((v||0)*100) + '%';
+              row.appendChild(label); row.appendChild(barWrap); row.appendChild(pct);
+              comp.appendChild(row);
+            }
+            wrap.appendChild(comp);
+            body.appendChild(wrap);
+          }
+          if(obj.mitre) addSection('MITRE', obj.mitre);
+          if(obj.stride) addSection('STRIDE', obj.stride);
+          if(obj.pasta) addSection('PASTA', obj.pasta);
+          if(obj.dread) addSection('DREAD', obj.dread);
+          if(obj.mapping_details) addSection('Mappings', obj.mapping_details);
+        }catch(e){ body.innerText = 'Failed to render explain'; }
+      }
+      btn.addEventListener('click', async function(){
+        try{
+          // build preview payload from first selected row or first table row
+          const rows = (window.csvSelectedRows && window.csvSelectedRows.length? window.csvSelectedRows : (window._csvRows||[]));
+          const sel = rows && rows.length? rows[0] : null;
+          if(!sel){ notifications && notifications.toast && notifications.toast('No row selected for preview','warn'); return; }
+          const graph = (document.getElementById('graphSelector')||{value:'identity'}).value || 'identity';
+          let url = '/api/v1/graph/'+graph+'/preview?detail=summary';
+          let payload = {};
+          if(graph === 'identity') payload = _rowToIdentity(sel);
+          else if(graph === 'cloud') payload = _rowToCloudResource(sel) || {};
+          else payload = _rowToNetworkFlow(sel) || {};
+          const resp = await fetch(url, { method:'POST', headers: { 'content-type':'application/json', ..._authHeaders() }, body: JSON.stringify(payload) });
+          if(!resp.ok){ const txt = await resp.text(); notifications && notifications.toast && notifications.toast('Preview failed','error'); body.innerText = txt; modal.style.display='flex'; return; }
+          const data = await resp.json(); renderExplain(data); anchor.href = ''; anchor.innerText = '';
+          modal.style.display='flex';
+        }catch(e){ if(window.notifications && notifications.toast){ notifications.toast('Preview error','error'); } }
+      });
+    }catch(_){ } })();
+  </script>
+  <script>
+  // ---------------- HopGraph Correlation (Single CSV) -----------------
+  (function hopgraphCorrelate(){ try {
+    const btn = document.getElementById('btnCorrelateHopGraph'); if(!btn) return;
+    btn.addEventListener('click', async function(){
+      try {
+        // Gather selected or fallback rows
+        const rows = (window.csvSelectedRows && window.csvSelectedRows.length? window.csvSelectedRows : (window._csvRows||[])).slice(0,400);
+        if(!rows.length){ if(window.notifications && notifications.toast){ notifications.toast('No rows selected','warn'); } return; }
+        // Build CSV blob for upload endpoint
+        const headers = Object.keys(rows[0]||{});
+        const canonicalMap = {};
+        headers.forEach(h => { const l = h.toLowerCase(); if(/user/.test(l)) canonicalMap['user']=h; else if(/host/.test(l)) canonicalMap['host']=h; else if(/proc|process/.test(l)) canonicalMap['process']=h; else if(/sha256|hash/.test(l)) canonicalMap['file_hash']=h; else if(l==='domain'||/dns|sni/.test(l)) canonicalMap['domain']=h; else if(l==='ip'||l==='src_ip') canonicalMap['ip']=h; else if(l==='dst_ip'||l==='dest_ip') canonicalMap['ip_dst']=h; });
+        let csvLines = [headers.join(',')];
+        rows.forEach(r => { csvLines.push(headers.map(h => JSON.stringify(r[h]||'')).join(',')); });
+        const blob = new Blob([csvLines.join('\n')+'\n'], { type:'text/csv' });
+        const fd = new FormData();
+        fd.append('files', new File([blob], 'single_source_selection.csv', { type:'text/csv' }));
+        const upResp = await fetch('/api/v1/upload/files', { method:'POST', headers:{ ..._authHeaders(), 'X-Correlation-Analyze':'csv-single' }, body: fd });
+        let upJson={}; try{ upJson = await upResp.json().catch(()=>({})); }catch(_){ }
+        if(!upResp.ok){ document.getElementById('corrSummary').textContent = 'Upload failed: '+upResp.status+' '+(upJson.detail||''); document.getElementById('correlationPanel').style.display='block'; return; }
+        const sessionIds = Array.isArray(upJson.sessions)? upJson.sessions : (upJson.sessions? [upJson.sessions]: []);
+        if(!sessionIds.length){ document.getElementById('corrSummary').textContent='No session IDs returned.'; document.getElementById('correlationPanel').style.display='block'; return; }
+        // Build session
+        const body = { session_ids: sessionIds, correlate: true, ewma: true, mapping: canonicalMap };
+        const buildResp = await fetch('/api/v1/graph/session/build', { method:'POST', headers:{ 'Content-Type':'application/json', ..._authHeaders() }, body: JSON.stringify(body) });
+        let buildJson={}; try{ buildJson = await buildResp.json().catch(()=>({})); }catch(_){ }
+        document.getElementById('correlationPanel').style.display='block';
+        if(!buildResp.ok){ document.getElementById('corrSummary').textContent='Build failed: '+buildResp.status+' '+(buildJson.detail||''); return; }
+        const summary = buildJson.summary || buildJson;
+        const factors = summary.factors || [];
+        const conf = summary.confidence; const verdict = summary.verdict;
+        let txt = 'Session IDs: '+(summary.session_ids||[]).join(', ')+'\n';
+        txt += 'Verdict: '+verdict+'  Confidence: '+conf+'\n';
+        txt += 'Factors:\n'+(factors.map(f => typeof f==='string'? ' - '+f : ' - '+(f.factor||f.name)+'('+ (f.score||'') +')').join('\n') || ' (none)');
+        const corr = summary.correlation || {}; const pairs=[]; Object.keys(corr).forEach(a => { Object.keys(corr[a]||{}).forEach(b => { const v=corr[a][b]; if(v>0) pairs.push(`${a}<->${b}:${v}`); }); });
+        txt += '\nPairs: '+(pairs.slice(0,20).join(', ')||'none');
+        document.getElementById('corrSummary').textContent = txt;
+        // Mini chain from path_scores
+        const ps = summary.path_scores || {}; const keys = Object.keys(ps).sort((a,b)=> (ps[b].score||0)-(ps[a].score||0));
+        if(keys.length){
+          const topKey = keys[0]; const scObj = ps[topKey];
+          const anomalies = scObj.anomalies || [];
+          const contrib = scObj.contributions || {};
+          const parts = Object.keys(contrib).slice(0,6);
+          const chain = (parts.length? parts.join(' -> ') : topKey.replace(/__/,' -> ')) + `\nScore=${(scObj.score||0).toFixed(3)} Anom=${anomalies.join(',')||'none'}`;
+          document.getElementById('corrMiniChain').textContent = chain;
+          let pathTxt = keys.slice(0,5).map(k => `${k}  score=${(ps[k].score||0).toFixed(3)} anom=${(ps[k].anomalies||[]).length}`).join('\n');
+          document.getElementById('corrPathScores').textContent = pathTxt || 'None.';
+          // Make each path clickable for remediation lookup
+          try {
+            const host = document.getElementById('corrPathScores');
+            const lines = keys.slice(0,10).map(k => {
+              const sc = ps[k];
+              return `<span class='corr-path-item' data-path='${k}' style='display:block;cursor:pointer;'>${k} :: ${(sc.score||0).toFixed(3)} (${(sc.anomalies||[]).length} anom)</span>`;
+            }).join('');
+            host.innerHTML = lines;
+            host.querySelectorAll('.corr-path-item').forEach(el => {
+              el.addEventListener('click', async () => {
+                const chain = el.getAttribute('data-path');
+                if(!chain) return;
+                const box = document.getElementById('corrRemLookup');
+                box.textContent = 'Fetching remediation for '+chain+'...';
+                try {
+                  const r = await fetch('/api/v1/remediation/suggest?path='+encodeURIComponent(chain));
+                  let j = {}; try { j = await r.json(); } catch(_){ }
+                  if(!r.ok){ box.textContent = 'Lookup failed: '+r.status; return; }
+                  const acts = j.actions || [];
+                  const rat = j.rationale || [];
+                  const lines2 = [];
+                  lines2.push('Chain: '+chain);
+                  lines2.push('Severity: '+(j.severity||'n/a'));
+                  if(acts.length){ lines2.push('Actions:'); acts.forEach(a => lines2.push(' - '+a)); }
+                  if(rat.length){ lines2.push('Rationale:'); rat.slice(0,5).forEach(rn => lines2.push(' * '+rn)); }
+                  box.textContent = lines2.join('\n');
+                } catch(e){ box.textContent = 'Error: '+(e.message||e); }
+              });
+            });
+          } catch(_){ }
+        } else {
+          document.getElementById('corrMiniChain').textContent='No path scores available.';
+          document.getElementById('corrPathScores').textContent='None.';
+        }
+        // Shared risk ranking using threat_ranking.js
+        try {
+          const riskDiv = document.getElementById('corrRiskRank');
+          if(riskDiv){
+            if(window.ThreatRanking && typeof ThreatRanking.computeRiskRankings==='function'){
+              const topN = parseInt(localStorage.getItem('threat_top_n')||'5',10) || 5;
+              const ranks = ThreatRanking.computeRiskRankings(summary, topN);
+              riskDiv.textContent = ranks.length ? ranks.map((r,i)=>`${i+1}. ${r.key} risk=${r.risk.toFixed(3)} path=${r.score.toFixed(3)} anom=${r.anomalies}` ).join('\n') : 'No rankings.';
+              // remediation hints (top entry)
+              const remDiv = document.getElementById('corrRemediation');
+              if(remDiv){ remDiv.textContent = (ranks[0] && ranks[0].remediation && ranks[0].remediation.length) ? ranks[0].remediation.map(h=>'- '+h).join('\n') : 'No specific hints.'; }
+            } else { riskDiv.textContent='Ranking module unavailable.'; }
+          }
+        } catch(_){ }
+      } catch(e){ document.getElementById('corrSummary').textContent='Correlation error: '+(e.message||e); document.getElementById('correlationPanel').style.display='block'; }
+    });
+  } catch(_){ } })();
+  </script>
+  <script>
+  // Lightweight RA header sniff and panel render for CSV Analyzer
+  (function raHeaderSniff(){ try {
+    var fileInput = document.getElementById('fileInput'); if(!fileInput) return;
+    fileInput.addEventListener('change', async function(){
+      try {
+        var f = fileInput.files && fileInput.files[0]; if(!f || !/\.csv$/i.test(f.name)) return;
+        var text = await f.text();
+        var headerLine = (text.split(/\r?\n/)[0] || '').trim(); if(!headerLine) return;
+        var cols = headerLine.split(/[,;\t]/).map(function(c){ return (c||'').trim(); }).filter(Boolean);
+        if (isRAHeaders(cols)) renderRASignalsFromHeaders(cols);
+      } catch(_){ }
+    });
+
+    function isRAHeaders(cols){
+      try {
+        var lc = (cols||[]).map(function(c){ return String(c||'').toLowerCase(); });
+        var hasProto = lc.some(function(c){ return /(protocol|proto|vpn|rdp|bastion)/.test(c); });
+        var hasUser = lc.some(function(c){ return /(user|account|principal)/.test(c); });
+        var hasSrc = lc.some(function(c){ return /(src|source).*ip|src_ip|client/.test(c); });
+        var hasDst = lc.some(function(c){ return /(dst|dest|destination|host|server)/.test(c); });
+        var hasPort = lc.some(function(c){ return /(port|dst_port|dport)/.test(c); });
+        return [hasProto, hasUser, hasSrc, hasDst, hasPort].filter(Boolean).length >= 3;
+      } catch(_) { return false; }
+    }
+    function renderRASignalsFromHeaders(cols){
+      try {
+        var panel = document.getElementById('raSignalsPanel'); var box = document.getElementById('raSignalsSummary');
+        var lc = (cols||[]).map(function(c){ return String(c||'').toLowerCase(); });
+        var found = [];
+        if (lc.some(function(c){ return /(protocol|proto)/.test(c); })) found.push('protocol');
+        if (lc.some(function(c){ return /(vpn|rdp|bastion)/.test(c); })) found.push('source=remote_access');
+        if (lc.some(function(c){ return /(user|account|principal)/.test(c); })) found.push('user');
+        if (lc.some(function(c){ return /(src|source).*ip|src_ip|client/.test(c); })) found.push('src_ip');
+        if (lc.some(function(c){ return /(dst|dest|destination|host|server)/.test(c); })) found.push('dest_host');
+        if (lc.some(function(c){ return /(port|dst_port|dport)/.test(c); })) found.push('dest_port');
+        if (lc.some(function(c){ return /(mfa|2fa)/.test(c); })) found.push('mfa_used');
+        if (!found.length) { box.textContent = 'No obvious RA headers detected.'; }
+        else {
+          var lines = [];
+          lines.push('Detected RA-like headers: ' + found.join(', '));
+          if (found.indexOf('mfa_used') >= 0) lines.push('Note: MFA column allows quick MFA coverage insights.');
+          lines.push('Tip: Use Send to Network/Identity to post into graphs, or batch via Multi-Source Correlator.');
+          box.textContent = lines.join('\n');
+        }
+        panel.style.display = 'block';
+      } catch(_){ }
+    }
+  } catch(_){ } })();
+  </script>
+</body>
+</html>

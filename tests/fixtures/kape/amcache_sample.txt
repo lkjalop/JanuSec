@@ -1,0 +1,19 @@
+C:\Program Files\Example\bad.exe; Publisher: EvilCorp; FileVersion: 1.2.3.4; Size: 123456; sha1: abcdef1234567890abcdef1234567890abcdef12
+C:\Program Files\Safe\good.exe; Publisher: GoodCorp; FileVersion: 9.9.9.9; Size: 54321; md5: 0123456789abcdef0123456789abcdef
+bad.exe; FileVersion: 2.0.0; Publisher: EvilCorp; Size: 99999; sha256: ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+C:\Program Files (x86)\Legacy\oldtool.exe; Size: 44444; FileVersion: 0.9.8; Publisher: LegacyInc
+C:\Program Files\Example\subdir\nested.exe; Publisher: NestedCorp; FileVersion: 3.2.1; md5: a1b2c3d4e5f60123456789abcdefabcd
+C:\Users\svc\AppData\Local\Temp\tmp.exe; FileVersion: 1.0; Size: 1024
+C:\Windows\System32\good.exe; Publisher: Microsoft Corporation; FileVersion: 10.0.19041.1; sha1: 1234567890abcdef1234567890abcdef12345678
+C:\Program Files\Weird\weird.exe; sha256: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef; Publisher: WeirdCo
+relative_name.exe; Publisher: RelCorp; FileVersion: 5.0
+C:\Path\With Spaces\space.exe; FileVersion: 7.7.7; Size: 777
+C:\Windows\System32\drivers\example.sys; Publisher: DriverCorp; Size: 20480
+C:\Program Files\Example\unicode_测试.exe; Publisher: UniCorp; FileVersion: 1.1
+C:\Program Files\Example\weird_chars-1.0.0.exe; sha1: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+C:\Users\Alice\Downloads\installer.exe; FileVersion: 4.4; Size: 305000
+C:\Users\Bob\Desktop\run me.exe; Publisher: BobCorp; FileVersion: 0.1
+C:\Program Files\Example\nested\deep\deep.exe; md5: 99998888777766665555444433332222
+C:\Program Files\Example\space in name.exe; Size: 123
+C:\Windows\Temp\suspicious.tmp.exe; Publisher: TempCorp; FileVersion: 0.0.1
+C:\Program Files\Example\weird.exe; Publisher: WeirdCorp; FileVersion: 1.0.0; Size: 88; sha256: deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef

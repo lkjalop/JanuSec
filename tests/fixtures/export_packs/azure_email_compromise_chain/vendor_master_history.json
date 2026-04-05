@@ -1,0 +1,13 @@
+[
+  {
+    "message_id": "msg-azure-bec-001",
+    "timestamp": "2025-03-15T02:06:00Z",
+    "supplier_name": "Ingram Micro",
+    "trusted_supplier_domain": "ingrammicro.com.au",
+    "known_bank_account": "BSB 082-001 / ACCT 63188211",
+    "pending_change_ticket": "VM-2025-0315-4421",
+    "recent_change_ts": "2025-03-15T01:58:00Z",
+    "last_verified_ts": "2025-02-20T07:30:00Z",
+    "approved_change": false
+  }
+]

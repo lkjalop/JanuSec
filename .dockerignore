@@ -1,0 +1,38 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pytest_cache/
+
+# Virtual environments
+.venv/
+venv/
+.env
+
+# Git
+.git
+.gitignore
+
+# Notebooks and large local artifacts
+*.ipynb_checkpoints
+
+# Local data / artifacts (persist via volume if needed)
+artifacts/
+backups/
+logs/
+
+# Build output
+build/
+dist/
+.eggs/
+*.egg-info/
+
+# Node / Frontend
+node_modules/
+
+# Cache
+.cache/
+
+# Misc
+.DS_Store

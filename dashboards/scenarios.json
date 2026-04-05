@@ -1,0 +1,41 @@
+{
+  "title": "Scenario & Threat Modeling Overview",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "panels": [
+    {
+      "type": "graph",
+      "title": "Scenario Matches (Observed)",
+      "targets": [
+        {"expr": "sum by (scenario_id) (increase(scenario_matches_total{status='observed'}[5m]))"}
+      ],
+      "datasource": null,
+      "id": 1
+    },
+    {
+      "type": "table",
+      "title": "Scenario Status Mix",
+      "targets": [
+        {"expr": "sum by (scenario_id,status) (increase(scenario_matches_total[5m]))"}
+      ],
+      "id": 2
+    },
+    {
+      "type": "stat",
+      "title": "Eval Latency p95",
+      "targets": [
+        {"expr": "histogram_quantile(0.95, rate(scenario_eval_latency_ms_bucket[5m]))"}
+      ],
+      "id": 3
+    },
+    {
+      "type": "graph",
+      "title": "High Risk Scenario Factors (Future)",
+      "targets": [
+        {"expr": "sum(increase(scenario_risk_flags_total[15m]))"}
+      ],
+      "id": 4
+    }
+  ]
+}

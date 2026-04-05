@@ -1,0 +1,69 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>OAuth Connectors</title>
+  <style>
+    body{font-family:Inter, Arial; background:#0f1113; color:#e6eef8; padding:24px}
+    .card{background:#121316;padding:16px;border-radius:8px;max-width:720px}
+    a.button{display:inline-block;padding:8px 12px;background:#0f62fe;color:white;border-radius:6px;text-decoration:none}
+    .line{margin:8px 0}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>OAuth Mailbox Connectors (Demo)</h2>
+    <p>This page initiates OAuth flows for MS Graph and Gmail using environment-configured client IDs. Use the API endpoints to register tenants.</p>
+    <div class="line">
+      <a class="button" id="ms-start" href="#">Start MS Graph OAuth</a>
+    </div>
+    <div class="line">
+      <a class="button" id="gmail-start" href="#">Start Gmail OAuth</a>
+    </div>
+    <div style="margin-top:12px">
+      <label style="font-size:13px;color:#9fb2ff">Tenant ID:</label>
+      <input id="tenant" placeholder="default" style="padding:6px;border-radius:6px;background:#0b0d0f;color:#e6eef8;border:1px solid #1f2933;margin-left:8px" />
+      <a class="button" id="check-status" href="#" style="margin-left:8px">Check Status</a>
+    </div>
+    <div id="status" style="margin-top:12px;font-size:13px;color:#cfe7ff"></div>
+    <div id="subscriptions" style="margin-top:12px;font-size:13px;color:#bfe"></div>
+    <div style="margin-top:12px;color:#9fb2ff;font-size:13px">Note: For demo use set MSGRAPH_CLIENT_ID/MSGRAPH_CLIENT_SECRET or GMAIL_CLIENT_ID/GMAIL_CLIENT_SECRET as env vars on the server.</div>
+  </div>
+<script>
+function openUrl(path){
+  fetch(path).then(r=>r.json()).then(j=>{
+    if(j.auth_url) window.open(j.auth_url, '_blank')
+  }).catch(e=>alert('Failed: '+e))
+}
+document.getElementById('ms-start').addEventListener('click', ()=>openUrl('/api/v1/integrations/oauth/msgraph/start'))
+document.getElementById('gmail-start').addEventListener('click', ()=>openUrl('/api/v1/integrations/oauth/gmail/start'))
+document.getElementById('check-status').addEventListener('click', ()=>{
+  const tenant = (document.getElementById('tenant').value || 'default')
+  const provider = 'msgraph'
+  const out = document.getElementById('status')
+  out.textContent = 'Checking...'
+  fetch(`/api/v1/connectors/${tenant}/${provider}/status`).then(r=>{
+    if(!r.ok) throw new Error('status fetch failed')
+    return r.json()
+  }).then(j=>{
+    out.innerHTML = `Connected: ${j.connected} <br/>Expires: ${j.expires_at || 'n/a'} <br/>State: <pre style="color:#bfe">${JSON.stringify(j.state||{}, null, 2)}</pre>`
+    if(!j.connected){
+      out.innerHTML += `<div style="margin-top:8px"><a class=\"button\" href=\"/api/v1/integrations/oauth/msgraph/start?tenant=${tenant}\">Re-authorize MS Graph</a></div>`
+    } else if (j.re_auth_url) {
+      out.innerHTML += `<div style="margin-top:8px"><a class=\"button\" href=\"${j.re_auth_url}\">Re-authorize</a></div>`
+    }
+    // fetch subscriptions
+    fetch('/api/v1/subscriptions/list').then(r=>r.json()).then(all=>{
+      const subs = Object.entries(all).filter(([k,v])=>v.tenant === tenant)
+      if(subs.length){
+        const el = document.getElementById('subscriptions')
+        el.innerHTML = '<b>Subscriptions</b><br/>' + subs.map(s=>`ID: ${s[0]} expires: ${s[1].expires_at}`).join('<br/>')
+      }
+    }).catch(()=>{})
+  }).catch(e=>{
+    out.textContent = 'Error: '+e
+  })
+})
+</script>
+</body>
+</html>

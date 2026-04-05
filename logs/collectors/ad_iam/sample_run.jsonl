@@ -1,0 +1,2 @@
+{"ts": 1735690000, "tenant": "demo", "server_url": "ldaps://dc01.example.com", "action": "poll", "event_count": 42, "status": "ok"}
+{"ts": 1735690001, "tenant": "demo", "server_url": "ldaps://dc01.example.com", "action": "forward", "event_count": 42, "status": "ok"}

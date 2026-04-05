@@ -1,0 +1,10 @@
+{GUID}\Count\MyApp.exe -> Count=7; LastRun=2024-01-02T13:14:15
+{GUID}\Count\OtherApp.exe -> Count=2; LastRun=2023-12-31T23:59:59
+{GUID}\Count\LegacyTool.exe -> Count=0; LastRun=2022-05-05T05:05:05
+{GUID}\Count\Space Name.exe -> Count=3; LastRun=2024-01-01 00:00:01
+{GUID}\Count\noext -> Count=1; LastRun=2023-11-11T11:11:11
+AnotherPrefix\Count\relative.exe -> Count=5; LastRun=2023-10-10T10:10:10
+{GUID}\Count\weird_chars-1.0.0.exe -> Count=12; LastRun=2024-01-03T03:03:03
+{GUID}\Count\unicode_测试.exe -> Count=2; LastRun=2023-09-09T09:09:09
+{GUID}\Count\MyApp.exe -> Count=8; LastRun=2024-01-03T14:00:00
+{GUID}\Count\ServiceApp.exe -> Count=1; LastRun=2023-12-30T12:12:12

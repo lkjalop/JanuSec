@@ -1,0 +1,21 @@
+{
+  "fixture": "macos.json",
+  "platform": "macos",
+  "timeline_entries": [
+    {
+      "ts": 1767398598.8749235,
+      "kind": "process",
+      "source": "mac.tasks",
+      "platform": "macos",
+      "summary": "macOS task launchservicesd (PID 88) observed in dump"
+    },
+    {
+      "ts": 1767398598.8749235,
+      "kind": "process",
+      "source": "mac.tasks",
+      "platform": "macos",
+      "summary": "macOS task securityd (PID 10) observed in dump"
+    }
+  ],
+  "registry": {}
+}

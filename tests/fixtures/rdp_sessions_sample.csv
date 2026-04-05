@@ -1,0 +1,3 @@
+timestamp,user,src_ip,dst_host,dst_ip,protocol
+2024-11-01T11:00:00Z,bob,192.0.2.10,host-a,192.0.2.50,rdp
+2024-11-01T11:05:00Z,bob,192.0.2.10,host-b,192.0.2.60,rdp

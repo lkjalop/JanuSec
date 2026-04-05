@@ -1,0 +1,37 @@
+name: Security - Bandit
+
+on:
+  push:
+    paths:
+      - '**/*.py'
+      - 'bandit.yaml'
+      - '.github/workflows/bandit.yml'
+  pull_request:
+    paths:
+      - '**/*.py'
+      - 'bandit.yaml'
+      - '.github/workflows/bandit.yml'
+
+jobs:
+  bandit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install Bandit
+        run: pip install bandit
+      - name: Run Bandit (SARIF)
+        run: |
+          if [ -f bandit.yaml ]; then
+            bandit -r . -c bandit.yaml -x tests,venv,.venv -f sarif -o bandit.sarif || true
+          else
+            bandit -r . -x tests,venv,.venv -f sarif -o bandit.sarif || true
+          fi
+      - name: Upload SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: bandit.sarif
+        continue-on-error: true

@@ -1,0 +1,1 @@
+{"actions": {"['user:svc1', 'user:svc2']": [["iam:CreateAccessKey", 1], ["s3:PutObject", 1]], "*": [["arn:aws:iam::123456789012:role/Admin", 1]]}, "edges": {"['user:svc1', 'user:svc2']": {}, "*": {}}}

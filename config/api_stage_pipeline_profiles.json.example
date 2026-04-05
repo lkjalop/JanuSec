@@ -1,0 +1,21 @@
+{
+  "customer-alpha": {
+    "customer_name": "Customer Alpha",
+    "pipelines": ["customer-alpha-prod"],
+    "fixture_vectors": [
+      "tests/data/api_security_auth_harness.json",
+      "tests/data/api_security_auth_harness_alpha.json"
+    ],
+    "artifact_base_url": "https://github.com/ORG/REPO/actions/workflows/api-stage-harness.yml",
+    "notes": "Describe the tenant/pipeline focus here (e.g., HIPAA, payments)."
+  },
+  "customer-beta": {
+    "customer_name": "Customer Beta",
+    "pipelines": ["customer-beta-prod"],
+    "fixture_vectors": [
+      "tests/data/api_security_auth_harness.json",
+      "tests/data/api_security_auth_harness_beta.json"
+    ],
+    "notes": "Optional textual notes for reviewers."
+  }
+}

@@ -1,0 +1,156 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "gnetId": null,
+  "graphTooltip": 0,
+  "id": null,
+  "iteration": 1650000000000,
+  "templating": {
+    "list": [
+      {
+        "name": "tenant_id",
+        "type": "query",
+        "datasource": "Prometheus",
+        "refresh": 2,
+        "hide": 0,
+        "query": "label_values(janusec_slo_success_rate_tenant, tenant_id)",
+        "sort": 1,
+        "definition": "label_values(janusec_slo_success_rate_tenant, tenant_id)",
+        "multi": false,
+        "includeAll": false
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Playbook Failures (total)",
+      "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
+      "targets": [
+        {"expr": "sum(playbook_failures_total)", "legendFormat": "all"},
+        {"expr": "sum(janusec_playbook_failures_total)", "legendFormat": "janusec"}
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Policy Blocked (total)",
+      "gridPos": {"h": 4, "w": 6, "x": 6, "y": 0},
+      "targets": [
+        {"expr": "sum(policy_blocked_total)", "legendFormat": "all"},
+        {"expr": "sum(janusec_policy_blocked_total)", "legendFormat": "janusec"}
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Rate Limit Dropped (total)",
+      "gridPos": {"h": 4, "w": 6, "x": 12, "y": 0},
+      "targets": [
+        {"expr": "sum(rate_limit_dropped_total)", "legendFormat": "all"},
+        {"expr": "sum(janusec_rate_limit_dropped_total)", "legendFormat": "janusec"}
+      ]
+    },
+    {
+      "type": "gauge",
+      "title": "RL % Rate-limited",
+      "gridPos": {"h": 6, "w": 6, "x": 0, "y": 4},
+      "targets": [
+        {"expr": "janusec_rate_limit_rate_limited_pct"}
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "DLQ Depth",
+      "gridPos": {"h": 6, "w": 6, "x": 6, "y": 4},
+      "targets": [
+        {"expr": "janusec_rate_limit_dlq_depth"}
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "p95 Step Latency (s)",
+      "gridPos": {"h": 6, "w": 12, "x": 12, "y": 4},
+      "targets": [
+        {"expr": "janusec_rate_limit_p95_step_latency"}
+      ]
+    },
+    {
+      "type": "gauge",
+      "title": "SLO Success Rate",
+      "gridPos": {"h": 6, "w": 6, "x": 0, "y": 10},
+      "targets": [
+        {"expr": "janusec_slo_success_rate"}
+      ]
+    },
+    {
+      "type": "gauge",
+      "title": "SLO 5xx Error Rate",
+      "gridPos": {"h": 6, "w": 6, "x": 6, "y": 10},
+      "targets": [
+        {"expr": "janusec_slo_errors_5xx_rate"}
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Guardrail MTTC (s)",
+      "gridPos": {"h": 6, "w": 12, "x": 12, "y": 10},
+      "targets": [
+        {"expr": "janusec_guardrail_mttc_seconds"}
+      ]
+    },
+    {
+      "type": "gauge",
+      "title": "Tenant SLO Success Rate",
+      "gridPos": {"h": 6, "w": 6, "x": 0, "y": 16},
+      "targets": [
+        {"expr": "janusec_slo_success_rate_tenant{tenant_id=\"$tenant_id\"}"}
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Tenant Guardrail MTTC (s)",
+      "gridPos": {"h": 6, "w": 12, "x": 6, "y": 16},
+      "targets": [
+        {"expr": "janusec_guardrail_mttc_seconds_tenant{tenant_id=\"$tenant_id\"}"}
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Risk Off-hours (total)",
+      "gridPos": {"h": 4, "w": 6, "x": 6, "y": 22},
+      "targets": [
+        {"expr": "sum(janusec_risk_offhours_total)"}
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Risk Role Mismatch (total)",
+    "gridPos": {"h": 4, "w": 6, "x": 6, "y": 22},
+      "targets": [
+        {"expr": "sum(janusec_risk_role_mismatch_total)"}
+      ]
+    }
+    ,
+    {"type": "row", "title": "Egress Safety", "gridPos": {"h": 1, "w": 24, "x": 0, "y": 26}},
+    {"type": "stat", "title": "SSRF Blocks (total)", "gridPos": {"h": 4, "w": 6, "x": 0, "y": 27},
+      "targets": [{"expr": "sum(webhook_ssrf_blocks_total)", "legendFormat": "blocked"}]},
+    {"type": "bargauge", "title": "SSRF Blocks by Reason (5m)", "gridPos": {"h": 4, "w": 12, "x": 6, "y": 27},
+      "targets": [{"expr": "sum by (reason) (rate(webhook_ssrf_blocks_total[5m]))", "legendFormat": "{{reason}}"}]},
+    {"type": "timeseries", "title": "Webhook Error EWMA (by host)", "gridPos": {"h": 8, "w": 24, "x": 0, "y": 31},
+      "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1}},
+      "targets": [{"expr": "webhook_error_rate_ewma", "legendFormat": "{{host}}"}]},
+    {"type": "stat", "title": "Delivery Success (5m rate)", "gridPos": {"h": 4, "w": 6, "x": 0, "y": 39},
+      "targets": [{"expr": "sum by (channel) (rate(notifications_sent_total{outcome=\"success\"}[5m]))", "legendFormat": "{{channel}}"}]},
+    {"type": "gauge", "title": "Success Ratio (5m)", "gridPos": {"h": 4, "w": 6, "x": 6, "y": 39},
+      "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1}},
+      "targets": [{"expr": "sum by (channel) (rate(notifications_sent_total{outcome=\"success\"}[5m])) / sum by (channel) (rate(notifications_sent_total[5m]))", "legendFormat": "{{channel}}"}]}
+  ],
+  "refresh": "30s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["janusec", "guardrails"],
+  "time": {"from": "now-6h", "to": "now"},
+  "timezone": "browser",
+  "title": "JanuSec Guardrails & SLOs",
+  "uid": "janusec-guardrails",
+  "version": 1
+}

@@ -1,0 +1,13 @@
+{
+  "thread_context": {
+    "reply_chain": [
+      {"from_domain": "vendor.com", "reply_to_domain": "vendor-payments.com"},
+      {"from_domain": "vendor-payments.com", "reply_to_domain": "vendor-payments.com"}
+    ]
+  },
+  "indicators": {
+    "display_name_mismatch": true,
+    "new_sender_domain": true
+  },
+  "factors": ["vendor_spoof_chain", "display_name_mismatch", "new_sender_domain"]
+}

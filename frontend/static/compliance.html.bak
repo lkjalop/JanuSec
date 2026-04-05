@@ -1,0 +1,741 @@
+﻿<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Compliance Assessment</title>
+<style>
+body{background:#0B0E14;color:#E8EBF0;font-family:Inter,Segoe UI,sans-serif}
+.wrap{max-width:1150px;margin:20px auto;padding:12px}
+.card{background:#151922;border:1px solid #2A3142;border-radius:8px;margin-bottom:16px;padding:12px}
+.row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+.btn{padding:8px 14px;background:#1C2230;border:1px solid #2A3142;border-radius:6px;color:#E8EBF0;cursor:pointer}
+.input{padding:8px;background:#1C2230;border:1px solid #2A3142;border-radius:6px;color:#E8EBF0}
+table{border-collapse:collapse;width:100%}th,td{border:1px solid #2A3142;padding:6px 8px;font-size:12px}
+.hint{color:#A8B2C3;font-size:12px}
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.kpi{background:#1C2230;border:1px solid #2A3142;border-radius:8px;padding:12px}
+.kpi .v{font-size:24px;font-weight:600}
+.kpi .l{font-size:12px;color:#A8B2C3;margin-top:4px}
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.pill{display:inline-block;padding:4px 8px;border-radius:999px;border:1px solid #2A3142;background:#1C2230;font-size:11px;color:#E8EBF0}
+.muted{color:#A8B2C3}
+</style></head>
+<body>
+<div class="wrap">
+  <div class="row">
+    <a class="btn" href="/static/janusec-platform-complete-LIVE.html">â† Console</a>
+    <a class="btn" href="/static/hunt_network.html">Network</a>
+    <a class="btn" href="/static/hunt_endpoint.html">Endpoint</a>
+    <a class="btn" href="/static/metrics.html">Metrics</a>
+    <a class="btn" href="/static/integrations.html">Integrations</a>
+    <a class="btn" href="/static/sbom.html">SBOM</a>
+  </div>
+  <h2>Compliance Assessment</h2>
+  <div class="card" id="euAct" style="display:none">
+    <h3>EU AI Act Readiness</h3>
+    <div class="kpis">
+      <div class="kpi"><div class="v" id="eu9_overdue">â€“</div><div class="l">Article 9: Overdue Reviews</div></div>
+      <div class="kpi"><div class="v" id="eu9_high">â€“</div><div class="l">Article 9: High Risks</div></div>
+      <div class="kpi"><div class="v" id="eu10_rate">â€“</div><div class="l">Article 10: Compliance Rate</div></div>
+      <div class="kpi"><div class="v" id="eu10_pii">â€“</div><div class="l">Article 10: PII Anon Rate</div></div>
+    </div>
+    <div class="hint" style="margin-top:6px">Backed by /api/v1/compliance/eu-ai-act/article-9 and /eu-ai-act/article-10</div>
+  </div>
+  <div class="card" id="biasCard" style="display:none">
+    <h3>Bias Readiness</h3>
+    <div class="row" style="align-items:center; gap:8px">
+      <label class="hint">Attribute:</label>
+      <select id="biasAttr" class="input" style="max-width:200px"><option value="tenant_id">tenant_id</option><option value="user_group">user_group</option><option value="geo">geo</option></select>
+      <label class="hint">Window:</label>
+      <select id="biasWindow" class="input" style="max-width:160px">
+        <option value="604800" selected>7 days</option>
+        <option value="86400">24 hours</option>
+        <option value="2592000">30 days</option>
+      </select>
+      <label class="hint"><input type="checkbox" id="biasInclSusp"/> Include suspicious</label>
+      <button class="btn" id="biasReload">Run</button>
+    </div>
+    <div class="kpis" style="margin-top:8px">
+      <div class="kpi"><div class="v" id="biasDir">â€“</div><div class="l">Disparate Impact Ratio</div></div>
+      <div class="kpi"><div class="v" id="biasEod">â€“</div><div class="l">Equal Opportunity (approx)</div></div>
+      <div class="kpi"><div class="v" id="biasGroups">â€“</div><div class="l">Groups</div></div>
+      <div class="kpi"><div class="v" id="biasFlag">â€“</div><div class="l">Flagged</div></div>
+    </div>
+    <div id="biasTable" style="margin-top:8px"></div>
+  </div>
+  <div class="card" id="crossmapCard" style="display:none">
+    <h3>Framework Crossmap</h3>
+    <div class="hint">STRIDE categories mapped to SOC2, ISO 27001/42001/19001 and ISMS hints.</div>
+    <div id="crossmapTable" style="margin-top:8px"></div>
+  </div>
+  <div class="card" id="aiPlanCard" style="display:none">
+    <h3>AI Incident Response Plan</h3>
+    <div class="hint">Generates a structured IR playbook for AI incidents.</div>
+    <div class="row" style="margin-top:6px; gap:8px">
+      <button class="btn" id="btnGenAIPlan">Generate Plan</button>
+      <a class="btn" id="btnDownloadAIPlan" href="#" download="ai_incident_plan.json" style="display:none">Download JSON</a>
+    </div>
+    <div id="aiPlanSummary" class="muted" style="margin-top:8px"></div>
+  </div>
+  <div class="card" id="postureCard" style="display:none">
+    <div class="row">
+      <div class="pill" id="postureBadge">Cloud Posture: loadingâ€¦</div>
+      <div class="hint">Summary from /api/v1/compliance/posture (tenant-scoped)</div>
+    </div>
+  </div>
+
+  <div class="card" id="executive" style="display:none">
+    <h3 style="margin-bottom:10px">Executive Snapshot</h3>
+    <div class="kpis" id="kpiRow">
+      <div class="kpi"><div class="v" id="k_overall">â€“</div><div class="l">Overall Score</div></div>
+      <div class="kpi"><div class="v" id="k_high">â€“</div><div class="l">High-Risk Controls</div></div>
+      <div class="kpi"><div class="v" id="k_medium">â€“</div><div class="l">Medium-Risk Controls</div></div>
+      <div class="kpi"><div class="v" id="k_low">â€“</div><div class="l">Low-Risk Controls</div></div>
+    </div>
+    <div class="muted" id="execNotes" style="margin-top:8px"></div>
+    <div class="row" style="margin-top:10px">
+      <button class="btn" id="btnExportExec">Export Executive HTML Summary</button>
+      <span class="hint">Generates a concise, shareable executive report.</span>
+    </div>
+    <div id="topHigh" style="margin-top:12px">
+      <div class="hint" style="margin-bottom:6px">Top 5 High-Risk Controls</div>
+      <div id="topHighList" class="row" style="align-items:stretch"></div>
+    </div>
+  </div>
+  <div class="card" id="proReport" style="display:none">
+    <h3>Professional Report (Pro)</h3>
+    <div class="hint">Optionally edit the executive summary before generating the Pro PDF.</div>
+    <div class="row" style="margin-top:6px; gap:8px">
+      <input id="orgName" class="input" placeholder="Organization name" style="min-width:220px"/>
+      <input id="auditorName" class="input" placeholder="Assessor/Auditor name" style="min-width:220px"/>
+    </div>
+    <textarea id="execEdit" class="input" placeholder="Executive summary (optional)" style="width:100%;height:100px;margin-top:8px"></textarea>
+    <textarea id="aiInsights" class="input" placeholder="AI Insights (optional, one per line)" style="width:100%;height:70px;margin-top:8px"></textarea>
+    <div class="row" style="margin-top:8px">
+      <button class="btn" id="btnDraftExec">Draft Summary</button>
+      <button class="btn" id="btnAISummarize">Summarize via AI</button>
+      <button class="btn" id="btnProPdf">Download Pro PDF</button>
+      <button class="btn" id="btnProPdfAdvanced">Advanced Pro (TitanAI)</button>
+    </div>
+  </div>
+
+  <div class="card" id="evidenceCard" style="display:block">
+    <h3>Evidence Upload</h3>
+    <div class="hint">Associate documents/screenshots/logs to a specific control.</div>
+    <div class="row" style="margin-top:6px; gap:8px">
+      <input id="evControl" class="input" placeholder="Control ID (e.g., A.9.2, CC6.6)" style="min-width:180px"/>
+      <input id="evDesc" class="input" placeholder="Description (optional)" style="min-width:280px"/>
+      <input id="evActor" class="input" placeholder="Your email (optional for audit)" style="min-width:240px"/>
+      <input id="evFile" type="file" class="input"/>
+      <button class="btn" id="btnEvUpload">Upload</button>
+    </div>
+    <div id="evStatus" class="muted" style="margin-top:8px"></div>
+  </div>
+
+  <div class="card">
+    <div class="row">
+      <select id="framework" class="input" title="Assessment framework"></select>
+      <input id="files" type="file" class="input" multiple accept=".pdf,.txt,.md,.log,.json"/>
+      <select id="modeSel" class="input" title="Local runs now in the API; External sends a job to your configured webhook. Background simulates a long-run locally.">
+        <option value="local">Local</option>
+        <option value="external">External</option>
+      </select>
+      <label class="hint"><input type="checkbox" id="bgChk"/> Background</label>
+      <button class="btn" id="btnRun">Run Assessment</button>
+      <button class="btn" id="btnRefresh" style="display:none">Refresh Job</button>
+      <input id="filterText" class="input" placeholder="Filter controls..." style="min-width:200px"/>
+      <select id="filterRisk" class="input">
+        <option value="">All risks</option>
+        <option>High</option>
+        <option>Medium</option>
+        <option>Low</option>
+      </select>
+      <button class="btn" id="btnExport">Export CSV</button>
+      <span class="hint">Accepts PDF or text files. Uses local/dev x-api-key.</span>
+    </div>
+  </div>
+
+  <div class="grid-2">
+    <div class="card" id="fwOverview">
+      <h3>Framework Overview</h3>
+      <div class="hint" style="margin:6px 0 10px">Decision-support view. Not a full GRC catalog. Local assessments support ISO/IEC 27001; others shown for context.</div>
+      <div id="fwCards" class="kpis"></div>
+    </div>
+    <div class="card" id="signals">
+      <h3>Signals Snapshot</h3>
+      <div class="kpis">
+        <div class="kpi"><div class="v" id="s_incidents">â€“</div><div class="l">Incidents (7d)</div></div>
+        <div class="kpi"><div class="v" id="s_alerts">â€“</div><div class="l">Alerts (24h)</div></div>
+        <div class="kpi"><div class="v" id="s_detectors">â€“</div><div class="l">Active Detectors</div></div>
+        <div class="kpi"><div class="v" id="s_sbom">â€“</div><div class="l">Open SBOM Vulns</div></div>
+      </div>
+      <div class="hint" style="margin-top:8px">Derived from platform metrics; helps prioritize remediation, not a compliance attestation.</div>
+    </div>
+  </div>
+
+  <div class="card" id="remediationCard" style="display:none">
+    <h3>Remediation Tracker</h3>
+    <div class="hint">Track remediation plans for high-risk control gaps.</div>
+    <div class="row" style="margin-top:6px; gap:8px">
+      <input id="remControl" class="input" placeholder="Control ID (e.g., A.9.2)" style="min-width:180px"/>
+      <input id="remAssignee" class="input" placeholder="Assigned to" style="min-width:140px"/>
+      <input id="remDue" class="input" placeholder="Due date (YYYY-MM-DD)" style="min-width:150px"/>
+    </div>
+    <textarea id="remPlan" class="input" placeholder="Remediation plan" style="width:100%;height:70px;margin-top:8px"></textarea>
+    <div class="row" style="margin-top:8px">
+      <button class="btn" id="btnRemCreate">Create Remediation</button>
+      <button class="btn" id="btnRemReload">Reload</button>
+    </div>
+    <div id="remTable" style="margin-top:8px"></div>
+  </div>
+
+  <div class="card" id="summary" style="display:none"></div>
+  <div class="card" id="links" style="display:none"></div>
+  <div class="card" id="job" style="display:none"><h3>Job Status</h3><div id="jobStatus">Idle</div></div>
+  <div class="card" id="heatmap" style="display:none"><h3>Risk Heatmap (by Domain)</h3><div id="heat"></div></div>
+  <div class="card">
+    <h3>Controls</h3>
+    <table><thead><tr><th>Control</th><th>Title</th><th>Score</th><th>Risk</th><th>Domain</th><th>Supporting</th></tr></thead>
+    <tbody id="tbl"></tbody></table>
+  </div>
+</div>
+<script>
+function safeNotify(msg, level){ try{ if(window.showNotification) return window.showNotification(msg, level); if(window.notifications && typeof window.notifications.showToast === 'function') return window.notifications.showToast(msg, 4000); console.log('[notify]', level||'info', msg); }catch(e){ console.log('notify-fail', e, msg); } }
+function H(){ try{ const k=localStorage.getItem('apiKey')||'devkey123'; return {'x-api-key':k}; }catch(_){return {'x-api-key':'devkey123'} } }
+async function loadPosture(){
+  try{
+    const r = await fetch('/api/v1/compliance/posture', { headers: { ...H() } });
+    if(!r.ok) return;
+    const j = await r.json();
+    const pc = document.getElementById('postureCard');
+    const pb = document.getElementById('postureBadge');
+    if(!pc||!pb) return;
+    const sev = (j.severity||{}); const hi = (sev.high||0)+(sev.critical||0);
+    pb.textContent = `Cloud Posture â€¢ total ${j.total||0} â€¢ hi/crit ${hi}`;
+    pc.style.display = '';
+  }catch(e){}
+}
+// Populate framework selector from API (fallback to ISO27001)
+async function loadFrameworks(){
+  const sel = document.getElementById('framework');
+  function setDefault(){ sel.innerHTML = '<option value="ISO27001" selected>ISO/IEC 27001:2022</option>'; }
+  try{
+    const r = await fetch('/api/v1/compliance/frameworks', { headers: H() });
+    let j = {}; try{ j = await r.json(); }catch(_){ }
+    const arr = Array.isArray(j.frameworks)? j.frameworks : [];
+    if(!arr.length){ setDefault(); return; }
+    sel.innerHTML = '';
+    arr.forEach(fw => {
+      const opt = document.createElement('option');
+      opt.value = String(fw);
+      opt.textContent = String(fw).toUpperCase();
+      sel.appendChild(opt);
+    });
+    const prefers = ['ISO27001','ISO_27001','ISO/IEC 27001'];
+    const found = prefers.find(p => arr.includes(p));
+    if(found) sel.value = found;
+  }catch(e){ setDefault(); }
+}
+// TitanAI framework metadata (lightweight, for overview only)
+const COMPLIANCE_FRAMEWORKS = {
+  ISO_27001: { name: 'ISO/IEC 27001:2022', total_controls: 93 },
+  SOC_2: { name: 'SOC 2 Type II', total_controls: 64 },
+  ESSENTIAL_8: { name: 'Australian Essential Eight', total_controls: 8 },
+  NIST_CSF: { name: 'NIST Cybersecurity Framework', total_controls: 108 },
+  PCI_DSS: { name: 'PCI DSS v4.0', total_controls: 264 }
+};
+function renderFrameworkOverview(){
+  const el = document.getElementById('fwCards');
+  if(!el) return;
+  el.innerHTML = '';
+  const order = ['ISO_27001','SOC_2','ESSENTIAL_8','NIST_CSF','PCI_DSS'];
+  order.forEach(k=>{
+    const f = COMPLIANCE_FRAMEWORKS[k]; if(!f) return;
+    const div = document.createElement('div');
+    div.className = 'kpi';
+    const supported = (k==='ISO_27001');
+    div.innerHTML = `<div class=\"v\">${f.total_controls}</div><div class=\"l\">${f.name}${supported? '':' Â· preview'}</div>`;
+    el.appendChild(div);
+  });
+}
+
+async function loadSignals(){
+  try{
+    const headers = { ...H() };
+    // Dashboard metrics/status endpoints
+    const [mRes, sRes] = await Promise.all([
+      fetch('/api/v1/dashboard/metrics', { headers }),
+      fetch('/api/v1/dashboard/status', { headers })
+    ]);
+    let m = {}; try{ m = await mRes.json(); }catch(_){ }
+    let s = {}; try{ s = await sRes.json(); }catch(_){ }
+    // Best-effort extraction with safe fallbacks
+    const incidents7d = (m.incidents_last_7d || m.incidents7d || m.incidents || 0);
+    const alerts24h = (m.alerts_last_24h || m.alerts24h || m.alerts || 0);
+    const detectors = (m.active_detectors || m.rules_active || s.active_detectors || 0);
+    const sbomOpen = (m.sbom_open_vulns || m.vulns_open || 0);
+    document.getElementById('s_incidents').textContent = incidents7d;
+    document.getElementById('s_alerts').textContent = alerts24h;
+    document.getElementById('s_detectors').textContent = detectors;
+    document.getElementById('s_sbom').textContent = sbomOpen;
+  }catch(e){ /* non-fatal for page */ }
+}
+
+async function assess(){
+  const fw = document.getElementById('framework').value||'ISO27001';
+  const inp = document.getElementById('files');
+  if(!inp.files.length){ safeNotify('Select at least one file','error'); return; }
+  const mode = document.getElementById('modeSel').value;
+  const fd = new FormData();
+  for(const f of inp.files) fd.append('files', f);
+  const bg = document.getElementById('bgChk').checked;
+  const url = '/api/v1/compliance/assess/files?framework='+encodeURIComponent(fw)+'&external='+(mode==='external')+'&background='+bg;
+  const r = await fetch(url,{ method:'POST', headers: H(), body: fd });
+  const j = await r.json();
+  if(!r.ok){ safeNotify('Assess failed: '+(j.detail||j.error||r.status),'error'); return; }
+  // External queued job path
+  if(r.status === 202 && j.job_id){
+    window.__CMP_JOB = j.job_id;
+    document.getElementById('job').style.display='block';
+    document.getElementById('btnRefresh').style.display='inline-block';
+    document.getElementById('jobStatus').textContent = 'Queued ('+j.job_id+')';
+    // auto-refresh status for a short period
+    try{ if(window.__CMP_TIMER) clearInterval(window.__CMP_TIMER); }catch(_){ }
+    window.__CMP_TIMER = setInterval(refreshJob, 5000);
+    return;
+  }
+  const aid = j.assessment_id;
+  const sum = document.getElementById('summary');
+  sum.style.display='block';
+  sum.innerHTML = `<div>Assessment ID: <b>${aid}</b></div>
+                   <div>Framework: ${j.framework}</div>
+                   <div>Overall Score: <b>${j.overall_score}</b></div>
+                   <div>Risk Matrix: ${JSON.stringify(j.risk_matrix)}</div>`;
+  const ln = document.getElementById('links');
+  ln.style.display='block';
+  ln.innerHTML = `<a class="btn" target="_blank" href="/api/v1/compliance/report?assessment_id=${aid}&format=html">Open HTML Report</a>
+                  <a class="btn" target="_blank" href="/api/v1/compliance/report?assessment_id=${aid}&format=pdf">Download PDF</a>
+                  <a class="btn" target="_blank" href="/api/v1/compliance/graphml?assessment_id=${aid}">Export GraphML</a>`;
+  const tb = document.getElementById('tbl');
+  tb.innerHTML = '';
+  window.__CMP_LAST = j; // store for filters/export
+  (j.control_results||[]).forEach(c => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${c.control_id}</td><td>${c.title||''}</td><td>${c.score}</td><td>${c.risk_tier}</td><td>${c.domain}</td><td>${c.supporting_count}</td>`;
+    tb.appendChild(tr);
+  });
+  // Executive snapshot from results
+  try{
+    const ex = document.getElementById('executive');
+    const counts = {High:0,Medium:0,Low:0};
+    let sum=0, n=0;
+    (j.control_results||[]).forEach(c=>{ counts[c.risk_tier]= (counts[c.risk_tier]||0)+1; if(typeof c.score==='number'){ sum+=c.score; n++; } });
+    const overall = (typeof j.overall_score==='number')? j.overall_score : (n? Math.round((sum/n)*10)/10 : 'â€“');
+    document.getElementById('k_overall').textContent = overall;
+    document.getElementById('k_high').textContent = counts.High||0;
+    document.getElementById('k_medium').textContent = counts.Medium||0;
+    document.getElementById('k_low').textContent = counts.Low||0;
+    // brief narrative
+    const note = [];
+    if((counts.High||0)>0){ note.push(`${counts.High} high-risk controls need attention`); }
+    if((counts.Medium||0)>0){ note.push(`${counts.Medium} medium-risk controls planned`); }
+    document.getElementById('execNotes').textContent = note.join(' • ') || 'Assessment completed.';\n    try { document.getElementById('proReport').style.display='block'; } catch (_) {}
+    ex.style.display='block';
+    // Top 5 High-Risk Controls
+    const high = (j.control_results||[]).filter(c=>c.risk_tier==='High');
+    high.sort((a,b)=> (b.score||0) - (a.score||0));
+    const top5 = high.slice(0,5);
+    const listEl = document.getElementById('topHighList');
+    if(listEl){
+      listEl.innerHTML = '';
+      top5.forEach(c => {
+        const item = document.createElement('div');
+        item.className = 'kpi';
+        item.style.minWidth = '220px';
+        const cid = c.control_id;
+        const title = (c.title||'').slice(0,60);
+        const score = c.score;
+        item.innerHTML = `<div class=\"v\" style=\"font-size:18px\">${cid}</div>
+                          <div class=\"l\">${title}</div>
+                          <div class=\"l\" style=\"margin-top:6px\">Score: ${score}</div>
+                          <div style=\"margin-top:8px\"><button class=\"btn\" data-attach=\"${cid}\">Attach Evidence</button></div>`;
+        listEl.appendChild(item);
+      });
+      // Wire attach buttons
+      listEl.querySelectorAll('button[data-attach]').forEach(btn=>{
+        btn.onclick = ()=>{
+          const cid = btn.getAttribute('data-attach');
+          openEvidenceFor(cid);
+        };
+      });
+    }
+  }catch(_){ }
+  renderHeatmap(j.control_results||[]);
+}
+
+async function refreshJob(){
+  const job = window.__CMP_JOB; if(!job) return;
+  const r = await fetch('/api/v1/compliance/job/'+encodeURIComponent(job), { headers: H() });
+  const j = await r.json();
+  if(!r.ok){ safeNotify('Job fetch failed: '+(j.detail||j.error||r.status),'error'); return; }
+  const st = document.getElementById('jobStatus');
+  st.textContent = 'Status: '+j.status+(j.assessment_id?(' (assessment '+j.assessment_id+')'):'');
+  if(j.status === 'completed' && j.assessment_id){
+    // fetch report JSON via report html? Simpler: load report HTML link and controls from cache endpoint is not present; rely on links to reports
+    document.getElementById('links').style.display='block';
+    document.getElementById('links').innerHTML = `<a class="btn" target="_blank" href="/api/v1/compliance/report?assessment_id=${j.assessment_id}&format=html">Open HTML Report</a>
+                   <a class=\"btn\" target=\"_blank\" href=\"/api/v1/compliance/report?assessment_id=${j.assessment_id}&format=pdf\">Download PDF</a>
+                   <a class=\"btn\" target=\"_blank\" href=\"/api/v1/compliance/graphml?assessment_id=${j.assessment_id}\">Export GraphML</a>`;
+    try{ if(window.__CMP_TIMER) clearInterval(window.__CMP_TIMER);}catch(_){ }
+  }
+}
+
+function renderHeatmap(items){
+  const heat = document.getElementById('heat');
+  const card = document.getElementById('heatmap');
+  const map = {};
+  items.forEach(c => {
+    const k = c.domain||'General';
+    const r = c.risk_tier||'Unknown';
+    map[k] = map[k]||{High:0,Medium:0,Low:0};
+    if(r in map[k]) map[k][r]++;
+  });
+  const rows = Object.entries(map).map(([d,v])=>`<tr><td>${d}</td><td>${v.High}</td><td>${v.Medium}</td><td>${v.Low}</td></tr>`).join('');
+  heat.innerHTML = `<table><thead><tr><th>Domain</th><th>High</th><th>Medium</th><th>Low</th></tr></thead><tbody>${rows||'<tr><td colspan=4>n/a</td></tr>'}</tbody></table>`;
+  card.style.display='block';
+}
+function applyFilters(){
+  const j = window.__CMP_LAST||{};
+  const txt = (document.getElementById('filterText').value||'').toLowerCase();
+  const risk = document.getElementById('filterRisk').value;
+  const tb = document.getElementById('tbl');
+  tb.innerHTML='';
+  const items=(j.control_results||[]).filter(c=>{
+    const okRisk = !risk || c.risk_tier===risk;
+    const okTxt = !txt || [c.control_id,c.title,c.domain].some(x=>String(x||'').toLowerCase().includes(txt));
+    return okRisk && okTxt;
+  });
+  items.forEach(c=>{ const tr=document.createElement('tr'); tr.innerHTML=`<td>${c.control_id}</td><td>${c.title||''}</td><td>${c.score}</td><td>${c.risk_tier}</td><td>${c.domain}</td><td>${c.supporting_count}</td>`; tb.appendChild(tr); });
+  renderHeatmap(items);
+}
+function exportCSV(){
+  const j = window.__CMP_LAST||{};
+  const items = j.control_results||[];
+  let csv='control_id,title,score,risk_tier,domain,supporting_count\n';
+  items.forEach(c=>{ csv += `${c.control_id},"${(c.title||'').replaceAll('"','""')}",${c.score},${c.risk_tier},${c.domain},${c.supporting_count}\n`; });
+  const blob = new Blob([csv], {type:'text/csv'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download='compliance_controls.csv'; a.click(); URL.revokeObjectURL(a.href);
+}
+document.getElementById('btnRun').onclick = assess;
+document.getElementById('btnRefresh').onclick = refreshJob;
+document.getElementById('filterText').oninput = applyFilters;
+document.getElementById('filterRisk').onchange = applyFilters;
+  document.getElementById('btnExport').onclick = exportCSV;
+  document.getElementById('btnProPdf').onclick = downloadProPdf;
+  document.getElementById('btnDraftExec').onclick = draftExec;
+  const _btnProAdv = document.getElementById('btnProPdfAdvanced');
+  if(_btnProAdv){ _btnProAdv.onclick = async ()=>{
+    try{
+      const aid = (window.__CMP_LAST && window.__CMP_LAST.assessment_id) || window.__CMP_AID;
+      if(!aid){ safeNotify('No assessment to export','error'); return; }
+      const docs = [];
+      // Minimal document: embed the executive summary
+      const execText = document.getElementById('execEdit').value||'';
+      if(execText) docs.push({ filename: 'executive.txt', text: execText });
+      const body = {
+        framework: (window.__CMP_LAST && window.__CMP_LAST.framework) || (document.getElementById('framework').value||'ISO27001'),
+        organization: document.getElementById('orgName').value||undefined,
+        assessor: document.getElementById('auditorName').value||undefined,
+        documents: docs.length? docs : [{ filename: 'placeholder.txt', text: 'Assessment context placeholder' }],
+        organization_context: {}
+      };
+      const r = await fetch('/api/v1/compliance/report/titanai/advanced', { method:'POST', headers: { ...H(), 'Content-Type':'application/json' }, body: JSON.stringify(body) });
+      if(!r.ok){ const t = await r.text(); safeNotify('Advanced Pro is unavailable: '+t,'warn'); return; }
+      const blob = await r.blob(); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download='janusec_advanced_pro_report.pdf'; a.click(); URL.revokeObjectURL(a.href);
+    }catch(e){ safeNotify('Advanced Pro error: '+(e.message||e),'error'); }
+  }; }
+  const _btnAISum = document.getElementById('btnAISummarize');
+  if(_btnAISum){ _btnAISum.onclick = async ()=>{
+    try{
+      // Build a source text: use current exec summary if present; otherwise draft from top risks
+      let src = (document.getElementById('execEdit').value||'').trim();
+      if(!src){
+        const j = window.__CMP_LAST||{}; const high = (j.control_results||[]).filter(c=>c.risk_tier==='High').slice(0,10);
+        src = 'Summarize high-risk control gaps and actions:\n'+high.map(c=>`${c.control_id} ${c.title||''} score=${c.score}`).join('\n');
+      }
+      const r = await fetch('/api/v1/compliance/summarize', { method:'POST', headers: { ...H(), 'Content-Type':'application/json' }, body: JSON.stringify({ text: src }) });
+      const j = await r.json();
+      if(!r.ok){ safeNotify('AI summarize failed: '+(j.detail||r.status),'error'); return; }
+      const out = (j.summary||'').trim();
+      if(out) document.getElementById('execEdit').value = out;
+      if(Array.isArray(j.labels) && j.labels.length){ document.getElementById('aiInsights').value = j.labels.join('\n'); }
+    }catch(e){ safeNotify('AI summarize error: '+(e.message||e),'error'); }
+  }; }
+// Export concise executive HTML summary
+function generateExecutiveSummaryHTML(){
+  const j = window.__CMP_LAST||{};
+  const results = j.control_results||[];
+  const counts = results.reduce((acc,c)=>{ const r=c.risk_tier||'Unknown'; acc[r]=(acc[r]||0)+1; return acc; },{});
+  const high = results.filter(c=>c.risk_tier==='High').sort((a,b)=> (b.score||0)-(a.score||0)).slice(0,5);
+  const orgScore = (typeof j.overall_score==='number')? j.overall_score : '';
+  const fw = j.framework || (document.getElementById('framework').value||'ISO27001');
+  const rows = high.map(c=>`<tr><td>${c.control_id}</td><td>${(c.title||'').replace(/</g,'&lt;')}</td><td>${c.score}</td></tr>`).join('');
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Executive Summary</title>
+  <style>body{background:#0B0E14;color:#E8EBF0;font-family:Segoe UI,Inter,sans-serif;padding:16px} .muted{color:#A8B2C3}
+  table{border-collapse:collapse;width:100%;margin-top:10px} th,td{border:1px solid #2A3142;padding:6px 8px;font-size:12px}
+  .k{display:inline-block;margin-right:10px;padding:4px 8px;border:1px solid #2A3142;border-radius:999px;background:#151922}</style></head>
+  <body>
+   <h2>Executive Summary</h2>
+   <div class="muted">Framework: ${fw}</div>
+   <div style="margin-top:8px">
+     <span class="k">Overall Score: <b>${orgScore!==''?orgScore:'n/a'}</b></span>
+     <span class="k">High: <b>${counts.High||0}</b></span>
+     <span class="k">Medium: <b>${counts.Medium||0}</b></span>
+     <span class="k">Low: <b>${counts.Low||0}</b></span>
+   </div>
+   <h3 style="margin-top:16px">Top 5 High-Risk Controls</h3>
+   <table><thead><tr><th>Control</th><th>Title</th><th>Score</th></tr></thead><tbody>${rows||'<tr><td colspan="3">No high-risk controls</td></tr>'}</tbody></table>
+   <div class="muted" style="margin-top:12px">Generated from JanuSec assessment results. Decision support only; not a GRC attestation.</div>
+    <script src="/static/js/notifications.js"></script>
+</body></html>`;
+}
+const _btnExportExec = document.getElementById('btnExportExec');
+if(_btnExportExec){
+  _btnExportExec.onclick = ()=>{
+    try{
+      const html = generateExecutiveSummaryHTML();
+      const blob = new Blob([html], {type:'text/html'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = 'executive_summary.html'; a.click();
+      URL.revokeObjectURL(url);
+    }catch(e){ safeNotify('Failed to export summary','error'); }
+  };
+}
+// Initial renders
+renderFrameworkOverview();
+loadSignals();
+loadFrameworks();
+loadPosture();
+// Crossmap view
+async function loadCrossmap(){
+  try{
+    const r = await fetch('/api/v1/compliance/crossmap', { headers: H() });
+    if(!r.ok) return;
+    const j = await r.json();
+    const tbl = document.getElementById('crossmapTable');
+    const fmw = j.frameworks||[];
+    const rows = Object.entries(j.crossmap||{}).map(([cat,mp])=>{
+      const cells = fmw.map(f=> (mp[f]||[]).join('<br>') || '-').join('</td><td>');
+      return `<tr><td>${cat}</td><td>${cells}</td></tr>`;
+    }).join('');
+    tbl.innerHTML = `<table><thead><tr><th>STRIDE</th>${fmw.map(f=>`<th>${f.toUpperCase()}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table>`;
+    document.getElementById('crossmapCard').style.display = 'block';
+  }catch(e){}
+}
+
+async function downloadProPdf(){
+  try{
+    const aid = (window.__CMP_LAST && window.__CMP_LAST.assessment_id) || window.__CMP_AID;
+    if(!aid){ safeNotify('No assessment to export','error'); return; }
+    const insightsRaw = (document.getElementById('aiInsights').value||'').split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
+    const body = {
+      assessment_id: aid,
+      organization: document.getElementById('orgName').value||undefined,
+      auditor: document.getElementById('auditorName').value||undefined,
+      executive_summary: document.getElementById('execEdit').value||undefined,
+      ai_insights: insightsRaw.length? insightsRaw : undefined
+    };
+    const r = await fetch('/api/v1/compliance/report/titanai', { method:'POST', headers: { ...H(), 'Content-Type':'application/json' }, body: JSON.stringify(body) });
+    if(!r.ok){ const t = await r.text(); safeNotify('Pro PDF failed: '+t,'error'); return; }
+    const blob = await r.blob();
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'janusec_pro_report.pdf'; a.click(); URL.revokeObjectURL(a.href);
+  }catch(e){ safeNotify('Pro PDF error: '+(e.message||e),'error'); }
+}
+
+function draftExec(){
+  try{
+    const j = window.__CMP_LAST||{};
+    const counts = {High:0,Medium:0,Low:0};
+    (j.control_results||[]).forEach(c=>{ counts[c.risk_tier]= (counts[c.risk_tier]||0)+1; });
+    const s = (typeof j.overall_score==='number')? j.overall_score : 'n/a';
+    const high = (j.control_results||[]).filter(c=>c.risk_tier==='High').slice(0,5).map(c=>`${c.control_id} ${c.title||''}`);
+    const lines = [];
+    lines.push(`This assessment evaluates ${j.framework||'ISO27001'} controls using uploaded evidence.`);
+    lines.push(`Overall score: ${s}. High=${counts.High||0}, Medium=${counts.Medium||0}, Low=${counts.Low||0}.`);
+    if(high.length){ lines.push('Top high‑risk controls:'); high.forEach(t=>lines.push(`- ${t}`)); }
+    lines.push('Recommendations: prioritize remediation of high‑risk gaps and enhance evidence coverage for partial controls.');
+    document.getElementById('execEdit').value = lines.join('\n');
+  }catch(_){ document.getElementById('execEdit').value = 'Executive summary draft unavailable.'; }
+}
+loadCrossmap();
+// EU AI Act readiness tiles
+async function loadEUAct(){
+  try{
+    const h = H();
+    const [r9,r10] = await Promise.all([
+      fetch('/api/v1/compliance/eu-ai-act/article-9', { headers: h }),
+      fetch('/api/v1/compliance/eu-ai-act/article-10', { headers: h })
+    ]);
+    if(!r9.ok || !r10.ok) return;
+    const j9 = await r9.json();
+    const j10 = await r10.json();
+    // Article 9
+    const rep9 = (j9.report||{});
+    const overdue = Number(rep9.overdue_reviews||0);
+    const high = Number(rep9.high_risks||0);
+    document.getElementById('eu9_overdue').textContent = overdue;
+    document.getElementById('eu9_high').textContent = high;
+    // Article 10
+    const rep10 = (j10.report||{});
+    const rate = Number(rep10.compliance_rate||0);
+    const piiRate = Number(rep10.pii_anonymization_rate||0);
+    document.getElementById('eu10_rate').textContent = Math.round(rate*100)+'%';
+    document.getElementById('eu10_pii').textContent = Math.round(piiRate*100)+'%';
+    document.getElementById('euAct').style.display='block';
+  }catch(e){ /* non-fatal */ }
+}
+loadEUAct();
+
+// Evidence upload wiring
+async function uploadEvidence(controlId, file, description, actor){
+  try{
+    if(!controlId){ safeNotify('Control ID required','error'); return; }
+    if(!file){ safeNotify('Select a file','error'); return; }
+    const fd = new FormData();
+    fd.append('control_id', controlId);
+    if(description) fd.append('description', description);
+    fd.append('file', file);
+    const headers = H(); // x-api-key
+    // Add actor header if provided
+    const hdrs = { 'x-api-key': headers['x-api-key'] };
+    if(actor) hdrs['X-Actor'] = actor;
+    const r = await fetch('/api/v1/compliance/evidence/upload', { method:'POST', headers: hdrs, body: fd });
+    const j = await r.json();
+    if(!r.ok){ safeNotify('Evidence upload failed: '+(j.detail||r.status),'error'); return; }
+    document.getElementById('evStatus').textContent = 'Uploaded evidence id '+(j.evidence && j.evidence.id ? j.evidence.id : '');
+    safeNotify('Evidence uploaded','success');
+  }catch(e){ safeNotify('Upload error: '+(e.message||e),'error'); }
+}
+const _btnEv = document.getElementById('btnEvUpload');
+if(_btnEv){ _btnEv.onclick = ()=>{
+  const cid = document.getElementById('evControl').value||'';
+  const desc = document.getElementById('evDesc').value||'';
+  const actor = document.getElementById('evActor').value||'';
+  const f = document.getElementById('evFile').files[0];
+  uploadEvidence(cid, f, desc, actor);
+}; }
+
+// Helper to prefill evidence form for a control and prompt file selection
+function openEvidenceFor(controlId){
+  try{
+    document.getElementById('evControl').value = controlId || '';
+    document.getElementById('evidenceCard').scrollIntoView({behavior:'smooth'});
+    const input = document.getElementById('evFile');
+    input.click();
+  }catch(_){ }
+}
+
+// Remediation UI
+async function loadRemediations(){
+  try{
+    const r = await fetch('/api/v1/compliance/remediation/list', { headers: H() });
+    if(!r.ok) return;
+    const j = await r.json();
+    const rows = (j.items||[]).map(it=>{
+      const due = it.due_date? String(it.due_date).slice(0,10) : '';
+      return `<tr><td>${it.control_id}</td><td>${(it.remediation_plan||'').slice(0,80)}</td><td>${it.assigned_to||''}</td><td>${due}</td><td>${it.status||''}</td><td><button class='btn' data-rem='${it.id}' data-act='complete'>Mark Complete</button></td></tr>`;
+    }).join('');
+    const html = `<table><thead><tr><th>Control</th><th>Plan</th><th>Owner</th><th>Due</th><th>Status</th><th>Action</th></tr></thead><tbody>${rows||'<tr><td colspan=6>None</td></tr>'}</tbody></table>`;
+    const el = document.getElementById('remTable'); el.innerHTML = html;
+    el.querySelectorAll('button[data-rem]').forEach(btn=>{
+      btn.onclick = async ()=>{
+        const id = btn.getAttribute('data-rem');
+        const r2 = await fetch(`/api/v1/compliance/remediation/${id}/status`, { method:'PATCH', headers:{...H(), 'Content-Type':'application/json'}, body: JSON.stringify({ status:'completed' }) });
+        if(!r2.ok){ const t = await r2.text(); safeNotify('Update failed: '+t,'error'); return; }
+        await loadRemediations();
+      };
+    });
+    document.getElementById('remediationCard').style.display='block';
+  }catch(e){}
+}
+const _btnRemCreate = document.getElementById('btnRemCreate');
+if(_btnRemCreate){ _btnRemCreate.onclick = async ()=>{
+  try{
+    const aid = (window.__CMP_LAST && window.__CMP_LAST.assessment_id) || window.__CMP_AID;
+    const body = {
+      assessment_id: aid,
+      control_id: document.getElementById('remControl').value||'',
+      remediation_plan: document.getElementById('remPlan').value||'',
+      assigned_to: document.getElementById('remAssignee').value||'',
+      due_date: document.getElementById('remDue').value||''
+    };
+    const r = await fetch('/api/v1/compliance/remediation/create', { method:'POST', headers:{...H(), 'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    if(!r.ok){ const t = await r.text(); safeNotify('Create remediation failed: '+t,'error'); return; }
+    await loadRemediations();
+  }catch(e){ safeNotify('Create remediation error','error'); }
+}; }
+const _btnRemReload = document.getElementById('btnRemReload');
+if(_btnRemReload){ _btnRemReload.onclick = loadRemediations; }
+loadRemediations();
+</script>
+  <script src="/static/js/notifications.js"></script>
+</body></html>
+// Bias card
+async function loadBias(){
+  try{
+    const sel = document.getElementById('biasAttr');
+    const inc = document.getElementById('biasInclSusp').checked;
+    const attr = sel && sel.value || 'tenant_id';
+    const winSel = document.getElementById('biasWindow');
+    const win = winSel && winSel.value ? ('&window_seconds='+encodeURIComponent(winSel.value)) : '';
+    const url = '/api/v1/compliance/bias/report?attr='+encodeURIComponent(attr)+'&include_suspicious='+(inc?'1':'0')+win;
+    const r = await fetch(url, { headers: H() });
+    if(!r.ok) return;
+    const j = await r.json();
+    document.getElementById('biasDir').textContent = (j.dir!=null)? j.dir : 'â€“';
+    document.getElementById('biasEod').textContent = (j.eod!=null)? j.eod : 'â€“';
+    document.getElementById('biasGroups').textContent = (j.groups||[]).length;
+    document.getElementById('biasFlag').textContent = j.flagged? 'Yes' : 'No';
+    const rows = (j.groups||[]).map(g=>`<tr><td>${g.group}</td><td>${g.count}</td><td>${g.positive}</td><td>${g.positive_rate}</td></tr>`).join('');
+    document.getElementById('biasTable').innerHTML = `<table><thead><tr><th>Group</th><th>Total</th><th>Positive</th><th>Rate</th></tr></thead><tbody>${rows}</tbody></table>`;
+    document.getElementById('biasCard').style.display = 'block';
+  }catch(e){}
+}
+document.getElementById('biasReload').onclick = loadBias;
+loadBias();
+// AI Incident Plan
+async function generateAIPlan(){
+  try{
+    const r = await fetch('/api/v1/compliance/ai-incident-plan', { method:'POST', headers: H() });
+    if(!r.ok) return;
+    const j = await r.json();
+    const plan = j.plan||{};
+    const sum = document.getElementById('aiPlanSummary');
+    const roles = (plan.roles||[]).map(x=>x.role+': '+x.owner).join(', ');
+    const trig = (plan.triggers||[]).slice(0,3).join('; ');
+    sum.innerHTML = `Version: <b>${plan.version||''}</b><br/>Roles: ${roles}<br/>Top Triggers: ${trig}`;
+    // Prepare download
+    try{
+      const blob = new Blob([JSON.stringify(plan,null,2)], {type:'application/json'});
+      const url = URL.createObjectURL(blob);
+      const a = document.getElementById('btnDownloadAIPlan');
+      a.href = url; a.style.display='inline-block';
+    }catch(_){ }
+    document.getElementById('aiPlanCard').style.display='block';
+  }catch(e){ }
+}
+document.getElementById('btnGenAIPlan').onclick = generateAIPlan;
+document.getElementById('aiPlanCard').style.display='block';
+// Metrics validation
+async function loadMetricsValidation(){
+  try{
+    const r = await fetch('/api/v1/compliance/metrics/validate', { headers: H() });
+    if(!r.ok) return;
+    const j = await r.json();
+    // Inject a small card if registry exists
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.innerHTML = `<h3>Metric Consistency</h3><div class="kpis"><div class="kpi"><div class="v">${j.registry_ok? 'OK':'N/A'}</div><div class="l">Registry</div></div><div class="kpi"><div class="v">${j.decision_cache_size}</div><div class="l">Decision Cache</div></div><div class="kpi"><div class="v">${j.metrics_scrape_bytes}</div><div class="l">Scrape Bytes</div></div><div class="kpi"><div class="v">${j.ok? 'PASS':'WARN'}</div><div class="l">Status</div></div></div>`;
+    document.querySelector('.wrap').appendChild(card);
+  }catch(e){}
+}
+loadMetricsValidation();
+

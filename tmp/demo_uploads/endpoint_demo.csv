@@ -1,0 +1,3 @@
+event_id,host,user,process,file_path,sha256,ip,timestamp
+evt-ep-1,host-1,alice,cmd.exe,C:\\Windows\\System32\\cmd.exe,hash-abc123,10.0.0.5,2025-11-12T00:00:00Z
+evt-ep-2,host-2,bob,powershell.exe,C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe,hash-abc123,10.0.0.6,2025-11-12T00:01:00Z

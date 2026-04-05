@@ -1,0 +1,21 @@
+{
+  "status_code": 429,
+  "observed_routes": [
+    "/api/v1/backup/delete",
+    "/api/v1/llm/prompts",
+    "/api/v1/messages/bulk/send",
+    "/api/v1/payouts/bulk",
+    "/api/v1/payouts/create",
+    "/api/v1/registry/packages/edge-app",
+    "/api/v1/registry/packages/pre-release",
+    "/api/v1/runbooks/execute",
+    "/api/v1/users/alpha/",
+    "/api/v1/users/beta",
+    "/api/v9/internal/secret",
+    "/portal/dashboard"
+  ],
+  "response": {
+    "detail": "tenant_rate_limit"
+  },
+  "ok": false
+}

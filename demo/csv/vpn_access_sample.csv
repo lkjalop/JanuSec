@@ -1,0 +1,2 @@
+timestamp,user,src_ip,vpn_endpoint,mfa_used,vpn_version
+2024-11-01T10:00:00Z,alice,198.51.100.10,gateway-1,false,6.0

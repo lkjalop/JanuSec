@@ -1,0 +1,21 @@
+[
+  {
+    "requestTimeEpoch": 1767313551000,
+    "httpMethod": "POST",
+    "path": "/api/v1/payouts/approve",
+    "status": 401,
+    "identity": {
+      "sourceIp": "198.51.100.10",
+      "userAgent": "curl/8.4.0",
+      "user": "alice"
+    },
+    "requestId": "req-123",
+    "responseLength": 512,
+    "integrationLatency": 120,
+    "headers": {
+      "User-Agent": "curl/8.4.0",
+      "Content-Type": "application/json"
+    },
+    "api_gateway": "aws_apigateway"
+  }
+]

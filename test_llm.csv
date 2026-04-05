@@ -1,0 +1,4 @@
+filename,hash,verdict,factors
+malware.exe,abc123,suspicious,lolbin;unsigned_sensitive_path
+chrome.exe,def456,benign,known_good
+powershell.exe,ghi789,malicious,encoded_command;suspicious_parent

@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "templates": [
+    {
+      "name": "scheduled_backup_exfil",
+      "match_factors": ["net:flow_microcluster_exfil"],
+      "conditions": {"hour_range": [0,4], "tag": "backup_job"},
+      "action": "suppress"
+    },
+    {
+      "name": "admin_lateral_tool_whitelist",
+      "match_factors": ["endpoint:lateral_exec_remote_tool"],
+      "conditions": {"user_role": "admin", "tool_whitelist": true},
+      "action": "lower_weight", "delta": -0.4
+    },
+    {
+      "name": "bulk_api_schema_change_release",
+      "match_factors": ["api:schema_drift_high_risk"],
+      "conditions": {"deployment_window": true},
+      "action": "lower_weight", "delta": -0.3
+    }
+  ]
+}

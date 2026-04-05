@@ -1,0 +1,3 @@
+{
+  "verdict": {"summary": "Suspected compromise via DNS-based C2","confidence": 0.85}
+}

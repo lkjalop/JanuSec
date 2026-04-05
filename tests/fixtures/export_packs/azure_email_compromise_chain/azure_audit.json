@@ -1,0 +1,8 @@
+[
+  {
+    "activityDateTime": "2025-03-15T02:31:00Z",
+    "activityDisplayName": "Add member to role",
+    "initiatedBy": { "user": { "userPrincipalName": "alex.mercer@contoso.dev" } },
+    "targetResources": [{ "displayName": "Global Administrator" }]
+  }
+]

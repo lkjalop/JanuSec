@@ -1,0 +1,37 @@
+{
+  "dashboard": {
+    "id": null,
+    "uid": "sultry-overview",
+    "title": "Sultry Overview",
+    "timezone": "browser",
+    "panels": [
+      {
+        "type": "timeseries",
+        "title": "EWMA Intensity",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+        "targets": [
+          {"expr": "sultry_ewma_intensity", "legendFormat": "ewma_intensity"}
+        ]
+      },
+      {
+        "type": "barchart",
+        "title": "Incidents by Domain",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+        "targets": [
+          {"expr": "topk(10, sum by (domain) (increase(sultry_events_total[1h])))", "legendFormat": "{{domain}}"}
+        ]
+      },
+      {
+        "type": "table",
+        "title": "Top Factors (1h)",
+        "gridPos": {"h": 6, "w": 24, "x": 0, "y": 8},
+        "targets": [
+          {"expr": "topk(20, increase(sultry_events_total[1h]))", "legendFormat": "{{factor}}"}
+        ]
+      }
+    ],
+    "schemaVersion": 30,
+    "version": 0
+  },
+  "overwrite": false
+}

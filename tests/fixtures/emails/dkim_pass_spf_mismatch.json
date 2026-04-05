@@ -1,0 +1,13 @@
+{
+  "id": "msg-003",
+  "ts": 1700000200,
+  "from": "ceo@corp.example.com",
+  "to": ["finance@example.com"],
+  "subject": "Quarterly numbers",
+  "body": "Numbers attached. cc: ceo@corp.example.com",
+  "headers": {
+    "DKIM-Signature": "v=1; a=rsa-sha256; d=corp.example.com; s=sel; h=from:subject; bh=abc123; b=...",
+    "Authentication-Results": "mx.corp.example.com; spf=pass smtp.mailfrom=otherdomain.com; dkim=pass header.d=corp.example.com; dmarc=quarantine; dmarc-policy=quarantine"
+  },
+  "return_path": "mail-svc@otherdomain.com"
+}

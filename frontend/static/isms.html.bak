@@ -1,0 +1,63 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>ISMS Evidence</title>
+  <style>
+    body { background: #0f1720; color: #e6eef6; font-family: Arial, sans-serif; }
+    .panel { padding: 16px; border-radius: 8px; background: #0b1220; margin: 12px; }
+    button { padding: 8px 12px; margin-right: 8px; }
+    #evidenceList div { padding:6px; border-bottom:1px solid #1b222c }
+  </style>
+</head>
+<body>
+  <div class="panel">
+    <h2>ISMS Evidence & Report</h2>
+    <div>
+      <button id="refresh">Refresh Counts</button>
+      <button id="download">Download Report (signed)</button>
+      <input id="secret" placeholder="HMAC secret" style="padding:6px;margin-left:8px;" />
+    </div>
+    <div id="counts" style="margin-top:12px">Loading...</div>
+    <div style="margin-top:12px">
+      <h3>Evidence</h3>
+      <div id="evidenceList">Loading...</div>
+    </div>
+    <div style="margin-top:12px">
+      <h3>Upload Evidence File</h3>
+      <input type="file" id="fileInput" /> <input id="summaryInput" placeholder="Summary" /> <button id="uploadBtn">Upload</button>
+    </div>
+  </div>
+  <script>
+    async function refresh(){
+      try{
+        const r = await fetch('/api/v1/isms/evidence', { headers: authHeaders() });
+        const j = await r.json();
+        document.getElementById('counts').innerText = `Evidence count: ${j.count}`;
+        const list = document.getElementById('evidenceList'); list.innerHTML = '';
+        (j.evidence || []).forEach(e=>{ const d=document.createElement('div'); d.textContent = `${e.id} (${e.tenant_id|| (e.manifest && e.manifest.tenant_id) || ''})`; list.appendChild(d); });
+      }catch(e){ document.getElementById('counts').innerText = 'Error'; }
+    }
+    document.getElementById('refresh').addEventListener('click', refresh);
+    document.getElementById('download').addEventListener('click', async ()=>{
+      const secret = document.getElementById('secret').value || '';
+      const url = `/api/v1/isms/report/download${secret?('?hmac_secret='+encodeURIComponent(secret)) : ''}`;
+      const r = await fetch(url, { headers: authHeaders() });
+      if (!r.ok) { alert('download failed'); return; }
+      const blob = await r.blob();
+      const urlb = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = urlb; a.download = 'isms_report.zip'; document.body.appendChild(a); a.click(); a.remove();
+    });
+    document.getElementById('uploadBtn').addEventListener('click', async ()=>{
+      const f = document.getElementById('fileInput').files[0];
+      if(!f) { alert('select file'); return; }
+      const fd = new FormData(); fd.append('file', f); fd.append('summary', document.getElementById('summaryInput').value || '');
+      const r = await fetch('/api/v1/isms/evidence/upload', { method:'POST', headers: authHeaders(), body: fd });
+      if(!r.ok){ alert('upload failed'); return; }
+      refresh();
+    });
+    refresh();
+  </script>
+</body>
+</html>

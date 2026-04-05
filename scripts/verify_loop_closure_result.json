@@ -1,0 +1,53 @@
+{
+  "incidents": [
+    {
+      "url": "http://localhost:8080/api/v1/incidents",
+      "status": 401,
+      "body": {
+        "detail": "unauthorized"
+      }
+    },
+    {
+      "url": "http://localhost:8080/api/v1/test_helpers/create_incident",
+      "status": 200,
+      "body": {
+        "incident": {
+          "id": "inc-1764612631994",
+          "artifact_id": "notepad.exe",
+          "title": "CSV Escalation - Row 0",
+          "severity": "trace",
+          "status": "open",
+          "summary": "Auto-generated incident from CSV Analyzer.",
+          "metadata": {
+            "attack_subgraph": null
+          },
+          "tenant_id": null,
+          "ts": 1764612631.9949815
+        }
+      },
+      "helper": true
+    }
+  ],
+  "sboms": [
+    {
+      "url": "http://localhost:8080/api/v1/sbom/upload",
+      "status": 200,
+      "body": {
+        "sbom_id": "sbom-2",
+        "components": 1,
+        "vulns_found": 0
+      }
+    }
+  ],
+  "domSnapshot": {
+    "found": false,
+    "html": null
+  },
+  "errors": [],
+  "console": [
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+    }
+  ]
+}

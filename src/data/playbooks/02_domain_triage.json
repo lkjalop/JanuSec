@@ -1,0 +1,8 @@
+{
+  "name": "domain_triage",
+  "steps": [
+    {"type": "intel.reputation", "inputs": {"token": "${domain}"}},
+    {"type": "bgp.check", "inputs": {"domain": "${domain}"}},
+    {"type": "notify.teams", "inputs": {"title": "Domain triage done", "text": "${domain}"}}
+  ]
+}

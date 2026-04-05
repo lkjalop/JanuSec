@@ -1,0 +1,50 @@
+name: LLM Mock Tests
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  llm-mock:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: [3.10, 3.11]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ matrix.python }}-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-${{ matrix.python }}-
+      - name: Install dependencies (requirements.txt / pyproject fallback)
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          elif [ -f pyproject.toml ]; then
+            if command -v poetry >/dev/null 2>&1; then
+              poetry install --no-dev
+            else
+              python -m pip install build
+              python -m build --wheel --outdir dist || true
+              python -m pip install dist/*.whl || python -m pip install .
+            fi
+          else
+            echo "No requirements.txt or pyproject.toml found — attempting editable install"
+            python -m pip install -e . || true
+          fi
+      - name: Run LLM tests (mock)
+        env:
+          LLM_MOCK: '1'
+          PLATFORM_LITE_INIT: '1'
+        run: |
+          python -m pytest -q tests/test_llm_prompt.py tests/test_llm_circuit_breaker.py tests/test_llm_enforcement.py tests/test_llm_trip_behavior.py

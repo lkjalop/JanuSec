@@ -1,0 +1,1465 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JanuSec SOC Platform - Live Demo</title>
+    <style>
+        :root {
+            --bg-primary: #0B0E14;
+            --bg-secondary: #151922;
+            --bg-tertiary: #1C2230;
+            --bg-hover: #232834;
+            --accent: #4A63E7;
+            --accent-hover: #5B72F0;
+            --text-primary: #E8EBF0;
+            --text-secondary: #A8B2C3;
+            --text-muted: #6B7789;
+            --border: #2A3142;
+            --critical: #E54D4D;
+            --high: #E67E22;
+            --medium: #F39C12;
+            --low: #3498DB;
+            --safe: #52C41A;
+            --success: #52C41A;
+            --warning: #F39C12;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            overflow: hidden;
+        }
+
+        .app-container {
+            display: grid;
+            grid-template-columns: 240px 1fr 380px;
+            grid-template-rows: 56px 1fr;
+            height: 100vh;
+            transition: grid-template-columns 0.3s ease;
+        }
+
+        .app-container.panel-detached {
+            grid-template-columns: 240px 1fr;
+        }
+
+        /* Header */
+        .header {
+            grid-column: 1 / -1;
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            padding: 0 20px;
+            justify-content: space-between;
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-weight: 600;
+            font-size: 18px;
+        }
+
+        .status-bar {
+            display: flex;
+            gap: 24px;
+            align-items: center;
+        }
+
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+
+        .status-dot.active {
+            background: var(--safe);
+        }
+
+        .status-dot.connecting {
+            background: var(--warning);
+        }
+
+        .status-dot.error {
+            background: var(--critical);
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        /* Sidebar */
+        .sidebar {
+            background: var(--bg-secondary);
+            border-right: 1px solid var(--border);
+            padding: 16px;
+            overflow-y: auto;
+        }
+
+        .nav-section {
+            margin-bottom: 24px;
+        }
+
+        .nav-title {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-muted);
+            margin-bottom: 8px;
+            font-weight: 600;
+        }
+
+        .nav-item {
+            padding: 10px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 4px;
+            font-size: 14px;
+        }
+
+        .nav-item:hover {
+            background: var(--bg-hover);
+        }
+
+        .nav-item.active {
+            background: var(--accent);
+            color: white;
+        }
+
+        .nav-badge {
+            margin-left: auto;
+            background: var(--critical);
+            color: white;
+            font-size: 10px;
+            padding: 2px 6px;
+            border-radius: 10px;
+            font-weight: 600;
+        }
+
+        /* Main Content */
+        .main-content {
+            background: var(--bg-primary);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .content-header {
+            background: var(--bg-secondary);
+            padding: 16px 24px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .content-title {
+            font-size: 20px;
+            font-weight: 600;
+        }
+
+        .action-bar {
+            display: flex;
+            gap: 12px;
+        }
+
+        .btn {
+            padding: 8px 16px;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: 1px solid var(--border);
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .btn:hover {
+            background: var(--bg-hover);
+        }
+
+        .btn-primary {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: var(--accent-hover);
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* Dashboard Grid */
+        .dashboard-grid {
+            padding: 24px;
+            overflow-y: auto;
+            flex: 1;
+        }
+
+        .metrics-row {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        .metric-card {
+            background: var(--bg-secondary);
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            position: relative;
+        }
+
+        .metric-card.loading {
+            opacity: 0.6;
+        }
+
+        .metric-value {
+            font-size: 32px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .metric-label {
+            font-size: 12px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .loading-spinner {
+            width: 20px;
+            height: 20px;
+            border: 2px solid var(--border);
+            border-top: 2px solid var(--accent);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            position: absolute;
+            top: 20px;
+            right: 20px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .chart-container {
+            background: var(--bg-secondary);
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            padding: 20px;
+            margin-bottom: 24px;
+            height: 300px;
+        }
+
+        /* Alert Feed */
+        .alert-feed {
+            background: var(--bg-secondary);
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            padding: 16px;
+        }
+
+        .alert-item {
+            padding: 12px;
+            border-radius: 6px;
+            margin-bottom: 8px;
+            background: var(--bg-tertiary);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .alert-item:hover {
+            background: var(--bg-hover);
+        }
+
+        .alert-item.new {
+            animation: alertSlideIn 0.3s ease;
+            border: 1px solid var(--accent);
+        }
+
+        @keyframes alertSlideIn {
+            from { transform: translateX(-100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+
+        .alert-severity {
+            width: 4px;
+            height: 40px;
+            border-radius: 2px;
+        }
+
+        .alert-severity.critical {
+            background: var(--critical);
+        }
+
+        .alert-severity.high {
+            background: var(--high);
+        }
+
+        .alert-severity.medium {
+            background: var(--medium);
+        }
+
+        .alert-severity.low {
+            background: var(--low);
+        }
+
+        .alert-content {
+            flex: 1;
+        }
+
+        .alert-title {
+            font-size: 14px;
+            font-weight: 500;
+            margin-bottom: 4px;
+        }
+
+        .alert-meta {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .alert-timestamp {
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-left: auto;
+        }
+
+        /* Right Panel */
+        .right-panel {
+            background: var(--bg-secondary);
+            border-left: 1px solid var(--border);
+            padding: 20px;
+            overflow-y: auto;
+            position: relative;
+        }
+
+        .panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .detach-btn {
+            width: 32px;
+            height: 32px;
+            border-radius: 6px;
+            border: 1px solid var(--border);
+            background: var(--bg-tertiary);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+        }
+
+        .detach-btn:hover {
+            background: var(--bg-hover);
+        }
+
+        /* Investigation Details */
+        .investigation-section {
+            margin-bottom: 24px;
+        }
+
+        .section-title {
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 12px;
+            color: var(--text-secondary);
+        }
+
+        .evidence-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .evidence-item {
+            padding: 10px;
+            background: var(--bg-primary);
+            border-radius: 6px;
+            font-size: 13px;
+            font-family: 'Monaco', 'Consolas', monospace;
+        }
+
+        /* Integration Section */
+        .integration-panel {
+            background: var(--bg-tertiary);
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 16px;
+        }
+
+        .integration-header {
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-muted);
+            margin-bottom: 12px;
+        }
+
+        .integration-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 8px;
+        }
+
+        .integration-btn {
+            padding: 10px;
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            position: relative;
+        }
+
+        .integration-btn:hover {
+            background: var(--bg-hover);
+            border-color: var(--accent);
+        }
+
+        .integration-btn.connected {
+            border-color: var(--safe);
+            background: rgba(82, 196, 26, 0.1);
+        }
+
+        .integration-btn.connecting {
+            border-color: var(--warning);
+            background: rgba(243, 156, 18, 0.1);
+        }
+
+        .integration-btn.error {
+            border-color: var(--critical);
+            background: rgba(229, 77, 77, 0.1);
+        }
+
+        /* Upload Zone */
+        .upload-zone {
+            border: 2px dashed var(--border);
+            border-radius: 8px;
+            padding: 32px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-bottom: 24px;
+        }
+
+        .upload-zone:hover {
+            border-color: var(--accent);
+            background: var(--bg-tertiary);
+        }
+
+        .upload-zone.dragover {
+            border-color: var(--accent);
+            background: rgba(74, 99, 231, 0.1);
+        }
+
+        .upload-zone.uploading {
+            border-color: var(--warning);
+            background: rgba(243, 156, 18, 0.1);
+        }
+
+        /* Notification System */
+        .notification {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--accent);
+            border-radius: 8px;
+            padding: 16px;
+            min-width: 300px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+            animation: slideIn 0.3s ease;
+            z-index: 1000;
+        }
+
+        .notification.success {
+            border-color: var(--success);
+        }
+
+        .notification.warning {
+            border-color: var(--warning);
+        }
+
+        .notification.error {
+            border-color: var(--critical);
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateX(400px);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+
+        /* Error states */
+        .error-message {
+            color: var(--critical);
+            font-size: 13px;
+            margin-top: 8px;
+        }
+
+        .retry-btn {
+            background: var(--critical);
+            border-color: var(--critical);
+            color: white;
+            font-size: 11px;
+            padding: 4px 8px;
+            margin-top: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div class="app-container" id="appContainer">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-left">
+                <div class="logo">
+                    <svg width="28" height="28" viewBox="0 0 64 64" fill="none">
+                        <circle cx="32" cy="32" r="30" stroke="var(--accent)" stroke-width="2"/>
+                        <path d="M32 8 L32 56" stroke="var(--accent)" stroke-width="1" opacity="0.3"/>
+                        <path d="M20 24 Q20 20 24 20 L28 20 L28 44 Q28 48 24 48 L20 48 Z" fill="var(--accent)" opacity="0.8"/>
+                        <path d="M44 24 Q44 20 40 20 L36 20 L36 44 Q36 48 40 48 L44 48 Z" fill="var(--accent)" opacity="0.8"/>
+                    </svg>
+                    JanuSec Platform <span style="font-size: 12px; color: var(--text-muted);">LIVE</span>
+                </div>
+                <div class="status-bar">
+                    <div class="status-item" id="connectionStatus">
+                        <div class="status-dot connecting" id="statusDot"></div>
+                        <span id="statusText">Connecting...</span>
+                    </div>
+                    <div class="status-item">
+                        <span style="color: var(--text-muted);">Last Update:</span>
+                        <span id="lastUpdate">Starting...</span>
+                    </div>
+                </div>
+            </div>
+            <div class="status-bar">
+                <div class="status-item">
+                    <span style="color: var(--critical);">●</span>
+                    Critical: <strong id="criticalCount">-</strong>
+                </div>
+                <div class="status-item">
+                    <span style="color: var(--high);">●</span>
+                    High: <strong id="highCount">-</strong>
+                </div>
+                <div class="status-item">
+                    <span style="color: var(--medium);">●</span>
+                    Medium: <strong id="mediumCount">-</strong>
+                </div>
+            </div>
+        </header>
+
+        <!-- Sidebar -->
+        <nav class="sidebar">
+            <div class="nav-section">
+                <div class="nav-title">Detection & Response</div>
+                <div class="nav-item active" onclick="switchView('dashboard')">
+                    <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/>
+                    </svg>
+                    Dashboard
+                </div>
+                <div class="nav-item" onclick="switchView('artifacts')">
+                    <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                    </svg>
+                    Artifacts
+                    <span class="nav-badge" id="artifactsBadge">-</span>
+                </div>
+                <div class="nav-item" onclick="switchView('threats')">
+                    <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                    </svg>
+                    Active Threats
+                    <span class="nav-badge" id="threatsBadge">-</span>
+                </div>
+                <div class="nav-item" onclick="switchView('hunt')">
+                    <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                    </svg>
+                    Threat Hunt
+                </div>
+            </div>
+
+            <div class="nav-section">
+                <div class="nav-title">Analysis Tools</div>
+                <div class="nav-item" onclick="switchView('mitre')">
+                    <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+                    </svg>
+                    MITRE ATT&CK
+                </div>
+                <div class="nav-item" onclick="switchView('timeline')">
+                    <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                    </svg>
+                    Timeline
+                </div>
+            </div>
+
+            <div class="nav-section">
+                <div class="nav-title">System</div>
+                <div class="nav-item" onclick="switchView('settings')">
+                    <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                    </svg>
+                    Settings
+                </div>
+            </div>
+        </nav>
+
+        <!-- Main Content Area -->
+        <main class="main-content" id="mainContent">
+            <div class="content-header">
+                <h1 class="content-title">Security Operations Dashboard</h1>
+                <div class="action-bar">
+                    <button class="btn" onclick="refreshData()" id="refreshBtn">
+                        <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                        </svg>
+                        Refresh
+                    </button>
+                    <button class="btn btn-primary" onclick="showUploadZone()" id="uploadBtn">
+                        <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+                        </svg>
+                        Upload Files
+                    </button>
+                </div>
+            </div>
+
+            <div class="dashboard-grid">
+                <!-- Upload Zone (hidden by default) -->
+                <div class="upload-zone" id="uploadZone" style="display: none;">
+                    <svg width="48" height="48" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="margin: 0 auto 16px; opacity: 0.5;">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+                    </svg>
+                    <div style="color: var(--text-primary); font-weight: 500; margin-bottom: 8px;">Drop threat files here</div>
+                    <div style="color: var(--text-muted); font-size: 13px;">Supports PCAP, EVTX, JSON, CSV, and LOG formats</div>
+                    <div id="uploadStatus" style="margin-top: 12px; display: none;"></div>
+                    <input type="file" id="fileInput" style="display: none;" multiple accept=".pcap,.evtx,.json,.csv,.log,.txt">
+                </div>
+
+                <!-- Metrics Cards -->
+                <div class="metrics-row">
+                    <div class="metric-card" id="criticalMetric">
+                        <div class="loading-spinner" style="display: none;"></div>
+                        <div class="metric-value" style="color: var(--critical);" id="criticalValue">-</div>
+                        <div class="metric-label">Critical Threats</div>
+                        <div class="error-message" id="criticalError" style="display: none;"></div>
+                    </div>
+                    <div class="metric-card" id="artifactsMetric">
+                        <div class="loading-spinner" style="display: none;"></div>
+                        <div class="metric-value" id="artifactsValue">-</div>
+                        <div class="metric-label">Artifacts Analyzed</div>
+                        <div class="error-message" id="artifactsError" style="display: none;"></div>
+                    </div>
+                    <div class="metric-card" id="detectionMetric">
+                        <div class="loading-spinner" style="display: none;"></div>
+                        <div class="metric-value" style="color: var(--safe);" id="detectionValue">-%</div>
+                        <div class="metric-label">Detection Rate</div>
+                        <div class="error-message" id="detectionError" style="display: none;"></div>
+                    </div>
+                    <div class="metric-card" id="responseMetric">
+                        <div class="loading-spinner" style="display: none;"></div>
+                        <div class="metric-value" id="responseValue">-s</div>
+                        <div class="metric-label">Avg Response Time</div>
+                        <div class="error-message" id="responseError" style="display: none;"></div>
+                    </div>
+                </div>
+
+                <!-- Real-time Chart -->
+                <div class="chart-container">
+                    <h3 style="margin-bottom: 16px; font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 8px;">
+                        Threat Detection Timeline
+                        <div class="status-dot active" id="chartStatus"></div>
+                    </h3>
+                    <div id="chartContent" style="height: 240px; display: flex; align-items: center; justify-content: center; color: var(--text-muted);">
+                        Loading threat timeline...
+                    </div>
+                </div>
+
+                <!-- Alert Feed -->
+                <div class="alert-feed">
+                    <h3 style="margin-bottom: 16px; font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 8px;">
+                        Live Alert Feed
+                        <div class="status-dot active" id="alertStatus"></div>
+                        <span id="alertCount" style="margin-left: auto; font-size: 12px; color: var(--text-muted);">0 alerts</span>
+                    </h3>
+                    <div id="alertFeed" style="max-height: 400px; overflow-y: auto;">
+                        <div style="text-align: center; color: var(--text-muted); padding: 20px;">
+                            Loading recent alerts...
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- Right Panel (Investigation/Details) -->
+        <aside class="right-panel" id="rightPanel">
+            <div class="panel-header">
+                <h3 style="font-size: 16px; font-weight: 600;">Investigation Console</h3>
+                <button class="detach-btn" onclick="toggleDetachPanel()" title="Detach Panel">
+                    <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
+                    </svg>
+                </button>
+            </div>
+
+            <!-- System Status Panel -->
+            <div class="integration-panel">
+                <div class="integration-header">System Status</div>
+                <div style="margin-bottom: 12px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                        <span style="font-size: 12px;">Pipeline Status</span>
+                        <span id="pipelineStatus" style="font-size: 12px; color: var(--safe);">Active</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                        <span style="font-size: 12px;">Database</span>
+                        <span id="databaseStatus" style="font-size: 12px; color: var(--warning);">Connected (Fallback)</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span style="font-size: 12px;">Events/min</span>
+                        <span id="eventsPerMin" style="font-size: 12px; color: var(--accent);">-</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Integration Panel -->
+            <div class="integration-panel">
+                <div class="integration-header">External Integrations</div>
+                <div class="integration-grid">
+                    <button class="integration-btn connected" id="xdrIntegration">
+                        <svg width="14" height="14" fill="currentColor" viewBox="0 0 20 20">
+                            <path d="M10 12a2 2 0 100-4 2 2 0 000 4z"/>
+                            <path fill-rule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clip-rule="evenodd"/>
+                        </svg>
+                        XDR
+                    </button>
+                    <button class="integration-btn" id="zeekIntegration">
+                        <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0"/>
+                        </svg>
+                        ZEEK
+                    </button>
+                    <button class="integration-btn" id="slackIntegration">
+                        <svg width="14" height="14" fill="currentColor" viewBox="0 0 20 20">
+                            <path d="M2 5a2 2 0 012-2h7a2 2 0 012 2v4a2 2 0 01-2 2H9l-3 3v-3H4a2 2 0 01-2-2V5z"/>
+                            <path d="M15 7v2a4 4 0 01-4 4H9.828l-1.766 1.767c.28.149.599.233.938.233h2l3 3v-3h2a2 2 0 002-2V9a2 2 0 00-2-2h-1z"/>
+                        </svg>
+                        Slack
+                    </button>
+                    <button class="integration-btn" id="teamsIntegration">
+                        <svg width="14" height="14" fill="currentColor" viewBox="0 0 20 20">
+                            <path d="M13 6a3 3 0 11-6 0 3 3 0 016 0zM18 8a2 2 0 11-4 0 2 2 0 014 0zM14 15a4 4 0 00-8 0v3h8v-3zM6 8a2 2 0 11-4 0 2 2 0 014 0zM16 18v-3a5.972 5.972 0 00-.75-2.906A3.005 3.005 0 0119 15v3h-3zM4.75 12.094A5.973 5.973 0 004 15v3H1v-3a3 3 0 013.75-2.906z"/>
+                        </svg>
+                        Teams
+                    </button>
+                </div>
+            </div>
+
+            <!-- Cost Analysis -->
+            <div class="investigation-section">
+                <div class="section-title">Cost Analysis</div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                    <div style="padding: 12px; background: var(--bg-primary); border-radius: 6px;">
+                        <div style="font-size: 20px; font-weight: 600; color: var(--accent);" id="detectionCosts">$-</div>
+                        <div style="font-size: 11px; color: var(--text-muted);">Detection Costs Today</div>
+                    </div>
+                    <div style="padding: 12px; background: var(--bg-primary); border-radius: 6px;">
+                        <div style="font-size: 20px; font-weight: 600; color: var(--safe);" id="preventedDamage">$-</div>
+                        <div style="font-size: 11px; color: var(--text-muted);">Prevented Damage</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Active Investigation -->
+            <div class="investigation-section" id="activeInvestigation">
+                <div class="section-title">Latest Analysis</div>
+                <div class="evidence-list" id="evidenceList">
+                    <div style="text-align: center; color: var(--text-muted); padding: 20px;">
+                        No active investigations
+                    </div>
+                </div>
+            </div>
+
+            <!-- Action Buttons -->
+            <div style="margin-top: auto; padding-top: 20px;">
+                <button class="btn btn-primary" style="width: 100%; justify-content: center; margin-bottom: 8px;" onclick="generateReport()">
+                    Generate Security Report
+                </button>
+                <button class="btn" style="width: 100%; justify-content: center; margin-bottom: 8px;" onclick="exportData()">
+                    Export Threat Data
+                </button>
+                <button class="btn" style="width: 100%; justify-content: center;" onclick="openSettings()">
+                    Platform Settings
+                </button>
+            </div>
+        </aside>
+    </div>
+
+    <!-- Live API Integration Script -->
+    <script>
+        // JanuSec Live API Client
+        class JanuSecAPI {
+            constructor(baseUrl = '') {
+                this.baseUrl = baseUrl;
+                this.eventSource = null;
+                this.connectionState = 'disconnected';
+                this.retryCount = 0;
+                this.maxRetries = 5;
+                this.retryDelay = 2000;
+            }
+
+            async request(endpoint, options = {}) {
+                const defaultHeaders = {
+                    'Content-Type': 'application/json',
+                    'X-Tenant-ID': 'demo'
+                };
+
+                try {
+                    const response = await fetch(`${this.baseUrl}${endpoint}`, {
+                        headers: { ...defaultHeaders, ...(options.headers || {}) },
+                        ...options
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    }
+
+                    const contentType = response.headers.get('content-type');
+                    if (contentType && contentType.includes('application/json')) {
+                        return await response.json();
+                    }
+                    return await response.text();
+                } catch (error) {
+                    console.error(`API request failed: ${endpoint}`, error);
+                    throw error;
+                }
+            }
+
+            async get(endpoint) {
+                return this.request(endpoint);
+            }
+
+            async post(endpoint, data) {
+                return this.request(endpoint, {
+                    method: 'POST',
+                    body: JSON.stringify(data)
+                });
+            }
+
+            async uploadFiles(files) {
+                const formData = new FormData();
+                Array.from(files).forEach(file => {
+                    formData.append('files', file);
+                });
+
+                try {
+                    const response = await fetch('/api/v1/csv/upload', {
+                        method: 'POST',
+                        headers: {
+                            'X-Tenant-ID': 'demo'
+                        },
+                        body: formData
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`Upload failed: ${response.status}`);
+                    }
+
+                    return await response.json();
+                } catch (error) {
+                    console.error('File upload failed:', error);
+                    throw error;
+                }
+            }
+
+            updateConnectionStatus(status) {
+                this.connectionState = status;
+                const statusDot = document.getElementById('statusDot');
+                const statusText = document.getElementById('statusText');
+
+                statusDot.className = 'status-dot';
+                switch(status) {
+                    case 'connected':
+                        statusDot.classList.add('active');
+                        statusText.textContent = 'Connected to Backend';
+                        this.retryCount = 0;
+                        break;
+                    case 'connecting':
+                        statusDot.classList.add('connecting');
+                        statusText.textContent = 'Connecting...';
+                        break;
+                    case 'error':
+                        statusDot.classList.add('error');
+                        statusText.textContent = 'Connection Error';
+                        break;
+                    default:
+                        statusDot.classList.add('error');
+                        statusText.textContent = 'Disconnected';
+                }
+            }
+
+            async testConnection() {
+                try {
+                    this.updateConnectionStatus('connecting');
+                    await this.get('/health');
+                    this.updateConnectionStatus('connected');
+                    return true;
+                } catch (error) {
+                    this.updateConnectionStatus('error');
+                    return false;
+                }
+            }
+
+            async retry(func, ...args) {
+                for (let i = 0; i < this.maxRetries; i++) {
+                    try {
+                        return await func.apply(this, args);
+                    } catch (error) {
+                        if (i === this.maxRetries - 1) throw error;
+                        await new Promise(resolve => setTimeout(resolve, this.retryDelay * (i + 1)));
+                    }
+                }
+            }
+        }
+
+        // Global API instance
+        const api = new JanuSecAPI();
+
+        // Dashboard Controller
+        class DashboardController {
+            constructor() {
+                this.refreshInterval = null;
+                this.lastUpdateTime = new Date();
+                this.isLoading = false;
+            }
+
+            async initialize() {
+                showNotification('JanuSec Platform initializing...', 'info');
+
+                // Test connection
+                const connected = await api.testConnection();
+                if (!connected) {
+                    showNotification('Backend connection failed - using demo mode', 'warning');
+                    this.loadDemoData();
+                    return;
+                }
+
+                // Load initial data
+                await this.loadAllData();
+
+                // Setup auto-refresh
+                this.startAutoRefresh();
+
+                showNotification('JanuSec Platform initialized successfully', 'success');
+            }
+
+            async loadAllData() {
+                if (this.isLoading) return;
+                this.isLoading = true;
+
+                try {
+                    await Promise.all([
+                        this.loadMetrics(),
+                        this.loadAlerts(),
+                        this.loadCostAnalysis(),
+                        this.loadIntegrationStatus()
+                    ]);
+
+                    this.updateLastUpdate();
+                } catch (error) {
+                    showNotification('Failed to load dashboard data', 'error');
+                    console.error('Dashboard load error:', error);
+                } finally {
+                    this.isLoading = false;
+                }
+            }
+
+            async loadMetrics() {
+                const metricCards = ['critical', 'artifacts', 'detection', 'response'];
+
+                metricCards.forEach(metric => {
+                    const card = document.getElementById(`${metric}Metric`);
+                    const spinner = card.querySelector('.loading-spinner');
+                    const errorElement = document.getElementById(`${metric}Error`);
+
+                    card.classList.add('loading');
+                    spinner.style.display = 'block';
+                    errorElement.style.display = 'none';
+                });
+
+                try {
+                    const metrics = await api.retry(api.get, '/api/v1/metrics/executive');
+
+                    // Update metric values
+                    document.getElementById('criticalValue').textContent = metrics.critical_threats || 0;
+                    document.getElementById('artifactsValue').textContent = metrics.artifacts_analyzed || 0;
+                    document.getElementById('detectionValue').textContent = `${(metrics.detection_rate || 0).toFixed(1)}%`;
+                    document.getElementById('responseValue').textContent = `${(metrics.avg_response_time || 0).toFixed(1)}s`;
+
+                    // Update header counts
+                    document.getElementById('criticalCount').textContent = metrics.critical_threats || 0;
+                    document.getElementById('highCount').textContent = metrics.high_threats || 0;
+                    document.getElementById('mediumCount').textContent = metrics.medium_threats || 0;
+
+                    // Update navigation badges
+                    document.getElementById('artifactsBadge').textContent = metrics.artifacts_analyzed || 0;
+                    document.getElementById('threatsBadge').textContent = (metrics.critical_threats || 0) + (metrics.high_threats || 0);
+
+                } catch (error) {
+                    this.showMetricsError('Failed to load metrics');
+                    console.error('Metrics load error:', error);
+                } finally {
+                    metricCards.forEach(metric => {
+                        const card = document.getElementById(`${metric}Metric`);
+                        const spinner = card.querySelector('.loading-spinner');
+
+                        card.classList.remove('loading');
+                        spinner.style.display = 'none';
+                    });
+                }
+            }
+
+            showMetricsError(message) {
+                ['critical', 'artifacts', 'detection', 'response'].forEach(metric => {
+                    const errorElement = document.getElementById(`${metric}Error`);
+                    errorElement.textContent = message;
+                    errorElement.style.display = 'block';
+                });
+            }
+
+            async loadAlerts() {
+                const alertStatus = document.getElementById('alertStatus');
+                alertStatus.className = 'status-dot connecting';
+
+                try {
+                    const alertsData = await api.retry(api.get, '/api/v1/alerts/recent?limit=10');
+                    const alerts = alertsData.alerts || alertsData || [];
+
+                    this.displayAlerts(alerts);
+                    alertStatus.className = 'status-dot active';
+
+                    document.getElementById('alertCount').textContent = `${alerts.length} alerts`;
+
+                } catch (error) {
+                    alertStatus.className = 'status-dot error';
+                    document.getElementById('alertFeed').innerHTML = `
+                        <div style="text-align: center; color: var(--critical); padding: 20px;">
+                            Failed to load alerts
+                            <br><button class="retry-btn" onclick="dashboard.loadAlerts()">Retry</button>
+                        </div>
+                    `;
+                    console.error('Alerts load error:', error);
+                }
+            }
+
+            displayAlerts(alerts) {
+                const alertFeed = document.getElementById('alertFeed');
+
+                if (!alerts || alerts.length === 0) {
+                    alertFeed.innerHTML = `
+                        <div style="text-align: center; color: var(--text-muted); padding: 20px;">
+                            No recent alerts
+                        </div>
+                    `;
+                    return;
+                }
+
+                alertFeed.innerHTML = alerts.map(alert => {
+                    const timeAgo = this.formatTimeAgo(new Date(alert.timestamp || alert.created_at));
+                    return `
+                        <div class="alert-item">
+                            <div class="alert-severity ${alert.severity || 'medium'}"></div>
+                            <div class="alert-content">
+                                <div class="alert-title">${alert.title || alert.event_id || 'Unknown Alert'}</div>
+                                <div class="alert-meta">
+                                    ${alert.mitre ? `MITRE: ${alert.mitre} • ` : ''}
+                                    Confidence: ${((alert.confidence || 0) * 100).toFixed(1)}%
+                                </div>
+                            </div>
+                            <div class="alert-timestamp">${timeAgo}</div>
+                        </div>
+                    `;
+                }).join('');
+            }
+
+            async loadCostAnalysis() {
+                try {
+                    const finops = await api.retry(api.get, '/api/v1/finops/overview');
+
+                    document.getElementById('detectionCosts').textContent =
+                        `$${Math.round(finops.detection_costs_today || 0)}`;
+                    document.getElementById('preventedDamage').textContent =
+                        `$${Math.round(finops.prevented_damage || 0).toLocaleString()}`;
+
+                } catch (error) {
+                    document.getElementById('detectionCosts').textContent = '$-';
+                    document.getElementById('preventedDamage').textContent = '$-';
+                    console.error('Cost analysis load error:', error);
+                }
+            }
+
+            async loadIntegrationStatus() {
+                const integrations = ['xdr', 'zeek', 'slack', 'teams'];
+
+                integrations.forEach(integration => {
+                    const btn = document.getElementById(`${integration}Integration`);
+                    btn.classList.remove('connected', 'error');
+                    btn.classList.add('connecting');
+                });
+
+                try {
+                    // Check health endpoint for integration status
+                    const health = await api.get('/health');
+
+                    // XDR is usually connected based on health
+                    const xdrBtn = document.getElementById('xdrIntegration');
+                    if (health.status === 'healthy') {
+                        xdrBtn.classList.remove('connecting', 'error');
+                        xdrBtn.classList.add('connected');
+                    } else {
+                        xdrBtn.classList.remove('connecting', 'connected');
+                        xdrBtn.classList.add('error');
+                    }
+
+                    // Other integrations default to disconnected for now
+                    ['zeek', 'slack', 'teams'].forEach(integration => {
+                        const btn = document.getElementById(`${integration}Integration`);
+                        btn.classList.remove('connecting', 'connected');
+                    });
+
+                } catch (error) {
+                    integrations.forEach(integration => {
+                        const btn = document.getElementById(`${integration}Integration`);
+                        btn.classList.remove('connecting', 'connected');
+                        btn.classList.add('error');
+                    });
+                }
+            }
+
+            formatTimeAgo(date) {
+                const now = new Date();
+                const diffMs = now - date;
+                const diffMins = Math.floor(diffMs / 60000);
+                const diffHours = Math.floor(diffMins / 60);
+
+                if (diffMins < 1) return 'Just now';
+                if (diffMins < 60) return `${diffMins}m ago`;
+                if (diffHours < 24) return `${diffHours}h ago`;
+                return date.toLocaleDateString();
+            }
+
+            updateLastUpdate() {
+                this.lastUpdateTime = new Date();
+                document.getElementById('lastUpdate').textContent = 'Just now';
+            }
+
+            startAutoRefresh() {
+                // Update "last update" time display
+                setInterval(() => {
+                    const timeAgo = this.formatTimeAgo(this.lastUpdateTime);
+                    document.getElementById('lastUpdate').textContent = timeAgo;
+                }, 30000);
+
+                // Auto-refresh data every 30 seconds
+                this.refreshInterval = setInterval(() => {
+                    if (!this.isLoading) {
+                        this.loadAllData();
+                    }
+                }, 30000);
+            }
+
+            loadDemoData() {
+                // Load demo data when backend is unavailable
+                document.getElementById('criticalValue').textContent = '2';
+                document.getElementById('artifactsValue').textContent = '572';
+                document.getElementById('detectionValue').textContent = '98.2%';
+                document.getElementById('responseValue').textContent = '1.2s';
+
+                document.getElementById('criticalCount').textContent = '2';
+                document.getElementById('highCount').textContent = '8';
+                document.getElementById('mediumCount').textContent = '15';
+
+                document.getElementById('artifactsBadge').textContent = '572';
+                document.getElementById('threatsBadge').textContent = '10';
+
+                // Demo alerts
+                const demoAlerts = [
+                    {
+                        severity: 'critical',
+                        title: 'Ransomware Pattern Detected - powerscan.exe',
+                        mitre: 'T1486',
+                        confidence: 0.95,
+                        timestamp: new Date(Date.now() - 120000)
+                    },
+                    {
+                        severity: 'high',
+                        title: 'Suspicious Network Beacon - 185.220.101.1',
+                        mitre: 'T1071',
+                        confidence: 0.87,
+                        timestamp: new Date(Date.now() - 900000)
+                    }
+                ];
+
+                this.displayAlerts(demoAlerts);
+                document.getElementById('alertCount').textContent = '2 alerts (demo)';
+
+                document.getElementById('detectionCosts').textContent = '$342';
+                document.getElementById('preventedDamage').textContent = '$8,420';
+            }
+        }
+
+        // File Upload Handler
+        class FileUploadHandler {
+            constructor() {
+                this.uploadZone = document.getElementById('uploadZone');
+                this.fileInput = document.getElementById('fileInput');
+                this.uploadStatus = document.getElementById('uploadStatus');
+
+                this.setupEventListeners();
+            }
+
+            setupEventListeners() {
+                this.uploadZone.addEventListener('click', () => this.fileInput.click());
+
+                this.uploadZone.addEventListener('dragover', (e) => {
+                    e.preventDefault();
+                    this.uploadZone.classList.add('dragover');
+                });
+
+                this.uploadZone.addEventListener('dragleave', () => {
+                    this.uploadZone.classList.remove('dragover');
+                });
+
+                this.uploadZone.addEventListener('drop', (e) => {
+                    e.preventDefault();
+                    this.uploadZone.classList.remove('dragover');
+                    this.handleFiles(e.dataTransfer.files);
+                });
+
+                this.fileInput.addEventListener('change', (e) => {
+                    this.handleFiles(e.target.files);
+                });
+            }
+
+            async handleFiles(files) {
+                if (files.length === 0) return;
+
+                this.uploadZone.classList.add('uploading');
+                this.uploadStatus.style.display = 'block';
+                this.uploadStatus.innerHTML = `
+                    <div style="color: var(--accent);">
+                        📤 Uploading ${files.length} file(s) for analysis...
+                    </div>
+                `;
+
+                try {
+                    const result = await api.uploadFiles(files);
+
+                    showNotification(`Successfully uploaded ${files.length} file(s) for analysis`, 'success');
+
+                    this.uploadStatus.innerHTML = `
+                        <div style="color: var(--safe);">
+                            ✅ Upload complete - ${files.length} file(s) processing
+                        </div>
+                    `;
+
+                    // Refresh dashboard after upload
+                    setTimeout(() => {
+                        dashboard.loadAllData();
+                        this.hideUploadZone();
+                    }, 2000);
+
+                } catch (error) {
+                    showNotification(`Upload failed: ${error.message}`, 'error');
+
+                    this.uploadStatus.innerHTML = `
+                        <div style="color: var(--critical);">
+                            ❌ Upload failed: ${error.message}
+                            <br><button class="retry-btn" onclick="fileUpload.handleFiles(document.getElementById('fileInput').files)">Retry</button>
+                        </div>
+                    `;
+                } finally {
+                    this.uploadZone.classList.remove('uploading');
+                }
+            }
+
+            hideUploadZone() {
+                setTimeout(() => {
+                    this.uploadZone.style.display = 'none';
+                    this.uploadStatus.style.display = 'none';
+                }, 3000);
+            }
+        }
+
+        // Global instances
+        let dashboard;
+        let fileUpload;
+
+        // Initialize dashboard when page loads
+        document.addEventListener('DOMContentLoaded', async () => {
+            dashboard = new DashboardController();
+            fileUpload = new FileUploadHandler();
+
+            await dashboard.initialize();
+        });
+
+        // UI Functions
+        function showUploadZone() {
+            const uploadZone = document.getElementById('uploadZone');
+            uploadZone.style.display = uploadZone.style.display === 'none' ? 'block' : 'none';
+        }
+
+        function refreshData() {
+            const refreshBtn = document.getElementById('refreshBtn');
+            refreshBtn.disabled = true;
+            refreshBtn.innerHTML = '<div class="loading-spinner" style="width: 14px; height: 14px; position: static;"></div> Refreshing...';
+
+            dashboard.loadAllData().finally(() => {
+                refreshBtn.disabled = false;
+                refreshBtn.innerHTML = `
+                    <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                    </svg>
+                    Refresh
+                `;
+                showNotification('Dashboard refreshed', 'success');
+            });
+        }
+
+        function switchView(view) {
+            // Update navigation
+            document.querySelectorAll('.nav-item').forEach(item => {
+                item.classList.remove('active');
+            });
+            event.target.closest('.nav-item').classList.add('active');
+
+            // Update content title
+            const contentTitle = document.querySelector('.content-title');
+            const titles = {
+                dashboard: 'Security Operations Dashboard',
+                artifacts: 'Artifact Analysis',
+                threats: 'Active Threat Monitoring',
+                hunt: 'Threat Hunting Console',
+                mitre: 'MITRE ATT&CK Framework',
+                timeline: 'Security Timeline',
+                settings: 'Platform Settings'
+            };
+
+            contentTitle.textContent = titles[view] || view.charAt(0).toUpperCase() + view.slice(1);
+            showNotification(`Switched to ${titles[view] || view}`, 'info');
+        }
+
+        function generateReport() {
+            showNotification('Generating security report...', 'info');
+            // Simulate report generation
+            setTimeout(() => {
+                showNotification('Security report generated and exported', 'success');
+            }, 2000);
+        }
+
+        function exportData() {
+            showNotification('Exporting threat data...', 'info');
+            setTimeout(() => {
+                showNotification('Threat data exported successfully', 'success');
+            }, 1500);
+        }
+
+        function openSettings() {
+            showNotification('Opening platform settings...', 'info');
+        }
+
+        // Notification system
+        function showNotification(message, type = 'info') {
+            const notification = document.createElement('div');
+            notification.className = `notification ${type}`;
+
+            const colors = {
+                info: 'var(--accent)',
+                success: 'var(--success)',
+                warning: 'var(--warning)',
+                error: 'var(--critical)'
+            };
+
+            notification.innerHTML = `
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <div style="width: 8px; height: 8px; background: ${colors[type]}; border-radius: 50%;"></div>
+                    <span>${message}</span>
+                </div>
+            `;
+
+            document.body.appendChild(notification);
+
+            setTimeout(() => {
+                notification.style.animation = 'slideOut 0.3s ease';
+                setTimeout(() => notification.remove(), 300);
+            }, 4000);
+        }
+
+        // Panel detachment (simplified for demo)
+        function toggleDetachPanel() {
+            showNotification('Panel detachment feature available in full version', 'info');
+        }
+    </script>
+  <script src="/static/js/notifications.js"></script>
+</body>
+</html>

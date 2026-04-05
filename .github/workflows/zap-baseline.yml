@@ -1,0 +1,51 @@
+name: DAST - ZAP Baseline
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Target base URL (e.g., https://dev.example.com)'
+        required: true
+      spider:
+        description: 'Enable spider (true/false)'
+        required: false
+        default: 'false'
+  schedule:
+    - cron: '0 3 * * 1'  # Weekly Monday 03:00 UTC
+
+jobs:
+  zap-baseline:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target: ["${{ vars.DEV_URL }}", "${{ vars.STAGE_URL }}"]
+    env:
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run ZAP Baseline Scan
+        uses: zaproxy/action-baseline@v0.13.0
+        with:
+          target: ${{ github.event_name == 'workflow_dispatch' && inputs.target || matrix.target }}
+          cmd_options: >-
+            -a
+            ${{ fromJSON('[''--auto'']')[0] }}
+            ${{ inputs.spider == 'true' && '-m 5' || '' }}
+        continue-on-error: true
+
+      - name: Upload ZAP Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: zap-report
+          path: report.html
+      - name: Slack notify (summary)
+        if: always() && env.SLACK_WEBHOOK_URL != ''
+        run: |
+          STATUS=${{ job.status }}
+          TARGET=${{ github.event_name == 'workflow_dispatch' && inputs.target || matrix.target }}
+          COLOR="#36a64f"
+          if [ "$STATUS" != "success" ]; then COLOR="#ff4136"; fi
+          payload='{"attachments":[{"color":"'"$COLOR"'","title":"ZAP Baseline","text":"Status: '"$STATUS"'\nTarget: '"$TARGET"'","fields":[{"title":"Repo","value":"'"${GITHUB_REPOSITORY}"'","short":true},{"title":"Run","value":"'"${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"'","short":true}]}]}'
+          curl -X POST -H 'Content-type: application/json' --data "$payload" "$SLACK_WEBHOOK_URL"

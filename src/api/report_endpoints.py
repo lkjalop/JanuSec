@@ -185,7 +185,7 @@ def _build_html_payload(report: dict[str, Any], session_ids: list[str], recipien
         'correlation': report.get('network_highlights'),
         'meta': meta,
         'network_highlights': report.get('network_highlights'),
-        'top_mitre': report.get('top_mitre'),
+        'top_mitre': report.get('top_mitre_techniques') or report.get('top_mitre'),
     }
     # Compose email sections using Tier1/Tier2 summaries when available
     try:

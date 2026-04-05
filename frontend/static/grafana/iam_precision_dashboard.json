@@ -1,0 +1,16 @@
+{
+  "annotations": {"list": []},
+  "panels": [
+    {
+      "type": "graph",
+      "title": "A/B Cohort TP/FP Over Time",
+      "targets": [
+        {"expr": "sum by (variant) (rate(iam_feedback_total{verdict=\"TP\"}[1d]))", "legendFormat": "TP - {{variant}}"},
+        {"expr": "sum by (variant) (rate(iam_feedback_total{verdict=\"FP\"}[1d]))", "legendFormat": "FP - {{variant}}"}
+      ],
+      "id": 1
+    }
+  ],
+  "title": "IAM Precision by Cohort",
+  "schemaVersion": 16
+}

@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sandbox Tasks</title>
+  <style>
+    body { background:#0b0f16; color:#e4e9f0; font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica, Arial, sans-serif; }
+    .card { background:#0f1624; border:1px solid #1f2a3a; border-radius:8px; padding:16px; margin:16px auto; max-width: 900px; }
+    input, button { background:#0b1220; color:#e4e9f0; border:1px solid #263245; border-radius:6px; padding:8px 10px; }
+    button { cursor:pointer; }
+    .row { display:flex; gap:12px; align-items:center; flex-wrap: wrap; }
+    table { width:100%; border-collapse:collapse; margin-top:10px; }
+    th, td { border-bottom:1px solid #1f2a3a; padding:8px; text-align:left; }
+    .muted { color:#9fb3c8; font-size: 12px; }
+  </style>
+  <script>
+    function H(){ return { 'x-api-key': (localStorage.apiKey||'devkey123') } }
+    async function submitSandbox(e){
+      e.preventDefault();
+      const url = document.getElementById('sb-url').value.trim();
+      const file = document.getElementById('sb-file').files[0];
+      if(!url && !file){ try{ if(window.showToast) showToast('Provide a URL or choose a file',4000); else if(window.notifications) window.notifications.showToast('Provide a URL or choose a file',4000); }catch(_){} return; }
+      const form = new FormData();
+      if(url) form.append('url', url);
+      if(file) form.append('file', file, file.name);
+      const res = await fetch('/api/v1/sandbox/submit', { method:'POST', headers: H(), body: form });
+      const j = await res.json();
+      if(!res.ok){ try{ if(window.showNotification) showNotification('Submit failed: '+(j.detail||res.status),'error'); else if(window.notifications) window.notifications.showNotification('Submit failed: '+(j.detail||res.status),'error'); }catch(_){} return; }
+      addTaskRow(j.task_id, 'queued');
+      setTimeout(()=>pollResult(j.task_id), 1200);
+    }
+    function addTaskRow(taskId, status){
+      const tbody = document.getElementById('tasks');
+      const tr = document.createElement('tr');
+      tr.id = 'row-'+taskId;
+      tr.innerHTML = `<td>${taskId}</td><td id="st-${taskId}">${status}</td><td id="sm-${taskId}" class="muted">—</td>`;
+      tbody.prepend(tr);
+    }
+    async function pollResult(taskId){
+      try{
+        const res = await fetch('/api/v1/sandbox/result?task_id='+encodeURIComponent(taskId), { headers: H() });
+        const j = await res.json();
+        document.getElementById('st-'+taskId).textContent = j.status;
+        if(j.status !== 'completed'){
+          setTimeout(()=>pollResult(taskId), 2000);
+          return;
+        }
+        const r = j.result||{};
+        const i = r.iocs||{};
+        const mitre = (r.mitre||[]).join(', ');
+        const facts = (r.factors||[]).join(', ');
+        const sm = `${r.summary||''} | IoCs: d=${(i.domains||[]).length}, ip=${(i.ips||[]).length}, h=${(i.hashes||[]).length}, u=${(i.urls||[]||[]).length} | MITRE: ${mitre} | Factors: ${facts}`;
+        document.getElementById('sm-'+taskId).textContent = sm;
+      }catch(e){ console.error(e); }
+    }
+  </script>
+  </head>
+  <body>
+    <div class="card">
+      <h2>Sandbox Analysis</h2>
+      <p class="muted">Requires SANDBOX_PROVIDER and API env vars; disabled by default.</p>
+      <form onsubmit="submitSandbox(event)">
+        <div class="row">
+          <input id="sb-url" type="url" placeholder="http(s):// sample URL" style="min-width:320px" />
+          <input id="sb-file" type="file" />
+          <button type="submit">Submit</button>
+        </div>
+      </form>
+      <table>
+        <thead><tr><th>Task ID</th><th>Status</th><th>Summary</th></tr></thead>
+        <tbody id="tasks"></tbody>
+      </table>
+    </div>
+    <script src="/static/js/notifications.js"></script>
+</body>
+  </html>

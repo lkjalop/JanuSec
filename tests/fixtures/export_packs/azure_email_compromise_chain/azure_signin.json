@@ -1,0 +1,11 @@
+[
+  {
+    "createdDateTime": "2025-03-15T02:17:09Z",
+    "userPrincipalName": "alex.mercer@contoso.dev",
+    "appDisplayName": "Azure Portal",
+    "ipAddress": "185.220.101.47",
+    "riskDetail": "anonymizedIPAddress",
+    "riskLevelDuringSignIn": "high",
+    "conditionalAccessStatus": "failure"
+  }
+]

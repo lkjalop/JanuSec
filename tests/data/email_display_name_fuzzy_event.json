@@ -1,0 +1,11 @@
+{
+  "message_id": "mid-005",
+  "from_address": "john.doe@example.com",
+  "display_name": "Finance Team",
+  "user_directory_lookup": {
+    "display_name": "John Doe",
+    "match_score": 0.72
+  },
+  "subject": "Action required",
+  "body": "Please review the attached document."
+}

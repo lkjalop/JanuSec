@@ -1,0 +1,7 @@
+{
+  "name": "notify_exec",
+  "steps": [
+    {"type": "report.export", "inputs": {"format": "html"}},
+    {"type": "notify.slack", "inputs": {"text": "Executive update dispatched"}}
+  ]
+}

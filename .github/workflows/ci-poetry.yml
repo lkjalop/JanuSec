@@ -1,0 +1,43 @@
+name: CI (Poetry)
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - name: Install Poetry
+        run: |
+          python -m pip install --upgrade pip
+          pip install poetry
+      - name: Install dependencies
+        run: |
+          poetry config virtualenvs.create false
+          poetry install --no-interaction --no-ansi
+      - name: Run migrations
+        env:
+          DATABASE_DSN: ${{ secrets.DATABASE_DSN }}
+        run: |
+          python - <<'PY'
+          from db.migrator import run_migrations_once
+          import os
+          dsn = os.getenv('DATABASE_DSN')
+          if dsn:
+              run_migrations_once(dsn)
+          else:
+              print('No DATABASE_DSN provided; skipping DB migrations')
+          PY
+      - name: Run tests
+        env:
+          PYTHONPATH: src
+        run: |
+          pytest -q

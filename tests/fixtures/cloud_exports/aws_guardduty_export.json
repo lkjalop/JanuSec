@@ -1,0 +1,10 @@
+[
+  {
+    "id": "gd-2001",
+    "type": "CredentialAccess:IAMUser/AnomalousBehavior",
+    "severity": 7.8,
+    "accountId": "123456789012",
+    "region": "ap-southeast-2",
+    "service": {"eventFirstSeen": "2026-03-20T01:40:00Z"}
+  }
+]

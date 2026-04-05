@@ -1,0 +1,31 @@
+auto_llm_default: false
+risk_appetite_default: medium
+thresholds:
+  low: 3
+  medium: 5
+  high: 8
+llm:
+  provider_default: ollama
+  model_default: "mistral-7b-instruct"
+  test_model: "llam3b:8b"
+  batch_size: 8
+  max_rows: 400
+  redact_pii: true
+  allow_cloud_fallback: false
+report:
+  max_apps: 10
+  max_words: 1800
+  include_mitre_heatmap: true
+  include_playbooks: true
+compliance:
+  - NIST
+  - ISO27001
+  - ISO42001
+  - AUS:Essential8
+delivery:
+  - email
+  - slack
+  - teams
+ad_ingest:
+  hash_user_ids: true
+  allow_unhash_opt_in: false

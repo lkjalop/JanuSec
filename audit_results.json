@@ -1,0 +1,80 @@
+{
+  "timestamp": 1758778327.4406917,
+  "phases": {
+    "imports": {
+      "unresolved": [],
+      "status": "pass"
+    },
+    "dependency_usage": {
+      "unused_requirements": [
+        "asyncio-mqtt",
+        "aiofiles",
+        "pandas",
+        "aioredis",
+        "structlog",
+        "tenacity",
+        "pytest",
+        "pytest-asyncio",
+        "pytest-mock",
+        "regex",
+        "orjson",
+        "memory-profiler",
+        "cachetools",
+        "notebook",
+        "matplotlib",
+        "seaborn",
+        "uvicorn[standard]",
+        "openpyxl",
+        "requests",
+        "pytest-cov"
+      ],
+      "status": "warn"
+    },
+    "ruff": {
+      "rc": 127,
+      "output_excerpt": [
+        "NOT_FOUND"
+      ],
+      "status": "skipped"
+    },
+    "bandit": {
+      "rc": 127,
+      "output_excerpt": [
+        "NOT_FOUND"
+      ],
+      "status": "skipped"
+    },
+    "mypy": {
+      "rc": 127,
+      "output_excerpt": [
+        "NOT_FOUND"
+      ],
+      "status": "skipped"
+    },
+    "replay": {
+      "skipped": true,
+      "reason": "no input provided"
+    },
+    "metrics": {
+      "reachable": false,
+      "error": "[WinError 10061] No connection could be made because the target machine actively refused it"
+    },
+    "coverage": {
+      "skipped": true
+    },
+    "suppression_precision": {
+      "skipped": true
+    },
+    "rubric": {
+      "skipped": true
+    },
+    "metric_deltas": {
+      "skipped": true
+    }
+  },
+  "hashes": {
+    "D:\\AI\\Threat_thy_sniffer\\src\\core\\correlation\\hunt_correlation.py": "0feb9e86db0be41ff5960589c456f9cb96d08851e5ce23b987532bdc9649566e",
+    "D:\\AI\\Threat_thy_sniffer\\src\\core\\hunt\\lane_registry.py": "3238b8450ea33293f9292cd41f41412446dea0c6f20b90a60fdfff473907e66a"
+  },
+  "overall": "pass"
+}

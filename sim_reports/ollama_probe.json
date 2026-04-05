@@ -1,0 +1,32 @@
+[
+  {
+    "url": "http://localhost:11434/api/generate",
+    "code": 200,
+    "text": "{\"model\":\"llama3:8b\",\"created_at\":\"2026-01-10T04:21:43.4319302Z\",\"response\":\"It\",\"done\":false}\n{\"model\":\"llama3:8b\",\"created_at\":\"2026-01-10T04:21:43.5923112Z\",\"response\":\" looks\",\"done\":false}\n{\"mode"
+  },
+  {
+    "url": "http://localhost:11434/v1/generate",
+    "code": 404,
+    "text": "404 page not found"
+  },
+  {
+    "url": "http://localhost:11434/generate",
+    "code": 404,
+    "text": "404 page not found"
+  },
+  {
+    "url": "http://localhost:11434/api/generate",
+    "code": 200,
+    "text": "{\"model\":\"llama3:8b\",\"created_at\":\"2026-01-10T04:22:00.5699449Z\",\"response\":\"It\",\"done\":false}\n{\"model\":\"llama3:8b\",\"created_at\":\"2026-01-10T04:22:01.0336667Z\",\"response\":\" looks\",\"done\":false}\n{\"mode"
+  },
+  {
+    "url": "http://localhost:11434/v1/generate",
+    "code": 404,
+    "text": "404 page not found"
+  },
+  {
+    "url": "http://localhost:11434/api/generate",
+    "code": 200,
+    "text": "{\"model\":\"llama3:8b\",\"created_at\":\"2026-01-10T04:22:12.317038Z\",\"response\":\"\",\"done\":true,\"done_reason\":\"load\"}"
+  }
+]

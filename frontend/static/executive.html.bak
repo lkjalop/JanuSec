@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>JanuSec Executive Overview</title>
+<style>
+  :root{--bg:#0B0E14;--panel:#151922;--panel2:#1C2230;--b:#2A3142;--txt:#E8EBF0;--mut:#A8B2C3;--accent:#4A63E7}
+  body{margin:0;background:var(--bg);color:var(--txt);font-family:Inter,Segoe UI,sans-serif}
+  .wrap{max-width:1100px;margin:0 auto;padding:22px}
+  .row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+  .card{background:var(--panel);border:1px solid var(--b);border-radius:8px;padding:14px;margin-bottom:14px}
+  .btn{padding:8px 14px;border-radius:6px;background:var(--accent);color:#fff;text-decoration:none}
+  table{width:100%;border-collapse:collapse}
+  th,td{border-bottom:1px solid var(--b);padding:8px 10px;font-size:13px;text-align:left}
+  .mut{color:var(--mut)}
+  .pill{display:inline-block; padding:2px 8px; border:1px solid var(--b); border-radius:999px; font-size:12px; margin:2px; background:var(--panel2)}
+</style></head>
+<body>
+<div class="wrap">
+  <div class="row"><a class="btn" href="/static/janusec-platform-complete-LIVE.html">← Console</a>
+    <a class="btn" id="openHtml" target="_blank">Open Full Report</a>
+    <a class="btn" id="openPdf" target="_blank">Download PDF</a>
+    <a class="btn" id="saveSnap" target="_blank">Save Snapshot</a>
+    <label class="mut" style="display:flex;align-items:center;gap:6px">
+      <input type="checkbox" id="toggleVex"> Include VEX-suppressed
+    </label>
+  </div>
+  <div class="card"><h2>Executive Overview</h2>
+    <div id="headline" class="mut">Loading…</div>
+  </div>
+  <div class="row">
+    <div class="card" style="flex:1"><h3>Verdict Totals</h3><div id="verdicts">–</div></div>
+    <div class="card" style="flex:1"><h3>Severity</h3><div id="severity">–</div></div>
+  </div>
+  <div class="card"><h3>Top MITRE Techniques</h3>
+    <table><thead><tr><th>Technique</th><th>Count</th></tr></thead><tbody id="mitre"></tbody></table>
+  </div>
+  <div class="row">
+    <div class="card" style="flex:1"><h3>STRIDE</h3><div id="stride">–</div></div>
+    <div class="card" style="flex:1"><h3>DREAD (Avg)</h3><div id="dread">–</div></div>
+  </div>
+  <div class="card"><h3>MAESTRO Top Phases</h3><div id="maestro">–</div></div>
+  <div class="card"><h3>Recommendations</h3><ul id="recs"></ul></div>
+  <div class="card"><h3>Evidence Metrics & Integrity <span id="eviStatus" class="mut" style="font-weight:normal"></span></h3>
+    <div id="evidenceMetrics" class="mut">Loading…</div>
+    <div style="margin-top:8px"><button class="btn" id="verifySnapshotBtn" style="background:#1C2230">Verify Snapshot Hash</button> <span id="snapHash" class="mut" style="font-size:12px"></span></div>
+  </div>
+  <!-- Undo Details Modal (reused from CSV Analyzer style) -->
+  <div id="undoDetailsModal" style="position:fixed; inset:0; display:none; align-items:center; justify-content:center; background:rgba(0,0,0,0.6);">
+    <div style="background:var(--panel); border:1px solid var(--b); border-radius:8px; width: min(900px, 96vw); max-height: 80vh; overflow:auto;">
+      <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 12px; border-bottom:1px solid var(--b);">
+        <div style="font-weight:600">Undo Details</div>
+        <button class="btn secondary" onclick="closeUndoDetailsModal()">Close</button>
+      </div>
+      <div id="undoDetailsBody" style="padding:12px; color:var(--mut)"></div>
+      <div style="padding:10px 12px; border-top:1px solid var(--b); display:flex; gap:8px; justify-content:flex-end;">
+        <button class="btn secondary" onclick="closeUndoDetailsModal()">Cancel</button>
+        <button class="btn" id="execUndoBtn" onclick="execUndoFromModal()">Execute Undo</button>
+      </div>
+    </div>
+  </div>
+  <div class="card"><h3>Undo History (Audit)</h3>
+    <div id="undoHistory" class="mut">Loading…</div>
+    <div style="margin-top:8px">
+      <button class="btn secondary" id="refreshUndoHistory">Refresh</button>
+      <button class="btn" id="triggerBroadcastBtn" style="margin-left:8px">Trigger Broadcast</button>
+    </div>
+  </div>
+  <div class="card"><h3>SBOM Summary</h3>
+    <div id="sbomSummary" class="mut">No SBOM data</div>
+    <div class="row" id="sbomRows" style="margin-top:8px"></div>
+    <div id="sbomCompPills" style="margin-top:6px"></div>
+    <div id="sbomBadges" style="margin-top:6px"></div>
+    <div id="sbomExposure" style="margin-top:6px"></div>
+    <div id="sbomAging" style="margin-top:6px"></div>
+    <div id="sbomOpenAccepted" style="margin-top:6px"></div>
+  </div>
+  <div class="card"><h3>Top Affected Components</h3>
+    <table><thead><tr><th>Component</th><th>Count</th></tr></thead><tbody id="sbomTopComps"></tbody></table>
+  </div>
+  <div class="card"><h3>Fix Plan (Top 5 by Suppressed Risk)</h3>
+    <table><thead><tr><th>Component</th><th>Items</th><th>Suppressed Risk</th><th>Target SLA (days)</th></tr></thead><tbody id="fixPlan"></tbody></table>
+  </div>
+  <div class="card"><h3>Network Beacons <span id="hdrBeacons" class="mut" style="font-weight:normal"></span></h3>
+    <div class="mut">Top suspected periodic flows by low coefficient of variation (CV) and volume.</div>
+    <div class="row" style="margin:6px 0"><button class="btn" id="exportBeacons" style="padding:6px 10px; background:#1C2230">Export CSV</button></div>
+    <table><thead><tr><th>Src</th><th>Dst</th><th>Port</th><th>Count</th><th>Period (s)</th><th>CV</th><th>Intervals</th><th></th></tr></thead>
+      <tbody id="beaconsBody"><tr><td class="mut" colspan="8">Loading…</td></tr></tbody>
+    </table>
+  </div>
+  <div class="row">
+    <div class="card" style="flex:1; min-width:320px"><h3>Novel TLS Fingerprints <span id="hdrTLS" class="mut" style="font-weight:normal"></span></h3>
+      <div id="tlsSummary" class="mut">–</div>
+      <div style="display:flex; gap:12px; flex-wrap:wrap; margin-top:8px">
+        <div style="flex:1; min-width:260px"><div class="mut">Top JA3</div><div id="topJA3">–</div></div>
+        <div style="flex:1; min-width:260px"><div class="mut">Top JA4</div><div id="topJA4">–</div></div>
+      </div>
+    </div>
+  <div class="card" style="flex:1; min-width:320px"><h3>DNS / DoH / SNI Anomalies <span id="hdrDNS" class="mut" style="font-weight:normal"></span></h3>
+      <div id="dnsSummary" class="mut">–</div>
+      <div style="margin-top:8px"><div class="mut">Hosts with high NXDOMAIN rate</div>
+        <div class="mut" style="margin:6px 0">Since window: 
+          <select id="nxSince" style="background:#0B0E14;color:#E8EBF0;border:1px solid #2A3142;border-radius:6px;padding:4px 6px">
+            <option value="900">15m</option>
+            <option value="3600" selected>1h</option>
+            <option value="14400">4h</option>
+            <option value="86400">24h</option>
+          </select>
+          <button id="nxApply" class="btn" style="padding:4px 8px;margin-left:6px">Apply</button>
+        </div>
+        <table><thead><tr><th>Host</th><th>NX Rate</th><th>Total</th></tr></thead><tbody id="nxHosts"></tbody></table>
+      </div>
+      <div style="margin-top:8px"><div class="mut">SNI Unicode/Punycode Examples</div><div id="sniExamples" style="max-height:120px; overflow:auto"></div></div>
+    </div>
+  </div>
+  <div class="card"><h3>Zeek Retro Hunt</h3>
+    <div class="mut">Upload Zeek NDJSON logs (conn.log.json, dns.log.json). We'll parse in-browser and replay to the platform.</div>
+    <div class="row" style="margin-top:8px">
+      <input type="file" id="zeekFile" multiple accept=".json,.ndjson,.log,.txt" />
+      <button class="btn" id="zeekUploadBtn">Replay</button>
+      <button class="btn" id="refreshNetBtn" style="background:#2A8F4A">Refresh Network Panels</button>
+    </div>
+    <div id="zeekStatus" class="mut" style="margin-top:8px"></div>
+  </div>
+  <div class="card" id="huntMini" style="display:none"><h3>Hunting (Mini Panels) <span id="expFlag" class="mut" style="font-weight:normal"></span></h3>
+    <div class="row" id="huntMiniRows"></div>
+  </div>
+</div>
+<script>
+  function safeNotify(msg, level){
+    try{
+      if(window.showNotification) return window.showNotification(msg, level);
+      if(window.notifications && typeof window.notifications.showToast === 'function') return window.notifications.showToast(msg, 5000);
+      console.log('[notify]', level||'info', msg);
+    }catch(e){ console.log('notify-fail', e, msg); }
+  }
+
+  function authHeaders(){
+    try{
+      const k=localStorage.getItem('apiKey')||'devkey123';
+      const t=localStorage.getItem('tenantId');
+      const h={'x-api-key':k}; if(t) h['X-Tenant-ID']=t; return h;
+    }catch(_){ return {'x-api-key':'devkey123'} }
+  }
+  function esc(s){return String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;')}
+  async function load(){
+    const params = new URLSearchParams(location.search);
+    const sessions = params.get('sessions');
+    const includeSupp = params.get('include_suppressed_vex') === 'true';
+    const baseQ = new URLSearchParams({ include_model: 'true', include_scenarios: 'true', include_suppressed_vex: String(includeSupp) });
+    if(sessions){ baseQ.set('sessions', sessions); }
+    const q = baseQ.toString();
+    document.getElementById('openHtml').href = `/api/v1/report/ingestion?format=html&${q}`;
+    document.getElementById('openPdf').href = `/api/v1/report/ingestion?format=pdf&${q}`;
+    const cb = document.getElementById('toggleVex');
+    if (cb) {
+      cb.checked = includeSupp;
+      cb.addEventListener('change', ()=>{
+        const nParams = new URLSearchParams(location.search);
+        if (cb.checked) nParams.set('include_suppressed_vex','true'); else nParams.delete('include_suppressed_vex');
+        location.search = nParams.toString();
+      });
+    }
+    const saveBtn = document.getElementById('saveSnap');
+    if(saveBtn){ saveBtn.addEventListener('click', (e)=>{
+      e.preventDefault(); const np = new URLSearchParams(baseQ);
+      np.set('save_snapshot','true'); np.set('format','html');
+      const ts = new Date().toISOString(); np.set('snapshot_title', `Exec Snapshot ${ts}`);
+      window.open(`/api/v1/report/ingestion?${np.toString()}`, '_blank');
+    }); }
+    const r = await fetch(`/api/v1/report/ingestion?format=json&${q}`, { headers: { ...authHeaders() }});
+    if(!r.ok){ document.getElementById('headline').textContent = 'Unable to load report. Ensure API is running and API key set.'; return; }
+    const j = await r.json();
+    const total = (j.verdict_stats && j.verdict_stats.total_events) || 0;
+    if(total === 0){
+      document.getElementById('headline').innerHTML = `No events found. Try <a class="btn" href="/static/csv_analyzer.html">CSV Analyzer</a> and reopen Executive.`;
+    } else {
+      document.getElementById('headline').textContent = `Analyzed ${total} events. Tenant: ${j.tenant_id||'default'}. Generated: ${new Date((j.generated_at||0)*1000).toISOString()}`;
+    }
+    const vc = j.verdict_stats || {}; delete vc.total_events; document.getElementById('verdicts').innerHTML = Object.entries(vc).map(([k,v])=>`${esc(k)}: <b>${v}</b>`).join('<br/>') || '–';
+    const sev = j.severity_distribution || {}; document.getElementById('severity').innerHTML = Object.entries(sev).map(([k,v])=>`${esc(k)}: <b>${v}</b>`).join('<br/>') || '–';
+    const mitre = j.top_mitre_techniques||[]; document.getElementById('mitre').innerHTML = mitre.slice(0,10).map(r=>`<tr><td>${esc(r.technique||'')}</td><td>${r.count||0}</td></tr>`).join('');
+    // STRIDE/DREAD/MAESTRO summary
+    const tms = j.threat_model_summary || {}; const stride = (tms.stride_categories||[]).join(', ')||'–';
+    document.getElementById('stride').textContent = stride;
+    const dread = tms.dread_average_across_events || {}; document.getElementById('dread').innerHTML = Object.entries(dread).map(([k,v])=>`${esc(k)}: <b>${v}</b>`).join('<br/>')||'–';
+    // FinOps card (if present)
+    const fin = j.finops || null;
+    if(fin){
+      let host = document.getElementById('finops');
+      if(!host){ const card=document.createElement('div'); card.className='card'; card.innerHTML='<h3>FinOps & ROI</h3><div id="finops"></div>';
+        document.querySelector('.wrap').insertBefore(card, document.querySelector('.wrap').children[6]); host=document.getElementById('finops'); }
+      host.innerHTML = `Ingest cost: $${esc(fin.ingest_cost_estimate)} · Storage cost: $${esc(fin.storage_cost_estimate)} · Alert triage cost: $${esc(fin.alert_triage_cost_estimate)}<br/>`
+        + `Avoided triage: $${esc(fin.avoided_manual_triage_cost_estimate)} · Suspicious-cell savings: $${esc(fin.suspicious_cell_cost_saved_estimate)}<br/>`
+        + `<b>Net savings:</b> $${esc(fin.net_savings_estimate)} · <b>ROI:</b> ${fin.roi_ratio_estimate!=null? esc(fin.roi_ratio_estimate):'n/a'}`;
+    }
+    const maestro = tms.maestro_phase_density || []; document.getElementById('maestro').innerHTML = maestro.slice(0,10).map(([p,c])=>`${esc(p)}: <b>${c}</b>`).join('<br/>')||'–';
+    const recs = j.recommendations||[]; document.getElementById('recs').innerHTML = recs.map(r=>`<li>${esc(r)}</li>`).join('')||'<li>No critical actions at this time.</li>';
+    // SBOM compact summary (if present)
+  const sb = j.sbom_vuln_summary || null;
+    if(sb){
+      const sev = sb.severity_distribution || {};
+      const sevHtml = Object.entries(sev).map(([k,v])=>`${esc(k)}: <b>${v}</b>`).join(' · ');
+      document.getElementById('sbomSummary').innerHTML = `SBOMs: <b>${(sb.sbom_ids||[]).length}</b> · Vulns: <b>${sb.total_vulns||0}</b> · ${sevHtml || 'n/a'}`;
+      const cves = (sb.top_cves||[]).slice(0,6).map(t=>`${esc(t.cve)} (${t.count})`).join(', ');
+      const comps = (sb.top_components||[]).slice(0,6).map(t=>`${esc(t.component)} (${t.count})`).join(', ');
+      document.getElementById('sbomRows').innerHTML = `
+        <div style="flex:1; min-width:280px"><div class="mut">Top CVEs</div><div>${cves || '—'}</div></div>
+        <div style="flex:1; min-width:280px"><div class="mut">Top Components</div><div>${comps || '—'}</div></div>`;
+      const pillHtml = (sb.top_components||[]).slice(0,12).map(t=>`<span class="pill">${esc(t.component)}${t.reachable? ' <span class=\"mut\">(reachable)</span>':''} (${t.count})</span>`).join('');
+      document.getElementById('sbomCompPills').innerHTML = pillHtml || '<span class="mut">No components</span>';
+      // SBOM badges
+      const badges = [];
+      if((sb.kev_present_count||0)>0){ badges.push(`<span class=\"pill\" style=\"background:#3a2433; border-color:#6b2d45\">KEV present: ${esc(sb.kev_present_count)}</span>`); }
+      if((sb.epss_weighted_critical_last_30d||0)>0){ badges.push(`<span class=\"pill\" style=\"background:#24333a; border-color:#2d6b6b\">EPSS-weighted criticals (30d): ${esc(sb.epss_weighted_critical_last_30d)}</span>`); }
+      if((sb.accepted_exceptions_count||0)>0){ badges.push(`<span class=\"pill\" style=\"background:#2a233a; border-color:#4b3d7a\">Accepted risk: ${esc(sb.accepted_exceptions_count)}</span>`); }
+      document.getElementById('sbomBadges').innerHTML = badges.join(' ');
+      const compRows = (sb.top_components||[]).slice(0,15).map(t=>`<tr><td>${esc(t.component)}</td><td>${t.count}</td></tr>`).join('');
+      document.getElementById('sbomTopComps').innerHTML = compRows || '<tr><td colspan="2" class="mut">No data</td></tr>';
+      // Fix plan
+      const fp = (j.sbom_fix_plan||[]).slice(0,5);
+      document.getElementById('fixPlan').innerHTML = fp.length? fp.map(p=>`<tr><td>${esc(p.component)}</td><td>${esc(p.items)}</td><td>${esc(p.suppressed_risk.toFixed? p.suppressed_risk.toFixed(3): p.suppressed_risk)}</td><td>${esc(p.target_sla_days)}</td></tr>`).join('') : '<tr><td colspan="4" class="mut">No prioritized actions</td></tr>';
+      // Exposure badge
+      const exp = typeof sb.epss_weighted_exposure === 'number' ? sb.epss_weighted_exposure.toFixed(3) : null;
+  document.getElementById('sbomExposure').innerHTML = exp? `<span class="pill" style="background:#20313c;border-color:#2d4f6b;position:relative">EPSS-weighted exposure: ${esc(exp)} <span class="mut" style="cursor:help" title="Sum(severity_weight × EPSS) across unsuppressed vulnerabilities; approximates probabilistic exploit pressure.">ⓘ</span> <a href="#" style="color:#8fb4ff;font-size:11px" title="EPSS estimates probability of exploitation; we severity-weight it to bias remediation." onclick="event.preventDefault(); safeNotify('EPSS-weighted exposure = Σ(severity_weight × EPSS) across current unsuppressed vulnerabilities. Severity weights: critical 1.0, high 0.6, medium 0.3, low 0.1. Lower is better.','info');">What is this?</a></span>`:'';
+  // Critical aging buckets
+  const aging = sb.critical_aging || {};
+  const agingHtml = `<span class=\"mut\" style=\"font-size:12px;margin-right:4px\">Critical aging:</span>` + ['le_7d','d8_30d','gt_30d'].map(k=>`<span class=\"pill\" title=\"Open critical vulnerabilities in age bucket ${k}\">${k.replace('le_7d','≤7d').replace('d8_30d','8–30d').replace('gt_30d','>30d')}: ${(aging[k]||0)}</span>`).join(' ');
+      document.getElementById('sbomAging').innerHTML = agingHtml || '';
+      // Open vs accepted severity counts
+      const openSev = sb.open_by_severity||{}; const accSev = sb.accepted_by_severity||{};
+      const severities = ['critical','high','medium','low'];
+      const oa = severities.map(s=>`<span class="pill" style="background:#1f2530">${s}: <b>${openSev[s]||0}</b> open / <span class="mut">${accSev[s]||0} accepted</span></span>`).join(' ');
+      document.getElementById('sbomOpenAccepted').innerHTML = oa;
+    } else {
+      document.getElementById('sbomSummary').textContent = 'No SBOM data';
+      document.getElementById('sbomRows').innerHTML = '';
+      document.getElementById('sbomCompPills').innerHTML = '';
+      document.getElementById('sbomTopComps').innerHTML = '<tr><td colspan="2" class="mut">No data</td></tr>';
+      document.getElementById('sbomBadges').innerHTML = '';
+      document.getElementById('fixPlan').innerHTML = '<tr><td colspan="4" class="mut">No data</td></tr>';
+      document.getElementById('sbomExposure').innerHTML = '';
+      document.getElementById('sbomAging').innerHTML = '';
+      document.getElementById('sbomOpenAccepted').innerHTML = '';
+    }
+    // Evidence metrics
+    try {
+      const evr = await fetch('/api/v1/cases/metrics', { headers: { ...authHeaders() }});
+      if (evr.ok){
+        const em = await evr.json();
+        const sev = em.case_severity_distribution || {}; const sevHtml = Object.entries(sev).map(([k,v])=>`<span class="pill">${esc(k)}: ${esc(v)}</span>`).join(' ');
+        const integ = em.integrity || {}; const iv = integ.percent_verified!=null? integ.percent_verified.toFixed(1)+'%' : 'n/a';
+        const failed = (em.failed_cases||[]).slice(0,5).join(', ');
+        document.getElementById('evidenceMetrics').innerHTML = `Cases: <b>${em.total_cases}</b> · Artifacts: <b>${em.total_artifacts}</b> · 24h Cases: <b>${em.recent_cases_24h}</b> · 24h Artifacts: <b>${em.recent_artifacts_24h}</b><br/>`
+          + `Integrity verified: <b>${iv}</b> (pass: ${integ.verified_pass||0} / fail: ${integ.verified_fail||0}) `
+          + (failed? `<span class='mut'>Failed chains: ${esc(failed)}</span>`:'')
+          + `<div style='margin-top:6px'>Severity dist: ${sevHtml || '—'}</div>`;
+      } else {
+        document.getElementById('evidenceMetrics').textContent = 'Metrics unavailable';
+      }
+    } catch(e){ document.getElementById('evidenceMetrics').textContent='Metrics error'; }
+    // Snapshot hash fetch
+    try {
+      const hs = await fetch(`/api/v1/report/ingestion/hash?${q}`, { headers: { ...authHeaders() }});
+      if(hs.ok){ const hj = await hs.json(); document.getElementById('snapHash').textContent = 'SHA256: ' + hj.sha256.slice(0,24) + '…'; document.getElementById('snapHash').dataset.fullHash = hj.sha256; }
+    } catch {}
+    // Start telemetry polling (TP/FP estimates)
+    try{
+      startTelemetryPolling();
+    }catch(_){ }
+  }
+
+  let _telemetryPollId = null;
+  async function fetchTelemetryMetrics(){
+    try{
+      const r = await fetch('/api/v1/telemetry/metrics', { headers:{ ...authHeaders() } });
+      if(!r.ok) return null; const j = await r.json(); return j;
+    }catch(_){ return null; }
+  }
+  async function startTelemetryPolling(intervalMs=10000){
+    if(_telemetryPollId) return; // already running
+    async function tick(){ const tm = await fetchTelemetryMetrics(); if(tm){ const el=document.getElementById('evidenceMetrics'); if(el){ const est = tm.tp_fp_estimates || {}; const br = est.benign_ratio!=null? (est.benign_ratio*100).toFixed(1)+'%':'n/a'; const mr = est.malicious_ratio!=null? (est.malicious_ratio*100).toFixed(1)+'%':'n/a'; const add = `<div style="margin-top:6px">Telemetry dispositions: <b>${tm.total_dispositions}</b> · benign: <b>${tm.by_disposition.benign||0}</b>, malicious: <b>${tm.by_disposition.malicious||0}</b>, needs_review: <b>${tm.by_disposition.needs_review||0}</b><br/>Benign ratio (proxy): <b>${br}</b> · Malicious ratio: <b>${mr}</b></div>`; el.innerHTML = (el.innerHTML||'') + add; } }
+    }
+    // run immediately and schedule
+    await tick(); _telemetryPollId = setInterval(tick, intervalMs);
+    // also try SSE stream for lower-latency updates
+    try{
+      if(typeof WebSocket !== 'undefined'){
+        const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+        const wsUrl = `${proto}://${location.host}/api/v1/telemetry/ws`;
+        const ws = new WebSocket(wsUrl);
+        ws.onmessage = function(evt){
+          try {
+            const data = JSON.parse(evt.data || '{}');
+            if (data && data.payload && data.type === 'metrics') {
+              const tm = data.payload;
+              const el = document.getElementById('evidenceMetrics');
+              if (el) {
+                const est = tm.tp_fp_estimates || {};
+                const br = est.benign_ratio != null ? (est.benign_ratio * 100).toFixed(1) + '%' : 'n/a';
+                const mr = est.malicious_ratio != null ? (est.malicious_ratio * 100).toFixed(1) + '%' : 'n/a';
+                const add = `<div style="margin-top:6px">[live] Telemetry dispositions: <b>${tm.total_dispositions}</b> · benign: <b>${tm.by_disposition.benign||0}</b>, malicious: <b>${tm.by_disposition.malicious||0}</b>, needs_review: <b>${tm.by_disposition.needs_review||0}</b><br/>Benign ratio (proxy): <b>${br}</b> · Malicious ratio: <b>${mr}</b></div>`;
+                el.innerHTML = (el.innerHTML || '') + add;
+              }
+            }
+          } catch (e) {
+            // ignore parse errors
+          }
+        };
+        ws.onclose = function(){ /* fallback left intact: polling will continue */ };
+      }
+    }catch(_){ }
+  }
+  // Undo history (audit) helpers
+  async function loadUndoHistory(){
+    const el = document.getElementById('undoHistory'); if(!el) return; el.textContent = 'Loading...';
+    try{
+      const r = await fetch('/api/v1/telemetry/undo_tokens', { headers: { ...authHeaders() } });
+      if(!r.ok){ el.textContent = 'Unable to load undo tokens'; return; }
+      const j = await r.json(); const list = j.tokens || j || [];
+      if(!list.length){ el.innerHTML = '<div class="muted">No undo tokens recorded</div>'; return; }
+  el.innerHTML = `<table style="width:100%; border-collapse:collapse"><thead><tr><th>Token</th><th>Creator</th><th>Count</th><th>TS</th><th></th></tr></thead><tbody>${list.map(t=>`<tr><td style="max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">${esc(t.token||t.id||'')}</td><td>${esc(t.creator||t.analyst||'')}</td><td>${esc(String(t.count||t.ids?.length||0))}</td><td>${t.ts? new Date(t.ts*1000).toLocaleString():''}</td><td><button class='btn secondary preview-undo-btn' data-token='${esc(t.token||t.id||'')}'>Preview</button></td></tr>`).join('')}</tbody></table>`;
+  // wire preview buttons
+  setTimeout(()=>{ const btns = el.querySelectorAll('.preview-undo-btn'); btns.forEach(b=>{ b.addEventListener('click', ()=>{ const token = b.getAttribute('data-token'); if(token) showUndoDetails(token); }); }); }, 10);
+    }catch(e){ el.textContent = 'Undo history error'; }
+  }
+  async function previewUndoToken(token){
+    // open modal-based preview
+    try{ await showUndoDetails(token); }catch(e){ safeNotify('Preview error','error'); }
+  }
+
+  function openUndoDetailsModal(){ const m = document.getElementById('undoDetailsModal'); if(m) m.style.display='flex'; }
+  function closeUndoDetailsModal(){ const m = document.getElementById('undoDetailsModal'); if(m) m.style.display='none'; }
+
+  async function showUndoDetails(token){
+    const body = document.getElementById('undoDetailsBody'); if(!body) return; body.innerHTML = 'Loading…'; openUndoDetailsModal();
+    try{
+      const r = await fetch('/api/v1/telemetry/preview_undo', { method:'POST', headers: { 'Content-Type':'application/json', ...authHeaders() }, body: JSON.stringify({ token }) });
+      if(!r.ok){ body.innerHTML = '<div class="mut">Preview failed or unauthorized</div>'; return; }
+      const j = await r.json(); const rows = j.rows || [];
+        // Build rows HTML with an "Open in CSV Analyzer" link when possible (prefers session identifiers)
+        const rowsHtml = (rows.slice(0,200)).map(rr=>{
+          const session = rr.session || rr.session_id || rr.sessionId || rr.session_uuid || rr.sessionKey || '';
+          const rowIdx = (rr.row_index!=null? rr.row_index : (rr.rowIndex!=null? rr.rowIndex : ''));
+          let openLink = '';
+          try{
+            if(session || rowIdx!==''){
+                const p = new URLSearchParams(); if(session) p.set('session', session); if(rowIdx!=='') p.set('row', String(rowIdx));
+                // prefer artifact identifiers when present
+                const artifact = rr.artifact_id || rr.event_id || rr.id || rr.hash || '';
+                if(artifact) p.set('artifact_id', artifact);
+                const href = `/static/csv_analyzer.html?${p.toString()}`;
+                // include a tooltip/title so users see the exact link
+                openLink = `<a class="btn" href="${href}" target="_blank" title="Open in CSV Analyzer: ${href}">Open</a>`;
+              }
+          }catch(_){ openLink = ''; }
+          return `<tr><td>${esc(String(rr.row_index||''))}</td><td>${esc(String(rr.disposition||''))}</td><td>${esc(String(rr.analyst||''))}</td><td>${new Date((rr.ts||0)*1000).toLocaleString()}</td><td>${openLink}</td></tr>`;
+        }).join('');
+    // augment rowsHtml to include artifact_id when available and set title tooltip on Open buttons
+    body.innerHTML = `<div>This undo will revert <b>${j.count||rows.length}</b> dispositions.</div><div style="margin-top:8px"><table style="width:100%; border-collapse:collapse"><thead><tr><th>Row</th><th>Disp</th><th>Analyst</th><th>TS</th><th></th></tr></thead><tbody>${rowsHtml}</tbody></table></div>`;
+      window._exec_undo_token = token;
+    }catch(e){ body.innerHTML = '<div class="mut">Preview error</div>'; }
+  }
+
+  async function execUndoFromModal(){
+    try{
+      const token = window._exec_undo_token;
+      if(!token){ safeNotify('No token available','error'); return; }
+      const resp = await fetch('/api/v1/telemetry/undo_with_token', { method:'POST', headers: { 'Content-Type':'application/json', ...authHeaders() }, body: JSON.stringify({ token }) });
+      if(!resp.ok){ const j = await resp.json().catch(()=>({})); safeNotify('Undo failed: '+(j.detail||resp.status),'error'); return; }
+      safeNotify('Undo applied','success'); closeUndoDetailsModal();
+      try{ await fetch('/api/v1/telemetry/trigger_broadcast', { method:'POST', headers:{ ...authHeaders() } }); }catch(_){ /* ignore */ }
+    }catch(e){ safeNotify('Undo error','error'); }
+  }
+  // wire refresh button
+  document.addEventListener('DOMContentLoaded', ()=>{ const btn=document.getElementById('refreshUndoHistory'); if(btn) btn.addEventListener('click', loadUndoHistory); setTimeout(()=>{ try{ loadUndoHistory(); }catch(_){ } }, 120); });
+  async function loadNetwork(){
+    try{
+      const r = await fetch('/api/v1/network/summary', { headers: { ...authHeaders() }});
+      if(!r.ok){ document.getElementById('beaconsBody').innerHTML = '<tr><td colspan="8" class="mut">Network summary unavailable</td></tr>'; return; }
+      const j = await r.json();
+      // Beacons
+      const bb = j.beacons||[];
+      const spark = (arr)=>{
+        if(!arr||!arr.length) return '';
+        const max = Math.max(...arr);
+        const w = 80, h = 16; const pad = 2; const step = Math.max(1, Math.floor(w/arr.length));
+        let x = pad; const pts=[];
+        for(const v of arr){ const y = h - Math.round((v/max)*(h-pad)) - pad; pts.push(`${x},${y}`); x += step; }
+        return `<svg width="${w}" height="${h}"><polyline points="${pts.join(' ')}" fill="none" stroke="#6ba5ff" stroke-width="1"/></svg>`;
+      };
+      document.getElementById('beaconsBody').innerHTML = (bb.length? bb.map(b=>{
+        const q = new URLSearchParams({ src: b.src||'', dst: b.dst||'', port: String(b.port||'') }).toString();
+        const link = `/static/hunt_network.html?${q}`;
+        const hist = (b.intervals_hist||[]).slice(0,4).map(h=>`${esc(h.seconds)}s:${esc(h.count)}`).join(' · ');
+        const sp = spark((b.intervals||[]));
+        return `<tr><td>${esc(b.src||'')}</td><td>${esc(b.dst||'')}</td><td>${esc(b.port||'')}</td><td>${esc(b.count||0)}</td><td>${b.period!=null? esc(b.period):'–'}</td><td>${b.cv!=null? esc(b.cv):'–'}</td><td class="mut">${hist||'—'} ${sp}</td><td><a class="btn" href="${link}" target="_blank">Hunt</a></td></tr>`;
+  }).join('') : '<tr><td class="mut" colspan="8">No suspected beacons</td></tr>');
+      // TLS fingerprints
+      const tls = j.tls||{}; const ja3 = tls.ja3||{distinct:0,novel:0,top:[]}; const ja4 = tls.ja4||{distinct:0,novel:0,top:[]};
+      document.getElementById('tlsSummary').innerHTML = `JA3 distinct: <b>${ja3.distinct}</b> · novel: <b>${ja3.novel}</b> &nbsp; | &nbsp; JA4 distinct: <b>${ja4.distinct}</b> · novel: <b>${ja4.novel}</b>`;
+      const linkJA3 = (val)=>`/static/hunt_network.html?ja3=${encodeURIComponent(val)}`;
+      const linkJA4 = (val)=>`/static/hunt_network.html?ja4=${encodeURIComponent(val)}`;
+      document.getElementById('topJA3').innerHTML = (ja3.top||[]).map(t=>`<span class="pill"><a style="color:#fff;text-decoration:none" href="${linkJA3(t.value)}" target="_blank">${esc(t.value)}</a> <span class="mut">(${t.count})</span></span>`).join(' ')||'–';
+      document.getElementById('topJA4').innerHTML = (ja4.top||[]).map(t=>`<span class="pill"><a style="color:#fff;text-decoration:none" href="${linkJA4(t.value)}" target="_blank">${esc(t.value)}</a> <span class="mut">(${t.count})</span></span>`).join(' ')||'–';
+      // DNS/DoH
+      const dns = j.dns||{tunnel_suspected:0,long_label:0,novel_domains:0,doh:0,doh_quic:0,high_nx_hosts:[]};
+      document.getElementById('dnsSummary').innerHTML = `DNS tunnel suspected: <b>${dns.tunnel_suspected}</b> · long label: <b>${dns.long_label}</b> · novel domains: <b>${dns.novel_domains}</b> · DoH: <b>${dns.doh}</b> · DoH(QUIC): <b>${dns.doh_quic}</b>`;
+      const sel = document.getElementById('nxSince');
+      const chosen = sel ? parseInt(sel.value || '3600',10) : (j.default_since||3600);
+      const nxRows = (dns.high_nx_hosts||[]).map(h=>{
+        const since = chosen || j.default_since || 3600;
+        const link = `/static/hunt_network.html?host=${encodeURIComponent(h.host)}&since=${encodeURIComponent(since)}`;
+        return `<tr><td><a href="${link}" target="_blank">${esc(h.host)}</a></td><td>${esc(h.rate)}</td><td>${esc(h.total)}</td></tr>`;
+      }).join('');
+      document.getElementById('nxHosts').innerHTML = nxRows || '<tr><td colspan="3" class="mut">None</td></tr>';
+      const sni = j.sni||{unicode_count:0,punycode_count:0,examples:[]};
+      document.getElementById('sniExamples').innerHTML = (sni.examples||[]).map(x=>`<span class="pill">${esc(x)}</span>`).join(' ') || '<span class="mut">None</span>';
+      // Headers with sample size
+      const smp = j.sample_size||0;
+      document.getElementById('hdrBeacons').textContent = smp? `(sample: ${smp})` : '';
+      document.getElementById('hdrTLS').textContent = smp? `(sample: ${smp})` : '';
+      document.getElementById('hdrDNS').textContent = smp? `(sample: ${smp})` : '';
+      // Hunting mini-panels (feature-gated)
+      const flags = j.flags || [];
+      const hunt = j.hunt_metrics || {};
+      if(flags.includes('mini_panels')){
+        const host = document.getElementById('huntMini');
+        host.style.display = 'block';
+        document.getElementById('expFlag').textContent = 'EXPERIMENTAL';
+        const entries = [
+          ['Beacon suspects', hunt.beacon_suspects],
+          ['Novel JA4', hunt.novel_ja4],
+          ['NX burst hosts', hunt.dns_nx_burst_hosts],
+            ['DoH hits', hunt.doh_hits],
+          ['LOLBins', hunt.lolbins]
+        ];
+        document.getElementById('huntMiniRows').innerHTML = entries.map(e=>`<div class="card" style="flex:1;min-width:150px; text-align:center; background:#1C2230"><div class="mut" style="font-size:11px">${esc(e[0])}</div><div style="font-size:22px;font-weight:600">${esc(e[1]||0)}</div></div>`).join('');
+      }
+    }catch(e){
+      document.getElementById('beaconsBody').innerHTML = '<tr><td colspan="8" class="mut">Failed to load network summary</td></tr>';
+    }
+    const nxBtn = document.getElementById('nxApply'); if(nxBtn){ nxBtn.onclick = loadNetwork; }
+  }
+  async function parseZeekNdjson(files){
+    const events = [];
+    for(const f of files){
+      const text = await f.text();
+      const lines = text.split(/\r?\n/);
+      for(const ln of lines){
+        if(!ln.trim()) continue;
+        try{
+          const obj = JSON.parse(ln);
+          // Detect log type by fields
+          if(obj['id.orig_h'] && obj['id.resp_h']){
+            // conn-style
+            events.push({
+              id: obj.uid || undefined,
+              host: obj.host || undefined,
+              src_ip: obj['id.orig_h'], dst_ip: obj['id.resp_h'],
+              dst_port: obj['id.resp_p'] || obj['resp_p'] || obj['id.resp_p_orig'],
+              ts: typeof obj.ts === 'number' ? obj.ts : undefined,
+              ja3: obj.ja3 || obj['ssl.ja3'] || undefined,
+              http_user_agent: obj.user_agent || undefined,
+              sni: obj.server_name || obj['ssl.server_name'] || undefined,
+            });
+          } else if(obj.qtype_name || obj.query){
+            // dns-style
+            let rcode = obj.rcode_name || obj.rcode;
+            events.push({
+              id: obj.uid || undefined,
+              host: obj.host || undefined,
+              dns_query: obj.query || obj.qname || undefined,
+              dns_rcode: rcode,
+              ts: typeof obj.ts === 'number' ? obj.ts : undefined,
+            });
+          }
+        }catch(_){ }
+      }
+    }
+    return events;
+  }
+  async function replayZeek(files){
+    const statusEl = document.getElementById('zeekStatus');
+    statusEl.textContent = 'Parsing…';
+    const events = await parseZeekNdjson(files);
+    statusEl.textContent = `Parsed ${events.length} events. Uploading…`;
+    const chunkSize = 400;
+    let accepted = 0, errors = 0;
+    for(let i=0;i<events.length;i+=chunkSize){
+      const chunk = events.slice(i, i+chunkSize);
+      try{
+        const r = await fetch('/api/v1/endpoints/log_batch', { method:'POST', headers:{ 'Content-Type':'application/json', ...authHeaders() }, body: JSON.stringify({ events: chunk, classify: false, include_rules: true, send_alerts: false }) });
+        if(r.ok){ const j = await r.json(); accepted += j.accepted||0; } else { errors++; }
+      }catch(_){ errors++; }
+      statusEl.textContent = `Uploaded ${Math.min(i+chunkSize, events.length)} / ${events.length}…`;
+    }
+    statusEl.textContent = `Done. Accepted ${accepted}. Errors: ${errors}. Refreshing network panels…`;
+    await loadNetwork();
+  }
+  function wireActions(){
+    const up = document.getElementById('zeekUploadBtn');
+    const fi = document.getElementById('zeekFile');
+    if(up && fi){ up.addEventListener('click', ()=>{ if(!fi.files || fi.files.length===0){ document.getElementById('zeekStatus').textContent='Select one or more files first.'; return; } replayZeek(fi.files); }); }
+    const rf = document.getElementById('refreshNetBtn'); if(rf){ rf.addEventListener('click', loadNetwork); }
+    const exp = document.getElementById('exportBeacons'); if(exp){ exp.addEventListener('click', async ()=>{
+      try{
+        const r = await fetch('/api/v1/network/summary', { headers: { ...authHeaders() }});
+        if(!r.ok) return; const j = await r.json();
+        const rows = [['src','dst','port','count','period','cv']].concat((j.beacons||[]).map(b=>[b.src,b.dst,b.port,b.count,b.period,b.cv]));
+        const csv = rows.map(r=>r.map(x=>`"${(x??'').toString().replaceAll('"','""')}"`).join(',')).join('\n');
+        const blob = new Blob([csv], {type:'text/csv'}); const url = URL.createObjectURL(blob);
+        const a = document.createElement('a'); a.href = url; a.download = 'beacons.csv'; a.click(); URL.revokeObjectURL(url);
+      }catch(_){ }
+    }); }
+  }
+  load(); loadNetwork(); wireActions();
+  // Wire snapshot verify button
+  document.addEventListener('DOMContentLoaded', ()=>{
+    const btn = document.getElementById('verifySnapshotBtn');
+    if(btn){ btn.addEventListener('click', async ()=>{
+      btn.disabled = true; btn.textContent='Verifying…';
+      try{
+        const params = new URLSearchParams(location.search);
+        const includeSupp = params.get('include_suppressed_vex') === 'true';
+        const baseQ = new URLSearchParams({ include_model: 'true', include_scenarios: 'true', include_suppressed_vex: String(includeSupp) });
+        const sessions = params.get('sessions'); if(sessions) baseQ.set('sessions', sessions);
+        const hs = await fetch(`/api/v1/report/ingestion/hash?${baseQ.toString()}`, { headers: { ...authHeaders() }});
+        if(hs.ok){ const hj = await hs.json(); const el=document.getElementById('snapHash'); const current=el? el.dataset.fullHash: null; if(current && current===hj.sha256){ btn.textContent='Integrity: OK'; btn.style.background='#2A8F4A'; } else { btn.textContent='Integrity: MISMATCH'; btn.style.background='#A13D3D'; if(el) el.textContent='SHA256: '+hj.sha256.slice(0,24)+'…'; } }
+        else { btn.textContent='Verify Failed'; btn.style.background='#A13D3D'; }
+      }catch(e){ btn.textContent='Verify Error'; }
+      setTimeout(()=>{ btn.disabled=false; }, 2000);
+    }); }
+  });
+</script>
+  <script src="/static/js/notifications.js"></script>
+</body></html>

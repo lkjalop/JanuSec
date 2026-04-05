@@ -1,0 +1,4 @@
+user,host,proc,sha256,observed_ts
+alice,host1.exe,procA,hash1,1672531200
+bob,host2.exe,procB,hash2,1672531260
+carol,host1.exe,procC,hash3,1672531320

@@ -1,0 +1,2 @@
+{"batch_id":"test-4b0d99","sha256":"hashA","name":"a.exe","timestamp":1775350903.0199096,"factors":["signature_mismatch","size_large","high_entropy"],"custody_hash":"974fe53ec36a1b64c05b4e9c2c92582709e845d5b30b08c75ba98be8d34536d7"}
+{"batch_id":"test-4b0d99","sha256":"hashB","name":"b.bin","timestamp":1775350903.0219135,"factors":["baseline_observation"],"custody_hash":"d1fecb4a0eb2490ee7561922231fbb4b3a351021f3335b1195654c983842b779"}

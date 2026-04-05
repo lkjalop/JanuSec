@@ -1,0 +1,30 @@
+{
+  "ewma": {
+    "alpha": 0.2,
+    "residual_scale": 0.4,
+    "warmup_min": 10
+  },
+  "rarity": {
+    "idf_smoothing": 1.0,
+    "min_samples": 20
+  },
+  "thresholds": {
+    "decay_half_life_seconds": 900.0,
+    "suspicious": 0.5,
+    "threat": 1.2
+  },
+  "version": 1,
+  "weights": {
+    "cloud_pivot": 0.25,
+    "ewma_max": 0.25,
+    "high_value_touch": 0.3,
+    "isolation_forest_max": 0.4,
+    "lateral": 0.3,
+    "new_host": 0.25,
+    "periodicity": 0.3,
+    "priv_escalation": 0.5,
+    "privilege": 0.4,
+    "rare_hour": 0.2,
+    "rarity": 0.25
+  }
+}

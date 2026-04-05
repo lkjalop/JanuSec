@@ -1,0 +1,41 @@
+name: TF-IDF Seeder
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'src/enrichment/**'
+      - 'scripts/**'
+
+jobs:
+  seed-tfidf:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - name: Create venv
+        run: |
+          python -m venv .venv
+          . .venv/bin/activate
+      - name: Install dependencies (best-effort)
+        run: |
+          . .venv/bin/activate
+          pip install --upgrade pip
+          pip install -r requirements.txt || true
+          pip install scikit-learn joblib || true
+      - name: Run migration (fakeredis fallback)
+        run: |
+          . .venv/bin/activate
+          python scripts/migrate_with_fakeredis.py || true
+      - name: Build TF-IDF from shadow
+        run: |
+          . .venv/bin/activate
+          python scripts/build_tfidf_from_shadow.py || true
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfidf-artifacts
+          path: data/tfidf_*

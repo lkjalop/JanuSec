@@ -1,0 +1,33 @@
+name: Qualys Connector Integration
+
+on:
+  workflow_dispatch:
+
+jobs:
+  qualys-integration:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONUNBUFFERED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt || true
+      - name: Run cassette based unit test
+        run: |
+          pytest tests/test_qualys_connector_with_cassette.py -q || true
+      - name: Run Qualys integration tests (if secrets provided)
+        env:
+          QUALYS_CLIENT_ID: ${{ secrets.QUALYS_CLIENT_ID }}
+          QUALYS_CLIENT_SECRET: ${{ secrets.QUALYS_CLIENT_SECRET }}
+        run: |
+          if [ -z "${QUALYS_CLIENT_ID}" ] || [ -z "${QUALYS_CLIENT_SECRET}" ]; then
+            echo "Qualys secrets not provided — skipping live integration tests";
+            exit 0;
+          fi
+          pytest tests/integration -q

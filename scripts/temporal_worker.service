@@ -1,0 +1,16 @@
+[Unit]
+Description=JanuSec Temporal Worker
+After=network.target
+
+[Service]
+Type=simple
+User=janusec
+WorkingDirectory=/opt/janusec
+ExecStart=/opt/janusec/.venv/bin/python -m src.workers.temporal_worker
+Restart=on-failure
+RestartSec=5
+Environment=JNS_DB_DSN=postgresql://postgres:postgres@localhost:5432/janusec
+Environment=TEMPORAL_METRICS_PORT=8000
+
+[Install]
+WantedBy=multi-user.target

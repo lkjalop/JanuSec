@@ -1,0 +1,93 @@
+# Page snapshot
+
+```yaml
+- generic [ref=e2]:
+  - heading "CSV Analyzer" [level=2] [ref=e3]
+  - generic [ref=e4]: Upload CSV or XLSX to parse hundreds of rows client-side. Use filters to view Suspicious vs Passed. Deep Analyze opens richer frameworks view.
+  - generic [ref=e5]:
+    - button "Choose File" [ref=e6] [cursor=pointer]
+    - button "Load" [ref=e7] [cursor=pointer]
+    - button "Fetch Explain" [ref=e8] [cursor=pointer]
+    - button "Signal Details" [ref=e9] [cursor=pointer]
+    - generic [ref=e10]:
+      - generic [ref=e11]: Graph
+      - combobox "Graph" [ref=e12] [cursor=pointer]:
+        - option "Identity" [selected]
+        - option "Cloud"
+        - option "Network"
+    - button "Deep Analyze" [ref=e13] [cursor=pointer]
+    - button "Send to Identity Graph" [ref=e14] [cursor=pointer]
+    - button "Send to Cloud Graph" [ref=e15] [cursor=pointer]
+    - button "Send to Network Graph" [ref=e16] [cursor=pointer]
+    - button "Correlate (HopGraph)" [ref=e17] [cursor=pointer]
+    - textbox [ref=e19]:
+      - /placeholder: Company (optional)
+    - textbox [ref=e21]:
+      - /placeholder: Recipients (comma separated)
+    - generic [ref=e22]:
+      - generic [ref=e23]: Persona
+      - combobox "Persona" [ref=e24] [cursor=pointer]:
+        - option "CISO" [selected]
+        - option "SOC"
+        - option "Hunter"
+        - option "Forensics"
+    - generic [ref=e25]:
+      - checkbox "Include Model Summary" [ref=e26]
+      - generic [ref=e27]: Include Model Summary
+    - button "Export Report" [ref=e28] [cursor=pointer]
+    - button "Share Report" [ref=e29] [cursor=pointer]
+    - button "Toggle Theme" [ref=e30] [cursor=pointer]
+  - generic [ref=e31]:
+    - generic [ref=e32]: "Filter:"
+    - button "All" [ref=e33] [cursor=pointer]
+    - button "Suspicious" [ref=e34] [cursor=pointer]
+    - button "Passed" [ref=e35] [cursor=pointer]
+    - generic [ref=e36]:
+      - checkbox "Show ranking explanation" [checked] [ref=e37]
+      - generic [ref=e38]: Show ranking explanation
+    - textbox "Quick search (process/path/host)" [ref=e39]
+    - generic [ref=e40]: Showing 1 of 1
+  - generic [ref=e41]: results:1 of 1
+  - generic [ref=e42]:
+    - status [ref=e43]: Showing 1 of 1 rows
+    - generic [ref=e44]:
+      - generic [ref=e45]: "Selected: 0"
+      - button "Mark Good" [disabled] [ref=e46] [cursor=pointer]
+      - button "Mark Review" [disabled] [ref=e47] [cursor=pointer]
+      - button "Mark Threat" [disabled] [ref=e48] [cursor=pointer]
+      - button "Select All (visible)" [ref=e49] [cursor=pointer]
+      - button "Clear" [ref=e50] [cursor=pointer]
+    - generic [ref=e51]:
+      - generic [ref=e52]: "Row Verdict Summary: FAIL=1 | PASS=0 | NEUTRAL=0 (Total=1)"
+      - table "CSV results" [ref=e53]:
+        - rowgroup [ref=e54]:
+          - row "Process Path SHA256 Host Verdict DREAD Signals Details" [ref=e55]:
+            - columnheader "Process" [ref=e56]: Process
+            - columnheader "Path" [ref=e58]: Path
+            - columnheader "SHA256" [ref=e60]: SHA256
+            - columnheader "Host" [ref=e62]: Host
+            - columnheader "Verdict" [ref=e64]: Verdict
+            - columnheader "DREAD" [ref=e66]: DREAD
+            - columnheader "Signals" [ref=e68]: Signals
+            - columnheader "Details" [ref=e70]: Details
+        - rowgroup [ref=e72]:
+          - row "rundll32 /windows/system32/rundll32.exe deadbeef host1 SUSPICIOUS lolbin Details Copy" [ref=e73]:
+            - cell "rundll32" [ref=e74]:
+              - generic "rundll32" [ref=e75]
+            - cell "/windows/system32/rundll32.exe" [ref=e76]:
+              - generic "/windows/system32/rundll32.exe" [ref=e77]
+            - cell "deadbeef" [ref=e78]:
+              - generic "deadbeef" [ref=e79]
+            - cell "host1" [ref=e80]:
+              - generic "host1" [ref=e81]
+            - cell "SUSPICIOUS" [ref=e82]:
+              - generic "SUSPICIOUS" [ref=e83]
+            - cell [ref=e84]
+            - cell "lolbin" [ref=e85]:
+              - generic "lolbin" [ref=e86]
+            - cell "Details Copy" [ref=e87]:
+              - checkbox [ref=e88]
+              - button "Details" [ref=e89] [cursor=pointer]
+              - button "Copy" [ref=e90] [cursor=pointer]
+    - generic [ref=e91]: "Tip: Client parsing supports large files; showing up to 1000 rows. Deep Analyze merges signals and opens the deep frameworks page."
+```

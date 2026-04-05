@@ -1,0 +1,58 @@
+[
+  {
+    "createdDateTime": "2026-03-20T01:15:00Z",
+    "userPrincipalName": "alice@contoso.com",
+    "appDisplayName": "Azure Portal",
+    "ipAddress": "198.51.100.77",
+    "status": {"errorCode": 0},
+    "clientAppUsed": "Browser",
+    "riskDetail": "none",
+    "location": {"city": "Sydney", "countryOrRegion": "AU"}
+  },
+  {
+    "createdDateTime": "2026-03-20T01:16:00Z",
+    "userPrincipalName": "alice@contoso.com",
+    "policyName": "Require phishing-resistant MFA",
+    "appDisplayName": "Azure Portal",
+    "result": "failure"
+  },
+  {
+    "detectedDateTime": "2026-03-20T01:17:00Z",
+    "userPrincipalName": "alice@contoso.com",
+    "riskType": "anomalousToken",
+    "riskLevel": "high",
+    "riskEventType": "tokenAnomaly"
+  },
+  {
+    "activityDateTime": "2026-03-20T01:20:00Z",
+    "activityDisplayName": "Add eligible member to role",
+    "initiatedBy": {"user": {"userPrincipalName": "alice@contoso.com"}},
+    "targetResources": [{"displayName": "Privileged Role Administrator"}],
+    "result": "success"
+  },
+  {
+    "incidentId": "inc-1001",
+    "title": "Impossible travel followed by suspicious role activity",
+    "severity": "high",
+    "status": "active",
+    "alerts": [{"alertId": "alert-1", "serviceSource": "MicrosoftDefenderXDR"}],
+    "createdDateTime": "2026-03-20T01:22:00Z"
+  },
+  {
+    "time": "2026-03-20T01:25:00Z",
+    "resourceGroupName": "rg-prod-identity",
+    "operationName": {"value": "Microsoft.Authorization/roleAssignments/write"},
+    "caller": "alice@contoso.com",
+    "correlationId": "corr-2001",
+    "category": {"value": "Administrative"}
+  },
+  {
+    "time": "2026-03-20T01:30:00Z",
+    "srcIp": "10.10.1.4",
+    "destIp": "203.0.113.45",
+    "destPort": 443,
+    "protocol": "T",
+    "flowState": "A",
+    "bytes": 24576
+  }
+]

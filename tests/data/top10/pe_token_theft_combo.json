@@ -1,0 +1,5 @@
+{
+  "impersonation": true,
+  "target_process": "lsass.exe",
+  "file_path": "C:/Windows/Temp/cred_dump.dmp"
+}

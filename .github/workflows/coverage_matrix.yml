@@ -1,0 +1,108 @@
+name: Coverage Matrix
+
+on:
+  pull_request:
+  push:
+    branches: [ main ]
+
+jobs:
+  coverage-matrix:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install minimal deps
+        run: |
+          python -m pip install --upgrade pip
+          # install project if it has requirements
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+      - name: Generate coverage matrices
+        run: |
+          python -m src.tools.coverage_generator --json coverage_report.json --md coverage_report.md
+      - name: Load coverage JSON for CI steps
+        id: coverage
+        run: |
+          python - <<'PY'
+          import json,sys
+          with open('coverage_report.json','r',encoding='utf-8') as f:
+              j = json.load(f)
+          # expose top-level counts as outputs (stringify to avoid YAML issues)
+          # example: tactics_counts
+          out = {'tactics_count': str(len(j.get('tactics',{}))),'rules_total': str(len(j.get('rules',[])))}
+          print('::set-output name=summary::'+json.dumps(out))
+          PY
+      - name: Post coverage summary as PR comment (inline MD when small)
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+            const jsonPath = 'coverage_report.json';
+            const mdPath = 'coverage_report.md';
+            if(!fs.existsSync(jsonPath)){
+              core.warning('coverage_report.json missing');
+            } else {
+              const data = JSON.parse(fs.readFileSync(jsonPath,'utf8'));
+              const tactics = data.tactics || {};
+              const total_rules = (data.rules || []).length;
+              let body = `### Coverage matrix summary\n- Total rules: **${total_rules}**\n- Tactics covered: **${Object.keys(tactics).length}**\n\n`;
+              body += '|Tactic|Count|\n|---:|---:|\n';
+              for(const t of Object.keys(tactics).sort()){
+                body += `|${t}|${(Array.isArray(tactics[t])? tactics[t].length : tactics[t]) }|\n`;
+              }
+              body += '\n---\n';
+              if(fs.existsSync(mdPath)){
+                const stats = fs.statSync(mdPath);
+                const size = stats.size || 0;
+                const MAX_INLINE = 30000; // bytes; avoid large comments
+                if(size <= MAX_INLINE){
+                  const md = fs.readFileSync(mdPath,'utf8');
+                  body += `<details><summary>Full coverage_report.md</summary>\n\n` + '```markdown\n' + md + '\n```\n' + '</details>';
+                } else {
+                  // file is large; rely on artifact upload step — mention where to find it
+                  body += '\nCoverage report is large and has been uploaded as a workflow artifact (see "Artifacts" in this run).';
+                }
+              }
+              await github.rest.issues.createComment({owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number, body});
+            }
+      - name: Gate coverage baseline (fail on drop)
+        run: |
+          python - <<'PY'
+          import json,sys,os
+          base_path = '.github/coverage_baseline.json'
+          report_path = 'coverage_report.json'
+          if not os.path.exists(report_path):
+              print('coverage_report.json missing; skipping baseline gate')
+              sys.exit(0)
+          report = json.load(open(report_path,'r',encoding='utf-8'))
+          if not os.path.exists(base_path):
+              print('baseline missing; skip gating (create .github/coverage_baseline.json to enable)')
+              sys.exit(0)
+          baseline = json.load(open(base_path,'r',encoding='utf-8'))
+          # baseline is expected to be {"tactics": {"Initial Access": 3, ...}, "min_rules_total": 50}
+          failures = []
+          # check tactics
+          for t,c in (baseline.get('tactics') or {}).items():
+              report_count = len(report.get('tactics',{}).get(t,[])) if isinstance(report.get('tactics',{}).get(t,[]), list) else int(report.get('tactics',{}).get(t,0) or 0)
+              if report_count < int(c):
+                  failures.append(f'Tactic "{t}" dropped from baseline {c} -> {report_count}')
+          # check total
+          min_total = int(baseline.get('min_rules_total', 0) or 0)
+          total_rules = len(report.get('rules',[]))
+          if min_total and total_rules < min_total:
+              failures.append(f'Rules total below baseline {min_total} -> {total_rules}')
+          if failures:
+              print('\n'.join(failures))
+              sys.exit(2)
+          print('Coverage baseline checks passed')
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-matrix
+          path: |
+            coverage_report.json
+            coverage_report.md

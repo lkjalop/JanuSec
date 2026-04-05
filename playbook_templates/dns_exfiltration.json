@@ -1,0 +1,51 @@
+{
+  "alert_type": "dns_exfiltration",
+  "summary": "High-entropy subdomains and excessive TXT queries indicating DNS tunneling/data theft (MITRE T1048.003). Often linked with KEV families like PlugX and Cobalt Strike malleable profiles.",
+  "severity": "high",
+  "mitre": [
+    "T1048.003",
+    "T1071.004",
+    "T1568.003"
+  ],
+  "cisa_kev": [],
+  "cvss_reference": 8.6,
+  "epss": 0.55,
+  "references": [
+    "https://attack.mitre.org/techniques/T1048/003/",
+    "https://www.mandiant.com/resources/blog/dns-tunneling-detections"
+  ],
+  "steps": [
+    {
+      "order": 1,
+      "action": "Quarantine DNS egress for impacted asset (split-horizon block)",
+      "rationale": "Prevents continued exfiltration while investigation runs.",
+      "automated": true
+    },
+    {
+      "order": 2,
+      "action": "Dump resolver logs for queried domains and correlate peers",
+      "rationale": "Finds additional hosts participating in tunnel.",
+      "automated": true,
+      "automation_id": "dns_peer_correlation"
+    },
+    {
+      "order": 3,
+      "action": "Inspect payload fragments / decode base32 or chunked data",
+      "rationale": "Determines data sensitivity and legal notification impact.",
+      "tool_suggestion": "Python dnslib decoder or SANS DnsChef parser",
+      "automated": false
+    },
+    {
+      "order": 4,
+      "action": "Collect host forensic triage (memory + autoruns)",
+      "rationale": "Tunnels typically paired with credential theft (T1003).",
+      "automated": false
+    },
+    {
+      "order": 5,
+      "action": "Update DLP/SASE policies with detected domain families",
+      "rationale": "Prevents recurrence of same toolkit across tenants.",
+      "automated": false
+    }
+  ]
+}

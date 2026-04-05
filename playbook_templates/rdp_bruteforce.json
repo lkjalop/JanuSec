@@ -1,0 +1,51 @@
+{
+  "alert_type": "rdp_bruteforce",
+  "summary": "Burst of failed RDP logons / lateral movement attempts sourced from single IP range (MITRE T1110). Often precedes ransomware deployment exploiting KEV CVE-2019-0708 / BlueKeep class flaws.",
+  "severity": "medium",
+  "mitre": [
+    "T1110.001",
+    "T1021.001",
+    "T1078"
+  ],
+  "cisa_kev": [
+    "CVE-2019-0708"
+  ],
+  "cvss_reference": 9.8,
+  "epss": 0.73,
+  "references": [
+    "https://attack.mitre.org/techniques/T1110/001/",
+    "https://www.cisa.gov/news-events/cybersecurity-advisories/aa22-013a"
+  ],
+  "steps": [
+    {
+      "order": 1,
+      "action": "Block offending IP range / geolocation at edge firewalls",
+      "rationale": "Immediately halts credential spray volume.",
+      "automated": true
+    },
+    {
+      "order": 2,
+      "action": "Enforce MFA and conditional access on targeted accounts",
+      "rationale": "Prevents password reuse from brute-force success.",
+      "automated": false
+    },
+    {
+      "order": 3,
+      "action": "Force password reset for accounts with repeated failures",
+      "rationale": "Mitigates credential stuffing with reused secrets.",
+      "automated": false
+    },
+    {
+      "order": 4,
+      "action": "Collect Security Event IDs 4625/4624 and correlate host activity",
+      "rationale": "Identifies lateral attempts that succeeded.",
+      "automated": true
+    },
+    {
+      "order": 5,
+      "action": "Audit exposed RDP services for patch level and NLA status",
+      "rationale": "Ensures BlueKeep-class vulnerabilities remediated.",
+      "automated": false
+    }
+  ]
+}

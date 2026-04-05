@@ -1,0 +1,8 @@
+{
+  "findingId": "f-9999",
+  "recommendationType": "IAMKeyNoMFA",
+  "resource": {"id": "/subscriptions/1111/resourcegroups/rg2/providers/Microsoft.Compute/virtualMachines/vm1"},
+  "severity": "Low",
+  "timeGenerated": "2024-05-03T09:00:00Z",
+  "extra_unknown_field": "should be ignored"
+}

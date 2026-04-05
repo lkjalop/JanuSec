@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Batch Events</title>
+  <style>
+    :root { color-scheme: dark; }
+    body { background:#0b0e14; color:#e8ebf0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
+    .container { max-width: 1100px; margin: 20px auto; padding: 16px; background: #121824; border: 1px solid #273044; border-radius: 8px; }
+    .row { display:flex; gap:12px; flex-wrap: wrap; }
+    .card { background:#0f1420; border:1px solid #273044; border-radius:8px; padding:12px; margin:8px 0; }
+    label { display:block; font-size: 12px; color:#9fb0cc; margin-bottom:4px; }
+    input, select { background:#0b0e14; color:#e8ebf0; border:1px solid #2a3142; border-radius:6px; padding:6px 8px; }
+    input[type="checkbox"] { transform: translateY(2px); }
+    button { background:#1f7a8c; color:#fff; border:none; border-radius:6px; padding:10px 14px; cursor:pointer; }
+    button:disabled { background:#2d3b52; cursor:not-allowed; }
+    .muted { color:#9fb0cc; font-size: 12px; }
+    pre { background:#0b0e14; border:1px solid #273044; padding:10px; border-radius:6px; overflow:auto; max-height: 360px; }
+    .grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:12px; }
+    .pill { display:inline-block; background:#172136; border:1px solid #273044; border-radius:999px; padding:2px 8px; font-size:12px; margin-right:6px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2 style="margin:0 0 12px">Batch Events Generator</h2>
+    <div class="muted" style="margin-bottom:12px">Generate synthetic endpoint/network events and send to /api/v1/endpoints/log_batch for live streaming in the LIVE console.</div>
+
+    <div class="grid">
+      <div class="card">
+        <label>Number of events</label>
+        <input id="count" type="number" min="1" max="1000" value="100" />
+      </div>
+      <div class="card">
+        <label>Event mix</label>
+        <select id="mix">
+          <option value="balanced">Balanced (endpoint+network)</option>
+          <option value="endpoint">Endpoint-only</option>
+          <option value="network">Network-only</option>
+        </select>
+      </div>
+      <div class="card">
+        <label>Tenant ID</label>
+        <input id="tenant" type="text" placeholder="default" />
+        <div class="muted">Header X-Tenant-ID is set automatically.</div>
+      </div>
+      <div class="card">
+        <label>Options</label>
+        <div><input id="classify" type="checkbox" checked /> <span>Classify</span></div>
+        <div><input id="rules" type="checkbox" checked /> <span>Evaluate rules</span></div>
+        <div><input id="alerts" type="checkbox" /> <span>Emit alerts</span></div>
+      </div>
+    </div>
+
+    <div style="margin:10px 0">
+      <button id="sendBtn">Send Batch</button>
+      <span id="status" class="pill">Idle</span>
+      <a href="/" style="margin-left:12px" class="pill">Open LIVE Console</a>
+    </div>
+
+    <div class="row">
+      <div class="card" style="flex:1; min-width: 340px">
+        <h3 style="margin:6px 0">Request Preview</h3>
+        <pre id="req"></pre>
+      </div>
+      <div class="card" style="flex:1; min-width: 340px">
+        <h3 style="margin:6px 0">Response</h3>
+        <pre id="res"></pre>
+      </div>
+    </div>
+
+    <div class="muted">Auth: Uses x-api-key from localStorage.apiKey or 'devkey123'.</div>
+  </div>
+
+  <script>
+    function apiKey(){ try { return localStorage.getItem('apiKey') || 'devkey123'; } catch(e){ return 'devkey123'; } }
+    function tenantId(){ const v = document.getElementById('tenant').value.trim(); return v || null; }
+
+    const domains = ['corp.local', 'acme.io', 'janusec.internal', 'prod.net'];
+    const procs = ['powershell.exe', 'cmd.exe', 'bash', 'python.exe', 'curl', 'wget'];
+    const hosts = ['edr-01', 'edr-02', 'db-01', 'web-01', 'api-01', 'jump-01'];
+    const rcodes = [0, 0, 0, 3, 'NXDOMAIN', 2];
+    const urls = ['http://update.acme.io', 'https://cdn.prod.net/app.js', 'http://unknown.bad', 'http://janusec.internal/api'];
+
+    function rnd(arr){ return arr[Math.floor(Math.random()*arr.length)]; }
+    function id(){ return 'evt-' + Math.floor(Date.now() + Math.random()*100000).toString(36); }
+    function ip(){ return `${Math.floor(Math.random()*223)+1}.${Math.floor(Math.random()*255)}.${Math.floor(Math.random()*255)}.${Math.floor(Math.random()*255)}`; }
+
+    function makeEndpoint(){
+      const p = rnd(procs);
+      const suspicious = Math.random() < 0.15;
+      const details = suspicious ? { url: rnd(urls), hash: Math.random()<0.5 ? '44d88612fea8a8f36de82e1278abb02f' : undefined } : {};
+      return {
+        id: id(),
+        host: rnd(hosts),
+        process: { name: p, command_line: p + (suspicious ? ' -enc SQBFAFgAIAAvQwBFAE4ARABTAE0AQQBMAEwAIAAnAHIAAyc=' : ' /c whoami') },
+        details,
+        dns_rcode: rnd(rcodes)
+      };
+    }
+
+    function makeNetwork(){
+      const nx = Math.random() < 0.3;
+      return {
+        id: id(),
+        host: rnd(hosts),
+        ip: ip(),
+        domain: nx ? `nonexistent.${rnd(domains)}` : `svc.${rnd(domains)}`,
+        dns_rcode: nx ? 'NXDOMAIN' : 0,
+        details: { url: rnd(urls) }
+      };
+    }
+
+    function buildEvents(n, mix){
+      const events = [];
+      for(let i=0;i<n;i++){
+        if(mix === 'endpoint') events.push(makeEndpoint());
+        else if(mix === 'network') events.push(makeNetwork());
+        else events.push(Math.random()<0.5 ? makeEndpoint() : makeNetwork());
+      }
+      return events;
+    }
+
+    function updatePreview(){
+      const n = Math.max(1, Math.min(1000, parseInt(document.getElementById('count').value||'100')));
+      const mix = document.getElementById('mix').value;
+      const payload = {
+        events: buildEvents(Math.min(n, 20), mix), // preview first 20 only
+        classify: document.getElementById('classify').checked,
+        send_alerts: document.getElementById('alerts').checked,
+        include_rules: document.getElementById('rules').checked,
+        tenant_id: tenantId()
+      };
+      document.getElementById('req').textContent = JSON.stringify(payload, null, 2);
+    }
+
+    async function sendBatch(){
+      const btn = document.getElementById('sendBtn');
+      btn.disabled = true; document.getElementById('status').textContent = 'Sending...';
+      const n = Math.max(1, Math.min(1000, parseInt(document.getElementById('count').value||'100')));
+      const mix = document.getElementById('mix').value;
+      const payload = {
+        events: buildEvents(n, mix),
+        classify: document.getElementById('classify').checked,
+        send_alerts: document.getElementById('alerts').checked,
+        include_rules: document.getElementById('rules').checked,
+        tenant_id: tenantId()
+      };
+      try {
+        const r = await fetch('/api/v1/endpoints/log_batch', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': apiKey(),
+            'X-Tenant-ID': tenantId() || ''
+          },
+          body: JSON.stringify(payload)
+        });
+        const text = await r.text();
+        document.getElementById('res').textContent = text;
+        document.getElementById('status').textContent = r.ok ? 'Sent' : 'Error';
+      } catch (e) {
+        document.getElementById('res').textContent = 'Request failed: ' + (e && e.message || e);
+        document.getElementById('status').textContent = 'Error';
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    document.getElementById('count').addEventListener('input', updatePreview);
+    document.getElementById('mix').addEventListener('change', updatePreview);
+    document.getElementById('classify').addEventListener('change', updatePreview);
+    document.getElementById('rules').addEventListener('change', updatePreview);
+    document.getElementById('alerts').addEventListener('change', updatePreview);
+    document.getElementById('tenant').addEventListener('input', updatePreview);
+    document.getElementById('sendBtn').addEventListener('click', sendBatch);
+    updatePreview();
+  </script>
+  <script src="/static/js/notifications.js"></script>
+</body>
+</html>

@@ -1,0 +1,8 @@
+timestamp,user,src_ip,geo_country,geo_city,dst_host,protocol,mfa_used,verdict,risk_score
+2024-01-15T08:42:00Z,alice@company.com,203.0.113.45,US,Seattle,vpn-gateway,vpn,true,BENIGN,2.1
+2024-01-15T14:18:00Z,alice@company.com,185.34.12.89,RU,Moscow,vpn-gateway,vpn,false,CRITICAL,9.3
+2024-01-15T09:00:00Z,bob@company.com,198.51.100.23,US,New York,vpn-gateway,vpn,true,BENIGN,1.8
+2024-01-15T09:15:00Z,bob@company.com,198.51.100.23,US,New York,vpn-gateway,vpn,true,BENIGN,1.5
+2024-01-15T11:30:00Z,charlie@company.com,10.20.30.40,US,Austin,vpn-gateway,vpn,true,BENIGN,2.0
+2024-01-16T22:15:00Z,bob@company.com,192.168.1.55,US,New York,vpn-gateway,vpn,false,WARNING,6.2
+2024-01-17T10:00:00Z,dave@company.com,45.67.89.12,CN,Beijing,vpn-gateway,vpn,false,HIGH,8.1

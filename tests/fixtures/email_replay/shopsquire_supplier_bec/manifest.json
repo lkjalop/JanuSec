@@ -1,0 +1,13 @@
+{
+  "tenant_id": "shopsquire-demo",
+  "provider": "email",
+  "files": [
+    { "path": "email_message.json", "source_kind": "email_message", "labels": ["email", "bec"] },
+    { "path": "attachment_forensics.json", "source_kind": "attachment_forensics", "labels": ["email", "attachment"] },
+    { "path": "attachment_detonation.json", "source_kind": "attachment_detonation", "labels": ["email", "sandbox"] },
+    { "path": "mailbox_trace.json", "source_kind": "mailbox_trace", "labels": ["email", "delivery"] },
+    { "path": "click_telemetry.json", "source_kind": "click_telemetry", "labels": ["email", "click"] },
+    { "path": "supplier_baseline.json", "source_kind": "supplier_baseline", "labels": ["email", "baseline"] },
+    { "path": "vendor_master_history.json", "source_kind": "vendor_master_history", "labels": ["email", "vendor"] }
+  ]
+}

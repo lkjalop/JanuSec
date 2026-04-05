@@ -1,0 +1,1 @@
+{"proc_name": "rundll32.exe", "command_line": "rundll32.exe url.dll,JavaScript:evil()"}

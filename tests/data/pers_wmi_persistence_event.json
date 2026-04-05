@@ -1,0 +1,7 @@
+{
+  "event_id": "evt-pers-wmi-1",
+  "host": "host-106",
+  "timestamp": "2025-10-12T13:05:00Z",
+  "wmi_event_filter": true,
+  "wmi_consumer_created": true
+}

@@ -1,0 +1,32 @@
+[
+  {
+    "row_index": 0,
+    "sheet": "Endpoint",
+    "host": "wsus-client-01",
+    "process_name": "MpCmdRun.exe",
+    "process_path": "C:\\ProgramData\\Microsoft\\Windows Defender\\Platform\\4.18.24010.7-0\\MpCmdRun.exe",
+    "path": "C:\\Windows\\SoftwareDistribution\\Download\\Install\\mpam-d.exe",
+    "command_line": "\"C:\\ProgramData\\Microsoft\\Windows Defender\\Platform\\4.18.24010.7-0\\MpCmdRun.exe\" -SignatureUpdate",
+    "ts": 1700000100
+  },
+  {
+    "row_index": 1,
+    "sheet": "Endpoint",
+    "host": "wsus-client-01",
+    "process_name": "TiWorker.exe",
+    "process_path": "C:\\Windows\\WinSxS\\amd64_microsoft-windows-servicingstack\\TiWorker.exe",
+    "path": "C:\\Windows\\SoftwareDistribution\\Download\\Install\\update.msu",
+    "command_line": "TiWorker.exe /UpdateDeploymentProvider",
+    "ts": 1700000200
+  },
+  {
+    "row_index": 2,
+    "sheet": "Endpoint",
+    "host": "wsus-client-01",
+    "process_name": "UsoClient.exe",
+    "process_path": "C:\\Windows\\System32\\UsoClient.exe",
+    "path": "C:\\Windows\\SoftwareDistribution\\Download\\Install\\WindowsUpdateBox.exe",
+    "command_line": "UsoClient StartScan",
+    "ts": 1700000300
+  }
+]

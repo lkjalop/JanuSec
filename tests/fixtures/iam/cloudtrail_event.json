@@ -1,0 +1,11 @@
+{
+  "eventVersion": "1.08",
+  "userIdentity": {"arn": "arn:aws:iam::123456789012:user/Alice"},
+  "eventTime": "2025-12-17T12:03:00Z",
+  "eventSource": "iam.amazonaws.com",
+  "eventName": "CreateUser",
+  "awsRegion": "us-west-2",
+  "sourceIPAddress": "203.0.113.5",
+  "eventID": "evt-123",
+  "resources": []
+}

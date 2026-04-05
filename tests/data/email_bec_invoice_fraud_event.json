@@ -1,0 +1,12 @@
+{
+  "subject": "URGENT: Invoice payment and bank account change",
+  "attachments": [
+    {"filename": "invoice_2025_12.pdf"}
+  ],
+  "indicators": {
+    "urgency_language": true,
+    "new_sender_domain": true,
+    "reply_to_mismatch": true
+  },
+  "factors": ["invoice", "payment", "bank", "urgency_language", "new_sender_domain", "reply_to_mismatch"]
+}

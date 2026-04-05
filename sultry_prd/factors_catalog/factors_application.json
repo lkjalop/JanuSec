@@ -1,0 +1,7 @@
+[
+	{"name":"suspicious_sql_injection_attempt","domain":"application","severity":0.86,"mitre":["T1190"],"stride":["Tampering"],"kill_chain":["Exploitation"],"compliance":["PCI-DSS:6.5"],"diamond":{"capability":"web_exploit","infrastructure":"web_app"},"dread":{"damage":8,"repro":6}},
+	{"name":"unauthorized_db_access","domain":"application","severity":0.9,"mitre":[],"stride":["InfoDisclosure"],"kill_chain":["Exfiltration"],"compliance":["PCI-DSS:10"],"diamond":{"capability":"db_access","infrastructure":"db_server"},"dread":{"damage":9,"repro":7}},
+	{"name":"anomalous_query_pattern_db","domain":"application","severity":0.84,"mitre":[],"stride":["InfoDisclosure"],"kill_chain":["Exfiltration"],"compliance":["PCI-DSS:10"],"diamond":{"capability":"db_query_abuse","infrastructure":"db_server"},"dread":{"damage":8,"repro":6}},
+	{"name":"web_shell_deployment","domain":"application","severity":0.94,"mitre":["T1505"],"stride":["Tampering"],"kill_chain":["Persistence"],"compliance":["PCI-DSS:6.5"],"diamond":{"capability":"persistence","infrastructure":"web_server"},"dread":{"damage":9,"repro":8}},
+	{"name":"database_permission_escalation","domain":"application","severity":0.9,"mitre":[],"stride":["Elevation"],"kill_chain":["PrivilegeEscalation"],"compliance":["PCI-DSS:8"],"diamond":{"capability":"privilege_escalation","infrastructure":"db_server"},"dread":{"damage":9,"repro":8}}
+]

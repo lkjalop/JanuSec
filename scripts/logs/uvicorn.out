@@ -1,0 +1,21 @@
+{"ts":"2025-10-11T21:18:32.535823Z","level":"INFO","logger":"api.metrics_init","msg":"Metrics initialized (registry=True)"}
+{"ts":"2025-10-11T21:18:32.582685Z","level":"INFO","logger":"src.plugins.loader","msg":"Plugin registry file not found: plugins/registry.json"}
+{"ts":"2025-10-11T21:18:32.613936Z","level":"INFO","logger":"api.startup","msg":"Plugin registry loaded (version=None, soar_actions=0, extractors=0)"}
+{"ts":"2025-10-11T21:18:32.660810Z","level":"INFO","logger":"src.api.metrics_init","msg":"Metrics initialized (registry=True)"}
+{"ts":"2025-10-11T21:18:32.707687Z","level":"INFO","logger":"api.startup","msg":"Wired live.rules_engine with metrics into runtime_state"}
+{"ts":"2025-10-11T21:18:32.760752Z","level":"INFO","logger":"api.app","msg":"Mounting React frontend at /react from D:\\AI\\Threat_thy_sniffer\\frontend\\react\\dist"}
+{"ts":"2025-10-11T21:18:32.760752Z","level":"INFO","logger":"api.app","msg":"Mounting SPA frontend at /spa from D:\\AI\\Threat_thy_sniffer\\frontend\\spa"}
+{"ts":"2025-10-11T21:18:33.438664Z","level":"INFO","logger":"src.plugins.loader","msg":"Plugin registry file not found: plugins/registry.json"}
+{"ts":"2025-10-11T21:18:33.438664Z","level":"INFO","logger":"src.api.startup","msg":"Plugin registry loaded (version=None, soar_actions=0, extractors=0)"}
+{"ts":"2025-10-11T21:18:33.438664Z","level":"INFO","logger":"src.api.startup","msg":"Wired live.rules_engine with metrics into runtime_state"}
+{"ts":"2025-10-11T21:18:33.438664Z","level":"INFO","logger":"src.api.app","msg":"Mounting React frontend at /react from D:\\AI\\Threat_thy_sniffer\\frontend\\react\\dist"}
+{"ts":"2025-10-11T21:18:33.438664Z","level":"INFO","logger":"src.api.app","msg":"Mounting SPA frontend at /spa from D:\\AI\\Threat_thy_sniffer\\frontend\\spa"}
+{"ts":"2025-10-11T21:21:04.638084Z","level":"INFO","logger":"src.api.app","msg":"Serving LIVE Console frontend at root","correlation_id":"req-1760217664636","tenant_id":"default"}
+INFO:     127.0.0.1:63515 - "GET / HTTP/1.1" 200 OK
+{"ts":"2025-10-11T21:21:05.125004Z","level":"INFO","logger":"src.api.app","msg":"Serving LIVE Console frontend at root","correlation_id":"req-1760217665125","tenant_id":"default"}
+INFO:     127.0.0.1:63516 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63549 - "GET /static/csv_analyzer.html HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63549 - "GET /static/js/parse_tabular.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:63550 - "GET /static/js/notifications.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:63549 - "GET /api/v1/cases HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63550 - "GET /static/vendor/xlsx.full.min.js HTTP/1.1" 304 Not Modified

@@ -1,0 +1,9 @@
+{
+  "message_id": "mid-004",
+  "process_parent_message_id": "mid-004",
+  "attachments": [
+    { "filename": "macro_payload.docm" },
+    { "filename": "readme.txt" }
+  ],
+  "process_name": "at"
+}

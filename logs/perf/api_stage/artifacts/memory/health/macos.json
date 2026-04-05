@@ -1,0 +1,17 @@
+{
+  "fixture": "macos.json",
+  "job_id": "mem-6434f7fcd071",
+  "host": "mac-mem-host",
+  "platform": "macos",
+  "volatility_plugins": [],
+  "rekall_plugins": [
+    "tasks"
+  ],
+  "sandbox_status": "submitted",
+  "sandbox_adapters": [
+    "joe",
+    "anyrun"
+  ],
+  "timeline_length": 2,
+  "factors": []
+}

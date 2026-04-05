@@ -1,0 +1,46 @@
+[
+  {
+    "id": "AML.T0043",
+    "name": "Craft Adversarial Data (Prompt Injection)",
+    "severity_default": 70,
+    "description": "User or content attempts to coerce model to ignore instructions, exfiltrate secrets, or change tools/roles.",
+    "detections": ["regex_templates", "semantic_similarity", "unicode_nfkc"],
+    "controls": ["block_request", "alert_security", "add_to_pattern_catalog"],
+    "references": [
+      "https://atlas.mitre.org/techniques/AML.T0043"
+    ]
+  },
+  {
+    "id": "AML.T0020",
+    "name": "Supply Chain Compromise",
+    "severity_default": 60,
+    "description": "Tampered SDK/API responses, model artifacts or dependencies affecting output integrity.",
+    "detections": ["checksum_validation", "schema_anomaly", "latency_outlier"],
+    "controls": ["quarantine_dependency", "fail_closed", "escalate"],
+    "references": [
+      "https://atlas.mitre.org/techniques/AML.T0020"
+    ]
+  },
+  {
+    "id": "AML.T0048",
+    "name": "Exfiltration via Inference",
+    "severity_default": 65,
+    "description": "Attempts to elicit PII/secrets via normal outputs.",
+    "detections": ["pii_detector", "secret_scanner"],
+    "controls": ["mask_output", "deny_and_guidance"],
+    "references": [
+      "https://atlas.mitre.org/techniques/AML.T0048"
+    ]
+  },
+  {
+    "id": "AML.T0015",
+    "name": "Model Evasion/Obfuscation",
+    "severity_default": 55,
+    "description": "Unicode/homoglyph or encoding tricks to bypass policy.",
+    "detections": ["unicode_nfkc", "control_char_filter"],
+    "controls": ["normalize_then_recheck", "block_on_match"],
+    "references": [
+      "https://atlas.mitre.org/techniques/AML.T0015"
+    ]
+  }
+]

@@ -1,0 +1,72 @@
+const { test, expect } = require('@playwright/test');
+const path = require('path');
+
+test('CSV Analyzer smoke: local explain, disabled fetch explain, deep analyze merge', async ({ page, baseURL }) => {
+  const helpers = require('./helpers/csv_helpers');
+  await page.goto('/static/csv_analyzer.html');
+  const fixture = path.resolve(__dirname, 'fixtures', 'test_row.csv');
+  // Ensure file input exists; if not, create one in-page (tests should not mutate app but this is a safe fallback)
+  try{
+    await page.waitForFunction(() => !!(document.querySelector('input[type=file]#fileInput') || document.querySelector('[data-test="csv-file-input"]')), { timeout: 2000 });
+  }catch(e){
+    await page.evaluate(() => { if(!document.querySelector('input[type=file]#fileInput')){ const inp=document.createElement('input'); inp.type='file'; inp.id='fileInput'; inp.style.display='none'; document.body.appendChild(inp); } });
+  }
+  await helpers.setInputFilesSafe(page, fixture);
+  // Click load/parse
+  await helpers.clickWithFallback(page, 'csv-btn-load', '#btnLoad');
+  // wait for table row to appear
+  await page.waitForSelector('tr[data-row]', { timeout: 5000 });
+  // open details for first row
+  await page.click('tr[data-row] button[title="Why flagged / details"]');
+  // modal opens
+  await page.waitForSelector('#csvDrillModal', { state: 'visible', timeout: 3000 });
+  // Fetch Explain button should be disabled (no event id)
+  const fetchBtn = await page.$('#csvDrillBody .csv-btn-inline[disabled]');
+  expect(fetchBtn).not.toBeNull();
+  // Why Suspicious should contain at least one factor pill
+  const whyHtml = await page.$eval('#csvDrillBody', el => el.innerText);
+  expect(whyHtml.toLowerCase()).toContain('signals');
+  // DREAD should show a score (non-zero) if triggers exist
+  const dreadText = await page.$eval('#csvDrillBody', el => el.innerText.match(/DREAD:\s*([0-9\.]+)/));
+  expect(dreadText).not.toBeNull();
+  // Set a fake decision id directly on the first row and call openCsvRowDetails to refresh
+  await page.evaluate(() => { try{ const r = (window.LAST_RESULTS||[])[0]; if(r){ r.raw = r.raw || {}; r.raw.event_id = 'DECISION-1234'; } try{ if(typeof window.openCsvRowDetails === 'function') window.openCsvRowDetails(0); }catch(e){} }catch(e){} });
+  await page.waitForSelector('#csvDrillModal', { state: 'visible', timeout: 3000 });
+  // Now try Fetch Explain (server may or may not exist). Intercept network to return 404 to force fallback.
+  await page.route('**/api/v1/decisions/*/explain', route => { route.fulfill({ status: 404, body: 'Not found' }); });
+  // Click Fetch Explain
+  await helpers.clickWithFallback(page, 'csv-btn-explain', '#btnExplain');
+  // Expect local explain to be shown
+  await page.waitForSelector('#csvExplainAnchor', { timeout: 3000 });
+  const explainTxt = await page.$eval('#csvExplainAnchor', el => el.innerText.toLowerCase());
+  expect(explainTxt).toContain('explain (local)');
+
+  // Close modal before triggering pipeline analyze
+  await page.click('.csv-modal-close').catch(()=>{});
+  await page.waitForSelector('#csvDrillModal', { state: 'hidden', timeout: 3000 }).catch(()=>{});
+
+  // Stub pipeline analyze endpoint to return a pipeline artifact matching the same hash/host
+  await page.route('**/api/v1/artifacts/analyze_batch', async route => {
+    const body = { report: { all_artifacts: [ { name: 'rundll32.exe', path: 'C:\\temp\\bad.exe', sha256: 'deadbeef123', host: 'host-1', verdict: 'SUSPICIOUS', risk: 8, factors: ['lolbin','repeat_hash'] } ] } };
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+  });
+  // Trigger pipeline analyze
+  await helpers.clickWithFallback(page, 'csv-btn-deep-analyze', '#btnAnalyzePipeline');
+  // Wait for pipeline badge
+  await page.waitForSelector('#pipelineBadge .pill', { timeout: 5000 });
+  // Wait until merged result contains deep_enriched factor on any row
+  await page.waitForFunction(() => {
+    try{ const arr = window.LAST_RESULTS || []; return arr.some(r=> Array.isArray(r && r.factors) && r.factors.includes('deep_enriched')); }catch(e){ return false; }
+  }, null, { timeout: 15000 });
+  const hasDeep = await page.evaluate(() => { try{ const arr = window.LAST_RESULTS || []; return arr.some(r=> Array.isArray(r && r.factors) && r.factors.includes('deep_enriched')); }catch(e){ return false; } });
+  expect(hasDeep).toBe(true);
+  // Also ensure the UI signals column shows at least one signal
+  const signalsText = await page.$eval('tr[data-row] td:nth-child(7)', td => td.innerText.toLowerCase());
+  expect(signalsText.length).toBeGreaterThan(0);
+  // Confirm DREAD updated (score presence) by inspecting the stored _dread
+  const dreadScore = await page.evaluate(() => { try{ const r=(window.LAST_RESULTS||[])[0]; return r && r._dread && r._dread.score; }catch(e){ return null; } });
+  expect(dreadScore).not.toBeNull();
+  // Open modal to validate DREAD displayed
+  await page.click('tr[data-row] button[title="Why flagged / details"]');
+  await page.waitForSelector('#csvDrillModal', { state: 'visible', timeout: 3000 });
+});

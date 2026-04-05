@@ -1,0 +1,3 @@
+Forensic Analyst Report:
+
+Artifacts: request EDR, memory, file hashes. Timeline: reconstructed via HopGraph edges.

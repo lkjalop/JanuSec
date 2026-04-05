@@ -1,0 +1,3 @@
+event_id,from,to,subject,src_ip,dkim,spf,timestamp
+email-e1,attacker@example.com,victim@example.com,Important update,203.0.113.5,pass,fail,2025-11-12T00:00:05Z
+email-e2,newsletter@news.example.com,user@example.com,Weekly,198.51.100.10,pass,pass,2025-11-12T00:02:00Z

@@ -1,0 +1,1 @@
+{"sources": {"network": {"last_ts": 1775373434.3420274, "count": 818}, "zeek_conn": {"last_ts": 1775373492.7886543, "count": 49}, "firewall": {"last_ts": 1775373408.8307712, "count": 18}, "dns": {"last_ts": 1775379545.4341724, "count": 5}}, "last_ok_ts": 1775379545.4341724}

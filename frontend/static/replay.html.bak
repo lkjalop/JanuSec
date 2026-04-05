@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en" class="theme-dark">
+<head>
+<meta charset="UTF-8" />
+<title>Scenario Replay</title>
+<link rel="preconnect" href="/static" />
+<style>
+ body{margin:0;font-family:Inter,Segoe UI,sans-serif;background:#0B0E14;color:#E8EBF0;padding:24px;}
+ h1{font-size:20px;margin:0 0 18px 0;}
+ .panel{background:#141A24;border:1px solid #2C3746;border-radius:8px;padding:16px;margin-bottom:18px;}
+ .row{display:flex;gap:12px;flex-wrap:wrap;align-items:center;}
+ .btn{background:#1D2531;border:1px solid #2C3746;color:#E8EBF0;padding:8px 14px;border-radius:6px;cursor:pointer;font-size:13px;}
+ .btn:hover{background:#222C39;}
+ .btn-primary{background:#4A63E7;border-color:#4A63E7;color:#fff;}
+ .btn-primary:hover{background:#5C74F2;}
+ input,select,textarea{background:#0B0E14;color:#E8EBF0;border:1px solid #2C3746;border-radius:6px;padding:8px;font-size:13px;font-family:inherit;}
+ table{width:100%;border-collapse:collapse;font-size:12px;margin-top:12px;}
+ th,td{padding:6px 8px;border:1px solid #2C3746;text-align:left;}
+ th{background:#1D2531;}
+ .metrics{display:flex;gap:14px;flex-wrap:wrap;margin-top:12px;}
+ .metric{background:#1D2531;border:1px solid #2C3746;border-radius:6px;padding:10px 12px;min-width:120px;}
+ .metric .val{font-size:22px;font-weight:600;}
+ .upload-box{border:2px dashed #2C3746;border-radius:8px;padding:24px;text-align:center;cursor:pointer;margin-top:12px;}
+ .upload-box.drag{border-color:#4A63E7;background:#233155;}
+ pre{background:#0B0E14;border:1px solid #2C3746;padding:10px;border-radius:6px;overflow:auto;font-size:11px;}
+ .pill{display:inline-block;padding:3px 8px;border-radius:999px;background:#233155;font-size:11px;margin:2px 4px 2px 0;}
+ .notice{font-size:12px;color:#93A0B1;margin-top:8px;}
+</style>
+<script>
+function authHeaders(){ try{ const key=localStorage.getItem('apiKey')||'devkey123'; return {'x-api-key':key}; }catch(_){ return {'x-api-key':'devkey123'}; } }
+// Restore last scenario name on load
+document.addEventListener('DOMContentLoaded',()=>{ try{ const last = localStorage.getItem('lastReplayScenario'); if(last){ const inp=document.getElementById('scenarioName'); if(inp) inp.value=last; } }catch(_){ } });
+async function runReplay(){ const name=(document.getElementById('scenarioName')||{}).value||''; if(!name){ notify('Enter a scenario name'); return; } try{ const r=await fetch('/api/v1/replay/scenario?name='+encodeURIComponent(name), { headers: authHeaders() }); let j={}; try{ j=await r.json(); }catch(_){ } if(!r.ok){ notify('Replay failed: '+(j.detail||j.error||r.status)); return; } renderMetrics(j); renderSummary(j); notify('Replay complete'); }catch(e){ notify('Replay error: '+(e.message||e)); } }
+function renderMetrics(j){ const m=document.getElementById('metrics'); if(!m) return; const c=j.counts||{}; const prec=(j.precision??0).toFixed(2); const rec=(j.recall??0).toFixed(2); m.innerHTML=''; const defs=[['TP',c.tp],['FP',c.fp],['FN',c.fn],['TN',c.tn],['Total',c.total],['Precision',prec],['Recall',rec]]; defs.forEach(d=>{ const div=document.createElement('div'); div.className='metric'; div.innerHTML='<div class=val>'+d[1]+'</div><div style="font-size:11px;opacity:.65">'+d[0]+'</div>'; m.appendChild(div); }); }
+function renderSummary(j){ const out=document.getElementById('rawOut'); if(!out) return; out.textContent=JSON.stringify(j,null,2); }
+function notify(msg){ const box=document.getElementById('notice'); if(box){ box.textContent=msg; box.style.opacity=1; setTimeout(()=>{ box.style.opacity=.7; },2000); } }
+async function uploadScenario(){ const name=(document.getElementById('scenarioName')||{}).value||''; if(!name){ notify('Enter a name first'); return; } const text=(document.getElementById('recordsText')||{}).value||''; if(!text){ notify('Provide JSON lines or array'); return; } let records=[]; try{ if(text.trim().startsWith('[')){ records=JSON.parse(text); } else { records=text.split(/\n+/).filter(l=>l.trim()).map(l=>{ try{return JSON.parse(l);}catch(_){ return null; } }).filter(Boolean); } }catch(e){ notify('Parse error: '+e.message); return; } try{ const payload={ name, records, append:true }; const r=await fetch('/api/v1/replay/upload', { method:'POST', headers:{'Content-Type':'application/json', ...authHeaders()}, body: JSON.stringify(payload) }); let j={}; try{ j=await r.json(); }catch(_){ } if(!r.ok){ notify('Upload failed: '+(j.detail||j.error||r.status)); return; } try{ localStorage.setItem('lastReplayScenario', name); }catch(_){ } notify('Uploaded '+(j.written||records.length)+' record(s)'); }catch(e){ notify('Upload error: '+(e.message||e)); } }
+async function relabelScenario(){ const name=(document.getElementById('scenarioName')||{}).value||''; const idx=parseInt((document.getElementById('labelIndex')||{}).value||'-1'); const gtSel=document.getElementById('gtValue'); const gt=(gtSel? (gtSel.value==='true') : true); if(!name||idx<0){ notify('Name + valid index required'); return; } try{ const payload={ name, index:idx, gt }; const r=await fetch('/api/v1/replay/label', { method:'PATCH', headers:{'Content-Type':'application/json', ...authHeaders()}, body: JSON.stringify(payload) }); let j={}; try{ j=await r.json(); }catch(_){ } if(!r.ok){ notify('Label failed: '+(j.detail||j.error||r.status)); return; } try{ localStorage.setItem('lastReplayScenario', name); }catch(_){ } notify('Label updated'); }catch(e){ notify('Label error: '+(e.message||e)); } }
+</script>
+</head>
+<body>
+<h1>Scenario Replay</h1>
+<div class="panel">
+  <div class="row">
+    <input id="scenarioName" placeholder="scenario name (file without .log)" style="flex:1;" />
+    <button class="btn-primary btn" onclick="runReplay()">Run Replay</button>
+    <button class="btn" onclick="uploadScenario()">Upload Records</button>
+  </div>
+  <div class="row" style="margin-top:10px;">
+    <textarea id="recordsText" placeholder='Paste JSON lines or array: {"event":{},"gt":true,"factors":["x"]} ...' style="flex:1; min-height:120px;"></textarea>
+  </div>
+  <div class="row" style="margin-top:10px;">
+    <input id="labelIndex" placeholder="line index" style="width:120px;" />
+    <select id="gtValue"><option value="true">gt=true</option><option value="false">gt=false</option></select>
+    <button class="btn" onclick="relabelScenario()">Relabel Line</button>
+  </div>
+  <div id="notice" class="notice">Idle</div>
+</div>
+<div class="panel">
+  <div style="font-size:12px; text-transform:uppercase; letter-spacing:.5px; opacity:.65;">Metrics</div>
+  <div id="metrics" class="metrics"></div>
+</div>
+<div class="panel">
+  <div style="font-size:12px; text-transform:uppercase; letter-spacing:.5px; opacity:.65;">Replay Raw Output</div>
+  <pre id="rawOut">{}</pre>
+</div>
+</body>
+</html>

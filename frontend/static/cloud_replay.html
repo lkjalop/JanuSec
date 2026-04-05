@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Cloud Replay Console</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script defer src="/static/js/parse_tabular.js"></script>
+<style>
+:root{--bg:#09101c;--panel:#0f1728;--panel2:#121b2f;--border:#24324d;--text:#ecf2ff;--muted:#8fa0c2;--accent:#4a6cf7;--ok:#2fb36f;--warn:#ff9d42;--danger:#ef5350}
+*{box-sizing:border-box}body{margin:0;font-family:Inter,"Segoe UI",system-ui,sans-serif;background:radial-gradient(circle at top right,rgba(74,108,247,.16),transparent 28%),linear-gradient(180deg,#0a1222 0%,#09101c 100%);color:var(--text)}
+.page{min-height:100vh;display:grid;grid-template-columns:320px minmax(520px,1fr) 420px;gap:18px;padding:18px}
+.panel{background:rgba(15,23,40,.9);border:1px solid var(--border);border-radius:16px;overflow:hidden;box-shadow:0 18px 50px rgba(0,0,0,.35)}
+.head{padding:16px 18px;border-bottom:1px solid var(--border)}.body{padding:18px}.title{font-size:20px;font-weight:700}.sub{font-size:12px;color:var(--muted);line-height:1.45;margin-top:6px}
+.stack{display:grid;gap:14px}.row,.actions,.badges{display:flex;gap:8px;flex-wrap:wrap}.right{position:sticky;top:18px;align-self:start}
+.badge,.pill{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);border-radius:999px;padding:6px 10px;font-size:11px;color:var(--muted);background:rgba(255,255,255,.03)}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--accent)}.btn{appearance:none;border:1px solid var(--border);background:var(--panel2);color:var(--text);padding:10px 14px;border-radius:10px;font-size:13px;font-weight:600;cursor:pointer}.btn:hover{filter:brightness(1.08)}.btn-primary{background:linear-gradient(135deg,var(--accent),#6284ff);border-color:#5b79ff}
+.field{display:grid;gap:6px}.field label,.label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
+input[type=text],select,textarea{width:100%;padding:10px 12px;background:var(--panel2);border:1px solid var(--border);border-radius:10px;color:var(--text);font:inherit}
+input[type=file]{display:none}.drop{border:1px dashed #39507d;border-radius:14px;padding:18px;background:rgba(74,108,247,.05)}
+.files,.timeline{display:grid;gap:10px}.file,.card,.item,details{border:1px solid var(--border);border-radius:14px;background:rgba(255,255,255,.03)}
+.status-good{color:var(--ok)}.status-warn{color:var(--warn)}.status-bad{color:var(--danger)}
+.file,.card,.item{padding:14px}.tiny{font-size:11px;color:var(--muted)}.empty{color:var(--muted);font-size:12px;border:1px dashed var(--border);border-radius:12px;padding:16px}
+.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.metric{padding:12px;border:1px solid var(--border);border-radius:12px;background:var(--panel2)}.metric .v{margin-top:6px;font-size:20px;font-weight:700}
+.banner{border:1px solid rgba(74,108,247,.35);background:linear-gradient(135deg,rgba(46,170,220,.12),rgba(74,108,247,.05));border-radius:14px;padding:14px 16px;line-height:1.55}
+.item{display:grid;grid-template-columns:96px 1fr;gap:14px}.time{font-size:12px;font-weight:600;color:var(--muted)}.ititle{font-size:14px;font-weight:700}.isub{margin-top:6px;font-size:12px;color:var(--muted);line-height:1.45}
+.list{margin:0;padding-left:18px;line-height:1.5}.list li{margin-bottom:8px}details{padding:12px 14px}details+details{margin-top:10px}summary{cursor:pointer;font-weight:700;font-size:13px}
+pre{margin:0;white-space:pre-wrap;font-size:11px;color:var(--muted)}a{color:inherit;text-decoration:none}
+@media(max-width:1320px){.page{grid-template-columns:300px 1fr}.right{grid-column:1/-1;position:static}}
+@media(max-width:920px){.page{grid-template-columns:1fr}.grid{grid-template-columns:1fr}.item{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="page">
+  <section class="panel">
+    <div class="head">
+      <div class="title">Cloud Replay Console</div>
+      <div class="sub">Upload real Azure or AWS export files, map their source kinds, and run the same backend analysis used by JanuSec reporting. This is a real analysis page over existing APIs, not a static mock.</div>
+    </div>
+    <div class="body stack">
+      <div class="badges">
+        <span class="badge"><span class="dot" style="background:var(--ok)"></span>Real backend analysis</span>
+        <span class="badge"><span class="dot"></span>Tier 1 + Tier 2 + personas</span>
+        <span class="badge"><span class="dot" style="background:var(--warn)"></span>Human-gated actions</span>
+      </div>
+      <div class="field"><label for="tenantId">Tenant / Account Label</label><input id="tenantId" type="text" placeholder="contoso-dev or aws-123456789012"></div>
+      <div class="field"><label for="provider">Primary Provider</label><select id="provider"><option value="azure">Azure</option><option value="aws">AWS</option><option value="mixed">Mixed</option></select></div>
+      <div class="drop">
+        <div class="label">Upload Files</div>
+        <div class="sub" style="margin:0 0 12px 0">Use raw exported files where possible: JSON, JSONL, CSV, XLSX, or a built replay JSON. Azure: sign-in, audit, CA, Identity Protection, Defender, Activity Log, Key Vault, NSG flow. AWS: CloudTrail, IAM history, GuardDuty, Security Hub, Config, VPC flow, resource access.</div>
+        <div class="actions">
+          <button class="btn btn-primary" id="pickFilesBtn">Choose Files</button>
+          <button class="btn" id="loadReplayBtn">Load Replay JSON</button>
+        </div>
+        <input id="fileInput" type="file" multiple accept=".json,.jsonl,.csv,.xlsx,.xls">
+        <input id="replayInput" type="file" accept=".json">
+      </div>
+      <div><div class="label" style="margin-bottom:10px">File Mapping</div><div id="fileList" class="files"><div class="empty">No files selected yet.</div></div></div>
+      <div class="actions">
+        <button class="btn btn-primary" id="analyzeBtn">Analyze Uploaded Files</button>
+        <a class="btn" href="/" target="_blank" rel="noopener">Open LIVE Console</a>
+      </div>
+      <div id="leftStatus" class="tiny"></div>
+      <div class="card">
+        <div class="label" style="margin-bottom:10px">Connector Health And Config</div>
+        <div class="stack">
+          <div class="field"><label for="connectorSelect">Connector</label><select id="connectorSelect"></select></div>
+          <div class="actions">
+            <button class="btn" id="loadConnectorConfigBtn">Load Config</button>
+            <button class="btn" id="saveConnectorConfigBtn">Save Config</button>
+          </div>
+          <div class="field"><label for="connectorConfigJson">Connector Config JSON</label><textarea id="connectorConfigJson" rows="8" placeholder='{"client_id":"...","client_secret":"...","subscription_id":"..."}'></textarea></div>
+          <div class="actions">
+            <button class="btn" id="dryRunConnectorBtn">Dry Run</button>
+            <button class="btn btn-primary" id="pollConnectorBtn">Poll Connector</button>
+          </div>
+          <div id="connectorHealthSummary" class="tiny">No connector checks run yet.</div>
+          <pre id="connectorHealthDrilldown"></pre>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <main class="stack">
+    <section class="panel">
+      <div class="head"><div class="title">Business Outcomes</div><div class="sub">Lead with what happened, why it matters, how sure we are, and what to do next. Technical proof stays below.</div></div>
+      <div class="body stack">
+        <div id="businessHeadline" class="banner">No analysis has been run yet.</div>
+        <div class="grid" style="grid-template-columns:repeat(4,minmax(0,1fr));">
+          <div class="metric"><div class="label">Verdict</div><div id="metricVerdict" class="v">-</div></div>
+          <div class="metric"><div class="label">Confidence</div><div id="metricConfidence" class="v">-</div></div>
+          <div class="metric"><div class="label">Corroboration</div><div id="metricCorroboration" class="v">-</div></div>
+          <div class="metric"><div class="label">Connection Status</div><div id="metricConnection" class="v">-</div></div>
+        </div>
+        <div class="card"><div class="label" style="margin-bottom:10px">Upload Provenance</div><div id="uploadProvenance" class="tiny" style="font-size:12px;color:var(--text);line-height:1.6">No upload provenance yet.</div></div>
+        <div class="card"><div class="label" style="margin-bottom:10px">What To Do Next</div><ul id="nextActions" class="list"></ul></div>
+        <div class="card"><div class="label" style="margin-bottom:10px">What To Hunt Next And Why</div><ul id="huntLeads" class="list"></ul></div>
+      </div>
+    </section>
+    <section class="panel">
+      <div class="head"><div class="title">Evidence Timeline</div><div class="sub">Chronological chain of findings and missing evidence, with drill-downs for source-specific details.</div></div>
+      <div class="body"><div id="timeline" class="timeline"><div class="empty">Run analysis to build the timeline.</div></div></div>
+    </section>
+  </main>
+
+  <aside class="panel right" id="rightRail">
+    <div class="head">
+      <div class="title">Tier Summaries</div>
+      <div class="sub">Business-first Tier 1 and deeper Tier 2 on the right rail. Use detach for analyst review without losing the main evidence timeline.</div>
+      <div class="actions" style="margin-top:12px"><button class="btn" id="detachBtn">Detach Rail</button><button class="btn" id="openNewTabBtn">Open In New Tab</button></div>
+    </div>
+    <div class="body stack" id="rightRailContent">
+      <section class="card"><div class="label" style="margin-bottom:10px">Tier 1</div><div id="tier1Summary">Tier 1 summary will appear here after analysis.</div></section>
+      <section class="card"><div class="label" style="margin-bottom:10px">Tier 2</div><div id="tier2Summary">Tier 2 summary will appear here after analysis.</div></section>
+      <details open><summary>Confirmed Evidence</summary><ul id="confirmedEvidence" class="list"></ul></details>
+      <details><summary>Missing Evidence</summary><ul id="missingEvidence" class="list"></ul></details>
+      <details><summary>Priority Next Pulls</summary><ul id="priorityPulls" class="list"></ul></details>
+      <details><summary>Containment Preconditions</summary><ul id="containmentPreconditions" class="list"></ul></details>
+      <details><summary>Handoff By Role</summary><div id="handoffByRole"></div></details>
+      <details><summary>Domain Artifacts To Hunt</summary><ul id="domainArtifacts" class="list"></ul></details>
+      <details><summary>Technical Drill-Down</summary><pre id="technicalDrilldown"></pre></details>
+    </div>
+  </aside>
+</div>
+
+<script>
+(function(){
+const state={files:[],latestAssessment:null,latestRows:[],latestPlaybook:null,latestTier2:null,personas:{}};
+const KINDS={azure:['entra_signin','entra_audit','conditional_access','identity_protection','defender_incident','activity_log','keyvault_access','nsg_flow','mailbox_trace','click_telemetry','resource_access'],aws:['cloudtrail','iam_policy_history','guardduty','securityhub','config_history','vpc_flow','resource_access','mailbox_trace','click_telemetry'],mixed:['entra_signin','entra_audit','conditional_access','identity_protection','defender_incident','activity_log','keyvault_access','nsg_flow','cloudtrail','iam_policy_history','guardduty','securityhub','config_history','vpc_flow','resource_access','mailbox_trace','click_telemetry']};
+const CONNECTORS={azure:['eventhub','entra_signin','entra_audit','defender_cloud'],aws:['cloudtrail','guardduty','securityhub','vpcflow'],mixed:['eventhub','entra_signin','entra_audit','defender_cloud','cloudtrail','guardduty','securityhub','vpcflow']};
+const $=(id)=>document.getElementById(id);
+const esc=(v)=>String(v==null?'':v).replace(/[&<>\"']/g,(c)=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[c]));
+function authHeaders(){try{const key=localStorage.getItem('apiKey')||'devkey123';const tenant=localStorage.getItem('tenantId')||$('tenantId').value||'cloud-replay';return {'x-api-key':key,'X-Tenant-ID':tenant};}catch(_){return {'x-api-key':'devkey123','X-Tenant-ID':'cloud-replay'};}}
+function setStatus(text){$('leftStatus').textContent=text||'';}
+function inferSourceKind(name,provider){const lower=String(name||'').toLowerCase();const m=[['signin','entra_signin'],['sign-in','entra_signin'],['audit','entra_audit'],['conditional','conditional_access'],['identity_protection','identity_protection'],['risk','identity_protection'],['defender','defender_incident'],['activity','activity_log'],['keyvault','keyvault_access'],['key_vault','keyvault_access'],['nsg','nsg_flow'],['cloudtrail','cloudtrail'],['guardduty','guardduty'],['securityhub','securityhub'],['config','config_history'],['policy','iam_policy_history'],['iam','iam_policy_history'],['vpc','vpc_flow'],['mailbox','mailbox_trace'],['click','click_telemetry'],['resource','resource_access']];for(const [needle,kind] of m){if(lower.includes(needle)) return kind;}return provider==='aws'?'cloudtrail':'entra_signin';}
+function currentTenant(){return $('tenantId').value||'cloud-replay';}
+function currentProvider(){return $('provider').value||'azure';}
+function updateConnectorOptions(){const sel=$('connectorSelect');const provider=currentProvider();const opts=CONNECTORS[provider]||[];sel.innerHTML=opts.map((opt)=>`<option value="${esc(opt)}">${esc(opt)}</option>`).join('');}
+async function fetchJson(url, options){const resp=await fetch(url, options);let payload={};try{payload=await resp.json();}catch(_){payload={};}if(!resp.ok){throw new Error(payload.detail?JSON.stringify(payload.detail):`HTTP ${resp.status}`);}return payload;}
+function summarizeConnectorStatus(statusPayload, checkpointPayload, pollPayload){const status=(statusPayload&&statusPayload.status)||{};const checkpoint=(checkpointPayload&&checkpointPayload.checkpoint)||{};const ok=status.ok===true||status.healthy===true||pollPayload?.ok===true;const tone=ok?'status-good':(status.status==='misconfigured'?'status-bad':'status-warn');const lines=[`<span class="${tone}">${esc(status.status|| (pollPayload&&pollPayload.ok?'ok':'unknown'))}</span>`,`healthy=${esc(String(status.healthy!=null?status.healthy:'n/a'))}`,`last_count=${esc(String(status.last_count!=null?status.last_count:'n/a'))}`,`checkpoint_keys=${esc(String(Object.keys(checkpoint||{}).length))}`];$('connectorHealthSummary').innerHTML=lines.join(' • ');$('connectorHealthDrilldown').textContent=JSON.stringify({status:statusPayload,checkpoint:checkpointPayload,poll:pollPayload||null},null,2);}
+async function loadConnectorConfig(){const tenant=currentTenant();const provider=currentProvider();const connector=$('connectorSelect').value;if(!connector) return;try{const payload=await fetchJson(`/api/v1/connectors/${encodeURIComponent(tenant)}/${encodeURIComponent(provider)}/${encodeURIComponent(connector)}/config`,{headers:{...authHeaders()}});$('connectorConfigJson').value=JSON.stringify(payload.config||{},null,2);const status=await fetchJson(`/api/v1/connectors/${encodeURIComponent(tenant)}/${encodeURIComponent(provider)}/${encodeURIComponent(connector)}/status`,{headers:{...authHeaders()}});const checkpoint=await fetchJson(`/api/v1/connectors/${encodeURIComponent(tenant)}/${encodeURIComponent(provider)}/${encodeURIComponent(connector)}/checkpoint`,{headers:{...authHeaders()}});summarizeConnectorStatus(status,checkpoint,null);setStatus(`Loaded config and status for ${provider}/${connector}.`);}catch(error){setStatus(`Connector config load failed: ${error.message||error}`);}}
+async function saveConnectorConfig(){const tenant=currentTenant();const provider=currentProvider();const connector=$('connectorSelect').value;if(!connector) return;try{const config=JSON.parse($('connectorConfigJson').value||'{}');await fetchJson(`/api/v1/connectors/${encodeURIComponent(tenant)}/${encodeURIComponent(provider)}/${encodeURIComponent(connector)}/config`,{method:'PUT',headers:{'Content-Type':'application/json',...authHeaders()},body:JSON.stringify({config})});setStatus(`Saved config for ${provider}/${connector}.`);await loadConnectorConfig();}catch(error){setStatus(`Connector config save failed: ${error.message||error}`);}}
+async function runConnectorPoll(dryRun){const tenant=currentTenant();const provider=currentProvider();const connector=$('connectorSelect').value;if(!connector) return;try{const payload=await fetchJson(`/api/v1/connectors/${encodeURIComponent(tenant)}/${encodeURIComponent(provider)}/${encodeURIComponent(connector)}/poll`,{method:'POST',headers:{'Content-Type':'application/json',...authHeaders()},body:JSON.stringify({dry_run:!!dryRun,limit:100})});const status=await fetchJson(`/api/v1/connectors/${encodeURIComponent(tenant)}/${encodeURIComponent(provider)}/${encodeURIComponent(connector)}/status`,{headers:{...authHeaders()}});const checkpoint=await fetchJson(`/api/v1/connectors/${encodeURIComponent(tenant)}/${encodeURIComponent(provider)}/${encodeURIComponent(connector)}/checkpoint`,{headers:{...authHeaders()}});summarizeConnectorStatus(status,checkpoint,payload);setStatus(`${dryRun?'Dry run':'Live poll'} completed for ${provider}/${connector}.`);}catch(error){setStatus(`Connector poll failed: ${error.message||error}`);}}
+function renderFileList(){const list=$('fileList');if(!state.files.length){list.innerHTML='<div class=\"empty\">No files selected yet.</div>';return;}const provider=$('provider').value;const opts=KINDS[provider]||KINDS.mixed;list.innerHTML=state.files.map((f,idx)=>`<div class="file"><div style="font-size:13px;font-weight:600">${esc(f.name)}</div><div class="tiny">${esc(f.sizeLabel)} • ${esc(f.typeLabel)}</div><div class="field"><label>Source Kind</label><select data-file-idx="${idx}" class="source-kind">${opts.map((opt)=>`<option value="${esc(opt)}" ${opt===f.source_kind?'selected':''}>${esc(opt)}</option>`).join('')}</select></div></div>`).join('');list.querySelectorAll('.source-kind').forEach((n)=>n.addEventListener('change',(e)=>{const i=Number(e.target.getAttribute('data-file-idx'));if(Number.isFinite(i)&&state.files[i]) state.files[i].source_kind=e.target.value;}));}
+async function readJsonFile(file){const text=await file.text();if(file.name.toLowerCase().endsWith('.jsonl')) return text.split(/\r?\n/).filter(Boolean).map((line)=>JSON.parse(line));return JSON.parse(text);}
+async function readCsvFile(file){const text=await file.text();const lines=text.split(/\r?\n/).filter(Boolean);if(!lines.length) return [];const headers=lines[0].split(',').map((v)=>v.trim());return lines.slice(1).map((line)=>{const cols=line.split(',');const row={};headers.forEach((h,idx)=>row[h]=cols[idx]!=null?cols[idx].trim():'');return row;});}
+async function readSpreadsheetFile(file){if(window.parseTabular&&typeof window.parseTabular.parseFile==='function'){const parsed=await window.parseTabular.parseFile(file);return parsed&&parsed.rows?parsed.rows:[];}throw new Error('XLSX parsing support is unavailable in this runtime.');}
+function unwrapRows(raw){if(Array.isArray(raw)) return raw;if(raw&&Array.isArray(raw.Records)) return raw.Records;if(raw&&Array.isArray(raw.records)) return raw.records;if(raw&&Array.isArray(raw.Findings)) return raw.Findings;if(raw&&Array.isArray(raw.findings)) return raw.findings;if(raw&&Array.isArray(raw.value)) return raw.value;if(raw&&Array.isArray(raw.items)) return raw.items;if(raw&&typeof raw==='object') return [raw];return [];}
+async function normalizeFile(meta){const file=meta.file;const lower=file.name.toLowerCase();let rows=[];if(lower.endsWith('.json')||lower.endsWith('.jsonl')) rows=unwrapRows(await readJsonFile(file)); else if(lower.endsWith('.csv')) rows=await readCsvFile(file); else if(lower.endsWith('.xlsx')||lower.endsWith('.xls')) rows=await readSpreadsheetFile(file); else throw new Error(`Unsupported file type: ${file.name}`); return rows.map((row,idx)=>Object.assign({},row,{source_kind:meta.source_kind,provider:meta.provider,file_name:meta.name,row_index:row.row_index!=null?row.row_index:idx}));}
+function listOrFallback(items,fallback){return Array.isArray(items)&&items.length?items:[fallback];}
+function renderList(id,items,fallback){const el=$(id);const arr=listOrFallback(items,fallback);el.innerHTML=arr.map((item)=>`<li>${esc(typeof item==='string'?item:JSON.stringify(item))}</li>`).join('');}
+function renderRoleBlocks(handoff){const el=$('handoffByRole');const entries=Object.entries(handoff||{});if(!entries.length){el.innerHTML='<div class=\"empty\">No role handoff was returned.</div>';return;}el.innerHTML=entries.map(([role,text])=>`<div class="card" style="margin-top:10px"><div class="label" style="margin-bottom:6px">${esc(role.replace(/_/g,' '))}</div><div class="tiny" style="font-size:12px;color:var(--text);line-height:1.5">${esc(text)}</div></div>`).join('');}
+function providerSpecificHunts(provider,assessment){
+const hop=((assessment.decision_record||{}).hopgraph_context)||{};
+const factors=((assessment.verdict||{}).semantic_top_factors||[]).map((entry)=>entry.factor_name||entry);
+const hunts=[];
+if(provider==='azure'||provider==='mixed'){
+  hunts.push('Pull Entra sign-ins, audit logs, Conditional Access detail, Identity Protection detail, Defender incident detail, Activity Log, Key Vault access, and NSG flow for the same identity and timeframe.');
+  if(factors.some((f)=>String(f).includes('privilege_change'))) hunts.push('Check for follow-on role assignments, app consent, service principal abuse, and secret access after the privilege change.');
+}
+if(provider==='aws'||provider==='mixed'){
+  hunts.push('Pull fuller CloudTrail around the identity, IAM role and policy history, GuardDuty detail, Security Hub detail, Config history, VPC flow, and impacted resource or service logs.');
+  if(factors.some((f)=>String(f).includes('access_key_creation'))) hunts.push('Check for key use from new IPs, cross-region API calls, and persistence via additional roles, keys, or policy drift.');
+}
+if((hop.connection_status||'')==='connected') hunts.push('Use HopGraph pivots to test whether the events form one chain or separate clusters across identity, control-plane, network, and endpoint domains.');
+hunts.push('Look for fileless execution, LOLBin abuse, scheduled tasks, encoded PowerShell, WMI, or browser/session-token reuse if the chain suggests the actor tried to hide host artifacts.');
+hunts.push('Look for beacon cadence, repeated low-volume egress, DNS or TLS irregularity, and parent-child process mismatches that would support C2 rather than one-off admin activity.');
+return hunts;
+}
+function renderProvenance(assessment){
+  const prov=assessment.upload_provenance||{};
+  const files=prov.file_counts||{};
+  const kinds=prov.source_kind_counts||{};
+  const warnings=Array.isArray(prov.parser_warnings)?prov.parser_warnings:[];
+  const parts=[
+    `Tenant: ${esc(prov.tenant||assessment.org||assessment.tenant||'unknown')}`,
+    `Accepted rows: ${esc(prov.accepted_rows!=null?prov.accepted_rows:assessment.accepted_rows!=null?assessment.accepted_rows:'-')}`,
+    `Rejected rows: ${esc(prov.rejected_rows!=null?prov.rejected_rows:assessment.rejected_rows!=null?assessment.rejected_rows:'-')}`,
+    `Ingest time: ${esc(prov.ingest_time?new Date(Number(prov.ingest_time)*1000).toLocaleString():'n/a')}`,
+    `Files: ${esc(Object.entries(files).map(([k,v])=>`${k} (${v})`).join(', ')||'n/a')}`,
+    `Source kinds: ${esc(Object.entries(kinds).map(([k,v])=>`${k} (${v})`).join(', ')||'n/a')}`,
+    `Parser warnings: ${esc(warnings.join(' | ')||'none')}`
+  ];
+  $('uploadProvenance').innerHTML=parts.join('<br>');
+}
+function buildTimelineItems(assessment){const rows=Array.isArray(assessment.rows)?assessment.rows:[];return rows.filter((row)=>row&&(row.reason||row.suspicious||row.factor||row.source_kind)).slice(0,18).map((row,idx)=>({when:row.ts||row.event_ts||row.createdDateTime||row.eventTime||row.activityDateTime||row.detectedDateTime||row.time||`step-${idx+1}`,title:row.reason||row.event_type||row.activityDisplayName||row.operationName||row.title||row.source_kind||'Correlated event',sub:[row.user,row.userPrincipalName,row.caller,row.ip,row.sourceIPAddress,row.resource,row.resourceId].filter(Boolean).join(' • ')||row.source_kind||row.sheet||row.file_name||'evidence'}));}
+function renderTimeline(assessment){const el=$('timeline');const items=buildTimelineItems(assessment);if(!items.length){el.innerHTML='<div class=\"empty\">No timeline evidence available from this run.</div>';return;}el.innerHTML=items.map((item)=>`<div class="item"><div class="time">${esc(String(item.when))}</div><div><div class="ititle">${esc(item.title)}</div><div class="isub">${esc(item.sub)}</div></div></div>`).join('');}
+function renderAssessment(){const assessment=state.latestAssessment||{};const verdict=assessment.verdict||{};const personas=state.personas||{};const executive=personas.executive||{};const hunter=personas.threat_hunter||{};const forensics=personas.forensics||{};const playbook=(state.latestPlaybook&&state.latestPlaybook.playbook)||state.latestPlaybook||{};const tier2=state.latestTier2||{};const chunks=Array.isArray(tier2.chunks)?tier2.chunks.map((c)=>c.chunk||'').filter(Boolean):[];const risk=assessment.risk_quantification||{};const hop=((assessment.decision_record||{}).hopgraph_context)||{};const provider=$('provider').value;$('businessHeadline').textContent=executive.what_happened||'Analysis completed. Review the business summary, hunt leads, and evidence drill-downs on the right.';$('metricVerdict').textContent=assessment.final_verdict||verdict.final_verdict||assessment.verdict||'-';$('metricConfidence').textContent=(assessment.final_confidence!=null||verdict.final_confidence!=null)?`${Math.round(Number(assessment.final_confidence!=null?assessment.final_confidence:verdict.final_confidence)*100)}%`:'-';$('metricCorroboration').textContent=(hop.corroboration_count!=null)?String(hop.corroboration_count):'-';$('metricConnection').textContent=hop.connection_status||'unknown';renderProvenance(assessment);renderList('nextActions',executive.immediate_actions||executive.recommended_next_steps||playbook.recommendation_actions,'Review the evidence and keep containment human-approved until missing evidence is closed.');renderList('huntLeads',hunter.corroboration_targets||hunter.pivot_leads||providerSpecificHunts(provider,assessment),'Pivot on the same user, IP, role, and resource across adjacent domains.');$('tier1Summary').textContent=executive.what_happened||'Tier 1 summary unavailable for this run.';$('tier2Summary').textContent=chunks.join(' ')||tier2.summary||((tier2.detail||'').includes('unavailable')?'Tier 2 unavailable for this run.':'Tier 2 unavailable for this run.');renderList('confirmedEvidence',playbook.confirmed_evidence||assessment.canonical?.evidence_summary||executive.why_it_was_flagged,'No confirmed evidence block was returned.');renderList('missingEvidence',playbook.missing_evidence||executive.still_unconfirmed,'No missing evidence was returned.');renderList('priorityPulls',playbook.priority_next_pulls||hunter.recommended_hunts||providerSpecificHunts(provider,assessment),'No priority next pulls were returned.');renderList('containmentPreconditions',playbook.containment_preconditions||['Keep human approval in place until corroboration and missing-evidence checks are complete.'],'Containment preconditions were not returned.');renderRoleBlocks(playbook.handoff_by_role||{});renderList('domainArtifacts',forensics.artifacts_to_collect||providerSpecificHunts(provider,assessment),'No domain artifacts were returned.');$('technicalDrilldown').textContent=JSON.stringify({final_verdict:assessment.final_verdict||verdict.final_verdict,final_confidence:assessment.final_confidence!=null?assessment.final_confidence:verdict.final_confidence,severity:assessment.severity||risk.severity,semantic_top_factors:assessment.semantic_top_factors||verdict.semantic_top_factors||[],supporting_model_factors:assessment.supporting_model_factors||verdict.supporting_model_factors||[],risk_quantification:risk,dependency_status:assessment.dependency_status||{},hopgraph_context:hop,upload_provenance:assessment.upload_provenance||{},assessment_id:assessment.assessment_id,tenant:assessment.org||assessment.tenant,row_count:Array.isArray(assessment.rows)?assessment.rows.length:0},null,2);renderTimeline(assessment);}
+function loadReplayJson(json){const item=Array.isArray(json.files)?json.files[0]:null;if(!item){setStatus('Replay JSON did not contain a files[] payload.');return;}state.latestAssessment=item.assessment||{};state.personas=item.personas||{};state.latestPlaybook=item.playbook||{};state.latestTier2=item.tier2||{};renderAssessment();setStatus('Loaded replay JSON into the Cloud Replay Console.');}
+async function analyzeFiles(){if(!state.files.length){setStatus('Choose at least one file first.');return;}setStatus('Parsing files and sending them to the backend analysis pipeline...');try{let rows=[];for(const meta of state.files){rows=rows.concat(await normalizeFile(meta));}state.latestRows=rows;const tenant=$('tenantId').value||'cloud-replay';const analyzeResp=await fetch('/api/v1/csv/deep_analyze',{method:'POST',headers:{'Content-Type':'application/json',...authHeaders()},body:JSON.stringify({org:tenant,tenant,rows,options:{auto_llm:true}})});if(!analyzeResp.ok) throw new Error(`Deep analyze failed: HTTP ${analyzeResp.status}`);const assessment=await analyzeResp.json();state.latestAssessment=assessment;const personas={};for(const persona of ['executive','soc_analyst','threat_hunter','forensics']){const r=await fetch(`/api/v1/reports/persona_view?persona=${encodeURIComponent(persona)}&disclosure_level=2&top_n=6`,{method:'POST',headers:{'Content-Type':'application/json',...authHeaders()},body:JSON.stringify(assessment)});personas[persona]=r.ok?await r.json():{};}state.personas=personas;const playbookResp=await fetch('/api/v1/playbooks/generate',{method:'POST',headers:{'Content-Type':'application/json',...authHeaders()},body:JSON.stringify(assessment)});state.latestPlaybook=playbookResp.ok?await playbookResp.json():{};const tier2Resp=await fetch('/api/v1/csv/tier2_summarize',{method:'POST',headers:{'Content-Type':'application/json',...authHeaders()},body:JSON.stringify({org:tenant,assessment_id:assessment.assessment_id||'cloud-replay',rows})});state.latestTier2=tier2Resp.ok?await tier2Resp.json():{};renderAssessment();setStatus(`Analysis complete for ${rows.length} rows across ${state.files.length} files.`);}catch(error){console.error(error);setStatus(error.message||String(error));}}
+function detachRail(){const source=$('rightRailContent');const win=window.open('','janusec-cloud-rail','width=520,height=980');if(!win) return;win.document.write('<!doctype html><html><head><title>Detached Tier Rail</title></head><body style=\"margin:0;background:#09101c;color:#ecf2ff;font-family:Inter,Segoe UI,system-ui,sans-serif\"><div style=\"padding:18px\" id=\"shell\"></div></body></html>');win.document.getElementById('shell').innerHTML=source.innerHTML;win.document.title='Detached Tier Rail';}
+$('pickFilesBtn').addEventListener('click',()=>$('fileInput').click());$('loadReplayBtn').addEventListener('click',()=>$('replayInput').click());$('analyzeBtn').addEventListener('click',analyzeFiles);$('detachBtn').addEventListener('click',detachRail);$('openNewTabBtn').addEventListener('click',()=>window.open(window.location.href,'_blank','noopener'));$('provider').addEventListener('change',()=>{renderFileList();updateConnectorOptions();});$('loadConnectorConfigBtn').addEventListener('click',loadConnectorConfig);$('saveConnectorConfigBtn').addEventListener('click',saveConnectorConfig);$('dryRunConnectorBtn').addEventListener('click',()=>runConnectorPoll(true));$('pollConnectorBtn').addEventListener('click',()=>runConnectorPoll(false));
+$('fileInput').addEventListener('change',(e)=>{const provider=$('provider').value;state.files=Array.from(e.target.files||[]).map((file)=>({file,name:file.name,source_kind:inferSourceKind(file.name,provider),provider,sizeLabel:`${Math.max(1,Math.round(file.size/1024))} KB`,typeLabel:file.type||'file'}));renderFileList();setStatus(`${state.files.length} file(s) selected.`);});
+$('replayInput').addEventListener('change',async (e)=>{const file=(e.target.files||[])[0];if(!file) return;try{loadReplayJson(JSON.parse(await file.text()));}catch(error){setStatus(`Replay JSON could not be loaded: ${error.message||error}`);}});
+updateConnectorOptions();
+})();
+</script>
+</body>
+</html>

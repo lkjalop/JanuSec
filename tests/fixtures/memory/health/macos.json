@@ -1,0 +1,25 @@
+{
+  "host": "mac-mem-host",
+  "platform": "macos",
+  "volatility": {
+    "mac.tasks": [
+      {"name": "launchservicesd", "pid": 88},
+      {"name": "securityd", "pid": 10}
+    ],
+    "mac.netscan": [
+      {"Process": "securityd", "dst": "api.apple.com:443"}
+    ]
+  },
+  "rekall": {
+    "tasks": [
+      {"name": "launchservicesd", "pid": 88}
+    ]
+  },
+  "sandbox": {
+    "status": "submitted",
+    "submissions": [
+      {"adapter": "joe", "verdict": "benign"},
+      {"adapter": "anyrun", "verdict": "queued"}
+    ]
+  }
+}

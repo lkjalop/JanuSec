@@ -1,0 +1,12 @@
+{
+  "org_policy_attach": true,
+  "resource_wildcard": true,
+  "organization_wide_role": true,
+  "domain": "cloud",
+  "provider": "aws",
+  "eventSource": "organizations.amazonaws.com",
+  "eventName": "AttachPolicy",
+  "policy": "ServiceControlPolicy",
+  "resource": "*",
+  "factors": ["org_policy_attach", "resource_wildcard", "organization_wide_role"]
+}

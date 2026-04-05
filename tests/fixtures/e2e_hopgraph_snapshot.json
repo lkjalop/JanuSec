@@ -1,0 +1,12 @@
+{
+  "nodes": [
+    {"id":"email:ceo@paypa¶2.com","type":"email"},
+    {"id":"user:finance@example.com","type":"user"},
+    {"id":"ip:198.51.100.23","type":"ip"},
+    {"id":"host:host-123","type":"host"}
+  ],
+  "edges": [
+    {"src":"email:ceo@paypa¶2.com","dst":"user:finance@example.com","type":"sent_to"},
+    {"src":"ip:198.51.100.23","dst":"host:host-123","type":"accessed"}
+  ]
+}

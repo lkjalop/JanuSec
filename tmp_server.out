@@ -1,0 +1,163 @@
+[env] Loaded settings from C:\AI\janusec\.env
+==================================================
+Starting JanuSec Platform
+==================================================
+
+Server: http://0.0.0.0:8080
+Console: http://0.0.0.0:8080/console
+CSV Upload: http://0.0.0.0:8080/api/v1/csv/upload-page
+API Docs: http://0.0.0.0:8080/docs
+
+Press Ctrl+C to stop
+==================================================
+{"ts":"2026-04-02T09:46:19.631397Z","level":"INFO","logger":"src.api.startup","msg":"Cost ledger snapshot loaded: 1470 records"}
+{"ts":"2026-04-02T09:46:19.639385Z","level":"INFO","logger":"src.api.startup","msg":"Plugin registry loaded (version=2025.10.0, soar_actions=0, extractors=0)"}
+{"ts":"2026-04-02T09:46:19.640553Z","level":"INFO","logger":"src.api.startup","msg":"Wired live.rules_engine with metrics into runtime_state"}
+{"ts":"2026-04-02T09:46:19.693224Z","level":"INFO","logger":"src.api.app","msg":"Included fallback emitted_factors handler"}
+{"ts":"2026-04-02T09:46:19.696225Z","level":"INFO","logger":"src.api.app","msg":"Included fallback factors handler"}
+{"ts":"2026-04-02T09:46:19.699761Z","level":"INFO","logger":"src.api.app","msg":"Included fallback factors taxonomy handlers"}
+{"ts":"2026-04-02T09:46:19.703778Z","level":"INFO","logger":"src.api.app","msg":"Re-mounted remote_access router to restore missing paths (added=/api/v1/remote_access/bastion/ingest,/api/v1/remote_access/ingest,/api/v1/remote_access/rdp/ingest,/api/v1/remote_access/vpn/ingest)"}
+{"ts":"2026-04-02T09:46:19.707050Z","level":"INFO","logger":"src.api.app","msg":"Late-mounted endpoint_malware router"}
+{"ts":"2026-04-02T09:46:19.710909Z","level":"INFO","logger":"src.api.app","msg":"Late-mounted kape_endpoints router"}
+{"ts":"2026-04-02T09:46:19.712435Z","level":"INFO","logger":"src.api.app","msg":"Route inventory audit: 77 routes, 12 allowlisted, 77 extras"}
+{"ts":"2026-04-02T09:46:19.712435Z","level":"WARNING","logger":"src.api.app","msg":"Routes not in allowlist (first 25): /api/v1/admin/approval_policies GET, /api/v1/admin/approval_policies POST, /api/v1/admin/approval_policies/{name} DELETE, /api/v1/admin/approval_policies/{name} GET, /api/v1/admin/calibration/approve POST, /api/v1/admin/calibration/run POST, /api/v1/admin/calibration/runs GET, /api/v1/admin/calibration/suggestions GET, /api/v1/admin/sandbox/refresh POST, /api/v1/admin/sandbox/tasks GET, /api/v1/analysis/session/start POST, /api/v1/analysis/session/{session_id}/cancel POST, /api/v1/analysis/session/{session_id}/status GET, /api/v1/api_security/gateway_logs POST, /api/v1/assessments/generate_persona POST, /api/v1/assessments/hopgraph_report POST, /api/v1/assessments/{assessment_id}/events GET, /api/v1/assessments/{assessment_id}/ws GET, /api/v1/debug/last-errors GET, /api/v1/endpoint/malware/analyze POST, /api/v1/endpoint/malware/capabilities GET, /api/v1/factors GET, /api/v1/factors/emitted GET, /api/v1/factors/history/{factor} GET, /api/v1/factors/taxonomy GET"}
+{"ts":"2026-04-02T09:46:19.737308Z","level":"INFO","logger":"src.api.app","msg":"Late-mounted iam_connector router to restore /api/v1/iam/connectors/status (from src.api.iam_connector_endpoints)"}
+{"ts":"2026-04-02T09:46:19.739811Z","level":"INFO","logger":"src.api.app","msg":"Mounting React frontend at /react from C:\\AI\\janusec\\frontend\\react\\dist"}
+{"ts":"2026-04-02T09:46:19.740466Z","level":"INFO","logger":"src.api.app","msg":"Mounting SPA frontend at /spa from C:\\AI\\janusec\\frontend\\spa"}
+{"ts":"2026-04-02T09:46:19.880784Z","level":"INFO","logger":"src.api.app","msg":"Included unified ingestion controller router"}
+{"ts":"2026-04-02T09:46:19.976831Z","level":"INFO","logger":"src.api.app","msg":"Suppression rules router included"}
+{"ts":"2026-04-02T09:46:19.987859Z","level":"INFO","logger":"src.api.app","msg":"Approvals RBAC router included"}
+{"ts":"2026-04-02T09:46:20.009993Z","level":"INFO","logger":"src.graph.unified","msg":"UnifiedGraph bound to provider graph.hopgraph (weight=100)"}
+{"ts":"2026-04-02T09:46:20.113749Z","level":"INFO","logger":"src.api.app","msg":"register_core_routers called (full=True)"}
+{"ts":"2026-04-02T09:46:20.140817Z","level":"INFO","logger":"src.api.app","msg":"Included iam_connector_router into app (lite)"}
+{"ts":"2026-04-02T09:46:20.183734Z","level":"INFO","logger":"src.api.app","msg":"Included rules_admin_router into app (lite)"}
+{"ts":"2026-04-02T09:46:20.194766Z","level":"INFO","logger":"src.api.app","msg":"Included decision_feedback_router into app (lite)"}
+{"ts":"2026-04-02T09:46:20.202577Z","level":"INFO","logger":"src.api.app","msg":"Included admin_factors router into app (lite)"}
+{"ts":"2026-04-02T09:46:20.204676Z","level":"INFO","logger":"src.api.app","msg":"Included decision_confidence_router into app (lite)"}
+{"ts":"2026-04-02T09:46:20.223790Z","level":"INFO","logger":"src.api.app","msg":"Included decision_endpoints into app (lite)"}
+{"ts":"2026-04-02T09:46:20.229379Z","level":"INFO","logger":"src.api.app","msg":"Included hopgraph_stream_router into app"}
+{"ts":"2026-04-02T09:46:20.231383Z","level":"INFO","logger":"src.api.app","msg":"Included config_router into app (lite)"}
+{"ts":"2026-04-02T09:46:20.234498Z","level":"INFO","logger":"src.api.app","msg":"Included assessments_router into app (lite)"}
+{"ts":"2026-04-02T09:46:20.261568Z","level":"INFO","logger":"src.api.app","msg":"Included report_router into app (lite)"}
+{"ts":"2026-04-02T09:46:20.271204Z","level":"INFO","logger":"src.api.app","msg":"Included report_forwarding_router into app (lite)"}
+{"ts":"2026-04-02T09:46:20.284737Z","level":"INFO","logger":"src.api.app","msg":"Included upload_router into app (lite)"}
+{"ts":"2026-04-02T09:46:20.392328Z","level":"INFO","logger":"src.api.app","msg":"Included sbom_router into app (lite)"}
+{"ts":"2026-04-02T09:46:20.395836Z","level":"INFO","logger":"src.api.app","msg":"Included supply_chain_router into app (lite)"}
+{"ts":"2026-04-02T09:46:20.400817Z","level":"INFO","logger":"src.api.app","msg":"Included csv_multi_router into app (lite)"}
+{"ts":"2026-04-02T09:46:20.407847Z","level":"INFO","logger":"src.api.app","msg":"Included api_sec_router into app (lite)"}
+{"ts":"2026-04-02T09:46:20.411362Z","level":"INFO","logger":"src.api.app","msg":"Included email_router into app (lite)"}
+{"ts":"2026-04-02T09:46:20.415371Z","level":"INFO","logger":"src.api.app","msg":"Included email_subscriptions_router into app (lite)"}
+{"ts":"2026-04-02T09:46:20.415371Z","level":"INFO","logger":"src.api.app","msg":"Included remote_access_router into app (lite)"}
+{"ts":"2026-04-02T09:46:20.418760Z","level":"INFO","logger":"src.api.app","msg":"Included data_router into app (lite)"}
+{"ts":"2026-04-02T09:46:20.419765Z","level":"INFO","logger":"src.api.app","msg":"Included tier2_router into app (lite)"}
+{"ts":"2026-04-02T09:46:20.446919Z","level":"INFO","logger":"src.api.app","msg":"Included iam_ingest_router into app (lite)"}
+{"ts":"2026-04-02T09:46:20.460539Z","level":"INFO","logger":"src.api.app","msg":"Included iam_connector_router into app (lite)"}
+{"ts":"2026-04-02T09:46:20.490747Z","level":"INFO","logger":"src.api.app","msg":"Included integrations_router into app (lite)"}
+{"ts":"2026-04-02T09:46:20.492763Z","level":"INFO","logger":"src.api.app","msg":"Included intel_router into app (lite)"}
+{"ts":"2026-04-02T09:46:20.501710Z","level":"INFO","logger":"src.api.app","msg":"Included deep_analyze_router into app (lite)"}
+{"ts":"2026-04-02T09:46:20.502708Z","level":"INFO","logger":"src.api.app","msg":"Included csv_deep_analyze_router into app (lite)"}
+{"ts":"2026-04-02T09:46:20.503707Z","level":"INFO","logger":"src.api.app","msg":"Included llm_config_router into app (lite)"}
+{"ts":"2026-04-02T09:46:20.505716Z","level":"INFO","logger":"src.api.app","msg":"Included endpoint_malware router (lite)"}
+{"ts":"2026-04-02T09:46:20.509743Z","level":"INFO","logger":"src.api.app","msg":"Dynamically loaded artifact_router into app (lite)"}
+{"ts":"2026-04-02T09:46:20.513748Z","level":"INFO","logger":"src.api.app","msg":"Dynamically loaded custody router into app (lite)"}
+{"ts":"2026-04-02T09:46:20.516749Z","level":"INFO","logger":"src.api.app","msg":"Dynamically loaded decisions_stream router into app (lite)"}
+{"ts":"2026-04-02T09:46:20.519748Z","level":"INFO","logger":"src.api.app","msg":"Included network_ingest_router into app (lite)"}
+{"ts":"2026-04-02T09:46:20.521267Z","level":"INFO","logger":"src.api.app","msg":"Included dev_router into app (lite)"}
+{"ts":"2026-04-02T09:46:20.551629Z","level":"INFO","logger":"src.api.app","msg":"Included compliance_router into app (lite)"}
+{"ts":"2026-04-02T09:46:20.553640Z","level":"INFO","logger":"src.api.app","msg":"Included custody_router into app (lite)"}
+{"ts":"2026-04-02T09:46:20.558611Z","level":"INFO","logger":"src.api.app","msg":"Included risk_router into app (lite)"}
+{"ts":"2026-04-02T09:46:20.568130Z","level":"INFO","logger":"src.api.app","msg":"Included pull_endpoints_router into app (lite)"}
+{"ts":"2026-04-02T09:46:20.578170Z","level":"INFO","logger":"src.api.app","msg":"Included hunt_lanes router into app (lite)"}
+{"ts":"2026-04-02T09:46:20.592878Z","level":"INFO","logger":"src.api.app","msg":"Included router decisions"}
+{"ts":"2026-04-02T09:46:20.594036Z","level":"INFO","logger":"src.api.app","msg":"Included router hopgraph_stream"}
+{"ts":"2026-04-02T09:46:20.594036Z","level":"INFO","logger":"src.api.app","msg":"Included router risk"}
+{"ts":"2026-04-02T09:46:20.599434Z","level":"INFO","logger":"src.api.app","msg":"Included router temporal"}
+{"ts":"2026-04-02T09:46:20.600497Z","level":"INFO","logger":"src.api.app","msg":"Included router upload"}
+{"ts":"2026-04-02T09:46:20.604092Z","level":"INFO","logger":"src.api.app","msg":"Included router stream_ingest"}
+{"ts":"2026-04-02T09:46:20.626935Z","level":"INFO","logger":"src.api.app","msg":"Included router csv"}
+{"ts":"2026-04-02T09:46:20.642001Z","level":"INFO","logger":"src.api.app","msg":"Included router soar"}
+{"ts":"2026-04-02T09:46:20.643013Z","level":"INFO","logger":"src.api.app","msg":"Included router dashboard"}
+{"ts":"2026-04-02T09:46:20.644004Z","level":"INFO","logger":"src.api.app","msg":"Included router integrations"}
+{"ts":"2026-04-02T09:46:20.644004Z","level":"INFO","logger":"src.api.app","msg":"Included router metrics_status"}
+{"ts":"2026-04-02T09:46:20.645004Z","level":"INFO","logger":"src.api.app","msg":"Included router custody"}
+{"ts":"2026-04-02T09:46:20.645635Z","level":"INFO","logger":"src.api.app","msg":"Included router artifact"}
+{"ts":"2026-04-02T09:46:20.648161Z","level":"INFO","logger":"src.api.app","msg":"Included router nlp"}
+{"ts":"2026-04-02T09:46:20.648161Z","level":"INFO","logger":"src.api.app","msg":"Included router sbom"}
+{"ts":"2026-04-02T09:46:20.649665Z","level":"INFO","logger":"src.api.app","msg":"Included router supply_chain"}
+{"ts":"2026-04-02T09:46:20.661982Z","level":"INFO","logger":"src.api.app","msg":"Included router ingest_sysmon_wef"}
+{"ts":"2026-04-02T09:46:20.667087Z","level":"INFO","logger":"src.api.app","msg":"Included router ingest_endpoint_xdr"}
+{"ts":"2026-04-02T09:46:20.672606Z","level":"INFO","logger":"src.api.app","msg":"Included router ingest_suricata_eve"}
+{"ts":"2026-04-02T09:46:20.676613Z","level":"INFO","logger":"src.api.app","msg":"Included router connectivity_smoke"}
+{"ts":"2026-04-02T09:46:20.682502Z","level":"INFO","logger":"src.api.app","msg":"Included router ingest_cloudtrail"}
+{"ts":"2026-04-02T09:46:20.690168Z","level":"INFO","logger":"src.api.app","msg":"Included router ingest_siem"}
+{"ts":"2026-04-02T09:46:20.690850Z","level":"INFO","logger":"src.api.app","msg":"Included router ingest_sysmon_wef"}
+{"ts":"2026-04-02T09:46:20.700542Z","level":"INFO","logger":"src.api.app","msg":"Included router iam"}
+{"ts":"2026-04-02T09:46:20.720020Z","level":"INFO","logger":"src.api.app","msg":"Included router iam_admin"}
+{"ts":"2026-04-02T09:46:20.721089Z","level":"INFO","logger":"src.api.app","msg":"Included router iam_ingest"}
+{"ts":"2026-04-02T09:46:20.721089Z","level":"INFO","logger":"src.api.app","msg":"Included router iam_connectors"}
+{"ts":"2026-04-02T09:46:20.737776Z","level":"INFO","logger":"src.api.app","msg":"Included router connector_control"}
+{"ts":"2026-04-02T09:46:20.738767Z","level":"INFO","logger":"src.api.app","msg":"Included router ebpf"}
+{"ts":"2026-04-02T09:46:20.745098Z","level":"INFO","logger":"src.api.app","msg":"Included router identity_graph"}
+{"ts":"2026-04-02T09:46:20.748129Z","level":"INFO","logger":"src.api.app","msg":"Included router identity_reporting"}
+{"ts":"2026-04-02T09:46:20.752127Z","level":"INFO","logger":"src.api.app","msg":"Included router cloud_graph"}
+{"ts":"2026-04-02T09:46:20.757656Z","level":"INFO","logger":"src.api.app","msg":"Included router network_graph"}
+{"ts":"2026-04-02T09:46:20.757656Z","level":"INFO","logger":"src.api.app","msg":"Included router compliance"}
+{"ts":"2026-04-02T09:46:20.758648Z","level":"INFO","logger":"src.api.app","msg":"Included router report"}
+{"ts":"2026-04-02T09:46:20.763167Z","level":"INFO","logger":"src.api.app","msg":"Included router automations"}
+{"ts":"2026-04-02T09:46:20.770359Z","level":"INFO","logger":"src.api.app","msg":"Included router feedback"}
+{"ts":"2026-04-02T09:46:20.770872Z","level":"INFO","logger":"src.api.app","msg":"Included router dev"}
+{"ts":"2026-04-02T09:46:20.775920Z","level":"INFO","logger":"src.api.app","msg":"Included router admin_rules"}
+{"ts":"2026-04-02T09:46:20.775920Z","level":"INFO","logger":"src.api.app","msg":"Included router decision_feedback"}
+{"ts":"2026-04-02T09:46:20.777540Z","level":"INFO","logger":"src.api.app","msg":"Included router factors"}
+{"ts":"2026-04-02T09:46:20.777540Z","level":"INFO","logger":"src.api.app","msg":"Included router admin_factors"}
+{"ts":"2026-04-02T09:46:20.783152Z","level":"INFO","logger":"src.api.app","msg":"Included router suppression_admin"}
+{"ts":"2026-04-02T09:46:20.783599Z","level":"INFO","logger":"src.api.app","msg":"Included router unified_ingest"}
+{"ts":"2026-04-02T09:46:20.790630Z","level":"INFO","logger":"src.api.app","msg":"Included router risk_config_admin"}
+{"ts":"2026-04-02T09:46:20.792133Z","level":"INFO","logger":"src.api.app","msg":"Included router replay"}
+{"ts":"2026-04-02T09:46:20.794134Z","level":"INFO","logger":"src.api.app","msg":"Included router scenario_replay"}
+{"ts":"2026-04-02T09:46:20.794134Z","level":"INFO","logger":"src.api.app","msg":"Included router unified_graph"}
+{"ts":"2026-04-02T09:46:20.794134Z","level":"INFO","logger":"src.api.app","msg":"Included router network_ingest"}
+{"ts":"2026-04-02T09:46:20.795134Z","level":"INFO","logger":"src.api.app","msg":"Included router cloud_ingest"}
+{"ts":"2026-04-02T09:46:20.796133Z","level":"INFO","logger":"src.api.app","msg":"Included router app_ingest"}
+{"ts":"2026-04-02T09:46:20.796133Z","level":"INFO","logger":"src.api.app","msg":"Included router identity_ingest"}
+{"ts":"2026-04-02T09:46:20.796133Z","level":"INFO","logger":"src.api.app","msg":"Included router decision_confidence"}
+{"ts":"2026-04-02T09:46:20.797134Z","level":"INFO","logger":"src.api.app","msg":"Included router node_factors"}
+{"ts":"2026-04-02T09:46:20.798142Z","level":"INFO","logger":"src.api.app","msg":"Included router emitted_factors"}
+{"ts":"2026-04-02T09:46:20.798142Z","level":"INFO","logger":"src.api.app","msg":"Included router graph_session"}
+{"ts":"2026-04-02T09:46:20.800264Z","level":"INFO","logger":"src.api.app","msg":"Included router suggestions"}
+{"ts":"2026-04-02T09:46:20.800264Z","level":"INFO","logger":"src.api.app","msg":"Included router config"}
+{"ts":"2026-04-02T09:46:20.800264Z","level":"INFO","logger":"src.api.app","msg":"Included router assessments"}
+{"ts":"2026-04-02T09:46:20.800264Z","level":"INFO","logger":"src.api.app","msg":"Included router tier2"}
+{"ts":"2026-04-02T09:46:20.802790Z","level":"INFO","logger":"src.api.app","msg":"Included router playbooks"}
+{"ts":"2026-04-02T09:46:20.805485Z","level":"INFO","logger":"src.api.app","msg":"Included router identity_hopgraph_facade"}
+{"ts":"2026-04-02T09:46:20.807077Z","level":"INFO","logger":"src.api.app","msg":"Included router cooccurrence_admin"}
+{"ts":"2026-04-02T09:46:20.807619Z","level":"INFO","logger":"src.api.app","msg":"Included router endpoint_malware"}
+{"ts":"2026-04-02T09:46:20.811855Z","level":"INFO","logger":"src.api.app","msg":"Included router isms"}
+{"ts":"2026-04-02T09:46:20.813095Z","level":"INFO","logger":"src.api.app","msg":"Included router metrics_correlation"}
+{"ts":"2026-04-02T09:46:20.814262Z","level":"INFO","logger":"src.api.app","msg":"Included router llm_tier1"}
+{"ts":"2026-04-02T09:46:20.814930Z","level":"INFO","logger":"src.api.app","msg":"Dynamically included supply_chain_endpoints router"}
+{"ts":"2026-04-02T09:46:20.816836Z","level":"INFO","logger":"src.api.app","msg":"Included SLO metrics router"}
+{"ts":"2026-04-02T09:46:20.907333Z","level":"INFO","logger":"src.api.app","msg":"create_app: included iam_connector_router from src.api.iam_connector_endpoints"}
+[startup] reload=False (source: --no-reload flag)  log_level=warning
+{"ts":"2026-04-02T11:01:27.182500Z","level":"ERROR","logger":"asyncio","msg":"Exception in callback _ProactorBasePipeTransport._call_connection_lost(None)\nhandle: <Handle _ProactorBasePipeTransport._call_connection_lost(None)>","exc_type":"ConnectionResetError"}
+{"ts":"2026-04-02T11:34:21.101119Z","level":"ERROR","logger":"asyncio","msg":"Exception in callback _ProactorBasePipeTransport._call_connection_lost(None)\nhandle: <Handle _ProactorBasePipeTransport._call_connection_lost(None)>","exc_type":"ConnectionResetError"}
+{"ts":"2026-04-02T11:38:22.356602Z","level":"INFO","logger":"src.integrations.tenant_store","msg":"Using encrypted file secret backend","correlation_id":"req-1775129902289","tenant_id":"offline-demo"}
+{"ts":"2026-04-02T11:38:22.471932Z","level":"INFO","logger":"src.integrations.tenant_store","msg":"Using encrypted file secret backend","correlation_id":"req-1775129902458","tenant_id":"offline-demo"}
+{"ts":"2026-04-02T11:38:22.513724Z","level":"INFO","logger":"src.integrations.tenant_store","msg":"Using encrypted file secret backend","correlation_id":"req-1775129902505","tenant_id":"offline-demo"}
+{"ts":"2026-04-02T11:38:22.606969Z","level":"INFO","logger":"src.integrations.tenant_store","msg":"Using encrypted file secret backend","correlation_id":"req-1775129902598","tenant_id":"offline-demo"}
+{"ts":"2026-04-02T11:38:22.633216Z","level":"INFO","logger":"src.integrations.tenant_store","msg":"Using encrypted file secret backend","correlation_id":"req-1775129902630","tenant_id":"offline-demo"}
+{"ts":"2026-04-02T11:38:22.732461Z","level":"INFO","logger":"src.integrations.tenant_store","msg":"Using encrypted file secret backend","correlation_id":"req-1775129902723","tenant_id":"offline-demo"}
+{"ts":"2026-04-02T11:38:22.756824Z","level":"INFO","logger":"src.integrations.tenant_store","msg":"Using encrypted file secret backend","correlation_id":"req-1775129902753","tenant_id":"offline-demo"}
+{"ts":"2026-04-02T11:38:22.856050Z","level":"INFO","logger":"src.integrations.tenant_store","msg":"Using encrypted file secret backend","correlation_id":"req-1775129902847","tenant_id":"offline-demo"}
+{"ts":"2026-04-02T11:38:44.032203Z","level":"WARNING","logger":"src.integrations.llm_client","msg":"Ollama probe failed: HTTPConnectionPool(host='host.docker.internal', port=11434): Max retries exceeded with url: /api/version (Caused by ConnectTimeoutError(<HTTPConnection(host='host.docker.internal', port=11434) at 0x2468a9b2a10>, 'Connection to host.docker.internal timed out. (connect timeout=60.0)'))","correlation_id":"req-1775129902947","tenant_id":"offline-demo"}
+{"ts":"2026-04-02T11:39:05.172798Z","level":"WARNING","logger":"src.integrations.llm_client","msg":"Ollama probe failed: HTTPConnectionPool(host='host.docker.internal', port=11434): Max retries exceeded with url: /api/version (Caused by ConnectTimeoutError(<HTTPConnection(host='host.docker.internal', port=11434) at 0x2468cf88250>, 'Connection to host.docker.internal timed out. (connect timeout=60.0)'))","correlation_id":"req-1775129924120","tenant_id":"offline-demo"}
+{"ts":"2026-04-02T11:39:57.929429Z","level":"INFO","logger":"src.integrations.tenant_store","msg":"Using encrypted file secret backend","correlation_id":"req-1775129997926","tenant_id":"offline-demo"}
+{"ts":"2026-04-02T11:39:58.057387Z","level":"INFO","logger":"src.integrations.tenant_store","msg":"Using encrypted file secret backend","correlation_id":"req-1775129998049","tenant_id":"offline-demo"}
+{"ts":"2026-04-02T11:39:58.084234Z","level":"INFO","logger":"src.integrations.tenant_store","msg":"Using encrypted file secret backend","correlation_id":"req-1775129998080","tenant_id":"offline-demo"}
+{"ts":"2026-04-02T11:39:58.180216Z","level":"INFO","logger":"src.integrations.tenant_store","msg":"Using encrypted file secret backend","correlation_id":"req-1775129998173","tenant_id":"offline-demo"}
+{"ts":"2026-04-02T11:39:58.208565Z","level":"INFO","logger":"src.integrations.tenant_store","msg":"Using encrypted file secret backend","correlation_id":"req-1775129998205","tenant_id":"offline-demo"}
+{"ts":"2026-04-02T11:39:58.304207Z","level":"INFO","logger":"src.integrations.tenant_store","msg":"Using encrypted file secret backend","correlation_id":"req-1775129998298","tenant_id":"offline-demo"}
+{"ts":"2026-04-02T11:39:58.332123Z","level":"INFO","logger":"src.integrations.tenant_store","msg":"Using encrypted file secret backend","correlation_id":"req-1775129998328","tenant_id":"offline-demo"}
+{"ts":"2026-04-02T11:39:58.397556Z","level":"INFO","logger":"src.integrations.tenant_store","msg":"Using encrypted file secret backend","correlation_id":"req-1775129998391","tenant_id":"offline-demo"}
+{"ts":"2026-04-02T11:40:19.538815Z","level":"WARNING","logger":"src.integrations.llm_client","msg":"Ollama probe failed: HTTPConnectionPool(host='host.docker.internal', port=11434): Max retries exceeded with url: /api/version (Caused by ConnectTimeoutError(<HTTPConnection(host='host.docker.internal', port=11434) at 0x2468d058290>, 'Connection to host.docker.internal timed out. (connect timeout=60.0)'))","correlation_id":"req-1775129998485","tenant_id":"offline-demo"}
+{"ts":"2026-04-02T11:40:40.697530Z","level":"WARNING","logger":"src.integrations.llm_client","msg":"Ollama probe failed: HTTPConnectionPool(host='host.docker.internal', port=11434): Max retries exceeded with url: /api/version (Caused by ConnectTimeoutError(<HTTPConnection(host='host.docker.internal', port=11434) at 0x2468cee0990>, 'Connection to host.docker.internal timed out. (connect timeout=60.0)'))","correlation_id":"req-1775130019663","tenant_id":"offline-demo"}

@@ -1,0 +1,7 @@
+{
+  "event_id": "evt-col-keylog-1",
+  "host": "host-109",
+  "timestamp": "2025-10-12T13:08:00Z",
+  "keylogger_implant_detected": true,
+  "http_bytes_out": 800000
+}

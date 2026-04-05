@@ -1,0 +1,62 @@
+name: Migrations and DB tests
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  db-migrations:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: janusec
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d janusec"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Wait for Postgres
+        run: |
+          for i in {1..30}; do pg_isready -h localhost -p 5432 -U postgres -d janusec && break || sleep 1; done
+
+      - name: Run Migrations
+        env:
+          APP_DB_DSN: postgresql://postgres:postgres@localhost:5432/janusec
+        run: |
+          python scripts/run_migrations.py
+
+      - name: Run DB tests
+        env:
+          APP_DB_DSN: postgresql://postgres:postgres@localhost:5432/janusec
+        run: |
+          python -m pytest -q tests/test_db_smoke.py -q
+
+      - name: Run correlation rule tests
+        env:
+          APP_DB_DSN: postgresql://postgres:postgres@localhost:5432/janusec
+        run: |
+          python -m pytest -q tests/test_top10_rules.py -q
+          python -m pytest -q tests/test_top20_rules.py -q
+          python -m pytest -q tests/test_top30_rules.py -q

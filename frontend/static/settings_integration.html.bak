@@ -1,0 +1,45 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Integration Settings</title></head>
+<body>
+<h1>Integration Settings</h1>
+<form id="cfg">
+  <label>Tenant ID: <input id="tenant" value="default"></label><br>
+  <label>Integration Name: <input id="name" value="postgres"></label><br>
+  <label>Config JSON:</label><br>
+  <textarea id="cfgjson" rows="10" cols="80">{"dsn":"postgresql://postgres:postgres@localhost:5432/janusec"}</textarea><br>
+  <button type="button" id="save">Save</button>
+  <button type="button" id="test">Test</button>
+    <h2>Retention & Sampling</h2>
+    <label>Retention Days: <input id="retention" value="90" type="number"></label><br>
+    <label>Sampling Rate (0-1): <input id="sampling" value="1" type="number" step="0.01" min="0" max="1"></label><br>
+    <button type="button" id="saveRetention">Save Retention</button>
+  <div id="res"></div>
+</form>
+<script>
+async function save(){
+  const tenant=document.getElementById('tenant').value;
+  const name=document.getElementById('name').value;
+  const cfg=JSON.parse(document.getElementById('cfgjson').value||'{}');
+  const res=await fetch('/api/v1/integrations/'+name+'/config',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({tenant_id:tenant,config:cfg})});
+  const j=await res.json(); document.getElementById('res').innerText=JSON.stringify(j);
+}
+async function saveRetention(){
+  const tenant=document.getElementById('tenant').value;
+  const retention=document.getElementById('retention').value;
+  const sampling=document.getElementById('sampling').value;
+  const res=await fetch('/api/v1/integrations/retention/config',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({tenant_id:tenant,config:{retention_days:parseInt(retention),sampling_rate:parseFloat(sampling)}})});
+  const j=await res.json(); document.getElementById('res').innerText=JSON.stringify(j);
+}
+document.getElementById('saveRetention').onclick=saveRetention;
+async function test(){
+  const name=document.getElementById('name').value;
+  const tenant=document.getElementById('tenant').value;
+  const res=await fetch('/api/v1/integrations/'+name+'/config/test?tenant_id='+tenant);
+  const j=await res.json(); document.getElementById('res').innerText=JSON.stringify(j);
+}
+document.getElementById('save').onclick=save;
+document.getElementById('test').onclick=test;
+</script>
+</body>
+</html>

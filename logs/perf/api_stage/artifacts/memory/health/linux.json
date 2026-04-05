@@ -1,0 +1,17 @@
+{
+  "fixture": "linux.json",
+  "job_id": "mem-5d2590dab627",
+  "host": "linux-mem-host",
+  "platform": "linux",
+  "volatility_plugins": [],
+  "rekall_plugins": [
+    "pslist"
+  ],
+  "sandbox_status": "submitted",
+  "sandbox_adapters": [
+    "joe",
+    "anyrun"
+  ],
+  "timeline_length": 3,
+  "factors": []
+}

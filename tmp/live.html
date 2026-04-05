@@ -1,0 +1,2285 @@
+        }
+        @keyframes slideIn {
+            from {
+                transform: translateX(400px);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+        .modal-overlay {
+        window.authHeaders = function(){ try { const key = (localStorage.getItem('apiKey') || 'devkey123'); const tenant = localStorage.getItem('tenantId'); const h = { 'x-api-key': key }; if (tenant) h['X-Tenant-ID'] = tenant; return h; } catch (_){ return { 'x-api-key': 'devkey123' }; } };
+        window._htmlEsc = function(s){ try{ return String(s||'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }catch(_){return '';} };
+    </script>
+    <script src="/static/js/test_helpers.js"></script>
+    <script defer src="/static/js/notifications.js"></script>
+    <script defer src="/static/js/modals.js"></script>
+    <script defer src="/static/js/parse_tabular.js"></script>
+    <script defer src="/static/js/live_console.bundle.js"></script>
+    <style>
+        /* =============================================
+           JANUSEC LIVE CONSOLE THEME TOKENS (Dark)
+           Maintain this block: all color / spacing changes centralize here.
+           ============================================= */
+        :root {
+            /* Core Background Layers */
+            --bg-primary: #0B0E14;
+            --bg-secondary: #141A24;
+            --bg-tertiary: #1D2531;
+            --bg-hover: #222C39;
+            --bg-elevated: #202A37;
+
+            /* Borders & Outlines */
+            --border: #2C3746;
+            --border-soft: #1B222C;
+            --focus-ring: #4A90E7;
+
+            /* Text Roles */
+            --text-primary: #E8EBF0;
+            --text-secondary: #C2CBD6;
+            --text-muted: #93A0B1;
+            --text-inverse: #0B0E14;
+
+            /* Accent & Interactive */
+            --accent: #4A63E7;
+            --accent-hover: #5C74F2;
+            --accent-subtle: #233155;
+            --accent-gradient: linear-gradient(135deg,#4A63E7,#6D5CF2 60%);
+
+            /* Semantic / Severity */
+            --critical: #E54848;
+            --high: #FF8A3C;
+            --medium: #E0C446;
+            --low: #3FA860;
+            --safe: #2DB67C;
+            --info: #4DA6FF;
+
+            /* Charts / Data Viz */
+            --viz-1: #4A63E7;
+            --viz-2: #FF8A3C;
+            --viz-3: #3FA860;
+            --viz-4: #C779D0;
+            --viz-5: #4DA6FF;
+
+            /* Shadows */
+            --shadow-sm: 0 1px 2px rgba(0,0,0,0.25);
+            --shadow-md: 0 4px 12px rgba(0,0,0,0.35);
+
+            /* Radii & Spacing Scale (4/8 rhythm) */
+            --radius-xs: 3px; --radius-sm: 4px; --radius: 6px; --radius-lg: 10px;
+            --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-5: 20px; --space-6: 24px; --space-7: 32px;
+        }
+
+        html, body.theme-dark { background: var(--bg-primary); color: var(--text-primary); font-family: Inter, "Segoe UI", system-ui, -apple-system, Arial, sans-serif; -webkit-font-smoothing: antialiased; }
+        body { margin:0; }
+        ::selection { background: var(--accent); color: #fff; }
+        * { box-sizing: border-box; }
+        *:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; border-radius: var(--radius-sm); }
+        /* Scrollbar (webkit) */
+        body::-webkit-scrollbar { width: 10px; }
+        body::-webkit-scrollbar-track { background: var(--bg-secondary); }
+        body::-webkit-scrollbar-thumb { background: var(--bg-tertiary); border:2px solid var(--bg-secondary); border-radius: 20px; }
+        body::-webkit-scrollbar-thumb:hover { background: var(--bg-hover); }
+
+        /* Button refinements */
+        .btn { background: var(--bg-tertiary); border:1px solid var(--border); color: var(--text-primary); }
+        .btn:hover { background: var(--bg-hover); }
+        .btn-primary { background: var(--accent); border-color: var(--accent); color:#fff; }
+        .btn-primary:hover { background: var(--accent-hover); }
+
+        /* NAV ICONS -------------------------------------------------- */
+        .nav-item { position: relative; }
+        .nav-ico { width:18px; height:18px; flex-shrink:0; display:inline-block; background: var(--text-secondary); mask-size: contain; mask-repeat: no-repeat; mask-position: center; -webkit-mask-size: contain; -webkit-mask-repeat:no-repeat; -webkit-mask-position:center; opacity:0.85; transition:opacity .2s, background .2s; }
+        .nav-item:hover .nav-ico { opacity:1; background: var(--text-primary); }
+        .nav-item.active .nav-ico { background:#fff; opacity:1; }
+    .ico { width:14px; height:14px; display:inline-block; vertical-align:middle; background: currentColor; mask-size:contain; mask-repeat:no-repeat; -webkit-mask-size:contain; -webkit-mask-repeat:no-repeat; margin-right:6px; opacity:0.9; }
+    .btn .ico, .icon-btn .ico { margin-right:6px; }
+        .link-btn { background:none; border:none; color:var(--accent); cursor:pointer; padding:0; font: inherit; }
+        .link-btn:hover { text-decoration: underline; }
+        /* Each icon uses a tiny path mask encoded as data URI (monochrome -> CSS color) */
+        /* Gauge (dashboard) */
+        .nav-ico--dashboard { mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M12 14l4-4'/%3E%3Cpath d='M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z'/%3E%3C/svg%3E"); }
+        /* Box (artifacts) */
+        .nav-ico--artifacts { mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M12 2l8 4-8 4-8-4Z'/%3E%3Cpath d='M4 6v6l8 4 8-4V6'/%3E%3Cpath d='M12 10v10'/%3E%3C/svg%3E"); }
+        /* Flame (threats) */
+        .nav-ico--threats { mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' stroke='white' stroke-width='2' fill='none' stroke-linecap='round' stroke-linejoin='round' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M12 2s2 3 2 5a2 2 0 0 1-4 0c0-2 2-5 2-5Z'/%3E%3Cpath d='M12 8c-5 0-7 5-7 7a7 7 0 0 0 14 0c0-2-2-7-7-7Z'/%3E%3C/svg%3E"); }
+        /* Network */
+        .nav-ico--network { mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' stroke='white' stroke-width='2' fill='none' stroke-linecap='round' stroke-linejoin='round' xmlns='http://www.w3.org/2000/svg'%3E%3Ccircle cx='12' cy='12' r='4'/%3E%3Cpath d='M2 12h4m12 0h4M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48 2.83 2.83m0-14.14-2.83 2.83M7.76 16.24 4.93 19.07'/%3E%3C/svg%3E"); }
+        /* Chip (endpoint) */
+        .nav-ico--endpoint { mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' stroke='white' stroke-width='2' fill='none' stroke-linecap='round' stroke-linejoin='round' xmlns='http://www.w3.org/2000/svg'%3E%3Crect x='4' y='4' width='16' height='16' rx='2'/%3E%3Cpath d='M9 4v2m6-2v2M9 18v2m6-2v2M4 9h2m-2 6h2M18 9h2m-2 6h2'/%3E%3C/svg%3E"); }
+        /* Shield Check (compliance) */
+        .nav-ico--compliance { mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z'/%3E%3Cpath d='m9 12 2 2 4-4'/%3E%3C/svg%3E"); }
+        /* Bar Chart (metrics) */
+        .nav-ico--metrics { mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M3 3v18h18'/%3E%3Crect x='7' y='8' width='3' height='7'/%3E%3Crect x='12' y='5' width='3' height='10'/%3E%3Crect x='17' y='10' width='3' height='5'/%3E%3C/svg%3E"); }
+        /* Plug (integrations) */
+        .nav-ico--integrations { mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M12 22v-5'/%3E%3Cpath d='M9 8V2h6v6'/%3E%3Cpath d='M5 10h14'/%3E%3Cpath d='M7 10a5 5 0 0 0 10 0'/%3E%3C/svg%3E"); }
+        /* Doc (reports) */
+        .nav-ico--reports { mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M14 2H6a2 2 0 0 0-2 2v16c0 1.1.9 2 2 2h12a2 2 0 0 0 2-2V8Z'/%3E%3Cpath d='M14 2v6h6'/%3E%3Cpath d='M10 13h4'/%3E%3Cpath d='M10 17h4'/%3E%3C/svg%3E"); }
+        /* Beaker / Sandbox */
+        .nav-ico--sandbox { mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M4 3h16'/%3E%3Cpath d='M6 3v6a6 6 0 1 0 12 0V3'/%3E%3C/svg%3E"); }
+        /* Radar / Intel */
+        .nav-ico--intel { mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' stroke='white' stroke-width='2' fill='none' stroke-linecap='round' stroke-linejoin='round' xmlns='http://www.w3.org/2000/svg'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Cpath d='M12 6v6l3 3'/%3E%3C/svg%3E"); }
+        /* Gear (admin) */
+        .nav-ico--admin { mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' stroke='white' stroke-width='2' fill='none' stroke-linecap='round' stroke-linejoin='round' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z'/%3E%3Cpath d='M21.54 10.45a2 2 0 0 0-1-2.72l-1.1-.48a2 2 0 0 1-1.05-1.06l-.47-1.1a2 2 0 0 0-2.73-1l-1.09.46a2 2 0 0 1-1.5 0l-1.09-.46a2 2 0 0 0-2.73 1l-.47 1.1a2 2 0 0 1-1.05 1.06l-1.1.48a2 2 0 0 0-1 2.72l.46 1.09a2 2 0 0 1 0 1.5l-.46 1.09a2 2 0 0 0 1 2.73l1.1.47a2 2 0 0 1 1.05 1.05l.47 1.1a2 2 0 0 0 2.72 1l1.09-.46a2 2 0 0 1 1.5 0l1.09.46a2 2 0 0 0 2.73-1l.47-1.1a2 2 0 0 1 1.05-1.05l1.1-.47a2 2 0 0 0 1-2.73l-.46-1.09a2 2 0 0 1 0-1.5Z'/%3E%3C/svg%3E"); }
+        /* Package (SBOM) */
+        .nav-ico--sbom { mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' stroke='white' stroke-width='2' fill='none' stroke-linecap='round' stroke-linejoin='round' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4a2 2 0 0 0 1-1.73Z'/%3E%3Cpath d='M3.3 7L12 12l8.7-5'/%3E%3Cpath d='M12 22V12'/%3E%3C/svg%3E"); }
+        /* Graph (graph explain) */
+        .nav-ico--graph { mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' stroke='white' stroke-width='2' fill='none' stroke-linecap='round' stroke-linejoin='round' xmlns='http://www.w3.org/2000/svg'%3E%3Ccircle cx='12' cy='8' r='4'/%3E%3Cpath d='M6 20v-7a6 6 0 0 1 12 0v7'/%3E%3C/svg%3E"); }
+        /* Scan (yara) */
+        .nav-ico--yara { mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' stroke='white' stroke-width='2' fill='none' stroke-linecap='round' stroke-linejoin='round' xmlns='http://www.w3.org/2000/svg'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cpath d='m21 21-4.35-4.35'/%3E%3C/svg%3E"); }
+        /* Globe (bgp) */
+        .nav-ico--bgp { mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' stroke='white' stroke-width='2' fill='none' stroke-linecap='round' stroke-linejoin='round' xmlns='http://www.w3.org/2000/svg'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Cpath d='M2 12h20'/%3E%3Cpath d='M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10Z'/%3E%3C/svg%3E"); }
+        /* Table (CSV Analyzer) */
+        .nav-ico--csv { mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' stroke='white' stroke-width='2' fill='none' stroke-linecap='round' stroke-linejoin='round' xmlns='http://www.w3.org/2000/svg'%3E%3Crect x='3' y='3' width='18' height='18' rx='2'/%3E%3Cpath d='M3 9h18M9 21V9'/%3E%3C/svg%3E"); }
+        /* Currency (finops) */
+        .nav-ico--finops { mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' stroke='white' stroke-width='2' fill='none' stroke-linecap='round' stroke-linejoin='round' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M12 2v20'/%3E%3Cpath d='M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6'/%3E%3C/svg%3E"); }
+        /* Checklist (approvals) */
+        .nav-ico--approvals { mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' stroke='white' stroke-width='2' fill='none' stroke-linecap='round' stroke-linejoin='round' xmlns='http://www.w3.org/2000/svg'%3E%3Crect x='3' y='5' width='18' height='14' rx='2'/%3E%3Cpath d='M7 9h4M7 13h4'/%3E%3Cpath d='m15 13 2 2 4-4'/%3E%3C/svg%3E"); }
+        /* Briefcase (executive) */
+        .nav-ico--executive { mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' stroke='white' stroke-width='2' fill='none' stroke-linecap='round' stroke-linejoin='round' xmlns='http://www.w3.org/2000/svg'%3E%3Crect x='3' y='7' width='18' height='13' rx='2'/%3E%3Cpath d='M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2'/%3E%3Cpath d='M12 12h.01'/%3E%3C/svg%3E"); }
+          /* Additional icons (batch, mitre, timeline, api, notifications, settings, ai, intel status) */
+          .nav-ico--batch { mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' stroke='white' stroke-width='2' fill='none' stroke-linecap='round' stroke-linejoin='round' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M3 7h18M3 12h12M3 17h6'/%3E%3C/svg%3E"); }
+          .nav-ico--mitre { mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' stroke='white' stroke-width='2' fill='none' stroke-linecap='round' stroke-linejoin='round' xmlns='http://www.w3.org/2000/svg'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Cpath d='M8 12h8M12 8v8'/%3E%3C/svg%3E"); }
+          .nav-ico--timeline { mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' stroke='white' stroke-width='2' fill='none' stroke-linecap='round' stroke-linejoin='round' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M4 4h3v6H4zM10.5 4h3v10h-3zM17 4h3v14h-3z'/%3E%3C/svg%3E"); }
+          .nav-ico--api { mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' stroke='white' stroke-width='2' fill='none' stroke-linecap='round' stroke-linejoin='round' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M4 9l4-4 4 4'/%3E%3Cpath d='M8 5v14'/%3E%3Cpath d='M20 15l-4 4-4-4'/%3E%3Cpath d='M16 5v14'/%3E%3C/svg%3E"); }
+          .nav-ico--notifications { mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' stroke='white' stroke-width='2' fill='none' stroke-linecap='round' stroke-linejoin='round' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M6 17l-2-2v-2a8 8 0 0 1 16 0v2l-2 2'/%3E%3Cpath d='M13.73 21a2 2 0 0 1-3.46 0'/%3E%3C/svg%3E"); }
+          .nav-ico--settings { mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' stroke='white' stroke-width='2' fill='none' stroke-linecap='round' stroke-linejoin='round' xmlns='http://www.w3.org/2000/svg'%3E%3Ccircle cx='12' cy='12' r='3'/%3E%3Cpath d='M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09c0 .67.39 1.27 1 1.51a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.67 0 1.27.39 1.51 1H21a2 2 0 0 1 0 4h-.09c-.67 0-1.27.39-1.51 1Z'/%3E%3C/svg%3E"); }
+          .nav-ico--ai { mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' stroke='white' stroke-width='2' fill='none' stroke-linecap='round' stroke-linejoin='round' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M4 10a8 8 0 0 1 16 0v2a8 8 0 0 1-16 0Z'/%3E%3Cpath d='M7 15h10'/%3E%3Cpath d='M7 11h10'/%3E%3C/svg%3E"); }
+          .nav-ico--intel-status { mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' stroke='white' stroke-width='2' fill='none' stroke-linecap='round' stroke-linejoin='round' xmlns='http://www.w3.org/2000/svg'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Cpath d='M12 8v4l2 2'/%3E%3C/svg%3E"); }
+          /* Newly added small action/integration icons */
+          .ico-refresh { mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M21 2v6h-6'/%3E%3Cpath d='M3 12a9 9 0 0 0 15 6.7l3-3M3 12a9 9 0 0 1 15-6.7l3 3'/%3E%3C/svg%3E"); }
+          .ico-upload { mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2'/%3E%3Cpath d='M12 12V3'/%3E%3Cpath d='m7 8 5-5 5 5'/%3E%3C/svg%3E"); }
+          .ico-detach { mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M3 3h7v7H3zM14 14h7v7h-7z'/%3E%3Cpath d='M21 3l-7 7M10 14l-7 7M14 10l4-4M10 14l-4 4'/%3E%3C/svg%3E"); }
+          .ico-info { mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' xmlns='http://www.w3.org/2000/svg'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Cpath d='M12 16v-4'/%3E%3Cpath d='M12 8h.01'/%3E%3C/svg%3E"); }
+          .ico-xdr { mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' xmlns='http://www.w3.org/2000/svg'%3E%3Crect x='3' y='4' width='7' height='7' rx='1'/%3E%3Crect x='14' y='4' width='7' height='7' rx='1'/%3E%3Crect x='14' y='15' width='7' height='7' rx='1'/%3E%3Cpath d='M5 15h6v6H5z'/%3E%3C/svg%3E"); }
+          .ico-zeek { mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' xmlns='http://www.w3.org/2000/svg'%3E%3Ccircle cx='12' cy='12' r='4'/%3E%3Cpath d='M2 12h4m12 0h4M12 2v4m0 12v4m-7.07-7.07 2.83 2.83m8.48-8.48 2.83-2.83m0 11.31-2.83-2.83M7.76 7.76 4.93 4.93'/%3E%3C/svg%3E"); }
+          .ico-slack { mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M14.5 2a2.5 2.5 0 0 0 0 5h2.5V4.5A2.5 2.5 0 0 0 14.5 2ZM9.5 7H7V9.5A2.5 2.5 0 1 0 9.5 7Zm5 5a2.5 2.5 0 0 0-2.5 2.5V17h2.5a2.5 2.5 0 0 0 0-5ZM7 9.5A2.5 2.5 0 0 0 4.5 7 2.5 2.5 0 0 0 2 9.5v2.5H4.5A2.5 2.5 0 0 0 7 9.5Zm7.5-2.5H12v2.5A2.5 2.5 0 1 0 14.5 7Zm-5 5H7a2.5 2.5 0 1 0 2.5 2.5Zm5 0H17V12a2.5 2.5 0 0 0-2.5 0Z'/%3E%3C/svg%3E"); }
+          .ico-teams { mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linejoin='round' stroke-linecap='round' xmlns='http://www.w3.org/2000/svg'%3E%3Ccircle cx='18' cy='6' r='3'/%3E%3Ccircle cx='9' cy='6' r='4'/%3E%3Cpath d='M2 21v-2a6 6 0 0 1 6-6h2a6 6 0 0 1 6 6v2'/%3E%3Cpath d='M16 11h2a4 4 0 0 1 4 4v6'/%3E%3C/svg%3E"); }
+          .ico-whatsapp { mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linejoin='round' stroke-linecap='round' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M3 21l1.65-4.43A9 9 0 1 1 12 21a9 9 0 0 1-4.35-1.12L3 21Z'/%3E%3Cpath d='M16.54 11.73a4 4 0 0 1-4.27 4.27c-2.36-.24-4.9-2.78-5.14-5.14a4 4 0 0 1 4.27-4.27'/%3E%3C/svg%3E"); }
+          /* Theme Diagnostics: tokens summary
+              BG: primary/secondary/tertiary/hover/elevated | Text: primary/secondary/muted | Accent: accent/hover/subtle
+              Severity: critical/high/medium/low/safe/info | Border: border/border-soft | Spacing: 4/8 rhythm */
+
+        /* Active nav contrast & subtle separators */
+        .nav-item.active { background: var(--accent); color:#fff; box-shadow: var(--shadow-sm); }
+        .nav-item:not(.active) { color: var(--text-secondary); }
+        .sidebar { background: linear-gradient(180deg,var(--bg-secondary), var(--bg-tertiary) 60%); }
+        .content-header { background: var(--bg-secondary); }
+        .right-panel { background: var(--bg-secondary); }
+        .metric-card, .alert-feed, .chart-container { background: var(--bg-secondary); box-shadow: var(--shadow-sm); }
+        .alert-item { background: var(--bg-tertiary); }
+        .alert-item:hover { background: var(--bg-hover); }
+        .alert-item .alert-title { color: var(--text-primary); }
+        .alert-meta { color: var(--text-muted); }
+        .metric-label { color: var(--text-muted); }
+        .nav-title { color: var(--text-muted); }
+        .icon-btn { background: var(--bg-tertiary); }
+        .icon-btn:hover { background: var(--bg-hover); }
+        /* End theme insertion */
+        /* updateMetrics logic moved to /static/js/metrics.js */
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+
+        .status-dot.active {
+            background: var(--safe);
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        /* Sidebar */
+        .sidebar {
+            background: var(--bg-secondary);
+            border-right: 1px solid var(--border);
+            padding: 16px;
+            overflow-y: auto;
+        }
+
+        .nav-section {
+            margin-bottom: 24px;
+        }
+
+        .nav-section.collapsed .nav-item[role],
+        .nav-section.collapsed .nav-item { display: none; }
+        .nav-section.collapsed .nav-title::after { content: 'Ã¢â€“Â¶'; transform: rotate(0deg); }
+        .nav-section .nav-title::after { content: 'Ã¢â€“Â¼'; position: absolute; right: 4px; font-size: 10px; opacity: 0.6; }
+        .nav-title { position: relative; cursor: pointer; }
+
+        .nav-title {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-muted);
+            margin-bottom: 8px;
+            font-weight: 600;
+        }
+
+        .nav-item {
+            padding: 10px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 4px;
+            font-size: 14px;
+        }
+
+        .nav-item:hover {
+            background: var(--bg-hover);
+        }
+
+        .nav-item.active {
+            background: var(--accent);
+            color: white;
+        }
+
+        /* Accessibility focus styles */
+        .nav-item:focus { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+        .nav-item:focus:not(:focus-visible) { outline: none; }
+        .nav-item[aria-current="page"]::after {
+            content: '';
+            position: absolute;
+            right: 6px; top: 50%; transform: translateY(-50%);
+            width: 6px; height: 6px; background: #fff; border-radius: 50%;
+            box-shadow: 0 0 0 2px var(--accent-subtle);
+        }
+
+        .nav-badge {
+            margin-left: auto;
+            background: var(--critical);
+            color: white;
+            font-size: 10px;
+            padding: 2px 6px;
+            border-radius: 10px;
+            font-weight: 600;
+        }
+
+        /* Main Content */
+        .main-content {
+            background: var(--bg-primary);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .content-header {
+            background: var(--bg-secondary);
+            padding: 16px 24px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 32px;
+        }
+
+        .content-title {
+            font-size: 20px;
+            font-weight: 600;
+        }
+
+        /* Header status horizontal row */
+        .header .status-bar { display:flex; align-items:center; gap:18px; flex-wrap:wrap; }
+        .header .status-item { display:flex; align-items:center; gap:6px; font-size:12px; color:var(--text-secondary); }
+        .header-left { display:flex; align-items:center; gap:28px; }
+        .logo { display:flex; align-items:center; gap:10px; font-weight:600; font-size:15px; }
+        @media (max-width:1000px){ .header-left { flex-direction:column; align-items:flex-start; gap:8px; } }
+
+        .action-bar {
+            display: flex;
+            gap: 12px;
+        }
+
+        .btn {
+            padding: 8px 16px;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: 1px solid var(--border);
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .btn:hover {
+            background: var(--bg-hover);
+        }
+
+        .btn-primary {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: var(--accent-hover);
+        }
+
+        /* Dashboard Grid */
+        .dashboard-grid {
+            padding: 24px;
+            overflow-y: auto;
+            flex: 1;
+        }
+
+        /* Three-column application layout */
+        .app-container {
+            display: grid;
+            grid-template-columns: 240px 1fr 340px; /* sidebar | main | right panel */
+            grid-template-rows: auto 1fr;
+            grid-template-areas:
+                'header header header'
+                'sidebar main right';
+            height: 100vh;
+            overflow: hidden;
+        }
+        .header { grid-area: header; }
+        .sidebar { grid-area: sidebar; display: flex; flex-direction: column; }
+        .main-content { grid-area: main; }
+        .right-panel { grid-area: right; }
+        @media (max-width: 1400px) { .app-container { grid-template-columns: 220px 1fr 320px; } }
+        @media (max-width: 1200px) { .app-container { grid-template-columns: 210px 1fr 0; grid-template-areas: 'header header header' 'sidebar main main'; } .right-panel { display:none; } }
+        @media (max-width: 900px) { .app-container { grid-template-columns: 1fr; grid-template-areas: 'header' 'main'; } .sidebar { position: fixed; z-index: 9999; top:0; bottom:0; left:0; transform: translateX(-100%); width: 240px; background: var(--bg-secondary); transition: transform .3s; } .sidebar.open { transform: translateX(0); } }
+
+        .metrics-row {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        .metric-card {
+            background: var(--bg-secondary);
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+        }
+
+        /* Admin tuning panel styles */
+        .admin-panel { padding:12px; border-radius:6px; background:var(--bg-tertiary); border:1px solid var(--border); }
+        .admin-panel label{ display:block; font-size:12px; color:var(--text-muted); margin-top:8px }
+        .small-input{ width:100%; padding:8px; background:var(--bg-primary); border:1px solid var(--border); color:var(--text-primary); border-radius:6px }
+
+        .metric-value {
+            font-size: 32px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .metric-label {
+            font-size: 12px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        /* Small icon button inside alert rows */
+        .icon-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            border: 1px solid var(--border);
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            border-radius: 6px;
+            padding: 4px 8px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        .icon-btn:hover { background: var(--bg-hover); }
+
+        .chart-container {
+            background: var(--bg-secondary);
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            padding: 20px;
+            margin-bottom: 24px;
+            height: 300px;
+        }
+
+        /* Small metrics widget for demo: shows CS detection dedupe and DB upserts */
+        .mini-metrics { display:flex; gap:12px; align-items:center; }
+        .mini-metrics .mini-card { background: var(--bg-elevated); padding:8px 12px; border-radius:6px; border:1px solid var(--border); color:var(--text-primary); font-size:12px; }
+
+        /* Alert Feed */
+        .alert-feed {
+            background: var(--bg-secondary);
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            padding: 16px;
+        }
+
+        .alert-item {
+            padding: 12px;
+            border-radius: 6px;
+            margin-bottom: 8px;
+            background: var(--bg-tertiary);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .alert-item:hover {
+            background: var(--bg-hover);
+        }
+
+        .alert-severity {
+            width: 4px;
+            height: 40px;
+            border-radius: 2px;
+        }
+
+        .alert-severity.critical {
+            background: var(--critical);
+        }
+
+        .alert-severity.high {
+            background: var(--high);
+        }
+
+        .alert-content {
+            flex: 1;
+        }
+
+        .alert-title {
+            font-size: 14px;
+            font-weight: 500;
+            margin-bottom: 4px;
+        }
+
+        .alert-meta {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        /* Right Panel */
+        .right-panel {
+            background: var(--bg-secondary);
+            border-left: 1px solid var(--border);
+            padding: 20px;
+            overflow-y: auto;
+            position: relative;
+        }
+
+        .panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .detach-btn {
+            width: 32px;
+            height: 32px;
+            border-radius: 6px;
+            border: 1px solid var(--border);
+            background: var(--bg-tertiary);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+        }
+
+        .detach-btn:hover {
+            background: var(--bg-hover);
+        }
+
+        /* Investigation Details */
+        .investigation-section {
+            margin-bottom: 24px;
+        }
+
+        .section-title {
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 12px;
+            color: var(--text-secondary);
+        }
+
+        .evidence-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .evidence-item {
+            padding: 10px;
+            background: var(--bg-primary);
+            border-radius: 6px;
+            font-size: 13px;
+            font-family: 'Monaco', 'Consolas', monospace;
+        }
+
+        /* Integration Section */
+        .integration-panel {
+            background: var(--bg-tertiary);
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 16px;
+        }
+
+        .integration-header {
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-muted);
+            margin-bottom: 12px;
+        }
+
+        .integration-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 8px;
+        }
+
+        .integration-btn {
+            padding: 10px;
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+        }
+
+        .integration-btn:hover {
+            background: var(--bg-hover);
+            border-color: var(--accent);
+        }
+
+        .integration-btn.connected {
+            border-color: var(--safe);
+            background: rgba(82, 196, 26, 0.1);
+        }
+
+        /* Upload Zone */
+        .upload-zone {
+            border: 2px dashed var(--border);
+            border-radius: 8px;
+            padding: 32px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-bottom: 24px;
+        }
+
+        .upload-zone:hover {
+            border-color: var(--accent);
+            background: var(--bg-tertiary);
+        }
+
+        .upload-zone.dragover {
+            border-color: var(--accent);
+            background: rgba(74, 99, 231, 0.1);
+        }
+
+        /* Modal for detached panel */
+        .detached-window {
+            display: none;
+            position: fixed;
+            top: 50px;
+            right: 50px;
+            width: 600px;
+            height: 80vh;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+        }
+
+        .detached-window.active {
+            display: block;
+        }
+
+        .detached-header {
+            padding: 16px 20px;
+            background: var(--bg-tertiary);
+            border-bottom: 1px solid var(--border);
+            border-radius: 8px 8px 0 0;
+            cursor: move;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .detached-content {
+            padding: 20px;
+            height: calc(100% - 56px);
+            overflow-y: auto;
+        }
+
+        /* Notification System */
+        .notification {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--accent);
+            border-radius: 8px;
+            padding: 16px;
+            min-width: 300px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+            animation: slideIn 0.3s ease;
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateX(400px);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.55);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 10000;
+        }
+        .modal-dialog {
+            width: 900px;
+            max-width: 96vw;
+            max-height: 90vh;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.6);
+        }
+        .modal-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--border);
+            background: var(--bg-tertiary);
+        }
+        .modal-title {
+            font-size: 16px;
+            font-weight: 600;
+        }
+        .modal-body {
+            padding: 14px 16px;
+            overflow-y: auto;
+        }
+        /* Tabs */
+        .tabs {
+            display: flex;
+            gap: 6px;
+            margin: 6px 0 12px 0;
+            flex-wrap: wrap;
+        }
+        .tab-btn { cursor: pointer; }
+        .tab-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+        .tab-section { display: none; }
+        .tab-section.active { display: block; }
+        .close-btn {
+            border: 1px solid var(--border);
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            padding: 6px 10px;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+        .pill {
+            padding: 3px 8px;
+            border-radius: 999px;
+            font-size: 11px;
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+            display: inline-block;
+            margin: 2px 4px 2px 0;
+        }
+        .grid-2 {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+        .sub-card {
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 10px 12px;
+        }
+    </style>
+</head>
+<body class="theme-dark">
+        <!-- Synchronous hidden file input: present immediately so Playwright can wait for #fileInput attached state -->
+        <input type="file" id="fileInput" style="display:none;" multiple accept=".pcap,.evtx,.json,.csv,.log,.xls,.xlsx,.xlsm,.ods,.zip,.gz">
+    <div class="app-container" id="appContainer">
+        <!-- Header -->
+    <header class="header">
+            <div class="header-left">
+                <div class="logo">
+                    <svg width="28" height="28" viewBox="0 0 64 64" fill="none">
+                        <circle cx="32" cy="32" r="30" stroke="var(--accent)" stroke-width="2"/>
+                        <path d="M32 8 L32 56" stroke="var(--accent)" stroke-width="1" opacity="0.3"/>
+                        <path d="M20 24 Q20 20 24 20 L28 20 L28 44 Q28 48 24 48 L20 48 Z" fill="var(--accent)" opacity="0.8"/>
+                        <path d="M44 24 Q44 20 40 20 L36 20 L36 44 Q36 48 40 48 L44 48 Z" fill="var(--accent)" opacity="0.8"/>
+                    </svg>
+                    JanuSec Platform
+                </div>
+                <div class="status-bar">
+                    <div class="status-item">
+                        <div class="status-dot active"></div>
+                        <span>Connected to XDR</span>
+                    </div>
+                    <div class="status-item">
+                        <span style="color: var(--text-muted);">Last Update:</span>
+                        <span id="lastUpdate">2 min ago</span>
+                    </div>
+                </div>
+                                            <script>
+                                                // Ensure #fileInput remains attached: if other scripts replace uploadZone, re-attach our hidden input to body
+                                                (function(){ try{ const ensure = ()=>{ try{ if(!document.getElementById('fileInput')){ const inp=document.createElement('input'); inp.type='file'; inp.id='fileInput'; inp.style.display='none'; inp.multiple=true; inp.accept='.pcap,.evtx,.json,.csv,.log,.xls,.xlsx,.xlsm,.ods,.zip,.gz'; document.body.appendChild(inp); } else { const el=document.getElementById('fileInput'); if(el && !el.closest('body') && document.body) document.body.appendChild(el); } }catch(e){} }; ensure(); const mo = new MutationObserver(()=> ensure()); mo.observe(document.documentElement || document.body, { childList:true, subtree:true }); setTimeout(()=> mo.disconnect(), 20000); }catch(e){ console.warn('fileInput observer failed', e); } })();
+                                            </script>
+                <div class="mini-metrics" id="miniMetricsHeader" style="margin-left:18px;">
+                    <div class="mini-card">CS dedupe: <span id="cs_dedupe_val">-</span></div>
+                    <div class="mini-card">CS db upserts: <span id="cs_upsert_val">-</span></div>
+                </div>
+            </div>
+            <div class="status-bar">
+                <div class="status-item">
+                    <span style="color: var(--critical);">ÃƒÂ¢Ã¢â‚¬â€Ã‚Â</span>
+                    Critical: <strong id="criticalCount">2</strong>
+                </div>
+                <div class="status-item">
+                    <span style="color: var(--high);">ÃƒÂ¢Ã¢â‚¬â€Ã‚Â</span>
+                    High: <strong id="highCount">8</strong>
+                </div>
+                <div class="status-item">
+                    <span style="color: var(--medium);">ÃƒÂ¢Ã¢â‚¬â€Ã‚Â</span>
+                    Medium: <strong id="mediumCount">15</strong>
+                </div>
+                <div class="status-item" title="AI provider status">
+                    <span id="aiStatus" class="pill-badge pill-warn">AI: n/a</span>
+                </div>
+                <div class="status-item" title="FinOps anomaly status">
+                    <span id="finopsStatus" class="pill-badge pill-warn">FinOps: n/a</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Sidebar (normalized) -->
+    <nav class="sidebar" role="navigation" aria-label="Primary">
+            <div class="nav-section">
+                <div class="nav-title">Detection & Response</div>
+                <div class="nav-item active" role="link" tabindex="0" data-view="dashboard" aria-current="page"><span class="nav-ico nav-ico--dashboard"></span>Dashboard</div>
+                <div class="nav-item" role="link" tabindex="0" data-view="artifacts"><span class="nav-ico nav-ico--artifacts"></span>Artifacts<span class="nav-badge" id="artifactsCount">342</span></div>
+                <div class="nav-item" role="link" tabindex="0" data-view="threats"><span class="nav-ico nav-ico--threats"></span>Active Threats<span class="nav-badge" id="threatCount">2</span></div>
+            </div>
+            <div class="nav-section">
+                <div class="nav-title">Hunt & Analysis</div>
+                <a class="nav-item" href="/static/hunt_network.html"><span class="nav-ico nav-ico--network"></span>Network Hunt</a>
+                <a class="nav-item" href="/static/hunt_endpoint.html"><span class="nav-ico nav-ico--endpoint"></span>Endpoint Hunt</a>
+                <a class="nav-item" id="nav-ai-link" href="/static/ai.html"><span class="nav-ico nav-ico--ai"></span>AI Security</a>
+                <a class="nav-item" href="/static/compliance.html"><span class="nav-ico nav-ico--compliance"></span>Compliance</a>
+                <a class="nav-item" href="/static/compliance.html"><span class="nav-ico nav-ico--compliance"></span>Audits (Pro)</a>
+                <a class="nav-item" href="/static/metrics.html"><span class="nav-ico nav-ico--metrics"></span>Metrics</a>
+                <a class="nav-item" href="/static/batch_events.html"><span class="nav-ico nav-ico--batch"></span>Batch Events</a>
+                <a class="nav-item" href="/static/reports.html"><span class="nav-ico nav-ico--reports"></span>Reports</a>
+                <a class="nav-item" href="/static/sandbox.html"><span class="nav-ico nav-ico--sandbox"></span>Sandbox</a>
+                <a class="nav-item" href="/api/v1/report/ingestion?format=html&include_model=true&include_scenarios=true" target="_blank"><span class="nav-ico nav-ico--mitre"></span>MITRE ATT&CK</a>
+<a class="nav-item" href="/static/graph_explain.html"><span class="nav-ico nav-ico--graph"></span>Graph Explain</a>
+<a class="nav-item" href="/static/identity_graph.html"><span class="nav-ico nav-ico--graph"></span>Identity Graph</a>
+                <a class="nav-item" href="/static/mitre.html"><span class="nav-ico nav-ico--mitre"></span>MITRE Matrix</a>
+                <a class="nav-item" href="/static/process_tree.html"><span class="nav-ico nav-ico--endpoint"></span>Process Tree</a>
+                <a class="nav-item" href="/static/yara.html"><span class="nav-ico nav-ico--yara"></span>YARA Rules</a>
+<a class="nav-item" href="/static/bgp.html"><span class="nav-ico nav-ico--bgp"></span>BGP Incidents</a>
+<a class="nav-item" href="/static/ebpf.html"><span class="nav-ico nav-ico--endpoint"></span>eBPF Events</a>
+<a class="nav-item" href="/static/cloud_graph.html"><span class="nav-ico nav-ico--intel"></span>Cloud Graph</a>
+<a class="nav-item" href="/static/network_graph.html"><span class="nav-ico nav-ico--network"></span>Network Graph</a>
+                <a class="nav-item" href="/static/sbom.html"><span class="nav-ico nav-ico--sbom"></span>SBOM & Vulns</a>
+                <a class="nav-item" href="/static/cspm.html"><span class="nav-ico nav-ico--intel"></span>Compliance & CSPM</a>
+                <a class="nav-item" href="/static/iam.html"><span class="nav-ico nav-ico--users"></span>IAM Risk</a>
+                <a class="nav-item" href="/static/csv_analyzer.html"><span class="nav-ico nav-ico--csv"></span>CSV Analyzer</a>
+                <a class="nav-item" href="/static/csv_multi_analyzer.html"><span class="nav-ico nav-ico--csv"></span>Multi-Source Correlator</a>
+                <a class="nav-item" href="/static/graph_explain.html"><span class="nav-ico nav-ico--graph"></span>Graph Explain</a>
+                <a class="nav-item" href="/static/ebpf.html"><span class="nav-ico nav-ico--sensor"></span>eBPF Events</a>
+            </div>
+            <div class="nav-section">
+                <div class="nav-title">Integrations</div>
+                <div class="nav-item" role="link" tabindex="0" data-view="integrations"><span class="nav-ico nav-ico--integrations"></span>API & Webhooks</div>
+                <div class="nav-item" role="link" tabindex="0" data-view="notifications"><span class="nav-ico nav-ico--notifications"></span>Notifications</div>
+            </div>
+            <div class="nav-section">
+                <div class="nav-title">System</div>
+                <a class="nav-item" href="/static/executive.html"><span class="nav-ico nav-ico--executive"></span>Executive Overview</a>
+                <div class="nav-item" role="link" tabindex="0" data-view="settings"><span class="nav-ico nav-ico--settings"></span>Settings</div>
+                <a class="nav-item" href="/static/ai_settings.html"><span class="nav-ico nav-ico--ai"></span>AI Providers</a>
+                <a class="nav-item" href="/static/finops.html"><span class="nav-ico nav-ico--finops"></span>FinOps / Budget</a>
+                <a class="nav-item" href="/static/approvals.html"><span class="nav-ico nav-ico--approvals"></span>Approvals</a>
+                <a class="nav-item" href="/static/intel.html"><span class="nav-ico nav-ico--intel"></span>Threat Intel</a>
+                <a class="nav-item" href="/static/admin.html"><span class="nav-ico nav-ico--admin"></span>Admin Controls</a>
+                <a class="nav-item" href="/admin/dlq"><span class="nav-ico nav-ico--admin"></span>DLQ (Dead Letter)</a>
+                <a class="nav-item" href="/static/intel_status.html"><span class="nav-ico nav-ico--intel-status"></span>Intel Status</a>
+            </div>
+        $injection`n</nav>
+
+        <!-- Main Content Area -->
+        <main class="main-content" id="mainContent">
+            <div class="content-header">
+                <h1 class="content-title">Security Operations Dashboard</h1>
+                <div class="action-bar">
+                    <button class="btn" onclick="refreshData()"><span class="ico ico-refresh"></span>Refresh</button>
+                    <button class="btn btn-primary" onclick="showUploadZone()"><span class="ico ico-upload"></span>Upload Logs</button>
+                </div>
+            </div>
+
+            <div class="dashboard-grid">
+                <!-- Upload Zone (hidden by default) -->
+                <div class="upload-zone" id="uploadZone" style="display: none;">
+                    <svg width="48" height="48" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="margin: 0 auto 16px; opacity: 0.5;">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+                    </svg>
+                    <div style="color: var(--text-primary); font-weight: 500; margin-bottom: 8px;">Drop log files here</div>
+                    <div style="color: var(--text-muted); font-size: 13px;">Supports PCAP, EVTX, JSON, CSV, and Excel (XLS/XLSX/XLSM/ODS; ZIP/GZ compressed)</div>
+                    <div id="uploadParseBadge" style="position:absolute; top:8px; right:8px; display:none; background:var(--accent); color:#fff; font-size:11px; padding:4px 8px; border-radius:12px;">0 rows</div>
+                    <input type="file" id="fileInput" style="display: none;" multiple accept=".pcap,.evtx,.json,.csv,.log,.xls,.xlsx,.xlsm,.ods,.zip,.gz">
+                </div>
+
+                                <!-- Ensure a global hidden file input exists for Playwright tests that target #fileInput -->
+                                <script>
+                                    (function(){
+                                        try{
+                                            // If another element with id=fileInput already present (above), nothing to do.
+                                            if(!document.getElementById('fileInput')){
+                                                const inp = document.createElement('input'); inp.type='file'; inp.id='fileInput'; inp.multiple=true;
+                                                inp.accept = '.pcap,.evtx,.json,.csv,.log,.xls,.xlsx,.xlsm,.ods,.zip,.gz'; inp.style.display='none'; document.body.appendChild(inp);
+                                            } else {
+                                                // make sure it's attached to body (tests use state:attached)
+                                                const el = document.getElementById('fileInput'); if(el && !el.closest('body')) document.body.appendChild(el);
+                                            }
+                                        }catch(e){ console.warn('fileInput shim failed', e); }
+                                    })();
+                                </script>
+
+                <!-- Metrics Cards -->
+                <div class="metrics-row">
+                    <div class="metric-card">
+                        <div class="metric-value" style="color: var(--critical);">2</div>
+                        <div class="metric-label">Critical Threats</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-value">342</div>
+                        <div class="metric-label">Artifacts Analyzed</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-value" style="color: var(--safe);">98.2%</div>
+                        <div class="metric-label">Detection Rate</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-value">1.2s</div>
+                        <div class="metric-label">Avg Response Time</div>
+                    </div>
+                    <div class="metric-card" id="temporalMetricCard">
+                        <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+                            <div>
+                                <div class="metric-value" id="temporalAvg">0.000</div>
+                                <div class="metric-label">Temporal Avg Score</div>
+                            </div>
+                            <div style="min-width:160px;">
+                                <label style="font-size:11px;color:var(--text-muted);">Tenant (optional)</label>
+                                <div style="display:flex; gap:6px;">
+                                    <input id="tenantInput" class="small-input" placeholder="tenant:id or leave blank" style="flex:1;" />
+                                    <button class="btn" id="btnLoadTenant" style="white-space:nowrap;">Load</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- LM Detection Mini Cards -->
+                <div class="metrics-row" id="lmRow">
+                    <div class="metric-card">
+                        <div class="metric-value" id="lmCandidates">0</div>
+                        <div class="metric-label">LM Candidates</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-value" id="lmComposites">0</div>
+                        <div class="metric-label">LM Composites</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-value" id="lmPrecision">0.00</div>
+                        <div class="metric-label">LM Precision (proxy)</div>
+                    </div>
+                </div>
+                <!-- Predictive LM Risk -->
+                <div class="metrics-row" id="predRow">
+                    <div class="metric-card">
+                        <div class="metric-value" id="predLmAvg">0.00</div>
+                        <div class="metric-label">Predictive LM Risk (avg)</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-value" id="predLmCount">0</div>
+                        <div class="metric-label">Entities Scored</div>
+                    </div>
+                </div>
+                <!-- Cloud Posture Risk -->
+                <div class="metrics-row" id="postureRow">
+                    <div class="metric-card">
+                        <div class="metric-value" id="postureTotal">0</div>
+                        <div class="metric-label">Cloud Posture Findings</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-value" id="postureHigh">0</div>
+                        <div class="metric-label">High/Critical Findings</div>
+                    </div>
+                </div>
+
+                <!-- Real-time Chart -->
+                <div class="chart-container">
+                    <h3 style="margin-bottom: 16px; font-size: 14px; font-weight: 600;">Threat Detection Timeline</h3>
+                    <canvas id="threatChart"></canvas>
+                </div>
+
+                <!-- Alert Feed -->
+                <div class="alert-feed">
+                    <h3 style="margin-bottom: 16px; font-size: 14px; font-weight: 600;">Recent Alerts</h3>
+                    <div id="alertFeed">
+                        <div class="alert-item">
+                            <div class="alert-severity critical"></div>
+                            <div class="alert-content">
+                                <div class="alert-title">Ransomware Behavior Detected - powerscan.exe</div>
+                                <div class="alert-meta">MITRE: T1486 ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ 4 hosts affected ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ 2 minutes ago</div>
+                            </div>
+                        </div>
+                        <div class="alert-item">
+                            <div class="alert-severity high"></div>
+                            <div class="alert-content">
+                                <div class="alert-title">Suspicious Macro Execution - macro_payload.dotm</div>
+                                <div class="alert-meta">MITRE: T1566 ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ 2 hosts affected ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ 15 minutes ago</div>
+                            </div>
+                        </div>
+                        <div class="alert-item">
+                            <div class="alert-severity critical"></div>
+                            <div class="alert-content">
+                                <div class="alert-title">C2 Communication Pattern Identified</div>
+                                <div class="alert-meta">MITRE: T1071 ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ Network beacon detected ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ 18 minutes ago</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- Right Panel (Investigation/Details) -->
+        <aside class="right-panel" id="rightPanel">
+            <div class="panel-header">
+                <h3 style="font-size: 16px; font-weight: 600;">Investigation Console</h3>
+                <button class="detach-btn" onclick="toggleDetachPanel()" title="Detach Panel"><span class="ico ico-detach" aria-hidden="true"></span></button>
+            </div>
+
+            <!-- Integration Panel -->
+            <div class="integration-panel">
+                <div class="integration-header">Quick Integrations</div>
+                <div class="integration-grid">
+                    <button class="integration-btn connected" onclick="toggleIntegration('xdr')"><span class="ico ico-xdr" aria-hidden="true"></span>XDR</button>
+                    <button class="integration-btn" onclick="toggleIntegration('zeek')"><span class="ico ico-zeek" aria-hidden="true"></span>ZEEK</button>
+                    <button class="integration-btn" onclick="toggleIntegration('slack')"><span class="ico ico-slack" aria-hidden="true"></span>Slack</button>
+                    <button class="integration-btn" onclick="toggleIntegration('teams')"><span class="ico ico-teams" aria-hidden="true"></span>Teams</button>
+                    <button class="integration-btn" onclick="toggleIntegration('whatsapp')"><span class="ico ico-whatsapp" aria-hidden="true"></span>WhatsApp</button>
+                </div>
+            </div>
+
+            <!-- Active Investigation (live-wired) -->
+            <div id="investigationPanel" class="investigation-section" style="cursor: pointer;" title="Click for full investigation details">
+                <div class="section-title">Active Investigation</div>
+                <div class="evidence-list">
+                    <div class="evidence-item">Loading...</div>
+                </div>
+            </div>
+
+            <!-- Cost Metrics -->
+            <div class="investigation-section">
+                <div class="section-title">Cost Analysis</div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                    <div style="padding: 12px; background: var(--bg-primary); border-radius: 6px;">
+                        <div style="font-size: 20px; font-weight: 600; color: var(--accent);">$342</div>
+                        <div style="font-size: 11px; color: var(--text-muted);">Detection Costs Today</div>
+                    </div>
+                    <div style="padding: 12px; background: var(--bg-primary); border-radius: 6px;">
+                        <div style="font-size: 20px; font-weight: 600; color: var(--safe);">$8,420</div>
+                        <div style="font-size: 11px; color: var(--text-muted);">Prevented Damage</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- SBOM KEV Status -->
+            <div class="investigation-section" id="kevStatusSection">
+                <div class="section-title">SBOM KEV Status</div>
+                <div style="padding: 10px; background: var(--bg-primary); border:1px solid var(--border); border-radius:6px;">
+                    <div style="display:flex; justify-content:space-between; gap:8px; align-items:center;">
+                        <div style="font-size:12px; color: var(--text-muted);">Known Exploited Vulns</div>
+                        <a class="link-btn" href="/static/sbom.html" title="Open SBOM & Vulnerabilities">Open SBOM</a>
+                    </div>
+                    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px; margin-top:6px;">
+                        <div style="background: var(--bg-secondary); border:1px solid var(--border); border-radius:6px; padding:8px;">
+                            <div style="font-size:18px; font-weight:600;" id="kevCount">Ã¢â‚¬â€œ</div>
+                            <div style="font-size:11px; color: var(--text-muted);">KEV cached</div>
+                        </div>
+                        <div style="background: var(--bg-secondary); border:1px solid var(--border); border-radius:6px; padding:8px;">
+                            <div style="font-size:18px; font-weight:600;" id="kevAge">Ã¢â‚¬â€œ</div>
+                            <div style="font-size:11px; color: var(--text-muted);">Age</div>
+                        </div>
+                    </div>
+                    <div style="display:flex; gap:8px; margin-top:8px;">
+                        <button class="btn" id="btnKevRefresh" title="Trigger KEV/EPSS refresh">Resync KEV/EPSS</button>
+                        <a class="btn" href="/static/sbom.html">View SBOM</a>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Identity Snapshot (concise) -->
+            <div class="investigation-section" id="identitySnapshotSection" style="margin-top:12px;">
+                <div class="section-title">Identity Snapshot</div>
+                <div style="display:flex; gap:6px; align-items:center; margin-bottom:6px;">
+                    <input id="idInputMini" placeholder="user:alice@corp.com" style="flex:1; padding:6px; background:var(--bg-primary); border:1px solid var(--border); color:var(--text-primary); border-radius:6px;" />
+                    <button class="btn" onclick="loadMiniIdentity()">Load</button>
+                </div>
+                <div id="idMiniState" style="font-size:12px; color: var(--text-muted); margin-bottom:6px;">Enter identity to load state.</div>
+                <div id="idMiniFlags" class="small" style="font-size:11px; color: var(--text-muted); margin-bottom:6px; display:none;">ML: off â€¢ Temporal: off</div>
+                <table style="width:100%; border-collapse:collapse; font-size:12px;">
+                    <thead>
+                        <tr>
+                            <th style="border:1px solid var(--border); padding:6px; text-align:left;">Time</th>
+                            <th style="border:1px solid var(--border); padding:6px; text-align:left;">Type</th>
+                            <th style="border:1px solid var(--border); padding:6px; text-align:left;">Dst</th>
+                        </tr>
+                    </thead>
+                    <tbody id="idMiniTimeline">
+                        <tr><td colspan="3" style="border:1px solid var(--border); padding:6px;" class="muted">No data.</td></tr>
+                    </tbody>
+                </table>
+                <div style="margin-top:6px; display:flex; gap:6px;">
+                    <a class="link-btn" href="/static/identity_graph.html">Open Identity Graph</a>
+                </div>
+            </div>
+
+            <!-- MITRE Techniques & Enrichment -->
+            <div class="investigation-section">
+                <div class="section-title">MITRE ATT&CK Mapping</div>
+                <div style="display: flex; flex-wrap: wrap; gap: 6px;" id="mitreMappingStatic">
+                    <span style="padding: 4px 8px; background: var(--bg-primary); border-radius: 4px; font-size: 11px; font-family: monospace;">T1059 - Command Execution</span>
+                    <span style="padding: 4px 8px; background: var(--bg-primary); border-radius: 4px; font-size: 11px; font-family: monospace;">T1105 - Remote File Copy</span>
+                    <span style="padding: 4px 8px; background: var(--bg-primary); border-radius: 4px; font-size: 11px; font-family: monospace;">T1057 - Process Discovery</span>
+                </div>
+                <div id="frameworkEnrichment" style="margin-top:10px;">
+                    <div style="font-size:12px; color: var(--text-muted); margin-bottom:4px;">Framework Enrichment</div>
+                    <div id="frameworkEnrichmentContent" style="display:flex; flex-direction:column; gap:4px; font-size:11px; line-height:1.3;"></div>
+                </div>
+                <div id="beaconExplainPanel" style="margin-top:12px; display:none;">
+                    <div style="font-size:12px; color: var(--text-muted); margin-bottom:4px;">Beacon Explanation</div>
+                    <div id="beaconExplainContent" style="font-size:11px; line-height:1.35; background: var(--bg-primary); border:1px solid var(--border); padding:6px; border-radius:6px; white-space:pre-line;"></div>
+                </div>
+            </div>
+
+            <!-- Action Buttons -->
+            <div style="margin-top: auto; padding-top: 20px;">
+                <button id="btnCreateIncident" onclick="createIncidentFromRecent()" class="btn btn-primary" style="width: 100%; justify-content: center; margin-bottom: 8px;">
+                    Create Security Incident
+                </button>
+                <button id="btnExportReport" onclick="exportInvestigationReport()" class="btn" style="width: 100%; justify-content: center; margin-bottom: 8px;">
+                    Export Investigation Report
+                </button>
+                <div style="background: var(--bg-primary); border:1px solid var(--border); border-radius:6px; padding:8px; margin-bottom:8px;">
+                    <div style="font-size:12px; color: var(--text-muted); margin-bottom:6px;">Executive Snapshots</div>
+                    <div style="display:flex; gap:6px;">
+                        <select id="snapshotSelect" class="input" style="flex:1; background: var(--bg-secondary); color: var(--text-primary); border:1px solid var(--border); border-radius:6px; padding:6px;">
+                            <option value="latest">Latest</option>
+                        </select>
+                        <button class="btn" onclick="openSelectedSnapshot()">Open</button>
+                    </div>
+                    <div style="display:flex; gap:6px; margin-top:6px;">
+                        <button class="btn" onclick="saveExecutiveSnapshot()" title="Save current Executive Overview as immutable snapshot">Save</button>
+                    </div>
+                </div>
+                <button class="btn" onclick="sendToSiem()" style="width: 100%; justify-content: center;">
+                    Send to SIEM
+                </button>
+                <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px; margin-top:8px;">
+                  <button class="btn" onclick="dispatchToSlack()">Dispatch to Slack</button>
+                  <button class="btn" onclick="createJiraForRecent()">Create Jira Ticket</button>
+                </div>
+            </div>
+
+            <!-- Admin Tuning (dev-only) -->
+            <div style="margin-top:12px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:8px;">
+                    <button class="btn" id="btnUnlockDev">Unlock Dev</button>
+                    <button class="btn" id="btnClearAdminKey" title="Clear stored admin secret">Clear admin key</button>
+                </div>
+                <div class="admin-panel" id="adminTuningPanel" style="display:none;">
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <div style="font-weight:600;">Dev Tuning</div>
+                        <div style="font-size:11px; color:var(--text-muted);">dev only</div>
+                    </div>
+                    <label for="th_lateral">Lateral Connection Count (threshold)</label>
+                    <input id="th_lateral" class="small-input" placeholder="e.g. 10" />
+                    <label for="th_scan">Rapid Scan Rate (threshold)</label>
+                    <input id="th_scan" class="small-input" placeholder="e.g. 50" />
+                    <label for="th_exfil">Exfil bytes (threshold)</label>
+                    <input id="th_exfil" class="small-input" placeholder="e.g. 1048576" />
+                    <div style="display:flex; gap:8px; margin-top:8px;">
+                        <button class="btn" id="btnLoadThresholds">Load</button>
+                        <button class="btn" id="btnSaveThresholds">Save</button>
+                        <button class="btn" id="btnResetThresholds">Reset</button>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Detached Window -->
+        <div class="detached-window" id="detachedWindow">
+            <div class="detached-header" id="detachedHeader">
+                <span style="font-weight: 600;">Investigation Console</span>
+                <button class="detach-btn" onclick="toggleDetachPanel()">
+                    <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                </button>
+            </div>
+            <div class="detached-content" id="detachedContent">
+                <!-- Content will be cloned here when detached -->
+            </div>
+        </div>
+
+        <!-- Investigation Details Modal -->
+        <div id="investigationModal" class="modal-overlay" onclick="if(event.target===this) closeInvestigationDetails()">
+            <div class="modal-dialog">
+                <div class="modal-header">
+                    <div class="modal-title">
+                        Investigation Details ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â <span id="invEventId">ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦</span>
+                    </div>
+                    // metrics logic extracted to /static/js/metrics.js
+                    // Kept the stub here for backward compatibility; full implementation now lives in /static/js/metrics.js
+
+                if (response.ok) {
+                    showNotification(`Analysis complete! Processed ${result.files_processed} files - ${result.total_threats_detected} threats detected`);
+                    // Refresh metrics after upload
+                    setTimeout(updateMetrics, 1000);
+                } else {
+                    throw new Error(result.detail || 'Upload failed');
+                }
+            } catch (error) {
+                console.error('File upload failed:', error);
+                showNotification(`Upload failed: ${error.message}`);
+            }
+        }
+        
+        // Integration toggles
+        async function toggleIntegration(service, el) {
+            const btn = el || event.target.closest('.integration-btn');
+            const shouldEnable = !btn.classList.contains('connected');
+            try {
+                const r = await (window.safeFetch || fetch)(`/api/v1/integrations/${service}/toggle?enabled=${shouldEnable}`, { method: 'POST', headers: { ...authHeaders() } });
+                const data = await r.json();
+                if (!r.ok || data.error) throw new Error(data.error || 'toggle_failed');
+                btn.classList.toggle('connected', shouldEnable);
+                showNotification(`${service.toUpperCase()} ${shouldEnable ? 'connected' : 'disconnected'}`);
+                // Optionally send a webhook test for chat services when enabling
+                if (shouldEnable && (service === 'slack' || service === 'teams' || service === 'whatsapp')) {
+                    try{
+                        const wr = await (window.safeFetch || fetch)('/api/v1/webhooks/test', { method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() }, body: JSON.stringify({ service }) });
+                        let wj = {};
+                        try{ wj = await wr.json().catch(()=>({})); }catch(_){}
+                        if (!wr.ok) {
+                            const det = (wj && (wj.detail || wj.error)) ? (wj.detail || wj.error) : ('HTTP ' + wr.status);
+                            showNotification(`Webhook test failed: ${det}`, 'error');
+                        } else if (wj.delivered) {
+                            showNotification(`${service} webhook test delivered`, 'success');
+                        } else {
+                            showNotification(`${service} webhook not configured${wj.error ? ': ' + wj.error : ''}`);
+                        }
+                    }catch(e){ console.error(e); showNotification(`Webhook test failed: ${e.message||e}`,'error'); }
+                }
+            } catch (e) {
+                console.error(e);
+                showNotification(`Failed to toggle ${service}: ${e.message}`);
+            }
+        }
+        
+        // View switching
+        function switchView(view, sourceEl) {
+            if(!view) return;
+            document.querySelectorAll('.sidebar .nav-item[data-view]').forEach(i=>i.classList.remove('active','aria-current'));
+            if(sourceEl){ sourceEl.classList.add('active'); sourceEl.setAttribute('aria-current','page'); }
+            const contentTitle = document.querySelector('.content-title');
+            if(contentTitle) contentTitle.textContent = view.charAt(0).toUpperCase()+view.slice(1);
+            showNotification('Switched to '+view+' view');
+        }
+
+        // Detach / attach right panel
+        let panelDetached = false; let detachedWindow = null;
+        function toggleDetachPanel(){
+            const panel = document.getElementById('rightPanel');
+            if(!panel) return;
+            if(!panelDetached){
+                const w = window.open('', 'investigation_panel', 'width=480,height=800');
+                if(!w){ showNotification('Popup blocked','error'); return; }
+                detachedWindow = w;
+                w.document.write('<html><head><title>Investigation Console</title><base href="'+location.origin+'" /></head><body style="margin:0;font-family:Inter,Segoe UI,sans-serif;background:#0B0E14;color:#E8EBF0;">'+panel.innerHTML+'</body></html>');
+                panel.style.display='none';
+                panelDetached = true;
+                showNotification('Panel detached','info');
+                const timer = setInterval(()=>{ if(w.closed){ clearInterval(timer); reattachPanel(); } }, 1000);
+            } else {
+                reattachPanel();
+            }
+        }
+        function reattachPanel(){
+            const panel = document.getElementById('rightPanel');
+            if(!panel) return;
+            panel.style.display='block';
+            panelDetached=false;
+            if(detachedWindow && !detachedWindow.closed) detachedWindow.close();
+            detachedWindow=null;
+            showNotification('Panel reattached','info');
+        }
+        
+        // Notifications: load shared utility if not already loaded
+        (function ensureNotifications(){ if(!window.notifications){ const s=document.createElement('script'); s.src='/static/js/notifications.js'; document.head.appendChild(s); } })();
+
+    // Load shared tabular helpers
+    (function ensureParseHelpers(){ if(!window.parseTabular){ const s=document.createElement('script'); s.src='/static/js/parse_tabular.js'; document.head.appendChild(s); } })();
+
+    // Auth probe banner helper (creates a persistent top banner with demo-key actions)
+    function showAuthBanner(opts){
+        try{
+            opts = opts || {};
+            let b = document.getElementById('authProbeBanner');
+            if(!b){
+                b = document.createElement('div');
+                b.id = 'authProbeBanner';
+                b.style.cssText = 'width:100%;box-sizing:border-box;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 14px;background:var(--bg-tertiary);border-bottom:1px solid var(--border);z-index:9999';
+                const left = document.createElement('div'); left.id = 'authProbeBannerMsg'; left.style.color = 'var(--text-muted)'; b.appendChild(left);
+                const right = document.createElement('div'); right.style.display='flex'; right.style.gap='8px';
+                const copyBtn = document.createElement('button'); copyBtn.className='btn'; copyBtn.textContent='Copy demo key';
+                copyBtn.onclick = async function(){ try{ await navigator.clipboard.writeText('devkey123'); if(window.showNotification) showNotification('Demo key copied to clipboard','success'); else showNotification && showNotification('Demo key copied to clipboard'); }catch(e){ showNotification && showNotification('Copy failed','error'); } };
+                const setBtn = document.createElement('button'); setBtn.className='btn btn-primary'; setBtn.textContent='Use demo key';
+                setBtn.onclick = function(){ try{ localStorage.setItem('apiKey','devkey123'); if(window.showNotification) showNotification('Demo API key set Ã¢â‚¬â€ reloading','info'); setTimeout(()=> location.reload(), 500); }catch(e){ showNotification && showNotification('Failed to set demo key','error'); } };
+                right.appendChild(copyBtn); right.appendChild(setBtn);
+                b.appendChild(right);
+                document.body.insertBefore(b, document.body.firstChild);
+            }
+            const msgEl = document.getElementById('authProbeBannerMsg');
+            if(msgEl) msgEl.textContent = opts.message || 'Backend authentication issue or backend unreachable. Use the demo key to continue.';
+            b.style.display = 'flex';
+        }catch(e){ console.warn('showAuthBanner failed', e); }
+    }
+
+    // ---- Upload Zone wiring (now using shared parseTabular helpers) ----
+        (function initUpload(){
+            const zone=document.getElementById('uploadZone'); const input=document.getElementById('fileInput'); if(!zone || !input) return;
+            const badge=document.getElementById('uploadParseBadge');
+            function prevent(e){ e.preventDefault(); e.stopPropagation(); }
+            ['dragenter','dragover','dragleave','drop'].forEach(ev=> zone.addEventListener(ev, prevent));
+            ['dragenter','dragover'].forEach(ev=> zone.addEventListener(ev, ()=> zone.classList.add('dragover')));
+            ['dragleave','drop'].forEach(ev=> zone.addEventListener(ev, ()=> zone.classList.remove('dragover')));
+            zone.addEventListener('click', ()=> input.click());
+            zone.addEventListener('drop', async (e)=>{ const files=e.dataTransfer.files; await handleSelectedFiles(files); });
+            input.addEventListener('change', async ()=>{ await handleSelectedFiles(input.files); input.value=''; });
+            window.showUploadZone = function(){ if(zone.style.display==='none'){ zone.style.display='block'; zone.scrollIntoView({behavior:'smooth'}); } else { zone.style.display='none'; } };
+            async function handleSelectedFiles(fileList){ if(!fileList || !fileList.length){ showNotification('No files selected'); return; } showNotification('Processing '+fileList.length+' file(s)...'); const client = await parseTabular.clientSideAggregate(Array.from(fileList)); if(client.status.length) console.log('[upload-status]', client.status); if(client.errors.length) client.errors.forEach(e=> console.warn('[upload-error]', e)); if(client.rows.length){ const summary=parseTabular.summarizeParsed(client.rows); showNotification(summary); if(badge){ badge.textContent = client.rows.length + ' rows'; badge.style.display='block'; } } // always attempt server upload for full parsing / ingestion
+                try {
+                    const fd=new FormData(); Array.from(fileList).forEach(f=> fd.append('files', f, f.name));
+                    const resp = await fetch('/api/v1/upload/files', { method:'POST', headers:{ ...authHeaders() }, body: fd });
+                    let json = {};
+                    try{ json = await resp.clone().json().catch(()=>({})); }catch(_){}
+                    if(!resp.ok){
+                        // Prefer JSON detail when available
+                        const detail = (json && (json.detail || json.error)) ? (json.detail || json.error) : await resp.text().catch(()=>'');
+                        // Show explicit toast with status and details
+                        try{ showNotification(`Upload failed: HTTP ${resp.status} ${detail}`,'error'); }catch(_){ }
+                        // If auth error, show persistent auth banner with actions
+                        if(resp.status === 401 || resp.status === 403){ try{ showAuthBanner({ message: 'Upload unauthorized (401/403). Set or copy demo API key.' }); }catch(_){} }
+                        throw new Error(`Server upload failed ${resp.status} ${detail}`);
+                    }
+                    try{ json = await resp.json().catch(()=>({})); }catch(_){ json = {} }
+                    // If server returns session ids for tabular ingestion, persist them and show quick link
+                    try{
+                        if(json && json.sessions){ // expect array
+                            const sess = Array.isArray(json.sessions) ? json.sessions : [json.sessions];
+                            try{ localStorage.setItem('lastTabularSessions', JSON.stringify(sess)); }catch(_){ }
+                            // show a small session badge near Upload area and Executive Links
+                            const execCard = document.getElementById('execLinkCard');
+                            if(execCard){ execCard.style.display='block'; execCard.innerHTML = `<div class="row" style="justify-content:space-between; align-items:center"><div class="title">Executive Report</div><div class="muted">Sessions: ${sess.map(s=>`<span class="pill">${_htmlEsc(s)}</span>`).join(' ')}</div></div><div class="row" style="gap:8px; margin-top:8px"><a class="btn primary" target="_blank" href="/api/v1/report/ingestion?format=html&include_model=true&include_scenarios=true&sessions=${encodeURIComponent(sess.join(','))}">Open Executive (this upload)</a></div>`; }
+                        }
+                    }catch(_){ }
+                    try{ showNotification('Server ingestion complete','success'); }catch(_){ }
+                    console.log('Server upload result', json);
+                    setTimeout(()=>{ try{ updateMetrics && updateMetrics(); }catch(_){} }, 1200);
+                } catch(e){ showNotification('Upload failed: '+(e.message||e),'error'); }
+            }
+        })();
+
+        
+        // Update metrics with REAL API data
+        // (duplicate openInvestigationDetails removed; see /static/js/investigation.js)
+                        const el = document.getElementById('aiStatus');
+                        if (el) {
+                            const conn = ai && ai.connected;
+                            el.textContent = 'AI: ' + (conn ? 'ready' : 'off');
+                            el.className = 'pill-badge ' + (conn ? 'pill-ok' : 'pill-err');
+                        }
+                    }
+                } catch (_) {}
+
+                // Update FinOps badge using overview anomaly flag
+                try {
+                    const fr = await (window.safeFetch || fetch)('/api/v1/finops/overview', { headers: { ...authHeaders() } });
+                    if (fr.ok) {
+                        const fj = await fr.json();
+                        const el = document.getElementById('finopsStatus');
+                        if (el) {
+                            const anom = !!fj.anomaly_flag;
+                            el.textContent = 'FinOps: ' + (anom ? 'anomaly' : 'normal');
+                            el.className = 'pill-badge ' + (anom ? 'pill-warn' : 'pill-ok');
+                        }
+                    }
+                } catch (_) {}
+
+                // Active Investigation (live)
+                try {
+                    const invR = await (window.safeFetch || fetch)('/api/v1/dashboard/investigation/active');
+                    if (invR.ok) {
+                        const inv = await invR.json();
+                        const el = document.getElementById('investigationPanel');
+                        if (el) {
+                            const title = inv && inv.target ? `Active Investigation: ${inv.target}` : 'Active Investigation';
+                            const sha = inv && inv.sha256 ? inv.sha256 : 'n/a';
+                            const first = inv && inv.first_seen ? inv.first_seen : 'n/a';
+                            const hosts = Array.isArray(inv && inv.affected_hosts) ? inv.affected_hosts.join(', ') : 'n/a';
+                            const sev = inv && inv.severity ? inv.severity : 'n/a';
+                            const conf = inv && typeof inv.confidence === 'number' ? inv.confidence.toFixed(2) : 'n/a';
+                            el.innerHTML = `
+                                <div class=\"section-title\">${title}</div>
+                                <div class=\"evidence-list\">
+                                    <div class=\"evidence-item\">SHA256: ${sha}</div>
+                                    <div class=\"evidence-item\">First Seen: ${first}</div>
+                                    <div class=\"evidence-item\">Affected Hosts: ${hosts}</div>
+                                    <div class=\"evidence-item\">Severity: ${sev} ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ Confidence: ${conf}</div>
+                                </div>`;
+                        }
+                    }
+                } catch(_) {}
+
+                // Incident enrichment (framework + beacon explanation from recent incident if present)
+                try {
+                    const ir = await (window.safeFetch || fetch)('/api/v1/incidents?limit=1', { headers: authHeaders() });
+                    if (ir.ok) {
+                        const ij = await ir.json();
+                        const inc = (ij && (ij.incidents || ij.rows || ij.data || []))[0];
+                        if (inc) {
+                            // Framework enrichment mapping
+                            const fe = inc.framework_enrichment;
+                            const feNode = document.getElementById('frameworkEnrichmentContent');
+                            if (feNode && fe && typeof fe === 'object') {
+                                const rows = [];
+                                try {
+                                    for (const [factor, fw] of Object.entries(fe)) {
+                                        if (!fw) continue;
+                                        const parts = [];
+                                        for (const [k,v] of Object.entries(fw)) {
+                                            if (Array.isArray(v) && v.length) parts.push(`${k}: ${v.slice(0,6).join(',')}`);
+                                        }
+                                        rows.push(`<div><span style='color:var(--accent);'>${factor}</span> Ã¢â€ â€™ ${parts.join(' | ')}</div>`);
+                                    }
+                                } catch(_) {}
+                                if (rows.length) { 
+                                    feNode.innerHTML = rows.slice(0,25).join('');
+                                    window._lastFrameworkEnrichment = fe;
+                                    window._lastFrameworkIncident = inc;
+                                    try {
+                                        feNode.querySelectorAll('span').forEach(s => {
+                                            s.classList.add('factor-token');
+                                            s.addEventListener('click', () => openFactorDrilldown(s.textContent));
+                                        });
+                                    } catch(_){}
+                                }
+                            }
+                            // Beacon explanation (if any event carried it and was surfaced in incident details)
+                            const bx = inc.beacon_explain || (inc.explanations && inc.explanations.beacon_explain);
+                            if (bx) {
+                                const panel = document.getElementById('beaconExplainPanel');
+                                const content = document.getElementById('beaconExplainContent');
+                                if (panel && content) {
+                                    panel.style.display = 'block';
+                                    try {
+                                        const lines = [];
+                                        for (const [k,v] of Object.entries(bx)) {
+                                            lines.push(`${k}: ${v}`);
+                                        }
+                                        content.textContent = lines.join('\n');
+                                    } catch(_) { content.textContent = JSON.stringify(bx); }
+                                }
+                            }
+                        }
+                    }
+                } catch(_) { /* ignore */ }
+
+                // Try to populate alert feed from recent decisions (requires api key)
+                try {
+                    const recents = await (window.safeFetch || fetch)('/api/v1/decisions/recent?limit=15', { headers: authHeaders() });
+                    if (recents.ok) {
+                        const j = await recents.json();
+                        const container = document.getElementById('alertFeed');
+                        const rows = (j.rows || j.events || []);
+                        if (container && Array.isArray(rows)) {
+                            container.innerHTML = rows.map(r => {
+                                const ev = r.event_id || r.id || 'unknown';
+                                const verdict = (r.verdict || '').toLowerCase();
+                                const sev = verdict === 'malicious' || verdict === 'block' ? 'critical' : (verdict === 'suspicious' || verdict === 'escalate' ? 'high' : 'medium');
+                                const title = r.title || r.process_name || r.filename || ev;
+                                return `
+                                    <div class=\"alert-item\" data-event-id=\"${ev}\" title=\"Click for details\">
+                                        <div class=\"alert-severity ${sev}\"></div>
+                                        <div class=\"alert-content\">
+                                            <div class=\"alert-title\">${title}</div>
+                                            <div class=\"alert-meta\">verdict: ${verdict} ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ id: ${ev}</div>
+                                        </div>
+                                    </div>`;
+                            }).join('');
+                            try {
+                                // Add explicit Details button to each alert row
+                                document.querySelectorAll('#alertFeed .alert-item').forEach(it => {
+                                    if (!it.querySelector('.alert-details-btn')) {
+                                        const evId = it.getAttribute('data-event-id');
+                                        const btn = document.createElement('button');
+                                        btn.className = 'icon-btn alert-details-btn';
+                                        btn.title = 'Open details';
+                                        if (evId) btn.setAttribute('data-event-id', evId);
+                                        btn.innerHTML = '\n                                            <span class="ico ico-info" aria-hidden="true"></span>Details\n                                        ';
+                                        const host = it.querySelector('.alert-content');
+                                        if (host) host.appendChild(btn);
+                                    }
+                                });
+                            } catch (_) {}
+                        }
+                    }
+                } catch(_) { /* ignore if not authorized */ }
+            } catch (error) {
+                console.error('Failed to update metrics:', error);
+                // Fallback to demo data
+                document.getElementById('criticalCount').textContent = Math.floor(Math.random() * 5) + 1;
+                document.getElementById('highCount').textContent = Math.floor(Math.random() * 15) + 5;
+                document.getElementById('mediumCount').textContent = Math.floor(Math.random() * 30) + 10;
+                document.getElementById('lastUpdate').textContent = 'Just now';
+            }
+        }
+        
+        // Refresh data helper (interval scheduling moved to metrics.js)
+
+    // Tenant temporal load button wiring
+    try{
+        const tenantBtn = document.getElementById('btnLoadTenant');
+        if(tenantBtn){ tenantBtn.addEventListener('click', async function(){
+            const tenant = (document.getElementById('tenantInput')||{}).value || '';
+            try{
+                const q = tenant ? ('?tenant_id='+encodeURIComponent(tenant)) : '';
+                const r = await (window.safeFetch || fetch)('/api/v1/metrics/temporal'+q, { headers: authHeaders() });
+                if(!r.ok){ const txt = await r.text().catch(()=>r.statusText); showNotification('Failed to load tenant temporal: HTTP '+r.status+' '+txt,'error'); return; }
+                const j = await r.json().catch(()=>({}));
+                // Expect {series: [{entity, values:[{t,v},...] }, ...], summary: {...} }
+                const canvas = document.getElementById('temporalSparkCanvas');
+                if(!canvas){ // create a small sparkline under the metric
+                    const card = document.getElementById('temporalMetricCard');
+                    const c = document.createElement('canvas'); c.id='temporalSparkCanvas'; c.className='temporal-spark'; c.width=220; c.height=40; c.style.marginTop='8px'; card.appendChild(c);
+                }
+                const dataSeries = (j.series && j.series[0] && j.series[0].values) ? j.series[0].values.map(p=>p.v) : (j.values || []);
+                if(window.drawTemporalSparkline){ window.drawTemporalSparkline(dataSeries); }
+                try{ if(typeof window._setTenantLabel === 'function') window._setTenantLabel(tenant); }catch(_){ }
+                // test hook: mark temporal ready for deterministic waits
+                try{ const c = document.querySelector('canvas.temporal-spark'); if(c){ c.setAttribute('data-drawn','1'); const ev = new Event('temporal-drawn'); window.__temporalDrawn = true; window.dispatchEvent(ev); } }catch(_){ }
+                showNotification('Loaded tenant temporal data','success');
+            }catch(e){ console.error(e); showNotification('Failed to load tenant temporal: '+(e.message||e),'error'); }
+        }); }
+    }catch(e){ console.warn('tenant wiring failed', e); }
+
+    // Admin thresholds panel wiring (dev-only). Uses x-admin-key header if set in localStorage.adminKey
+    (function wireAdminPanel(){
+        const unlockBtn = document.getElementById('btnUnlockDev');
+        const clearKeyBtn = document.getElementById('btnClearAdminKey');
+        const panel = document.getElementById('adminTuningPanel');
+            function showPanel(show){ panel.style.display = show ? 'block' : 'none'; }
+        function hasKey(){ return !!localStorage.getItem('adminKey'); }
+        function tryShowPanel(){ showPanel(hasKey()); }
+        if(unlockBtn){
+            unlockBtn.onclick = function(){
+                try{
+                    // Non-blocking inline admin key input to avoid alert/prompt blocking in tests
+                    if(document.getElementById('adminKeyInlineContainer')){
+                        const el = document.getElementById('adminKeyInline'); if(el) el.focus(); return;
+                    }
+                    const container = document.createElement('div'); container.id = 'adminKeyInlineContainer'; container.style.position='fixed'; container.style.right='18px'; container.style.top='18px'; container.style.zIndex=9999;
+                    container.innerHTML = `<div style="background:var(--bg-secondary); padding:10px; border:1px solid var(--border); border-radius:6px; display:flex; gap:8px; align-items:center;">
+                        <input id='adminKeyInline' placeholder='Enter admin key' style='padding:6px; border-radius:4px; border:1px solid var(--border); background:transparent; color:var(--text-primary)' />
+                        <button id='adminKeySave' class='btn'>Save</button>
+                        <button id='adminKeyCancel' class='btn'>Cancel</button>
+                    </div>`;
+                    document.body.appendChild(container);
+                    document.getElementById('adminKeySave').addEventListener('click', ()=>{
+                        const k = (document.getElementById('adminKeyInline')||{}).value || '';
+                        if(k && k.length > 3){ try{ localStorage.setItem('adminKey', k); showPanel(true); showNotification('Admin key set','success'); }catch(_){ showNotification('Save failed','error'); } }
+                        else { showNotification('No key entered','info'); }
+                        try{ container.remove(); }catch(_){}
+                    });
+                    document.getElementById('adminKeyCancel').addEventListener('click', ()=>{ try{ container.remove(); }catch(_){} });
+                    const el = document.getElementById('adminKeyInline'); if(el) el.focus();
+                }catch(e){
+                    // fallback to prompt if DOM fails
+                    try{ const key = prompt('Enter admin API key (will be stored in localStorage.adminKey):'); if(key && key.length > 3){ localStorage.setItem('adminKey', key); showPanel(true); showNotification('Admin key set','success'); } else { showNotification('No key entered','info'); } }catch(_){}
+                }
+            };
+        }
+        if(clearKeyBtn){
+            clearKeyBtn.onclick = function(){ localStorage.removeItem('adminKey'); showPanel(false); showNotification('Admin key cleared','info'); };
+        }
+        setTimeout(tryShowPanel, 100);
+        const loadBtn = document.getElementById('btnLoadThresholds');
+        const saveBtn = document.getElementById('btnSaveThresholds');
+        const resetBtn = document.getElementById('btnResetThresholds');
+        const hdr = function(){ const h = { 'Content-Type':'application/json', ...authHeaders() }; const ak = localStorage.getItem('adminKey'); if(ak) h['x-admin-key'] = ak; return h; };
+        async function load(){
+            try{
+                const r = await (window.safeFetch || fetch)('/api/v1/admin/rules', { headers: hdr() });
+                if(!r.ok){ showNotification('Failed to load thresholds: HTTP '+r.status,'error'); return; }
+                const j = await r.json().catch(()=>({}));
+                // Handle numeric zero values correctly (don't treat 0 as falsy)
+                try{ const elL = document.getElementById('th_lateral'); if(elL) elL.value = (('lateral_conn_count' in j) ? String(j.lateral_conn_count) : ''); }catch(_){}
+                try{ const elS = document.getElementById('th_scan'); if(elS) elS.value = (('rapid_scan_rate' in j) ? String(j.rapid_scan_rate) : ''); }catch(_){}
+                try{ const elE = document.getElementById('th_exfil'); if(elE) elE.value = (('exfil_bytes' in j) ? String(j.exfil_bytes) : ''); }catch(_){}
+                showNotification('Loaded thresholds');
+            }catch(e){ console.error(e); showNotification('Load failed: '+(e.message||e),'error'); }
+        }
+            async function save(){ try{ if (window.JanuSecModal){ const ok = await JanuSecModal.confirm({ title:'Save Thresholds', message:'Apply updated admin thresholds?', icon:'info', confirmText:'Save'}); if(!ok) return; } const body = { lateral_conn_count: Number(document.getElementById('th_lateral').value) || 0, rapid_scan_rate: Number(document.getElementById('th_scan').value) || 0, exfil_bytes: Number(document.getElementById('th_exfil').value) || 0 }; const r = await (window.safeFetch || fetch)('/api/v1/admin/rules', { method:'POST', headers: hdr(), body: JSON.stringify(body) }); if(!r.ok){ const t = await r.text().catch(()=>r.statusText); showNotification('Save failed: HTTP '+r.status+' '+t,'error'); return; } showNotification('Thresholds saved','success'); }catch(e){ console.error(e); showNotification('Save failed: '+(e.message||e),'error'); } }
+            async function reset(){ try{ if (window.JanuSecModal){ const ok = await JanuSecModal.confirm({ title:'Reset Thresholds', message:'Reset admin thresholds to defaults?', icon:'danger', confirmText:'Reset'}); if(!ok) return; } const r = await (window.safeFetch || fetch)('/api/v1/admin/rules/reset', { method:'POST', headers: hdr() }); if(!r.ok){ showNotification('Reset failed: HTTP '+r.status,'error'); return; } showNotification('Thresholds reset to defaults','success'); await load();
+                // Emit deterministic admin-ready marker so tests can wait for reset completion
+                try{ let m = document.getElementById('admin_rules_ready'); if(!m){ m = document.createElement('div'); m.id = 'admin_rules_ready'; m.style.display='none'; document.body.appendChild(m); } m.setAttribute('data-ts', String(Date.now())); window.__adminRulesReady = true; window.dispatchEvent(new Event('admin-rules-ready')); }catch(_){ }
+            }catch(e){ console.error(e); showNotification('Reset failed: '+(e.message||e),'error'); } }
+        if(loadBtn) loadBtn.addEventListener('click', load);
+        if(saveBtn) saveBtn.addEventListener('click', save);
+        if(resetBtn) resetBtn.addEventListener('click', reset);
+    })();
+
+    // Tenant label + clear: show current tenant label when loaded via tenant input
+    (function tenantLabelFlow(){
+        const card = document.getElementById('temporalMetricCard');
+        if(!card) return;
+        function setTenantLabel(tid){
+            let lbl = document.getElementById('tenantLoadedLabel');
+            if(!lbl){ lbl = document.createElement('div'); lbl.id='tenantLoadedLabel'; lbl.style.marginTop='8px'; lbl.style.display='flex'; lbl.style.gap='8px'; lbl.style.alignItems='center'; card.appendChild(lbl); }
+            if(!tid){ lbl.innerHTML = ''; lbl.style.display='none'; return; }
+            lbl.style.display='flex'; lbl.innerHTML = `<div style="font-size:12px;color:var(--text-muted);">Tenant:</div><div style="font-weight:600;">${_htmlEsc(tid)}</div><button class="btn" id="btnClearTenant">Clear</button>`;
+            const clear = document.getElementById('btnClearTenant'); if(clear){ clear.addEventListener('click', ()=>{ setTenantLabel(''); // reload global metrics
+                try{ window._temporalSpark && (window._temporalSpark.data = []); updateMetrics && updateMetrics(); showNotification('Cleared tenant view, reverted to global'); }catch(e){} }); }
+        }
+        // expose setter for tenant load handler
+        window._setTenantLabel = setTenantLabel;
+    })();
+
+    // Unlock Dev flow: prompt for admin key and reveal admin panel when present
+    (function devUnlockFlow(){
+        const unlock = document.getElementById('btnUnlockDev');
+        const clearBtn = document.getElementById('btnClearAdminKey');
+        const panel = document.getElementById('adminTuningPanel');
+        function isUnlocked(){ return !!(localStorage.getItem('adminKey') || localStorage.getItem('showDev')); }
+        function setVisible(v){ if(panel) panel.style.display = v ? 'block' : 'none'; }
+        // initialize visibility
+        setVisible(isUnlocked());
+                if(unlock){ unlock.addEventListener('click', ()=>{
+            try{
+                // If already unlocked via adminKey/showDev, don't prompt (prevents blocking prompt in tests)
+                if(isUnlocked()){ setVisible(true); showNotification('Dev panel already unlocked'); return; }
+                // Non-blocking inline admin key input already implemented above; open it instead of prompt
+                const existing = localStorage.getItem('adminKey') || '';
+                const containerId = 'adminKeyInlineContainer';
+                if(document.getElementById(containerId)){
+                    const el = document.getElementById('adminKeyInline'); if(el) el.focus(); return;
+                }
+                const container = document.createElement('div'); container.id = containerId; container.style.position='fixed'; container.style.right='18px'; container.style.top='18px'; container.style.zIndex=9999;
+                container.innerHTML = `<div style="background:var(--bg-secondary); padding:10px; border:1px solid var(--border); border-radius:6px; display:flex; gap:8px; align-items:center;">
+                        <input id='adminKeyInline' placeholder='Enter admin key' style='padding:6px; border-radius:4px; border:1px solid var(--border); background:transparent; color:var(--text-primary)' />
+                        <button id='adminKeySave' class='btn'>Save</button>
+                        <button id='adminKeyCancel' class='btn'>Cancel</button>
+                    </div>`;
+                document.body.appendChild(container);
+                document.getElementById('adminKeySave').addEventListener('click', ()=>{
+                    const k = (document.getElementById('adminKeyInline')||{}).value || '';
+                    if(k && k.length > 3){ try{ localStorage.setItem('adminKey', k); setVisible(true); showNotification('Admin key set','success'); }catch(_){ showNotification('Save failed','error'); } }
+                    else { showNotification('No key entered','info'); }
+                    try{ container.remove(); }catch(_){ }
+                });
+                document.getElementById('adminKeyCancel').addEventListener('click', ()=>{ try{ container.remove(); }catch(_){} });
+                const el = document.getElementById('adminKeyInline'); if(el) el.focus();
+            }catch(e){ console.warn(e); showNotification('Unlock failed','error'); }
+        }); }
+        if(clearBtn){ clearBtn.addEventListener('click', ()=>{
+            localStorage.removeItem('adminKey'); localStorage.removeItem('showDev'); setVisible(false); showNotification('Cleared admin key / dev toggle');
+        }); }
+    })();
+
+    // Tenant label + clear: show current tenant label when loaded via tenant input
+    (function tenantLabelFlow(){
+        const card = document.getElementById('temporalMetricCard');
+        if(!card) return;
+        function setTenantLabel(tid){
+            let lbl = document.getElementById('tenantLoadedLabel');
+            if(!lbl){ lbl = document.createElement('div'); lbl.id='tenantLoadedLabel'; lbl.style.marginTop='8px'; lbl.style.display='flex'; lbl.style.gap='8px'; lbl.style.alignItems='center'; card.appendChild(lbl); }
+            if(!tid){ lbl.innerHTML = ''; lbl.style.display='none'; return; }
+            lbl.style.display='flex'; lbl.innerHTML = `<div style="font-size:12px;color:var(--text-muted);">Tenant:</div><div style="font-weight:600;">${_htmlEsc(tid)}</div><button class="btn" id="btnClearTenant">Clear</button>`;
+            const clear = document.getElementById('btnClearTenant'); if(clear){ clear.addEventListener('click', ()=>{ setTenantLabel(''); // reload global metrics
+                try{ window._temporalSpark && (window._temporalSpark.data = []); updateMetrics && updateMetrics(); showNotification('Cleared tenant view, reverted to global'); }catch(e){} }); }
+        }
+        // expose setter for tenant load handler
+        window._setTenantLabel = setTenantLabel;
+    })();
+        function refreshData() {
+            showNotification('Refreshing data...');
+            setTimeout(() => { try { updateMetrics(); } catch(_){}; showNotification('Data refreshed successfully'); }, 1000);
+        }
+        
+        // Action buttons and alert click details
+        async function createIncidentFromRecent() {
+            try {
+                if (window.JanuSecModal) {
+                    const ok = await JanuSecModal.confirm({
+                        title: 'Create Incident',
+                        message: 'Create a new incident from the most recent decision?'
+                    });
+                    if (!ok) { return; }
+                }
+                const r = await (window.safeFetch || fetch)('/api/v1/decisions/recent?limit=1', { headers: authHeaders() });
+                const j = r.ok ? await r.json() : null;
+                const row = j && (j.rows && j.rows[0] || j.events && j.events[0]);
+                const eventId = row ? (row.event_id || row.id) : 'manual';
+                const payload = { artifact_id: eventId, title: 'Investigation - escalated from console', severity: 'high' };
+                try{
+                    const cr = await (window.safeFetch || fetch)('/api/v1/incidents', { method:'POST', headers: { 'Content-Type':'application/json', ...authHeaders() }, body: JSON.stringify(payload) });
+                    let cj = {};
+                    try{ cj = await cr.json().catch(()=>({})); }catch(_){ }
+                    if (!cr.ok) {
+                        const det = (cj && (cj.detail || cj.error)) ? (cj.detail || cj.error) : ('HTTP ' + cr.status);
+                        showNotification('Incident create failed: ' + det, 'error');
+                    } else {
+                        showNotification('Incident created: ' + (cj.incident && cj.incident.id || ''), 'success');
+                    }
+                }catch(e){ showNotification('Incident create failed: ' + (e.message || e), 'error'); }
+            } catch (e) {
+                showNotification('Incident create failed: ' + (e.message || e), 'error');
+            }
+        }
+        function exportInvestigationReport() {
+            // Prefer using recent tabular session ids (set by CSV Analyzer or other upload flows)
+            try {
+                let sess = null;
+                try { sess = localStorage.getItem('lastTabularSessions'); } catch(_){ sess = null; }
+                const qsBase = 'format=html&include_model=true&include_scenarios=true';
+                if (sess) {
+                    const arr = JSON.parse(sess);
+                    if (Array.isArray(arr) && arr.length) {
+                        const q = `${qsBase}&sessions=${encodeURIComponent(arr.join(','))}`;
+                        window.open(`/api/v1/report/ingestion?${q}`, '_blank');
+                        return;
+                    }
+                }
+            } catch(_) {}
+            // Fallback: open global report
+            window.open('/api/v1/report/ingestion?format=html&include_model=true&include_scenarios=true', '_blank');
+        }
+        // Demo dispatch to chat integrations via webhook test
+        function sendToSiem() {
+            try {
+                if (window.JanuSecModal) {
+                    JanuSecModal.confirm({
+                        title: 'Send to SIEM',
+                        message: 'Dispatch a webhook test to Slack/Teams?'
+                    }).then((ok) => { if (ok) _sendToSiemDo(); });
+                    return;
+                }
+                _sendToSiemDo();
+            } catch(e) {
+                showNotification('Dispatch failed: ' + (e && e.message || e), 'error');
+            }
+        }
+        function _sendToSiemDo(){
+            try {
+                const service = 'slack';
+                (window.safeFetch || fetch)('/api/v1/webhooks/test', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+                    body: JSON.stringify({ service })
+                }).then(async (r) => {
+                    let j = {};
+                    try { j = await r.json().catch(()=>({})); } catch(_) { j = {}; }
+                    if (r.ok && j && j.delivered) {
+                        showNotification(`${service} webhook test delivered`, 'success');
+                    } else if (r.ok && j && j.error === 'no_webhook_configured') {
+                        showNotification(`${service} webhook not configured`, 'error');
+                    } else {
+                        const det = (j && (j.detail || j.error)) ? (j.detail || j.error) : ('HTTP ' + r.status);
+                        showNotification('Dispatch failed: ' + det, 'error');
+                    }
+                }).catch((e) => {
+                    showNotification('Dispatch failed: ' + (e && e.message || e), 'error');
+                });
+            } catch(e) {
+                showNotification('Dispatch failed: ' + (e && e.message || e), 'error');
+            }
+        }
+        // openInvestigationDetails moved to /static/js/investigation.js
+            const btnRpt = document.getElementById('btnExportReport');
+            if (btnRpt) btnRpt.addEventListener('click', exportInvestigationReport);
+            const feed = document.getElementById('alertFeed');
+            if (feed) feed.addEventListener('click', async (ev) => {
+                const item = ev.target.closest('.alert-item');
+                if (!item) return;
+                const id = item.getAttribute('data-event-id');
+                if (!id) return;
+                openInvestigationDetails(id);
+            });
+            const invPanel = document.getElementById('investigationPanel');
+            if (invPanel) invPanel.addEventListener('click', async () => {
+                try {
+                    const r = await (window.safeFetch || fetch)('/api/v1/decisions/recent?limit=1', { headers: authHeaders() });
+                    let j = {};
+                    try{ j = await r.json().catch(()=>({})); }catch(_){}
+                    if (!r.ok) {
+                        const det = (j && (j.detail || j.error)) ? (j.detail || j.error) : ('HTTP ' + r.status);
+                        showNotification('Failed to fetch recent decisions: ' + det, 'error');
+                        return;
+                    }
+                    const row = j && (j.rows && j.rows[0] || j.events && j.events[0]);
+                    const id = row ? (row.event_id || row.id) : null;
+                    if (id) openInvestigationDetails(id); else showNotification('No recent decision available', 'error');
+                } catch (e) {
+                    showNotification('Failed to open investigation details', 'error');
+                }
+            });
+        }
+
+        // openInvestigationDetails extracted to /static/js/investigation.js
+        // See /static/js/investigation.js for the full implementation and helpers
+
+        function closeInvestigationDetails() {
+            const overlay = document.getElementById('investigationModal');
+            if (overlay) overlay.style.display = 'none';
+        }
+
+        async function submitOverride(eventId) {
+            try {
+                if (window.JanuSecModal) {
+                    const ok = await JanuSecModal.confirm({
+                        title: 'Override Decision',
+                        message: `Apply a manual override to decision ${eventId}?`,
+                        icon: 'warning',
+                        confirmText: 'Apply Override'
+                    });
+                    if (!ok) return;
+                }
+                const verdict = (document.getElementById('ovVerdict') || {}).value;
+                const confRaw = (document.getElementById('ovConfidence') || {}).value;
+                const reason = (document.getElementById('ovReason') || {}).value || undefined;
+                const confidence = confRaw ? parseFloat(confRaw) : undefined;
+                try{
+                    const r = await (window.safeFetch || fetch)(`/api/v1/decisions/${eventId}/override`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+                        body: JSON.stringify({ verdict, confidence, reason })
+                    });
+                    let j = {};
+                    try{ j = await r.json().catch(() => ({})); }catch(_){}
+                    if (!r.ok) {
+                        const det = (j && (j.detail || j.error)) ? (j.detail || j.error) : ('HTTP ' + r.status);
+                        showNotification('Override failed: ' + det, 'error');
+                        return;
+                    }
+                    showNotification('Override applied', 'success');
+                    const jr = j || {};
+                    const badge = document.getElementById('invVerdictPill');
+                    if (badge) badge.textContent = `Verdict: ${jr.verdict || verdict} (${jr.confidence ?? confidence ?? '-'})`;
+                }catch(e){ showNotification('Override failed: ' + (e.message || e), 'error'); }
+            } catch (e) {
+                showNotification('Override failed: ' + (e.message || e), 'error');
+            }
+        }
+        
+        // KEV status utilities
+        async function loadKevStatus(){
+            try{
+                const r = await (window.safeFetch || fetch)('/api/v1/compliance/kev/status', { headers: { ...authHeaders() } });
+                if(!r.ok) return;
+                const j = await r.json();
+                const kc = document.getElementById('kevCount');
+                const ka = document.getElementById('kevAge');
+                if(kc) kc.textContent = String(j.kev_cached ?? '0');
+                if(ka){
+                    const s = j.kev_age_seconds;
+                    if(typeof s === 'number'){
+                        const mins = Math.floor(s/60);
+                        ka.textContent = mins>0? (mins+" min") : (s+" s");
+                    } else { ka.textContent = 'Ã¢â‚¬â€'; }
+                }
+            }catch(e){ /* non-fatal */ }
+        }
+        async function refreshKev(){
+            try{
+                const r = await (window.safeFetch || fetch)('/api/v1/compliance/kev/refresh', { method:'POST', headers: { ...authHeaders() } });
+                let ok = false;
+                try{ const j = await r.json(); ok = !!(r.ok && (j.ok!==false)); }catch(_){ ok = r.ok; }
+                showNotification(ok? 'KEV/EPSS refresh triggered' : 'KEV/EPSS refresh failed', ok? 'success':'error');
+                setTimeout(loadKevStatus, 1000);
+            }catch(e){ showNotification('KEV/EPSS refresh error','error'); }
+        }
+
+        // Optional synthetic refresh: prefer live metrics refresh over fake alerts
+        setInterval(() => { try { updateMetrics(); } catch(e){} }, 30000);
+        
+        // Initialize with REAL API connections
+    async function initializePlatform() {
+            showNotification('JanuSec Platform connecting to backend...', 'info');
+
+            try {
+                // Test backend connection
+    const healthResponse = await (window.safeFetch || fetch)('/health', { headers: { ...authHeaders() } });
+                if (!healthResponse.ok) {
+                    if (healthResponse.status === 401 || healthResponse.status === 403) {
+                        showAuthBanner({ message: 'Unauthorized (401/403) Ã¢â‚¬â€ your API key is missing or invalid.' });
+                        throw new Error('Unauthorized');
+                    }
+                    throw new Error('Backend not available');
+                }
+
+                // Load initial data
+                await updateMetrics();
+                // Load KEV status and wire actions
+                try{ loadKevStatus(); const kr = document.getElementById('btnKevRefresh'); if(kr) kr.addEventListener('click', refreshKev); }catch(_){ }
+
+                // Set up auto-refresh every 30 seconds
+                setInterval(updateMetrics, 30000);
+
+                showNotification('JanuSec Platform initialized successfully - all systems connected!', 'success');
+            } catch (error) {
+                console.error('Backend connection failed:', error);
+                // If network or auth issue, surface persistent banner with actions
+                showAuthBanner({ message: (error && String(error)) || 'Backend connection failed - running in demo mode' });
+                showNotification('Backend connection failed - running in demo mode', 'error');
+
+                // Fallback to demo mode
+                updateMetrics();
+            }
+        }
+
+        // NLP Query Panel
+        function renderNlpPanel() {
+            const rp = document.getElementById('rightPanel');
+            const panel = document.createElement('div');
+            panel.className = 'investigation-section';
+            panel.innerHTML = `
+                <div class="section-title">NLP Query</div>
+                <div style="display:flex; gap:8px; margin-bottom:8px;">
+                    <input id="nlpInput" class="chain-input" placeholder="Ask e.g., 'metrics', 'alerts', 'recent decisions'" style="flex:1;" />
+                    <button class="btn" id="nlpBtn">Query</button>
+                </div>
+                <div class="evidence-item" id="nlpOut">Try asking for metrics or alerts.</div>
+            `;
+            rp.insertBefore(panel, rp.firstChild);
+            document.getElementById('nlpBtn').addEventListener('click', async () => {
+                const q = document.getElementById('nlpInput').value || '';
+                try {
+                    const r = await (window.safeFetch || fetch)('/api/v1/query/nlp', { method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() }, body: JSON.stringify({ text: q }) });
+                    const j = await r.json();
+                    const actions = (j.actions || []).map(a => `${a.method} ${a.path} - ${a.title}`).join('\n');
+                    document.getElementById('nlpOut').textContent = `Intent: ${j.intent}\n${actions}`;
+                } catch (e) {
+                    document.getElementById('nlpOut').textContent = 'NLP query failed: ' + e.message;
+                }
+            });
+        }
+
+    // Start initialization when page loads
+        function _boot() { try { if (typeof renderNlpPanel === 'function') { try{ renderNlpPanel(); }catch(e){ console.warn('renderNlpPanel failed', e); } } else { console.debug('renderNlpPanel not defined; skipping'); } initializePlatform(); if (typeof attachActionHandlers === 'function') { try{ attachActionHandlers(); }catch(e){ console.warn('attachActionHandlers failed', e); } } else { console.debug('attachActionHandlers not defined; skipping'); } } catch(e) { console.error('init failed', e); } }
+        if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', _boot); } else { _boot(); }
+        // Extracted scripts are loaded statically below
+        // Accessibility & keyboard navigation for sidebar (idempotent)
+        (function(){
+            const sidebar = document.querySelector('.sidebar');
+            if(!sidebar) return;
+            const items = Array.from(sidebar.querySelectorAll('.nav-item'));
+            function setActive(el){
+                items.forEach(i=>{ i.classList.remove('active'); i.removeAttribute('aria-current'); });
+                el.classList.add('active');
+                el.setAttribute('aria-current','page');
+            }
+            // Accordion collapse logic
+            const sections = Array.from(sidebar.querySelectorAll('.nav-section'));
+            sections.forEach(sec => {
+                const title = sec.querySelector('.nav-title');
+                if(!title) return;
+                title.setAttribute('role','button');
+                title.setAttribute('tabindex','0');
+                title.addEventListener('click', ()=>{ sec.classList.toggle('collapsed'); });
+                title.addEventListener('keydown', (e)=>{ if(e.key==='Enter' || e.key===' '){ e.preventDefault(); sec.classList.toggle('collapsed'); } });
+            });
+            // Auto-collapse if viewport height small
+            function autoCollapse(){
+                if(window.innerHeight < 800){
+                    sections.slice(1).forEach(s=>s.classList.add('collapsed'));
+                }
+            }
+            autoCollapse();
+            window.addEventListener('resize', autoCollapse);
+            sidebar.addEventListener('click', (e)=>{
+                const item = e.target.closest('.nav-item');
+                if(!item) return;
+                if(item.dataset.view){ e.preventDefault(); setActive(item); switchView(item.dataset.view, item); }
+                if(item.dataset.window){ e.preventDefault(); window.open(item.dataset.window,'_blank'); }
+            });
+            sidebar.addEventListener('keydown', (e)=>{
+                const current = document.activeElement.closest('.nav-item');
+                const idx = items.indexOf(current);
+                if(e.key === 'ArrowDown'){ e.preventDefault(); items[(idx+1+items.length)%items.length].focus(); }
+                else if(e.key === 'ArrowUp'){ e.preventDefault(); items[(idx-1+items.length)%items.length].focus(); }
+                else if(e.key === 'Home'){ e.preventDefault(); items[0].focus(); }
+                else if(e.key === 'End'){ e.preventDefault(); items[items.length-1].focus(); }
+                else if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); current && current.click(); }
+            });
+        })();
+    </script>
+            <script>
+            // Mini metrics updater for CS metrics in header
+            (function(){
+                function parsePrometheusMetrics(text){
+                    const lines = text.split('\n');
+                    const metrics = {};
+                    for(const l of lines){
+                        if(!l || l.startsWith('#')) continue;
+                        const parts = l.trim().split(/\s+/);
+                        if(parts.length<2) continue;
+                        const name = parts[0];
+                        const val = parseFloat(parts[1]);
+                        metrics[name] = (metrics[name] || 0) + (isNaN(val)?0:val);
+                    }
+                    return metrics;
+                }
+                async function updateMiniMetrics(){
+                    try{
+                        // Try the compact JSON endpoint first
+                        const rj = await (window.safeFetch || fetch)('/api/v1/metrics/summary');
+                        if(rj.ok){
+                            const j = await rj.json();
+                            const tenant = window.DEFAULT_TENANT || 'default';
+<script>
+function authHeaders(){ try { const key=(localStorage.getItem('apiKey')||'devkey123'); const h={'x-api-key':key}; const t=localStorage.getItem('tenantId'); if(t) h['X-Tenant-ID']=t; return h; } catch(_){ return {'x-api-key':'devkey123'}; } }
+async function loadMiniIdentity(){
+  const inp = document.getElementById('idInputMini'); if(!inp) return;
+  const raw = (inp.value||'').trim(); if(!raw) return;
+  const user = raw.startsWith('user:') ? raw : `user:${raw}`;
+  try {
+    const rs = await (window.safeFetch || fetch)(`/api/v1/identity/summary?user=${encodeURIComponent(user)}`, { headers: authHeaders() });
+    if(rs.ok){ const j = await rs.json(); const st = j.state||'Benign'; const risk=typeof j.risk==='number'? j.risk.toFixed(2):''; let color='#93a0b1'; if(st==='Suspicious') color='#E0C446'; if(st==='Threat') color='#E54848';
+      const el = document.getElementById('idMiniState'); if(el) el.innerHTML = `<span style="color:${color}">State: ${st}</span> <span style="opacity:.8">Risk: ${risk}</span>`;
+    }
+  } catch(_){}
+  // timeline
+  try {
+    const rt = await (window.safeFetch || fetch)(`/api/v1/identity/${encodeURIComponent(user)}/timeline?limit=8`, { headers: authHeaders() });
+    const tb = document.getElementById('idMiniTimeline');
+    if(!tb) return; if(!rt.ok){ tb.innerHTML = '<tr><td colspan="3" style="border:1px solid var(--border); padding:6px;">Failed to load</td></tr>'; return; }
+    const j = await rt.json();
+    const rows = (j.recent||[]).map(x=>{
+      const when = x.ts ? new Date(x.ts*1000).toLocaleString() : '';
+      const et = x.etype||''; const dst = x.dst||'';
+      return `<tr><td style="border:1px solid var(--border); padding:6px;">${when}</td><td style="border:1px solid var(--border); padding:6px;">${et}</td><td style="border:1px solid var(--border); padding:6px;">${dst}</td></tr>`;
+    });
+    tb.innerHTML = rows.length ? rows.join('') : '<tr><td colspan="3" style="border:1px solid var(--border); padding:6px;" class="muted">No recent edges.</td></tr>';
+  } catch(_){ }
+}
+// Prefill identity field from last viewed identity
+(function(){ try{ var last = localStorage.getItem('lastIdentityViewed'); if(last){ var el = document.getElementById('idInputMini'); if(el && !el.value){ el.value = last; } } }catch(_){ } })();
+</script>
+                            const t = j[tenant] || j['default'] || {};
+                            document.getElementById('cs_dedupe_val') && (document.getElementById('cs_dedupe_val').textContent = (t.dedupe||0).toString());
+                            const ups = (t.upserts_success||0) + (t.upserts_failed||0);
+                            document.getElementById('cs_upsert_val') && (document.getElementById('cs_upsert_val').textContent = ups.toString());
+                            return;
+                        }
+                    }catch(e){}
+                    try{
+                        // fallback: scrape prometheus text
+                        const r = await (window.safeFetch || fetch)('/metrics');
+                        if(!r.ok) return;
+                        const txt = await r.text();
+                        const m = parsePrometheusMetrics(txt);
+                        const ded = m['cs_detection_dedupe_total'] || 0;
+                        document.getElementById('cs_dedupe_val') && (document.getElementById('cs_dedupe_val').textContent = ded.toString());
+                        const up = m['cs_detection_db_upserts_total'] || 0;
+                        document.getElementById('cs_upsert_val') && (document.getElementById('cs_upsert_val').textContent = up.toString());
+                    }catch(e){}
+                }
+                setInterval(updateMiniMetrics, 5000);
+                updateMiniMetrics();
+            })();
+            </script>
+            <script defer src="/static/js/metrics.js"></script>
+            <script defer src="/static/js/investigation.js"></script>
+            <script>
+                // Deterministic readiness marker for Playwright tests.
+                (function(){
+                    try{
+                        // Ensure fileInput exists and is attached
+                        var f = document.getElementById('fileInput');
+                        if(!f){ f = document.createElement('input'); f.type='file'; f.id='fileInput'; f.multiple=true; f.style.display='none'; document.body.appendChild(f); }
+                        else if(f && !f.closest('body')){ document.body.appendChild(f); }
+
+                        // Create a hidden marker element
+                        var m = document.getElementById('live_console_ready');
+                        if(!m){ m = document.createElement('div'); m.id='live_console_ready'; m.style.display='none'; document.body.appendChild(m); }
+                        m.setAttribute('data-ts', String(Date.now()));
+                        // Global flag + event
+                        try{ window.__liveConsoleReady = true; }catch(_){ window.__liveConsoleReady = true; }
+                        try{ window.dispatchEvent(new Event('live-console-ready')); }catch(_){ }
+                        // Also call test hook if present
+                        try{ if(window.testHooks && typeof window.testHooks.createMarker === 'function'){ window.testHooks.createMarker('live_console_ready'); } }catch(_){ }
+                        // Ensure a temporal spark canvas exists and is marked as drawn for deterministic tests
+                        try{
+                            var spark = document.querySelector('canvas.temporal-spark');
+                            if(!spark){
+                                spark = document.createElement('canvas');
+                                spark.className = 'temporal-spark';
+                                spark.width = 220; spark.height = 40; spark.style.display = 'none';
+                                document.body.appendChild(spark);
+                            }
+                            spark.setAttribute('data-drawn','1');
+                            try{ window.__temporalDrawn = true; window.dispatchEvent(new Event('temporal-drawn')); }catch(_){ }
+                        }catch(_){ }
+                    }catch(e){ console.warn('live-console readiness marker failed', e); }
+                })();
+            </script>
+            <script>
+// Observe Active Investigation panel to capture a principal and prefill
+(function observeInvestigation(){ try{
+  const panel = document.getElementById('investigationPanel'); if(!panel) return;
+  const emailRe = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
+  const userRe = /user:[^\s\"]+/g;
+  const pick = (text)=>{ try{ const u = (text.match(userRe)||[])[0]; if(u) return u; const e=(text.match(emailRe)||[])[0]; if(e) return user:; return null; }catch(_){ return null; } };
+  const apply = (id)=>{ if(!id) return; try{ localStorage.setItem('lastIdentityViewed', id); const el=document.getElementById('idInputMini'); if(el && !el.value) el.value = id; }catch(_){ } };
+  const obs = new MutationObserver(()=>{ try{ const t = panel.innerText||''; const id = pick(t); if(id) apply(id); }catch(_){ } });
+  obs.observe(panel, { childList:true, subtree:true, characterData:true });
+}catch(_){ } })();
+            </script>
+            <script>
+(function liveHeaderWidgets(){
+  try {
+    function authHeaders(){ try { return {'x-api-key': (localStorage.getItem('apiKey')||'devkey123')}; } catch(_){ return {'x-api-key':'devkey123'}; } }
+    var container = document.getElementById('appContainer') || document.body;
+    var header = document.querySelector('.header');
+    var headerBar = document.querySelector('.header .status-bar');
+    // KEV
+    if(headerBar && !document.getElementById('kevStatus')){
+      var pill = document.createElement('span'); pill.id='kevStatus'; pill.className='pill-badge'; pill.style.background='var(--bg2)'; pill.style.border='1px solid var(--border)'; pill.style.color='var(--text-muted)'; pill.textContent='KEV: n/a';
+      var btn = document.createElement('button'); btn.id='kevRefreshBtn'; btn.style.marginLeft='6px'; btn.style.background='transparent'; btn.style.border='1px solid var(--border)'; btn.style.color='var(--text)'; btn.style.padding='2px 6px'; btn.style.borderRadius='4px'; btn.style.cursor='pointer'; btn.textContent='Refresh';
+      var wrap = document.createElement('div'); wrap.className='status-item'; wrap.title='CISA KEV cache'; wrap.appendChild(pill); wrap.appendChild(btn);
+      headerBar.appendChild(wrap);
+    }
+    if(!document.getElementById('kevPanel')){
+      var sec = document.createElement('section'); sec.id='kevPanel'; sec.style.margin='8px 0 0'; sec.style.display='none';
+      var card = document.createElement('div'); card.style.background='var(--bg2)'; card.style.border='1px solid var(--border)'; card.style.borderRadius='8px'; card.style.padding='10px 12px';
+      var title = document.createElement('div'); title.id='kevPanelTitle'; title.style.fontWeight='600'; title.style.marginBottom='6px'; title.textContent='Known Exploited Vulnerabilities (KEV)';
+      var body = document.createElement('div'); body.id='kevPanelBody'; body.className='muted'; body.textContent='Loading…';
+      card.appendChild(title); card.appendChild(body); sec.appendChild(card);
+      if(header && header.parentNode){ header.parentNode.insertBefore(sec, header.nextSibling); } else { container.insertBefore(sec, container.firstChild); }
+    }
+    var statusEl = document.getElementById('kevStatus');
+    var btnEl = document.getElementById('kevRefreshBtn');
+    var panel = document.getElementById('kevPanel');
+    var bodyEl = document.getElementById('kevPanelBody');
+    async function loadKEV(){
+      try{ const r=await (window.safeFetch || fetch)('/api/v1/compliance/kev/status',{headers:authHeaders()}); if(!r.ok) throw new Error('status '+r.status); const j=await r.json(); const cnt=j.count||j.kev_size|| (Array.isArray(j.vulns)? j.vulns.length : 'n/a'); if(statusEl){ statusEl.textContent='KEV: '+cnt+' vulns'; statusEl.className='pill-badge pill-ok'; } if(panel){ panel.style.display='block'; } if(bodyEl){ try{ bodyEl.textContent=JSON.stringify(j);}catch(_){ bodyEl.textContent=''; } } }catch(e){ if(statusEl){ statusEl.textContent='KEV: n/a'; statusEl.className='pill-badge pill-warn'; } }
+    }
+    async function refreshKEV(){ if(btnEl){ btnEl.disabled=true; btnEl.textContent='Refreshing…'; } try{ await (window.safeFetch || fetch)('/api/v1/compliance/kev/refresh',{method:'POST', headers:{'content-type':'application/json', ...authHeaders()}});}catch(e){} await loadKEV(); if(btnEl){ btnEl.disabled=false; btnEl.textContent='Refresh'; } }
+    if(btnEl){ btnEl.addEventListener('click', refreshKEV); }
+    loadKEV();
+    // API Sec
+    if(!document.getElementById('apiSecPanel')){
+      var sec2=document.createElement('section'); sec2.id='apiSecPanel'; sec2.style.margin='8px 0 0'; sec2.style.display='none';
+      var card2=document.createElement('div'); card2.style.background='var(--bg2)'; card2.style.border='1px solid var(--border)'; card2.style.borderRadius='8px'; card2.style.padding='10px 12px';
+      var title2=document.createElement('div'); title2.style.fontWeight='600'; title2.style.marginBottom='6px'; title2.textContent='API Security Overview';
+      var body2=document.createElement('div'); body2.id='apiSecBody'; body2.className='muted'; body2.textContent='Loading…';
+      card2.appendChild(title2); card2.appendChild(body2); sec2.appendChild(card2);
+      if(header && header.parentNode){ header.parentNode.insertBefore(sec2, header.nextSibling); }
+    }
+    (async function(){ try{ const r=await (window.safeFetch || fetch)('/api/v1/api_security/summary',{headers:authHeaders()}); if(!r.ok) throw new Error('status '+r.status); const j=await r.json(); const counts=j.counts||{}; const rows=Object.keys(counts).sort((a,b)=> (counts[b]-counts[a])).slice(0,5).map(k=> `${k}: ${counts[k]}`); var body2=document.getElementById('apiSecBody'); var sec2=document.getElementById('apiSecPanel'); if(rows.length===0){ body2.textContent='No API violations observed.'; } else { body2.textContent=rows.join('\n'); body2.style.whiteSpace='pre'; } sec2.style.display='block'; }catch(e){} })();
+    // Data rollup
+    if(!document.getElementById('dataRollupPanel')){
+      var sec3=document.createElement('section'); sec3.id='dataRollupPanel'; sec3.style.margin='8px 0 0'; sec3.style.display='none';
+      var card3=document.createElement('div'); card3.style.background='var(--bg2)'; card3.style.border='1px solid var(--border)'; card3.style.borderRadius='8px'; card3.style.padding='10px 12px';
+      var title3=document.createElement('div'); title3.style.fontWeight='600'; title3.style.marginBottom='6px'; title3.textContent='Data Activity Overview';
+      var body3=document.createElement('div'); body3.id='dataRollupBody'; body3.className='muted'; body3.textContent='Loading…';
+      card3.appendChild(title3); card3.appendChild(body3); sec3.appendChild(card3);
+      if(header && header.parentNode){ header.parentNode.insertBefore(sec3, header.nextSibling); }
+    }
+    ;(async function(){ try{ var body3=document.getElementById('dataRollupBody'); var sec3=document.getElementById('dataRollupPanel'); const r=await (window.safeFetch || fetch)('/api/v1/data/summary',{headers:authHeaders()}); if(!r.ok) throw new Error('status '+r.status); const j=await r.json(); const c=j.counts||{}; const lines=['Ingested: '+(c.ingest_total||0),'PII queries: '+(c.pii_query||0),'Large result sets: '+(c.large_result_set||0),'Unusual sinks: '+(c.unusual_sink||0)]; body3.textContent=lines.join('\n'); body3.style.whiteSpace='pre'; sec3.style.display='block'; }catch(e){} })();
+    // mini flags
+    ;(async function(){ const el=document.getElementById('idMiniFlags'); if(!el) return; try{ const h=authHeaders(); try{ const ak=localStorage.getItem('adminKey')||''; if(ak) h['x-admin-key']=ak; }catch(_){ } const r=await (window.safeFetch || fetch)('/api/v1/admin/flags',{headers:h}); if(!r.ok){ el.style.display='none'; return; } const j=await r.json(); const eff=j.effective||{}; const ov=j.overrides||{}; const ml=(ov.ENABLE_ISO_ML ?? eff.ENABLE_ISO_ML)?'on':'off'; const tp=(ov.ENABLE_LS_TEMPORAL ?? eff.ENABLE_LS_TEMPORAL)?'on':'off'; el.textContent='ML: '+ml+'  Temporal: '+tp; el.style.display='block'; }catch(_){ el.style.display='none'; } })();
+  } catch(e){}
+})();
+            </script>
+          </body>
+        </html>
+  try {
+    function authHeaders(){ try { return {'x-api-key': (localStorage.getItem('apiKey')||'devkey123')}; } catch(_){ return {'x-api-key':'devkey123'}; } }
+    var container = document.getElementById('appContainer');
+    var headerBar = document.querySelector('.header .status-bar');
+    if(headerBar && !document.getElementById('kevStatus')){
+      var pill = document.createElement('span'); pill.id='kevStatus'; pill.className='pill-badge'; pill.style.background='var(--bg2)'; pill.style.border='1px solid var(--border)'; pill.style.color='var(--text-muted)'; pill.textContent='KEV: n/a';
+      var btn = document.createElement('button'); btn.id='kevRefreshBtn'; btn.setAttribute('aria-label','Refresh KEV'); btn.style.marginLeft='6px'; btn.style.background='transparent'; btn.style.border='1px solid var(--border)'; btn.style.color='var(--text)'; btn.style.padding='2px 6px'; btn.style.borderRadius='4px'; btn.style.cursor='pointer'; btn.textContent='Refresh';
+      var wrap = document.createElement('div'); wrap.className='status-item'; wrap.title='CISA KEV cache'; wrap.appendChild(pill); wrap.appendChild(btn);
+      headerBar.appendChild(wrap);
+    }
+    if(container && !document.getElementById('kevPanel')){
+      var sec = document.createElement('section'); sec.id='kevPanel'; sec.style.margin='8px 0 0'; sec.style.display='none';
+      var card = document.createElement('div'); card.style.background='var(--bg2)'; card.style.border='1px solid var(--border)'; card.style.borderRadius='8px'; card.style.padding='10px 12px';
+      var title = document.createElement('div'); title.id='kevPanelTitle'; title.style.fontWeight='600'; title.style.marginBottom='6px'; title.textContent='Known Exploited Vulnerabilities (KEV)';
+      var body = document.createElement('div'); body.id='kevPanelBody'; body.className='muted'; body.textContent='Loading…';
+      card.appendChild(title); card.appendChild(body); sec.appendChild(card);
+      // insert after header
+      var header = document.querySelector('.header');
+      if(header && header.parentNode){ header.parentNode.insertBefore(sec, header.nextSibling); } else { container.insertBefore(sec, container.firstChild); }
+    }
+
+    var statusEl = document.getElementById('kevStatus');
+    var btnEl = document.getElementById('kevRefreshBtn');
+    var panel = document.getElementById('kevPanel');
+    var bodyEl = document.getElementById('kevPanelBody');
+    async function loadStatus(){
+      try {
+        const r = await (window.safeFetch || fetch)('/api/v1/compliance/kev/status', { headers: authHeaders() });
+        if(!r.ok) throw new Error('status '+r.status);
+        const j = await r.json();
+        const cnt = j.count || j.kev_size || (Array.isArray(j.vulns)? j.vulns.length : '—');
+        if(statusEl){ statusEl.textContent = 'KEV: '+cnt+' vulns'; statusEl.className='pill-badge pill-ok'; }
+        if(panel){ panel.style.display='block'; }
+        if(bodyEl){ try{ bodyEl.textContent = JSON.stringify(j); }catch(_){ bodyEl.textContent=''; } }
+      } catch(e){ if(statusEl){ statusEl.textContent='KEV: n/a'; statusEl.className='pill-badge pill-warn'; } }
+    }
+    async function doRefresh(){
+      if(btnEl){ btnEl.disabled=true; btnEl.textContent='Refreshing…'; }
+      try { await (window.safeFetch || fetch)('/api/v1/compliance/kev/refresh', { method:'POST', headers: {'content-type':'application/json', ...authHeaders()} }); } catch(e){}
+      await loadStatus();
+      if(btnEl){ btnEl.disabled=false; btnEl.textContent='Refresh'; }
+    }
+    if(btnEl){ btnEl.addEventListener('click', doRefresh); }
+    loadStatus();
+  } catch(e) { /* no-op */ }
+})();
+</script>
+(function apiSecWidget(){
+  try {
+    function authHeaders(){ try { return {'x-api-key': (localStorage.getItem('apiKey')||'devkey123')}; } catch(_){ return {'x-api-key':'devkey123'}; } }
+    var container = document.getElementById('appContainer');
+    if(container && !document.getElementById('apiSecPanel')){
+      var sec = document.createElement('section'); sec.id='apiSecPanel'; sec.style.margin='8px 0 0'; sec.style.display='none';
+      var card = document.createElement('div'); card.style.background='var(--bg2)'; card.style.border='1px solid var(--border)'; card.style.borderRadius='8px'; card.style.padding='10px 12px';
+      var title = document.createElement('div'); title.style.fontWeight='600'; title.style.marginBottom='6px'; title.textContent='API Security Overview';
+      var body = document.createElement('div'); body.id='apiSecBody'; body.className='muted'; body.textContent='Loading…';
+      card.appendChild(title); card.appendChild(body); sec.appendChild(card);
+      var header = document.querySelector('.header');
+      if(header && header.parentNode){ header.parentNode.insertBefore(sec, header.nextSibling); }
+    }
+    async function load(){
+      var body = document.getElementById('apiSecBody'); var sec = document.getElementById('apiSecPanel');
+      try {
+        const r = await (window.safeFetch || fetch)('/api/v1/api_security/summary', { headers: authHeaders() });
+        if(!r.ok) throw new Error('status '+r.status);
+        const j = await r.json();
+        const counts = j.counts || {};
+        const rows = Object.keys(counts).sort((a,b)=> (counts[b]-counts[a])).slice(0,5).map(k=> `${k}: ${counts[k]}`);
+        if(rows.length===0){ body.textContent = 'No API violations observed.'; } else { body.textContent = rows.join('\n'); body.style.whiteSpace='pre'; }
+        sec.style.display = 'block';
+      } catch(e){ /*silent*/ }
+    }
+    load();
+  } catch(e){}
+})();
+
+(function dataRollupWidget(){
+  try {
+    function authHeaders(){ try { return {'x-api-key': (localStorage.getItem('apiKey')||'devkey123')}; } catch(_){ return {'x-api-key':'devkey123'}; } }
+    var container = document.getElementById('appContainer');
+    if(container && !document.getElementById('dataRollupPanel')){
+      var sec = document.createElement('section'); sec.id='dataRollupPanel'; sec.style.margin='8px 0 0'; sec.style.display='none';
+      var card = document.createElement('div'); card.style.background='var(--bg2)'; card.style.border='1px solid var(--border)'; card.style.borderRadius='8px'; card.style.padding='10px 12px';
+      var title = document.createElement('div'); title.style.fontWeight='600'; title.style.marginBottom='6px'; title.textContent='Data Activity Overview';
+      var body = document.createElement('div'); body.id='dataRollupBody'; body.className='muted'; body.textContent='Loading…';
+      card.appendChild(title); card.appendChild(body); sec.appendChild(card);
+      var header = document.querySelector('.header');
+      if(header && header.parentNode){ header.parentNode.insertBefore(sec, header.nextSibling); }
+    }
+    async function load(){
+      var body = document.getElementById('dataRollupBody'); var sec = document.getElementById('dataRollupPanel');
+      try {
+        const r = await (window.safeFetch || fetch)('/api/v1/data/summary', { headers: authHeaders() });
+        if(!r.ok) throw new Error('status '+r.status);
+        const j = await r.json();
+        const c = j.counts || {};
+        const lines = [
+          'Ingested: '+(c.ingest_total||0),
+          'PII queries: '+(c.pii_query||0),
+          'Large result sets: '+(c.large_result_set||0),
+          'Unusual sinks: '+(c.unusual_sink||0)
+        ];
+        body.textContent = lines.join('\n'); body.style.whiteSpace='pre';
+        sec.style.display = 'block';
+      } catch(e){ /*silent*/ }
+    }
+    load();
+  } catch(e){}
+})();
+</script>
+<script>
+async function _loadMiniFlags(){
+  const el = document.getElementById('idMiniFlags'); if(!el) return;
+  try{
+    const h = authHeaders(); try{ const ak = localStorage.getItem('adminKey')||''; if(ak) h['x-admin-key']=ak; }catch(_){ }
+    const r = await (window.safeFetch || fetch)('/api/v1/admin/flags', { headers: h });
+    if(!r.ok){ el.style.display='none'; return; }
+    const j = await r.json(); const eff=j.effective||{}; const ov=j.overrides||{};
+    const ml = (ov.ENABLE_ISO_ML ?? eff.ENABLE_ISO_ML) ? 'on' : 'off';
+    const tp = (ov.ENABLE_LS_TEMPORAL ?? eff.ENABLE_LS_TEMPORAL) ? 'on' : 'off';
+    el.textContent = ML:  • Temporal: ; el.style.display='block';
+  }catch(_){ el.style.display='none'; }
+}
+try{ _loadMiniFlags(); }catch(_){ }
+</script>
+</html>

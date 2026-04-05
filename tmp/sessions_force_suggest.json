@@ -1,0 +1,1 @@
+{"sessions":[{"id":"force-1","data":{"entities":{"some_field":["x"]}}},{"id":"force-2","data":{"entities":{"another_field":["y"]}}}], "ewma": true, "ewma_alpha": 0.6}

@@ -1,0 +1,41 @@
+name: Terraform Plan
+
+on:
+  pull_request:
+    paths:
+      - 'infra/terraform/**'
+
+jobs:
+  terraform-plan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: 'read'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: 1.5.0
+      - name: Terraform Init
+        working-directory: infra/terraform
+        run: terraform init -input=false
+      - name: Terraform Format Check
+        working-directory: infra/terraform
+        run: terraform fmt -check
+      - name: TFLint
+        uses: wata727/tflint-action@v0.3.0
+        with:
+          directory: infra/terraform
+      - name: Checkov
+        uses: bridgecrewio/checkov-action@master
+        with:
+          directory: infra/terraform
+      - name: Terraform Plan
+        working-directory: infra/terraform
+        env:
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: |
+          terraform plan -out=tfplan -input=false
+          terraform show -no-color tfplan

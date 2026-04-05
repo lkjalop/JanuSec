@@ -1,0 +1,7 @@
+[
+  {"control_id": "A.5.1.1", "title": "Information Security Policy", "keywords": ["policy", "isms", "security"]},
+  {"control_id": "A.6.1.2", "title": "Segregation of Duties", "keywords": ["segregation", "duties", "roles"]},
+  {"control_id": "A.8.1.1", "title": "Inventory of Assets", "keywords": ["asset", "inventory", "classification"]},
+  {"control_id": "A.9.2.1", "title": "User Registration", "keywords": ["user", "registration", "access"]}
+]
+

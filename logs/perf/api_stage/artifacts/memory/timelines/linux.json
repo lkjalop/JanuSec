@@ -1,0 +1,28 @@
+{
+  "fixture": "linux.json",
+  "platform": "linux",
+  "timeline_entries": [
+    {
+      "ts": 1767398598.8590415,
+      "kind": "process",
+      "source": "linux.pslist",
+      "platform": "linux",
+      "summary": "Linux process sshd (PID 1122) present in dump"
+    },
+    {
+      "ts": 1767398598.8590415,
+      "kind": "process",
+      "source": "linux.pslist",
+      "platform": "linux",
+      "summary": "Linux process cron (PID 776) present in dump"
+    },
+    {
+      "ts": 1767398598.8590415,
+      "kind": "file",
+      "source": "linux.lsof",
+      "platform": "linux",
+      "summary": "sshd holds /usr/lib/ssh/sshd via fd 3r"
+    }
+  ],
+  "registry": {}
+}

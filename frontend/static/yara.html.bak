@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>YARA Rules Console</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root { --bg:#0B0E14; --card:#151922; --muted:#A8B2C3; --text:#E8EBF0; --border:#2A3142; --accent:#4A63E7; }
+    body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Inter, sans-serif; background: var(--bg); color: var(--text); }
+    .wrap { max-width: 1100px; margin: 0 auto; padding: 16px; }
+    h1 { font-size: 20px; font-weight: 600; }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 12px; }
+    .row { display:flex; gap:8px; align-items:center; flex-wrap: wrap; }
+    .btn { background:#1C2230; border:1px solid var(--border); color:var(--text); padding:8px 12px; border-radius:6px; cursor:pointer; }
+    .btn:hover { background:#232834; }
+    .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    textarea { width:100%; min-height:140px; font-family: monospace; background:#0E121A; color:var(--text); border:1px solid var(--border); border-radius:6px; padding:10px; }
+    input[type="text"], input[type="file"] { background:#0E121A; color:var(--text); border:1px solid var(--border); border-radius:6px; padding:8px 10px; }
+    .muted { color: var(--muted); font-size: 12px; }
+    .pill { display:inline-block; padding:3px 8px; border-radius:999px; border:1px solid var(--border); font-size:11px; margin: 2px 4px 2px 0; }
+    pre { background:#0E121A; border:1px solid var(--border); padding:10px; border-radius:6px; overflow:auto; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>YARA Rules Console</h1>
+    <p class="muted">Optional feature, gated by YARA_ENABLED=1 and the <code>yara-python</code> package. This console helps you manage rules and test them against local samples.</p>
+
+    <div class="card">
+      <h3>1) Environment & Dependencies</h3>
+      <ul class="muted">
+        <li>Set <code>YARA_ENABLED=1</code> in your environment to enable YARA scanning in the backend.</li>
+        <li>Install dependency: <code>pip install yara-python</code> in the server environment.</li>
+        <li>Configure a directory for local samples via <code>YARA_SAMPLES_DIR</code> (optional) for quick local scans.</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h3>2) Rule Management</h3>
+      <div class="row" style="margin:6px 0;">
+        <input id="ruleName" type="text" placeholder="Rule name (e.g., Suspicious_Encoded_PS)" style="min-width:260px;" />
+        <button class="btn" onclick="saveRule()">Save Rule</button>
+        <button class="btn" onclick="listRules()">List Rules</button>
+        <button class="btn" onclick="deleteRule()">Delete Rule</button>
+      </div>
+      <textarea id="ruleText" placeholder="rule Example {\n  strings:\n    $a = /powershell.*-enc/i\n  condition:\n    $a\n}"></textarea>
+      <div id="ruleMsg" class="muted">Enter YARA rule text above and click Save. Rules are stored server-side when YARA is enabled (otherwise this is a local demo only).</div>
+    </div>
+
+    <div class="card">
+      <h3>3) Test Rules Against a Sample</h3>
+      <div class="row" style="margin:6px 0;">
+        <input id="samplePath" type="text" placeholder="Local path (server-side) or drop a file below" style="flex:1; min-width:280px;" />
+        <button class="btn" onclick="scanSamplePath()">Scan Path</button>
+        <input id="fileInput" type="file" />
+        <button class="btn" onclick="scanUploaded()">Scan Uploaded</button>
+      </div>
+      <div class="row" style="margin:6px 0;">
+        <input id="eventId" type="text" placeholder="Event ID (optional, to annotate decision)" style="min-width:320px;" />
+      </div>
+      <div id="scanOut" class="muted">No scan performed yet.</div>
+      <pre id="scanJson">{}</pre>
+    </div>
+
+    <div class="card">
+      <h3>4) Operational Notes</h3>
+      <ul class="muted">
+        <li>For safety, remote downloads from MalwareBazaar or other feeds are not performed automatically without explicit configuration.</li>
+        <li>When a sample is available, matched rules may emit factors like <span class="pill">malware:yara_match_YourRule</span>.</li>
+        <li>Large files are scanned with size/time limits to keep pipeline latency bounded.</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h3>5) YARA Health</h3>
+      <p class="muted">Rule-level counters are exported to Prometheus metrics:</p>
+      <ul class="muted">
+        <li><code>yara_rule_matches_total{rule=...}</code></li>
+        <li><code>yara_rule_bytes_scanned_total{rule=...}</code></li>
+        <li><code>yara_rule_timeouts_total{rule=...}</code> and <code>yara_rule_errors_total{rule=...}</code> (if configured)</li>
+      </ul>
+      <p class="muted">Open <a href="/metrics" target="_blank">/metrics</a> to inspect live counters. Consider scraping into Prometheus/Grafana for dashboards.</p>
+    </div>
+  </div>
+
+  <script>
+    function h(){ try { return { 'x-api-key': localStorage.getItem('apiKey') || 'devkey123', 'Content-Type': 'application/json' }; } catch { return { 'x-api-key': 'devkey123', 'Content-Type': 'application/json' }; } }
+    async function saveRule(){
+      const name = (document.getElementById('ruleName')||{}).value || '';
+      const text = (document.getElementById('ruleText')||{}).value || '';
+      if(!name||!text){ document.getElementById('ruleMsg').textContent='Name and rule text required'; return; }
+      try {
+        const r = await fetch('/api/v1/yara/rules', { method:'POST', headers: h(), body: JSON.stringify({ name, rule: text }) });
+        const j = await r.json();
+        document.getElementById('ruleMsg').textContent = r.ok ? 'Rule saved' : (j.detail||'save failed');
+      } catch(e){ document.getElementById('ruleMsg').textContent = 'Save failed: '+(e.message||e); }
+    }
+    async function listRules(){
+      try { const r = await fetch('/api/v1/yara/rules', { headers: h() }); const j = await r.json(); document.getElementById('ruleMsg').textContent = r.ok ? (Array.isArray(j.rules)?('Rules: '+j.rules.map(x=>x.name||'rule').join(', ')) : 'No rules') : (j.detail||'list failed'); } catch(e){ document.getElementById('ruleMsg').textContent = 'List failed: '+(e.message||e); }
+    }
+    async function deleteRule(){
+      const name = (document.getElementById('ruleName')||{}).value || '';
+      if(!name){ document.getElementById('ruleMsg').textContent='Provide rule name to delete'; return; }
+      try { const r = await fetch('/api/v1/yara/rules?name='+encodeURIComponent(name), { method:'DELETE', headers: h() }); const j = await r.json(); document.getElementById('ruleMsg').textContent = r.ok ? 'Rule deleted' : (j.detail||'delete failed'); } catch(e){ document.getElementById('ruleMsg').textContent = 'Delete failed: '+(e.message||e); }
+    }
+    async function scanSamplePath(){
+      const p = (document.getElementById('samplePath')||{}).value || '';
+      const ev = (document.getElementById('eventId')||{}).value || '';
+      if(!p){ document.getElementById('scanOut').textContent='Enter a server-accessible file path.'; return; }
+      try { const r = await fetch('/api/v1/yara/scan_path', { method:'POST', headers: h(), body: JSON.stringify(ev?{ path: p, event_id: ev }:{ path: p }) }); const j = await r.json(); document.getElementById('scanOut').textContent = r.ok ? 'Scan complete' : (j.detail||'scan failed'); document.getElementById('scanJson').textContent = JSON.stringify(j,null,2); } catch(e){ document.getElementById('scanOut').textContent = 'Scan failed: '+(e.message||e); }
+    }
+    async function scanUploaded(){
+      try {
+        const fi = document.getElementById('fileInput');
+        if(!fi||!fi.files||!fi.files[0]){ document.getElementById('scanOut').textContent='Choose a file first.'; return; }
+        const ev = (document.getElementById('eventId')||{}).value || '';
+        const form = new FormData(); form.append('file', fi.files[0]);
+        const url = ev ? ('/api/v1/yara/scan_upload?event_id='+encodeURIComponent(ev)) : '/api/v1/yara/scan_upload';
+        const r = await fetch(url, { method:'POST', headers: { 'x-api-key': (localStorage.getItem('apiKey')||'devkey123') }, body: form });
+        const j = await r.json();
+        document.getElementById('scanOut').textContent = r.ok ? 'Scan complete' : (j.detail||'scan failed');
+        document.getElementById('scanJson').textContent = JSON.stringify(j,null,2);
+      } catch(e){ document.getElementById('scanOut').textContent = 'Scan failed: '+(e.message||e); }
+    }
+  </script>
+  <script src="/static/js/notifications.js"></script>
+</body>
+</html>

@@ -1,0 +1,20 @@
+[
+  {
+    "message_id": "msg-shopsquire-bec-001",
+    "timestamp": "2025-03-15T02:13:00Z",
+    "attachment_name": "Harbourside_Acquisition_Details_CONFIDENTIAL.xlsm",
+    "file_hash": "4f7b69d5c7469f6b5590fd3c9b1d7e0aab9d91234d347ab79a0a22a5b4d4ef92",
+    "sandbox_verdict": "malicious",
+    "sandbox_engine": "janusec-demo-sandbox",
+    "sandbox_behaviors": [
+      "autoexec_macro",
+      "powershell_spawn",
+      "certutil_download",
+      "periodic_http_beacon"
+    ],
+    "contacted_domains": [
+      "secure-sync-checkin.net",
+      "cdn-dropbox-sync.co"
+    ]
+  }
+]

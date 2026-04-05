@@ -1,0 +1,44 @@
+[
+  {
+    "name": "tenant-alpha",
+    "pipeline_profile": "customer-alpha",
+    "vectors": "tests/data/api_security_auth_harness_alpha.json",
+    "soak_count": 180,
+    "soak_payload": "tests/data/api_security_auth_harness_alpha.json"
+  },
+  {
+    "name": "tenant-bravo",
+    "pipeline_profile": "customer-bravo",
+    "vectors": "tests/data/api_security_auth_harness_bravo.json",
+    "soak_count": 150,
+    "soak_payload": "tests/data/api_security_auth_harness_bravo.json"
+  },
+  {
+    "name": "tenant-gamma",
+    "pipeline_profile": "customer-gamma",
+    "vectors": "tests/data/api_security_auth_harness_gamma.json",
+    "soak_count": 120,
+    "soak_payload": "tests/data/api_security_auth_harness_gamma.json"
+  },
+  {
+    "name": "tenant-delta",
+    "pipeline_profile": "customer-delta",
+    "vectors": "tests/data/api_security_auth_harness_delta.json",
+    "soak_count": 140,
+    "soak_payload": "tests/data/api_security_auth_harness_delta.json"
+  },
+  {
+    "name": "tenant-saas",
+    "pipeline_profile": "customer-saas",
+    "vectors": "tests/data/api_security_auth_harness_saas.json",
+    "soak_count": 130,
+    "soak_payload": "tests/data/api_security_auth_harness_saas.json"
+  },
+  {
+    "name": "tenant-private-preview",
+    "pipeline_profile": "customer-private-preview",
+    "vectors": "tests/data/api_security_auth_harness_private.json",
+    "soak_count": 100,
+    "soak_payload": "tests/data/api_security_auth_harness_private.json"
+  }
+]

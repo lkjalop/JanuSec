@@ -1,0 +1,10 @@
+{
+  "name": "cloud-shadow-admin-policy-rollback",
+  "trigger": {"factor": "cloud:iam_policy_shadow_admin"},
+  "dry_run": true,
+  "steps": [
+    {"type": "open_case", "params": {"title": "Shadow admin policy detected"}},
+    {"type": "policy_rollback", "params": {"policy_id": "shadow-admin-temp"}},
+    {"type": "notify", "params": {"webhook_url": "https://example.invalid/webhook", "msg": "Initiated policy rollback for shadow-admin"}}
+  ]
+}

@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BGP Incidents</title>
+  <style>
+    :root{--bg:#0B0E14;--card:#151922;--muted:#A8B2C3;--text:#E8EBF0;--border:#2A3142;--accent:#4A63E7}
+    body{margin:0;background:var(--bg);color:var(--text);font-family:Inter, Segoe UI, sans-serif}
+    .wrap{max-width:1100px;margin:20px auto;padding:12px}
+    .row{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+    .btn{padding:8px 12px;background:#1C2230;border:1px solid var(--border);border-radius:6px;color:var(--text);cursor:pointer}
+    .card{background:var(--card);border:1px solid var(--border);border-radius:8px;margin-bottom:16px;padding:12px}
+    table{border-collapse:collapse;width:100%}
+    th,td{border:1px solid var(--border);padding:6px 8px;font-size:12px}
+    .muted{color:var(--muted);font-size:12px}
+  </style>
+  <script>
+    function safeNotify(msg, level){
+      try{
+        if(window.showNotification) return showNotification(msg, level);
+        if(window.notifications && typeof window.notifications.showToast === 'function') return window.notifications.showToast(msg, 4000);
+        console.log('notify:', level||'info', msg);
+      }catch(e){ console.log('notify-fail', e, msg); }
+    }
+
+    function H(){ try { return { 'x-api-key': localStorage.getItem('apiKey')||'devkey123' }; } catch { return {'x-api-key':'devkey123'} } }
+    function adminHeaders(){
+      const h = H();
+      try{
+        const ak = localStorage.getItem('adminKey')||'';
+        if(ak) h['x-admin-key'] = ak      }catch(_){ }
+      return h;
+    }
+    async function load(){
+      try{
+        const r = await fetch('/api/v1/bgp/incidents', { headers: H() });
+        const j = await r.json();
+        const rows = Array.isArray(j.incidents) ? j.incidents : [];
+        const tbl = document.getElementById('tbl');
+        tbl.innerHTML = rows.length? rows.map(x=>`<tr><td>${x.prefix||'-'}</td><td>${x.asn||'-'}</td><td>${x.type||'-'}</td><td>${x.started_at||'-'}</td><td>${x.rpki||'-'}</td></tr>`).join('') : `<tr><td colspan="5" class="muted">No active incidents</td></tr>`;
+        const c = document.getElementById('count'); c.textContent = rows.length;
+      }catch(e){ console.error(e); }
+    }
+    async function loadStatus(){
+      try{
+        const s = document.getElementById('status');
+        s.textContent = 'Loading status...';
+        const r = await fetch('/api/v1/admin/bgp/status', { headers: adminHeaders() });
+        if(!r.ok){ s.textContent = 'Status unavailable (check admin key)'; return; }
+        const j = await r.json();
+        const ts = j.last_refresh_ts? new Date(j.last_refresh_ts*1000).toISOString() : 'n/a';
+        s.innerHTML = `Last refresh: <b>${ts}</b> • TTL: <b>${j.ttl_seconds??'n/a'}s</b> • Prefixes: <b>${j.prefix_count??'n/a'}</b>`;
+      }catch(e){ console.error(e); const s = document.getElementById('status'); s.textContent = 'Status error'; }
+    }
+    async function forceRefresh(){
+      try{
+        const r = await fetch('/api/v1/admin/bgp/refresh', { method:'POST', headers: adminHeaders() });
+        if(!r.ok){ safeNotify('Refresh failed (check admin key)','error'); return; }
+        await Promise.all([loadStatus(), load()]);
+      }catch(e){ console.error(e); safeNotify('Refresh error','error'); }
+    }
+    window.addEventListener('DOMContentLoaded', load);
+  </script>
+</head>
+<body>
+  <div class="wrap">
+    <div class="row">
+      <a class="btn" href="/static/janusec-platform-complete-LIVE.html">← Console</a>
+      <button class="btn" onclick="load()">Refresh</button>
+    </div>
+    <div class="card">
+      <h3>BGP Cache Status</h3>
+      <div class="row">
+        <input id="adminKey" class="btn" placeholder="Admin Key (x-admin-key)" onblur="try{localStorage.setItem('adminKey', this.value||'');}catch(_){ }" />
+        <button class="btn" onclick="loadStatus()">Load Status</button>
+        <button class="btn" onclick="forceRefresh()">Force Refresh</button>
+      </div>
+      <div id="status" class="muted">Status not loaded.</div>
+    </div>
+    <div class="card">
+      <h2>BGP Incidents</h2>
+      <div class="muted">Total prefixes: <span id="count">0</span></div>
+      <p class="muted">Stub page for future RPKI/hijack integration. This will list current incidents and potentially impacted destinations.</p>
+      <table>
+        <thead><tr><th>Prefix</th><th>ASN</th><th>Type</th><th>Started</th><th>RPKI</th></tr></thead>
+        <tbody id="tbl"></tbody>
+      </table>
+      <p class="muted" style="margin-top:8px;">Admin can force refresh via <code>POST /api/v1/admin/bgp/refresh</code> with <code>x-admin-key</code>.</p>
+    </div>
+  </div>
+  <script src="/static/js/notifications.js"></script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+version: '3.9'
+services:
+  app:
+    environment:
+      # Enable GCP SCC scheduled ingestion (file-based)
+      GCP_SCC_SCHED_DIR: /data/gcp_scc_exports
+      GCP_SCC_SCHED_INTERVAL_SEC: 30
+      GCP_SCC_SCHED_BASE: http://app:8080
+      GCP_SCC_SCHED_API_KEY: ${API_KEY:-devkey123}
+      GCP_SCC_SCHED_TENANT: ${TENANT_ID:-demo}
+      TLS_ENFORCE: "0" # set to "1" in production (requires https)
+    volumes:
+      - ./data/gcp_scc_exports:/data/gcp_scc_exports:ro
+      - ./data/dlq:/data/dlq

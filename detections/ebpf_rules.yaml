@@ -1,0 +1,48 @@
+---
+# Example detection templates linking low-level kernel symptoms to higher-order tags
+- id: ebpf_kprobe_sensitive_attach
+  name: eBPF sensitive kprobe attach
+  description: "Kernel program attempted to attach kprobe to a sensitive syscall or function"
+  event_type: kprobe_attach_sensitive
+  mitre: [T1055, T1218]
+  stride: [Elevation, Tampering]
+  severity: medium
+  suggested_logs:
+    - dmesg
+    - bpf_verifier
+    - process_ancestry
+
+- id: ebpf_verifier_reject
+  name: eBPF verifier reject
+  description: "Loader received a verifier rejection when loading an eBPF program"
+  event_type: bpf_verifier_reject
+  mitre: [T1609]
+  stride: [Tampering]
+  severity: low
+  suggested_logs:
+    - bpf_verifier
+    - loader_logs
+
+- id: ebpf_unusual_execve_rate
+  name: elevated execve rate
+  description: "Process or container exhibits a sudden spike in execve syscalls"
+  event_type: unusual_execve_rate
+  mitre: [T1059, T1204]
+  stride: [Repudiation, Elevation]
+  severity: high
+  suggested_logs:
+    - procfs_snapshot
+    - k8s_audit
+    - container_logs
+
+- id: net_rare_asn_connection
+  name: network peer rare ASN
+  description: "Outbound connection to a rare ASN or anomalous IP destination"
+  event_type: network_peer_rare_asn
+  mitre: [T1041]
+  stride: [InformationDisclosure]
+  severity: medium
+  suggested_logs:
+    - netflow
+    - conntrack
+    - dns_logs

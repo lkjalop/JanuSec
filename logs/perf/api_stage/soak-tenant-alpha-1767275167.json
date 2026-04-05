@@ -1,0 +1,8 @@
+{
+  "count": 20,
+  "avg_ms": 23.855,
+  "p95_ms": 28.591,
+  "failures": 0,
+  "throughput_eps": 41.92,
+  "tenant": "tenant-alpha"
+}

@@ -1,0 +1,96 @@
+{
+  "batch_id": "BATCH-CYBSTASH-CSV1",
+  "source_files": ["dump/cybstash csv1.xlsx"],
+  "status": "COMPLETE",
+  "generated_at": "2025-09-23T14:32:00Z",
+  "artifacts": [
+    {
+      "id": "a_powerscan_exe",
+      "artifact_name": "powerscan.exe",
+      "artifact_type": "EXECUTABLE",
+      "risk_score": 87,
+      "verdict": "MALICIOUS",
+      "rarity": "RARE",
+      "hosts": 4,
+      "cluster_id": "12",
+      "flags": ["unsigned","multi_host","rare"],
+      "factors": [
+        {"category": "STATIC", "score_delta": 18, "label": "Unsigned Executable", "notes": ["Missing publisher signature"]},
+        {"category": "RELATIONAL", "score_delta": 15, "label": "Multi-Host Spread", "notes": ["4 distinct hosts"]},
+        {"category": "RARITY", "score_delta": 10, "label": "Rare Prevalence", "notes": ["First appearance"]},
+        {"category": "TEMPORAL", "score_delta": 8, "label": "Burst Appearance", "notes": ["All detections within 10m"]},
+        {"category": "REPUTATION", "score_delta": 20, "label": "Negative Reputation", "notes": ["VirusTotal 8/62"]},
+        {"category": "SCRIPT", "score_delta": 6, "label": "Script-Like Behavior", "notes": ["Spawns powershell child"]},
+        {"category": "ORIGIN", "score_delta": 10, "label": "Suspicious Download Path", "notes": ["User Downloads folder"]}
+      ],
+      "mitre": ["T1059","T1105"],
+      "stride": ["Tampering","Elevation of Privilege"],
+      "cve_hints": [],
+      "reputation": {"vt_detect": 8, "vt_total": 62, "seen_before": false},
+      "prevalence": {"first_seen": "2025-09-23T14:20:00Z", "last_seen": "2025-09-23T14:25:00Z", "historical_count": 1},
+      "override": null
+    },
+    {
+      "id": "a_macro_payload_dotm",
+      "artifact_name": "macro_payload.dotm",
+      "artifact_type": "MACRO",
+      "risk_score": 72,
+      "verdict": "HIGH",
+      "rarity": "EMERGING",
+      "hosts": 1,
+      "cluster_id": "7",
+      "flags": ["macro","office_doc"],
+      "factors": [
+        {"category": "MACRO", "score_delta": 20, "label": "Embedded Auto-Exec Macro", "notes": ["AutoOpen routine"]},
+        {"category": "ORIGIN", "score_delta": 10, "label": "Recent External Download", "notes": ["Download age < 2h"]},
+        {"category": "STATIC", "score_delta": 8, "label": "Obfuscated Strings", "notes": ["Base64 patterns"]},
+        {"category": "TEMPORAL", "score_delta": 6, "label": "Off-Hours Activity", "notes": ["Execution at 03:14 local"]},
+        {"category": "RELATIONAL", "score_delta": 5, "label": "Spawns Scripting Host", "notes": ["wscript.exe child"]},
+        {"category": "RARITY", "score_delta": 5, "label": "Emerging", "notes": ["Seen only in 1 batch"]},
+        {"category": "REPUTATION", "score_delta": 18, "label": "Malicious Macro Signature", "notes": ["Hash flagged by internal YARA"]}
+      ],
+      "mitre": ["T1566","T1204"],
+      "stride": ["Repudiation","Information Disclosure"],
+      "cve_hints": [],
+      "reputation": {"vt_detect": 14, "vt_total": 62, "seen_before": false},
+      "prevalence": {"first_seen": "2025-09-23T14:15:00Z", "last_seen": "2025-09-23T14:15:00Z", "historical_count": 1},
+      "override": null
+    },
+    {
+      "id": "a_legit_signed_agent",
+      "artifact_name": "backup_agent.exe",
+      "artifact_type": "EXECUTABLE",
+      "risk_score": 12,
+      "verdict": "BENIGN",
+      "rarity": "COMMON",
+      "hosts": 15,
+      "flags": ["signed","common"],
+      "factors": [
+        {"category": "STATIC", "score_delta": -5, "label": "Trusted Signature", "notes": ["Match vendor CA"]},
+        {"category": "RELATIONAL", "score_delta": -3, "label": "Stable Prevalence", "notes": ["15 hosts across 5 batches"]}
+      ],
+      "mitre": [],
+      "stride": [],
+      "cve_hints": [],
+      "reputation": {"vt_detect": 0, "vt_total": 62, "seen_before": true},
+      "prevalence": {"first_seen": "2025-09-10T10:00:00Z", "last_seen": "2025-09-23T14:25:00Z", "historical_count": 5},
+      "override": null
+    }
+  ],
+  "top_risks": ["a_powerscan_exe","a_macro_payload_dotm"],
+  "mitre_coverage": ["T1059","T1105","T1566","T1204"],
+  "mitre_delta": ["T1566","T1204"],
+  "stride_coverage": ["Tampering","Elevation of Privilege","Repudiation","Information Disclosure"],
+  "business_impact": {
+    "summary": "Potential lateral discovery tooling and macro-based initial access present moderate escalation risk.",
+    "emerging_techniques": ["T1059","T1105"],
+    "propagation": {"multi_host_artifacts": 1, "affected_hosts": ["HR-LAPTOP-22","FIN-SVR-01","FIN-LAPTOP-03","HR-LAPTOP-07"]},
+    "recommended_actions": [
+      "Contain affected hosts to limit further discovery attempts",
+      "Block macro-enabled documents from external email senders",
+      "Hunt for additional artifacts in Cluster #12"
+    ],
+    "confidence": "HIGH"
+  },
+  "narrative": "Two elevated artifacts detected: powerscan.exe spreading across four hosts and a malicious macro document. Attack surface suggests initial access plus discovery staging." 
+}

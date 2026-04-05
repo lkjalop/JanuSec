@@ -1,0 +1,11 @@
+{
+  "message_id": "mid-003",
+  "from_address": "hr@example.com",
+  "received_headers": [
+    "from mail.evil.biz (mail.evil.biz [198.51.100.7]) by mx.example.net"
+  ],
+  "spf_result": "fail",
+  "dmarc_result": "fail",
+  "subject": "Important notice",
+  "body": "Please confirm your details."
+}

@@ -1,0 +1,37 @@
+{
+  "dashboard": {
+    "id": null,
+    "uid": "arc-verification",
+    "title": "ARC Verification Overview",
+    "panels": [
+      {
+        "type": "stat",
+        "title": "ARC Queue Depth",
+        "targets": [{"expr": "sum(arc_verify_queue_depth)", "legendFormat": "queue"}],
+        "gridPos": {"x": 0, "y": 0, "w": 12, "h": 4}
+      },
+      {
+        "type": "timeseries",
+        "title": "ARC Verify Latency (s)",
+        "targets": [{"expr": "histogram_quantile(0.95, sum(rate(arc_verify_latency_seconds_bucket[5m])) by (le))", "legendFormat": "p95"}],
+        "gridPos": {"x": 12, "y": 0, "w": 12, "h": 6}
+      },
+      {
+        "type": "timeseries",
+        "title": "DNS Cache Hits / Misses",
+        "targets": [
+          {"expr": "sum(arc_dns_cache_hits)", "legendFormat": "hits"},
+          {"expr": "sum(arc_dns_cache_misses)", "legendFormat": "misses"}
+        ],
+        "gridPos": {"x": 0, "y": 4, "w": 12, "h": 6}
+      },
+      {
+        "type": "table",
+        "title": "Per-tenant Pulls",
+        "targets": [{"expr": "sum by (tenant) (telemetry_pull_requests_total)", "legendFormat": "{{tenant}}"}],
+        "gridPos": {"x": 0, "y": 10, "w": 24, "h": 8}
+      }
+    ],
+    "schemaVersion": 34
+  }
+}

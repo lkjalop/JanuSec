@@ -1,0 +1,3 @@
+process_name,file_path,sha256,host,verdict
+powershell,C:\Windows\System32\cmd.exe,deadbeef,host1,SUSPICIOUS
+notepad,C:\Temp\bad.exe,cafebabecafe,host2,BENIGN

@@ -1,0 +1,7 @@
+[
+	{"name":"supply_chain_artifact_detected","domain":"supply_chain","severity":0.9,"mitre":[],"stride":[],"kill_chain":["Delivery"],"compliance":["ISO42001"],"diamond":{"capability":"supply_injection","infrastructure":"package_repo"},"dread":{"damage":9,"repro":8}},
+	{"name":"rare_package_repo_download","domain":"supply_chain","severity":0.82,"mitre":[],"stride":[],"kill_chain":["Delivery"],"compliance":["ISO42001"],"diamond":{"capability":"supply_injection","infrastructure":"pkg_repo"},"dread":{"damage":8,"repro":6}},
+	{"name":"malicious_container_image_pull_2","domain":"supply_chain","severity":0.92,"mitre":[],"stride":[],"kill_chain":["Delivery"],"compliance":["ISO42001"],"diamond":{"capability":"supply_injection","infrastructure":"container_registry"},"dread":{"damage":9,"repro":8}},
+	{"name":"credential_exposed_in_code","domain":"supply_chain","severity":0.86,"mitre":[],"stride":["InfoDisclosure"],"kill_chain":["Delivery"],"compliance":["ISO42001"],"diamond":{"capability":"credential_find","infrastructure":"repo"},"dread":{"damage":8,"repro":6}},
+	{"name":"artifact_hash_mismatch","domain":"supply_chain","severity":0.9,"mitre":[],"stride":[],"kill_chain":["Delivery"],"compliance":["ISO42001"],"diamond":{"capability":"tampered_artifact","infrastructure":"artifact_store"},"dread":{"damage":9,"repro":8}}
+]

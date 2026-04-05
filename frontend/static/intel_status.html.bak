@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Threat Intel Status</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body { background:#0b0e14; color:#e5e9f0; font-family: system-ui, sans-serif; margin:0; padding:1.2rem; }
+    h1 { font-size:1.4rem; margin:0 0 1rem; }
+    .grid { display:grid; gap:1rem; grid-template-columns: repeat(auto-fit,minmax(260px,1fr)); }
+    .card { background:#161b22; border:1px solid #232a33; border-radius:8px; padding:1rem; }
+    .badge { display:inline-block; padding:2px 8px; border-radius:12px; font-size:.7rem; background:#243041; margin-left:.5rem; }
+    .stale { color:#ffb347; }
+    table { width:100%; border-collapse: collapse; font-size:.8rem; }
+    th,td { padding:4px 6px; text-align:left; border-bottom:1px solid #232a33; }
+    th { background:#1d242d; }
+    code { background:#1d242d; padding:2px 4px; border-radius:4px; font-size:.75rem; }
+    .ok { color:#8fda89; }
+    .warn { color:#ffb347; }
+    .err { color:#ff6b6b; }
+    footer { margin-top:2rem; font-size:.65rem; opacity:.55; }
+    button { background:#243041; color:#e5e9f0; border:1px solid #2f3b47; padding:6px 12px; border-radius:4px; cursor:pointer; }
+    button:hover { background:#2d3946; }
+  </style>
+</head>
+<body>
+  <h1>Threat Intelligence Status <button id="refreshBtn">Refresh</button></h1>
+  <div id="overall"></div>
+  <div class="grid" id="cards"></div>
+  <h2>Sources</h2>
+  <table id="sourcesTbl">
+    <thead><tr><th>Source</th><th>Last Sync (age)</th><th>Stale?</th><th>Failures</th><th>Counts</th></tr></thead>
+    <tbody></tbody>
+  </table>
+  <h2>Confidence Coverage</h2>
+  <table id="confTbl">
+    <thead><tr><th>Kind</th><th>Items With Confidence</th></tr></thead>
+    <tbody></tbody>
+  </table>
+  <footer>Data auto-refreshes every 60s. Uses /api/v1/intel/status | Panel build: lightweight static.</footer>
+  <script>
+    const apiKey = localStorage.getItem('apiKey') || 'devkey123';
+    let timer;
+    function fmtAge(seconds){
+      if(seconds == null) return '—';
+      if(seconds < 90) return seconds.toFixed(0)+'s';
+      if(seconds < 3600) return (seconds/60).toFixed(1)+'m';
+      return (seconds/3600).toFixed(1)+'h';
+    }
+    async function load(){
+      try {
+        const r = await fetch('/api/v1/intel/status', { headers: { 'x-api-key': apiKey }});
+        const data = await r.json();
+        render(data);
+      } catch(e){ console.error(e); }
+      timer = setTimeout(load, 60000);
+    }
+    function render(data){
+      const overall = document.getElementById('overall');
+      if(!data.enabled){ overall.innerHTML = '<span class="warn">Threat intel disabled</span>'; return; }
+      overall.innerHTML = '<div>Enabled ✓ — Total IoCs: '+Object.values(data.counts).reduce((a,b)=>a+b,0)+' | Sync Interval: '+data.sync_interval+'s</div>';
+      const tbody = document.querySelector('#sourcesTbl tbody');
+      tbody.innerHTML='';
+      const freshness = data.freshness_seconds || {}; const stale = data.stale || {}; const last = data.last_sync || {}; const fails = data.failure_streaks || {}; const sc = data.source_counts || {};
+      Object.keys(last).sort().forEach(src => {
+        const tr = document.createElement('tr');
+        const age = freshness[src];
+        const f = fails[src] || 0;
+        const cnt = sc[src] || 0;
+        tr.innerHTML = `<td>${src}</td><td>${new Date(last[src]*1000).toLocaleString()} (${fmtAge(age)})</td><td class="${stale[src]?'warn':'ok'}">${stale[src]?'STALE':'OK'}</td><td class="${f? 'err':'ok'}">${f}</td><td>${cnt}</td>`;
+        tbody.appendChild(tr);
+      });
+      const confTbl = document.querySelector('#confTbl tbody');
+      confTbl.innerHTML='';
+      const cs = data.confidence_stats || {}; Object.keys(cs).forEach(kind => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${kind}</td><td>${cs[kind]}</td>`;
+        confTbl.appendChild(tr);
+      });
+      const cards = document.getElementById('cards');
+      cards.innerHTML='';
+      Object.entries(data.counts || {}).forEach(([k,v]) => {
+        const div = document.createElement('div');
+        div.className='card';
+        div.innerHTML = `<strong>${k}</strong><div style="font-size:1.2rem;margin-top:.35rem;">${v}</div>`;
+        cards.appendChild(div);
+      });
+    }
+    document.getElementById('refreshBtn').addEventListener('click', ()=>{ clearTimeout(timer); load(); });
+    load();
+  </script>
+  <script src="/static/js/notifications.js"></script>
+</body>
+</html>

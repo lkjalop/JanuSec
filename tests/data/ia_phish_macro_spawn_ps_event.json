@@ -1,0 +1,7 @@
+{
+  "id": "evt-phish-1",
+  "host": "host-e",
+  "user": "eve",
+  "parent_process": "WinWord.exe",
+  "child_process": "powershell.exe"
+}

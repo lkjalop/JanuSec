@@ -1,0 +1,300 @@
+from __future__ import annotations
+
+from typing import Any, Dict, List
+import base64
+import time
+
+from fastapi import APIRouter, UploadFile, File, HTTPException, Body, Query, Header, Request
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
+
+from security.auth import require_scopes
+from src.modules.compliance_mapper import ComplianceMapper
+from src.modules.compliance.taxonomy_loader import ControlTaxonomyLoader
+from .integrations_endpoints import _STATE as _INTEGRATIONS_STATE  # reuse in-memory config
+import httpx
+import asyncio
+try:
+    from prometheus_client import Counter  # type: ignore
+except Exception:  # pragma: no cover
+    class Counter:  # type: ignore
+        def __init__(self,*a,**k): pass
+        def labels(self,*a,**k): return self
+        def inc(self,*a,**k): return None
+
+
+router = APIRouter(prefix="/api/v1/compliance", tags=["Compliance"])
+
+_ASSESSMENT_CACHE: dict[str, dict[str, dict[str, Any]]] = {}  # tenant -> {assessment_id: {result, graph}}
+_CMP_JOBS: dict[str, dict[str, Any]] = {}  # job_id -> job meta (includes tenant)
+
+_cmp_assess_total = Counter('janusec_compliance_assess_total','Total compliance assessments',['mode'])
+_cmp_report_total = Counter('janusec_compliance_report_total','Total compliance reports',['format'])
+
+
+def _gen_assessment_id() -> str:
+    return f"cmp-{int(time.time()*1000)}"
+
+
+def _tenant_key(tenant_id: str | None) -> str:
+    return tenant_id or 'default'
+
+
+@router.post('/assess')
+async def assess_json(
+    payload: Dict[str, Any] = Body(...),
+    external: bool = Query(False),
+    background: bool = Query(False),
+    tenant_id: str | None = Header(None, alias='X-Tenant-ID'),
+    auth=require_scopes('factors.search')
+) -> JSONResponse:
+    framework = str(payload.get('framework') or 'ISO27001')
+    docs: List[dict] = []
+    for d in payload.get('documents') or []:
+        if not isinstance(d, dict):
+            continue
+        name = str(d.get('filename') or d.get('name') or 'document')
+        if 'text' in d and isinstance(d['text'], str):
+            docs.append({'filename': name, 'text': d['text']})
+        elif 'content_base64' in d and isinstance(d['content_base64'], str):
+            try:
+                b = base64.b64decode(d['content_base64'])
+            except Exception:
+                b = b''
+            docs.append({'filename': name, 'content': b})
+    if not docs:
+        raise HTTPException(status_code=400, detail='no_documents')
+    # External processing path
+    if external:
+        entry = _INTEGRATIONS_STATE.get('compliance')
+        url = entry and entry.get('webhook_url')
+        if not (entry and entry.get('connected') and url):
+            raise HTTPException(status_code=503, detail='compliance_external_unavailable')
+        job_id = f"job-{int(time.time()*1000)}"
+        _CMP_JOBS[job_id] = {
+            'job_id': job_id,
+            'tenant_id': tenant_id,
+            'framework': framework,
+            'status': 'queued',
+            'created': time.time(),
+            'assessment_id': None,
+            'error': None,
+        }
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                await client.post(str(url), json={'job_id': job_id, 'tenant_id': tenant_id, 'framework': framework, 'documents': docs})
+        except Exception as e:
+            _CMP_JOBS[job_id]['status'] = 'error'
+            _CMP_JOBS[job_id]['error'] = str(e)
+            raise HTTPException(status_code=502, detail='webhook_dispatch_failed')
+        _cmp_assess_total.labels(mode='external').inc()
+        return JSONResponse({'job_id': job_id, 'status': 'queued'}, status_code=202)
+    # Local background job
+    if background:
+        job_id = f"job-{int(time.time()*1000)}"
+        _CMP_JOBS[job_id] = {
+            'job_id': job_id,
+            'tenant_id': tenant_id,
+            'framework': framework,
+            'status': 'queued',
+            'created': time.time(),
+            'assessment_id': None,
+            'error': None,
+        }
+        async def _run():
+            try:
+                mapper = ComplianceMapper({})
+                res = await mapper.assess_documents(framework, docs)
+                aid = _gen_assessment_id()
+                g = res.pop('_graph', None)
+                t = _tenant_key(tenant_id)
+                _ASSESSMENT_CACHE.setdefault(t, {})[str(aid)] = {'result': res, 'graph': g}
+                _CMP_JOBS[job_id]['status'] = 'completed'
+                _CMP_JOBS[job_id]['assessment_id'] = aid
+                _cmp_assess_total.labels(mode='local').inc()
+            except Exception as e:
+                _CMP_JOBS[job_id]['status'] = 'error'
+                _CMP_JOBS[job_id]['error'] = str(e)
+        try:
+            asyncio.create_task(_run())
+        except Exception:
+            # fallback: run inline if loop missing
+            await _run()
+        return JSONResponse({'job_id': job_id, 'status': 'queued'}, status_code=202)
+
+    # Local processing
+    mapper = ComplianceMapper({})
+    res = await mapper.assess_documents(framework, docs)
+    aid = payload.get('assessment_id') or _gen_assessment_id()
+    g = res.pop('_graph', None)
+    t = _tenant_key(tenant_id)
+    _ASSESSMENT_CACHE.setdefault(t, {})[str(aid)] = {'result': res, 'graph': g}
+    _cmp_assess_total.labels(mode='local').inc()
+    return JSONResponse({'assessment_id': aid, **res})
+
+
+@router.post('/assess/files')
+async def assess_files(
+    files: List[UploadFile] = File(...),
+    framework: str = Query('ISO27001'),
+    external: bool = Query(False),
+    background: bool = Query(False),
+    tenant_id: str | None = Header(None, alias='X-Tenant-ID'),
+) -> JSONResponse:
+    if not files:
+        raise HTTPException(status_code=400, detail='no_files')
+    docs: List[dict] = []
+    MAX_SIZE = 10 * 1024 * 1024  # 10MB per file
+    ALLOWED = ('.pdf', '.txt', '.md', '.log', '.json')
+    for f in files:
+        try:
+            content = await f.read()
+        except Exception:
+            content = b''
+        name = (f.filename or 'document')
+        if not name.lower().endswith(ALLOWED):
+            raise HTTPException(status_code=415, detail='unsupported_media_type')
+        if len(content) > MAX_SIZE:
+            raise HTTPException(status_code=413, detail='file_too_large')
+        docs.append({'filename': name, 'content': content})
+    if external:
+        entry = _INTEGRATIONS_STATE.get('compliance')
+        url = entry and entry.get('webhook_url')
+        if not (entry and entry.get('connected') and url):
+            raise HTTPException(status_code=503, detail='compliance_external_unavailable')
+        job_id = f"job-{int(time.time()*1000)}"
+        _CMP_JOBS[job_id] = {
+            'job_id': job_id,
+            'tenant_id': tenant_id,
+            'framework': framework,
+            'status': 'queued',
+            'created': time.time(),
+            'assessment_id': None,
+            'error': None,
+        }
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                # Convert to base64 for transport
+                import base64
+                docs64 = [{'filename': d['filename'], 'content_base64': base64.b64encode(d['content']).decode('ascii')} for d in docs]
+                await client.post(str(url), json={'job_id': job_id, 'tenant_id': tenant_id, 'framework': framework, 'documents': docs64})
+        except Exception as e:
+            _CMP_JOBS[job_id]['status'] = 'error'
+            _CMP_JOBS[job_id]['error'] = str(e)
+            raise HTTPException(status_code=502, detail='webhook_dispatch_failed')
+        _cmp_assess_total.labels(mode='external').inc()
+        return JSONResponse({'job_id': job_id, 'status': 'queued'}, status_code=202)
+    # Local background job
+    if background and not external:
+        job_id = f"job-{int(time.time()*1000)}"
+        _CMP_JOBS[job_id] = {
+            'job_id': job_id,
+            'tenant_id': tenant_id,
+            'framework': framework,
+            'status': 'queued',
+            'created': time.time(),
+            'assessment_id': None,
+            'error': None,
+        }
+        async def _run():
+            try:
+                mapper = ComplianceMapper({})
+                res = await mapper.assess_documents(framework, docs)
+                aid = _gen_assessment_id()
+                g = res.pop('_graph', None)
+                t = _tenant_key(tenant_id)
+                _ASSESSMENT_CACHE.setdefault(t, {})[str(aid)] = {'result': res, 'graph': g}
+                _CMP_JOBS[job_id]['status'] = 'completed'
+                _CMP_JOBS[job_id]['assessment_id'] = aid
+                _cmp_assess_total.labels(mode='local').inc()
+            except Exception as e:
+                _CMP_JOBS[job_id]['status'] = 'error'
+                _CMP_JOBS[job_id]['error'] = str(e)
+        try:
+            asyncio.create_task(_run())
+        except Exception:
+            await _run()
+        return JSONResponse({'job_id': job_id, 'status': 'queued'}, status_code=202)
+
+    mapper = ComplianceMapper({})
+    res = await mapper.assess_documents(framework, docs)
+    aid = _gen_assessment_id()
+    g = res.pop('_graph', None)
+    t = _tenant_key(tenant_id)
+    _ASSESSMENT_CACHE.setdefault(t, {})[aid] = {'result': res, 'graph': g}
+    _cmp_assess_total.labels(mode='local').inc()
+    return JSONResponse({'assessment_id': aid, **res})
+
+
+@router.get('/frameworks')
+async def list_frameworks() -> dict[str, Any]:
+    # For now, we publish a simple list; mapping depth is driven by loaders
+    return {'frameworks': ['ISO27001']}
+
+
+@router.get('/controls')
+async def list_controls(framework: str = Query('ISO27001')) -> dict[str, Any]:
+    # Framework arg reserved for future extension (multiple loaders)
+    loader = ControlTaxonomyLoader()
+    controls = loader.load()
+    return {'framework': framework, 'count': len(controls), 'controls': controls}
+
+
+@router.get('/taxonomy/validate')
+async def taxonomy_validate() -> dict[str, Any]:
+    loader = ControlTaxonomyLoader()
+    controls = loader.load()
+    missing = [c for c in controls if not c.get('control_id') or not c.get('title')]
+    return {
+        'controls_loaded': len(controls),
+        'missing_required': len(missing),
+        'ok': len(missing) == 0
+    }
+
+
+@router.get('/report')
+async def compliance_report(assessment_id: str, format: str = Query('html', regex='^(html|pdf)$'), tenant_id: str | None = Header(None, alias='X-Tenant-ID')):
+    t = _tenant_key(tenant_id)
+    item = (_ASSESSMENT_CACHE.get(t) or {}).get(assessment_id)
+    if not item:
+        raise HTTPException(status_code=404, detail='assessment_not_found')
+    res = item['result']
+    if format == 'html':
+        # Simple HTML using a minimal dark style
+        def esc(x):
+            import html
+            return html.escape(str(x))
+        rows = ''.join(f"<tr><td>{esc(c['control_id'])}</td><td>{esc(c['title'])}</td><td>{esc(c['score'])}</td><td>{esc(c['risk_tier'])}</td><td>{esc(c['domain'])}</td></tr>" for c in res.get('control_results', [])[:200])
+        html = f"""
+<!DOCTYPE html><html><head><meta charset='utf-8'><title>Compliance Report</title>
+<style>body{{background:#0b0e14;color:#e8ebf0;font-family:Arial,sans-serif}}table{{border-collapse:collapse;width:100%}}th,td{{border:1px solid #2a3142;padding:6px 8px;font-size:12px}}</style></head>
+<body>
+<h2>Compliance Assessment Report</h2>
+<div>Framework: {esc(res.get('framework',''))}</div>
+<div>Overall Score: {esc(res.get('overall_score',''))}</div>
+<div>Risk Matrix: {esc(res.get('risk_matrix',''))}</div>
+<h3>Controls</h3>
+<table><tr><th>Control</th><th>Title</th><th>Score</th><th>Risk</th><th>Domain</th></tr>{rows}</table>
+</body></html>"""
+        _cmp_report_total.labels(format='html').inc()
+        return HTMLResponse(html)
+    # PDF
+    try:
+        from reportlab.lib.pagesizes import LETTER
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+        from reportlab.lib.styles import getSampleStyleSheet
+        from reportlab.lib import colors
+        import io
+        buf = io.BytesIO()
+        doc = SimpleDocTemplate(buf, pagesize=LETTER, leftMargin=36, rightMargin=36, topMargin=36, bottomMargin=36)
+        styles = getSampleStyleSheet()
+        story = [Paragraph('Compliance Assessment Report', styles['Title']), Spacer(1, 12)]
+        story.append(Paragraph(f"Framework: {res.get('framework','')}", styles['Normal']))
+        story.append(Paragraph(f"Overall Score: {res.get('overall_score','')}", styles['Normal']))
+        story.append(Paragraph(f"Risk Matrix: {res.get('risk_matrix','')}", styles['Normal']))
+        data = [['Control','Title','Score','Risk','Domain']]
+        for c in res.get('control_results', [])[:200]:
+            data.append([c.get('control_id'), c.get('title'), c.get('score'), c.get('risk_tier'), c.get('domain')])
+        tbl = Table(data)
+        tbl.setStyle(TableStyle([
+            ('GRID',(0,0),(-1,-1),0.4,colors.grey),
+            ('BACKGROUND',(0,0),(-1,0),colors.HexColor('#253347')),
