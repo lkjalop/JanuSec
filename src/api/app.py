@@ -317,6 +317,62 @@ if playbook_router is None:
 
         _stub_router = APIRouter(prefix='/api/v1/playbooks', tags=['Playbooks'])
 
+        def _playbook_steps_for_factors(factors: list, mitre_tags: list) -> list:
+            """Build actionable playbook steps from pipeline factors + MITRE tags."""
+            steps = []
+            fset = {str(f).lower() for f in (factors or [])}
+            mset = {str(t).upper() for t in (mitre_tags or [])}
+            step_n = 1
+
+            # MITRE-driven steps first
+            mitre_step_map = {
+                'T1003': ('Acquire memory image of affected host', 'Memory artifacts for credential dump analysis', 'forensics'),
+                'T1078': ('Disable or rotate compromised credential', 'Prevent further use of stolen identity', 'containment'),
+                'T1059': ('Collect and analyse command-line history and parent process', 'Script execution chain reconstruction', 'investigation'),
+                'T1071': ('Capture C2 network traffic and extract payload patterns', 'Identify C2 channel and infrastructure', 'network'),
+                'T1595': ('Block source IP/range at perimeter firewall', 'Stop automated scanning tool', 'containment'),
+                'T1110': ('Lock account after threshold and notify owner', 'Prevent further brute-force', 'containment'),
+                'T1530': ('Audit S3/Blob ACLs and revoke public access', 'Close data exfiltration path', 'cloud'),
+                'T1134': ('Review elevated role assignment history in IAM', 'Detect privilege abuse path', 'cloud'),
+            }
+            for t in mset:
+                if t in mitre_step_map:
+                    action, rationale, category = mitre_step_map[t]
+                    steps.append({'order': step_n, 'action': action, 'rationale': rationale,
+                                  'category': category, 'automated': False, 'mitre': t})
+                    step_n += 1
+
+            # Factor-driven steps
+            if any(x in fset for x in ('credential_access', 'lsass', 'credential_dump')):
+                steps.append({'order': step_n, 'action': 'Force password reset for affected accounts and review LSASS access logs',
+                              'rationale': 'Credential access factor confirmed', 'category': 'identity', 'automated': False})
+                step_n += 1
+            if any(x in fset for x in ('network_beacon', 'network:adaptive_ewma_regular_cadence')):
+                steps.append({'order': step_n, 'action': 'Block outbound destination IPs/domains at proxy/firewall',
+                              'rationale': 'C2 beacon pattern detected', 'category': 'network', 'automated': True})
+                step_n += 1
+            if any('cloud:admin_role' in f or 'cloud:privilege_escalation' in f or 'cloud:iam_policy' in f for f in fset):
+                steps.append({'order': step_n, 'action': 'Revoke temporary IAM credentials and audit CloudTrail for lateral movement',
+                              'rationale': 'Cloud IAM abuse factor', 'category': 'cloud', 'automated': False})
+                step_n += 1
+            if any('data:pci' in f or 'data:phi' in f or 'data:pii' in f for f in fset):
+                steps.append({'order': step_n, 'action': 'Notify DPO and open privacy breach assessment; restrict bucket/blob access',
+                              'rationale': 'Sensitive data exposure factor', 'category': 'compliance', 'automated': False})
+                step_n += 1
+            if any(x in fset for x in ('lolbin', 'temp_execution', 'orphan_process')):
+                steps.append({'order': step_n, 'action': 'Isolate endpoint and collect Sysmon/EDR process tree for review',
+                              'rationale': 'Living-off-the-land or suspicious execution', 'category': 'endpoint', 'automated': False})
+                step_n += 1
+            if any('email:phishing' in f or 'attachment:' in f for f in fset):
+                steps.append({'order': step_n, 'action': 'Quarantine email and extract IOCs (sender, URLs, attachments)',
+                              'rationale': 'Phishing delivery factor', 'category': 'email', 'automated': True})
+                step_n += 1
+
+            # Always-present close-out step
+            steps.append({'order': step_n, 'action': 'Document findings, close incident or escalate to Tier 2',
+                          'rationale': 'Standard close-out', 'category': 'closure', 'automated': False})
+            return steps
+
         @_stub_router.post('/generate')
         async def _stub_generate(req: Request):
             try:
@@ -324,7 +380,22 @@ if playbook_router is None:
             except Exception:
                 body = {}
             pbid = f"pb-{_uuid.uuid4().hex[:8]}"
-            playbook = {'id': pbid, 'created': _time.time(), 'steps': []}
+            factors = body.get('factors') or body.get('signals') or []
+            mitre_tags = body.get('mitre_tags') or body.get('mitre') or []
+            alert_type = body.get('alert_type') or 'generic'
+            verdict = body.get('verdict') or 'SUSPICIOUS'
+            host = body.get('host') or body.get('hostname') or 'unknown'
+            steps = _playbook_steps_for_factors(factors, mitre_tags)
+            playbook = {
+                'id': pbid,
+                'created': _time.time(),
+                'alert_type': alert_type,
+                'verdict': verdict,
+                'host': host,
+                'factor_count': len(factors),
+                'steps': steps,
+                'step_count': len(steps),
+            }
             try:
                 if not hasattr(app.state, 'playbooks'):
                     app.state.playbooks = {}
@@ -342,7 +413,34 @@ if playbook_router is None:
             pbid = body.get('playbook_id')
             if not pbid:
                 return JSONResponse({'detail': 'missing_playbook_id'}, status_code=400)
-            exec_result = {'playbook_id': pbid, 'status': 'executed', 'execution': {'playbook_id': pbid, 'steps_executed': 0}}
+            playbook = None
+            try:
+                playbook = (app.state.playbooks or {}).get(pbid)
+            except Exception:
+                pass
+            steps = (playbook or {}).get('steps') or []
+            auto_steps = [s for s in steps if s.get('automated')]
+            executed = []
+            for s in auto_steps:
+                executed.append({
+                    'order': s.get('order'),
+                    'action': s.get('action'),
+                    'status': 'completed',
+                    'automated': True,
+                    'ts': _time.time(),
+                })
+            exec_result = {
+                'playbook_id': pbid,
+                'status': 'executed',
+                'execution': {
+                    'playbook_id': pbid,
+                    'steps_total': len(steps),
+                    'steps_auto_executed': len(executed),
+                    'steps_pending_human': len(steps) - len(executed),
+                    'executed_steps': executed,
+                    'ts': _time.time(),
+                },
+            }
             return JSONResponse({'execution': exec_result})
 
         playbook_router = _stub_router
