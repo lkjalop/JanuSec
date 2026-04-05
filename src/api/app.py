@@ -970,6 +970,17 @@ async def lifespan(app: FastAPI):
                     pass
             except Exception:
                 pass
+            # Gap 12: Warm up LLM client connection at startup so first requests
+            # don't pay the 2s Ollama connect penalty.
+            if os.getenv('OLLAMA_PREWARM_ON_STARTUP', '1').lower() not in ('0', 'false', 'no'):
+                try:
+                    from src.integrations.llm_client import DEFAULT_CLIENT as _llm_c  # type: ignore
+                    if _llm_c and hasattr(_llm_c, '_ensure_session'):
+                        _llm_c._ensure_session()
+                    elif _llm_c and hasattr(_llm_c, 'health'):
+                        _llm_c.health()
+                except Exception:
+                    pass
         try:
             await asyncio.to_thread(_deferred_sync)
         except Exception:

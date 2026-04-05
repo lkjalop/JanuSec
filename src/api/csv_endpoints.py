@@ -34,6 +34,7 @@ class IngestRowsRequest(BaseModel):
     mapping: Dict[str, str] | None = None
     source: str | None = None
     limit: int | None = None
+    session_id: str | None = None
 
 
 def _try_import_deep_pipeline() -> None:
@@ -188,6 +189,10 @@ async def ingest_rows_endpoint(payload: IngestRowsRequest, tenant_id: str | None
         raise HTTPException(status_code=500, detail="ingestion_error")
     if tenant_id:
         result['tenant_id'] = tenant_id
+    # Gap 11 fix: always return a session_id so callers can poll deep_analyze status
+    if 'session_id' not in result or not result.get('session_id'):
+        import uuid as _uuid
+        result['session_id'] = payload.session_id or ('ingest-' + _uuid.uuid4().hex[:12])
     return JSONResponse(content=result)
 
 
@@ -259,9 +264,18 @@ async def analyze_row(payload: dict, tenant_id: str | None = Header(None, alias=
     event_id = str(row.get('event_id') or row.get('id') or row.get('hash') or row.get('file_path') or '')
     verdict = str(row.get('verdict') or '').upper() or 'UNKNOWN'
     confidence = float(row.get('confidence') or 0.0)
-    raw_factors = row.get('factors') or []
+    raw_factors = list(row.get('factors') or [])
     if not isinstance(raw_factors, list):
         raw_factors = []
+    # Gap 2/6 fix: always extract factors from raw column values before scoring
+    try:
+        from src.api.csv_handler import extract_factors_from_raw_row as _extract_raw  # type: ignore
+        derived = _extract_raw(row)
+        # Merge: caller-supplied factors take priority, raw-derived fill gaps
+        existing = set(raw_factors)
+        raw_factors = raw_factors + [f for f in derived if f not in existing]
+    except Exception:
+        pass
     # Compose risk score if available
     score_payload: dict[str, float | str | list] = {
         'event_id': event_id or 'adhoc',
@@ -390,20 +404,33 @@ async def upload_csv(
 
     raw = await file.read()
 
-    # If Excel, convert to CSV first; if JSON, pass through
+    # If Excel, convert ALL sheets to a single CSV (concatenated rows); if JSON, pass through
     content: bytes
     out_filename = file.filename
     if name.endswith(('.xlsx', '.xls')):
         try:
-            import io, csv
+            import io as _io, csv as _csv
             import openpyxl  # type: ignore
-            bio = io.BytesIO(raw)
+            bio = _io.BytesIO(raw)
             wb = openpyxl.load_workbook(bio, read_only=True, data_only=True)
-            sheet = wb.active
-            buf = io.StringIO()
-            writer = csv.writer(buf)
-            for row in sheet.iter_rows(values_only=True):
-                writer.writerow(['' if v is None else str(v) for v in row])
+            buf = _io.StringIO()
+            writer = _csv.writer(buf)
+            first_sheet = True
+            for sheet in wb.worksheets:  # iterate ALL sheets — Gap 1 fix
+                sheet_rows = list(sheet.iter_rows(values_only=True))
+                if not sheet_rows:
+                    continue
+                headers = ['' if v is None else str(v) for v in sheet_rows[0]]
+                if first_sheet:
+                    # Write header row once, prepend _sheet_source column
+                    writer.writerow(['_sheet_source'] + headers)
+                    first_sheet = False
+                else:
+                    # Subsequent sheets: skip their header row, use same column order
+                    # (rows with mismatched columns will have blank trailing cells)
+                    pass
+                for data_row in sheet_rows[1:]:
+                    writer.writerow([sheet.title] + ['' if v is None else str(v) for v in data_row])
             content = buf.getvalue().encode('utf-8')
             out_filename = (file.filename or 'upload.xlsx').rsplit('.',1)[0] + '.csv'
         except Exception as e:

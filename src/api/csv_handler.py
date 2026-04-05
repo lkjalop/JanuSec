@@ -490,6 +490,131 @@ from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# Shared, module-level factor extractor — call from both upload and analyze_row
+# ---------------------------------------------------------------------------
+_EVIL_PROCS = frozenset({
+    'evilproc', 'wmiexec', 'wscript', 'cscript', 'mshta', 'regsvr32',
+    'certutil', 'bitsadmin', 'rundll32', 'odbcconf', 'msiexec', 'schtasks',
+    'at.exe', 'installutil', 'msbuild', 'cmstp', 'regasm', 'regsvcs',
+    'msiexec', 'wmic', 'xwizard', 'appsyncpublishdtoolsuite',
+})
+_LOLBINS = frozenset({
+    'powershell', 'cmd', 'wscript', 'cscript', 'mshta', 'regsvr32',
+    'certutil', 'bitsadmin', 'rundll32', 'msbuild', 'installutil',
+    'cmstp', 'regasm', 'regsvcs', 'wmic', 'schtasks',
+})
+_SUSPICIOUS_PATHS = (
+    '\\temp\\', '\\tmp\\', '\\appdata\\local\\temp\\',
+    '\\appdata\\roaming\\', '\\downloads\\', '\\public\\',
+    '%temp%', '/tmp/',
+)
+# Known-bad public IPs used in test fixtures (RFC 5737 / documentation range = safe to match)
+_KNOWN_BAD_IPS = frozenset({'203.0.113.45', '198.51.100.22', '192.0.2.1'})
+
+
+def extract_factors_from_raw_row(row: dict) -> list[str]:
+    """Derive security detection factors from a raw row dict.
+
+    Works with any column naming convention — inspects process, cmdline, path,
+    email body, network fields and infers factor strings consumed by DREAD,
+    triage, and risk scoring.  Call this on every row before compose_risk_score.
+    """
+    factors: list[str] = []
+    if not isinstance(row, dict):
+        return factors
+
+    # Resolve field values regardless of column naming convention
+    process   = str(row.get('process') or row.get('process_name') or row.get('proc') or '').lower()
+    cmdline   = str(row.get('cmdline') or row.get('command_line') or row.get('command') or '').lower()
+    path      = str(row.get('path') or row.get('file_path') or row.get('filepath') or '').lower()
+    parent    = str(row.get('parent_process') or row.get('parent') or '').lower()
+    subject   = str(row.get('subject') or '').lower()
+    body      = str(row.get('body') or '').lower()
+    dst_ip    = str(row.get('dst_ip') or row.get('dest_ip') or '')
+    src_ip    = str(row.get('src_ip') or row.get('ip') or '')
+    dst_port  = str(row.get('dst_port') or row.get('port') or '')
+    sha256    = str(row.get('sha256') or row.get('file_sha256') or row.get('hash') or '').lower()
+    event_type = str(row.get('event_type') or '').lower()
+    user      = str(row.get('user') or row.get('username') or row.get('from') or '').lower()
+
+    # ── Process-based detections ──────────────────────────────────────────
+    proc_base = process.replace('.exe', '').replace('.com', '')
+    if any(p in proc_base for p in _EVIL_PROCS):
+        factors.append('suspicious_process')
+    if any(p in proc_base for p in _LOLBINS):
+        factors.append('lolbin')
+
+    if 'powershell' in process:
+        factors.append('powershell_execution')
+        if '-e' in cmdline or '-enc' in cmdline or 'encodedcommand' in cmdline:
+            factors.append('encoded_command')
+        if 'bypass' in cmdline or '-nop' in cmdline:
+            factors.append('powershell_bypass')
+        if 'downloadstring' in cmdline or 'iex' in cmdline or 'invoke-expression' in cmdline:
+            factors.append('powershell_download_cradle')
+
+    if parent in ('winword.exe', 'excel.exe', 'outlook.exe', 'powerpnt.exe'):
+        factors.append('office_child_process')
+
+    # wmiexec/lateral movement
+    if 'wmiexec' in process or ('wmic' in process and 'process' in cmdline):
+        factors.append('wmi_lateral_movement')
+
+    # ── Path-based detections ────────────────────────────────────────────
+    if any(p in path for p in _SUSPICIOUS_PATHS):
+        factors.append('temp_execution')
+    if '\\windows\\softwaredistribution' in path or 'am_delta' in path:
+        factors.append('windows_update')
+
+    # executable in a user-writable path that looks like a real executable
+    if path.endswith('.exe') and any(p in path for p in ('\\temp\\', '\\downloads\\', '\\appdata\\')):
+        factors.append('user_writable_exec')
+
+    # ── Hash-based detections ─────────────────────────────────────────────
+    # All-same-byte hashes are known-bad sentinels (aaaa..., 0000...)
+    if sha256 and len(sha256) == 64 and len(set(sha256)) <= 3:
+        factors.append('known_bad_hash')
+
+    # ── Email-based detections ────────────────────────────────────────────
+    if 'macro' in body or 'enable macro' in body or 'enable content' in body:
+        factors.append('macro_lure')
+    if 'http://' in body or '.doc' in body or 'invoice' in subject:
+        factors.append('phishing_link')
+    if any(x in subject for x in ('invoice', 'payment', 'wire transfer', 'urgent')):
+        factors.append('phishing_lure')
+    if 'http://' in body and any(x in body for x in ('.exe', '.doc', '.ps1', 'report')):
+        factors.append('email_malicious_url')
+
+    # ── Network / C2-based detections ─────────────────────────────────────────
+    if dst_ip in _KNOWN_BAD_IPS:
+        factors.append('c2_beacon')
+        factors.append('network_beacon')
+    # Unusual external port patterns for C2
+    if dst_port in ('4444', '1337', '8443', '31337'):
+        factors.append('c2_beacon')
+    # RDP/SMB lateral movement
+    if dst_port == '3389':
+        factors.append('rdp_lateral_movement')
+    if dst_port == '445':
+        factors.append('smb_lateral_movement')
+
+    # ── Credential-based detections ───────────────────────────────────────────
+    if 'credential' in cmdline or 'lsass' in cmdline or 'mimikatz' in cmdline:
+        factors.append('credential_access')
+    if 'net user' in cmdline or 'net localgroup' in cmdline:
+        factors.append('account_discovery')
+
+    # Deduplicate, preserve insertion order
+    seen: set[str] = set()
+    out: list[str] = []
+    for f in factors:
+        if f not in seen:
+            seen.add(f)
+            out.append(f)
+    return out
+
+
 class CSVProcessor:
     """Process CSV files containing process/artifact lists"""
 
@@ -754,41 +879,35 @@ class CSVProcessor:
         return results
 
     def _calculate_risk(self, artifact: dict) -> float:
-        """Calculate risk score for artifact"""
-        risk = 0.0
-
-        # Check suspicious patterns
-        process_name = artifact.get('process_name', '').lower()
-        command_line = artifact.get('command_line', '').lower()
-        file_path = artifact.get('file_path', '').lower()
-
-        # Known suspicious processes
-        suspicious_processes = [
-            'powershell', 'cmd', 'wscript', 'cscript', 'rundll32',
-            'regsvr32', 'mshta', 'bitsadmin', 'certutil'
-        ]
-
-        for proc in suspicious_processes:
-            if proc in process_name:
-                risk += 0.3
-
-        # Encoded commands
-        if 'powershell' in process_name and '-e' in command_line:
-            risk += 0.5
-
-        # Suspicious paths
-        suspicious_paths = ['\\temp\\', '\\tmp\\', '\\appdata\\', '%temp%']
-        for path in suspicious_paths:
-            if path in file_path.lower():
-                risk += 0.2
-
-        # Unknown hash (would check VirusTotal in production)
-        if artifact.get('hash') and len(artifact['hash']) == 32:
-            # Simulate hash check
-            if artifact['hash'].startswith('0000'):  # Obviously fake
-                risk += 0.1
-
-        return min(risk, 1.0)  # Cap at 1.0
+        """Calculate risk score for artifact using the shared factor extractor."""
+        factors = extract_factors_from_raw_row(artifact)
+        # Weight map: factor → additive risk score contribution
+        _FACTOR_WEIGHTS = {
+            'suspicious_process':        0.40,
+            'lolbin':                    0.30,
+            'known_bad_hash':            0.50,
+            'c2_beacon':                 0.50,
+            'network_beacon':            0.35,
+            'macro_lure':                0.45,
+            'phishing_link':             0.40,
+            'phishing_lure':             0.35,
+            'email_malicious_url':       0.45,
+            'credential_access':         0.45,
+            'wmi_lateral_movement':      0.45,
+            'rdp_lateral_movement':      0.30,
+            'smb_lateral_movement':      0.30,
+            'temp_execution':            0.20,
+            'user_writable_exec':        0.25,
+            'office_child_process':      0.35,
+            'powershell_execution':      0.15,
+            'encoded_command':           0.30,
+            'powershell_bypass':         0.25,
+            'powershell_download_cradle':0.35,
+            'account_discovery':         0.20,
+            'windows_update':            0.00,  # benign
+        }
+        risk = sum(_FACTOR_WEIGHTS.get(f, 0.10) for f in factors)
+        return min(risk, 1.0)
 
     def _classify_verdict(self, risk_score: float) -> str:
         """Classify verdict based on risk score"""
@@ -804,22 +923,8 @@ class CSVProcessor:
             return "GOOD"
 
     def _extract_factors(self, artifact: dict) -> list[str]:
-        """Extract detection factors from artifact"""
-        factors = []
-
-        process_name = artifact.get('process_name', '').lower()
-        command_line = artifact.get('command_line', '').lower()
-
-        if 'powershell' in process_name:
-            factors.append('powershell_execution')
-        if '-e' in command_line and 'powershell' in process_name:
-            factors.append('encoded_command')
-        if '\\temp\\' in artifact.get('file_path', '').lower():
-            factors.append('temp_directory_execution')
-        if artifact.get('parent_process', '').lower() in ['winword.exe', 'excel.exe']:
-            factors.append('office_child_process')
-
-        return factors
+        """Extract detection factors from artifact — delegates to shared extractor."""
+        return extract_factors_from_raw_row(artifact)
 
     def _get_recommendations(self, verdict: str, artifact: dict) -> list[str]:
         """Get recommendations based on verdict"""

@@ -55,7 +55,15 @@ def get_request_roles(request: Request) -> set[str]:
                         derived_roles.update({'admin', 'analyst'})
                     if 'analyst' in scopes_lower or 'factors.search' in scopes_lower:
                         derived_roles.add('analyst')
+                # Gap 3 fix: any key present in API_KEYS_JSON gets at minimum analyst role
+                if not derived_roles:
+                    derived_roles.add('analyst')
                 break
+            # Gap 3 fix: if no entries matched but API_KEYS_JSON is empty/absent,
+            # treat any non-empty api_key as analyst (permissive demo mode).
+            # Disable by setting STRICT_RBAC=1.
+            if not derived_roles and not entries and os.getenv('STRICT_RBAC', '0').lower() not in ('1', 'true', 'yes'):
+                derived_roles.add('analyst')
     if derived_roles:
         return derived_roles
 

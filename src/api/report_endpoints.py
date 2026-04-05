@@ -9,57 +9,6 @@ from fastapi.responses import StreamingResponse, HTMLResponse, JSONResponse
 from src.reporting.comprehensive_report_generator import build_report_html
 from .tenant_helpers import resolve_tenant_id
 
-router = APIRouter(prefix="/api/v1/report", tags=["report"])
-
-
-@router.post('/generate')
-async def generate_report(req: Request, format: str = Query('html'), include_model: bool = Query(False)):
-    payload = await req.json()
-    try:
-        resolve_tenant_id(req, payload.get('tenant_id') or payload.get('tenant'))
-    except Exception:
-        # tenant mismatch should surface consistently
-        raise
-    html = build_report_html(payload)
-    if format == 'html':
-        return HTMLResponse(html)
-    return HTMLResponse(html)
-
-
-@router.post('/generate_pdf')
-async def generate_pdf(req: Request, include_model: bool = Query(False)):
-    payload = await req.json()
-    try:
-        resolve_tenant_id(req, payload.get('tenant_id') or payload.get('tenant'))
-    except Exception:
-        raise
-    html = build_report_html(payload)
-
-    # Try to use WeasyPrint if available
-    try:
-        from weasyprint import HTML
-    except Exception:
-        # fallback: return HTML with error indicating missing dependency
-        return JSONResponse({'error': 'WeasyPrint not installed on server. Install weasyprint to enable PDF generation.'}, status_code=501)
-
-    # Create temporary HTML file for base_url resolution
-    try:
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.html', delete=False, encoding='utf-8') as tmp:
-            tmp.write(html)
-            tmp_path = tmp.name
-
-        pdf_bytes = HTML(filename=tmp_path).write_pdf()
-        # remove temp file
-        try:
-            os.unlink(tmp_path)
-        except Exception:
-            pass
-
-        return StreamingResponse(io.BytesIO(pdf_bytes), media_type='application/pdf', headers={
-            'Content-Disposition': f'attachment; filename="janusec_report_{int(time.time())}.pdf"'
-        })
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f'PDF generation failed: {e}')
 from fastapi import APIRouter, Request, Query, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse, PlainTextResponse
 from fastapi.encoders import jsonable_encoder
@@ -446,6 +395,39 @@ async def generate_pdf_report(req: Request, include_model: bool = Query(False)):
     # Fallback: return HTML content
     buf = html.encode('utf-8')
     return StreamingResponse(io.BytesIO(buf), media_type='text/html')
+
+
+@router.post('/api/v1/report/generate_pdf_from_html')
+async def generate_pdf_from_html_endpoint(req: Request):
+    """Accept raw HTML body and return a PDF (or HTML fallback). No session/DB lookups.
+    Request body: { "html": "<html>..." }
+    """
+    try:
+        body = await req.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail='invalid_json')
+    html = body.get('html', '')
+    if not html:
+        raise HTTPException(status_code=400, detail='html_required')
+    try:
+        from src.reporting.export import export_pdf_bytes_from_html as _export  # type: ignore
+        pdf_bytes = _export(html)
+        if pdf_bytes:
+            return StreamingResponse(io.BytesIO(pdf_bytes), media_type='application/pdf',
+                                     headers={'Content-Disposition': f'attachment; filename="report_{int(time.time())}.pdf"'})
+    except Exception:
+        pass
+    try:
+        from weasyprint import HTML as _WP  # type: ignore
+        pdf_bytes = _WP(string=html).write_pdf()
+        return StreamingResponse(io.BytesIO(pdf_bytes), media_type='application/pdf',
+                                 headers={'Content-Disposition': f'attachment; filename="report_{int(time.time())}.pdf"'})
+    except ImportError:
+        pass
+    except Exception:
+        pass
+    return StreamingResponse(io.BytesIO(html.encode('utf-8')), media_type='text/html',
+                             headers={'Content-Disposition': f'attachment; filename="report_{int(time.time())}.html"'})
 
 
 @router.post('/api/v1/report/generate')
