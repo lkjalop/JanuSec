@@ -1149,6 +1149,106 @@ def _generate_executive_summary(row: Dict[str, Any], domain: str, context: Optio
     return fallback, 'rule-based'
 
 
+def _auto_commit_tier1_incident(
+    row: Dict[str, Any],
+    text: str,
+    model: str,
+    payload: Dict[str, Any],
+    context: Dict[str, Any],
+) -> None:
+    """Persist a Tier-1 result as an incident when confidence or DREAD is high enough.
+
+    Gate: confidence >= LLM_T1_INCIDENT_MIN_CONFIDENCE (default 0.7)
+          OR dread_score >= LLM_T1_INCIDENT_MIN_DREAD   (default 7.0)
+    Controlled by env:
+      LLM_T1_INCIDENT_MIN_CONFIDENCE  — float 0-1 (default 0.7)
+      LLM_T1_INCIDENT_MIN_DREAD       — float 0-10 (default 7.0)
+      LLM_T1_INCIDENT_AUTO_COMMIT=1   — master switch (default: enabled)
+    """
+    try:
+        auto_commit = os.getenv('LLM_T1_INCIDENT_AUTO_COMMIT', '1').lower() not in ('0', 'false', 'no')
+        if not auto_commit:
+            return
+
+        min_conf = float(os.getenv('LLM_T1_INCIDENT_MIN_CONFIDENCE', '0.7'))
+        min_dread = float(os.getenv('LLM_T1_INCIDENT_MIN_DREAD', '7.0'))
+
+        confidence = float(payload.get('confidence') or payload.get('metadata', {}).get('confidence_score') or 0.0)
+        dread_score = float(
+            (payload.get('verdict') or {}).get('dread_score')
+            or (row.get('_dread') or {}).get('score')
+            or row.get('dread')
+            or 0.0
+        )
+        skipped = payload.get('llm_skipped_reason')
+        if skipped or (confidence < min_conf and dread_score < min_dread):
+            return  # below threshold — skip
+
+        import time as _time
+        import uuid as _uuid
+
+        from src.api.incidents_store import INCIDENT_STORE
+
+        tenant_id = (
+            context.get('tenant_id')
+            or context.get('org')
+            or row.get('tenant_id')
+            or 'default'
+        )
+        verdict_payload = payload.get('verdict') or {}
+        incident: Dict[str, Any] = {
+            'incident_id': f'tier1-{_uuid.uuid4().hex[:12]}',
+            'source': 'tier1_auto',
+            'tenant_id': tenant_id,
+            'created_at': _time.time(),
+            'title': (
+                f"{row.get('process_name') or row.get('name') or 'Alert'} "
+                f"on {row.get('host') or 'unknown host'} "
+                f"[{(verdict_payload.get('classification') or 'UNKNOWN').upper()}]"
+            ),
+            'severity': (
+                'critical' if dread_score >= 9.0
+                else 'high' if dread_score >= 7.0 or confidence >= 0.85
+                else 'medium'
+            ),
+            'confidence': confidence,
+            'dread_score': dread_score,
+            'tier1_summary': text,
+            'model': model,
+            'factors': row.get('factors') or [],
+            'mitre_techniques': verdict_payload.get('mitre_techniques') or [],
+            'host': row.get('host'),
+            'user': row.get('user'),
+            'process': row.get('process_name'),
+            'payload_snapshot': {
+                k: v for k, v in (payload or {}).items()
+                if k in ('metadata', 'verdict', 'top_factors', 'why_flagged', 'playbook', 'evidence_summary')
+            },
+            'recommendation_actions': [
+                {
+                    'id': f'tier1|review|{row.get("host","unknown")}',
+                    'domain': 'endpoint',
+                    'action': 'review_tier1_alert',
+                    'priority': 'high' if dread_score >= 7.0 else 'medium',
+                    'status': 'pending',
+                    'updated_ts': _time.time(),
+                }
+            ],
+        }
+
+        # Cap incidents store at 1000 entries to avoid unbounded growth
+        INCIDENT_STORE.append(incident)
+        if len(INCIDENT_STORE) > 1000:
+            del INCIDENT_STORE[:-1000]
+
+        logger.debug(
+            'Tier-1 auto-committed incident %s (confidence=%.2f dread=%.1f)',
+            incident['incident_id'], confidence, dread_score,
+        )
+    except Exception as exc:
+        logger.debug('Tier-1 auto-commit failed (non-fatal): %s', exc)
+
+
 @router.post('/generate', response_model=InsightResponse, operation_id='insights_generate')
 @require_roles('analyst','admin')
 async def generate_insight(request: Request = None) -> InsightResponse:
@@ -1186,6 +1286,8 @@ async def generate_insight(request: Request = None) -> InsightResponse:
 
     if insight_type == 'tier1':
         text, model, payload = _generate_tier1_summary(row, domain, context)
+        # Auto-persist high-confidence Tier-1 results to the incidents store
+        _auto_commit_tier1_incident(row, text, model, payload, context)
         return InsightResponse(text=text, insight_type='tier1', estimated_cost=0.0006, model=model, payload=payload)
     if insight_type == 'tier2':
         text, model, payload = _generate_tier2_summary(row, context)

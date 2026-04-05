@@ -136,6 +136,27 @@ def generate_persona_view(report: Dict[str, Any], persona: str, disclosure_level
         base["control_posture"] = _control_posture(report)
         # Include tier metadata when available
         base['tier_metadata'] = report.get('tier_metadata', {})
+        # Surface Tier-2 AI reasoning narrative for executive readers
+        tier2 = report.get('tier2_analysis') or report.get('tier2') or {}
+        if tier2:
+            exec_summary = tier2.get('executive_summary') or {}
+            ai_reasoning = tier2.get('ai_reasoning') or {}
+            plain_narrative = (
+                exec_summary.get('one_liner')
+                or ai_reasoning.get('primary_hypothesis')
+                or tier2.get('plain_english_narrative')
+            )
+            if plain_narrative:
+                base['plain_english_narrative'] = plain_narrative
+            threat_level = exec_summary.get('threat_level')
+            if threat_level:
+                base['tier2_threat_level'] = threat_level
+            recommended_action = exec_summary.get('recommended_action')
+            if recommended_action:
+                base['tier2_recommended_action'] = recommended_action
+            knowledge_gaps = ai_reasoning.get('knowledge_gaps')
+            if knowledge_gaps:
+                base['knowledge_gaps'] = knowledge_gaps
     elif p == "soc_analyst":
         base["timeline"] = report.get("attack_timeline", [])
         base["iocs"] = base["summary_signals"]["iocs"]
@@ -312,66 +333,116 @@ _TECHNIQUE_CONTROL_MAP: Dict[str, Dict[str, list[str]]] = {
         'SOC2': ['CC6.1', 'CC6.2', 'CC6.3'],
         'GDPR': ['Art. 32(1)(b)', 'Art. 32(1)(d)'],
         'PCI_DSS': ['8.2', '8.3', '10.2.4'],
+        'HIPAA': ['§164.308(a)(3)', '§164.308(a)(4)', '§164.312(a)(1)'],
+        'ISO27001': ['A.5.15', 'A.5.16', 'A.8.2'],
     },
     'T1110': {
         'SOC2': ['CC6.1', 'CC6.6'],
         'GDPR': ['Art. 32(1)(a)', 'Art. 32(1)(b)'],
         'PCI_DSS': ['8.3', '8.3.6', '10.2.4'],
+        'HIPAA': ['§164.312(d)', '§164.308(a)(5)'],
+        'ISO27001': ['A.5.16', 'A.8.5'],
     },
     'T1566': {
         'SOC2': ['CC6.7', 'CC6.8'],
         'GDPR': ['Art. 32(1)(b)'],
         'PCI_DSS': ['5.4', '12.6'],
+        'HIPAA': ['§164.308(a)(5)', '§164.308(a)(1)'],
+        'ISO27001': ['A.6.3', 'A.8.23'],
     },
     'T1003': {
         'SOC2': ['CC6.1', 'CC6.6'],
         'GDPR': ['Art. 32(1)(b)', 'Art. 33'],
         'PCI_DSS': ['8.2', '10.2.5'],
+        'HIPAA': ['§164.312(a)(1)', '§164.308(a)(1)', '§164.312(c)(1)'],
+        'ISO27001': ['A.5.17', 'A.8.2', 'A.5.28'],
     },
     'T1059': {
         'SOC2': ['CC6.8'],
         'GDPR': ['Art. 32(1)(b)'],
         'PCI_DSS': ['6.3', '10.2.2'],
+        'HIPAA': ['§164.308(a)(1)', '§164.312(b)'],
+        'ISO27001': ['A.8.9', 'A.8.20'],
     },
     'T1047': {
         'SOC2': ['CC6.8', 'CC7.2'],
         'GDPR': ['Art. 32(1)(d)'],
         'PCI_DSS': ['6.3', '10.2.2'],
+        'HIPAA': ['§164.312(b)'],
+        'ISO27001': ['A.8.9', 'A.8.15'],
     },
     'T1486': {
         'SOC2': ['A1.2', 'CC9.1'],
         'GDPR': ['Art. 32(1)(c)', 'Art. 33', 'Art. 34'],
         'PCI_DSS': ['12.10', '3.4'],
+        'HIPAA': ['§164.308(a)(7)', '§164.310(d)(1)', '§164.412'],
+        'ISO27001': ['A.5.29', 'A.5.30', 'A.8.13'],
     },
     'T1048': {
         'SOC2': ['CC6.7', 'CC7.3'],
         'GDPR': ['Art. 32(1)(b)', 'Art. 33'],
         'PCI_DSS': ['4.2', '10.3'],
+        'HIPAA': ['§164.308(a)(1)', '§164.312(e)(2)'],
+        'ISO27001': ['A.5.14', 'A.8.20'],
     },
     'T1071': {
         'SOC2': ['CC6.6', 'CC7.2'],
         'GDPR': ['Art. 32(1)(d)'],
         'PCI_DSS': ['1.3', '10.2.7'],
+        'HIPAA': ['§164.312(e)(1)', '§164.312(b)'],
+        'ISO27001': ['A.8.20', 'A.8.15'],
     },
     'T1190': {
         'SOC2': ['CC7.1', 'CC7.2'],
         'GDPR': ['Art. 32(1)(b)', 'Art. 33'],
         'PCI_DSS': ['6.3.3', '11.3'],
+        'HIPAA': ['§164.308(a)(1)', '§164.312(b)'],
+        'ISO27001': ['A.8.8', 'A.8.31'],
     },
     'T1021': {
         'SOC2': ['CC6.1', 'CC6.3'],
         'GDPR': ['Art. 32(1)(b)'],
         'PCI_DSS': ['7.2', '8.2', '10.2.3'],
+        'HIPAA': ['§164.308(a)(4)', '§164.312(a)(2)'],
+        'ISO27001': ['A.5.15', 'A.8.18'],
     },
     'T1552': {
         'SOC2': ['CC6.1', 'CC6.7'],
         'GDPR': ['Art. 32(1)(a)'],
         'PCI_DSS': ['8.3', '6.5'],
+        'HIPAA': ['§164.312(a)(1)', '§164.308(a)(3)'],
+        'ISO27001': ['A.5.17', 'A.8.12'],
     },
     'T1027': {
         'SOC2': ['CC7.1', 'CC7.2'],
         'GDPR': ['Art. 32(1)(d)'],
         'PCI_DSS': ['5.2', '10.2.7'],
+        'HIPAA': ['§164.312(b)'],
+        'ISO27001': ['A.8.16', 'A.8.15'],
+    },
+    # Data exfil / collection
+    'T1530': {
+        'SOC2': ['CC6.7', 'CC7.3'],
+        'GDPR': ['Art. 32(1)(b)', 'Art. 33'],
+        'PCI_DSS': ['3.5', '4.2'],
+        'HIPAA': ['§164.312(a)(1)', '§164.312(e)(1)'],
+        'ISO27001': ['A.5.12', 'A.5.14'],
+    },
+    # Privilege escalation
+    'T1134': {
+        'SOC2': ['CC6.3', 'CC6.8'],
+        'GDPR': ['Art. 32(1)(b)'],
+        'PCI_DSS': ['7.1', '8.2'],
+        'HIPAA': ['§164.308(a)(4)', '§164.312(a)(1)'],
+        'ISO27001': ['A.5.15', 'A.8.2'],
+    },
+    # Impact: account access removal
+    'T1531': {
+        'SOC2': ['CC6.2', 'CC7.2'],
+        'GDPR': ['Art. 32(1)(d)'],
+        'PCI_DSS': ['8.1', '12.10'],
+        'HIPAA': ['§164.308(a)(3)', '§164.308(a)(7)'],
+        'ISO27001': ['A.5.18', 'A.5.29'],
     },
 }
 
@@ -403,6 +474,8 @@ def _map_to_regulatory_controls(report: Dict[str, Any]) -> Dict[str, Any]:
     soc2: set[str] = set()
     gdpr: set[str] = set()
     pci: set[str] = set()
+    hipaa: set[str] = set()
+    iso27001: set[str] = set()
     matched_techniques: list[str] = []
 
     for tag in mitre_tags:
@@ -412,13 +485,17 @@ def _map_to_regulatory_controls(report: Dict[str, Any]) -> Dict[str, Any]:
             soc2.update(ctl.get('SOC2') or [])
             gdpr.update(ctl.get('GDPR') or [])
             pci.update(ctl.get('PCI_DSS') or [])
+            hipaa.update(ctl.get('HIPAA') or [])
+            iso27001.update(ctl.get('ISO27001') or [])
 
     # Always include baseline controls when any technique is matched
     if matched_techniques:
         soc2.update(['CC6.1'])
         pci.update(['10.1'])
+        hipaa.update(['§164.308(a)(1)'])  # baseline: Security Management Process
+        iso27001.update(['A.5.1'])         # baseline: Policies for information security
 
-    return {
+    result: Dict[str, Any] = {
         'SOC2': sorted(soc2),
         'GDPR': sorted(gdpr),
         'PCI_DSS': sorted(pci),
@@ -429,6 +506,21 @@ def _map_to_regulatory_controls(report: Dict[str, Any]) -> Dict[str, Any]:
             'PCI_DSS': 'Cardholder environment access logging and authentication requirements applicable to this activity.',
         } if matched_techniques else {},
     }
+    if hipaa:
+        result['HIPAA'] = sorted(hipaa)
+        if matched_techniques:
+            result['rationale']['HIPAA'] = (
+                'HIPAA Security Rule safeguards applicable to ePHI access controls and '
+                'breach notification obligations triggered by this activity.'
+            )
+    if iso27001:
+        result['ISO27001'] = sorted(iso27001)
+        if matched_techniques:
+            result['rationale']['ISO27001'] = (
+                'ISO/IEC 27001:2022 Annex A controls addressing access management, '
+                'incident response and operations security relevant to detected TTPs.'
+            )
+    return result
 
 
 def _statistical(report: Dict[str, Any]) -> Dict[str, Any]:
