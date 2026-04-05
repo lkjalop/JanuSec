@@ -4668,22 +4668,26 @@ def register_core_routers(full: bool = True):
         # initial import earlier failed due to optional heavy deps, attempt a
         # safe dynamic import here and include any routers found. This makes
         # the lightweight feedback capture endpoint available to TestClient.
-        if not deep_analyze_router:
+        _dr = deep_analyze_router
+        _cdr = csv_deep_analyze_router
+        if not _dr:
             try:
                 import importlib as _importlib
-                _mod = _importlib.import_module('src.api.deep_analyze_endpoints')
-                deep_analyze_router = getattr(_mod, 'router', None)
-                csv_deep_analyze_router = getattr(_mod, 'csv_router', None)
+                _dae_mod = _importlib.import_module('src.api.deep_analyze_endpoints')
+                _dr = getattr(_dae_mod, 'router', None)
+                _cdr = getattr(_dae_mod, 'csv_router', None)
+                globals()['deep_analyze_router'] = _dr
+                globals()['csv_deep_analyze_router'] = _cdr
             except Exception:
                 pass
-        if deep_analyze_router:
-            app.include_router(deep_analyze_router)
+        if _dr:
+            app.include_router(_dr)
             logger.info('Included deep_analyze_router into app (lite)')
-        if csv_deep_analyze_router:
-            app.include_router(csv_deep_analyze_router)
+        if _cdr:
+            app.include_router(_cdr)
             logger.info('Included csv_deep_analyze_router into app (lite)')
-    except Exception:
-        logger.debug('deep_analyze_router include failed (lite)')
+    except Exception as _dae_exc:
+        logger.debug('deep_analyze_router include failed (lite): %s', _dae_exc, exc_info=True)
     try:
         if llm_config_router:
             app.include_router(llm_config_router)

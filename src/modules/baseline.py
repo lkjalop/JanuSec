@@ -124,6 +124,22 @@ class BaselineModule:
             self.logger.info("BASELINE_SKIP_WARM set; skipping warm indicator loads")
             return
         
+        # Load persisted suppression state (known_good_patterns + false_positive_patterns)
+        suppression_path = os.getenv('BASELINE_SUPPRESSION_PATH', '')
+        if suppression_path:
+            try:
+                import json as _json
+                with open(suppression_path, 'r', encoding='utf-8') as _f:
+                    _state = _json.load(_f)
+                for _p in _state.get('known_good_patterns', []):
+                    self.known_good_patterns.add(_p)
+                    self.benign_patterns.add(_p)
+                for _k, _v in _state.get('false_positive_patterns', {}).items():
+                    self.false_positive_patterns[_k] = _v
+                self.logger.info('Loaded suppression state from %s', suppression_path)
+            except Exception as _e:
+                self.logger.warning('Could not load suppression state from %s: %s', suppression_path, _e)
+
         # Load threat intelligence indicators
         await self._load_threat_indicators()
         
@@ -670,6 +686,27 @@ class BaselineModule:
         """Learn from false positive events"""
         signature = self._create_event_signature(event)
         self.false_positive_patterns[signature] += 1
+
+        # Also create an identity-based signature when actor + action are present
+        actor = event.get('actor') or event.get('user') or event.get('identity')
+        action = event.get('action')
+        if actor and action:
+            identity_sig = f"identity:{actor}:{action}"
+            self.false_positive_patterns[identity_sig] += 1
+
+        # Persist updated suppression state to disk
+        suppression_path = os.getenv('BASELINE_SUPPRESSION_PATH', '')
+        if suppression_path:
+            try:
+                import json as _json
+                _state = {
+                    'known_good_patterns': list(self.known_good_patterns),
+                    'false_positive_patterns': dict(self.false_positive_patterns),
+                }
+                with open(suppression_path, 'w', encoding='utf-8') as _f:
+                    _json.dump(_state, _f)
+            except Exception as _e:
+                self.logger.warning('Could not persist suppression state to %s: %s', suppression_path, _e)
 
     async def quick_check(self, event: dict[str, Any]) -> BaselineResult:
         """Ultra-fast check for timeout scenarios"""

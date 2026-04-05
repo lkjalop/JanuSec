@@ -64,17 +64,17 @@ def get_request_roles(request: Request) -> set[str]:
             # Disable by setting STRICT_RBAC=1.
             if not derived_roles and not entries and os.getenv('STRICT_RBAC', '0').lower() not in ('1', 'true', 'yes'):
                 derived_roles.add('analyst')
-    if derived_roles:
-        return derived_roles
-
-    # Recognize x-admin-key matching ADMIN_API_KEY as admin role (takes precedence over test fallback)
+    # Always check x-admin-key — even when derived_roles already has content —
+    # so that x-api-key (non-admin scopes) + x-admin-key together grant admin.
     try:
         admin_key_hdr = request.headers.get('x-admin-key') or request.headers.get('X-Admin-Key')
         expected_admin_key = os.getenv('ADMIN_API_KEY') or os.getenv('X_ADMIN_KEY')
         if admin_key_hdr and expected_admin_key and admin_key_hdr == expected_admin_key:
-            return {'admin', 'analyst'}
+            derived_roles.update({'admin', 'analyst'})
     except Exception:
         pass
+    if derived_roles:
+        return derived_roles
 
     # During tests/lite mode allow implicit analyst role so correlation endpoints stay accessible.
     if os.getenv('TEST_HELPERS_ENABLED', '0').lower() in {'1', 'true', 'yes'} or 'PYTEST_CURRENT_TEST' in os.environ:
