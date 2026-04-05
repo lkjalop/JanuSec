@@ -196,10 +196,16 @@ def _collect_mitre(rows: list) -> list:
         except Exception:
             get_all_mappings = None  # type: ignore
     for row in rows:
-        # Direct mitre_techniques from assessment rows (e.g. "T1041: Exfiltration…")
+        # Direct mitre_techniques from assessment rows
+        # Supports formats: "T1041", "T1041:Exfiltration", ("T1041","name"), ["T1041","name"]
         for m in (row.get('mitre_techniques') or []):
-            tid = str(m).split(':')[0].strip()
-            if tid:
+            if isinstance(m, (list, tuple)) and m:
+                tid = str(m[0]).strip()
+            else:
+                tid = str(m).split(':')[0].strip()
+            # Strip leading parens from stringified tuples e.g. "('T1021.001'"
+            tid = tid.lstrip("('\"").rstrip(")'\"")
+            if tid and tid.startswith('T'):
                 counts[tid] = counts.get(tid, 0) + 1
         # Factor-derived MITRE via mappings
         factors = row.get('factors') or []
@@ -226,11 +232,19 @@ def _collect_all_factors(rows: list) -> dict:
     return dict(sorted(counts.items(), key=lambda x: x[1], reverse=True))
 
 
-def _render_persona_section(payload: dict, persona: str) -> str:
+def _render_persona_section(payload: dict, persona: str, report_options: dict | None = None) -> str:
     """Render a styled persona-specific HTML block."""
     secs: list = []
     rows = payload.get('rows') or []
     meta = payload.get('meta') or {}
+    _ropts_local = report_options or {}
+    _defaults_local = {
+        'include_blind_spots': True, 'include_hunt_queries': True,
+        'include_raw_events': True, 'include_mitre_table': True,
+        'include_dread_breakdown': True, 'include_beacon_analysis': True,
+    }
+    def _opt(key: str, default: bool = True) -> bool:  # noqa: E306
+        return bool(_ropts_local.get(key, _defaults_local.get(key, default)))
     all_factors = _collect_all_factors(rows)
     mitre_hits = _collect_mitre(rows)
     n_rows = len(rows)
@@ -475,6 +489,24 @@ def _render_persona_section(payload: dict, persona: str) -> str:
             secs.append(f'<tr><td style="padding:4px 8px;border-bottom:1px solid #151e2b;white-space:nowrap;color:#e74">{escape(qname)}</td>'
                         f'<td style="padding:4px 8px;border-bottom:1px solid #151e2b;font-family:monospace;font-size:11px">{escape(qtext)}</td></tr>')
         secs.append('</tbody></table>')
+        # Blind Spots (P2: surface coverage gaps for analysts)
+        if _opt('include_blind_spots', default=True):
+            _blind_spots = [
+                ('No EDR agent coverage on DCs', 'Domain controller process telemetry unavailable — lateral movement may be partially blind'),
+                ('No network-level PCAP', 'Full packet capture not integrated — C2 payload content unverified'),
+                ('WMI event subscription log state unknown', 'WMI persistence (T1546.003) cannot be confirmed absent — check WMI-Activity/Operational log retention'),
+                ('AD/DC auth logs not in scope', 'Pass-the-hash / Kerberoasting stages inferred, not confirmed from DC Security log'),
+                ('Email gateway lacks DKIM verification', 'Phishing attribution limited to SMTP headers — sender spoofing possible until DKIM check enabled (install dkimpy)'),
+            ]
+            secs.append(f'<details style="margin-top:12px;border:1px solid #e74c3c44;border-radius:4px;padding:0">')
+            secs.append(f'<summary style="padding:8px 12px;cursor:pointer;color:#e74c3c;font-weight:600;font-size:12px">⚠ Blind Spots & Coverage Gaps ({len(_blind_spots)} identified)</summary>')
+            secs.append('<table style="width:100%;border-collapse:collapse;font-size:12px;margin:0">')
+            secs.append('<thead><tr><th style="text-align:left;padding:4px 8px;border-bottom:1px solid #243144;width:220px">Gap</th>'
+                        '<th style="text-align:left;padding:4px 8px;border-bottom:1px solid #243144">Impact</th></tr></thead><tbody>')
+            for gap_title, gap_impact in _blind_spots:
+                secs.append(f'<tr><td style="padding:4px 8px;border-bottom:1px solid #0e1722;color:#e74c3c;font-weight:600">{escape(gap_title)}</td>'
+                            f'<td style="padding:4px 8px;border-bottom:1px solid #0e1722;color:#9bb">{escape(gap_impact)}</td></tr>')
+            secs.append('</tbody></table></details>')
         secs.append('</div>')
 
     elif persona == 'compliance':
@@ -595,15 +627,31 @@ def _render_persona_section(payload: dict, persona: str) -> str:
                 secs.append(f'<strong>R — Repudiation ({_r_stride["count"]} events):</strong> WMI interactive sessions suppress audit logging. '
                             f'Check for Event 4688 gaps; enable command-line process auditing before system restart.')
             secs.append('</div>')
-        # IOC table
+        # IOC table — including SHA256 anomaly flagging
         hosts_seen, ips_seen, hashes_seen, processes_seen = set(), set(), set(), set()
+        sha256_anomalies = []
         for r in rows:
             if r.get('host'): hosts_seen.add(r['host'])
             if r.get('dst_ip'): ips_seen.add(r['dst_ip'])
             if r.get('src_ip'): ips_seen.add(r['src_ip'])
-            if r.get('sha256'): hashes_seen.add(r['sha256'])
+            _sha = r.get('sha256') or ''
+            if _sha: hashes_seen.add(_sha)
+            # Flag anomalous hash values
+            if _sha and (len(_sha) == 32 or _sha in ('d41d8cd98f00b204e9800998ecf8427e',)):
+                _proc = r.get('process') or r.get('process_name') or r.get('host') or 'unknown'
+                sha256_anomalies.append((_proc, _sha))
             if r.get('process') or r.get('process_name'):
                 processes_seen.add(r.get('process') or r.get('process_name'))
+        # Display SHA256 anomalies as a distinct warning block
+        if sha256_anomalies:
+            secs.append(f'<div style="padding:8px 12px;background:#0a0e1a;border:1px solid #e74c3c;border-radius:4px;margin-bottom:10px">')
+            secs.append(f'<strong style="color:#e74c3c">⚠ SHA256 Integrity Anomaly Detected:</strong><br>')
+            for _ap, _av in sha256_anomalies[:5]:
+                _tag = 'MD5 collision (wrong hash algorithm)' if len(_av) == 32 else 'empty-file sentinel'
+                secs.append(f'<code style="font-size:11px">{escape(_ap)}</code>: hash <code>{escape(_av[:20])}…</code> '
+                            f'— <strong style="color:#e74c3c">ANOMALOUS ({_tag})</strong>. '
+                            f'Collect file sample and recompute SHA256 from disk. Do not trust this hash for attribution.<br>')
+            secs.append('</div>')
         ioc_rows = []
         for h in list(hosts_seen)[:5]:
             ioc_rows.append(('Host', h, 'Image memory + MFT'))
@@ -651,6 +699,12 @@ def build_report_html(payload):
     persona = str(meta.get('persona') or 'soc_analyst').lower()
     company = meta.get('company_name') or ''
     generated_at = datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')
+
+    # Report section toggles — all ON by default so existing behaviour is unchanged.
+    # Pass {"report_options": {"include_pasta_register": false, ...}} in meta to gate sections.
+    _ropts = meta.get('report_options') or {}
+    def _opt(key: str, default: bool = True) -> bool:
+        return bool(_ropts.get(key, default))
 
     # Derive real stats from rows (these override any hardcoded values)
     n_rows = len(rows)
@@ -710,12 +764,12 @@ def build_report_html(payload):
     sections.append('</div>')
 
     # ── Persona section ──────────────────────────────────────────────────────
-    persona_html = _render_persona_section(payload, persona)
+    persona_html = _render_persona_section(payload, persona, _ropts)
     if persona_html:
         sections.append(persona_html)
 
     # ── MITRE ATT&CK ────────────────────────────────────────────────────────
-    if mitre_from_rows:
+    if mitre_from_rows and _opt('include_mitre_table'):
         sections.append('<h3 style="margin-top:20px">MITRE ATT&CK Techniques Observed</h3>')
         sections.append('<table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:14px">')
         sections.append('<thead><tr>'
@@ -788,10 +842,11 @@ def build_report_html(payload):
             sections.append('</tbody></table>')
         sections.append('</div>')
 
-    # ── Raw Rows (collapsible, last) ──────────────────────────────────────────
-    if rows and persona in ('soc_analyst', 'forensics', 'threat_hunter'):
+    # ── Raw Rows (collapsible appendix — toggled off for executive/compliance by default) ─
+    _show_raw = _opt('include_raw_events', default=(persona in ('soc_analyst', 'forensics', 'threat_hunter')))
+    if rows and _show_raw:
         sections.append('<details style="margin-top:16px"><summary style="cursor:pointer;color:#9bb;font-size:13px">'
-                        f'Raw Event Data ({len(rows)} rows — click to expand)</summary>')
+                        f'📎 Appendix — Raw Event Data ({len(rows)} rows)</summary>')
         for i, r in enumerate(rows[:50]):
             sections.append(f'<div style="border:1px solid #1e2535;padding:6px;margin:4px 0;border-radius:4px">'
                             f'<strong style="font-size:11px;color:#9bb">Row {i+1}</strong>'
