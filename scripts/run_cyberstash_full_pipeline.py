@@ -503,7 +503,8 @@ def enrich_rows_locally(rows: list[dict]) -> list[dict]:
         stride_tags = []
         if any(f in factors for f in ("phishing_subject", "credential_harvest")):
             stride_tags.append("S")  # Spoofing
-        if any(f in factors for f in ("dropper_file_write", "masquerading_extension", "c2_data_staging")):
+        # Tampering: malicious process execution changes system state; dropper writes payload
+        if any(f in factors for f in ("dropper_file_write", "masquerading_extension", "c2_data_staging", "malicious_process")):
             stride_tags.append("T")  # Tampering
         if any(f in factors for f in ("lateral_movement_tool", "interactive_wmi_session")):
             stride_tags.extend(["E", "R"])  # Elevation of Privilege + Repudiation (WMI evasion)
@@ -513,6 +514,15 @@ def enrich_rows_locally(rows: list[dict]) -> list[dict]:
             stride_tags.extend(["E", "D"])  # Elevation + potential DoS
         if any(f in factors for f in ("malicious_process",)):
             stride_tags.extend(["S", "E"])  # Spoofing (masquerade) + Elevation
+        # SHA256 anomaly: MD5-length (32 char) value or known empty-file hash in SHA256 field
+        _sha_val = str(e.get("sha256") or e.get("file_hash") or "")
+        if _sha_val and (len(_sha_val) == 32 or _sha_val in (
+            "d41d8cd98f00b204e9800998ecf8427e",
+            "da39a3ee5e6b4b0d3255bfef95601890afd80709",
+        )):
+            factors.append("suspicious_sha256")
+            if "T" not in stride_tags:
+                stride_tags.append("T")  # Integrity anomaly
         e["stride_tags"] = sorted(set(stride_tags))
         enriched.append(e)
     return enriched
@@ -537,6 +547,15 @@ def build_threat_models(rows: list[dict]) -> dict:
             if tag in stride_counts:
                 ident = r.get("process") or r.get("process_name") or r.get("src_ip") or r.get("from") or r.get("subject") or f"row-{r.get('row_index',0)}"
                 stride_counts[tag].append({"row_index": r.get("row_index"), "identifier": str(ident)[:60], "sheet": r.get("_sheet","")})
+    # Fallback: supplement STRIDE-T from all_factors in case per-row tags were set under old code
+    _all_f: set = set()
+    for r in rows:
+        _all_f.update(r.get("factors") or [])
+    if not stride_counts["T"]:
+        for r in rows:
+            if any(f in (r.get("factors") or []) for f in ("dropper_file_write", "masquerading_extension", "malicious_process")):
+                ident = r.get("process") or r.get("process_name") or f"row-{r.get('row_index',0)}"
+                stride_counts["T"].append({"row_index": r.get("row_index"), "identifier": str(ident)[:60], "sheet": r.get("_sheet","")})
 
     stride_summary = {}
     for code, label in stride_labels.items():
@@ -1013,13 +1032,25 @@ def _build_attack_story(evidence: list[dict], iocs: dict) -> dict:
             key = f"{src}→{dst}:{port}"
             c2_connections.setdefault(key, []).append(ev["code"])
 
-    # Beacon interval estimate (median gap between callback epochs)
+    # Beacon interval estimate — use ONLY C2/network events to avoid contamination
+    # from Endpoint/Email timestamps (all-event calc previously gave wrong ~14s intervals)
     beacon_intervals: list[int] = []
-    if len(ts_values) >= 2:
-        sorted_ts = sorted(ts_values)
-        gaps = [sorted_ts[i+1]-sorted_ts[i] for i in range(len(sorted_ts)-1) if sorted_ts[i+1]-sorted_ts[i] < 600]
-        if gaps:
-            beacon_intervals = gaps
+    c2_ts_values: list[int] = []
+    for _bev in evidence:
+        if any(f in _bev["factors"] for f in ("c2_communication", "c2_port", "c2_beacon", "network_beacon", "external_connection")):
+            _rts = _bev["row"].get("ts") or _bev["row"].get("timestamp") or ""
+            try:
+                _bep = int(float(str(_rts)))
+                if 1_000_000_000 < _bep < 9_999_999_999:
+                    c2_ts_values.append(_bep)
+            except Exception:
+                pass
+    if len(c2_ts_values) >= 2:
+        _sorted_c2 = sorted(set(c2_ts_values))
+        _gaps = [_sorted_c2[i+1]-_sorted_c2[i] for i in range(len(_sorted_c2)-1)
+                 if 0 < _sorted_c2[i+1]-_sorted_c2[i] < 3600]
+        if _gaps:
+            beacon_intervals = _gaps
 
     # Identify pivot event (lateral movement)
     pivot_ev = None
@@ -1069,7 +1100,22 @@ def _build_attack_story(evidence: list[dict], iocs: dict) -> dict:
     else:
         lines.append("At an unrecorded time")
 
-    if phish_to and phish_subject:
+    # Lead with the most severe CONFIRMED event — prevent wrong primary victim framing
+    # (bob received phish but alice/evilproc is the CONFIRMED compromised machine)
+    _ep_proc = (initiating_ev["row"].get("process_name") or initiating_ev["row"].get("process") or "") if initiating_ev else ""
+    _ep_host = (initiating_ev["row"].get("hostname") or initiating_ev["row"].get("computer") or initiating_ev["row"].get("host") or "") if initiating_ev else ""
+    _ep_user = (initiating_ev["row"].get("user") or initiating_ev["row"].get("username") or "") if initiating_ev else ""
+    _ep_sheet = initiating_ev["sheet"].lower() if initiating_ev else ""
+    if _ep_proc and _ep_sheet in ("endpoint", "edr"):
+        _host_str = f"on {_ep_host}" if _ep_host else (f"by user {_ep_user}" if _ep_user else "on a company endpoint")
+        lines.append(f", malicious software ({_ep_proc}) was executed {_host_str}.")
+        if phish_to and phish_subject:
+            lines.append(
+                f" Likely initial delivery: {phish_to} received a phishing email"
+                f" with subject '{phish_subject}'"
+                f"{' from ' + phish_from if phish_from else ''}."
+            )
+    elif phish_to and phish_subject:
         lines.append(
             f", {phish_to} received a phishing email with subject '{phish_subject}'"
             f"{' from ' + phish_from if phish_from else ''}."
@@ -1079,9 +1125,9 @@ def _build_attack_story(evidence: list[dict], iocs: dict) -> dict:
     else:
         lines.append(", an attack was initiated.")
 
-    if initiating_ev and initiating_ev["factors"]:
-        proc = (initiating_ev["row"].get("process_name") or
-                initiating_ev["row"].get("process") or "")
+    # Secondary process mention if initiating event wasn't endpoint
+    if _ep_proc and _ep_sheet not in ("endpoint", "edr") and initiating_ev and initiating_ev["factors"]:
+        proc = (initiating_ev["row"].get("process_name") or initiating_ev["row"].get("process") or "")
         if proc:
             lines.append(f" A malicious process ({proc}) was executed on the endpoint.")
 
@@ -1094,6 +1140,14 @@ def _build_attack_story(evidence: list[dict], iocs: dict) -> dict:
             f" {len(codes)} {'callback' if len(codes)==1 else 'callbacks'} to the attacker's server"
             f" were detected{interval_str}."
         )
+
+    # Dropper activity: explicitly narrate file_write (doc.doc) as P0 collection requirement
+    _dropper_evs = [_dev for _dev in evidence if "dropper_file_write" in _dev.get("factors", [])]
+    if _dropper_evs:
+        _dv = _dropper_evs[0]
+        _dropped = (_dv["row"].get("cmdline") or _dv["row"].get("written_file") or "secondary payload")
+        _dp = _dv["row"].get("process_name") or _dv["row"].get("process") or "malicious process"
+        lines.append(f" Dropper activity: {_dp} wrote {_dropped} — collect before any remediation.")
 
     if duration_minutes is not None:
         lines.append(f" The detected activity window spanned {duration_minutes} minutes.")
@@ -1710,7 +1764,7 @@ def _story_soc(model: dict, assessment: dict, filename: str, W: float, st: dict)
     action_map = {"malicious": "ISOLATE/BLOCK", "suspicious": "INVESTIGATE"}
     for e in ev[:14]:
         r = e["row"]
-        host = (r.get("hostname") or r.get("computer") or r.get("host") or "—")[:16]
+        host = (r.get("hostname") or r.get("computer") or r.get("host") or "—")[:20]
         # User identity — check email sheet fields too
         user = (r.get("user") or r.get("username") or
                 r.get("to") or r.get("email_to") or
@@ -1745,7 +1799,7 @@ def _story_soc(model: dict, assessment: dict, filename: str, W: float, st: dict)
         story.append(_mini_tbl(W,
             ["ID", "Timestamp (UTC)", "Host", "User / Identity", "MITRE", "Score", "Action"],
             tbl_rows,
-            col_widths=[0.9*cm, 3.5*cm, 2.2*cm, 2.8*cm, 1.8*cm, 1.2*cm, W-12.4*cm]
+            col_widths=[0.9*cm, 3.5*cm, 2.8*cm, 2.8*cm, 1.8*cm, 1.2*cm, W-12.4*cm]
         ))
     story.append(Spacer(1, 10))
 
@@ -1791,8 +1845,8 @@ def _story_soc(model: dict, assessment: dict, filename: str, W: float, st: dict)
         story.append(Paragraph("Escalate to Tier-2 / Threat Hunter — Handoff Card", st["h2"]))
         hc_rows = []
 
-        # Summarize malicious events for handoff
-        for me in malicious_evs[:4]:
+        # Summarize ALL malicious events for handoff (was capped at 4 — lost context)
+        for me in malicious_evs[:15]:
             r = me["row"]
             proc  = r.get("process_name") or r.get("process") or "—"
             host  = r.get("hostname") or r.get("computer") or "—"
@@ -2170,18 +2224,21 @@ def _story_compliance(model: dict, assessment: dict, filename: str, W: float, st
                "UNKNOWN — data classification not complete"
     if model["has_pii"] and model["has_c2"]:
         notif_text = (
-            "GDPR Art.33 NOTIFICATION LIKELY REQUIRED — PII in scope + confirmed "
-            "C2 channel (possible exfiltration path)"
+            "GDPR Art.33 NOTIFICATION REQUIRED — PII in scope + confirmed "
+            "C2 channel. Risk to data subjects is not theoretical; notify supervisory authority."
         )
     elif model["has_pii"]:
         notif_text = "GDPR Art.33 ASSESSMENT REQUIRED — PII confirmed in scope"
     else:
         notif_text = "No PII confirmed — reassess if scope expands or additional data classified"
 
-    gdpr_start = atk["start_ts"] if atk["start_ts"] != "—" else "unknown — set on discovery"
+    import datetime as _dt_gdpr_pdf
+    # PDF GDPR clock: use discovery/analysis time, not raw historical event timestamp.
+    # Using the XLSX event timestamp would incorrectly backdate the DPA notification clock.
+    gdpr_start = _dt_gdpr_pdf.datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC") + " (analysis/discovery)"
 
     breach_rows = [
-        ["GDPR 72h clock",   f"[ ] Started  [ ] Waived  |  Incident start: {gdpr_start}"],
+        ["GDPR 72h clock",   f"[ ] Started  [ ] Waived  |  Clock starts: {gdpr_start}"],
         ["PII in scope",     pii_text],
         ["Notifiable event", notif_text],
         ["Overall severity", model["overall_risk"]],
