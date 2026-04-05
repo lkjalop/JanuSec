@@ -185,6 +185,189 @@ def _infer_alert_type(row: Dict[str, Any]) -> str:
     return 'generic_anomaly'
 
 
+def _extract_dread_dims(row: Dict[str, Any]) -> Dict[str, Any]:
+    """Return the 5 DREAD dimension scores (1-10) from whichever engine populated _dread.
+
+    Priority:
+    1. dread_engine path  — keys: damage, reproducibility, exploitability, affected, discoverability
+    2. factor_taxonomy path — uses max_components dict from aggregate_threat_model
+    3. Synthesise from composite score and factors (rough proportional split)
+    """
+    dread = row.get('_dread') or row.get('dread') or {}
+    if isinstance(dread, (int, float)):
+        dread = {'score': dread}
+
+    dims: Dict[str, Any] = {}
+    # --- Path 1: dread_engine explicitly populated all 5 ---
+    for key in ('damage', 'reproducibility', 'exploitability', 'affected', 'discoverability'):
+        v = dread.get(key) or dread.get(f'affected_users' if key == 'affected' else key)
+        if v is not None:
+            try:
+                dims[key] = int(round(float(v)))
+            except Exception:
+                pass
+
+    # --- Path 2: factor_taxonomy components dict ---
+    comps = dread.get('components') or dread.get('max_components') or {}
+    if isinstance(comps, dict) and not dims:
+        _map = {
+            'damage': comps.get('damage'),
+            'reproducibility': comps.get('reproducibility'),
+            'exploitability': comps.get('exploitability'),
+            'affected': comps.get('affected'),
+            'discoverability': comps.get('discoverability'),
+        }
+        for k, v in _map.items():
+            if v is not None:
+                try:
+                    # taxonomy values are 0..1, scale to 1-10
+                    scaled = max(1, min(10, int(round(float(v) * 10))))
+                    dims[k] = scaled
+                except Exception:
+                    pass
+
+    # --- Path 3: synthesise from composite ---
+    if not dims:
+        composite = (
+            dread.get('composite')
+            or dread.get('score')
+            or dread.get('risk_score', 0) * 10
+        )
+        try:
+            c = float(composite or 0)
+        except Exception:
+            c = 0.0
+        factors = [str(f).lower() for f in (row.get('factors') or [])]
+        # rough evidence-based splits
+        damage = min(10, max(1, int(c + (1 if any(x in ' '.join(factors) for x in ('lsass', 'credential', 'critical', 'tier1')) else 0))))
+        exploitability = min(10, max(1, int(c + (1 if any('exploit' in f or 'cve' in f or 'public_poc' in f for f in factors) else -1))))
+        reproducibility = min(10, max(1, int(c - (1 if any('rare' in f or 'unique' in f for f in factors) else 0))))
+        affected = min(10, max(1, int(c + (1 if any('domain' in f or 'all_user' in f for f in factors) else -1))))
+        discoverability = min(10, max(1, int(c - (1 if any('hidden' in f or 'obfuscat' in f for f in factors) else 0))))
+        dims = {
+            'damage': damage,
+            'reproducibility': reproducibility,
+            'exploitability': exploitability,
+            'affected': affected,
+            'discoverability': discoverability,
+        }
+
+    return dims
+
+
+# Evidence labels used to explain why each dimension scored as it did
+_DREAD_EVIDENCE_LABELS: Dict[str, Dict[str, str]] = {
+    'damage': {
+        'critical_ports': 'target exposes critical service ports (22/445/3389)',
+        'business_tier': 'asset is classified as {val} business tier',
+        'cmdb_criticality': 'CMDB criticality score {val}/10',
+        'vuln_high': '{val} high-CVSS vulnerabilities matched',
+    },
+    'exploitability': {
+        'exploit_available': 'public exploit or PoC available',
+        'avg_cvss': 'average CVSS {val} across matched CVEs',
+        'prior_exploits': 'prior exploitation activity detected',
+    },
+    'reproducibility': {
+        'asn_residential': 'source ASN is residential/static (persistent attacker infra)',
+        'tool_masscan': 'masscan fingerprint detected (automated tooling)',
+    },
+    'affected': {
+        'host_count': '{val} destination hosts in scope',
+        'domain_wide': 'asset serves domain-wide Identity/Auth role',
+    },
+    'discoverability': {
+        'public_dns': 'target has public DNS record',
+        'public_facing': 'asset is externally reachable',
+        'sequential_scan': 'sequential/automated scan pattern indicates pre-mapping',
+    },
+}
+
+
+def _build_dread_rationale(row: Dict[str, Any]) -> str:
+    """Return a compact evidence-anchored rationale string for each DREAD dimension.
+
+    Used to ground LLM prompts in concrete evidence instead of bare factor strings.
+    Returns an empty string when no DREAD data is available (safe to skip).
+    """
+    dims = _extract_dread_dims(row)
+    if not dims:
+        return ''
+
+    dread = row.get('_dread') or row.get('dread') or {}
+    if isinstance(dread, (int, float)):
+        dread = {}
+    factors = [str(f).lower() for f in (row.get('factors') or [])]
+    factor_str = ' '.join(factors)
+
+    def _hint(dim: str) -> str:
+        hints = []
+        if dim == 'damage':
+            ports = dread.get('destination_ports') or row.get('destination_ports') or []
+            critical = {22, 23, 445, 3389, 1433, 3306}
+            if set(ports) & critical:
+                hints.append('critical service ports exposed')
+            biz = (row.get('business_tier') or dread.get('business_tier') or '').lower()
+            if biz in ('high', 'critical'):
+                hints.append(f'asset tier: {biz}')
+            vuln = dread.get('vuln_matches') or []
+            high_cves = [v for v in (vuln if isinstance(vuln, list) else []) if (v.get('cvss') or 0) >= 7]
+            if high_cves:
+                hints.append(f'{len(high_cves)} high-CVSS CVE(s) matched (e.g. {high_cves[0].get("cve_id","CVE-??")} CVSS {high_cves[0].get("cvss","?")})')
+            if any(x in factor_str for x in ('lsass', 'credential', 'sam_hive', 'dpapi')):
+                hints.append('credential store targeted')
+        elif dim == 'exploitability':
+            if any('exploit' in f or 'public_poc' in f for f in factors):
+                hints.append('public exploit/PoC available')
+            avg_cvss = dread.get('avg_cvss')
+            if avg_cvss:
+                hints.append(f'avg CVSS {avg_cvss}')
+            if any('prior_exploit' in f for f in factors):
+                hints.append('prior exploitation observed')
+        elif dim == 'reproducibility':
+            asn = (dread.get('asn_category') or '').lower()
+            if asn in ('residential', 'static'):
+                hints.append(f'source ASN: {asn} (persistent infra)')
+            if any('masscan' in f or 'automated_tool' in f for f in factors):
+                hints.append('automated tooling fingerprint')
+            if not hints:
+                score = dims.get('reproducibility', 5)
+                hints.append('ease of repetition' + (' high' if score >= 7 else ' moderate' if score >= 4 else ' low'))
+        elif dim == 'affected':
+            hosts = row.get('destination_ips') or []
+            if isinstance(hosts, list) and hosts:
+                hints.append(f'{len(hosts)} destination host(s) in scope')
+            if any('domain' in f or 'all_user' in f or 'dc_' in f for f in factors):
+                hints.append('domain-wide identity asset')
+            user = row.get('user') or row.get('username')
+            if user:
+                hints.append(f'user: {user}')
+        elif dim == 'discoverability':
+            if any('public_dns' in f or 'public_facing' in f for f in factors):
+                hints.append('publicly reachable target')
+            if any('sequential' in f or 'horizontal_scan' in f for f in factors):
+                hints.append('sequential scan pattern (pre-mapped)')
+            if not hints:
+                score = dims.get('discoverability', 5)
+                hints.append('findability' + (' high — asset exposed' if score >= 7 else ' moderate' if score >= 4 else ' low — requires insider knowledge'))
+        return '; '.join(hints) if hints else 'based on pipeline telemetry'
+
+    labels = {
+        'damage': 'Damage',
+        'reproducibility': 'Reproducibility',
+        'exploitability': 'Exploitability',
+        'affected': 'Affected Users',
+        'discoverability': 'Discoverability',
+    }
+    lines = ['DREAD evidence:']
+    for dim in ('damage', 'exploitability', 'reproducibility', 'affected', 'discoverability'):
+        score = dims.get(dim)
+        if score is None:
+            continue
+        lines.append(f'  {labels[dim]} {score}/10 — {_hint(dim)}')
+    return '\n'.join(lines)
+
+
 def _build_signal_entries(row: Dict[str, Any]) -> List[Dict[str, Any]]:
     factors = row.get('factors')
     if not isinstance(factors, list):
@@ -266,16 +449,18 @@ def _compose_tier1_payload(row: Dict[str, Any], domain: str, ctx: Dict[str, Any]
     verdict_mitre = _normalize_mitre(row)
     if not verdict_mitre and template.get('mitre'):
         verdict_mitre = template.get('mitre', [])
+    _dread_dims = _extract_dread_dims(row)
     verdict = {
         'classification': row.get('verdict') or row.get('classification') or 'UNKNOWN',
-        'dread_score': (dread or {}).get('score'),
+        'dread_score': (dread or {}).get('score') or (dread or {}).get('composite'),
         'dread_breakdown': {
-            'damage': (dread or {}).get('damage'),
-            'reproducibility': (dread or {}).get('reproducibility'),
-            'exploitability': (dread or {}).get('exploitability'),
-            'affected_users': (dread or {}).get('affected_users'),
-            'discoverability': (dread or {}).get('discoverability'),
+            'damage': _dread_dims.get('damage'),
+            'reproducibility': _dread_dims.get('reproducibility'),
+            'exploitability': _dread_dims.get('exploitability'),
+            'affected_users': _dread_dims.get('affected'),
+            'discoverability': _dread_dims.get('discoverability'),
         },
+        'dread_rationale': _build_dread_rationale(row) or None,
         'mitre_techniques': verdict_mitre,
         'kill_chain_phase': row.get('kill_chain') or row.get('stage'),
     }
@@ -447,6 +632,16 @@ def _compose_tier2_payload(row: Dict[str, Any], ctx: Dict[str, Any], raw_text: A
         highlights = None
     if highlights:
         payload.setdefault('network_highlights', highlights)
+    # Attach per-dimension DREAD breakdown and rationale to Tier-2 payload
+    try:
+        _dims = _extract_dread_dims(row)
+        if _dims:
+            payload.setdefault('dread_breakdown', _dims)
+            rationale = _build_dread_rationale(row)
+            if rationale:
+                payload.setdefault('dread_rationale', rationale)
+    except Exception:
+        pass
     return payload
 
 
@@ -606,6 +801,30 @@ def _generate_tier1_summary(row: Dict[str, Any], domain: str, context: Dict[str,
         payload['llm_skipped_reason'] = 'below_severity_threshold'
         payload['weighted_confidence'] = _derive_confidence_score(row)
         return '', model, payload
+    # DREAD gate — skip LLM when both DREAD and confidence are below thresholds
+    # Set LLM_T1_MIN_DREAD (default 0 = disabled) and LLM_T1_DREAD_CONF_OVERRIDE to tune
+    try:
+        _min_dread = float(os.getenv('LLM_T1_MIN_DREAD', '0'))
+    except Exception:
+        _min_dread = 0.0
+    if _min_dread > 0:
+        _dread_val = float(
+            (row.get('_dread') or {}).get('score')
+            or (row.get('_dread') or {}).get('composite')
+            or row.get('dread')
+            or 0
+        )
+        _conf = _derive_confidence_score(row)
+        try:
+            _conf_override = float(os.getenv('LLM_T1_DREAD_CONF_OVERRIDE', '0.85'))
+        except Exception:
+            _conf_override = 0.85
+        # OR gate: skip only when BOTH dread and confidence are below their respective floors
+        if _dread_val < _min_dread and _conf < _conf_override:
+            payload = _compose_tier1_payload(row, domain, ctx, model, '')
+            payload['llm_skipped_reason'] = f'below_dread_threshold(dread={round(_dread_val,1)}<{_min_dread},conf={round(_conf,2)}<{_conf_override})'
+            payload['weighted_confidence'] = _conf
+            return '', model, payload
     # compute triage score early so gating and payloads can use it
     try:
         tri_inputs = {'dread': (row.get('_dread') or {}).get('score') or row.get('dread'),
@@ -652,18 +871,24 @@ def _generate_tier1_summary(row: Dict[str, Any], domain: str, context: Dict[str,
         proc = row.get('process_name') or row.get('image') or 'unknown process'
         host = row.get('host') or row.get('device') or 'unknown host'
         verdict = (row.get('verdict') or 'suspicious').upper()
-        dread = (row.get('_dread') or {}).get('score') or row.get('dread') or 0
+        dread_score = (row.get('_dread') or {}).get('score') or (row.get('_dread') or {}).get('composite') or row.get('dread') or 0
         signals = ', '.join(row.get('factors') or row.get('signals') or [])
         tenant_id = context.get('tenant_id') or context.get('org') or row.get('tenant_id')
         biz_ctx = _get_tenant_business_context(tenant_id, context)
         biz_line = f'\nBUSINESS CONTEXT: {biz_ctx}' if biz_ctx else ''
+        dread_rationale = _build_dread_rationale(row)
+        rationale_block = f'\n{dread_rationale}' if dread_rationale else f'\nDREAD composite: {dread_score}'
+        mitre_tags = ', '.join(_normalize_mitre(row)[:3]) or 'unknown'
         prompt = (
-            "You are a SOC analyst performing FAST TRIAGE. Follow the schema WHAT IS IT / EXPLOITABILITY / WHAT TO DO / "
-            "CONCISE PLAYBOOK (30-45 lines)."
+            "You are a SOC analyst performing FAST TRIAGE. Follow this schema exactly:\n"
+            "1. WHAT IS IT (1 sentence, non-technical — what happened in plain English)\n"
+            "2. WHY IT MATTERS (1 sentence — business/user impact based on evidence below)\n"
+            "3. WHAT TO DO NEXT (2-3 bullet points — specific, actionable, prioritised)\n"
+            "Ground every statement in the evidence provided. Avoid filler phrases.\n"
             f"\nProcess: {proc}\nHost: {host}\nVerdict: {verdict}\nDomain: {domain}\n"
-            f"DREAD: {dread}\nSignals: {signals or 'none'}{biz_line}"
+            f"MITRE: {mitre_tags}\nSignals: {signals or 'none'}{rationale_block}{biz_line}"
         )
-        llm_text = _llm_generate(prompt, model='gpt-4o-mini', max_tokens=512, context=context)
+        llm_text = _llm_generate(prompt, model='gpt-4o-mini', max_tokens=400, context=context)
         if llm_text:
             text = llm_text.strip()
             model = 'gpt-4o-mini'
