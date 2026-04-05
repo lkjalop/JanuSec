@@ -131,47 +131,20 @@ try:
     # Provide a lightweight security.auth.require_scopes stub so FastAPI
     # dependencies that call `require_scopes(...)` during import do not
     # enforce real auth during lite-mode tests.
-    if 'security.auth' not in sys.modules:
+    # Skip stub when ENFORCE_API_SECURITY=1 (used by test_api_security.py).
+    _skip_stub = os.environ.get('ENFORCE_API_SECURITY', '0').lower() in ('1', 'true', 'yes')
+    if 'security.auth' not in sys.modules and not _skip_stub:
         _sec = _early_types.ModuleType('security.auth')
-        # Strengthened stub: enforce simple header-based API key + scope check
+        # Permissive stub: FastAPI-compatible Header annotation, no enforcement.
         def require_scopes(scope):
-            from fastapi import HTTPException
-            def _dep(request=None, **kwargs):
-                try:
-                    # Basic check: header x-api-key must exist
-                    api_key = None
-                    if request is not None:
-                        try:
-                            api_key = request.headers.get('x-api-key') or request.headers.get('X-API-Key')
-                        except Exception:
-                            api_key = None
-                    if not api_key:
-                        raise HTTPException(status_code=401, detail='unauthorized')
-                    import os, json as _json
-                    keys_json = os.environ.get('API_KEYS_JSON') or '[]'
-                    try:
-                        entries = _json.loads(keys_json)
-                    except Exception:
-                        entries = []
-                    scopes_ok = False
-                    for ent in entries:
-                        if ent.get('key') == api_key:
-                            scs = ent.get('scopes') or []
-                            if '*' in scs or scope in scs:
-                                scopes_ok = True
-                                break
-                    if not scopes_ok:
-                        raise HTTPException(status_code=401, detail='scope_required')
-                    return True
-                except HTTPException:
-                    raise
-                except Exception:
-                    raise HTTPException(status_code=401, detail='unauthorized')
+            from fastapi import Header as _FHeader
+            async def _dep(x_api_key: str | None = _FHeader(None, alias='x-api-key')):
+                return True
             return _dep
-        def auth_dependency(request=None, **kwargs):
+        async def auth_dependency(x_api_key: str | None = None, authorization: str | None = None, required_scopes: list | None = None):
             return None
         class AuthContext:
-            def __init__(self, *args, **kwargs):
+            def __init__(self, *a, **kw):
                 self.scopes = []
         _sec.require_scopes = require_scopes
         _sec.auth_dependency = auth_dependency

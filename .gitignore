@@ -43,3 +43,8 @@ report_demo.py
 dist/
 build/
 frontend/static/vendor/
+
+# Environment secrets
+.env
+*.env.local
+

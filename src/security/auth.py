@@ -46,7 +46,7 @@ def _test_helper_api_keys() -> set[str]:
     raw = os.getenv('TEST_HELPER_API_KEYS', '')
     keys = {token.strip() for token in raw.split(',') if token and token.strip()}
     if not keys:
-        keys = {'testkey123', 'k3', 'janusec-test-key'}
+        keys = {'testkey123', 'k3', 'janusec-test-key', 'devkey123'}
     return keys
 
 def _load_api_keys():

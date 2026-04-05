@@ -1460,27 +1460,31 @@ def create_app(config: dict | None = None):
     try:
         m = getattr(app.state, '_factory_mode', None) or os.getenv('PLATFORM_LITE_INIT','0')
         if isinstance(m, str) and m.lower() in {'test', 'lite', '1', 'true', 'yes'}:
-            _orig_include = app.include_router
-            def _lite_include_router(router, *args, **kwargs):
-                try:
-                    p = getattr(router, 'prefix', '') or ''
-                    # allow routers that are admin/retrain/assessments related
-                    allow_keys = ('/admin', 'retrain', 'trainer', 'assess', '/api/v1/assessments')
-                    if any(k in p for k in allow_keys):
-                        return _orig_include(router, *args, **kwargs)
-                    # also allow explicitly named routers often used by tests
-                    name = getattr(router, '__name__', '') or getattr(router, 'name', '')
-                    if any(k in str(name) for k in ('online_trainer', 'admin', 'assess')):
-                        return _orig_include(router, *args, **kwargs)
-                    # skip inclusion to avoid heavy schema generation
-                    logger.debug('Skipping router include in lite/test mode: %s %s', p, name)
-                except Exception:
-                    # on any error, fall back to original include to avoid hiding issues
+            # Guard: only install wrapper if not already installed (avoids recursion on repeated create_app calls)
+            _already_wrapped = getattr(app.include_router, '_is_lite_wrapper', False)
+            if not _already_wrapped:
+                _orig_include = app.include_router
+                def _lite_include_router(router, *args, **kwargs):
                     try:
-                        return _orig_include(router, *args, **kwargs)
+                        p = getattr(router, 'prefix', '') or ''
+                        # allow routers that are admin/retrain/assessments related
+                        allow_keys = ('/admin', 'retrain', 'trainer', 'assess', '/api/v1/assessments', '/api/v1/connectors', '/api/v1/ingest', '/api/v1/status')
+                        if any(k in p for k in allow_keys):
+                            return _orig_include(router, *args, **kwargs)
+                        # also allow explicitly named routers often used by tests
+                        name = getattr(router, '__name__', '') or getattr(router, 'name', '')
+                        if any(k in str(name) for k in ('online_trainer', 'admin', 'assess')):
+                            return _orig_include(router, *args, **kwargs)
+                        # skip inclusion to avoid heavy schema generation
+                        logger.debug('Skipping router include in lite/test mode: %s %s', p, name)
                     except Exception:
-                        pass
-            app.include_router = _lite_include_router
+                        # on any error, fall back to original include to avoid hiding issues
+                        try:
+                            return _orig_include(router, *args, **kwargs)
+                        except Exception:
+                            pass
+                _lite_include_router._is_lite_wrapper = True
+                app.include_router = _lite_include_router
     except Exception:
         pass
 
@@ -2178,6 +2182,13 @@ def _register_background_schedulers():
             register_metrics_collector(app)
         except Exception:
             pass
+    except Exception:
+        pass
+
+    # Connector auto-poll background scheduler (set CONNECTOR_AUTOPOLL_ENABLED=1 to activate)
+    try:
+        from src.api.connector_autopoll import register_autopoll
+        register_autopoll(app)
     except Exception:
         pass
 
@@ -4725,6 +4736,19 @@ def register_core_routers(full: bool = True):
     except Exception as exc:
         logger.debug('cert_check router include failed: %s', exc)
     if not full:
+        # Include connectors control-plane router in lite mode so connector
+        # config/poll/status tests can hit /api/v1/connectors/* endpoints.
+        try:
+            from src.api.routes import connectors as _connectors_ctrl_lite
+            app.include_router(_connectors_ctrl_lite.router)
+        except Exception as _e:
+            logger.debug('connectors-ctrl include failed in lite mode: %s', _e)
+        # Include connector runtime-health status router (/api/v1/status/connectors)
+        try:
+            from src.api.status_connectors import router as _status_connectors_router
+            app.include_router(_status_connectors_router)
+        except Exception as _e:
+            logger.debug('status_connectors router include failed in lite mode: %s', _e)
         # Log current mounted routes for diagnostic purposes when running in lite mode
         try:
             routes = sorted({r.path for r in app.router.routes})

@@ -26,11 +26,67 @@ except Exception:
     compute_dread = None
 
 
+def _ensure_risk_quantification(report: Dict[str, Any]) -> None:
+    """Guarantee report['risk_quantification'] is populated with at least floor values.
+
+    This is a best-effort fallback for lite-pipeline paths where the full
+    offline_workbook_assessment is not executed.  The report dict is modified
+    in-place; existing populated values are never overwritten.
+    """
+    rq = report.get('risk_quantification') or {}
+    # Already has meaningful data — nothing to do
+    if rq.get('expected_loss_usd') or rq.get('severity'):
+        if not report.get('risk_quantification'):
+            report['risk_quantification'] = rq
+        return
+
+    rows = report.get('rows') or []
+    factors: list = []
+    for r in rows:
+        factors.extend(r.get('factors') or [])
+    n_rows = len(rows)
+    n_suspicious = sum(1 for r in rows if float(r.get('confidence', 0) or 0) > 0.5)
+    if not n_suspicious:
+        # Fall back to verdict confidence when rows don't carry per-row confidence
+        vc = float((report.get('verdict') or {}).get('final_confidence') or 0)
+        n_suspicious = 1 if vc > 0.5 else 0
+
+    verdict_sev = ((report.get('verdict') or {}).get('final_verdict') or '').upper()
+    if verdict_sev in ('CRITICAL', 'HIGH', 'MEDIUM', 'LOW'):
+        severity = verdict_sev
+    elif n_suspicious > 5:
+        severity = 'CRITICAL'
+    elif n_suspicious > 2:
+        severity = 'HIGH'
+    elif n_suspicious > 0:
+        severity = 'MEDIUM'
+    else:
+        severity = 'LOW'
+
+    try:
+        from src.analysis.offline_workbook_assessment import _estimate_expected_loss
+        expected = _estimate_expected_loss(severity, max(1, n_rows), n_suspicious, 0)
+    except Exception:
+        expected = {'LOW': 2500, 'MEDIUM': 12000, 'HIGH': 35000, 'CRITICAL': 90000}.get(severity, 2500)
+
+    report['risk_quantification'] = rq | {
+        'severity': severity,
+        'likelihood_percent': round(min(85, 20 + n_suspicious * 15), 1),
+        'expected_loss_usd': expected,
+        'impact_range_usd': [expected, expected * 3],
+        'damage_potential': min(10, 2 + len([f for f in factors if 'endpoint:' in str(f)])),
+        'evidence_based': bool(n_suspicious),
+        '_synthesized': True,
+    }
+
+
 def generate_persona_view(report: Dict[str, Any], persona: str, disclosure_level: int = 2, top_n: int = 10) -> Dict[str, Any]:
     """Generate a persona-specific view with summary signals and decision gates.
 
     Persona: 'executive' | 'soc_analyst' | 'compliance' | 'threat_hunter' | 'mssp' | 'forensics'
     """
+    # Ensure risk_quantification always has a value so downstream persona blocks can read dollar figures
+    _ensure_risk_quantification(report)
     base = {
         "report_id": report.get("report_id"),
         "persona": persona,
@@ -89,10 +145,13 @@ def generate_persona_view(report: Dict[str, Any], persona: str, disclosure_level
         base["audit_trail"] = _audit_trail(report)
         base["framework_mappings"] = report.get("framework_mappings", [])
         base["control_posture"] = _control_posture(report)
+        base["regulatory_control_ids"] = _map_to_regulatory_controls(report)
     elif p == "threat_hunter":
         base["factor_analysis"] = report.get("verdict", {}).get("all_factors", [])
         base["statistical"] = _statistical(report)
         base["corroboration_targets"] = _corroboration_targets(report)
+        base["kill_chain_stages"] = _derive_kill_chain_stages(report)
+        base["sigma_rules"] = _generate_sigma_stubs(report)
     elif p == "mssp":
         base["client"] = {"tenant_id": report.get("tenant_id")}
         base["sla"] = {"target_minutes": 15}
@@ -243,6 +302,135 @@ def _audit_trail(report: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+# ---------------------------------------------------------------------------
+# Regulatory control ID mapping for the Compliance persona
+# ---------------------------------------------------------------------------
+
+# MITRE ATT&CK technique → {framework: [control_ids]} mapping
+_TECHNIQUE_CONTROL_MAP: Dict[str, Dict[str, list[str]]] = {
+    'T1078': {
+        'SOC2': ['CC6.1', 'CC6.2', 'CC6.3'],
+        'GDPR': ['Art. 32(1)(b)', 'Art. 32(1)(d)'],
+        'PCI_DSS': ['8.2', '8.3', '10.2.4'],
+    },
+    'T1110': {
+        'SOC2': ['CC6.1', 'CC6.6'],
+        'GDPR': ['Art. 32(1)(a)', 'Art. 32(1)(b)'],
+        'PCI_DSS': ['8.3', '8.3.6', '10.2.4'],
+    },
+    'T1566': {
+        'SOC2': ['CC6.7', 'CC6.8'],
+        'GDPR': ['Art. 32(1)(b)'],
+        'PCI_DSS': ['5.4', '12.6'],
+    },
+    'T1003': {
+        'SOC2': ['CC6.1', 'CC6.6'],
+        'GDPR': ['Art. 32(1)(b)', 'Art. 33'],
+        'PCI_DSS': ['8.2', '10.2.5'],
+    },
+    'T1059': {
+        'SOC2': ['CC6.8'],
+        'GDPR': ['Art. 32(1)(b)'],
+        'PCI_DSS': ['6.3', '10.2.2'],
+    },
+    'T1047': {
+        'SOC2': ['CC6.8', 'CC7.2'],
+        'GDPR': ['Art. 32(1)(d)'],
+        'PCI_DSS': ['6.3', '10.2.2'],
+    },
+    'T1486': {
+        'SOC2': ['A1.2', 'CC9.1'],
+        'GDPR': ['Art. 32(1)(c)', 'Art. 33', 'Art. 34'],
+        'PCI_DSS': ['12.10', '3.4'],
+    },
+    'T1048': {
+        'SOC2': ['CC6.7', 'CC7.3'],
+        'GDPR': ['Art. 32(1)(b)', 'Art. 33'],
+        'PCI_DSS': ['4.2', '10.3'],
+    },
+    'T1071': {
+        'SOC2': ['CC6.6', 'CC7.2'],
+        'GDPR': ['Art. 32(1)(d)'],
+        'PCI_DSS': ['1.3', '10.2.7'],
+    },
+    'T1190': {
+        'SOC2': ['CC7.1', 'CC7.2'],
+        'GDPR': ['Art. 32(1)(b)', 'Art. 33'],
+        'PCI_DSS': ['6.3.3', '11.3'],
+    },
+    'T1021': {
+        'SOC2': ['CC6.1', 'CC6.3'],
+        'GDPR': ['Art. 32(1)(b)'],
+        'PCI_DSS': ['7.2', '8.2', '10.2.3'],
+    },
+    'T1552': {
+        'SOC2': ['CC6.1', 'CC6.7'],
+        'GDPR': ['Art. 32(1)(a)'],
+        'PCI_DSS': ['8.3', '6.5'],
+    },
+    'T1027': {
+        'SOC2': ['CC7.1', 'CC7.2'],
+        'GDPR': ['Art. 32(1)(d)'],
+        'PCI_DSS': ['5.2', '10.2.7'],
+    },
+}
+
+
+def _map_to_regulatory_controls(report: Dict[str, Any]) -> Dict[str, Any]:
+    """Return a mapping of regulatory control IDs relevant to the detected techniques.
+
+    Returns a dict keyed by framework ('SOC2', 'GDPR', 'PCI_DSS') with deduplicated
+    control IDs.  Also includes a brief human-readable rationale per framework.
+    """
+    # Collect MITRE technique tags from multiple sources
+    mitre_tags: set[str] = set()
+    verdict = report.get('verdict') or {}
+    for tag in (verdict.get('mitre_tags') or []):
+        mitre_tags.add(str(tag).split('.')[0].upper())
+    for row in (report.get('rows') or []):
+        for tag in (row.get('mitre_tags') or row.get('mitre') or []):
+            mitre_tags.add(str(tag).split('.')[0].upper())
+    for finding in (report.get('findings') or []):
+        for tag in (finding.get('mitre') or []):
+            mitre_tags.add(str(tag).split('.')[0].upper())
+    # Also look in framework_mappings if already present
+    for fm in (report.get('framework_mappings') or []):
+        if isinstance(fm, dict):
+            tech = str(fm.get('technique') or fm.get('technique_id') or '').split('.')[0].upper()
+            if tech:
+                mitre_tags.add(tech)
+
+    soc2: set[str] = set()
+    gdpr: set[str] = set()
+    pci: set[str] = set()
+    matched_techniques: list[str] = []
+
+    for tag in mitre_tags:
+        ctl = _TECHNIQUE_CONTROL_MAP.get(tag)
+        if ctl:
+            matched_techniques.append(tag)
+            soc2.update(ctl.get('SOC2') or [])
+            gdpr.update(ctl.get('GDPR') or [])
+            pci.update(ctl.get('PCI_DSS') or [])
+
+    # Always include baseline controls when any technique is matched
+    if matched_techniques:
+        soc2.update(['CC6.1'])
+        pci.update(['10.1'])
+
+    return {
+        'SOC2': sorted(soc2),
+        'GDPR': sorted(gdpr),
+        'PCI_DSS': sorted(pci),
+        'matched_techniques': sorted(matched_techniques),
+        'rationale': {
+            'SOC2': 'Logical access, change management, and monitoring controls relevant to detected TTPs.',
+            'GDPR': 'Data protection obligations triggered by potential personal data access or breach indicators.',
+            'PCI_DSS': 'Cardholder environment access logging and authentication requirements applicable to this activity.',
+        } if matched_techniques else {},
+    }
+
+
 def _statistical(report: Dict[str, Any]) -> Dict[str, Any]:
     v = report.get("verdict", {})
     return {
@@ -265,7 +453,7 @@ def _triage_focus(report: Dict[str, Any]) -> list[str]:
 def _corroboration_targets(report: Dict[str, Any]) -> list[str]:
     verdict = report.get("verdict") or {}
     prioritized = (verdict.get("semantic_top_factors") or verdict.get("top_contributing_factors") or [])
-    factors = [str(entry.get("factor_name") or entry) for entry in prioritized]
+    factors = [str(entry.get("factor_name") or entry) if isinstance(entry, dict) else str(entry) for entry in prioritized]
     targets: list[str] = []
     if any("email:" in factor for factor in factors):
         targets.append("Pull mailbox delivery traces, URL click telemetry, and attachment detonation evidence.")
@@ -280,3 +468,187 @@ def _corroboration_targets(report: Dict[str, Any]) -> list[str]:
     if any("corr:" in factor for factor in factors):
         targets.append("Pivot across identity, endpoint, and network timelines to validate the multi-stage chain.")
     return targets
+
+
+# ---------------------------------------------------------------------------
+# Kill-chain and Sigma helpers for the Threat Hunter persona
+# ---------------------------------------------------------------------------
+
+# MITRE ATT&CK technique → Lockheed Martin Kill Chain phase mapping (subset)
+_TECHNIQUE_KILL_CHAIN: Dict[str, str] = {
+    # Reconnaissance / Weaponization
+    'T1595': 'Reconnaissance',
+    'T1592': 'Reconnaissance',
+    'T1589': 'Reconnaissance',
+    'T1598': 'Reconnaissance',
+    # Initial Access
+    'T1078': 'Initial Access',
+    'T1190': 'Initial Access',
+    'T1566': 'Delivery',
+    'T1133': 'Initial Access',
+    'T1091': 'Delivery',
+    # Execution
+    'T1059': 'Execution',
+    'T1204': 'Execution',
+    'T1047': 'Execution',
+    'T1053': 'Execution',
+    # Persistence
+    'T1547': 'Installation',
+    'T1543': 'Installation',
+    'T1136': 'Installation',
+    # Privilege Escalation
+    'T1548': 'Exploitation',
+    'T1134': 'Exploitation',
+    # Defense Evasion
+    'T1027': 'Exploitation',
+    'T1055': 'Exploitation',
+    'T1218': 'Exploitation',
+    # Credential Access
+    'T1003': 'Exploitation',
+    'T1110': 'Exploitation',
+    'T1552': 'Exploitation',
+    # Discovery
+    'T1083': 'Actions on Objectives',
+    'T1057': 'Actions on Objectives',
+    'T1082': 'Actions on Objectives',
+    # Lateral Movement
+    'T1021': 'Lateral Movement',
+    'T1550': 'Lateral Movement',
+    # Collection
+    'T1005': 'Actions on Objectives',
+    'T1114': 'Actions on Objectives',
+    # Command and Control
+    'T1071': 'Command & Control',
+    'T1095': 'Command & Control',
+    'T1572': 'Command & Control',
+    # Exfiltration
+    'T1041': 'Actions on Objectives',
+    'T1048': 'Actions on Objectives',
+    # Impact
+    'T1486': 'Actions on Objectives',
+    'T1490': 'Actions on Objectives',
+}
+
+# Factor keyword → Sigma detection stubs
+_FACTOR_SIGMA_TEMPLATES: Dict[str, Dict[str, Any]] = {
+    'temp_execution': {
+        'title': 'Suspicious Execution from Temp Directory',
+        'status': 'experimental',
+        'description': 'Detects process execution from user or system temp paths.',
+        'logsource': {'category': 'process_creation', 'product': 'windows'},
+        'detection': {
+            'selection': {'Image|contains': ['\\AppData\\Local\\Temp\\', '\\Windows\\Temp\\']},
+            'condition': 'selection',
+        },
+        'level': 'medium',
+    },
+    'lolbin': {
+        'title': 'Living-off-the-Land Binary Abuse',
+        'status': 'experimental',
+        'description': 'Detects known LOLBAS programs used for proxy execution.',
+        'logsource': {'category': 'process_creation', 'product': 'windows'},
+        'detection': {
+            'selection': {'Image|endswith': ['\\mshta.exe', '\\certutil.exe', '\\wscript.exe', '\\cscript.exe', '\\regsvr32.exe', '\\rundll32.exe']},
+            'condition': 'selection',
+        },
+        'level': 'high',
+    },
+    'network_beacon': {
+        'title': 'Periodic Outbound C2 Beacon Pattern',
+        'status': 'experimental',
+        'description': 'Detects anomalous periodic outbound connections that match C2 beacon timing.',
+        'logsource': {'category': 'network_connection', 'product': 'zeek'},
+        'detection': {
+            'selection': {'resp_bytes': '0', 'duration|gt': 60},
+            'condition': 'selection',
+        },
+        'level': 'high',
+    },
+    'credential_access': {
+        'title': 'Credential Dumping via LSASS',
+        'status': 'experimental',
+        'description': 'Detects access to LSASS process memory consistent with credential harvesting.',
+        'logsource': {'category': 'process_access', 'product': 'windows'},
+        'detection': {
+            'selection': {'TargetImage|endswith': '\\lsass.exe', 'GrantedAccess': ['0x1010', '0x1410', '0x1FFFFF']},
+            'condition': 'selection',
+        },
+        'level': 'critical',
+    },
+    'identity:signin_anomaly': {
+        'title': 'Anomalous Sign-in Pattern',
+        'status': 'experimental',
+        'description': 'Detects sign-ins from unusual geography, impossible travel, or after hours.',
+        'logsource': {'service': 'azure_ad', 'product': 'azure'},
+        'detection': {
+            'selection': {'ResultType': '0', 'RiskLevelDuringSignIn': ['high', 'medium']},
+            'condition': 'selection',
+        },
+        'level': 'high',
+    },
+    'cloud:privilege_escalation': {
+        'title': 'Cloud IAM Privilege Escalation',
+        'status': 'experimental',
+        'description': 'Detects IAM role assumption or policy attachment in cloud environments.',
+        'logsource': {'service': 'cloudtrail', 'product': 'aws'},
+        'detection': {
+            'selection': {'eventName': ['AssumeRole', 'AttachUserPolicy', 'AttachRolePolicy', 'CreateAccessKey']},
+            'condition': 'selection',
+        },
+        'level': 'high',
+    },
+}
+
+
+def _derive_kill_chain_stages(report: Dict[str, Any]) -> list[str]:
+    """Map MITRE technique IDs from verdict/rows to Lockheed Martin Kill Chain stages."""
+    mitre_tags: list[str] = []
+    verdict = report.get('verdict') or {}
+    # Collect from verdict
+    mitre_tags.extend(verdict.get('mitre_tags') or [])
+    # Collect from individual rows
+    for row in (report.get('rows') or []):
+        mitre_tags.extend(row.get('mitre_tags') or row.get('mitre') or [])
+    # Also look in findings
+    for f in (report.get('findings') or []):
+        mitre_tags.extend(f.get('mitre') or [])
+
+    stages: list[str] = []
+    seen: set[str] = set()
+    for tag in mitre_tags:
+        # Normalize: strip subtechnique suffix (T1059.001 → T1059)
+        base = str(tag).split('.')[0].upper()
+        stage = _TECHNIQUE_KILL_CHAIN.get(base)
+        if stage and stage not in seen:
+            stages.append(stage)
+            seen.add(stage)
+    return stages
+
+
+def _generate_sigma_stubs(report: Dict[str, Any]) -> list[Dict[str, Any]]:
+    """Return Sigma detection rule stubs matching the active factors and patterns."""
+    factors: list[str] = []
+    verdict = report.get('verdict') or {}
+    for entry in (verdict.get('all_factors') or verdict.get('top_contributing_factors') or []):
+        if isinstance(entry, dict):
+            n = entry.get('factor_name') or entry.get('factor') or entry.get('name')
+            if n:
+                factors.append(str(n))
+        elif isinstance(entry, str):
+            factors.append(entry)
+    for row in (report.get('rows') or []):
+        factors.extend(str(f) for f in (row.get('factors') or []))
+
+    rules: list[Dict[str, Any]] = []
+    seen_titles: set[str] = set()
+    for factor in factors:
+        fl = factor.lower()
+        for key, stub in _FACTOR_SIGMA_TEMPLATES.items():
+            if key in fl or fl in key:
+                t = stub['title']
+                if t not in seen_titles:
+                    seen_titles.add(t)
+                    rules.append({'sigma_stub': stub, 'matched_factor': factor})
+        if len(rules) >= 4:
+            break
+    return rules

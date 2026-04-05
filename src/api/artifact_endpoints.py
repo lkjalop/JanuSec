@@ -148,10 +148,15 @@ def _artifact_from_decision(dec_obj) -> dict:
             d = score_dread(dread_factors)
             if isinstance(d, dict):
                 dread = d
-                # aggregate into a single score (mean of components)
-                vals = [float(x) for x in d.values() if isinstance(x, (int, float))]
-                if vals:
-                    dread_score = sum(vals) / len(vals)
+                # use composite_01 (0-1 range) if available, else mean of _*_01 fields
+                dread_score = None
+                if isinstance(d.get('composite_01'), (int, float)):
+                    dread_score = float(d['composite_01'])
+                else:
+                    vals = [float(v) for k, v in d.items() if k.endswith('_01') and isinstance(v, (int, float))]
+                    if vals:
+                        dread_score = sum(vals) / len(vals)
+                if dread_score is not None:
                     if dread_score >= 0.66:
                         dread_severity = 'high'
                     elif dread_score >= 0.33:

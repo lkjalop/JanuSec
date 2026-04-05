@@ -59,6 +59,15 @@ def get_request_roles(request: Request) -> set[str]:
     if derived_roles:
         return derived_roles
 
+    # Recognize x-admin-key matching ADMIN_API_KEY as admin role (takes precedence over test fallback)
+    try:
+        admin_key_hdr = request.headers.get('x-admin-key') or request.headers.get('X-Admin-Key')
+        expected_admin_key = os.getenv('ADMIN_API_KEY') or os.getenv('X_ADMIN_KEY')
+        if admin_key_hdr and expected_admin_key and admin_key_hdr == expected_admin_key:
+            return {'admin', 'analyst'}
+    except Exception:
+        pass
+
     # During tests/lite mode allow implicit analyst role so correlation endpoints stay accessible.
     if os.getenv('TEST_HELPERS_ENABLED', '0').lower() in {'1', 'true', 'yes'} or 'PYTEST_CURRENT_TEST' in os.environ:
         return {'analyst'}
@@ -92,7 +101,9 @@ def require_roles(*required: str) -> Callable[[Callable[..., Any]], Callable[...
             roles = get_request_roles(request)
             if not roles.intersection(required_set):
                 raise HTTPException(status_code=403, detail='forbidden_role')
-            # Request is already provided via wrapper signature; no need to inject into kwargs
+            # Forward request into the wrapped fn so handlers that read request.json() can work
+            if 'request' not in kwargs:
+                kwargs['request'] = request
             # Focused test-mode bypass: for graph/session/build ensure payload dict is present
             try:
                 if (os.getenv('TEST_HELPERS_ENABLED', '0').lower() in {'1','true','yes'} or 'PYTEST_CURRENT_TEST' in os.environ):

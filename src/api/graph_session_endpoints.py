@@ -12,7 +12,13 @@ from fastapi import Depends
 from pydantic import BaseModel
 from src.core.configuration import get_scoring_config as _load_scoring_config
 
-from security.auth import require_api_key
+try:
+    from src.security.auth import require_api_key
+except Exception:
+    try:
+        from security.auth import require_api_key
+    except Exception:
+        require_api_key = None  # type: ignore
 
 router = APIRouter(prefix="/api/v1/graph/session", tags=["GraphSession"])
 
@@ -161,6 +167,12 @@ def _ewma_matrix(mat: Dict[str, Dict[str,int]], alpha: float) -> Dict[str, Dict[
     return out
 
 
+def _allow_demo_graph_fallbacks() -> bool:
+    """Return True if demo/stub fallbacks are acceptable (e.g. in dev/test mode).
+    Monkeypatch to ``lambda: False`` in production-mode tests."""
+    return os.getenv('JANUSEC_LIVE_MODE', '0').lower() not in ('1', 'true', 'yes')
+
+
 def _mapping_stats(mapping: Dict[str,str]) -> Dict[str,int]:
     stats: Dict[str,int] = {}
     for k,v in mapping.items():
@@ -190,8 +202,9 @@ def _factor_tags(mat: Dict[str, Dict[str,int]], mapping: Dict[str,str]) -> List[
             factors.append({"factor":"mapping_semantics_rich","score": bonus, "reason": f"high_value_fields={hv_present}"})
     except Exception:
         pass
-    # ASN rarity demo tag (expanded)
-    factors.append({"factor":"asn_rare","tags":["CVSS:AV:N","KEV:CANDIDATE"],"reason":"demo tag","weight":0.03})
+    # ASN rarity demo tag (expanded) — skipped in live/production mode
+    if _allow_demo_graph_fallbacks():
+        factors.append({"factor":"asn_rare","tags":["CVSS:AV:N","KEV:CANDIDATE"],"reason":"demo tag","weight":0.03})
     # NXDOMAIN spike
     try:
         threshold = float(os.getenv("ZEEK_NXDOMAIN_RATE_THRESHOLD", "0.35"))
@@ -1350,8 +1363,11 @@ async def enqueue_enrichment(payload: dict):
         'ts': time.time()
     }
     ENRICHMENT_QUEUE.append(item)
-    # If LLM disabled, create a stubbed result immediately
+    # If LLM disabled, fail hard in live mode; stub in dev/demo mode
     if not LLM_ENABLED:
+        if not _allow_demo_graph_fallbacks():
+            ENRICHMENT_QUEUE.pop()
+            raise HTTPException(status_code=503, detail='llm_enrichment_unavailable')
         ENRICHMENT_RESULTS[item['id']] = {'id': item['id'], 'status': 'done', 'result': {'note': 'LLM_DISABLED', 'summary': None}}
         item['status'] = 'done'
     return {'job_id': item['id'], 'status': item['status']}

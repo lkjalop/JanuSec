@@ -346,7 +346,17 @@ except Exception:
     collect_calibration_rows = None  # type: ignore
     to_csv = None  # type: ignore
     to_html = None  # type: ignore
-from security.auth import require_scopes
+# Line 15 already imports require_scopes from src.security.auth (real auth).
+# Only import from the short alias 'security.auth' if it maps to the real module
+# (i.e. has require_api_key attr), not the permissive conftest stub.
+try:
+    import sys as _sys_server
+    _sec_mod = _sys_server.modules.get('security.auth')
+    if _sec_mod is not None and hasattr(_sec_mod, 'require_api_key'):
+        from security.auth import require_scopes  # type: ignore  # real module alias
+    # else: keep the require_scopes from src.security.auth imported at line 15
+except Exception:
+    pass
 try:
     # Optional import used only when CLUSTER_MINHASH_ENABLED is set and package is installed
     from datasketch import MinHash  # type: ignore
@@ -2265,15 +2275,6 @@ async def list_incidents(request: Request = None, limit: int = 50, tenant_id: st
 
 @app.post('/api/v1/graph/reconstruct', summary='Reconstruct attack subgraph around a seed alert', response_model=None)
 async def graph_reconstruct(seed: Optional[dict] = None, seed_event_id: Optional[str] = None, depth: int = 3, ttl_seconds: Optional[int] = None, attach_incident: bool = False, auth=Depends(require_scopes('factors.search'))) -> dict[str, Any]:
-    # Lite/test-mode auth bypass (mirrors temporal_query) so tests expecting 400 for missing seed don't 401.
-    try:
-        admin_permissive = os.getenv('ADMIN_PERMISSIVE_TEST','0').lower() in {'1','true','yes'}
-        test_helpers = os.getenv('TEST_HELPERS_ENABLED','0').lower() in {'1','true','yes'}
-        bypass = admin_permissive or test_helpers
-    except Exception:
-        bypass = False
-    if bypass:
-        auth = None
     try:
         # Metrics init (lazy) for reconstruction latency
         recon_hist = None
@@ -4109,7 +4110,8 @@ def explain_decision(event_id: str, request: Request = None) -> dict[str, Any]:
 
 
 if _CANONICAL_FULL_ROUTES_ENABLED:
-    app.get('/api/v1/decisions/recent', summary='Recent decisions persisted in database')(decisions_recent)  # type: ignore[misc]
+    # NOTE: decisions_recent is defined later in this module; route registration is
+    # deferred to after the function definition (see bottom of file).
     app.get('/api/v1/decisions/{event_id}/explain')(explain_decision)  # type: ignore[misc]
 else:
     LOGGER.debug('Skipping canonical decision explain/recent routes in lite mode; lite handlers remain active')
@@ -4655,6 +4657,13 @@ async def decisions_recent(limit: int = 50, tenant_id: str | None = None, reques
     except Exception:
         pass
     return {'decisions': rows, 'count': len(rows), 'tenant_id': tenant_id}
+
+# Register /decisions/recent now that the handler is defined
+if _CANONICAL_FULL_ROUTES_ENABLED:
+    try:
+        app.get('/api/v1/decisions/recent', summary='Recent decisions persisted in database')(decisions_recent)  # type: ignore[misc]
+    except Exception:
+        pass
 
 @app.get('/api/v1/decisions/cache_stats', summary='Decision cache stats (test/lite only)')  # type: ignore[misc]
 def decision_cache_stats() -> dict[str, Any]:

@@ -294,6 +294,65 @@ def get_server_runtime_state(app: FastAPI) -> ServerRuntime:
     return runtime
 
 
+def update_connector_health(
+    runtime: "ServerRuntime | None",
+    tenant_id: str,
+    connector_name: str,
+    *,
+    provider: str = "",
+    status: str = "ok",
+    ok: bool = True,
+    last_count: int = 0,
+    error: str | None = None,
+    checkpoint: "dict | None" = None,
+) -> None:
+    """Update connector health state in the runtime store."""
+    try:
+        if runtime is None:
+            return
+        tenant = runtime.tenants.setdefault(tenant_id, {})
+        if not isinstance(tenant.get('connector_health'), dict):
+            tenant['connector_health'] = {}
+        existing = tenant['connector_health'].setdefault(connector_name, {})
+        import time as _time
+        now = _time.time()
+        existing.update({
+            'provider': provider or existing.get('provider', ''),
+            'status': status,
+            'ok': ok,
+            'last_count': last_count,
+            'last_poll_ts': now,
+        })
+        if ok:
+            existing['last_ok_ts'] = now
+            existing['consecutive_failures'] = 0
+        else:
+            existing['last_error'] = error
+            existing['consecutive_failures'] = existing.get('consecutive_failures', 0) + 1
+        if checkpoint is not None:
+            existing['checkpoint'] = checkpoint
+    except Exception:
+        pass
+
+
+def get_connector_health(
+    runtime: "ServerRuntime | None",
+    tenant_id: str,
+    connector_name: "str | None" = None,
+) -> dict:
+    """Return connector health dict for tenant. If connector_name given, return single entry."""
+    try:
+        if runtime is None:
+            return {}
+        tenant = runtime.tenants.get(tenant_id, {})
+        health = tenant.get('connector_health', {})
+        if connector_name is not None:
+            return health.get(connector_name, {})
+        return health
+    except Exception:
+        return {}
+
+
 FILE_HASH_FACTORS: dict[str, int] | None = None
 FILE_BATCH_ANALYSIS: dict[str, dict[str, Any]] | None = None
 

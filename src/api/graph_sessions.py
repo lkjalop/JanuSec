@@ -346,6 +346,79 @@ def _get_scoring_config(force_refresh: bool = False) -> Dict[str, Any]:
     }
 
 
+    return {
+        'weights': dict(config.get('weights', {})),
+        'adaptive_ewma': dict(config.get('adaptive_ewma', {})),
+    }
+
+
+def _build_correlation_business_narrative(summary: Dict[str, Any], payload: Dict[str, Any], tenant_id: str | None) -> str | None:
+    """Generate a plain-English business narrative for a graph session correlation result.
+
+    Uses the LLM when available; returns None otherwise so the caller can skip the field.
+    """
+    try:
+        from src.integrations.llm_client import DEFAULT_CLIENT as _llm
+        client = _llm
+    except Exception:
+        client = None
+    if not client:
+        return None
+
+    verdict = summary.get('verdict') or 'unknown'
+    confidence = float(summary.get('confidence') or 0.0)
+    n_sessions = len(summary.get('session_ids') or [])
+    factors: list = []
+    for f in (summary.get('factors') or []):
+        if isinstance(f, dict):
+            n = f.get('name') or f.get('factor')
+            if n:
+                factors.append(str(n))
+        elif isinstance(f, str):
+            factors.append(f)
+    top_factors = factors[:5]
+
+    graph_s = summary.get('graph_summary') or {}
+    node_count = graph_s.get('node_count') or 0
+    edge_count = graph_s.get('edge_count') or 0
+    kill_chain = summary.get('kill_chain_tags') or []
+
+    tenant_hint = tenant_id or (payload.get('tenant') if isinstance(payload, dict) else None)
+    biz_ctx = ''
+    try:
+        from src.api.insights_endpoints import _get_tenant_business_context
+        biz_ctx = _get_tenant_business_context(tenant_hint, None) or ''
+    except Exception:
+        pass
+    biz_line = f'\nBUSINESS CONTEXT: {biz_ctx}' if biz_ctx else ''
+
+    prompt = (
+        "You are a security manager writing a 2-paragraph plain-English summary of a multi-source log correlation result for a business audience.\n"
+        "Paragraph 1: What the correlation shows — describe the pattern of activity across data sources in plain business terms.\n"
+        "Paragraph 2: Business impact and recommended next step for a manager or executive.\n"
+        f"{biz_line}\n"
+        f"CORRELATION VERDICT: {verdict.upper()}\n"
+        f"CONFIDENCE: {confidence:.0%}\n"
+        f"DATA SOURCES CORRELATED: {n_sessions}\n"
+        f"ENTITIES LINKED: {node_count} nodes, {edge_count} edges\n"
+        f"TOP SIGNALS: {', '.join(top_factors) or 'none'}\n"
+        + (f"KILL CHAIN PHASES: {', '.join(str(k) for k in kill_chain)}\n" if kill_chain else '')
+        + "\nRespond with exactly 2 paragraphs separated by a blank line. Plain English only."
+    )
+    try:
+        result = client.generate(prompt, model='gpt-4o-mini', max_tokens=350)
+        if isinstance(result, dict):
+            text = result.get('text') or result.get('content') or ''
+        else:
+            text = str(result or '')
+        text = text.strip()
+        if text and len(text) > 80:
+            return text
+    except Exception:
+        pass
+    return None
+
+
 def _check_dependency_status(force_refresh: bool = False) -> Dict[str, Any]:
     """Detect whether HopGraph or Redis-backed stores are unavailable.
 
@@ -4254,6 +4327,14 @@ async def build_session(
             'session_ids': summary.get('session_ids'),
             'mapping_stats': summary.get('mapping_stats'),
         }
+        # Attach a plain-language business narrative for the correlation session (best-effort LLM)
+        try:
+            if not summary.get('business_narrative'):
+                biz_narr = _build_correlation_business_narrative(summary, payload, tenant_id)
+                if biz_narr:
+                    summary['business_narrative'] = biz_narr
+        except Exception:
+            pass
         try:
             session_record = await _persist_graph_session_record(session_id, summary, payload, tenant_id)
             compat['tenant_id'] = tenant_id
