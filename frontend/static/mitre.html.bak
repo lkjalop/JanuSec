@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MITRE Matrix</title>
+  <link rel="preconnect" href="/" />
+  <!-- D3 for color scale -->
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <style>
+    :root { --bg:#0B0E14; --panel:#141A24; --muted:#93A0B1; --text:#E8EBF0; --border:#2C3746; --accent:#4A63E7; }
+    html,body{background:var(--bg);color:var(--text);font-family:Inter,Segoe UI,system-ui,Arial,sans-serif;margin:0}
+    .wrap{max-width:1400px;margin:0 auto;padding:20px}
+    .title{font-size:20px;font-weight:600;margin-bottom:16px}
+    .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;margin-bottom:30px}
+    .cell{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:12px;cursor:pointer;transition: all .2s ease;position:relative;overflow:hidden}
+    .cell:hover{transform:translateY(-2px);box-shadow:0 4px 12px rgba(0,0,0,.3);border-color:var(--accent)}
+    .cell .tech{font-weight:600;font-size:14px;margin-bottom:4px;position:relative;z-index:2}
+    .cell .count{font-size:20px;font-weight:700;margin:6px 0;position:relative;z-index:2}
+    .cell .tactic{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;position:relative;z-index:2}
+    .cell-bg{position:absolute;top:0;left:0;width:100%;height:100%;opacity:.15;z-index:1}
+    .legend{display:flex;align-items:center;gap:20px;margin-bottom:20px;padding:12px;background:var(--panel);border-radius:8px}
+    .legend-title{font-weight:600;margin-right:10px}
+    .legend-gradient{width:300px;height:20px;border-radius:4px;background:linear-gradient(to right,#1a1f2e,#f39c12,#e74c3c)}
+    .legend-labels{display:flex;justify-content:space-between;width:300px;font-size:11px;color:var(--muted)}
+    .muted{color:var(--muted);font-size:13px}
+    .list{margin-top:24px}
+    .event-item{background:var(--panel);padding:10px;margin:6px 0;border-radius:6px;border-left:3px solid var(--accent)}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="title">MITRE ATT&CK Technique Heatmap</div>
+    <div class="muted">Derived from Ingestion Report (Top techniques)</div>
+    <div class="legend"></div>
+    <div id="grid" class="grid" aria-live="polite"></div>
+    <div class="list">
+      <div class="title" style="font-size:16px">Selected Technique Events</div>
+      <div id="events" class="muted">Click a technique to list recent flagged events related to it (if available).</div>
+    </div>
+  </div>
+  <script>
+    function authHeaders(){ try { const key = localStorage.getItem('apiKey') || 'devkey123'; return {'x-api-key': key}; } catch (_) { return {}; } }
+    async function loadReport(){
+      const grid = document.getElementById('grid');
+      try{
+        const r = await fetch('/api/v1/report/ingestion?format=json', { headers: authHeaders() });
+        if(!r.ok){ grid.textContent = 'Failed to load report'; return; }
+        const j = await r.json();
+        const techniques = j.top_mitre_techniques || [];
+        if (techniques.length === 0) { grid.innerHTML = '<div class="muted">No MITRE techniques detected yet. Upload events to see coverage.</div>'; return; }
+        const maxCount = Math.max(1, ...techniques.map(t => t.count || 0));
+        const colorScale = d3.scaleLinear().domain([0, maxCount * 0.5, maxCount]).range(['#1a1f2e', '#f39c12', '#e74c3c']);
+        const tacticMap = getTacticMapping();
+        grid.innerHTML = techniques.map(t => {
+          const count = t.count || 0; const tech = t.technique || 'Txxxx'; const tactic = tacticMap[tech] || 'Unknown'; const color = colorScale(count); const textColor = count > maxCount * 0.6 ? '#ffffff' : '#e8ebf0';
+          return `
+            <div class='cell' role='button' tabindex='0' data-tech='${tech}'>
+              <div class='cell-bg' style='background:${color};'></div>
+              <div class='tech' style='color:${textColor};'>${tech}</div>
+              <div class='count' style='color:${textColor};'>${count}</div>
+              <div class='tactic'>${tactic}</div>
+            </div>`; }).join('');
+        grid.addEventListener('click', async (e) => { const el = e.target.closest('.cell'); if(!el) return; const tech = el.getAttribute('data-tech'); await showEventsForTechnique(tech); });
+        updateLegend(maxCount);
+      }catch(e){ grid.textContent = 'Error: '+(e&&e.message||e); }
+    }
+    function getTacticMapping(){ return { 'T1059':'Execution','T1078':'Persistence','T1548':'Privilege Escalation','T1055':'Defense Evasion','T1003':'Credential Access','T1082':'Discovery','T1021':'Lateral Movement','T1071':'Command and Control','T1041':'Exfiltration','T1485':'Impact','T1190':'Initial Access','T1566':'Initial Access','T1203':'Execution','T1204':'Execution','T1047':'Execution' }; }
+    function updateLegend(maxCount){ let legend = document.querySelector('.legend'); if(!legend){ legend = document.createElement('div'); legend.className='legend'; document.querySelector('.wrap').insertBefore(legend, document.getElementById('grid')); } legend.innerHTML = `
+      <div class="legend-title">Detection Intensity:</div>
+      <div>
+        <div class="legend-gradient"></div>
+        <div class="legend-labels"><span>Low (0)</span><span>Medium (${Math.round(maxCount/2)})</span><span>High (${maxCount})</span></div>
+      </div>`; }
+    async function showEventsForTechnique(tech){
+      const out = document.getElementById('events');
+      out.innerHTML = `<div class="muted">Loading events for ${tech}...</div>`;
+      try { const r = await fetch('/api/v1/report/ingestion?format=json', { headers: authHeaders() }); const j = r.ok ? await r.json() : {}; const flagged = j.flagged_events || []; const rows = [];
+        for(const f of flagged){ const techniques = (f.techniques || f.mitre || []).map(String); if (techniques.includes(tech)) { const severity = f.severity || f.verdict || 'unknown'; const severityColor = {critical:'#e74c3c', high:'#e67e22', medium:'#f39c12', low:'#27ae60', info:'#3498db'}[severity] || '#95a5a6'; rows.push(`
+            <div class=\"event-item\" style=\"border-left-color:${severityColor};\"> <strong>Event ${f.event_id || 'n/a'}</strong> <span style=\"float:right;color:${severityColor};\">${severity}</span><br><span class=\"muted\">${f.timestamp || 'No timestamp'}</span><br>${f.description || f.raw_output || 'No description'} </div>`); } }
+        if(!rows.length){ out.innerHTML = `<div class="muted">No events found for ${tech}.</div>`; return; }
+        out.innerHTML = `<div style="margin-bottom:10px;"><strong>${rows.length}</strong> events detected for <strong>${tech}</strong></div>${rows.slice(0,50).join('')}`; } catch(e) { out.textContent = 'Error: ' + (e && e.message || e); }
+    }
+    loadReport();
+  </script>
+  <script src="/static/js/notifications.js"></script>
+</body>
+</html>
+

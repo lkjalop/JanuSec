@@ -1,0 +1,120 @@
+name: Evidence CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  evidence:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python deps (prod)
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+      - name: Generate CycloneDX SBOM (Python)
+        run: |
+          pip install cyclonedx-bom
+          cyclonedx-py -o sbom-python.json || cyclonedx-bom -o sbom-python.json || true
+
+      - name: Build API image
+        run: |
+          docker build -t janusec-api:ci -f Dockerfile.api .
+
+      - name: Build Worker image
+        run: |
+          docker build -t janusec-worker:ci -f Dockerfile.worker .
+
+      - name: Trivy Scan (API image)
+        uses: aquasecurity/trivy-action@0.20.0
+        with:
+          image-ref: 'janusec-api:ci'
+          format: 'sarif'
+          output: 'trivy-api.sarif'
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH,MEDIUM'
+          ignore-unfixed: true
+
+      - name: Trivy Scan (Worker image)
+        uses: aquasecurity/trivy-action@0.20.0
+        with:
+          image-ref: 'janusec-worker:ci'
+          format: 'sarif'
+          output: 'trivy-worker.sarif'
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH,MEDIUM'
+          ignore-unfixed: true
+
+      - name: pip-audit (Python dependencies)
+        run: |
+          pip install pip-audit
+          pip-audit -r requirements.txt -f json -o pip-audit.json || true
+
+      - name: Semgrep (OWASP ASVS ruleset)
+        uses: returntocorp/semgrep-action@v1
+        with:
+          config: >-
+            p/owasp-top-ten
+            p/ci
+          generateSarif: true
+        env:
+          SEMGREP_ENABLE_VERSION_CHECK: "0"
+
+      - name: Trufflehog (secrets scan)
+        uses: trufflesecurity/trufflehog@v3.78.0
+        with:
+          path: .
+          json: true
+          fail: false
+        continue-on-error: true
+
+      - name: Collect Semgrep SARIF
+        run: |
+          if [ -f semgrep.sarif ]; then cp semgrep.sarif semgrep-results.sarif; fi
+
+      - name: Upload SARIF to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-api.sarif
+        continue-on-error: true
+
+      - name: Upload SARIF (Worker)
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-worker.sarif
+        continue-on-error: true
+
+      - name: Upload Semgrep SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: semgrep-results.sarif
+        continue-on-error: true
+
+      - name: Upload Evidence artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-bundle
+          path: |
+            sbom-python.json
+            pip-audit.json
+            trivy-api.sarif
+            trivy-worker.sarif
+            semgrep-results.sarif
+          if-no-files-found: warn

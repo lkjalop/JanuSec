@@ -1,0 +1,7 @@
+[
+  {"framework": "NIST_AI_RMF", "control_id": "GOV-1", "title": "Governance policies for AI risk management established", "keywords": ["governance","policy","risk"]},
+  {"framework": "NIST_AI_RMF", "control_id": "MAP-1", "title": "Context established for AI risks and impacts", "keywords": ["context","stakeholders","intended use"]},
+  {"framework": "NIST_AI_RMF", "control_id": "MEA-1", "title": "AI system risks measured and analyzed", "keywords": ["metrics","evaluation","testing"]},
+  {"framework": "NIST_AI_RMF", "control_id": "MANAGE-1", "title": "AI risks managed throughout lifecycle", "keywords": ["lifecycle","mitigation","monitoring"]}
+]
+

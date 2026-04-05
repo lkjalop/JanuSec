@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en" class="theme-dark">
+<head>
+<meta charset="utf-8" />
+<title>Feedback Admin</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<style>
+body{font-family:Inter, 'Segoe UI', system-ui, sans-serif;background:#0B0E14;color:#E8EBF0;padding:18px}
+.panel{background:#141A24;border:1px solid #2C3746;border-radius:8px;padding:12px;margin-bottom:12px}
+.btn{background:#1D2531;border:1px solid #2C3746;color:#E8EBF0;padding:6px 10px;border-radius:6px;cursor:pointer}
+.table{width:100%;border-collapse:collapse;font-size:13px}
+.table th,.table td{border:1px solid #2C3746;padding:6px 8px;text-align:left}
+.small{font-size:12px;color:#93A0B1}
+</style>
+<script>window.authHeaders = window.authHeaders || function(){ try { const key = localStorage.getItem('apiKey') || 'devkey123'; return { 'x-api-key': key }; } catch(_){ return { 'x-api-key':'devkey123' }; } };</script>
+</head>
+<body>
+<div class="panel">
+  <h2>Feedback Admin</h2>
+  <div class="small">List reports for org and inspect feedback + aggregated accuracy per LLM model.</div>
+  <div style="margin-top:8px;display:flex;gap:8px;align-items:center;">
+    <input id="orgInput" placeholder="org (default: unknown)" style="padding:6px;border-radius:6px;background:#0F1520;border:1px solid #2C3746;color:#E8EBF0" />
+    <button class="btn" id="btnList">List Reports</button>
+    <span id="listStatus" class="small"></span>
+  </div>
+  <div id="reportsHost" style="margin-top:12px"></div>
+</div>
+<div class="panel" id="reportPanel" style="display:none">
+  <h3 id="reportTitle">Report</h3>
+  <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
+    <button class="btn" id="btnRefreshFeedback">Refresh Feedback</button>
+    <button class="btn" id="btnShowMetrics">Show Aggregates</button>
+    <span id="reportMeta" class="small"></span>
+  </div>
+  <div id="metricsHost" style="margin-top:8px"></div>
+  <h4 style="margin-top:12px">Feedback Entries</h4>
+  <div id="feedbackList" style="margin-top:8px;max-height:360px;overflow:auto"></div>
+</div>
+<script>
+async function listReports(){
+  const org = (document.getElementById('orgInput').value || 'unknown');
+  document.getElementById('listStatus').textContent = 'loading...';
+  try{
+    const r = await fetch('/api/v1/assessments/report/list?org='+encodeURIComponent(org), { headers: { ...authHeaders() } });
+    if(!r.ok){ document.getElementById('listStatus').textContent = 'error: '+r.status; return; }
+    const j = await r.json(); document.getElementById('listStatus').textContent = j.length+' reports';
+    const host = document.getElementById('reportsHost'); host.innerHTML = '';
+    if(!j.length){ host.innerHTML = '<div class="small">No reports found.</div>'; return; }
+    const tbl = document.createElement('table'); tbl.className='table'; tbl.innerHTML = '<thead><tr><th>Report ID</th><th>Created</th><th>Retained</th><th>Status</th><th>Actions</th></tr></thead>';
+    let rowsHtml = '';
+    j.forEach(rp => {
+      rowsHtml += `<tr><td>${rp.report_id}</td><td>${rp.created_ts? new Date(rp.created_ts*1000).toLocaleString():''}</td><td>${rp.rows_retained||0}</td><td>${rp.status||''}</td><td><button class="btn" data-id="${rp.report_id}">Open</button></td></tr>`;
+    });
+    tbl.innerHTML += '<tbody>' + rowsHtml + '</tbody>';
+    host.appendChild(tbl);
+    host.querySelectorAll('button[data-id]').forEach(b=> b.addEventListener('click', (e)=> openReport(e.target.getAttribute('data-id'))));
+  }catch(e){ document.getElementById('listStatus').textContent = 'error'; }
+}
+async function openReport(report_id){
+  const org = (document.getElementById('orgInput').value || 'unknown');
+  document.getElementById('reportPanel').style.display='block';
+  document.getElementById('reportTitle').textContent = 'Report: '+report_id;
+  document.getElementById('reportMeta').textContent = '';
+  await refreshFeedback(report_id, org);
+}
+async function refreshFeedback(report_id, org){
+  const host = document.getElementById('feedbackList'); host.innerHTML = 'loading...';
+  try{
+    const r = await fetch('/api/v1/assessments/report/'+encodeURIComponent(report_id)+'/feedback?org='+encodeURIComponent(org), { headers: { ...authHeaders() } });
+    if(!r.ok){ host.innerHTML = 'failed to load: '+r.status; return; }
+    const j = await r.json();
+    if(!j.length){ host.innerHTML = '<div class="small">No feedback yet.</div>'; return; }
+    const lines = j.map(f=> `<div style="border-bottom:1px solid #2C3746;padding:6px;"><strong>${f.row_id}</strong> — ${new Date(f.ts*1000).toLocaleString()} — <em>${f.reviewer||''}</em> — <strong>${f.accurate? 'Accurate':'Inaccurate'}</strong><div class="small">${f.comment||''}</div></div>`);
+    host.innerHTML = lines.join('\n');
+  }catch(e){ host.innerHTML = 'error'; }
+}
+async function showMetrics(report_id){
+  const org = (document.getElementById('orgInput').value || 'unknown');
+  const mh = document.getElementById('metricsHost'); mh.innerHTML='loading...';
+  try{
+    const r = await fetch('/api/v1/assessments/report/'+encodeURIComponent(report_id)+'/metrics?org='+encodeURIComponent(org), { headers: { ...authHeaders() } });
+    if(!r.ok){ mh.innerHTML='failed: '+r.status; return; }
+    const j = await r.json();
+    let html = `<div class="small">Total feedback: ${j.total_feedback||0}</div>`;
+    html += '<table class="table"><thead><tr><th>Model</th><th>Count</th><th>Accurate</th><th>Inaccurate</th><th>Comments</th><th>TPR</th></tr></thead><tbody>';
+    Object.keys(j.models||{}).forEach(m => {
+      const s = j.models[m]; const tpr = s.count? ((s.accurate/s.count)*100).toFixed(1)+'%':'n/a';
+      html += `<tr><td>${m}</td><td>${s.count}</td><td>${s.accurate}</td><td>${s.inaccurate}</td><td>${s.comments}</td><td>${tpr}</td></tr>`;
+    });
+    html += '</tbody></table>';
+    mh.innerHTML = html;
+  }catch(e){ mh.innerHTML='error'; }
+}
+
+document.getElementById('btnList').addEventListener('click', listReports);
+document.getElementById('btnRefreshFeedback').addEventListener('click', ()=>{ const rid = document.getElementById('reportTitle').textContent.replace('Report: ',''); const org = (document.getElementById('orgInput').value||'unknown'); if(rid) refreshFeedback(rid, org); });
+document.getElementById('btnShowMetrics').addEventListener('click', ()=>{ const rid = document.getElementById('reportTitle').textContent.replace('Report: ',''); if(rid) showMetrics(rid); });
+
+</script>
+</body>
+</html>

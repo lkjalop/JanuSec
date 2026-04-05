@@ -1,0 +1,10 @@
+[
+	{"name":"suspicious_container_activity","domain":"cloud","severity":0.83,"mitre":[],"stride":["Tampering"],"kill_chain":["Execution"],"compliance":["ISO27017","CIS:Mitigation3"],"diamond":{"capability":"container_abuse","infrastructure":"container_host"},"dread":{"damage":7,"repro":6}},
+	{"name":"anomalous_api_key_usage","domain":"cloud","severity":0.88,"mitre":[],"stride":["Repudiation"],"kill_chain":["Installation"],"compliance":["ISO27017"],"diamond":{"capability":"api_abuse","infrastructure":"cloud_api"},"dread":{"damage":8,"repro":7}},
+	{"name":"sensitive_config_exfil","domain":"cloud","severity":0.9,"mitre":[],"stride":["InfoDisclosure"],"kill_chain":["Exfiltration"],"compliance":["GDPR:DataExfiltration","ISO27017"],"diamond":{"capability":"config_theft","infrastructure":"cloud_storage"},"dread":{"damage":9,"repro":8}},
+	{"name":"unusual_api_rate_limit_breaches","domain":"cloud","severity":0.75,"mitre":[],"stride":["Denial"],"kill_chain":[],"compliance":[],"diamond":{"capability":"automation","infrastructure":"api_gateway"},"dread":{"damage":6,"repro":5}},
+	{"name":"api_token_theft_2","domain":"cloud","severity":0.92,"mitre":[],"stride":["Repudiation"],"kill_chain":["Exfiltration"],"compliance":["ISO27017","GDPR:Credentials"],"diamond":{"capability":"credential_theft","infrastructure":"api"},"dread":{"damage":9,"repro":8}},
+	{"name":"sensitive_key_material_exposure","domain":"cloud","severity":0.95,"mitre":[],"stride":["InfoDisclosure"],"kill_chain":["Exfiltration"],"compliance":["GDPR:Credentials","ISO27017"],"diamond":{"capability":"secret_theft","infrastructure":"secrets_store"},"dread":{"damage":10,"repro":9}},
+	{"name":"sensitive_log_exposure","domain":"cloud","severity":0.88,"mitre":[],"stride":["InfoDisclosure"],"kill_chain":["Exfiltration"],"compliance":["GDPR:Logging"],"diamond":{"capability":"data_collection","infrastructure":"logging"},"dread":{"damage":8,"repro":7}},
+	{"name":"anomalous_service_mesh_traffic","domain":"cloud","severity":0.78,"mitre":[],"stride":["Tampering"],"kill_chain":[],"compliance":[],"diamond":{"capability":"service_abuse","infrastructure":"service_mesh"},"dread":{"damage":6,"repro":5}}
+]

@@ -1,0 +1,10 @@
+[
+  {
+    "configurationItemCaptureTime": "2026-03-20T01:37:00Z",
+    "resourceType": "AWS::IAM::User",
+    "resourceId": "Alice",
+    "configurationItemStatus": "ResourceDiscovered",
+    "complianceType": "NON_COMPLIANT",
+    "accountId": "123456789012"
+  }
+]

@@ -1,0 +1,116 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Tier2Investigation",
+  "type": "object",
+  "required": ["executive_summary", "ai_reasoning", "investigation_tasks", "siem_queries", "mitre_mapping"],
+  "properties": {
+    "executive_summary": {
+      "type": "object",
+      "required": ["one_liner", "threat_level", "recommended_action"],
+      "properties": {
+        "one_liner": {"type": "string"},
+        "threat_level": {"type": "string", "enum": ["LOW", "MEDIUM", "HIGH", "CRITICAL"]},
+        "recommended_action": {"type": "string"}
+      }
+    },
+    "ai_reasoning": {
+      "type": "object",
+      "required": ["primary_hypothesis", "supporting_evidence", "alternative_hypotheses", "knowledge_gaps", "confidence_level"],
+      "properties": {
+        "primary_hypothesis": {"type": "string"},
+        "supporting_evidence": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["observation", "significance", "confidence"],
+            "properties": {
+              "observation": {"type": "string"},
+              "significance": {"type": "string"},
+              "confidence": {"type": "number", "minimum": 0, "maximum": 1}
+            }
+          }
+        },
+        "alternative_hypotheses": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["hypothesis", "probability", "evidence_needed"],
+            "properties": {
+              "hypothesis": {"type": "string"},
+              "probability": {"type": "number", "minimum": 0, "maximum": 1},
+              "evidence_needed": {"type": "string"}
+            }
+          }
+        },
+        "knowledge_gaps": {"type": "array", "items": {"type": "string"}},
+        "confidence_level": {"type": "string", "enum": ["LOW", "MEDIUM", "HIGH"]},
+        "reasoning_caveats": {"type": "string"}
+      }
+    },
+    "investigation_tasks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["task", "tool", "priority"],
+        "properties": {
+          "task": {"type": "string"},
+          "tool": {"type": "string"},
+          "priority": {"type": "string", "enum": ["critical", "high", "medium", "low"]}
+        }
+      }
+    },
+    "siem_queries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "query", "platform"],
+        "properties": {
+          "name": {"type": "string"},
+          "query": {"type": "string"},
+          "platform": {"type": "string"},
+          "time_range": {"type": "string"}
+        }
+      }
+    },
+    "mitre_mapping": {
+      "type": "object",
+      "properties": {
+        "techniques": {"type": "array", "items": {"type": "string"}},
+        "tactics": {"type": "array", "items": {"type": "string"}},
+        "kill_chain_phase": {"type": "string"}
+      }
+    },
+    "evidence_timeline": {
+      "type": "object",
+      "properties": {
+        "events": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["timestamp", "event_type", "description"],
+            "properties": {
+              "timestamp": {"type": "string"},
+              "event_type": {"type": "string"},
+              "description": {"type": "string"},
+              "artifacts": {"type": "array", "items": {"type": "string"}}
+            }
+          }
+        }
+      }
+    },
+    "entity_graph": {
+      "type": "object",
+      "properties": {
+        "primary_entity": {"type": "object"},
+        "related_entities": {"type": "array", "items": {"type": "object"}}
+      }
+    },
+    "analyst_notes": {
+      "type": "object",
+      "properties": {
+        "notes": {"type": "array", "items": {"type": "string"}},
+        "tags": {"type": "array", "items": {"type": "string"}}
+      }
+    }
+  }
+}

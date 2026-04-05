@@ -1,0 +1,9 @@
+{
+  "count": 120,
+  "avg_ms": 18.382,
+  "p95_ms": 71.081,
+  "failures": 120,
+  "throughput_eps": 54.4,
+  "tenant": "tenant-gamma",
+  "pipeline_profile": "customer-gamma"
+}

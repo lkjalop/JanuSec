@@ -1,0 +1,11 @@
+method,path,status,user
+GET,/v1/accounts/123,200,alice
+GET,/v1/accounts/124,200,bob
+GET,/v1/accounts/125,200,carol
+GET,/v1/accounts/126,200,dan
+GET,/v1/accounts/127,200,erin
+GET,/v1/accounts/127/owner?user=bob,200,bob
+GET,/v1/accounts/127,200,alice
+GET,/v1/accounts/127,200,alice
+GET,/v1/accounts/127,200,alice
+GET,/v1/accounts/127,200,alice

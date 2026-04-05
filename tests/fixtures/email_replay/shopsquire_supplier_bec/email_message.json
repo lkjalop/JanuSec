@@ -1,0 +1,19 @@
+[
+  {
+    "message_id": "msg-shopsquire-001",
+    "timestamp": "2025-03-21T02:15:00Z",
+    "from": "accounts@ingramfake.com.au",
+    "to": "finance@shopsquire.example",
+    "reply_to": "accounts@ingramfake.com.au",
+    "sender_display_name": "Ingram Fake Accounts",
+    "subject": "[Accounts] Updated banking details and remittance advice",
+    "body": "Hi ShopSquire Team, we are changing payment procedures for the next remittance cycle. Please use the attached updated bank details before the next wire transfer. Urgent action is required.",
+    "spf_result": "fail",
+    "dkim_result": "fail",
+    "dmarc_result": "fail",
+    "supplier_name": "Ingram Micro",
+    "trusted_supplier_domain": "ingrammicro.com.au",
+    "attachment_name": "Harbourside_Acquisition_Details_CONFIDENTIAL.xlsm",
+    "url": "https://bit.ly/ingram-update"
+  }
+]

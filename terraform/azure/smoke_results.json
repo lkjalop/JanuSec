@@ -1,0 +1,35 @@
+﻿{
+    "worker_app":  {
+                       "fqdn":  "",
+                       "provisioning":  "Succeeded",
+                       "name":  "janusec-worker",
+                       "check":  "containerapp"
+                   },
+    "timestamp":  "2025-10-26T00:38:07.8022440+11:00",
+    "redis":  {
+                  "reachable":  true,
+                  "host":  "janusec-redis-i0veyg.redis.cache.windows.net",
+                  "name":  "janusec-redis-i0veyg",
+                  "check":  "redis"
+              },
+    "api_app":  {
+                    "fqdn":  "",
+                    "provisioning":  "",
+                    "name":  "janusec-api",
+                    "check":  "containerapp"
+                },
+    "keyvault":  {
+                     "error":  null,
+                     "admin_password_present":  true,
+                     "vault":  "janusec-kv-i0veyg",
+                     "check":  "keyvault"
+                 },
+    "api":  {
+                "url":  "https://janusec-api--7z9srs8.happydune-5311104c.australiasoutheast.azurecontainerapps.io",
+                "timeMs":  -1,
+                "error":  "The operation has timed out.",
+                "ok":  false,
+                "check":  "api",
+                "statusCode":  0
+            }
+}

@@ -1,0 +1,143 @@
+{
+  "cases": [
+    {
+      "name": "gamma_llm_misuse",
+      "ok": true,
+      "duration_ms": 26.514,
+      "missing_factors": [],
+      "reported_factors": [
+        "api:llm_atlas_risk"
+      ]
+    },
+    {
+      "name": "gamma_token_usage_anomaly",
+      "ok": true,
+      "duration_ms": 24.808,
+      "missing_factors": [],
+      "reported_factors": [
+        "api:automation_runbook_abuse",
+        "api:inventory_route_unknown"
+      ]
+    },
+    {
+      "name": "gamma_missing_headers",
+      "ok": true,
+      "duration_ms": 72.351,
+      "missing_factors": [],
+      "reported_factors": [
+        "api:inventory_route_unknown",
+        "api:missing_security_headers"
+      ]
+    },
+    {
+      "name": "owner_mismatch",
+      "ok": true,
+      "duration_ms": 72.071,
+      "missing_factors": [],
+      "reported_factors": [
+        "api:bola_resource_mismatch"
+      ]
+    },
+    {
+      "name": "owner_match",
+      "ok": true,
+      "duration_ms": 32.0,
+      "missing_factors": [],
+      "reported_factors": []
+    },
+    {
+      "name": "missing_headers",
+      "ok": true,
+      "duration_ms": 27.565,
+      "missing_factors": [],
+      "reported_factors": [
+        "api:missing_security_headers"
+      ]
+    },
+    {
+      "name": "unknown_route_inventory",
+      "ok": true,
+      "duration_ms": 26.971,
+      "missing_factors": [],
+      "reported_factors": [
+        "api:inventory_route_unknown"
+      ]
+    },
+    {
+      "name": "business_flow_policy_gap",
+      "ok": true,
+      "duration_ms": 22.162,
+      "missing_factors": [],
+      "reported_factors": [
+        "api:business_flow_policy_gap"
+      ]
+    },
+    {
+      "name": "business_flow_anomaly_high_risk",
+      "ok": true,
+      "duration_ms": 22.886,
+      "missing_factors": [],
+      "reported_factors": [
+        "api:business_flow_anomaly",
+        "api:business_flow_policy_gap"
+      ]
+    },
+    {
+      "name": "supply_chain_modification",
+      "ok": true,
+      "duration_ms": 28.688,
+      "missing_factors": [],
+      "reported_factors": [
+        "api:supply_chain_pipeline_modification"
+      ]
+    },
+    {
+      "name": "automation_runbook_abuse",
+      "ok": true,
+      "duration_ms": 23.478,
+      "missing_factors": [],
+      "reported_factors": [
+        "api:automation_runbook_abuse"
+      ]
+    },
+    {
+      "name": "phish_bulk_campaign",
+      "ok": true,
+      "duration_ms": 24.777,
+      "missing_factors": [],
+      "reported_factors": [
+        "api:business_flow_policy_gap",
+        "api:phish_campaign_bulk_send"
+      ]
+    },
+    {
+      "name": "llm_atlas_risk",
+      "ok": true,
+      "duration_ms": 28.869,
+      "missing_factors": [],
+      "reported_factors": [
+        "api:llm_atlas_risk"
+      ]
+    },
+    {
+      "name": "ransomware_backup_delete",
+      "ok": true,
+      "duration_ms": 27.534,
+      "missing_factors": [],
+      "reported_factors": [
+        "api:ransomware_api_activity"
+      ]
+    }
+  ],
+  "metrics": {
+    "count": 14,
+    "avg_ms": 32.905,
+    "p95_ms": 72.071
+  },
+  "tenant": "tenant-gamma",
+  "pipeline_profile": "customer-gamma",
+  "vector_sources": [
+    "tests\\data\\api_security_auth_harness_gamma.json",
+    "tests\\data\\api_security_auth_harness.json"
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "count": 140,
+  "avg_ms": 27.926,
+  "p95_ms": 40.287,
+  "failures": 0,
+  "throughput_eps": 35.81,
+  "tenant": "tenant-delta",
+  "pipeline_profile": "customer-delta"
+}

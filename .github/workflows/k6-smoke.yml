@@ -1,0 +1,41 @@
+name: Load - k6 Smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: 'Base URL of running API (e.g., https://dev.example.com)'
+        required: true
+      api_key:
+        description: 'x-api-key to use (optional)'
+        required: false
+        default: 'devkey123'
+  schedule:
+    - cron: '30 3 * * 1'  # Weekly Monday 03:30 UTC
+
+jobs:
+  k6-smoke:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        base_url: ["${{ vars.DEV_URL }}", "${{ vars.STAGE_URL }}"]
+    env:
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run k6 smoke
+        uses: grafana/k6-action@v0.2.0
+        with:
+          filename: scripts/k6/smoke.js
+        env:
+          BASE_URL: ${{ github.event_name == 'workflow_dispatch' && inputs.base_url || matrix.base_url }}
+          API_KEY: ${{ github.event_name == 'workflow_dispatch' && inputs.api_key || 'devkey123' }}
+      - name: Slack notify (summary)
+        if: always() && env.SLACK_WEBHOOK_URL != ''
+        run: |
+          STATUS=${{ job.status }}
+          TARGET=${{ github.event_name == 'workflow_dispatch' && inputs.base_url || matrix.base_url }}
+          COLOR="#36a64f"
+          if [ "$STATUS" != "success" ]; then COLOR="#ff4136"; fi
+          payload='{"attachments":[{"color":"'"$COLOR"'","title":"k6 Smoke","text":"Status: '"$STATUS"'\nBase URL: '"$TARGET"'","fields":[{"title":"Repo","value":"'"${GITHUB_REPOSITORY}"'","short":true},{"title":"Run","value":"'"${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"'","short":true}]}]}'
+          curl -X POST -H 'Content-type: application/json' --data "$payload" "$SLACK_WEBHOOK_URL"

@@ -1,0 +1,10 @@
+{"id":"e1","label":"benign","user":"alice","host":"host1","details":{}}
+{"id":"e2","label":"malicious","user":"alice","host":"host1","details":{"network":[{"direction":"outbound","bytes":6000000,"dst_port":443,"timestamp":1700000000,"proto":"tcp"}]}}
+{"id":"e3","label":"malicious","user":"bob","event_type":"auth_fail","details":{"auth":"fail"}}
+{"id":"e4","label":"malicious","user":"bob","event_type":"auth_fail","details":{"auth":"fail"}}
+{"id":"e5","label":"malicious","user":"bob","event_type":"auth_fail","details":{"auth":"fail"}}
+{"id":"e6","label":"malicious","user":"bob","event_type":"auth_fail","details":{"auth":"fail"}}
+{"id":"e7","label":"malicious","user":"bob","event_type":"auth_fail","details":{"auth":"fail"}}
+{"id":"e8","label":"benign","user":"carol","host":"host2","details":{"network":[{"direction":"outbound","bytes":2000,"dst_port":80,"timestamp":1700000500,"proto":"tcp"}]}}
+{"id":"e9","label":"benign","user":"dave","host":"host3","details":{}}
+{"id":"e10","label":"malicious","user":"eve","details":{"network":[{"direction":"outbound","bytes":7000000,"dst_port":443,"timestamp":1700000600,"proto":"tcp"},{"direction":"outbound","bytes":7000000,"dst_port":443,"timestamp":1700000630,"proto":"tcp"}]}}

@@ -1,0 +1,4 @@
+# Per-exporter rate limits (events per second)
+# IP address -> int
+"198.51.100.10": 200
+"192.0.2.45": 100

@@ -1,0 +1,59 @@
+{
+  "version": 1,
+  "description": "Active factor registry MVP (50 factors: 40 existing stubs + 10 phase1 additions)",
+  "factors": [
+    {"name": "identity:kerberos_s4u_abuse", "domain": "identity", "status": "active", "phase": 0, "weight": 1.0},
+    {"name": "identity:mfa_fatigue_mismatch", "domain": "identity", "status": "active", "phase": 0, "weight": 1.0},
+    {"name": "identity:role_mutation_burst", "domain": "identity", "status": "active", "phase": 0, "weight": 1.0},
+    {"name": "identity:conditional_access_drift", "domain": "identity", "status": "active", "phase": 0, "weight": 0.9},
+    {"name": "identity:session_stitching_anomaly", "domain": "identity", "status": "active", "phase": 1, "weight": 1.1},
+
+    {"name": "endpoint:code_sign_trust_anomaly", "domain": "endpoint", "status": "active", "phase": 0, "weight": 1.0},
+    {"name": "endpoint:dll_sideload_rare_path", "domain": "endpoint", "status": "active", "phase": 0, "weight": 1.0},
+    {"name": "endpoint:driver_load_rare_signature", "domain": "endpoint", "status": "active", "phase": 0, "weight": 1.0},
+    {"name": "endpoint:lateral_exec_remote_tool", "domain": "endpoint", "status": "active", "phase": 1, "weight": 1.2},
+    {"name": "endpoint:persistence_surface_multi", "domain": "endpoint", "status": "active", "phase": 1, "weight": 1.15},
+
+    {"name": "net:ja3_ja4_novel_pair", "domain": "network", "status": "active", "phase": 0, "weight": 1.0},
+    {"name": "net:sni_dns_nx_spike", "domain": "network", "status": "active", "phase": 0, "weight": 0.95},
+    {"name": "net:tls_cert_chain_anomaly", "domain": "network", "status": "active", "phase": 0, "weight": 0.9},
+    {"name": "net:flow_microcluster_exfil", "domain": "network", "status": "active", "phase": 1, "weight": 1.25},
+    {"name": "net:port_protocol_misuse", "domain": "network", "status": "active", "phase": 1, "weight": 1.1},
+
+    {"name": "cloud:cross_account_trust_chain", "domain": "cloud", "status": "active", "phase": 0, "weight": 1.05},
+    {"name": "cloud:kms_secrets_access_anomaly", "domain": "cloud", "status": "active", "phase": 0, "weight": 1.1},
+    {"name": "cloud:serverless_trigger_exposure", "domain": "cloud", "status": "active", "phase": 0, "weight": 0.9},
+    {"name": "cloud:container_ctrlplane_risky_binding", "domain": "cloud", "status": "active", "phase": 1, "weight": 1.15},
+    {"name": "cloud:egress_path_risk", "domain": "cloud", "status": "active", "phase": 1, "weight": 1.2},
+
+    {"name": "remote:handshake_reuse_key", "domain": "remote", "status": "active", "phase": 0, "weight": 1.0},
+    {"name": "remote:vpn_mfa_mode_anomaly", "domain": "remote", "status": "active", "phase": 0, "weight": 0.95},
+    {"name": "remote:jump_host_chain", "domain": "remote", "status": "active", "phase": 0, "weight": 1.05},
+    {"name": "remote:remote_tooling_session", "domain": "remote", "status": "active", "phase": 1, "weight": 1.1},
+    {"name": "remote:geo_velocity_asn_risk", "domain": "remote", "status": "active", "phase": 0, "weight": 0.9},
+
+    {"name": "api:schema_drift_high_risk", "domain": "application", "status": "active", "phase": 0, "weight": 1.0},
+    {"name": "api:client_fp_replay", "domain": "application", "status": "active", "phase": 0, "weight": 1.0},
+    {"name": "api:waf_ids_signal_join", "domain": "application", "status": "active", "phase": 0, "weight": 0.9},
+    {"name": "api:mtls_client_cert_drift", "domain": "application", "status": "active", "phase": 0, "weight": 0.95},
+    {"name": "api:key_lifecycle_anomaly", "domain": "application", "status": "active", "phase": 1, "weight": 1.1},
+
+    {"name": "data:query_shape_rare_sequence", "domain": "data", "status": "active", "phase": 1, "weight": 1.15},
+    {"name": "data:inventory_sensitivity_link", "domain": "data", "status": "active", "phase": 0, "weight": 0.9},
+    {"name": "data:egress_reconciliation_gap", "domain": "data", "status": "active", "phase": 1, "weight": 1.2},
+    {"name": "data:snapshot_diff_unexpected", "domain": "data", "status": "active", "phase": 0, "weight": 0.95},
+    {"name": "data:secrets_access_anomaly", "domain": "data", "status": "active", "phase": 0, "weight": 1.05},
+
+    {"name": "email:auth_alignment_fail", "domain": "email", "status": "active", "phase": 0, "weight": 0.9},
+    {"name": "email:sandbox_lineage_c2", "domain": "email", "status": "active", "phase": 0, "weight": 1.0},
+    {"name": "email:mailbox_rule_burst", "domain": "email", "status": "active", "phase": 1, "weight": 1.1},
+    {"name": "email:oauth_consent_suspicious", "domain": "email", "status": "active", "phase": 0, "weight": 0.95},
+    {"name": "email:reply_chain_hijack", "domain": "email", "status": "active", "phase": 0, "weight": 0.95},
+
+    {"name": "multi_stage_priv_lateral_exfil", "domain": "meta", "status": "experimental", "phase": 1, "weight": 1.3},
+    {"name": "lateral_beacon_chain", "domain": "meta", "status": "experimental", "phase": 1, "weight": 1.25},
+    {"name": "corr_domain_pivot_sequence", "domain": "meta", "status": "active", "phase": 1, "weight": 1.1},
+    {"name": "corr_multi_domain_chain", "domain": "meta", "status": "active", "phase": 1, "weight": 1.2},
+    {"name": "lane_host_pivot", "domain": "meta", "status": "active", "phase": 0, "weight": 1.0}
+  ]
+}

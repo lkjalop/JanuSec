@@ -1,0 +1,9 @@
+[
+  {
+    "activityDateTime": "2026-03-20T01:20:00Z",
+    "activityDisplayName": "Add eligible member to role",
+    "initiatedBy": {"user": {"userPrincipalName": "admin.ops@contoso.com"}},
+    "targetResources": [{"displayName": "Privileged Role Administrator"}],
+    "result": "success"
+  }
+]

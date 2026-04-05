@@ -1,0 +1,9 @@
+{
+  "count": 130,
+  "avg_ms": 31.42,
+  "p95_ms": 65.568,
+  "failures": 0,
+  "throughput_eps": 31.83,
+  "tenant": "tenant-saas",
+  "pipeline_profile": "customer-saas"
+}

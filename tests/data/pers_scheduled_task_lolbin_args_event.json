@@ -1,0 +1,7 @@
+{
+  "event_id": "evt-pers-task-1",
+  "host": "host-105",
+  "timestamp": "2025-10-12T13:04:00Z",
+  "scheduled_task_created": true,
+  "lolbin_in_task_args": true
+}

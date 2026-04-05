@@ -1,0 +1,4 @@
+{
+  "command_line": "powershell -nop -w hidden $a = \"AmsiUtils\"",
+  "process": "powershell.exe"
+}

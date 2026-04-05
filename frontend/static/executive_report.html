@@ -1,0 +1,507 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Executive Report Studio</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+:root{
+  --bg:#efe6da;
+  --bg2:#f7f2ea;
+  --panel:#fffaf3;
+  --panel-strong:#f2e5d5;
+  --ink:#17242d;
+  --muted:#62707d;
+  --border:#d9c7b3;
+  --accent:#914f2b;
+  --accent2:#245f61;
+  --ok:#2b7a4b;
+  --warn:#a56a11;
+  --bad:#7f2d1f;
+}
+*{box-sizing:border-box}
+body{margin:0;background:radial-gradient(circle at top left,rgba(145,79,43,.12),transparent 28%),linear-gradient(180deg,var(--bg) 0%,var(--bg2) 100%);color:var(--ink);font-family:Georgia,"Iowan Old Style","Palatino Linotype",serif}
+.page{min-height:100vh;display:grid;grid-template-columns:320px minmax(620px,1fr) 360px;gap:18px;padding:18px}
+.panel{background:rgba(255,250,243,.94);border:1px solid var(--border);border-radius:24px;box-shadow:0 18px 44px rgba(43,30,18,.08);overflow:hidden}
+.head{padding:18px 20px;border-bottom:1px solid var(--border)}
+.body{padding:20px}
+.title{font-size:24px;font-weight:700}
+.sub{margin-top:8px;font-size:13px;line-height:1.55;color:var(--muted)}
+.stack{display:grid;gap:14px}
+.field{display:grid;gap:6px}
+.field label,.label{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+input[type=text],select,textarea{width:100%;padding:11px 12px;border-radius:12px;border:1px solid var(--border);background:var(--panel);color:var(--ink);font:inherit}
+input[type=file]{display:none}
+.btns,.badges{display:flex;gap:8px;flex-wrap:wrap}
+.btn{appearance:none;border:1px solid var(--border);background:var(--panel);color:var(--ink);padding:10px 14px;border-radius:999px;font-size:13px;font-weight:700;cursor:pointer}
+.btn:hover{filter:brightness(1.02)}
+.btn-primary{background:linear-gradient(135deg,var(--accent),#b86a3f);color:#fff;border-color:#a15a35}
+.btn-secondary{background:linear-gradient(135deg,var(--accent2),#2f8382);color:#fff;border-color:#2f7372}
+.badge{padding:6px 10px;border-radius:999px;background:var(--panel-strong);border:1px solid var(--border);font-size:12px;color:var(--muted)}
+.hero{padding:24px 24px 18px;background:linear-gradient(135deg,#fffaf4,#f4eadc)}
+.eyebrow{font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--muted)}
+.headline{margin-top:10px;font-size:44px;line-height:1.02;max-width:12ch}
+.lede{margin-top:16px;max-width:72ch;font-size:16px;line-height:1.65;color:#394754}
+.grid-3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.metric{padding:14px;border-radius:18px;background:var(--panel);border:1px solid var(--border)}
+.metric .m-label{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.metric .m-value{margin-top:8px;font-size:28px;font-weight:700}
+.metric .m-sub{margin-top:6px;font-size:12px;color:var(--muted)}
+.report-grid{display:grid;grid-template-columns:1.2fr .8fr;gap:18px}
+.card{padding:18px;border:1px solid var(--border);border-radius:20px;background:var(--panel)}
+.card h3{margin:0 0 12px;font-size:18px}
+.list{margin:0;padding-left:18px;line-height:1.55}
+.list li{margin-bottom:8px}
+.claims{display:grid;gap:10px}
+.claim{padding:12px 14px;border:1px solid var(--border);border-radius:16px;background:#fffdf9}
+.claim-top{display:flex;gap:8px;align-items:center;justify-content:space-between}
+.status{display:inline-flex;align-items:center;padding:5px 10px;border-radius:999px;font-size:11px;letter-spacing:.12em;text-transform:uppercase;border:1px solid transparent}
+.status-confirmed{background:rgba(43,122,75,.12);border-color:rgba(43,122,75,.24);color:var(--ok)}
+.status-correlated{background:rgba(165,106,17,.12);border-color:rgba(165,106,17,.24);color:var(--warn)}
+.status-unknown{background:rgba(127,45,31,.1);border-color:rgba(127,45,31,.18);color:var(--bad)}
+.small{font-size:12px;color:var(--muted);line-height:1.5}
+.toggle-list{display:grid;gap:10px}
+.toggle{display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:14px;background:var(--panel)}
+.toggle input{margin-top:3px}
+.chart-wrap{padding:14px;border:1px solid var(--border);border-radius:18px;background:linear-gradient(180deg,#fffdf9,#f6eee3)}
+canvas{width:100%;height:auto;display:block}
+.section-hidden{display:none}
+.rail{position:sticky;top:18px;align-self:start}
+details{border:1px solid var(--border);border-radius:16px;background:var(--panel);padding:12px 14px}
+details summary{cursor:pointer;font-weight:700}
+pre{margin:0;white-space:pre-wrap;font-size:12px;color:#394754}
+.warn{padding:10px 12px;border-radius:14px;background:rgba(165,106,17,.1);border:1px solid rgba(165,106,17,.25);color:#7b540c}
+@media(max-width:1320px){.page{grid-template-columns:320px 1fr}.rail{grid-column:1/-1;position:static}}
+@media(max-width:920px){.page{grid-template-columns:1fr}.grid-3,.report-grid{grid-template-columns:1fr}.headline{font-size:34px}}
+</style>
+</head>
+<body>
+<div class="page">
+  <aside class="panel">
+    <div class="head">
+      <div class="title">Executive Report Studio</div>
+      <div class="sub">Checklist-driven, evidence-first reporting. Charts only use review-state counts. Claims are labeled as confirmed, correlated, or unknown.</div>
+    </div>
+    <div class="body stack">
+      <div class="badges">
+        <span class="badge">Canonical artifact</span>
+        <span class="badge">Review-state charts only</span>
+        <span class="badge">Export HTML / PDF / DOCX</span>
+      </div>
+      <div class="field">
+        <label for="timeframeSelect">Timeframe</label>
+        <select id="timeframeSelect">
+          <option value="24h">24 Hours</option>
+          <option value="72h">72 Hours</option>
+          <option value="5_business_days">5 Business Days</option>
+          <option value="weekend">Weekend</option>
+          <option value="14d">Fortnight</option>
+          <option value="30d">Monthly</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="selectionMode">Selection Mode</label>
+        <select id="selectionMode">
+          <option value="selected_key_alerts">Selected Key Alerts</option>
+          <option value="last_24h">Last 24 Hours</option>
+          <option value="operator_selected_range">Operator Selected Range</option>
+        </select>
+      </div>
+      <div>
+        <div class="label" style="margin-bottom:8px">Include In Report</div>
+        <div class="toggle-list">
+          <label class="toggle"><input type="checkbox" id="toggleOverview" checked><span><strong>Overview</strong><br><span class="small">Headline, business summary, decision now.</span></span></label>
+          <label class="toggle"><input type="checkbox" id="toggleClaims" checked><span><strong>Claim Register</strong><br><span class="small">Confirmed, correlated, and unknown labels.</span></span></label>
+          <label class="toggle"><input type="checkbox" id="toggleSelectedAlerts" checked><span><strong>Selected Alerts</strong><br><span class="small">Top evidence-bearing alerts only.</span></span></label>
+          <label class="toggle"><input type="checkbox" id="toggleReviewChart" checked><span><strong>Review-State Chart</strong><br><span class="small">Only counts from analyst review states.</span></span></label>
+          <label class="toggle"><input type="checkbox" id="toggleTrends" checked><span><strong>Trend Windows</strong><br><span class="small">24h, 72h, 5 days, weekend, fortnight, monthly.</span></span></label>
+          <label class="toggle"><input type="checkbox" id="toggleAppendix" checked><span><strong>Evidence Appendix</strong><br><span class="small">Raw proof for review and audit trail.</span></span></label>
+          <label class="toggle"><input type="checkbox" id="toggleGeo"><span><strong>GeoIP / ASN</strong><br><span class="small">Only if evidence-backed and analyst-approved.</span></span></label>
+          <label class="toggle"><input type="checkbox" id="toggleThreatIntel"><span><strong>Threat Intel Notes</strong><br><span class="small">Threat-researcher only, off by default.</span></span></label>
+        </div>
+      </div>
+      <div class="btns">
+        <button class="btn btn-primary" id="loadSampleBtn">Load Azure Sample</button>
+        <button class="btn" id="uploadBtn">Load JSON</button>
+        <input id="fileInput" type="file" accept=".json">
+      </div>
+      <div class="btns">
+        <button class="btn btn-secondary" id="refreshBtn">Rebuild Artifact</button>
+        <button class="btn" id="exportHtmlBtn">Export HTML</button>
+        <button class="btn" id="exportPdfBtn">Export PDF</button>
+        <button class="btn" id="exportDocxBtn">Export DOCX</button>
+      </div>
+      <div id="statusBox" class="small">No report loaded yet.</div>
+      <div class="warn" id="coverageWarn">Charts are meaningful only after analyst review states exist. Unknown-only windows are intentionally de-emphasized.</div>
+    </div>
+  </aside>
+
+  <main class="stack">
+    <section class="panel">
+      <div class="hero">
+        <div class="eyebrow">Executive Report</div>
+        <div class="headline" id="headline">Load a report</div>
+        <div class="lede" id="lede">This page loads a real replay artifact, builds a canonical executive report, and renders the same payload used for export.</div>
+        <div class="grid-3" style="margin-top:20px">
+          <div class="metric"><div class="m-label">Tenant</div><div class="m-value" id="metricTenant">-</div><div class="m-sub" id="metricQa">QA state: -</div></div>
+          <div class="metric"><div class="m-label">Timeframe</div><div class="m-value" id="metricTimeframe">24h</div><div class="m-sub" id="metricSelection">Selected key alerts</div></div>
+          <div class="metric"><div class="m-label">Decision Now</div><div class="m-value" id="metricAction" style="font-size:20px;line-height:1.25">-</div></div>
+        </div>
+        <div class="small" id="metricActionBasis" style="margin-top:14px">Evidence basis: -</div>
+      </div>
+      <div class="body stack">
+        <section id="overviewSection" class="report-grid">
+          <article class="card">
+            <h3>Business Outcomes Supported By Evidence</h3>
+            <ul class="list" id="businessOutcomes"></ul>
+          </article>
+          <article class="card">
+            <h3>Focus Cluster</h3>
+            <div id="focusCluster" class="small">No cluster selected.</div>
+            <div style="margin-top:12px" id="sharedPivots"></div>
+          </article>
+        </section>
+
+        <section id="claimsSection" class="card">
+          <h3>Claim Register</h3>
+          <div class="claims" id="claimRegister"></div>
+        </section>
+
+        <section id="selectedAlertsSection" class="card">
+          <h3>Selected Alerts</h3>
+          <ul class="list" id="selectedAlerts"></ul>
+        </section>
+
+        <section id="reviewChartSection" class="report-grid">
+          <article class="card chart-wrap">
+            <h3>Review State Composition</h3>
+            <canvas id="pieCanvas" width="420" height="280"></canvas>
+          </article>
+          <article class="card chart-wrap">
+            <h3>Trend Window</h3>
+            <canvas id="trendCanvas" width="420" height="280"></canvas>
+          </article>
+        </section>
+
+        <section id="frameworksSection" class="report-grid">
+          <article class="card">
+            <h3>Adjudication Workflow</h3>
+            <pre id="adjudicationPre">No adjudication summary loaded.</pre>
+          </article>
+          <article class="card">
+            <h3>Framework Sections</h3>
+            <div id="frameworkSections" class="stack"></div>
+          </article>
+        </section>
+
+        <section id="appendixSection" class="card">
+          <h3>Evidence Appendix</h3>
+          <pre id="appendixPre">No appendix loaded.</pre>
+        </section>
+      </div>
+    </section>
+  </main>
+
+  <aside class="panel rail">
+    <div class="head">
+      <div class="title">Review Notes</div>
+      <div class="sub">Use this rail to check whether the report is concise, evidence-based, and safe for distribution.</div>
+    </div>
+    <div class="body stack">
+      <details open>
+        <summary>Mandatory Checks</summary>
+        <ul class="list">
+          <li>Every business claim must be backed by evidence rows or corroborated pivots.</li>
+          <li>No dollar loss or attribution claim unless explicitly present in evidence-backed fields.</li>
+          <li>Charts must remain review-state only.</li>
+          <li>Technical detail belongs in appendix, not the main executive body.</li>
+        </ul>
+      </details>
+      <details open>
+        <summary>Current Artifact</summary>
+        <pre id="artifactMeta">No artifact loaded.</pre>
+      </details>
+      <details>
+        <summary>Export Notes</summary>
+        <div class="small">HTML, PDF, and DOCX export all use the same canonical executive artifact. PDF and DOCX depend on optional server libraries.</div>
+      </details>
+    </div>
+  </aside>
+</div>
+
+<script>
+(function(){
+  const SAMPLE_URL = '/static/data/tmp_azure_persona_output_v3.json';
+  const COLORS = {
+    reviewed_benign:'#4d8463',
+    reviewed_false_positive:'#8b6e2a',
+    needs_investigation:'#d08a23',
+    confirmed_malicious:'#a33f2f',
+    out_of_scope:'#708090',
+    duplicate:'#8e8e8e',
+    unknown:'#d2c4b2'
+  };
+  const LABELS = {
+    reviewed_benign:'Reviewed benign',
+    reviewed_false_positive:'Reviewed false positive',
+    needs_investigation:'Needs investigation',
+    confirmed_malicious:'Confirmed malicious',
+    out_of_scope:'Out of scope',
+    duplicate:'Duplicate',
+    unknown:'Unknown'
+  };
+  const state = { source:null, artifact:null };
+  const $ = (id)=>document.getElementById(id);
+  const esc = (v)=>String(v == null ? '' : v).replace(/[&<>\"']/g,(c)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const authHeaders = ()=>{ try { return {'x-api-key': localStorage.getItem('apiKey') || 'devkey123'}; } catch(_) { return {'x-api-key':'devkey123'}; } };
+
+  function currentOptions(){
+    return {
+      timeframe: $('timeframeSelect').value,
+      selection_mode: $('selectionMode').value,
+      include_overview: $('toggleOverview').checked,
+      include_claims: $('toggleClaims').checked,
+      include_selected_alerts: $('toggleSelectedAlerts').checked,
+      include_review_state_chart: $('toggleReviewChart').checked,
+      include_trends: $('toggleTrends').checked,
+      include_appendix: $('toggleAppendix').checked,
+      include_geoip_asn: $('toggleGeo').checked,
+      include_threat_intel: $('toggleThreatIntel').checked,
+      include_technical_appendix: $('toggleAppendix').checked
+    };
+  }
+
+  async function postJson(url, body, accept='json'){
+    const res = await fetch(url, {
+      method:'POST',
+      headers:{'Content-Type':'application/json', ...authHeaders()},
+      body: JSON.stringify(body)
+    });
+    if (!res.ok) {
+      let detail = `HTTP ${res.status}`;
+      try { const j = await res.json(); detail = j.detail || j.error || detail; } catch(_) {}
+      throw new Error(detail);
+    }
+    if (accept === 'blob') return await res.blob();
+    return await res.json();
+  }
+
+  function setStatus(text){ $('statusBox').textContent = text; }
+
+  function toggleSection(id, enabled){ $(id).classList.toggle('section-hidden', !enabled); }
+
+  function renderClaims(claims){
+    const host = $('claimRegister');
+    host.innerHTML = (claims || []).map((claim)=>{
+      const status = String(claim.status || 'unknown').toLowerCase();
+      const refs = Array.isArray(claim.evidence_refs) ? claim.evidence_refs.filter(Boolean) : [];
+      return `<div class="claim">
+        <div class="claim-top">
+          <strong>${esc(claim.claim || '')}</strong>
+          <span class="status status-${esc(status)}">${esc(status)}</span>
+        </div>
+        <div class="small" style="margin-top:8px;">${refs.length ? `Evidence refs: ${esc(refs.join(', '))}` : 'No direct evidence refs attached.'}</div>
+      </div>`;
+    }).join('') || '<div class="small">No claims available.</div>';
+  }
+
+  function renderList(id, items, fallback){
+    const el = $(id);
+    const values = Array.isArray(items) && items.length ? items : [fallback];
+    el.innerHTML = values.map((item)=>`<li>${esc(typeof item === 'string' ? item : JSON.stringify(item))}</li>`).join('');
+  }
+
+  function renderBusinessOutcomes(items){
+    const el = $('businessOutcomes');
+    if (!Array.isArray(items) || !items.length) {
+      el.innerHTML = '<li>No evidence-backed business outcomes were established.</li>';
+      return;
+    }
+    el.innerHTML = items.map((item)=>{
+      const refs = Array.isArray(item.evidence_refs) ? item.evidence_refs.filter(Boolean) : [];
+      return `<li><strong>${esc(item.statement || '')}</strong> <span class="status status-${esc((item.status || 'unknown').toLowerCase())}">${esc(item.status || 'unknown')}</span><div class="small">Evidence: ${esc(refs.join(', ') || 'No evidence refs attached.')}</div></li>`;
+    }).join('');
+  }
+
+  function renderFrameworkSections(sections){
+    const host = $('frameworkSections');
+    if (!Array.isArray(sections) || !sections.length) {
+      host.innerHTML = '<div class="small">No canonical framework mappings were present, so this section remains intentionally empty.</div>';
+      return;
+    }
+    host.innerHTML = sections.map((section)=>{
+      const items = Array.isArray(section.items) && section.items.length ? section.items : ['No canonical items present.'];
+      return `<div class="claim"><div class="claim-top"><strong>${esc(section.title || 'Framework')}</strong></div><div class="small" style="margin-top:8px;">${esc(section.summary || '')}</div><ul class="list">${items.map((item)=>`<li>${esc(typeof item === 'string' ? item : JSON.stringify(item))}</li>`).join('')}</ul></div>`;
+    }).join('');
+  }
+
+  function drawPie(counts){
+    const canvas = $('pieCanvas');
+    const ctx = canvas.getContext('2d');
+    const total = Object.values(counts || {}).reduce((a,b)=>a + Number(b || 0), 0);
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    if (!total) {
+      ctx.fillStyle = '#7a736a';
+      ctx.font = '16px Georgia';
+      ctx.fillText('No review-state counts available.', 24, 40);
+      return;
+    }
+    let start = -Math.PI / 2;
+    const cx = 130, cy = 140, r = 92;
+    Object.entries(counts).forEach(([key, value])=>{
+      const slice = (Number(value || 0) / total) * Math.PI * 2;
+      if (!slice) return;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.arc(cx, cy, r, start, start + slice);
+      ctx.closePath();
+      ctx.fillStyle = COLORS[key] || COLORS.unknown;
+      ctx.fill();
+      start += slice;
+    });
+    ctx.beginPath();
+    ctx.arc(cx, cy, 48, 0, Math.PI * 2);
+    ctx.fillStyle = '#fffaf4';
+    ctx.fill();
+    ctx.fillStyle = '#22303a';
+    ctx.font = '700 22px Georgia';
+    ctx.fillText(String(total), cx - 14, cy + 6);
+    ctx.font = '12px Georgia';
+    ctx.fillText('reviewed', cx - 24, cy + 24);
+    let y = 42;
+    Object.entries(counts).forEach(([key, value])=>{
+      ctx.fillStyle = COLORS[key] || COLORS.unknown;
+      ctx.fillRect(255, y - 10, 12, 12);
+      ctx.fillStyle = '#22303a';
+      ctx.font = '12px Georgia';
+      ctx.fillText(`${LABELS[key] || key}: ${value}`, 276, y);
+      y += 24;
+    });
+  }
+
+  function drawTrend(windowKey, trendWindows){
+    const canvas = $('trendCanvas');
+    const ctx = canvas.getContext('2d');
+    const counts = (trendWindows || {})[windowKey] || {};
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    const keys = Object.keys(LABELS);
+    const max = Math.max(...keys.map((key)=>Number(counts[key] || 0)), 1);
+    ctx.fillStyle = '#394754';
+    ctx.font = '14px Georgia';
+    ctx.fillText(`Window: ${windowKey}`, 20, 26);
+    keys.forEach((key, idx)=>{
+      const value = Number(counts[key] || 0);
+      const x = 24;
+      const y = 52 + idx * 30;
+      const width = Math.max(2, (value / max) * 250);
+      ctx.fillStyle = COLORS[key] || COLORS.unknown;
+      ctx.fillRect(x, y, width, 18);
+      ctx.fillStyle = '#22303a';
+      ctx.font = '12px Georgia';
+      ctx.fillText(LABELS[key] || key, x + 260, y + 13);
+      ctx.fillText(String(value), x + width + 8, y + 13);
+    });
+  }
+
+  function renderArtifact(artifact){
+    state.artifact = artifact;
+    const overview = artifact.overview || {};
+    const facts = artifact.facts || {};
+    const appendix = artifact.appendix || {};
+    $('headline').textContent = overview.headline || 'Executive assessment';
+    $('lede').textContent = overview.what_happened || 'No business narrative available.';
+    $('metricTenant').textContent = (artifact.meta || {}).tenant || '-';
+    $('metricQa').textContent = `QA state: ${((artifact.meta || {}).qa_review || {}).status || 'draft'}`;
+    $('metricTimeframe').textContent = artifact.timeframe || '24h';
+    $('metricSelection').textContent = String(artifact.selection_mode || '').replace(/_/g, ' ');
+    $('metricAction').textContent = overview.what_to_do_next || 'No action set.';
+    $('metricActionBasis').textContent = `Evidence basis: ${Array.isArray(overview.action_basis_refs) && overview.action_basis_refs.length ? overview.action_basis_refs.join(', ') : 'No evidence refs attached.'}`;
+    renderBusinessOutcomes(overview.business_outcomes || []);
+    $('focusCluster').textContent = JSON.stringify(facts.focus_cluster || {}, null, 2);
+    $('sharedPivots').innerHTML = ((facts.shared_pivots || []).map((pivot)=>`<span class="badge">${esc(pivot.pivot || '')}</span>`).join('')) || '<span class="badge">No filtered pivots</span>';
+    renderClaims(facts.claim_register || []);
+    renderList('selectedAlerts', (facts.selected_alerts || []).map((alert)=>`${alert.title} (${alert.severity || 'unknown'}, ${Math.round(Number(alert.confidence || 0) * 100)}%)`), 'No selected alerts.');
+    $('adjudicationPre').textContent = JSON.stringify(((facts.adjudication || {}).workflow || {}), null, 2);
+    renderFrameworkSections(facts.framework_sections || []);
+    $('appendixPre').textContent = JSON.stringify(appendix.evidence_appendix || {}, null, 2);
+    $('artifactMeta').textContent = JSON.stringify({
+      report_id: artifact.report_id,
+      tenant: (artifact.meta || {}).tenant,
+      qa_review: (artifact.meta || {}).qa_review,
+      report_regeneration: (artifact.meta || {}).report_regeneration
+    }, null, 2);
+
+    toggleSection('overviewSection', $('toggleOverview').checked);
+    toggleSection('claimsSection', $('toggleClaims').checked);
+    toggleSection('selectedAlertsSection', $('toggleSelectedAlerts').checked);
+    toggleSection('reviewChartSection', $('toggleReviewChart').checked || $('toggleTrends').checked);
+    toggleSection('appendixSection', $('toggleAppendix').checked);
+
+    drawPie(facts.review_state_counts || {});
+    drawTrend($('timeframeSelect').value, facts.trend_windows || {});
+
+    const reviewed = Object.entries(facts.review_state_counts || {}).filter(([key])=>key !== 'unknown').reduce((sum, [, value])=>sum + Number(value || 0), 0);
+    $('coverageWarn').style.display = reviewed ? 'none' : 'block';
+  }
+
+  async function rebuildArtifact(){
+    if (!state.source) {
+      setStatus('Load a replay JSON first.');
+      return;
+    }
+    setStatus('Building executive artifact from the current source...');
+    const artifact = await postJson('/api/v1/reports/executive/artifact', { source: state.source, options: currentOptions() });
+    renderArtifact(artifact);
+    setStatus('Executive artifact rebuilt.');
+  }
+
+  async function loadSample(){
+    setStatus('Loading Azure sample replay JSON...');
+    const res = await fetch(SAMPLE_URL, { headers: authHeaders() });
+    if (!res.ok) throw new Error(`Sample load failed: HTTP ${res.status}`);
+    state.source = await res.json();
+    await rebuildArtifact();
+  }
+
+  async function exportArtifact(fmt){
+    if (!state.source) {
+      setStatus('Load a replay JSON first.');
+      return;
+    }
+    setStatus(`Exporting ${fmt.toUpperCase()}...`);
+    const blob = await postJson(`/api/v1/reports/executive/render?format=${encodeURIComponent(fmt)}`, { source: state.source, options: currentOptions() }, 'blob');
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `executive_report.${fmt === 'html' ? 'html' : fmt}`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url), 5000);
+    setStatus(`${fmt.toUpperCase()} export ready.`);
+  }
+
+  $('loadSampleBtn').addEventListener('click', ()=>loadSample().catch((err)=>setStatus(err.message || String(err))));
+  $('refreshBtn').addEventListener('click', ()=>rebuildArtifact().catch((err)=>setStatus(err.message || String(err))));
+  $('exportHtmlBtn').addEventListener('click', ()=>exportArtifact('html').catch((err)=>setStatus(err.message || String(err))));
+  $('exportPdfBtn').addEventListener('click', ()=>exportArtifact('pdf').catch((err)=>setStatus(err.message || String(err))));
+  $('exportDocxBtn').addEventListener('click', ()=>exportArtifact('docx').catch((err)=>setStatus(err.message || String(err))));
+  $('uploadBtn').addEventListener('click', ()=>$('fileInput').click());
+  $('fileInput').addEventListener('change', async (event)=>{
+    const file = (event.target.files || [])[0];
+    if (!file) return;
+    try {
+      state.source = JSON.parse(await file.text());
+      await rebuildArtifact();
+    } catch (err) {
+      setStatus(`Failed to parse JSON: ${err.message || err}`);
+    }
+  });
+  ['timeframeSelect','selectionMode','toggleOverview','toggleClaims','toggleSelectedAlerts','toggleReviewChart','toggleTrends','toggleAppendix','toggleGeo','toggleThreatIntel']
+    .forEach((id)=>$(id).addEventListener('change', ()=>{ if (state.source) rebuildArtifact().catch((err)=>setStatus(err.message || String(err))); }));
+
+  loadSample().catch((err)=>setStatus(err.message || String(err)));
+})();
+</script>
+</body>
+</html>

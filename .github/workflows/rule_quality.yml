@@ -1,0 +1,63 @@
+name: Rule Quality Checks
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  test-and-sweep:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+      - name: Run duplicate rule id test
+        run: |
+          python -m pytest -q tests/test_duplicate_rule_ids.py
+
+      - name: Run auto-audit tests
+        run: |
+          python -m pytest -q tests/test_auto_audit_rules.py
+
+      - name: Run rule-quality sweep (best-effort)
+        run: |
+          python scripts/run_rule_quality_sweep.py || true
+
+      - name: Compare curated baseline to sweep (enforce curated pack)
+        run: |
+          python scripts/compare_curated_to_sweep.py
+
+      - name: Upload sweep reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: rule-quality-reports
+          path: |
+            data/rule_quality_report.json
+            data/rule_quality_report.csv
+            data/rule_mismatch_report.json
+            data/rule_suggestions.json
+            data/curated_baseline.json
+
+      - name: Compare domain pack to sweep (enforce domain pack)
+        run: |
+          python scripts/compare_pack_to_sweep.py data/domain_pack_rules.json
+
+      - name: Upload domain pack baseline
+        uses: actions/upload-artifact@v4
+        with:
+          name: domain-pack-baseline
+          path: |
+            data/domain_pack_baseline.json
+            data/domain_pack_missing_logs.json

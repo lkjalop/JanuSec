@@ -1,0 +1,14 @@
+{
+  "eventName": "CreateUserCredential",
+  "provider": "azure",
+  "iam_create_access_key": true,
+  "service_account_key_create": false,
+  "key_age_days": null,
+  "actor_account_id": "000-azure-actor",
+  "target_account_id": "111-azure-target",
+  "cross_account_origin": true,
+  "src_geo": "us",
+  "actor_home_geo": "us",
+  "off_hours": true,
+  "src_asn_cloud": true
+}

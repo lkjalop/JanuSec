@@ -1,0 +1,4 @@
+{
+  "registry": "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\\MyApp",
+  "process": "reg.exe"
+}

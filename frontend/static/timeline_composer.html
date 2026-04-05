@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Timeline Composer</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root{ --bg:#0B0E14; --bg2:#141A24; --bg3:#1D2531; --border:#2C3746; --text:#E8EBF0; --muted:#93A0B1; --accent:#4A63E7; }
+    body{ background:var(--bg); color:var(--text); font-family:Inter, system-ui, sans-serif; }
+    .wrap{ max-width:1280px; margin:20px auto; padding:0 16px; }
+    .row{ display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+    .card{ background:var(--bg2); border:1px solid var(--border); border-radius:8px; padding:12px; margin-bottom:12px; }
+    .pill{ padding:3px 8px; border-radius:999px; background:var(--bg3); border:1px solid var(--border); font-size:11px; color:#C2CBD6; display:inline-block; }
+    input, select, textarea{ background:var(--bg); color:var(--text); border:1px solid var(--border); border-radius:6px; padding:8px; }
+    button{ background:var(--bg3); color:var(--text); border:1px solid var(--border); border-radius:6px; padding:8px 12px; cursor:pointer; }
+    button.primary{ background:var(--accent); border-color:var(--accent); color:#fff; }
+    .timeline-item{ border-bottom:1px solid var(--border); padding:8px; }
+    .muted{ color:var(--muted); }
+    .grid2{ display:grid; grid-template-columns: 1fr 1fr; gap:12px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h2>Timeline Composer</h2>
+    <div class="card">
+      <div class="row">
+        <input id="fltMinutes" type="number" placeholder="last N minutes (e.g., 120)" style="min-width:200px;" />
+        <input id="fltTenant" placeholder="tenant (optional)" />
+        <input id="fltUser" placeholder="user" />
+        <input id="fltHost" placeholder="host" />
+        <input id="fltDomain" placeholder="domain" />
+        <input id="fltProcess" placeholder="process" />
+        <button id="btnCompose" class="primary">Compose</button>
+        <button id="btnExportJson">Export JSON</button>
+        <button id="btnExportHtml">Export HTML</button>
+        <label class="row" style="gap:6px;">
+          <input id="liveToggle" type="checkbox" /> Live (SSE)
+        </label>
+      </div>
+      <div class="muted" style="margin-top:6px;">Uses /api/v1/decisions/recent and session summaries when present.</div>
+    </div>
+
+    <div class="grid2">
+      <div class="card">
+        <div style="font-weight:600; margin-bottom:6px;">Timeline</div>
+        <div id="timeline"></div>
+      </div>
+      <div class="card">
+        <div style="font-weight:600; margin-bottom:6px;">Summary</div>
+        <div id="summary"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    function authHeaders(){ try{ const key=(localStorage.getItem('apiKey')||'devkey123'); const h={'x-api-key':key}; const t=localStorage.getItem('tenantId'); if(t) h['X-Tenant-ID']=t; return h; }catch(_){ return {'x-api-key':'devkey123'}; } }
+    function esc(s){ return String(s||'').replace(/[&<>]/g,'_'); }
+    function tsWithin(ts, minutes){ if(!ts||!minutes) return true; const now=Date.now()/1000; const diff=(now-Number(ts))/60; return diff>=0 && diff<=minutes; }
+    function matchCtx(d, f){ const c=d.context||d.hopgraph_context||{}; function has(v,k){ return !f[k] || (c[k] && String(c[k]).toLowerCase().includes(String(f[k]).toLowerCase())); } return has(c.user,'user') && has(c.host,'host') && has(c.process,'process') && has(c.domain,'domain'); }
+    async function fetchRecent(limit){ const qs='?limit='+encodeURIComponent(limit||200); const r=await fetch('/api/v1/decisions/recent'+qs,{headers:authHeaders()}); const j=await r.json().catch(()=>({})); return Array.isArray(j.decisions)? j.decisions: (j.rows||j.events||[]); }
+    function renderTimeline(rows){ const host=document.getElementById('timeline'); host.innerHTML = rows.length? rows.map(d=>{ const ts=d.ts||d.timestamp||''; const conf=(d.confidence!=null? Number(d.confidence).toFixed(2):'n/a'); const tags=(Array.isArray(d.tags)? d.tags: []).slice(0,6); return `<div class='timeline-item'><div><strong>${esc(d.verdict||'decision')}</strong> • <span class='muted'>conf ${esc(conf)}</span></div><div class='muted'>${esc(JSON.stringify(d.context||d.hopgraph_context||{}))}</div><div style='margin-top:4px;'>${tags.map(t=>`<span class='pill'>${esc(t)}</span>`).join(' ')}</div></div>`; }).join('') : '<div class="muted">No events</div>'; }
+    function renderSummary(rows){ const host=document.getElementById('summary'); const count=rows.length; const verdicts={}; rows.forEach(d=>{ const v=String(d.verdict||'unknown'); verdicts[v]=(verdicts[v]||0)+1; }); host.innerHTML = `<div>Events: <strong>${count}</strong></div><div style='margin-top:6px;'>${Object.keys(verdicts).map(k=>`<span class='pill'>${esc(k)}: ${verdicts[k]}</span>`).join(' ')}</div>`; }
+
+    async function compose(){ const minutes=Number(document.getElementById('fltMinutes').value||0)||null; const filters={ user:document.getElementById('fltUser').value.trim(), host:document.getElementById('fltHost').value.trim(), domain:document.getElementById('fltDomain').value.trim(), process:document.getElementById('fltProcess').value.trim() }; const rows=await fetchRecent(200); const sel=rows.filter(d=> tsWithin(d.ts||d.timestamp, minutes) && matchCtx(d,filters)); sel.sort((a,b)=> (Number(a.ts||0)-Number(b.ts||0))); window._lastTimeline = sel; renderTimeline(sel); renderSummary(sel); }
+    function exportJson(){ try{ const data=JSON.stringify({ generated_at:new Date().toISOString(), items:(window._lastTimeline||[]) }, null, 2); const blob=new Blob([data],{type:'application/json'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='timeline.json'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url); }catch(_){ alert('Export failed'); } }
+    function exportHtml(){ try{ const host=document.getElementById('timeline'); const html='<!doctype html><meta charset="utf-8"/><title>Timeline Export</title><style>body{font-family:Inter,system-ui,sans-serif;background:#0B0E14;color:#E8EBF0} .item{border-bottom:1px solid #2C3746;padding:8px}</style><body>'+host.innerHTML+'</body>'; const blob=new Blob([html],{type:'text/html'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='timeline.html'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url); }catch(_){ alert('Export failed'); } }
+
+    function startLive(){ try{ if(window._evSrc){ return; } const es = new EventSource('/api/v1/decisions/stream'); window._evSrc = es; es.onmessage = (ev)=>{ /* heartbeat or generic message */ }; es.addEventListener('decision', (ev)=>{ try{ const d = JSON.parse(ev.data||'{}'); const tl = window._lastTimeline || []; tl.push(d); window._lastTimeline = tl; renderTimeline(tl); renderSummary(tl); }catch(_){ } }); es.onerror = ()=>{ try{ es.close(); window._evSrc=null; }catch(_){ } }; }catch(_){ /* ignore */ } }
+    function stopLive(){ try{ if(window._evSrc){ window._evSrc.close(); window._evSrc=null; } }catch(_){} }
+
+    document.getElementById('btnCompose').addEventListener('click', compose);
+    document.getElementById('btnExportJson').addEventListener('click', exportJson);
+    document.getElementById('btnExportHtml').addEventListener('click', exportHtml);
+    document.getElementById('liveToggle').addEventListener('change', (e)=>{ if(e.target.checked) startLive(); else stopLive(); });
+
+    // initial load
+    setTimeout(compose, 300);
+  </script>
+</body>
+</html>

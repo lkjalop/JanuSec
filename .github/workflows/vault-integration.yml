@@ -1,0 +1,60 @@
+name: Vault Integration Tests
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  vault-integration:
+    runs-on: ubuntu-latest
+    services:
+      vault:
+        image: hashicorp/vault:1.14.1
+        options: >-
+          --health-cmd="/bin/sh -c 'curl -fsS http://localhost:8200/v1/sys/health || exit 1'"
+          --health-interval=2s
+          --health-timeout=10s
+          --health-retries=30
+        ports:
+          - 8200:8200
+        env:
+          VAULT_DEV_ROOT_TOKEN_ID: root
+        command: server -dev -dev-root-token-id=root -dev-listen-address=0.0.0.0:8200
+
+    env:
+      RUN_VAULT_INTEGRATION: '1'
+      SECRET_BACKEND: 'vault'
+      VAULT_ADDR: 'http://127.0.0.1:8200'
+      VAULT_TOKEN: 'root'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; else pip install pytest requests cryptography; fi
+
+      - name: Wait for Vault
+        run: |
+          echo "Waiting for Vault to be ready..."
+          for i in {1..30}; do
+            if curl -sS -f http://127.0.0.1:8200/v1/sys/health >/dev/null 2>&1; then
+              echo Vault is ready
+              break
+            fi
+            echo "still waiting... ($i)"
+            sleep 1
+          done
+
+      - name: Run Vault integration test
+        run: |
+          python -m pytest -q tests/test_vault_integration.py -q -r a -s

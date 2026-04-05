@@ -1,0 +1,6 @@
+{
+  "subject": "Action Required: Sign in to approve access",
+  "from": "accounts@microsoft.com",
+  "links": [{"url": "https://login.example-oauth.com/authorize", "domain": "login.example-oauth.com"}],
+  "indicators": {"brand_mismatch": true, "reply_to_mismatch": false}
+}

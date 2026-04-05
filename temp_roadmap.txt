@@ -1,0 +1,2291 @@
+# 🔗 JANUSEC IMPLEMENTATION ROADMAP - PART 1
+## Correlation Rules & Factor Synthesis (Production-Ready Code)
+
+**Date:** 2025-01-15 (Expanded)  
+**Focus:** Replacing stubbed correlation rules with production-grade implementations  
+**Priority:** P0 - Critical for FP reduction claims validation
+
+---
+
+## 📋 TABLE OF CONTENTS
+
+1. [Correlation Architecture Overview](#1-correlation-architecture-overview)
+2. [Factor Synthesis Engine](#2-factor-synthesis-engine)
+3. [Week 1 Correlation Rules (Production)](#3-week-1-correlation-rules-production)
+4. [Multi-Domain Correlation Chains](#4-multi-domain-correlation-chains)
+5. [Temporal Correlation Framework](#5-temporal-correlation-framework)
+6. [HopGraph Integration for Correlation](#6-hopgraph-integration-for-correlation)
+7. [Email Domain Correlation Rules](#7-email-domain-correlation-rules)
+8. [IAM Domain Correlation Rules](#8-iam-domain-correlation-rules)
+9. [Cloud Domain Correlation Rules](#9-cloud-domain-correlation-rules)
+10. [Network Domain Correlation Rules](#10-network-domain-correlation-rules)
+
+---
+
+## 1. CORRELATION ARCHITECTURE OVERVIEW
+
+### **Current State Analysis**
+
+```
+❌ 180+ rules registered but ~85% are "placeholder" implementations
+❌ Factor combining logic is minimal (simple additive)
+❌ No production validation metrics
+❌ Temporal windows defined but not actively used
+```
+
+### **Target Architecture**
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    CORRELATION ENGINE v2.0                               │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  ┌──────────────┐   ┌──────────────┐   ┌──────────────┐                 │
+│  │ Factor       │   │ Temporal     │   │ HopGraph     │                 │
+│  │ Extraction   │──▶│ Correlation  │──▶│ Context      │                 │
+│  │ (40+ factors)│   │ (300s window)│   │ Enrichment   │                 │
+│  └──────────────┘   └──────────────┘   └──────────────┘                 │
+│         │                  │                  │                          │
+│         ▼                  ▼                  ▼                          │
+│  ┌─────────────────────────────────────────────────────────────────┐    │
+│  │              FACTOR SYNTHESIS ENGINE                             │    │
+│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐              │    │
+│  │  │ Bayesian    │  │ Contextual  │  │ Temporal    │              │    │
+│  │  │ Combination │  │ Weighting   │  │ Decay       │              │    │
+│  │  └─────────────┘  └─────────────┘  └─────────────┘              │    │
+│  └─────────────────────────────────────────────────────────────────┘    │
+│                           │                                              │
+│                           ▼                                              │
+│  ┌─────────────────────────────────────────────────────────────────┐    │
+│  │              CORRELATION RULE ENGINE                             │    │
+│  │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐        │    │
+│  │  │ Endpoint │  │ Network  │  │ Email    │  │ Cloud    │        │    │
+│  │  │ Rules    │  │ Rules    │  │ Rules    │  │ Rules    │        │    │
+│  │  └──────────┘  └──────────┘  └──────────┘  └──────────┘        │    │
+│  └─────────────────────────────────────────────────────────────────┘    │
+│                           │                                              │
+│                           ▼                                              │
+│               ┌───────────────────────┐                                 │
+│               │  Final Risk Score     │                                 │
+│               │  + Explainability     │                                 │
+│               │  + MITRE Mapping      │                                 │
+│               └───────────────────────┘                                 │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 2. FACTOR SYNTHESIS ENGINE
+
+### **Problem Statement**
+Current implementation uses simple additive scoring:
+```python
+# CURRENT (naive)
+score = sum(factor_weights[f] for f in factors)
+```
+
+This doesn't account for:
+- Factor independence/correlation
+- Contextual relevance
+- Temporal decay
+- False positive history
+
+### **File:** `src/core/correlation/factor_synthesis.py` (NEW)
+
+```python
+"""
+Production-grade factor synthesis engine.
+
+Implements:
+1. Bayesian factor combination (accounts for independence)
+2. Contextual weighting (user role, time-of-day, asset criticality)
+3. Temporal decay (recent factors weighted higher)
+4. FP-adjusted scoring (penalize factors with high FP rates)
+5. Synergy detection (certain factor combinations are more suspicious)
+"""
+import math
+from datetime import datetime, timedelta
+from typing import Dict, List, Optional, Tuple, Set
+from dataclasses import dataclass, field
+from enum import Enum
+import numpy as np
+
+class FactorCategory(Enum):
+    """Factor categories for grouping and independence analysis."""
+    ENDPOINT = "endpoint"
+    NETWORK = "network"
+    EMAIL = "email"
+    IDENTITY = "identity"
+    CLOUD = "cloud"
+    DATA = "data"
+    API = "api"
+    PROCESS = "process"
+
+
+@dataclass
+class Factor:
+    """Represents a single security factor."""
+    name: str
+    base_weight: float
+    category: FactorCategory
+    timestamp: datetime
+    source_event_id: str
+    metadata: Dict = field(default_factory=dict)
+    
+    # Quality metrics (updated over time)
+    fp_rate: float = 0.0  # Historical FP rate for this factor
+    occurrence_count: int = 0
+    last_calibration: Optional[datetime] = None
+
+
+@dataclass
+class SynthesisResult:
+    """Result of factor synthesis."""
+    final_score: float
+    confidence: float
+    contributing_factors: List[Tuple[str, float]]  # (factor_name, contribution)
+    synergies_detected: List[str]
+    decay_applied: float
+    context_multiplier: float
+    fp_adjustment: float
+    explanation: str
+    mitre_tactics: List[str]
+
+
+class FactorSynthesisEngine:
+    """
+    Production-grade factor synthesis with Bayesian combination.
+    
+    Key innovations:
+    1. Treats factors as probabilistic evidence
+    2. Accounts for inter-factor correlation
+    3. Applies contextual adjustments
+    4. Provides full explainability
+    """
+    
+    # Factor synergy matrix: (factor1, factor2) -> synergy_boost
+    # These combinations are MORE suspicious together than separately
+    SYNERGY_MATRIX: Dict[Tuple[str, str], float] = {
+        # Office macro chain
+        ('lane_process_lineage:office_macro_spawn_powershell', 'net:domain_rare'): 0.25,
+        ('lane_process_lineage:office_macro_spawn_powershell', 'endpoint:encoded_command'): 0.20,
+        
+        # Credential theft chain
+        ('endpoint:mimikatz_pattern', 'identity:failed_logins_burst'): 0.30,
+        ('endpoint:lsass_access', 'net:smb_lateral'): 0.25,
+        
+        # Ransomware indicators
+        ('endpoint:vss_deletion', 'endpoint:mass_file_rename'): 0.35,
+        ('endpoint:bcdedit_modification', 'endpoint:shadow_copy_delete'): 0.30,
+        
+        # C2 indicators
+        ('net:beacon_detected', 'net:dns_tunneling'): 0.25,
+        ('net:ja3_rare', 'net:high_frequency_dns'): 0.20,
+        
+        # Email + Endpoint chain
+        ('email:phishing_link_clicked', 'endpoint:unsigned_exe_download'): 0.30,
+        ('email:attachment_executed', 'endpoint:child_of_browser'): 0.25,
+        
+        # Cloud + Identity chain
+        ('cloud:iam_privilege_escalation', 'identity:mfa_disabled'): 0.35,
+        ('cloud:public_bucket', 'data:pii_accessed'): 0.30,
+    }
+    
+    # Factor suppression: factors with high FP rates get penalized
+    FP_SUPPRESSION_THRESHOLD = 0.70  # Suppress if FP rate > 70%
+    FP_SUPPRESSION_FACTOR = 0.3  # Reduce weight to 30% of original
+    
+    # Temporal decay: recent factors weighted higher
+    TEMPORAL_DECAY_HALF_LIFE_MINUTES = 30  # Factor weight halves every 30 minutes
+    
+    # Category independence weights (for Bayesian combination)
+    # Factors in same category are NOT independent; different categories are
+    CATEGORY_INDEPENDENCE = {
+        (FactorCategory.ENDPOINT, FactorCategory.NETWORK): 0.95,  # Highly independent
+        (FactorCategory.ENDPOINT, FactorCategory.EMAIL): 0.90,
+        (FactorCategory.NETWORK, FactorCategory.CLOUD): 0.85,
+        (FactorCategory.IDENTITY, FactorCategory.CLOUD): 0.80,
+        (FactorCategory.ENDPOINT, FactorCategory.ENDPOINT): 0.40,  # Same category = correlated
+        (FactorCategory.NETWORK, FactorCategory.NETWORK): 0.45,
+    }
+    
+    def __init__(
+        self,
+        base_weights: Dict[str, float],
+        factor_fp_rates: Optional[Dict[str, float]] = None,
+        context_weights: Optional[Dict[str, float]] = None
+    ):
+        """
+        Initialize synthesis engine.
+        
+        Args:
+            base_weights: Default weight for each factor
+            factor_fp_rates: Historical FP rate per factor (from quality tracking)
+            context_weights: Contextual multipliers (user_role, time_of_day, etc.)
+        """
+        self.base_weights = base_weights
+        self.factor_fp_rates = factor_fp_rates or {}
+        self.context_weights = context_weights or {}
+        
+        # Factor category mapping
+        self.factor_categories = self._build_factor_category_map()
+    
+    def synthesize(
+        self,
+        factors: List[Factor],
+        context: Optional[Dict] = None,
+        reference_time: Optional[datetime] = None
+    ) -> SynthesisResult:
+        """
+        Synthesize multiple factors into a final risk score.
+        
+        This is the main entry point for factor combination.
+        
+        Args:
+            factors: List of Factor objects extracted from event(s)
+            context: Contextual information (user, host, time, asset_criticality)
+            reference_time: Time reference for temporal decay (default: now)
+        
+        Returns:
+            SynthesisResult with final score, confidence, and explanation
+        """
+        if not factors:
+            return SynthesisResult(
+                final_score=0.0,
+                confidence=0.0,
+                contributing_factors=[],
+                synergies_detected=[],
+                decay_applied=0.0,
+                context_multiplier=1.0,
+                fp_adjustment=0.0,
+                explanation="No factors present",
+                mitre_tactics=[]
+            )
+        
+        reference_time = reference_time or datetime.utcnow()
+        context = context or {}
+        
+        # Step 1: Apply FP rate suppression
+        adjusted_factors = self._apply_fp_suppression(factors)
+        
+        # Step 2: Apply temporal decay
+        decayed_factors, avg_decay = self._apply_temporal_decay(adjusted_factors, reference_time)
+        
+        # Step 3: Detect synergies
+        synergies, synergy_boost = self._detect_synergies(decayed_factors)
+        
+        # Step 4: Bayesian combination
+        base_score, contributions = self._bayesian_combine(decayed_factors)
+        
+        # Step 5: Apply synergy boost
+        score_with_synergy = min(base_score + synergy_boost, 1.0)
+        
+        # Step 6: Apply contextual multiplier
+        context_multiplier = self._calculate_context_multiplier(context)
+        final_score = min(score_with_synergy * context_multiplier, 1.0)
+        
+        # Step 7: Calculate confidence
+        confidence = self._calculate_confidence(decayed_factors, synergies)
+        
+        # Step 8: Extract MITRE tactics
+        mitre_tactics = self._extract_mitre_tactics(decayed_factors)
+        
+        # Step 9: Generate explanation
+        explanation = self._generate_explanation(
+            factors, contributions, synergies, context_multiplier, avg_decay
+        )
+        
+        return SynthesisResult(
+            final_score=final_score,
+            confidence=confidence,
+            contributing_factors=contributions,
+            synergies_detected=synergies,
+            decay_applied=avg_decay,
+            context_multiplier=context_multiplier,
+            fp_adjustment=sum(f.fp_rate for f in factors) / len(factors) if factors else 0,
+            explanation=explanation,
+            mitre_tactics=mitre_tactics
+        )
+    
+    def _apply_fp_suppression(self, factors: List[Factor]) -> List[Factor]:
+        """
+        Suppress factors with high historical FP rates.
+        
+        If a factor has FP rate > 70%, reduce its weight to 30% of original.
+        This prevents noisy factors from dominating scoring.
+        """
+        adjusted = []
+        
+        for f in factors:
+            fp_rate = self.factor_fp_rates.get(f.name, f.fp_rate)
+            
+            if fp_rate > self.FP_SUPPRESSION_THRESHOLD:
+                # Suppress noisy factor
+                adjusted_weight = f.base_weight * self.FP_SUPPRESSION_FACTOR
+                adjusted.append(Factor(
+                    name=f.name,
+                    base_weight=adjusted_weight,
+                    category=f.category,
+                    timestamp=f.timestamp,
+                    source_event_id=f.source_event_id,
+                    metadata={**f.metadata, 'fp_suppressed': True, 'original_weight': f.base_weight},
+                    fp_rate=fp_rate
+                ))
+            else:
+                adjusted.append(f)
+        
+        return adjusted
+    
+    def _apply_temporal_decay(
+        self, 
+        factors: List[Factor], 
+        reference_time: datetime
+    ) -> Tuple[List[Factor], float]:
+        """
+        Apply exponential decay to older factors.
+        
+        Recent factors (last 5 minutes) get full weight.
+        Older factors decay with half-life of 30 minutes.
+        """
+        decayed = []
+        total_decay = 0.0
+        
+        for f in factors:
+            age_minutes = (reference_time - f.timestamp).total_seconds() / 60
+            
+            # No decay for very recent factors
+            if age_minutes < 5:
+                decay_factor = 1.0
+            else:
+                # Exponential decay: weight = base * 0.5^(age/half_life)
+                decay_factor = math.pow(0.5, age_minutes / self.TEMPORAL_DECAY_HALF_LIFE_MINUTES)
+            
+            total_decay += (1 - decay_factor)
+            
+            decayed.append(Factor(
+                name=f.name,
+                base_weight=f.base_weight * decay_factor,
+                category=f.category,
+                timestamp=f.timestamp,
+                source_event_id=f.source_event_id,
+                metadata={**f.metadata, 'temporal_decay': decay_factor},
+                fp_rate=f.fp_rate
+            ))
+        
+        avg_decay = total_decay / len(factors) if factors else 0.0
+        return decayed, avg_decay
+    
+    def _detect_synergies(self, factors: List[Factor]) -> Tuple[List[str], float]:
+        """
+        Detect factor combinations that indicate higher risk.
+        
+        Certain factor pairs together are MORE suspicious than
+        the sum of their individual weights.
+        """
+        synergies = []
+        total_boost = 0.0
+        
+        factor_names = {f.name for f in factors}
+        
+        for (f1, f2), boost in self.SYNERGY_MATRIX.items():
+            # Check if both factors in the synergy pair are present
+            if f1 in factor_names and f2 in factor_names:
+                synergy_name = f"synergy:{f1}+{f2}"
+                synergies.append(synergy_name)
+                total_boost += boost
+        
+        return synergies, min(total_boost, 0.50)  # Cap synergy boost at 0.50
+    
+    def _bayesian_combine(self, factors: List[Factor]) -> Tuple[float, List[Tuple[str, float]]]:
+        """
+        Combine factors using Bayesian probability combination.
+        
+        For independent evidence:
+        P(threat|evidence) = 1 - ∏(1 - P(threat|e_i))
+        
+        For correlated evidence (same category), we discount.
+        """
+        if not factors:
+            return 0.0, []
+        
+        # Group factors by category
+        category_groups: Dict[FactorCategory, List[Factor]] = {}
+        for f in factors:
+            if f.category not in category_groups:
+                category_groups[f.category] = []
+            category_groups[f.category].append(f)
+        
+        # Combine within each category (with correlation discount)
+        category_probs: Dict[FactorCategory, float] = {}
+        contributions: List[Tuple[str, float]] = []
+        
+        for category, cat_factors in category_groups.items():
+            # Within category: factors are correlated
+            # Use max + dampened sum of others
+            sorted_factors = sorted(cat_factors, key=lambda f: f.base_weight, reverse=True)
+            
+            category_prob = sorted_factors[0].base_weight
+            contributions.append((sorted_factors[0].name, sorted_factors[0].base_weight))
+            
+            for f in sorted_factors[1:]:
+                # Diminishing returns for correlated factors
+                marginal_contrib = f.base_weight * 0.5  # 50% discount for same-category
+                category_prob = category_prob + marginal_contrib * (1 - category_prob)
+                contributions.append((f.name, marginal_contrib))
+            
+            category_probs[category] = min(category_prob, 0.95)
+        
+        # Combine across categories (independent evidence)
+        # P(not threat) = ∏(1 - P_category)
+        prob_not_threat = 1.0
+        for cat, prob in category_probs.items():
+            independence = self._get_category_independence(cat, list(category_probs.keys()))
+            prob_not_threat *= (1 - prob * independence)
+        
+        final_prob = 1 - prob_not_threat
+        
+        return min(final_prob, 0.98), contributions  # Cap at 0.98 (never 100% certain)
+    
+    def _get_category_independence(self, category: FactorCategory, all_categories: List[FactorCategory]) -> float:
+        """Get independence weight for a category given other categories."""
+        if len(all_categories) <= 1:
+            return 1.0
+        
+        # Average independence with other categories
+        independences = []
+        for other in all_categories:
+            if other != category:
+                key = (category, other) if category.value < other.value else (other, category)
+                ind = self.CATEGORY_INDEPENDENCE.get(key, 0.75)  # Default 75% independent
+                independences.append(ind)
+        
+        return sum(independences) / len(independences) if independences else 1.0
+    
+    def _calculate_context_multiplier(self, context: Dict) -> float:
+        """
+        Calculate contextual risk multiplier.
+        
+        Context factors:
+        - user_role: 'admin' = 1.3x, 'regular' = 1.0x
+        - time_of_day: business hours = 0.9x, off-hours = 1.2x
+        - asset_criticality: 'high' = 1.4x, 'medium' = 1.0x, 'low' = 0.8x
+        - geography: if unusual location = 1.3x
+        """
+        multiplier = 1.0
+        
+        # User role
+        user_role = context.get('user_role', 'regular')
+        role_multipliers = {'admin': 1.3, 'service_account': 1.2, 'regular': 1.0, 'guest': 0.9}
+        multiplier *= role_multipliers.get(user_role, 1.0)
+        
+        # Time of day
+        hour = context.get('hour_of_day', datetime.utcnow().hour)
+        if 9 <= hour <= 17:  # Business hours
+            multiplier *= 0.95
+        elif 0 <= hour <= 5:  # Late night
+            multiplier *= 1.25
+        
+        # Asset criticality
+        asset_criticality = context.get('asset_criticality', 'medium')
+        criticality_multipliers = {'critical': 1.5, 'high': 1.3, 'medium': 1.0, 'low': 0.7}
+        multiplier *= criticality_multipliers.get(asset_criticality, 1.0)
+        
+        # Unusual geography
+        if context.get('unusual_geography', False):
+            multiplier *= 1.3
+        
+        # First-time behavior
+        if context.get('first_time_seen', False):
+            multiplier *= 1.2
+        
+        return min(multiplier, 2.0)  # Cap at 2x
+    
+    def _calculate_confidence(self, factors: List[Factor], synergies: List[str]) -> float:
+        """
+        Calculate confidence in the final score.
+        
+        Higher confidence when:
+        - Multiple independent factors
+        - Synergies detected
+        - Factors from multiple categories
+        - Low FP rates on factors
+        """
+        if not factors:
+            return 0.0
+        
+        # Base confidence from factor count
+        factor_count_confidence = min(len(factors) / 5, 1.0)  # Max at 5 factors
+        
+        # Category diversity
+        unique_categories = len(set(f.category for f in factors))
+        diversity_confidence = min(unique_categories / 4, 1.0)  # Max at 4 categories
+        
+        # Synergy bonus
+        synergy_confidence = min(len(synergies) * 0.15, 0.30)  # Max 0.30 from synergies
+        
+        # FP rate penalty
+        avg_fp_rate = sum(f.fp_rate for f in factors) / len(factors)
+        fp_penalty = avg_fp_rate * 0.5  # High FP rates reduce confidence
+        
+        confidence = (
+            factor_count_confidence * 0.30 +
+            diversity_confidence * 0.40 +
+            synergy_confidence +
+            0.30  # Base confidence
+        ) - fp_penalty
+        
+        return max(min(confidence, 0.98), 0.10)  # Clamp to [0.10, 0.98]
+    
+    def _extract_mitre_tactics(self, factors: List[Factor]) -> List[str]:
+        """Extract unique MITRE ATT&CK tactics from factors."""
+        tactics = set()
+        
+        for f in factors:
+            if 'mitre' in f.metadata:
+                if isinstance(f.metadata['mitre'], list):
+                    tactics.update(f.metadata['mitre'])
+                else:
+                    tactics.add(f.metadata['mitre'])
+        
+        return sorted(tactics)
+    
+    def _generate_explanation(
+        self,
+        factors: List[Factor],
+        contributions: List[Tuple[str, float]],
+        synergies: List[str],
+        context_multiplier: float,
+        avg_decay: float
+    ) -> str:
+        """Generate human-readable explanation of scoring."""
+        lines = []
+        
+        # Top contributing factors
+        sorted_contribs = sorted(contributions, key=lambda x: x[1], reverse=True)[:5]
+        lines.append("Top contributing factors:")
+        for name, contrib in sorted_contribs:
+            lines.append(f"  • {name}: +{contrib:.2f}")
+        
+        # Synergies
+        if synergies:
+            lines.append("\nDetected attack patterns:")
+            for s in synergies:
+                lines.append(f"  • {s}")
+        
+        # Context
+        if context_multiplier != 1.0:
+            direction = "increased" if context_multiplier > 1 else "decreased"
+            lines.append(f"\nContextual risk {direction} by {abs(context_multiplier-1)*100:.0f}%")
+        
+        # Decay
+        if avg_decay > 0.1:
+            lines.append(f"\nTemporal decay applied: {avg_decay*100:.0f}% average reduction")
+        
+        return "\n".join(lines)
+    
+    def _build_factor_category_map(self) -> Dict[str, FactorCategory]:
+        """Map factor names to categories."""
+        category_map = {}
+        
+        # Endpoint factors
+        endpoint_prefixes = ['endpoint:', 'process:', 'lane_process_lineage:', 'lane_file_op:']
+        network_prefixes = ['net:', 'beacon:', 'ja3:', 'dns:']
+        email_prefixes = ['email:', 'bec:']
+        identity_prefixes = ['identity:', 'iam:', 'auth:']
+        cloud_prefixes = ['cloud:', 'aws:', 'azure:', 'gcp:']
+        data_prefixes = ['data:', 'dlp:', 'pii:']
+        api_prefixes = ['api:', 'graphql:']
+        
+        for factor_name in self.base_weights.keys():
+            if any(factor_name.startswith(p) for p in endpoint_prefixes):
+                category_map[factor_name] = FactorCategory.ENDPOINT
+            elif any(factor_name.startswith(p) for p in network_prefixes):
+                category_map[factor_name] = FactorCategory.NETWORK
+            elif any(factor_name.startswith(p) for p in email_prefixes):
+                category_map[factor_name] = FactorCategory.EMAIL
+            elif any(factor_name.startswith(p) for p in identity_prefixes):
+                category_map[factor_name] = FactorCategory.IDENTITY
+            elif any(factor_name.startswith(p) for p in cloud_prefixes):
+                category_map[factor_name] = FactorCategory.CLOUD
+            elif any(factor_name.startswith(p) for p in data_prefixes):
+                category_map[factor_name] = FactorCategory.DATA
+            elif any(factor_name.startswith(p) for p in api_prefixes):
+                category_map[factor_name] = FactorCategory.API
+            else:
+                category_map[factor_name] = FactorCategory.ENDPOINT  # Default
+        
+        return category_map
+
+
+# Integration helper
+def create_factor_from_event(
+    factor_name: str,
+    event: Dict,
+    base_weights: Dict[str, float]
+) -> Factor:
+    """Create a Factor object from an event dictionary."""
+    from datetime import datetime
+    
+    weight = base_weights.get(factor_name, 0.10)
+    
+    # Determine category from factor name
+    if factor_name.startswith(('endpoint:', 'process:', 'lane_process')):
+        category = FactorCategory.ENDPOINT
+    elif factor_name.startswith(('net:', 'beacon:', 'ja3:', 'dns:')):
+        category = FactorCategory.NETWORK
+    elif factor_name.startswith('email:'):
+        category = FactorCategory.EMAIL
+    elif factor_name.startswith(('identity:', 'iam:')):
+        category = FactorCategory.IDENTITY
+    elif factor_name.startswith(('cloud:', 'aws:', 'azure:')):
+        category = FactorCategory.CLOUD
+    else:
+        category = FactorCategory.ENDPOINT
+    
+    return Factor(
+        name=factor_name,
+        base_weight=weight,
+        category=category,
+        timestamp=event.get('timestamp', datetime.utcnow()),
+        source_event_id=event.get('event_id', 'unknown'),
+        metadata=event.get('metadata', {})
+    )
+```
+
+### **Unit Tests for Factor Synthesis**
+
+**File:** `tests/test_factor_synthesis.py` (NEW)
+
+```python
+"""
+Comprehensive tests for FactorSynthesisEngine.
+"""
+import pytest
+from datetime import datetime, timedelta
+from src.core.correlation.factor_synthesis import (
+    FactorSynthesisEngine, Factor, FactorCategory, SynthesisResult
+)
+
+
+@pytest.fixture
+def base_weights():
+    """Standard factor weights for testing."""
+    return {
+        'endpoint:mimikatz_pattern': 0.25,
+        'endpoint:encoded_command': 0.15,
+        'net:beacon_detected': 0.20,
+        'net:domain_rare': 0.12,
+        'email:phishing_link_clicked': 0.18,
+        'identity:failed_logins_burst': 0.15,
+        'cloud:iam_privilege_escalation': 0.22,
+        'lane_process_lineage:office_macro_spawn_powershell': 0.18,
+    }
+
+
+@pytest.fixture
+def engine(base_weights):
+    """Create synthesis engine for testing."""
+    return FactorSynthesisEngine(
+        base_weights=base_weights,
+        factor_fp_rates={'endpoint:encoded_command': 0.75}  # High FP rate
+    )
+
+
+class TestFactorSynthesis:
+    """Test factor synthesis engine."""
+    
+    def test_single_factor_scoring(self, engine):
+        """Test scoring with single factor."""
+        factors = [Factor(
+            name='endpoint:mimikatz_pattern',
+            base_weight=0.25,
+            category=FactorCategory.ENDPOINT,
+            timestamp=datetime.utcnow(),
+            source_event_id='test-1'
+        )]
+        
+        result = engine.synthesize(factors)
+        
+        assert 0.20 <= result.final_score <= 0.30
+        assert result.confidence > 0.3
+        assert len(result.contributing_factors) == 1
+    
+    def test_multi_factor_bayesian_combination(self, engine):
+        """Test Bayesian combination increases score."""
+        now = datetime.utcnow()
+        
+        factors = [
+            Factor('endpoint:mimikatz_pattern', 0.25, FactorCategory.ENDPOINT, now, 'e1'),
+            Factor('net:beacon_detected', 0.20, FactorCategory.NETWORK, now, 'e2'),
+            Factor('identity:failed_logins_burst', 0.15, FactorCategory.IDENTITY, now, 'e3'),
+        ]
+        
+        result = engine.synthesize(factors)
+        
+        # Multi-domain factors should combine to higher score
+        assert result.final_score > 0.40
+        assert result.confidence > 0.50
+        assert len(set(f.category for f in factors)) == 3  # 3 categories
+    
+    def test_synergy_detection(self, engine):
+        """Test that synergies boost score."""
+        now = datetime.utcnow()
+        
+        # These two factors have synergy defined
+        factors = [
+            Factor('lane_process_lineage:office_macro_spawn_powershell', 0.18, 
+                   FactorCategory.ENDPOINT, now, 'e1'),
+            Factor('net:domain_rare', 0.12, FactorCategory.NETWORK, now, 'e2'),
+        ]
+        
+        result = engine.synthesize(factors)
+        
+        assert len(result.synergies_detected) > 0
+        assert 'synergy:' in result.synergies_detected[0]
+        # Score should be higher than simple sum due to synergy
+        assert result.final_score > 0.30 + 0.20  # More than 0.18 + 0.12
+    
+    def test_fp_suppression(self, engine):
+        """Test that high FP rate factors are suppressed."""
+        now = datetime.utcnow()
+        
+        # endpoint:encoded_command has 75% FP rate in fixture
+        factors = [
+            Factor('endpoint:encoded_command', 0.15, FactorCategory.ENDPOINT, now, 'e1',
+                   fp_rate=0.75),
+        ]
+        
+        result = engine.synthesize(factors)
+        
+        # Score should be suppressed (30% of original)
+        assert result.final_score < 0.10  # Much less than 0.15
+    
+    def test_temporal_decay(self, engine):
+        """Test that old factors decay."""
+        now = datetime.utcnow()
+        old_time = now - timedelta(hours=2)  # 2 hours ago
+        
+        # Same factor, different timestamps
+        recent_factor = Factor('endpoint:mimikatz_pattern', 0.25, 
+                               FactorCategory.ENDPOINT, now, 'e1')
+        old_factor = Factor('endpoint:mimikatz_pattern', 0.25,
+                           FactorCategory.ENDPOINT, old_time, 'e2')
+        
+        recent_result = engine.synthesize([recent_factor], reference_time=now)
+        old_result = engine.synthesize([old_factor], reference_time=now)
+        
+        # Old factor should have lower score
+        assert old_result.final_score < recent_result.final_score
+        assert old_result.decay_applied > recent_result.decay_applied
+    
+    def test_context_multiplier_admin(self, engine):
+        """Test admin context increases risk."""
+        factors = [Factor('endpoint:mimikatz_pattern', 0.25, 
+                          FactorCategory.ENDPOINT, datetime.utcnow(), 'e1')]
+        
+        normal_result = engine.synthesize(factors, context={'user_role': 'regular'})
+        admin_result = engine.synthesize(factors, context={'user_role': 'admin'})
+        
+        assert admin_result.final_score > normal_result.final_score
+        assert admin_result.context_multiplier > 1.0
+    
+    def test_context_multiplier_offhours(self, engine):
+        """Test off-hours increases risk."""
+        factors = [Factor('endpoint:mimikatz_pattern', 0.25,
+                          FactorCategory.ENDPOINT, datetime.utcnow(), 'e1')]
+        
+        business_result = engine.synthesize(factors, context={'hour_of_day': 14})  # 2 PM
+        offhour_result = engine.synthesize(factors, context={'hour_of_day': 3})   # 3 AM
+        
+        assert offhour_result.final_score > business_result.final_score
+    
+    def test_confidence_increases_with_diversity(self, engine):
+        """Test confidence increases with category diversity."""
+        now = datetime.utcnow()
+        
+        # Single category
+        single_cat = [
+            Factor('endpoint:mimikatz_pattern', 0.25, FactorCategory.ENDPOINT, now, 'e1'),
+            Factor('endpoint:encoded_command', 0.15, FactorCategory.ENDPOINT, now, 'e2'),
+        ]
+        
+        # Multiple categories
+        multi_cat = [
+            Factor('endpoint:mimikatz_pattern', 0.25, FactorCategory.ENDPOINT, now, 'e1'),
+            Factor('net:beacon_detected', 0.20, FactorCategory.NETWORK, now, 'e2'),
+        ]
+        
+        single_result = engine.synthesize(single_cat)
+        multi_result = engine.synthesize(multi_cat)
+        
+        assert multi_result.confidence > single_result.confidence
+    
+    def test_explanation_generation(self, engine):
+        """Test that explanations are generated."""
+        factors = [
+            Factor('endpoint:mimikatz_pattern', 0.25, FactorCategory.ENDPOINT, 
+                   datetime.utcnow(), 'e1'),
+            Factor('net:beacon_detected', 0.20, FactorCategory.NETWORK,
+                   datetime.utcnow(), 'e2'),
+        ]
+        
+        result = engine.synthesize(factors)
+        
+        assert result.explanation is not None
+        assert 'contributing factors' in result.explanation.lower()
+    
+    def test_empty_factors(self, engine):
+        """Test handling of empty factor list."""
+        result = engine.synthesize([])
+        
+        assert result.final_score == 0.0
+        assert result.confidence == 0.0
+        assert len(result.contributing_factors) == 0
+```
+
+---
+
+## 3. WEEK 1 CORRELATION RULES (PRODUCTION)
+
+### **Rule 1: Office Macro → PowerShell Chain**
+
+**File:** `src/core/correlation/rules/week1/office_macro_chain.py`
+
+```python
+"""
+Production-grade Office Macro → PowerShell correlation chain.
+
+Attack Chain:
+1. User opens Office document (Word/Excel)
+2. Document contains malicious macro
+3. Macro spawns PowerShell with obfuscated command
+4. PowerShell downloads payload from rare domain
+5. Payload executes as child of PowerShell
+
+MITRE ATT&CK:
+- T1566.001: Phishing: Spearphishing Attachment
+- T1059.001: PowerShell
+- T1027: Obfuscated Files or Information
+- T1105: Ingress Tool Transfer
+"""
+import re
+from datetime import datetime, timedelta
+from typing import Dict, List, Optional, Any
+from dataclasses import dataclass
+from src.core.correlation.factor_synthesis import Factor, FactorCategory
+
+
+@dataclass
+class OfficeMacroCorrelationResult:
+    """Result of Office macro correlation analysis."""
+    is_suspicious: bool
+    score: float
+    chain_stage: int  # 1-5 depending on how far the chain progressed
+    factors_emitted: List[str]
+    mitre_tactics: List[str]
+    recommendations: List[str]
+    timeline: List[Dict]  # Ordered events in the chain
+
+
+class OfficeMacroCorrelator:
+    """
+    Correlates Office macro spawn patterns with downstream activity.
+    
+    Detection Logic:
+    1. Base: Office app (WINWORD.EXE, EXCEL.EXE) spawns PowerShell
+    2. Amplifier: PowerShell has encoded/obfuscated command
+    3. Amplifier: PowerShell connects to rare/new domain
+    4. Amplifier: PowerShell downloads executable
+    5. Amplifier: Downloaded file executes
+    """
+    
+    # Office process names
+    OFFICE_PROCESSES = {
+        'winword.exe', 'excel.exe', 'powerpnt.exe', 
+        'outlook.exe', 'msaccess.exe', 'mspub.exe'
+    }
+    
+    # PowerShell obfuscation patterns (case-insensitive)
+    PS_OBFUSCATION_PATTERNS = [
+        r'-e(nc|ncodedcommand)\s+[A-Za-z0-9+/=]{20,}',  # Base64 encoded command
+        r'-nop(rofile)?',                                # No profile (evasion)
+        r'-w(indowstyle)?\s+(h|hidden)',                 # Hidden window
+        r'-ep\s+bypass',                                 # Execution policy bypass
+        r'-sta',                                         # Single-threaded apartment
+        r'invoke-expression|iex\s*\(',                   # Dynamic execution
+        r'downloadstring|downloadfile',                  # Network download
+        r'new-object\s+net\.webclient',                  # WebClient object
+        r'invoke-webrequest|iwr\s',                      # Web request
+        r'start-bitstransfer',                           # BITS transfer
+        r'\[convert\]::frombase64string',                # Base64 decode
+        r'gzip|decompress',                              # Compression evasion
+        r'\-join\s*\[char\[\]\]',                        # String obfuscation
+        r'replace\s*\(\s*[\'"]\w+[\'"]',                 # String manipulation
+    ]
+    
+    # Network IOC patterns
+    SUSPICIOUS_DOMAIN_PATTERNS = [
+        r'\.top$', r'\.xyz$', r'\.tk$', r'\.ml$',  # Cheap TLDs
+        r'\.onion$',                                # Tor
+        r'\d{1,3}-\d{1,3}-\d{1,3}-\d{1,3}',        # IP in hostname
+        r'[a-z0-9]{20,}\.com',                      # Long random subdomain
+    ]
+    
+    def __init__(
+        self,
+        hopgraph_client: Optional[Any] = None,
+        temporal_cache: Optional[Any] = None
+    ):
+        """
+        Initialize correlator.
+        
+        Args:
+            hopgraph_client: HopGraph instance for graph queries
+            temporal_cache: Redis/memory cache for temporal correlation
+        """
+        self.hopgraph = hopgraph_client
+        self.temporal_cache = temporal_cache
+        self.correlation_window_seconds = 300  # 5 minute window
+    
+    def correlate(
+        self,
+        event: Dict,
+        context: Optional[Dict] = None
+    ) -> OfficeMacroCorrelationResult:
+        """
+        Main correlation entry point.
+        
+        Args:
+            event: Canonical event envelope with factors
+            context: Additional context (user, host, prior events)
+        
+        Returns:
+            OfficeMacroCorrelationResult with score and recommendations
+        """
+        factors = event.get('factors', [])
+        metadata = event.get('metadata', {})
+        host = event.get('host', '')
+        timestamp = event.get('timestamp', datetime.utcnow())
+        
+        # Initialize result
+        score = 0.0
+        chain_stage = 0
+        factors_emitted = []
+        mitre_tactics = []
+        recommendations = []
+        timeline = []
+        
+        # Stage 1: Check for Office → PowerShell spawn
+        if not self._check_office_spawn(factors, metadata):
+            return OfficeMacroCorrelationResult(
+                is_suspicious=False,
+                score=0.0,
+                chain_stage=0,
+                factors_emitted=[],
+                mitre_tactics=[],
+                recommendations=[],
+                timeline=[]
+            )
+        
+        score += 0.15
+        chain_stage = 1
+        factors_emitted.append('corr:office_macro_spawn_ps')
+        mitre_tactics.extend(['T1566.001', 'T1059.001'])
+        timeline.append({
+            'stage': 1,
+            'description': 'Office process spawned PowerShell',
+            'timestamp': timestamp.isoformat(),
+            'evidence': metadata.get('parent_process', '')
+        })
+        
+        # Stage 2: Check for obfuscation in command line
+        cmdline = metadata.get('command_line', '')
+        obfuscation_score, obfuscation_patterns = self._analyze_obfuscation(cmdline)
+        
+        if obfuscation_score > 0:
+            score += obfuscation_score
+            chain_stage = 2
+            factors_emitted.append(f'corr:ps_obfuscated:{obfuscation_score:.2f}')
+            mitre_tactics.append('T1027')
+            timeline.append({
+                'stage': 2,
+                'description': f'PowerShell obfuscation detected: {", ".join(obfuscation_patterns)}',
+                'timestamp': timestamp.isoformat(),
+                'evidence': cmdline[:200]  # First 200 chars
+            })
+        
+        # Stage 3: Check for network activity to rare domain
+        network_score, domain_info = self._check_network_activity(
+            host, timestamp, self.correlation_window_seconds
+        )
+        
+        if network_score > 0:
+            score += network_score
+            chain_stage = 3
+            factors_emitted.append('corr:ps_rare_domain_contact')
+            mitre_tactics.append('T1105')
+            timeline.append({
+                'stage': 3,
+                'description': f'Network connection to suspicious domain: {domain_info}',
+                'timestamp': timestamp.isoformat(),
+                'evidence': domain_info
+            })
+        
+        # Stage 4: Check for file download
+        download_score, file_info = self._check_file_download(
+            host, timestamp, self.correlation_window_seconds
+        )
+        
+        if download_score > 0:
+            score += download_score
+            chain_stage = 4
+            factors_emitted.append('corr:ps_file_download')
+            timeline.append({
+                'stage': 4,
+                'description': f'File downloaded: {file_info}',
+                'timestamp': timestamp.isoformat(),
+                'evidence': file_info
+            })
+        
+        # Stage 5: Check for execution of downloaded file
+        exec_score, exec_info = self._check_execution(
+            host, timestamp, self.correlation_window_seconds
+        )
+        
+        if exec_score > 0:
+            score += exec_score
+            chain_stage = 5
+            factors_emitted.append('corr:ps_downloaded_exec')
+            mitre_tactics.append('T1204.002')  # User Execution: Malicious File
+            timeline.append({
+                'stage': 5,
+                'description': f'Downloaded file executed: {exec_info}',
+                'timestamp': timestamp.isoformat(),
+                'evidence': exec_info
+            })
+        
+        # Generate recommendations based on chain stage
+        recommendations = self._generate_recommendations(chain_stage, score)
+        
+        return OfficeMacroCorrelationResult(
+            is_suspicious=score >= 0.25,
+            score=min(score, 1.0),
+            chain_stage=chain_stage,
+            factors_emitted=factors_emitted,
+            mitre_tactics=list(set(mitre_tactics)),
+            recommendations=recommendations,
+            timeline=timeline
+        )
+    
+    def _check_office_spawn(self, factors: List[str], metadata: Dict) -> bool:
+        """Check if this is an Office → PowerShell spawn."""
+        # Check factor
+        if 'lane_process_lineage:office_macro_spawn_powershell' in factors:
+            return True
+        
+        # Check metadata directly
+        parent = metadata.get('parent_process', '').lower()
+        current = metadata.get('process_name', '').lower()
+        
+        if any(office in parent for office in self.OFFICE_PROCESSES):
+            if 'powershell' in current or 'pwsh' in current:
+                return True
+        
+        return False
+    
+    def _analyze_obfuscation(self, cmdline: str) -> tuple:
+        """
+        Analyze PowerShell command line for obfuscation.
+        
+        Returns:
+            (score, list of detected patterns)
+        """
+        if not cmdline:
+            return 0.0, []
+        
+        cmdline_lower = cmdline.lower()
+        detected_patterns = []
+        score = 0.0
+        
+        for pattern in self.PS_OBFUSCATION_PATTERNS:
+            if re.search(pattern, cmdline_lower, re.IGNORECASE):
+                detected_patterns.append(pattern.split('|')[0])  # First part of pattern
+                
+                # Different patterns have different severity
+                if 'encodedcommand' in pattern or 'base64' in pattern:
+                    score += 0.20  # High severity
+                elif 'hidden' in pattern or 'bypass' in pattern:
+                    score += 0.15  # Medium severity
+                elif 'download' in pattern or 'webclient' in pattern:
+                    score += 0.18  # Network activity
+                else:
+                    score += 0.08  # Low severity
+        
+        # Check command line length (long = suspicious)
+        if len(cmdline) > 1000:
+            score += 0.10
+            detected_patterns.append('long_command')
+        
+        # Check for multiple encoding layers
+        base64_matches = re.findall(r'[A-Za-z0-9+/=]{50,}', cmdline)
+        if len(base64_matches) > 2:
+            score += 0.15
+            detected_patterns.append('multiple_encoded_blocks')
+        
+        return min(score, 0.45), detected_patterns
+    
+    def _check_network_activity(
+        self,
+        host: str,
+        timestamp: datetime,
+        window_seconds: int
+    ) -> tuple:
+        """
+        Check for network activity to suspicious domains.
+        
+        Queries HopGraph for recent network edges.
+        """
+        if not self.hopgraph:
+            return 0.0, None
+        
+        start_time = timestamp - timedelta(seconds=window_seconds)
+        
+        # Query network edges from this host
+        edges = self.hopgraph.get_edges_by_src(
+            f"host:{host}",
+            start_time=start_time,
+            end_time=timestamp,
+            edge_types=['dns_query', 'http_request', 'tcp_flow']
+        )
+        
+        for edge in edges:
+            domain = edge.get('dst_domain', '')
+            
+            # Check if domain is suspicious
+            for pattern in self.SUSPICIOUS_DOMAIN_PATTERNS:
+                if re.search(pattern, domain, re.IGNORECASE):
+                    return 0.20, domain
+            
+            # Check if domain is rare (first seen)
+            if self._is_rare_domain(domain):
+                return 0.15, domain
+        
+        return 0.0, None
+    
+    def _is_rare_domain(self, domain: str) -> bool:
+        """Check if domain is rare (first seen in environment)."""
+        if not self.hopgraph:
+            return False
+        
+        # Query historical prevalence
+        prevalence = self.hopgraph.get_domain_prevalence(domain)
+        return prevalence.get('first_seen_days_ago', 0) < 7
+    
+    def _check_file_download(
+        self,
+        host: str,
+        timestamp: datetime,
+        window_seconds: int
+    ) -> tuple:
+        """Check for file downloads following PowerShell execution."""
+        if not self.hopgraph:
+            return 0.0, None
+        
+        start_time = timestamp
+        end_time = timestamp + timedelta(seconds=window_seconds)
+        
+        # Query file creation edges
+        edges = self.hopgraph.get_edges_by_src(
+            f"host:{host}",
+            start_time=start_time,
+            end_time=end_time,
+            edge_types=['file_create', 'file_write']
+        )
+        
+        suspicious_extensions = {'.exe', '.dll', '.scr', '.bat', '.ps1', '.vbs'}
+        
+        for edge in edges:
+            file_path = edge.get('dst_path', '')
+            ext = file_path.split('.')[-1].lower() if '.' in file_path else ''
+            
+            if f'.{ext}' in suspicious_extensions:
+                return 0.18, file_path
+        
+        return 0.0, None
+    
+    def _check_execution(
+        self,
+        host: str,
+        timestamp: datetime,
+        window_seconds: int
+    ) -> tuple:
+        """Check for execution of potentially downloaded files."""
+        if not self.hopgraph:
+            return 0.0, None
+        
+        start_time = timestamp
+        end_time = timestamp + timedelta(seconds=window_seconds)
+        
+        # Query process creation edges
+        edges = self.hopgraph.get_edges_by_src(
+            f"host:{host}",
+            start_time=start_time,
+            end_time=end_time,
+            edge_types=['process_create']
+        )
+        
+        for edge in edges:
+            # Check if parent is PowerShell and child is suspicious
+            parent = edge.get('src_process', '').lower()
+            child = edge.get('dst_process', '').lower()
+            child_path = edge.get('dst_path', '')
+            
+            if 'powershell' in parent or 'pwsh' in parent:
+                # Check for execution from temp/download directories
+                temp_dirs = ['temp', 'tmp', 'downloads', 'appdata\\local']
+                if any(d in child_path.lower() for d in temp_dirs):
+                    return 0.22, f"{child} from {child_path}"
+        
+        return 0.0, None
+    
+    def _generate_recommendations(self, chain_stage: int, score: float) -> List[str]:
+        """Generate remediation recommendations based on chain stage."""
+        recommendations = []
+        
+        if chain_stage >= 1:
+            recommendations.append("Isolate host from network for investigation")
+            recommendations.append("Collect memory dump for forensic analysis")
+        
+        if chain_stage >= 2:
+            recommendations.append("Extract and decode PowerShell command for IOC extraction")
+            recommendations.append("Check other hosts for similar command patterns")
+        
+        if chain_stage >= 3:
+            recommendations.append("Block identified domain at DNS/proxy level")
+            recommendations.append("Search network logs for other hosts contacting same domain")
+        
+        if chain_stage >= 4:
+            recommendations.append("Submit downloaded file hash to threat intel")
+            recommendations.append("Check file reputation in VirusTotal/sandbox")
+        
+        if chain_stage >= 5:
+            recommendations.append("CRITICAL: Active compromise - initiate incident response")
+            recommendations.append("Check for persistence mechanisms (scheduled tasks, registry)")
+            recommendations.append("Review user account for unauthorized access")
+        
+        if score >= 0.70:
+            recommendations.insert(0, "HIGH PRIORITY: Escalate to Tier 2/3 analyst immediately")
+        
+        return recommendations
+
+
+# Factory function for rule integration
+def office_macro_spawn_powershell(evidence_env) -> List[Dict]:
+    """
+    Rule entry point for correlation engine.
+    
+    This function is called by the correlation engine for each event
+    that matches the 'office_macro_spawn_powershell' pattern.
+    """
+    correlator = OfficeMacroCorrelator(
+        hopgraph_client=evidence_env.get_hopgraph(),
+        temporal_cache=evidence_env.get_temporal_cache()
+    )
+    
+    result = correlator.correlate(
+        event={
+            'factors': evidence_env.factors,
+            'metadata': evidence_env.metadata,
+            'host': evidence_env.host,
+            'timestamp': evidence_env.timestamp
+        },
+        context={
+            'user': evidence_env.user,
+            'asset_criticality': evidence_env.get_asset_criticality()
+        }
+    )
+    
+    if not result.is_suspicious:
+        return []
+    
+    return [{
+        'factor': 'corr_office_macro_chain',
+        'score': result.score,
+        'chain_stage': result.chain_stage,
+        'contributing_factors': result.factors_emitted,
+        'mitre': result.mitre_tactics,
+        'recommendations': result.recommendations,
+        'timeline': result.timeline,
+        'confidence': min(result.score + 0.10, 0.98)
+    }]
+```
+
+---
+
+## 4. MULTI-DOMAIN CORRELATION CHAINS
+
+### **File:** `src/core/correlation/multi_domain_chains.py` (NEW)
+
+```python
+"""
+Multi-domain attack chain correlation.
+
+Correlates evidence across all 8 security domains:
+1. Email → Identity → Remote Access → Endpoint → Network → Cloud → Data → API
+
+This is JanuSec's key differentiator - no competitor connects all 8 domains.
+"""
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from typing import Dict, List, Optional, Set, Tuple
+from enum import Enum
+import networkx as nx
+
+
+class SecurityDomain(Enum):
+    """The 8 security domains JanuSec correlates."""
+    EMAIL = "email"
+    IDENTITY = "identity"
+    REMOTE_ACCESS = "remote_access"
+    ENDPOINT = "endpoint"
+    NETWORK = "network"
+    CLOUD = "cloud"
+    DATA = "data"
+    API = "api"
+
+
+@dataclass
+class DomainEvent:
+    """An event in a specific security domain."""
+    domain: SecurityDomain
+    event_id: str
+    timestamp: datetime
+    factors: List[str]
+    entities: Dict[str, str]  # user, host, ip, etc.
+    score: float
+    metadata: Dict = field(default_factory=dict)
+
+
+@dataclass
+class AttackChain:
+    """A detected multi-domain attack chain."""
+    chain_id: str
+    domains_involved: List[SecurityDomain]
+    events: List[DomainEvent]
+    total_score: float
+    confidence: float
+    mitre_chain: List[str]  # Ordered MITRE tactics
+    narrative: str  # Human-readable attack story
+    recommendations: List[str]
+
+
+class MultiDomainCorrelator:
+    """
+    Correlates events across security domains to detect attack chains.
+    
+    Key insight: Real attacks span multiple domains. A phishing email
+    leads to credential theft, which enables remote access, which leads
+    to endpoint compromise, etc.
+    
+    By tracking entity linkage (user, host, IP) across domains,
+    we can reconstruct full attack chains that single-domain tools miss.
+    """
+    
+    # Domain transition patterns (from_domain, to_domain) -> (linkage_entity, time_window_minutes)
+    DOMAIN_TRANSITIONS: Dict[Tuple[SecurityDomain, SecurityDomain], Tuple[str, int]] = {
+        # Email → Identity (user clicks phishing → credential theft)
+        (SecurityDomain.EMAIL, SecurityDomain.IDENTITY): ('user', 60),
+        
+        # Identity → Remote Access (compromised creds → VPN/RDP)
+        (SecurityDomain.IDENTITY, SecurityDomain.REMOTE_ACCESS): ('user', 120),
+        
+        # Remote Access → Endpoint (VPN connect → host activity)
+        (SecurityDomain.REMOTE_ACCESS, SecurityDomain.ENDPOINT): ('ip', 30),
+        
+        # Endpoint → Network (malware → C2 beacon)
+        (SecurityDomain.ENDPOINT, SecurityDomain.NETWORK): ('host', 15),
+        
+        # Network → Cloud (exfiltration → cloud storage)
+        (SecurityDomain.NETWORK, SecurityDomain.CLOUD): ('ip', 30),
+        
+        # Cloud → Data (unauthorized access → data query)
+        (SecurityDomain.CLOUD, SecurityDomain.DATA): ('user', 60),
+        
+        # Data → API (data access → API exfiltration)
+        (SecurityDomain.DATA, SecurityDomain.API): ('user', 30),
+        
+        # Direct jumps (attack shortcuts)
+        (SecurityDomain.EMAIL, SecurityDomain.ENDPOINT): ('user', 30),  # Macro execution
+        (SecurityDomain.IDENTITY, SecurityDomain.CLOUD): ('user', 60),  # Direct cloud access
+        (SecurityDomain.ENDPOINT, SecurityDomain.CLOUD): ('host', 45),  # Cloud credential theft
+    }
+    
+    # MITRE tactic mapping per domain
+    DOMAIN_MITRE_MAPPING: Dict[SecurityDomain, List[str]] = {
+        SecurityDomain.EMAIL: ['TA0001'],      # Initial Access
+        SecurityDomain.IDENTITY: ['TA0006'],   # Credential Access
+        SecurityDomain.REMOTE_ACCESS: ['TA0008'],  # Lateral Movement
+        SecurityDomain.ENDPOINT: ['TA0002', 'TA0003'],  # Execution, Persistence
+        SecurityDomain.NETWORK: ['TA0011'],    # Command and Control
+        SecurityDomain.CLOUD: ['TA0009'],      # Collection
+        SecurityDomain.DATA: ['TA0009'],       # Collection
+        SecurityDomain.API: ['TA0010'],        # Exfiltration
+    }
+    
+    def __init__(self, hopgraph_client=None, event_store=None):
+        """
+        Initialize correlator.
+        
+        Args:
+            hopgraph_client: For graph-based entity resolution
+            event_store: For querying historical events
+        """
+        self.hopgraph = hopgraph_client
+        self.event_store = event_store
+        self.active_chains: Dict[str, AttackChain] = {}
+    
+    def process_event(self, event: DomainEvent) -> Optional[AttackChain]:
+        """
+        Process a new event and attempt to link it to attack chains.
+        
+        Args:
+            event: New event from any security domain
+        
+        Returns:
+            AttackChain if event extends/creates a chain, None otherwise
+        """
+        # Step 1: Find existing chains this event could extend
+        matching_chains = self._find_matching_chains(event)
+        
+        if matching_chains:
+            # Extend the best matching chain
+            best_chain = max(matching_chains, key=lambda c: c.total_score)
+            extended_chain = self._extend_chain(best_chain, event)
+            return extended_chain
+        
+        # Step 2: Check if this event could start a new chain
+        if self._is_chain_starter(event):
+            new_chain = self._create_chain(event)
+            self.active_chains[new_chain.chain_id] = new_chain
+            return new_chain
+        
+        # Step 3: Look for historical events to backlink
+        historical_chain = self._backlink_to_history(event)
+        if historical_chain:
+            return historical_chain
+        
+        return None
+    
+    def _find_matching_chains(self, event: DomainEvent) -> List[AttackChain]:
+        """Find active chains that this event could extend."""
+        matching = []
+        
+        for chain_id, chain in self.active_chains.items():
+            # Check if event's domain is a valid transition from chain's last domain
+            last_domain = chain.domains_involved[-1]
+            
+            transition_key = (last_domain, event.domain)
+            if transition_key not in self.DOMAIN_TRANSITIONS:
+                continue
+            
+            linkage_entity, time_window = self.DOMAIN_TRANSITIONS[transition_key]
+            
+            # Check entity linkage
+            last_event = chain.events[-1]
+            if not self._entities_linked(last_event, event, linkage_entity):
+                continue
+            
+            # Check time window
+            time_diff = (event.timestamp - last_event.timestamp).total_seconds() / 60
+            if time_diff > time_window or time_diff < 0:
+                continue
+            
+            matching.append(chain)
+        
+        return matching
+    
+    def _entities_linked(
+        self,
+        event1: DomainEvent,
+        event2: DomainEvent,
+        linkage_type: str
+    ) -> bool:
+        """Check if two events share a linked entity."""
+        entity1 = event1.entities.get(linkage_type)
+        entity2 = event2.entities.get(linkage_type)
+        
+        if not entity1 or not entity2:
+            return False
+        
+        # Direct match
+        if entity1 == entity2:
+            return True
+        
+        # HopGraph-based resolution (e.g., IP→host→user mapping)
+        if self.hopgraph:
+            return self.hopgraph.are_entities_linked(entity1, entity2, linkage_type)
+        
+        return False
+    
+    def _is_chain_starter(self, event: DomainEvent) -> bool:
+        """Check if event could start a new attack chain."""
+        # Chain starters are typically Email or Identity events
+        chain_starter_domains = {SecurityDomain.EMAIL, SecurityDomain.IDENTITY}
+        
+        if event.domain not in chain_starter_domains:
+            return False
+        
+        # Must have suspicious factors
+        suspicious_starters = {
+            'email:phishing_detected',
+            'email:bec_detected',
+            'email:malicious_attachment',
+            'identity:impossible_travel',
+            'identity:password_spray',
+            'identity:credential_stuffing',
+        }
+        
+        return any(f in suspicious_starters for f in event.factors)
+    
+    def _create_chain(self, event: DomainEvent) -> AttackChain:
+        """Create a new attack chain from a starter event."""
+        chain_id = f"chain_{event.event_id}_{datetime.utcnow().timestamp()}"
+        
+        return AttackChain(
+            chain_id=chain_id,
+            domains_involved=[event.domain],
+            events=[event],
+            total_score=event.score,
+            confidence=0.30,  # Low confidence with single event
+            mitre_chain=self.DOMAIN_MITRE_MAPPING.get(event.domain, []),
+            narrative=self._generate_narrative([event]),
+            recommendations=self._generate_recommendations([event.domain])
+        )
+    
+    def _extend_chain(self, chain: AttackChain, event: DomainEvent) -> AttackChain:
+        """Extend an existing chain with a new event."""
+        # Update chain
+        chain.domains_involved.append(event.domain)
+        chain.events.append(event)
+        
+        # Recalculate score with domain diversity bonus
+        base_score = sum(e.score for e in chain.events) / len(chain.events)
+        domain_bonus = len(set(chain.domains_involved)) * 0.08  # 8% per unique domain
+        chain.total_score = min(base_score + domain_bonus, 1.0)
+        
+        # Increase confidence with each domain added
+        chain.confidence = min(0.30 + len(chain.domains_involved) * 0.15, 0.95)
+        
+        # Update MITRE chain
+        new_tactics = self.DOMAIN_MITRE_MAPPING.get(event.domain, [])
+        chain.mitre_chain = list(dict.fromkeys(chain.mitre_chain + new_tactics))
+        
+        # Regenerate narrative
+        chain.narrative = self._generate_narrative(chain.events)
+        chain.recommendations = self._generate_recommendations(chain.domains_involved)
+        
+        return chain
+    
+    def _backlink_to_history(self, event: DomainEvent) -> Optional[AttackChain]:
+        """Search historical events to find chain origin."""
+        if not self.event_store:
+            return None
+        
+        # Look back 24 hours for related events
+        lookback = timedelta(hours=24)
+        start_time = event.timestamp - lookback
+        
+        # Find events with same entities
+        related_events = self.event_store.query_by_entities(
+            entities=event.entities,
+            start_time=start_time,
+            end_time=event.timestamp
+        )
+        
+        if not related_events:
+            return None
+        
+        # Try to build a chain from historical events
+        historical_chain = self._build_chain_from_events(related_events + [event])
+        
+        if historical_chain and len(historical_chain.domains_involved) >= 2:
+            return historical_chain
+        
+        return None
+    
+    def _build_chain_from_events(self, events: List[DomainEvent]) -> Optional[AttackChain]:
+        """Build optimal chain from a set of events using graph analysis."""
+        if len(events) < 2:
+            return None
+        
+        # Build transition graph
+        G = nx.DiGraph()
+        
+        for i, e1 in enumerate(events):
+            for j, e2 in enumerate(events):
+                if i >= j:
+                    continue
+                
+                # Check if valid transition
+                transition_key = (e1.domain, e2.domain)
+                if transition_key in self.DOMAIN_TRANSITIONS:
+                    linkage_entity, time_window = self.DOMAIN_TRANSITIONS[transition_key]
+                    
+                    if self._entities_linked(e1, e2, linkage_entity):
+                        time_diff = (e2.timestamp - e1.timestamp).total_seconds() / 60
+                        if 0 <= time_diff <= time_window:
+                            # Edge weight: inverse of time (faster = higher priority)
+                            weight = 1 / (time_diff + 1)
+                            G.add_edge(i, j, weight=weight)
+        
+        if not G.edges():
+            return None
+        
+        # Find longest path (most domains covered)
+        try:
+            longest_path = nx.dag_longest_path(G)
+        except nx.NetworkXError:
+            # Graph has cycles or other issues
+            longest_path = list(G.nodes())[:5]  # Take first 5 events
+        
+        if len(longest_path) < 2:
+            return None
+        
+        # Build chain from path
+        chain_events = [events[i] for i in longest_path]
+        
+        chain = AttackChain(
+            chain_id=f"historical_chain_{datetime.utcnow().timestamp()}",
+            domains_involved=[e.domain for e in chain_events],
+            events=chain_events,
+            total_score=0.0,
+            confidence=0.0,
+            mitre_chain=[],
+            narrative="",
+            recommendations=[]
+        )
+        
+        # Calculate proper scores
+        base_score = sum(e.score for e in chain_events) / len(chain_events)
+        domain_bonus = len(set(chain.domains_involved)) * 0.08
+        chain.total_score = min(base_score + domain_bonus, 1.0)
+        chain.confidence = min(0.30 + len(chain.domains_involved) * 0.15, 0.95)
+        
+        for e in chain_events:
+            chain.mitre_chain.extend(self.DOMAIN_MITRE_MAPPING.get(e.domain, []))
+        chain.mitre_chain = list(dict.fromkeys(chain.mitre_chain))
+        
+        chain.narrative = self._generate_narrative(chain_events)
+        chain.recommendations = self._generate_recommendations(chain.domains_involved)
+        
+        return chain
+    
+    def _generate_narrative(self, events: List[DomainEvent]) -> str:
+        """Generate human-readable attack narrative."""
+        if not events:
+            return "No events in chain."
+        
+        narrative_parts = []
+        
+        domain_narratives = {
+            SecurityDomain.EMAIL: "Phishing email delivered to {user}",
+            SecurityDomain.IDENTITY: "Credential compromise detected for {user}",
+            SecurityDomain.REMOTE_ACCESS: "Unauthorized remote access from {ip}",
+            SecurityDomain.ENDPOINT: "Malicious activity on {host}",
+            SecurityDomain.NETWORK: "Command and control traffic to {ip}",
+            SecurityDomain.CLOUD: "Suspicious cloud access by {user}",
+            SecurityDomain.DATA: "Sensitive data accessed by {user}",
+            SecurityDomain.API: "API data exfiltration detected",
+        }
+        
+        for i, event in enumerate(events):
+            template = domain_narratives.get(event.domain, "Activity in {domain}")
+            
+            # Fill in entities
+            narrative = template.format(
+                user=event.entities.get('user', 'unknown'),
+                host=event.entities.get('host', 'unknown'),
+                ip=event.entities.get('ip', 'unknown'),
+                domain=event.domain.value
+            )
+            
+            time_str = event.timestamp.strftime("%H:%M:%S")
+            narrative_parts.append(f"{i+1}. [{time_str}] {narrative}")
+        
+        return "\n".join(narrative_parts)
+    
+    def _generate_recommendations(self, domains: List[SecurityDomain]) -> List[str]:
+        """Generate recommendations based on domains involved."""
+        recommendations = []
+        
+        if SecurityDomain.EMAIL in domains:
+            recommendations.append("Block sender domain and quarantine related emails")
+        
+        if SecurityDomain.IDENTITY in domains:
+            recommendations.append("Reset compromised user credentials")
+            recommendations.append("Enable MFA if not already active")
+        
+        if SecurityDomain.REMOTE_ACCESS in domains:
+            recommendations.append("Terminate active VPN/RDP sessions for affected user")
+        
+        if SecurityDomain.ENDPOINT in domains:
+            recommendations.append("Isolate affected hosts from network")
+            recommendations.append("Collect forensic artifacts (memory, disk image)")
+        
+        if SecurityDomain.NETWORK in domains:
+            recommendations.append("Block C2 domains/IPs at firewall")
+            recommendations.append("Hunt for beaconing on other hosts")
+        
+        if SecurityDomain.CLOUD in domains:
+            recommendations.append("Revoke cloud access tokens")
+            recommendations.append("Review CloudTrail/audit logs for data access")
+        
+        if SecurityDomain.DATA in domains:
+            recommendations.append("Assess data exposure and prepare breach notification")
+        
+        if SecurityDomain.API in domains:
+            recommendations.append("Rotate API keys for affected services")
+        
+        # Priority based on chain length
+        if len(domains) >= 4:
+            recommendations.insert(0, "CRITICAL: Multi-domain attack - escalate to incident response team")
+        elif len(domains) >= 2:
+            recommendations.insert(0, "HIGH: Cross-domain activity - prioritize investigation")
+        
+        return recommendations
+
+
+# Integration with correlation engine
+def multi_domain_correlation_rule(evidence_env) -> List[Dict]:
+    """
+    Entry point for multi-domain correlation rule.
+    
+    Called by correlation engine for each processed event.
+    """
+    correlator = MultiDomainCorrelator(
+        hopgraph_client=evidence_env.get_hopgraph(),
+        event_store=evidence_env.get_event_store()
+    )
+    
+    # Create domain event from evidence envelope
+    domain = _infer_domain(evidence_env.factors)
+    
+    event = DomainEvent(
+        domain=domain,
+        event_id=evidence_env.event_id,
+        timestamp=evidence_env.timestamp,
+        factors=evidence_env.factors,
+        entities={
+            'user': evidence_env.user,
+            'host': evidence_env.host,
+            'ip': evidence_env.src_ip or evidence_env.dst_ip,
+        },
+        score=evidence_env.current_score,
+        metadata=evidence_env.metadata
+    )
+    
+    chain = correlator.process_event(event)
+    
+    if not chain:
+        return []
+    
+    return [{
+        'factor': f'corr_multi_domain_chain:{len(chain.domains_involved)}',
+        'score': chain.total_score,
+        'confidence': chain.confidence,
+        'chain_id': chain.chain_id,
+        'domains': [d.value for d in chain.domains_involved],
+        'mitre': chain.mitre_chain,
+        'narrative': chain.narrative,
+        'recommendations': chain.recommendations
+    }]
+
+
+def _infer_domain(factors: List[str]) -> SecurityDomain:
+    """Infer security domain from factors."""
+    domain_prefixes = {
+        'email:': SecurityDomain.EMAIL,
+        'identity:': SecurityDomain.IDENTITY,
+        'iam:': SecurityDomain.IDENTITY,
+        'vpn:': SecurityDomain.REMOTE_ACCESS,
+        'rdp:': SecurityDomain.REMOTE_ACCESS,
+        'endpoint:': SecurityDomain.ENDPOINT,
+        'process:': SecurityDomain.ENDPOINT,
+        'net:': SecurityDomain.NETWORK,
+        'beacon:': SecurityDomain.NETWORK,
+        'cloud:': SecurityDomain.CLOUD,
+        'aws:': SecurityDomain.CLOUD,
+        'data:': SecurityDomain.DATA,
+        'dlp:': SecurityDomain.DATA,
+        'api:': SecurityDomain.API,
+    }
+    
+    for factor in factors:
+        for prefix, domain in domain_prefixes.items():
+            if factor.startswith(prefix):
+                return domain
+    
+    return SecurityDomain.ENDPOINT  # Default
+```
+
+---
+
+## 5. TEMPORAL CORRELATION FRAMEWORK
+
+### **File:** `src/core/correlation/temporal_correlation.py` (NEW)
+
+```python
+"""
+Production-grade temporal correlation framework.
+
+Implements:
+1. Sliding window correlation (configurable windows)
+2. Burst detection (rapid event clustering)
+3. Time-series pattern matching
+4. Circadian rhythm anomaly detection (unusual hour activity)
+"""
+from datetime import datetime, timedelta
+from typing import Dict, List, Optional, Tuple, Callable
+from dataclasses import dataclass, field
+from collections import defaultdict
+import math
+import redis
+from enum import Enum
+
+
+class TimeWindow(Enum):
+    """Standard time windows for correlation."""
+    IMMEDIATE = 30       # 30 seconds - process chain
+    SHORT = 300          # 5 minutes - attack stage
+    MEDIUM = 1800        # 30 minutes - session
+    LONG = 7200          # 2 hours - campaign
+    EXTENDED = 86400     # 24 hours - full attack cycle
+
+
+@dataclass
+class TemporalEvent:
+    """Event with temporal metadata."""
+    event_id: str
+    timestamp: datetime
+    factors: List[str]
+    host: str
+    user: str
+    score: float
+    metadata: Dict = field(default_factory=dict)
+
+
+@dataclass
+class TemporalPattern:
+    """A detected temporal pattern."""
+    pattern_type: str  # 'burst', 'sequence', 'periodic', 'circadian'
+    events: List[TemporalEvent]
+    confidence: float
+    score_boost: float
+    description: str
+
+
+class TemporalCorrelationEngine:
+    """
+    Correlates events across time windows.
+    
+    Key capabilities:
+    1. Burst detection: Multiple similar events in short window
+    2. Sequence detection: Ordered events matching attack chain
+    3. Periodic detection: Beacon-like regular intervals
+    4. Circadian anomaly: Activity outside normal hours
+    """
+    
+    def __init__(
+        self,
+        redis_client: Optional[redis.Redis] = None,
+        default_window: TimeWindow = TimeWindow.SHORT
+    ):
+        """
+        Initialize temporal correlation engine.
+        
+        Args:
+            redis_client: Redis for distributed temporal caching
+            default_window: Default correlation window
+        """
+        self.redis = redis_client
+        self.default_window = default_window
+        
+        # In-memory fallback if Redis unavailable
+        self.memory_cache: Dict[str, List[TemporalEvent]] = defaultdict(list)
+        
+        # Sequence patterns to detect (ordered list of factor patterns)
+        self.sequence_patterns = self._load_sequence_patterns()
+    
+    def add_event(self, event: TemporalEvent) -> List[TemporalPattern]:
+        """
+        Add event to temporal store and detect patterns.
+        
+        Args:
+            event: New event to process
+        
+        Returns:
+            List of detected temporal patterns
+        """
+        # Store event
+        self._store_event(event)
+        
+        # Detect patterns
+        patterns = []
+        
+        # Check for burst
+        burst = self._detect_burst(event)
+        if burst:
+            patterns.append(burst)
+        
+        # Check for sequence
+        sequence = self._detect_sequence(event)
+        if sequence:
+            patterns.append(sequence)
+        
+        # Check for periodic/beacon
+        periodic = self._detect_periodic(event)
+        if periodic:
+            patterns.append(periodic)
+        
+        # Check circadian anomaly
+        circadian = self._detect_circadian_anomaly(event)
+        if circadian:
+            patterns.append(circadian)
+        
+        return patterns
+    
+    def _store_event(self, event: TemporalEvent):
+        """Store event in temporal cache."""
+        cache_key = f"temporal:{event.host}:{event.user}"
+        
+        if self.redis:
+            # Redis storage with TTL
+            event_data = {
+                'event_id': event.event_id,
+                'timestamp': event.timestamp.isoformat(),
+                'factors': event.factors,
+                'score': event.score,
+                'host': event.host,
+                'user': event.user,
+            }
+            
+            self.redis.lpush(cache_key, str(event_data))
+            self.redis.ltrim(cache_key, 0, 999)  # Keep last 1000 events
+            self.redis.expire(cache_key, 86400)  # 24 hour TTL
+        else:
+            # In-memory fallback
+            self.memory_cache[cache_key].append(event)
+            # Trim to last 1000
+            if len(self.memory_cache[cache_key]) > 1000:
+                self.memory_cache[cache_key] = self.memory_cache[cache_key][-1000:]
+    
+    def _get_recent_events(
+        self,
+        host: str,
+        user: str,
+        window: TimeWindow
+    ) -> List[TemporalEvent]:
+        """Get events within time window."""
+        cache_key = f"temporal:{host}:{user}"
+        cutoff = datetime.utcnow() - timedelta(seconds=window.value)
+        
+        if self.redis:
+            raw_events = self.redis.lrange(cache_key, 0, -1)
+            events = []
+            for raw in raw_events:
+                try:
+                    data = eval(raw)  # Parse stored dict
+                    ts = datetime.fromisoformat(data['timestamp'])
+                    if ts >= cutoff:
+                        events.append(TemporalEvent(
+                            event_id=data['event_id'],
+                            timestamp=ts,
+                            factors=data['factors'],
+                            host=data['host'],
+                            user=data['user'],
+                            score=data['score']
+                        ))
+                except:
+                    continue
+            return events
+        else:
+            all_events = self.memory_cache.get(cache_key, [])
+            return [e for e in all_events if e.timestamp >= cutoff]
+    
+    def _detect_burst(self, event: TemporalEvent) -> Optional[TemporalPattern]:
+        """
+        Detect burst of similar events.
+        
+        A burst is 5+ events with overlapping factors within 60 seconds.
+        """
+        recent = self._get_recent_events(event.host, event.user, TimeWindow.IMMEDIATE)
+        
+        if len(recent) < 5:
+            return None
+        
+        # Count factor overlaps
+        event_factors = set(event.factors)
+        similar_events = []
+        
+        for e in recent:
+            e_factors = set(e.factors)
+            overlap = len(event_factors & e_factors)
+            if overlap > 0:
+                similar_events.append(e)
+        
+        if len(similar_events) >= 5:
+            # Calculate burst rate
+            time_span = (event.timestamp - similar_events[0].timestamp).total_seconds()
+            rate = len(similar_events) / max(time_span, 1)
+            
+            # High rate = more suspicious
+            score_boost = min(rate * 0.05, 0.25)
+            
+            return TemporalPattern(
+                pattern_type='burst',
+                events=similar_events,
+                confidence=min(len(similar_events) / 10, 0.90),
+                score_boost=score_boost,
+                description=f"Burst detected: {len(similar_events)} similar events in {time_span:.0f}s"
+            )
+        
+        return None
+    
+    def _detect_sequence(self, event: TemporalEvent) -> Optional[TemporalPattern]:
+        """
+        Detect ordered attack sequence.
+        
+        Matches events against predefined attack chain patterns.
+        """
+        recent = self._get_recent_events(event.host, event.user, TimeWindow.MEDIUM)
+        
+        if len(recent) < 2:
+            return None
+        
+        # Sort by timestamp
+        sorted_events = sorted(recent, key=lambda e: e.timestamp)
+        
+        # Extract factor sequence
+        factor_sequence = []
+        for e in sorted_events:
+            factor_sequence.extend(e.factors)
+        
+        # Match against known patterns
+        for pattern_name, pattern_factors in self.sequence_patterns.items():
+            match_score = self._match_sequence(factor_sequence, pattern_factors)
+            
+            if match_score > 0.6:  # 60% match threshold
+                return TemporalPattern(
+                    pattern_type='sequence',
+                    events=sorted_events,
+                    confidence=match_score,
+                    score_boost=match_score * 0.30,
+                    description=f"Attack sequence detected: {pattern_name} ({match_score:.0%} match)"
+                )
+        
+        return None
+    
+    def _match_sequence(self, observed: List[str], pattern: List[str]) -> float:
+        """
+        Match observed factors against pattern using LCS (longest common subsequence).
+        """
+        if not pattern:
+            return 0.0
+        
+        m, n = len(observed), len(pattern)
+        dp = [[0] * (n + 1) for _ in range(m + 1)]
+        
+        for i in range(1, m + 1):
+            for j in range(1, n + 1):
+                if observed[i-1] == pattern[j-1]:
+                    dp[i][j] = dp[i-1][j-1] + 1
+                else:
+                    dp[i][j] = max(dp[i-1][j], dp[i][j-1])
+        
+        lcs_length = dp[m][n]
+        return lcs_length / len(pattern)
+    
+    def _detect_periodic(self, event: TemporalEvent) -> Optional[TemporalPattern]:
+        """
+        Detect periodic beacon-like activity.
+        
+        Uses coefficient of variation to detect regular intervals.
+        """
+        recent = self._get_recent_events(event.host, event.user, TimeWindow.LONG)
+        
+        if len(recent) < 5:
+            return None
+        
+        # Calculate intervals between events
+        sorted_events = sorted(recent, key=lambda e: e.timestamp)
+        intervals = []
+        
+        for i in range(1, len(sorted_events)):
+            delta = (sorted_events[i].timestamp - sorted_events[i-1].timestamp).total_seconds()
+            if delta > 0:
+                intervals.append(delta)
+        
+        if len(intervals) < 4:
+            return None
+        
+        # Calculate coefficient of variation
+        mean_interval = sum(intervals) / len(intervals)
+        variance = sum((x - mean_interval) ** 2 for x in intervals) / len(intervals)
+        std_dev = math.sqrt(variance)
+        cv = std_dev / mean_interval if mean_interval > 0 else float('inf')
+        
+        # Low CV = regular intervals = beacon
+        if cv < 0.15:  # Very regular
+            return TemporalPattern(
+                pattern_type='periodic',
+                events=sorted_events,
+                confidence=1 - cv,
+                score_boost=0.30,
+                description=f"Beacon-like periodic activity detected: ~{mean_interval:.0f}s intervals (CV={cv:.2f})"
+            )
+        elif cv < 0.30:  # Somewhat regular
+            return TemporalPattern(
+                pattern_type='periodic',
+                events=sorted_events,
+                confidence=0.7 - cv,
+                score_boost=0.15,
+                description=f"Semi-periodic activity detected: ~{mean_interval:.0f}s intervals (CV={cv:.2f})"
+            )
+        
+        return None
+    
+    def _detect_circadian_anomaly(self, event: TemporalEvent) -> Optional[TemporalPattern]:
+        """
+        Detect activity outside normal working hours.
+        
+        Activity between midnight and 5 AM local time is suspicious.
+        """
+        hour = event.timestamp.hour
+        
+        # Late night hours (suspicious)
+        if 0 <= hour <= 5:
+            return TemporalPattern(
+                pattern_type='circadian',
+                events=[event],
+                confidence=0.60,
+                score_boost=0.15,
+                description=f"Activity at unusual hour: {hour:02d}:00 (late night)"
+            )
+        
+        # Weekend (optional enhancement: check day of week)
+        weekday = event.timestamp.weekday()
+        if weekday >= 5:  # Saturday or Sunday
+            return TemporalPattern(
+                pattern_type='circadian',
+                events=[event],
+                confidence=0.50,
+                score_boost=0.10,
+                description=f"Weekend activity detected"
+            )
+        
+        return None
+    
+    def _load_sequence_patterns(self) -> Dict[str, List[str]]:
+        """Load predefined attack sequence patterns."""
+        return {
+            'office_macro_chain': [
+                'lane_process_lineage:office_macro_spawn_powershell',
+                'endpoint:encoded_command',
+                'net:domain_rare',
+                'endpoint:file_download',
+                'endpoint:child_of_powershell',
+            ],
+            'credential_theft_chain': [
+                'endpoint:lsass_access',
+                'endpoint:mimikatz_pattern',
+                'identity:failed_logins_burst',
+                'identity:successful_login_different_host',
+            ],
+            'ransomware_chain': [
+                'endpoint:vss_deletion',
+                'endpoint:bcdedit_modification',
+                'endpoint:mass_file_rename',
+                'endpoint:ransom_note_creation',
+            ],
+            'data_exfiltration_chain': [
+                'data:sensitive_query',
+                'data:bulk_download',
+                'net:large_upload',
+                'cloud:storage_access',
+            ],
+            'lateral_movement_chain': [
+                'identity:remote_login',
+                'endpoint:admin_share_access',
+                'endpoint:psexec_pattern',
+                'endpoint:new_service_install',
+            ],
+        }
+
+
+# Integration function for correlation engine
+def temporal_correlation_rule(evidence_env) -> List[Dict]:
+    """
+    Entry point for temporal correlation rule.
+    """
+    engine = TemporalCorrelationEngine(
+        redis_client=evidence_env.get_redis_client()
+    )
+    
+    event = TemporalEvent(
+        event_id=evidence_env.event_id,
+        timestamp=evidence_env.timestamp,
+        factors=evidence_env.factors,
+        host=evidence_env.host,
+        user=evidence_env.user,
+        score=evidence_env.current_score,
+        metadata=evidence_env.metadata
+    )
+    
+    patterns = engine.add_event(event)
+    
+    results = []
+    for pattern in patterns:
+        results.append({
+            'factor': f'corr_temporal_{pattern.pattern_type}',
+            'score': pattern.score_boost,
+            'confidence': pattern.confidence,
+            'pattern_type': pattern.pattern_type,
+            'events_in_pattern': len(pattern.events),
+            'description': pattern.description
+        })
+    
+    return results
+```
+
+---
+
+## IMPLEMENTATION CHECKLIST - PART 1
+
+### **Priority P0 (Week 1-2)**
+
+| Task | File | Status |
+|------|------|--------|
+| Factor Synthesis Engine | `src/core/correlation/factor_synthesis.py` | 📝 Ready |
+| Bayesian combination tests | `tests/test_factor_synthesis.py` | 📝 Ready |
+| Office Macro Chain rule | `src/core/correlation/rules/week1/office_macro_chain.py` | 📝 Ready |
+| Multi-domain correlator | `src/core/correlation/multi_domain_chains.py` | 📝 Ready |
+| Temporal correlation | `src/core/correlation/temporal_correlation.py` | 📝 Ready |
+
+### **Priority P1 (Week 3-4)**
+
+| Task | File | Status |
+|------|------|--------|
+| Email BEC correlation | See Part 2 | Planned |
+| IAM privilege escalation | See Part 2 | Planned |
+| Cloud security rules | See Part 2 | Planned |
+| Network C2 detection | See Part 2 | Planned |
+
+---
+
+**Continue to Part 2 for:**
+- Closed-loop learning implementation
+- Production metrics and validation
+- ML model enhancements
+- Testing infrastructure
+- Domain-specific correlation rules (Email, IAM, Cloud, Network)
+

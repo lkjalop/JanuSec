@@ -1,0 +1,7 @@
+{
+  "name": "isolate_host",
+  "steps": [
+    {"type": "endpoint.quarantine", "inputs": {"host": "${host}"}},
+    {"type": "notify.slack", "inputs": {"text": "Host ${host} isolated"}}
+  ]
+}

@@ -1,0 +1,62 @@
+{
+  "dashboard": {
+    "id": null,
+    "uid": "decision-metrics",
+    "title": "Decision & Forwarding Metrics",
+    "tags": ["telemetry","decision"],
+    "timezone": "browser",
+    "schemaVersion": 27,
+    "version": 1,
+    "panels": [
+      {
+        "type": "graph",
+        "title": "Forward Requests (rate)",
+        "id": 1,
+        "targets": [
+          { "expr": "rate(forward_requests_total[5m])", "legendFormat": "{{persona}}" }
+        ],
+        "datasource": "Prometheus"
+      },
+      {
+        "type": "graph",
+        "title": "Forward Created Decisions",
+        "id": 2,
+        "targets": [
+          { "expr": "sum by (persona) (forward_created_decisions_total)", "legendFormat": "{{persona}}" }
+        ],
+        "datasource": "Prometheus"
+      },
+      {
+        "type": "graph",
+        "title": "Suggested Actions (rate)",
+        "id": 3,
+        "targets": [
+          { "expr": "rate(forward_suggested_actions_total[5m])", "legendFormat": "{{persona}}" }
+        ],
+        "datasource": "Prometheus"
+      },
+      {
+        "type": "graph",
+        "title": "Decision Lifecycle (created/approved/executed/rolled_back)",
+        "id": 4,
+        "targets": [
+          { "expr": "sum(decision_created_total)", "legendFormat": "created" },
+          { "expr": "sum(decision_approved_total)", "legendFormat": "approved" },
+          { "expr": "sum(decision_executed_total)", "legendFormat": "executed" },
+          { "expr": "sum(decision_rolled_back_total)", "legendFormat": "rolled_back" }
+        ],
+        "datasource": "Prometheus"
+      },
+      {
+        "type": "stat",
+        "title": "Open Pending Decisions",
+        "id": 5,
+        "targets": [
+          { "expr": "decision_pending_gauge", "legendFormat": "pending" }
+        ],
+        "datasource": "Prometheus"
+      }
+    ]
+  },
+  "overwrite": true
+}

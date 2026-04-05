@@ -1,0 +1,1006 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>CSV Analyzer</title>
+  <!-- Production CSV Analyzer page (dark themed) | DO NOT DELETE.
+       Test-only deterministic shim lives at /static/test_shims/csv_analyzer_shim.html.
+       Shared tokens imported from /static/css/theme.css for DRY. -->
+  <link rel="stylesheet" href="/static/css/theme.css" />
+    <script defer src="/static/js/theme.js"></script>
+  <script>
+  // Actions dropdown wiring
+  (function actionsDropdown(){ try{
+    const btn = document.getElementById('btnActions'); const menu = document.getElementById('actionsMenu');
+    if(!btn || !menu) return;
+    btn.addEventListener('click', function(e){ e.stopPropagation(); menu.style.display = (menu.style.display==='flex' ? 'none' : 'flex'); menu.style.flexDirection='column'; });
+    document.addEventListener('click', function(){ try{ menu.style.display='none'; }catch(_){ } });
+    menu.querySelectorAll('button[data-action]').forEach(function(b){ b.addEventListener('click', function(ev){ var act = b.getAttribute('data-action'); try{ if(act==='analyze') document.getElementById('btnAnalyzePipeline').click(); else if(act==='batch') document.getElementById('btnBatchAnalyze').click(); else if(act==='send-identity') document.getElementById('btnSendIdentity').click(); else if(act==='send-cloud') document.getElementById('btnSendCloud').click(); else if(act==='send-network') document.getElementById('btnSendNetwork').click(); else if(act==='correlate') document.getElementById('btnCorrelateHopGraph').click(); else if(act==='export') document.getElementById('btnExportReport').click(); else if(act==='share') { const sb=document.getElementById('btnShareReport'); if(sb) sb.click(); } }catch(_){ }
+      menu.style.display='none'; ev.stopPropagation(); }); });
+  }catch(_){ } })();
+
+    // authHeaders provided by shared /static/js/theme.js
+  </script>
+  <style>
+    html, body { margin:0; }
+    h2 { margin-top:0; }
+    .wrapper { padding:20px 28px; max-width:1500px; margin:0 auto; }
+    .panel { background:var(--bg-secondary); border:1px solid var(--border); border-radius:8px; padding:16px 20px; box-shadow:0 2px 6px rgba(0,0,0,.35); }
+    .controls { display:flex; flex-wrap:wrap; gap:12px; margin-bottom:16px; }
+    .btn { padding:8px 16px; border-radius:6px; font-size:13px; cursor:pointer; border:1px solid var(--border); background:var(--bg-tertiary); color:var(--text-primary); display:inline-flex; gap:6px; align-items:center; }
+    .btn:hover { background:var(--bg-hover); }
+    .btn-primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+    .btn-primary:hover { background:var(--accent-hover); }
+    .verdict-view-toggle { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-left:auto; }
+    .verdict-toggle-group { display:inline-flex; border:1px solid var(--border); border-radius:8px; overflow:hidden; }
+    .verdict-toggle-group .btn { border-radius:0; border:0; border-right:1px solid var(--border); padding:6px 14px; background:transparent; color:var(--text-muted); }
+    .verdict-toggle-group .btn:last-child { border-right:0; }
+    .verdict-toggle-group .btn.active-view { background:var(--accent); color:#fff; border-color:var(--accent); }
+    .inline-info { font-size:12px; color:var(--text-muted); }
+    .table-wrapper { width:100%; overflow:auto; }
+    table { width:100%; border-collapse:collapse; font-size:13px; min-width:900px; }
+    td, th { padding:8px 10px; border:1px solid var(--border); vertical-align:middle; }
+    td .cell-text { display:block; max-width:380px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    td .cell-text.break { white-space:normal; word-break:break-word; }
+    th { background:var(--bg-tertiary); text-align:left; font-weight:500; }
+    th[data-sort]::after { content: ''; display:inline-block; margin-left:8px; width:0; height:0; border-left:6px solid transparent; border-right:6px solid transparent; }
+    th[data-sort="asc"]::after { border-bottom:8px solid var(--text-primary); }
+    th[data-sort="desc"]::after { border-top:8px solid var(--text-primary); }
+    tbody tr:hover { background:var(--bg-hover); }
+    .llm-status-cell { width:70px; text-align:center; font-weight:600; }
+    .llm-indicator { display:inline-block; min-width:1.5em; text-align:center; font-size:14px; }
+    .pill { background:var(--accent); color:#fff; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:600; }
+    #pipelineBadge { margin-left:8px; }
+    #csvDrillModal { position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,.55); display:none; align-items:center; justify-content:center; padding:40px; }
+    #csvDrillModal .inner { background:var(--bg-secondary); border:1px solid var(--border); border-radius:10px; width:420px; max-width:90%; padding:24px 20px; box-shadow:0 4px 16px rgba(0,0,0,.6); animation:fadeIn .25s; }
+    #csvDrillBody div { margin-bottom:6px; font-size:13px; }
+    .csv-modal-close { margin-top:8px; }
+    @keyframes fadeIn { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:translateY(0); } }
+    .status-line { font-size:12px; color:var(--text-muted); margin-bottom:14px; }
+    .inline-info { font-size:11px; color:var(--text-muted); margin-left:6px; }
+    .empty-hint { color:var(--text-muted); font-size:13px; padding:12px 4px; }
+    .small { font-size:11px; color:var(--text-muted); }
+    .auto-pipeline-controls { display:flex; align-items:center; flex-wrap:wrap; gap:10px; margin:8px 0 4px; }
+    .auto-pipeline-note { font-size:11px; color:var(--text-muted); }
+    .pipeline-legend { display:flex; flex-wrap:wrap; gap:8px; align-items:center; font-size:10px; color:var(--text-muted); margin-bottom:12px; }
+    .pipeline-legend strong { font-size:11px; color:var(--text-muted); }
+    .persona-tabs { display:flex; gap:6px; flex-wrap:wrap; }
+    .persona-tab { border:1px solid var(--border); background:var(--bg-tertiary); color:var(--text-primary); padding:4px 10px; border-radius:999px; font-size:11px; cursor:pointer; text-transform:uppercase; letter-spacing:0.4px; }
+    .persona-tab.active { background:var(--accent); border-color:var(--accent); color:#fff; }
+    .stage-row { display:flex; justify-content:space-between; font-size:12px; padding:2px 0; border-bottom:1px solid rgba(255,255,255,0.05); }
+    .stage-row:last-child { border-bottom:none; }
+    .stage-row span { color:var(--text-muted); }
+    .stage-row.stage-done span { color:#2ecc71; }
+    .stage-row.stage-running span { color:#f1c40f; }
+    .stage-row.stage-error span { color:#e74c3c; }
+    .telemetry-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:6px; font-size:12px; }
+    .telemetry-grid div { background:var(--bg-tertiary); border:1px solid var(--border); border-radius:6px; padding:6px 8px; line-height:1.4; }
+    .mapping-pill { display:inline-flex; align-items:center; gap:6px; padding:4px 8px; border-radius:999px; background:rgba(255,255,255,0.05); font-size:11px; margin:2px; border:1px solid rgba(255,255,255,0.08); }
+    .report-meta-line { font-size:12px; color:var(--text-muted); margin-top:6px; }
+    .priority-wrapper { border:1px solid var(--border); border-radius:8px; padding:10px; background:var(--bg-tertiary); margin-bottom:10px; }
+    .priority-card { display:flex; align-items:center; justify-content:space-between; gap:10px; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:8px 10px; margin-bottom:8px; background:rgba(255,255,255,0.02); }
+    .priority-card:last-child { margin-bottom:0; }
+    .priority-rank { font-size:18px; font-weight:600; color:var(--accent); min-width:36px; text-align:center; }
+    .priority-meta { font-size:11px; color:var(--text-muted); margin-top:2px; }
+    .review-summary { font-size:12px; color:var(--text-muted); margin:6px 0; }
+    .deep-row-card { border:1px solid var(--border); border-radius:8px; padding:10px; margin-bottom:10px; background:var(--bg-tertiary); }
+    .deep-row-card.important { box-shadow:0 0 0 1px rgba(255,255,255,0.08), inset 0 0 12px rgba(255,255,255,0.05); }
+    .row-score-pill { display:inline-flex; align-items:center; border:1px solid var(--border); border-radius:999px; font-size:11px; padding:2px 8px; margin-left:6px; }
+    .review-controls { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
+    .review-pill { border:1px solid var(--border); border-radius:999px; padding:4px 10px; font-size:11px; background:transparent; color:var(--text-primary); cursor:pointer; transition:background .2s, border-color .2s; }
+    .review-pill.active { background:var(--accent); border-color:var(--accent); color:#fff; }
+    .review-note { width:100%; min-height:60px; background:rgba(255,255,255,0.03); border:1px solid var(--border); border-radius:6px; padding:6px 8px; margin-top:8px; color:var(--text-primary); font-size:12px; font-family:inherit; resize:vertical; }
+    .review-note:focus { outline:none; border-color:var(--accent); }
+    .domain-cue-line { font-size:12px; color:var(--text-muted); margin:4px 0 8px; }
+    .domain-pill { display:inline-flex; align-items:center; border:1px solid rgba(255,255,255,0.15); border-radius:999px; padding:2px 8px; font-size:10px; margin:2px; text-transform:uppercase; letter-spacing:0.4px; color:var(--text-muted); }
+    .text-muted { color:var(--text-muted); font-size:11px; }
+    .llm-sidebar { position:fixed; top:0; right:-460px; width:420px; max-width:60vw; height:100%; background:var(--bg-secondary); border-left:1px solid var(--border); box-shadow:-8px 0 24px rgba(0,0,0,0.45); padding:20px; transition:right .25s ease; z-index:1500; display:flex; flex-direction:column; }
+    .llm-sidebar.visible { right:0; }
+    .llm-sidebar.detached { right:auto; left:50%; transform:translateX(-50%); border:1px solid var(--border); box-shadow:0 12px 32px rgba(0,0,0,0.55); max-width:70vw; width:640px; }
+    .llm-sidebar-body { flex:1; overflow-y:auto; overflow-x:hidden; max-height:calc(100vh - 160px); border:1px solid var(--border); border-radius:8px; padding:12px; background:var(--bg-tertiary); white-space:normal; font-size:13px; line-height:1.45; }
+    .tier1-section { margin-bottom:12px; padding-bottom:8px; border-bottom:1px solid rgba(255,255,255,0.08); }
+    .tier1-section:last-child { border-bottom:none; }
+    .tier1-section h4 { margin:0 0 4px; font-size:13px; letter-spacing:0.4px; text-transform:uppercase; color:var(--text-muted); }
+    .tier1-table { width:100%; border-collapse:collapse; font-size:12px; margin-bottom:6px; color:var(--text-primary); }
+    .tier1-table td { padding:6px 8px; border-bottom:1px solid rgba(255,255,255,0.06); vertical-align:top; }
+    .tier1-table td:first-child { color:var(--text-muted); width:42%; text-transform:none; letter-spacing:0.2px; }
+    .tier1-table td:last-child { color:#f2f5ff; font-weight:600; }
+    .tier1-table tr:nth-child(odd) td { background:rgba(255,255,255,0.02); }
+    .tier1-table tr:last-child td { border-bottom:none; }
+    .tier1-chip-list { display:flex; flex-wrap:wrap; gap:6px; margin:6px 0 4px; }
+    .tier1-chip { padding:2px 8px; border-radius:999px; background:rgba(255,255,255,0.08); font-size:11px; }
+    .playbook-steps { margin:6px 0 4px 18px; padding-left:6px; line-height:1.5; }
+    .playbook-steps li { margin-bottom:6px; }
+    .tier1-playbook-meta { display:flex; flex-wrap:wrap; gap:6px; margin-top:6px; font-size:11px; color:var(--text-muted); }
+    .tier1-playbook-meta .tier1-meta-field { border:1px solid rgba(255,255,255,0.12); border-radius:6px; padding:3px 8px; background:rgba(255,255,255,0.02); }
+    body.llm-detached { overflow:auto; }
+    .llm-sidebar h3 { margin:0; font-size:18px; }
+    .llm-sidebar .close-btn { border:none; background:transparent; color:var(--text-muted); font-size:20px; cursor:pointer; }
+    .llm-sidebar-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; }
+    .llm-sidebar-footer { display:flex; justify-content:space-between; align-items:center; margin-top:12px; }
+    .llm-sidebar-footer .cost { font-size:12px; color:var(--text-muted); }
+    .badge { display:inline-flex; align-items:center; padding:2px 8px; border-radius:999px; font-size:11px; font-weight:600; letter-spacing:0.5px; }
+    .badge-info { background:#17809b; color:#fff; }
+    .badge-success { background:#1e8e3e; color:#fff; }
+    .badge-secondary { background:#4d4f59; color:#f5f5f7; }
+    .tier1-action-hint { font-size:11px; color:var(--text-muted); border-left:2px solid rgba(255,255,255,0.15); padding-left:10px; margin-bottom:10px; line-height:1.5; }
+    .tier1-action-hint ul { margin:6px 0 0 16px; padding:0; }
+    .tier1-action-hint li { margin-bottom:4px; }
+    .tier1-action-status { font-size:12px; color:var(--text-muted); margin-bottom:8px; }
+    .tier1-confidence { border:1px solid rgba(255,255,255,0.12); border-radius:8px; padding:12px; margin-top:12px; background:rgba(255,255,255,0.02); font-size:12px; line-height:1.5; }
+    .tier1-confidence-label { font-size:11px; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-muted); margin-bottom:4px; }
+    .tier1-confidence-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:8px; margin-bottom:8px; }
+    .tier1-confidence-metric { border:1px solid rgba(255,255,255,0.08); border-radius:6px; padding:8px; background:rgba(255,255,255,0.02); }
+    .tier1-confidence-metric .label { font-size:11px; letter-spacing:0.4px; text-transform:uppercase; color:var(--text-muted); }
+    .tier1-confidence-metric .value { font-size:14px; font-weight:600; margin-top:2px; }
+    .tier1-pipeline-list { margin:4px 0 0 18px; padding:0; }
+    .tier1-pipeline-list li { margin-bottom:4px; }
+    .tier1-uncertainty { font-size:11px; color:#f6c177; margin-top:6px; }
+    .tier1-factor-pill { display:inline-flex; border:1px solid rgba(255,255,255,0.15); border-radius:999px; padding:2px 8px; margin:2px 4px 0 0; font-size:11px; }
+    /* Verdict visual helpers */
+    tr.verdict-pass { box-shadow: inset 4px 0 0 0 #27ae60; }
+    tr.verdict-medium { box-shadow: inset 4px 0 0 0 #f39c12; }
+    tr.verdict-fail { box-shadow: inset 4px 0 0 0 #e74c3c; }
+  </style>
+</head>
+<body>
+  <div class="wrapper">
+    <h2 id="csv_title">CSV Analyzer</h2>
+    <div class="status-line">Upload CSV or XLSX to parse hundreds of rows client-side. Use filters to view Suspicious vs Passed. Deep Analyze opens richer frameworks view.</div>
+    <div class="panel" id="raSignalsPanel" style="display:none; margin-bottom:16px;">
+      <h3 style="margin:0 0 6px; font-size:15px;">Remote Access Signals</h3>
+      <div id="raSignalsSummary" style="font-family:Consolas,monospace; font-size:11px; background:var(--bg-tertiary); padding:8px; border:1px solid var(--border); border-radius:6px; white-space:pre; overflow:auto; max-height:220px;">No remote access signals detected.</div>
+    </div>
+    <div class="controls">
+      <input id="fileInput" data-test="csv-file-input" type="file" style="display:none;" />
+      <button id="btnSelectFiles" class="btn" title="Select CSV/XLSX files">Select Files</button>
+      <button id="btnLoad" data-test="csv-btn-load" class="btn btn-primary">Load</button>
+      <button id="btnEditMapping" class="btn" title="Adjust canonical field mapping" disabled>Edit Mapping</button>
+      <button id="btnExplain" data-test="csv-btn-explain" class="btn">Fetch Explain</button>
+      <!-- Deep Analyze button with test selector -->
+      <button id="btnAnalyzePipeline" data-test="csv-btn-deep-analyze" class="btn" title="Run Deep Analyze on selected or all rows">Deep Analyze</button>
+      <button id="btnSignalDetails" class="btn" title="Show/hide signal explanations">Signal Details</button>
+      <label style="display:inline-flex; align-items:center; gap:8px;">
+        <span class="small">Graph</span>
+        <select id="graphSelector" class="btn" style="padding:6px 10px;">
+          <option value="identity">Identity</option>
+          <option value="cloud">Cloud</option>
+          <option value="network">Network</option>
+        </select>
+      </label>
+      <div class="actions-dropdown" style="position:relative; display:inline-block;">
+        <button id="btnActions" class="btn">⚡ Actions ▾</button>
+        <div id="actionsMenu" class="actions-menu" style="display:none; position:absolute; right:0; margin-top:6px; background:var(--bg-secondary); border:1px solid var(--border); border-radius:8px; padding:8px; min-width:240px; z-index:1000;">
+          <style>
+            .actions-menu .menu-item { display:flex; align-items:center; gap:10px; width:100%; text-align:left; padding:6px 8px; border-radius:6px; background:transparent; border:none; cursor:pointer; }
+            .actions-menu .menu-item:hover { background:rgba(255,255,255,0.02); }
+            .actions-menu svg { width:16px; height:16px; flex:0 0 16px; fill:currentColor; opacity:0.9; }
+            .actions-menu .menu-label { flex:1; font-size:13px; }
+          </style>
+          <button class="menu-item" data-action="analyze"><svg data-name="icon-deep-analyze" viewBox="0 0 24 24" aria-hidden="true"><title>Deep Analyze</title><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm1 14h-2v-2h2v2zm0-4h-2V6h-2v6z"/></svg><span class="menu-label">Deep Analyze</span></button>
+          <button class="menu-item" data-action="batch"><svg data-name="icon-batch-analyze" viewBox="0 0 24 24" aria-hidden="true"><title>Batch Analyze</title><path d="M3 13h2v-2H3v2zm4 0h14v-2H7v2zM3 17h2v-2H3v2zm0-8h2V7H3v2z"/></svg><span class="menu-label">Batch Analyze</span></button>
+          <button class="menu-item" data-action="send-identity"><svg data-name="icon-send-identity" viewBox="0 0 24 24" aria-hidden="true"><title>Send to Identity</title><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg><span class="menu-label">Send to Identity</span></button>
+          <button class="menu-item" data-action="send-cloud"><svg data-name="icon-send-cloud" viewBox="0 0 24 24" aria-hidden="true"><title>Send to Cloud</title><path d="M19.35 10.04A7 7 0 0 0 5 9c0-2.76 2.24-5 5-5 1.64 0 3.09.8 4 2.03A5.994 5.994 0 0 1 19.35 10.04zM18 18H6v-1c0-2.21 3.58-4 6-4s6 1.79 6 4v1z"/></svg><span class="menu-label">Send to Cloud</span></button>
+          <button class="menu-item" data-action="send-network"><svg data-name="icon-send-network" viewBox="0 0 24 24" aria-hidden="true"><title>Send to Network</title><path d="M12 4l4 4h-3v6h-2V8H8l4-4zm6 10v6H6v-6H4v6a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-6h-2z"/></svg><span class="menu-label">Send to Network</span></button>
+          <button class="menu-item" data-action="correlate"><svg data-name="icon-correlate" viewBox="0 0 24 24" aria-hidden="true"><title>Correlate (HopGraph)</title><path d="M12 2L3 7v6c0 5 3.58 9.74 9 11 5.42-1.26 9-6 9-11V7l-9-5zM11 12h2v5h-2zM11 7h2v3h-2z"/></svg><span class="menu-label">Correlate (HopGraph)</span></button>
+          <div style="height:8px"></div>
+          <button class="menu-item" data-action="export"><svg data-name="icon-export" viewBox="0 0 24 24" aria-hidden="true"><title>Export Report</title><path d="M5 20h14v-2H5v2zm7-18L5.33 9h3.67v6h6V9h3.67L12 2z"/></svg><span class="menu-label">Export Report</span></button>
+          <button class="menu-item" data-action="share"><svg data-name="icon-share" viewBox="0 0 24 24" aria-hidden="true"><title>Share Report</title><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.03-.47-.09-.7l7.02-4.11c.54.5 1.25.82 2.07.82 1.66 0 3-1.34 3-3S19.66 2 18 2s-3 1.34-3 3c0 .24.04.47.09.7L8.07 9.81C7.54 9.3 6.83 9 6 9 4.34 9 3 10.34 3 12s1.34 3 3 3c.83 0 1.54-.3 2.07-.81l7.12 4.17c-.05.21-.09.43-.09.64 0 1.66 1.34 3 3 3s3-1.34 3-3-1.34-3-3-3z"/></svg><span class="menu-label">Share Report</span></button>
+        </div>
+      </div>
+      <label style="display:inline-flex; align-items:center; gap:8px;">
+        <span class="small">LLM Summaries</span>
+        <select id="llmLimit" class="btn" style="padding:6px 10px;">
+          <option value="25" selected>Top 25</option>
+          <option value="50">Top 50</option>
+          <option value="75">Top 75</option>
+          <option value="0">All</option>
+        </select>
+      </label>
+      <span id="llmCostEstimate" class="small" style="min-width:90px;">Est. cost: $0.000</span>
+      <span id="llmAggregateCost" class="small" style="min-width:110px;">Total cost: $0.000</span>
+      <button id="btnGenerateMore" class="btn" style="display:none;" title="Generate LLM summaries for next batch">Generate More</button>
+      <label style="display:inline-flex; align-items:center; gap:8px;">
+        <input id="reportCompany" placeholder="Company (optional)" style="padding:6px 10px; border-radius:6px; border:1px solid var(--border); background:var(--bg-tertiary); color:var(--text-primary);" />
+      </label>
+      <label style="display:inline-flex; align-items:center; gap:8px;">
+        <input id="reportRecipients" placeholder="Recipients (comma separated)" style="padding:6px 10px; border-radius:6px; border:1px solid var(--border); background:var(--bg-tertiary); color:var(--text-primary); width:260px;" />
+      </label>
+      <label style="display:inline-flex; align-items:center; gap:8px;">
+        <span class="small">Persona</span>
+        <select id="reportPersona" class="btn" style="padding:6px 10px;">
+          <option value="ciso">CISO</option>
+          <option value="soc">SOC</option>
+          <option value="compliance">Compliance</option>
+        </select>
+      </label>
+      <label style="display:inline-flex; align-items:center; gap:6px; font-size:13px;">
+        <input type="checkbox" id="reportIncludeModel" />
+        <span style="font-size:12px">Include Model Summary</span>
+      </label>
+      <button id="btnExportReport" class="btn" title="Generate comprehensive report for selected rows">Export Report</button>
+      <div id="pipelineBadge" style="display:inline-block"><span class="pill" style="display:none">pipeline</span></div>
+      <button class="btn" id="btnThemeToggle" type="button">Toggle Theme</button>
+    </div>
+    <div id="mappingSummaryBanner" class="mapping-pill" style="display:none; margin:6px 0 12px;"></div>
+    <div class="panel" id="reportDocumentPanel" style="display:none; margin-bottom:16px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+        <h3 style="margin:0;">Latest Assessment Report</h3>
+        <div id="reportPersonaTabs" class="persona-tabs">
+          <button type="button" class="persona-tab" data-persona="ciso">CISO</button>
+          <button type="button" class="persona-tab" data-persona="soc">SOC</button>
+          <button type="button" class="persona-tab" data-persona="compliance">Compliance</button>
+        </div>
+      </div>
+      <div id="reportDocumentMeta" class="report-meta-line"></div>
+      <div id="reportReviewCoverage" class="report-meta-line">Analyst review coverage will appear after Deep Analyze.</div>
+      <div id="reportDocumentBody" style="margin-top:12px; font-size:13px; line-height:1.5;">Export a report to view persona-ready guidance.</div>
+    </div>
+    <div class="panel" id="signalHelpPanel" style="display:none; margin-bottom:16px;">
+      <h3 style="margin:0 0 6px; font-size:15px;">Signal Explanations</h3>
+      <div id="signalHelpBody" style="font-size:13px; color:var(--text-muted); line-height:1.4;">
+        <!-- Populated by client JS -->
+      </div>
+    </div>
+    <div class="controls" style="margin-top:-6px">
+      <span class="small">Filter:</span>
+      <button id="btnFilterAll" class="btn btn-primary">All</button>
+      <button id="btnFilterSuspicious" class="btn">Suspicious</button>
+      <button id="btnFilterPassed" class="btn">Passed</button>
+      <label style="margin-left:12px; display:inline-flex; align-items:center; gap:8px; font-size:13px;">
+        <input type="checkbox" id="explainToggle" />
+        <span style="font-size:12px">Show ranking explanation</span>
+      </label>
+      <input id="csvSearch" placeholder="Quick search (process/path/host)" style="margin-left:12px; padding:6px 10px; border-radius:6px; border:1px solid var(--border); background:var(--bg-tertiary); color:var(--text-primary);" />
+      <div class="verdict-view-toggle">
+        <span class="small">Verdict View:</span>
+        <div class="verdict-toggle-group" role="group" aria-label="Toggle verdict view">
+          <button id="btnVerdictViewInitial" class="btn" type="button">Initial</button>
+          <button id="btnVerdictViewPipeline" class="btn" type="button">Post-pipeline</button>
+        </div>
+        <span id="verdictViewInfo" class="inline-info">Initial heuristics</span>
+      </div>
+      <div style="display:flex; align-items:center; gap:8px; margin-left:12px;">
+        <button id="btnPipelineSort" class="btn" title="Sort rows by pipeline triage score">Pipeline Sort</button>
+        <div class="pipeline-legend" id="pipelineLegend">
+          <strong>Legend:</strong>
+          <span style="background:#27ae60;color:#fff;padding:4px 8px;border-radius:6px;">Low</span>
+          <span style="background:#f39c12;color:#fff;padding:4px 8px;border-radius:6px;">Medium</span>
+          <span style="background:#e74c3c;color:#fff;padding:4px 8px;border-radius:6px;">High</span>
+        </div>
+      </div>
+      <span id="rowsSummary" class="inline-info"></span>
+    </div>
+    <div id="csv_results_ready" data-test="csv-results-ready" style="display:none"></div>
+    <div class="panel">
+      <div id="csv_status_live" role="status" aria-live="polite" style="font-size:12px; color:var(--text-muted); margin-bottom:8px;"></div>
+      <div id="bulkBar" class="controls" style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
+        <span class="small">Selected: <span id="selCount">0</span></span>
+        <button class="btn" id="bulkGood" disabled>Mark Good</button>
+        <button class="btn" id="bulkReview" disabled>Mark Review</button>
+        <button class="btn" id="bulkThreat" disabled>Mark Threat</button>
+        <button class="btn" id="bulkSelectAll">Select All (visible)</button>
+        <button class="btn" id="bulkClear">Clear</button>
+      </div>
+      <div class="table-wrapper">
+        <table id="results" role="table" aria-label="CSV results"><thead><tr>
+          <th role="columnheader" aria-label="LLM status">LLM</th>
+          <th data-col="process_name" role="columnheader" aria-sort="none">Process</th>
+          <th data-col="file_path" role="columnheader" aria-sort="none">Path</th>
+          <th data-col="sha256" role="columnheader" aria-sort="none">SHA256</th>
+          <th data-col="host" role="columnheader" aria-sort="none">Host</th>
+          <th data-col="verdict" role="columnheader" aria-sort="none">Verdict</th>
+          <th role="columnheader">Actions</th>
+          <th data-col="domain" role="columnheader" aria-sort="none">Domain</th>
+          <th data-col="dread" role="columnheader" aria-sort="none">DREAD</th>
+          <th data-col="signals" role="columnheader" aria-sort="none">Signals</th>
+          <th role="columnheader">Details</th>
+        </tr></thead><tbody id="tbody"><tr class="initial"><td colspan="10" class="empty-hint">No rows loaded yet.</td></tr></tbody></table>
+      </div>
+      <div class="small">Tip: Client parsing supports large files; showing up to 1000 rows. Deep Analyze merges signals and opens the deep frameworks page.</div>
+    </div>
+  </div>
+  <!-- Deep Analyze progress bar (global small indicator) -->
+  <div id="deepBackfillRibbonPlaceholder" style="position:fixed; right:18px; bottom:86px; display:block; z-index:1200;">
+    <div id="deepBackfillRibbon" style="background:linear-gradient(90deg,#06394b,#06485a); color:#eaffff; border:1px solid rgba(255,255,255,0.04); padding:8px; border-radius:8px; box-shadow:0 8px 24px rgba(0,0,0,0.45); display:flex; gap:10px; align-items:center;">
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <div><strong id="deepBackfillLabel">Auto Backfill</strong><div class="small" id="deepBackfillState" style="font-weight:700">idle</div></div>
+        <div style="display:flex;gap:8px;align-items:center"> 
+          <label class="small">Batch:<input id="deepBackfillBatch" type="number" min="1" value="10" style="width:72px;margin-left:6px;padding:4px;border-radius:6px;border:1px solid var(--border);background:var(--bg-tertiary);color:var(--text-primary)"/></label>
+          <label class="small">Interval(s):<input id="deepBackfillWindow" type="number" min="1" value="30" style="width:72px;margin-left:6px;padding:4px;border-radius:6px;border:1px solid var(--border);background:var(--bg-tertiary);color:var(--text-primary)"/></label>
+          <label class="small">Target%:<input id="deepBackfillTarget" type="number" min="0" max="100" value="100" style="width:72px;margin-left:6px;padding:4px;border-radius:6px;border:1px solid var(--border);background:var(--bg-tertiary);color:var(--text-primary)"/></label>
+        </div>
+      </div>
+      <div style="margin-left:6px"><button id="deepBackfillToggleGlobal" class="btn" style="padding:6px 10px;">Start</button></div>
+    </div>
+  </div>
+  <div id="deepAnalyzeProgress" style="position:fixed; right:18px; bottom:18px; display:none; width:320px; z-index:1200;">
+    <div style="background:var(--bg-secondary); border:1px solid var(--border); padding:8px; border-radius:8px; box-shadow:0 8px 24px rgba(0,0,0,0.45);">
+      <div style="font-size:13px; margin-bottom:6px;">Deep Analyze Progress <span id="dap_percent" style="float:right;color:var(--text-muted)">0%</span></div>
+      <div style="background:var(--bg-tertiary); height:12px; border-radius:6px; overflow:hidden;"><div id="dap_bar" style="height:100%; width:0%; background:linear-gradient(90deg,#4A63E7,#6C8CFF);"></div></div>
+    </div>
+  </div>
+  <!-- Confirm Cancel Modal -->
+  <div id="cancelConfirmModal" style="display:none; position:fixed; left:0; top:0; right:0; bottom:0; background:rgba(0,0,0,0.45); align-items:center; justify-content:center; z-index:1300;">
+    <div style="background:var(--bg-secondary); border:1px solid var(--border); border-radius:8px; width:360px; max-width:96%; padding:16px; box-shadow:0 8px 32px rgba(0,0,0,.6);">
+      <div style="font-weight:700; margin-bottom:8px;">Confirm Cancel Backfill</div>
+      <div id="cancelConfirmBody" class="small" style="margin-bottom:12px;">Are you sure you want to stop backfill for this assessment?</div>
+      <div style="display:flex; gap:8px; justify-content:flex-end;"><button id="cancelConfirmNo" class="btn">No</button><button id="cancelConfirmYes" class="btn btn-danger">Yes, stop</button></div>
+    </div>
+  </div>
+  <!-- Correlation Results Panel (hidden until built) -->
+  <div class="panel" id="correlationPanel" style="display:none; margin:18px 28px;">
+    <h3 style="margin:0 0 8px; font-size:15px;">HopGraph Correlation (Single Source Upload)</h3>
+    <div class="small" style="margin-bottom:6px;">Selected rows were packaged & uploaded; session built with canonical mapping guess. Use Multi-Source Correlator for heterogeneous sets.</div>
+    <div id="corrSummary" class="pre" style="font-size:11px; max-height:220px; overflow:auto;">No session yet.</div>
+    <h4 style="margin:12px 0 6px; font-size:13px;">Mini Attack Chain</h4>
+    <div id="corrMiniChain" class="pre" style="font-size:11px; max-height:140px; overflow:auto;">—</div>
+    <h4 style="margin:12px 0 6px; font-size:13px;">Top Path Scores</h4>
+    <div id="corrPathScores" class="pre" style="font-size:11px; max-height:160px; overflow:auto;">—</div>
+    <h4 style="margin:12px 0 6px; font-size:13px;">Risk Rankings (Shared)</h4>
+    <div id="corrRiskRank" class="pre" style="font-size:11px; max-height:160px; overflow:auto;">—</div>
+    <h4 style="margin:12px 0 6px; font-size:13px;">Remediation Hints</h4>
+    <div id="corrRemediation" class="pre" style="font-size:11px; max-height:140px; overflow:auto;">—</div>
+    <h4 style="margin:12px 0 6px; font-size:13px;">On-Demand Remediation</h4>
+    <div id="corrRemLookup" class="pre" style="font-size:11px; max-height:140px; overflow:auto;">Click a path score below to fetch targeted remediation actions.</div>
+  </div>
+  <!-- Modal (unified with LIVE console modal-overlay pattern) -->
+  <div id="csvDrillModal" class="modal-overlay" style="display:none" onclick="if(event.target===this) document.getElementById('csvDrillModal').style.display='none'">
+    <div class="modal" style="background:var(--bg-secondary); border:1px solid var(--border); border-radius:10px; width:640px; max-width:96%; padding:18px 20px; box-shadow:0 4px 16px rgba(0,0,0,.6);">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;"><strong id="csvDrillTitle">Details</strong><button class="btn csv-modal-close">Close</button></div>
+      <div id="csvDrillBody" style="max-height:560px; overflow:auto; font-size:13px; line-height:1.3"></div>
+      <a id="csvExplainAnchor" style="display:block; margin-top:8px; font-size:12px; color:var(--accent);"></a>
+    </div>
+  </div>
+
+  <!-- Deep Analyze Options Modal -->
+  <div id="deepAnalyzeModal" style="display:none; position:fixed; left:0; top:0; right:0; bottom:0; background:rgba(0,0,0,.55); align-items:center; justify-content:center; padding:24px;">
+    <div style="background:var(--bg-secondary); border:1px solid var(--border); border-radius:10px; width:720px; max-width:96%; padding:18px 20px; box-shadow:0 6px 24px rgba(0,0,0,.7);">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;"><strong>Deep Analyze Options</strong><button class="btn csv-modal-close" id="daClose">Close</button></div>
+      <div style="display:flex; gap:12px; margin-bottom:12px; align-items:center;">
+        <label style="display:inline-flex; align-items:center; gap:8px;"><input type="radio" name="da_mode" value="basic" checked /> Basic</label>
+        <label style="display:inline-flex; align-items:center; gap:8px;"><input type="radio" name="da_mode" value="advanced" /> Advanced <span title="Advanced mode enables the full signal set including optional eBPF syscall traces and PCAP-derived artifacts when available. Requires additional sensors (e.g., eBPF agents, Falco/Tetragon, or network capture) and may increase collection, storage, and privacy implications; use in controlled environments or with explicit approval." style="cursor:help;color:var(--text-muted);">ℹ️</span></label>
+        <label style="display:inline-flex; align-items:center; gap:8px; margin-left:12px;"><input type="checkbox" id="da_auto_llm" checked /> Auto-LLM <span title="Generates per-row AI summaries using your configured LLM provider. This consumes tokens and may incur cost; disable to skip LLM analysis for faster, cheaper runs. Requires an API key configured in Settings." style="cursor:help;color:var(--text-muted);">ℹ️</span></label>
+        <span class="small inline-info">Basic: 20 signals; Advanced: full set (+eBPF/PCAP where present)</span>
+      </div>
+      <div style="display:flex; align-items:center; gap:12px; margin-bottom:12px; flex-wrap:wrap;">
+        <label style="font-size:13px; display:inline-flex; align-items:center; gap:6px;">LLM Summaries:
+          <!-- Renamed IDs to avoid collisions with main controls -->
+          <select id="da_llmLimit" class="btn" style="padding:6px 10px;">
+            <option value="25" selected>Top 25 (DREAD sorted)</option>
+            <option value="50">Top 50</option>
+            <option value="75">Top 75</option>
+            <option value="0">All suspicious rows</option>
+          </select>
+        </label>
+        <span id="da_llmCostEstimate" class="small inline-info">Est. cost: $0.000</span>
+      </div>
+      <div style="margin-bottom:12px;"><strong>Detected Columns & Mapping Preview</strong><div id="daMappingPreview" style="margin-top:8px; max-height:260px; overflow:auto; border:1px solid var(--border); padding:8px; background:var(--bg-tertiary);"></div></div>
+      <div style="display:flex; justify-content:flex-end; gap:8px;"><button class="btn" id="daCancel">Cancel</button><button class="btn btn-primary" id="daConfirm">Run Deep Analyze</button></div>
+    </div>
+  </div>
+
+  <script defer src="/static/js/parse_tabular.js"></script>
+  <script defer src="/static/js/notifications.js"></script>
+  <script defer src="/static/js/dread_utils.js"></script>
+  <script defer src="/static/js/csv_ingest_shared.js"></script>
+  <script defer src="/static/js/csv_analyzer.js"></script>
+  <script defer src="/static/js/threat_ranking.js"></script>
+  <script>
+  // File chooser wiring: expose #btnSelectFiles to trigger native chooser
+  (function fileChooser(){ try{
+    var btn = document.getElementById('btnSelectFiles'); var inp = document.getElementById('fileInput');
+    if(btn && inp){ btn.addEventListener('click', function(){ try{ inp.click(); }catch(_){ } }); }
+  }catch(_){ } })();
+  (function reportButton(){ try{
+    var btn = document.getElementById('btnExportReport'); if(!btn) return;
+    // Helper: inject enhancements into a generated report window
+    function injectEnhancements(doc, rows, corrSummary){
+      try{
+        const container = doc.createElement('div'); container.style.padding='12px'; container.style.borderTop='2px solid #2b3443'; container.style.marginTop='8px';
+        // MITRE heatmap (best-effort from rows factors)
+        const mitreMap = {};
+        (rows||[]).forEach(r=>{ try{ const ms = (r._mitre||[]).concat((r.mitre||[])); (ms||[]).forEach(m=>{ const id = m && (m.id||m.name) ? (m.id||m.name) : null; if(id) mitreMap[id]=(mitreMap[id]||0)+1; }); }catch(_){ } });
+        const mitreKeys = Object.keys(mitreMap).sort((a,b)=>mitreMap[b]-mitreMap[a]);
+        const mitreSection = doc.createElement('div'); mitreSection.innerHTML = '<h3>MITRE Technique Heatmap</h3>';
+        if(mitreKeys.length){ const table = doc.createElement('table'); table.style.border='1px solid #333'; table.style.width='100%'; const thead = doc.createElement('thead'); thead.innerHTML='<tr><th>Technique</th><th>Count</th></tr>'; table.appendChild(thead); const tbody = doc.createElement('tbody'); mitreKeys.forEach(k=>{ const tr=doc.createElement('tr'); tr.innerHTML='<td style="padding:6px">'+k+'</td><td style="padding:6px">'+mitreMap[k]+'</td>'; tbody.appendChild(tr); }); table.appendChild(tbody); mitreSection.appendChild(table); } else { mitreSection.appendChild(doc.createElement('div')).textContent='No MITRE mappings detected.'; }
+        container.appendChild(mitreSection);
+
+        // DREAD per-row summary
+        const dreadSection = doc.createElement('div'); dreadSection.style.marginTop='12px'; dreadSection.innerHTML='<h3>Per-row DREAD Summary</h3>';
+        const list = doc.createElement('div'); (rows||[]).slice(0,200).forEach((r,idx)=>{
+          try{
+            const score = (r._dread && typeof r._dread.score!=='undefined')? r._dread.score : (r.dread? r.dread.score : 0);
+            const rowWrap = doc.createElement('div'); rowWrap.style.display='flex'; rowWrap.style.alignItems='center'; rowWrap.style.justifyContent='space-between'; rowWrap.style.gap='8px'; rowWrap.style.padding='6px 0';
+            const left = doc.createElement('div'); left.style.flex='1'; left.innerHTML = '<strong>'+(r.process_name||r.file_path||('row '+idx))+'</strong> — '+(r.host||'');
+            const barWrap = doc.createElement('div'); barWrap.style.width='240px'; barWrap.style.background='#222'; barWrap.style.borderRadius='6px'; barWrap.style.overflow='hidden'; barWrap.style.margin='0 8px';
+            const bar = doc.createElement('div'); bar.style.height='14px'; bar.style.width = Math.min(100, Math.round(score/10*100))+'%'; bar.style.background = score>6? '#e74c3c' : (score>3? '#f39c12' : '#27ae60'); barWrap.appendChild(bar);
+            const right = doc.createElement('div'); right.style.minWidth='220px'; right.style.textAlign='right'; right.innerHTML = 'DREAD: <strong>'+score+'</strong> <button class="copy-row-btn" data-idx="'+idx+'" style="margin-left:8px;padding:4px 8px;border-radius:6px;">Copy</button>';
+            rowWrap.appendChild(left); rowWrap.appendChild(barWrap); rowWrap.appendChild(right);
+            list.appendChild(rowWrap);
+          }catch(_){ }
+        });
+        dreadSection.appendChild(list);
+        container.appendChild(dreadSection);
+
+        // Playbook / triage suggestions (derive from correlation summary)
+        const playbook = doc.createElement('div'); playbook.style.marginTop='12px'; playbook.innerHTML = '<h3>Playbook Suggestions</h3>';
+        const pbList = doc.createElement('div');
+        try{
+          const ps = (corrSummary && corrSummary.path_scores) ? corrSummary.path_scores : null;
+          if(ps){
+            const keys = Object.keys(ps).sort((a,b)=> (ps[b].score||0)-(ps[a].score||0)).slice(0,3);
+            keys.forEach(k=>{ const p = ps[k]; const entry = doc.createElement('div'); entry.style.marginBottom='8px'; entry.innerHTML='<strong>'+k+'</strong><div style="font-size:12px;color:#cbd5e1">Score:'+((p.score||0).toFixed(3))+' • Anomalies:'+((p.anomalies||[]).length)+'</div><div style="margin-top:6px;font-size:13px">Suggested: Verify signer → check parent process → network telemetry → contain if confirmed.</div>'; pbList.appendChild(entry); });
+          } else {
+            pbList.textContent = 'No correlation path scores available. Consider running Deep Analyze to compute path_scores.';
+          }
+        }catch(_){ pbList.textContent = 'Playbook generation failed.'; }
+        playbook.appendChild(pbList); container.appendChild(playbook);
+
+        // Append container near top of body
+        const b = doc.body || doc.getElementsByTagName('body')[0]; if(b){ b.insertBefore(container, b.firstChild); }
+
+        // Wire copy buttons to copy the row summary
+        try{ const buttons = doc.querySelectorAll('.copy-row-btn'); buttons.forEach(function(btn){ btn.addEventListener('click', function(){ try{ const idx = parseInt(btn.getAttribute('data-idx'),10); const r = rows[idx]; if(!r) return; const txt = ['Process: '+(r.process_name||''),'Path: '+(r.file_path||''),'Host: '+(r.host||''),'Sha256: '+(r.sha256||''),'Verdict: '+(r.verdict||''),'DREAD: '+((r._dread&&r._dread.score)||'')].join(' | '); if(navigator.clipboard) navigator.clipboard.writeText(txt).catch(()=>{}); else { const ta=doc.createElement('textarea'); ta.value=txt; doc.body.appendChild(ta); ta.select(); try{ doc.execCommand('copy'); }catch(_){ } ta.remove(); } }catch(_){ } }); }); }catch(_){ }
+      }catch(e){ console.warn('injectEnhancements', e); }
+    }
+
+    btn.addEventListener('click', async function(){
+      try{
+        // If Deep Analyze recently run, use its summary; otherwise export as-is
+        var rows = (window.csvSelectedRows && window.csvSelectedRows.length ? window.csvSelectedRows : (window.LAST_RESULTS||[])).slice(0,200);
+        if(!rows || !rows.length){ if(window.notifications && notifications.toast) notifications.toast('No rows to include','warn'); return; }
+        // Optionally ensure deep analyze finished: if user previously clicked Deep Analyze, LAST_CORR_SUMMARY will exist
+        var company = (document.getElementById('reportCompany') && document.getElementById('reportCompany').value) ? document.getElementById('reportCompany').value.trim() : null;
+        var recipientsRaw = (document.getElementById('reportRecipients') && document.getElementById('reportRecipients').value) ? document.getElementById('reportRecipients').value : '';
+        var recipients = recipientsRaw.split(/[;,]+/).map(s=>s.trim()).filter(Boolean);
+        var includeModel = (document.getElementById('reportIncludeModel') && document.getElementById('reportIncludeModel').checked) ? true : false;
+        var payload = { title: 'CSV Analysis Report', rows: rows, summary: { total_rows: rows.length }, correlation: (window.LAST_CORR_SUMMARY || null), meta: { company_name: company, recipients: recipients } };
+        var url = '/api/v1/report/generate' + (includeModel ? '?include_model=true' : '');
+        var resp = await fetch(url, { method: 'POST', headers: { 'Content-Type':'application/json', 'x-api-key': (localStorage.getItem('apiKey')||'devkey123') }, body: JSON.stringify(payload) });
+        if(!resp.ok){ if(window.notifications && notifications.toast) notifications.toast('Report generation failed','error'); return; }
+        var ctype = (resp.headers.get('content-type')||'').toLowerCase();
+        // If server returned JSON (include_model flow) parse and handle safely
+        if(ctype.indexOf('application/json') !== -1){
+          try{
+            var j = await resp.json();
+            // j may include { html: '...', model_summary: {...}, model_html: '...' }
+            if(j.html){ var w = window.open('about:blank','_blank'); if(w){ w.document.open(); w.document.write(j.html); w.document.close(); try{ injectEnhancements(w.document, rows, window.LAST_CORR_SUMMARY || null); }catch(_){ } } window.__LAST_GENERATED_REPORT = { html: j.html, title: payload.title || 'CSV Analysis Report' } }
+            else if(j.model_html){ var w = window.open('about:blank','_blank'); if(w){ w.document.open(); w.document.write(j.model_html); w.document.close(); } window.__LAST_GENERATED_REPORT = { html: j.model_html, title: payload.title || 'Model Summary' };
+            } else if(j.model_summary){ // show a lightweight modal with JSON-summary provenance
+              window.__LAST_MODEL_SUMMARY = j.model_summary;
+              // open a small result window to show JSON summary
+              var sWin = window.open('about:blank','_blank'); if(sWin){ sWin.document.open(); sWin.document.write('<pre>'+JSON.stringify(j.model_summary, null, 2)+'</pre>'); sWin.document.close(); }
+            } else { // fallback to textual field
+              window.__LAST_GENERATED_REPORT = { html: JSON.stringify(j), title: payload.title || 'CSV Analysis Report' };
+            }
+          }catch(e){ var txt = await resp.text(); var w = window.open('about:blank','_blank'); if(w){ w.document.open(); w.document.write(txt); w.document.close(); try{ injectEnhancements(w.document, rows, window.LAST_CORR_SUMMARY || null); }catch(_){ } } window.__LAST_GENERATED_REPORT = { html: txt, title: payload.title || 'CSV Analysis Report' } }
+        } else {
+          var txt = await resp.text(); var w = window.open('about:blank','_blank'); if(w){ w.document.open(); w.document.write(txt); w.document.close(); try{ injectEnhancements(w.document, rows, window.LAST_CORR_SUMMARY || null); }catch(_){ } }
+          window.__LAST_GENERATED_REPORT = { html: txt, title: payload.title || 'CSV Analysis Report' };
+        }
+      }catch(e){ if(window.notifications && notifications.toast) notifications.toast('Failed to generate report','error'); }
+    });
+  }catch(_){ } })();
+
+    // Share flow: open a small modal to send report to webhook/email/teams/whatsapp
+    (function shareReport(){ try{
+      // append modal markup
+      const shareModal = document.createElement('div'); shareModal.id='shareModal'; shareModal.style.display='none'; shareModal.style.position='fixed'; shareModal.style.left='0'; shareModal.style.top='0'; shareModal.style.right='0'; shareModal.style.bottom='0'; shareModal.style.background='rgba(0,0,0,.55)'; shareModal.style.alignItems='center'; shareModal.style.justifyContent='center'; shareModal.innerHTML = `
+        <div style="background:var(--bg-secondary); border:1px solid var(--border); border-radius:8px; padding:16px; width:480px; max-width:96%; margin:48px auto;">
+          <h3 style="margin:0 0 8px; font-size:15px;">Share Report</h3>
+          <div style="display:flex; gap:8px; margin-bottom:8px;"><input id="shareTarget" placeholder="Webhook URL, email or phone" style="flex:1; padding:8px; border-radius:6px; border:1px solid var(--border); background:var(--bg-tertiary); color:var(--text-primary);" /><select id="shareChannel" style="width:140px; padding:8px; border-radius:6px; border:1px solid var(--border); background:var(--bg-tertiary); color:var(--text-primary);"><option value="webhook">Webhook</option><option value="email">Email</option><option value="whatsapp">WhatsApp</option><option value="teams">Teams</option></select></div>
+          <div style="margin-bottom:8px;"><input id="shareMsg" placeholder="Optional message" style="width:100%; padding:8px; border-radius:6px; border:1px solid var(--border); background:var(--bg-tertiary); color:var(--text-primary);"/></div>
+          <div style="display:flex; gap:8px; justify-content:flex-end;"><button id="shareCancel" class="btn">Cancel</button><button id="shareSend" class="btn btn-primary">Send</button></div>
+        </div>`;
+      document.body.appendChild(shareModal);
+      // add a share button next to export
+      const exportBtn = document.getElementById('btnExportReport');
+      if(exportBtn){ const shareBtn = document.createElement('button'); shareBtn.id='btnShareReport'; shareBtn.className='btn'; shareBtn.textContent='Share Report'; exportBtn.parentNode.insertBefore(shareBtn, exportBtn.nextSibling);
+        shareBtn.addEventListener('click', function(){ shareModal.style.display='flex'; }); }
+      document.getElementById('shareCancel').addEventListener('click', function(){ shareModal.style.display='none'; });
+      document.getElementById('shareSend').addEventListener('click', async function(){
+        try{
+          const target = document.getElementById('shareTarget').value.trim();
+          const channel = document.getElementById('shareChannel').value;
+          const message = document.getElementById('shareMsg').value || '';
+          if(!target){ if(window.notifications && notifications.toast) notifications.toast('Enter a webhook or email','warn'); return; }
+          const reportObj = window.__LAST_GENERATED_REPORT;
+          if(!reportObj || !reportObj.html){ if(window.notifications && notifications.toast) notifications.toast('No generated report to share. Export first.','warn'); return; }
+          // Upload the report HTML to server so it can generate a public path
+          const upResp = await fetch('/api/v1/report/upload', { method:'POST', headers: { 'Content-Type':'application/json', 'x-api-key': (localStorage.getItem('apiKey')||'devkey123') }, body: JSON.stringify({ filename: 'report_'+Date.now()+'.html', content: reportObj.html }) });
+          if(!upResp.ok){ const t=await upResp.text(); if(window.notifications && notifications.toast) notifications.toast('Upload failed','error'); return; }
+          const upJson = await upResp.json(); const url = upJson.url || upJson.path || '/';
+          // Call send endpoint
+          const sendResp = await fetch('/api/v1/integrations/send_report', { method: 'POST', headers: { 'Content-Type':'application/json', 'x-api-key': (localStorage.getItem('apiKey')||'devkey123') }, body: JSON.stringify({ channel: channel, target: target, report_url: url, message: message }) });
+          if(!sendResp.ok){ const t=await sendResp.text(); if(window.notifications && notifications.toast) notifications.toast('Send failed','error'); return; }
+          const j = await sendResp.json(); if(window.notifications && notifications.toast) notifications.toast('Report shared','success'); shareModal.style.display='none';
+        }catch(e){ if(window.notifications && notifications.toast) notifications.toast('Share failed','error'); }
+      });
+    }catch(_){ } })();
+    // Small accessibility: toggle explain checkbox persists
+    document.addEventListener('DOMContentLoaded', function(){ try{ var el=document.getElementById('explainToggle'); var v=localStorage.getItem('csv_explain_toggle')||'1'; if(el) { el.checked = (v!=='0'); el.addEventListener('change', function(){ try{ localStorage.setItem('csv_explain_toggle', el.checked?'1':'0'); window.dispatchEvent(new Event('csv-explain-toggle-changed')); }catch(_){ } }); } }catch(_){ } });
+
+    // Identity dispatch minimal wiring (depends on csv_analyzer.js selection helpers)
+    function _authHeaders(){ try { const key = (localStorage.getItem('apiKey')||'devkey123'); const h={'x-api-key':key}; const t=localStorage.getItem('tenantId'); if(t) h['X-Tenant-ID']=t; return h; } catch(_){ return {'x-api-key':'devkey123'}; } }
+    async function _postIdentityEvent(ev){
+      try { await (window.safeFetch || fetch)('/api/v1/graph/identity/ingest',{ method:'POST', headers: { 'content-type':'application/json', ..._authHeaders() }, body: JSON.stringify(ev) }); } catch(_){ }
+    }
+    function _rowToIdentity(row){
+      // Try to map common field names present in the parsed CSV rows
+      const user = row.user || row.username || row['User'] || row['Username'] || row['account'] || '';
+      const src_host = row.src_host || row.source_host || row['Source Host'] || row['src'] || '';
+      const dest_host = row.dest_host || row.host || row.hostname || row['Dest Host'] || row['host'] || '';
+      const action = row.action || row['Action'] || row['Event'] || '';
+      const event_type = row.event_type || row['Event Type'] || 'login';
+      const new_role = row.new_role || row.target_role || row['Role'] || '';
+      const ts = row.ts || row.timestamp || Date.now()/1000;
+      return { user, src_host, dest_host, action, event_type, new_role, ts };
+    }
+    (function identityBulk(){ try{
+      const btn = document.getElementById('btnSendIdentity'); if(!btn) return;
+      btn.addEventListener('click', async function(){
+        try{
+          // csv_analyzer.js should expose window.csvSelectedRows or similar;
+          // fall back to first 50 rows in tbody if not available
+          const sourceRows = (window.csvSelectedRows && window.csvSelectedRows.length? window.csvSelectedRows : ((window.LAST_RESULTS && window.LAST_RESULTS.length)? window.LAST_RESULTS : (window._csvRows||[])));
+          const rows = sourceRows.slice(0,200);
+          if(!rows || !rows.length){ notifications && notifications.toast && notifications.toast('No rows selected','warn'); return; }
+          let sent=0; for(const r of rows){ const ev=_rowToIdentity(r); if(ev.user){ await _postIdentityEvent(ev); sent++; } }
+          if(window.notifications && notifications.toast){ notifications.toast(`Posted ${sent} identity events`, 'success'); }
+        }catch(e){ if(window.notifications && notifications.toast){ notifications.toast('Failed to send identity events','error'); } }
+      });
+    }catch(_){ } })();
+
+    // Cloud Graph helpers
+    async function _postCloudResources(resources){
+      try { await (window.safeFetch || fetch)('/api/v1/graph/cloud/ingest',{ method:'POST', headers: { 'content-type':'application/json', ..._authHeaders() }, body: JSON.stringify(resources) }); } catch(_){ }
+    }
+    function _rowToCloudResource(row){
+      const id = row.arn || row.resource || row.cloud_resource || row.bucket || row.id || '';
+      const principals = Array.isArray(row.principals)? row.principals : (row.principals ? String(row.principals).split(/[;,\s]+/).filter(Boolean) : []);
+      const destinations = Array.isArray(row.destinations)? row.destinations : (row.destinations ? String(row.destinations).split(/[;,\s]+/).filter(Boolean) : []);
+      const publicFlag = !!(row.public || row.isPublic || row.internet_exposed);
+      if(!id) return null;
+      return { id, principals, destinations, public: publicFlag };
+    }
+    (function cloudBulk(){ try{
+      const btn = document.getElementById('btnSendCloud'); if(!btn) return;
+      btn.addEventListener('click', async function(){
+        try{
+          const sourceRows = (window.csvSelectedRows && window.csvSelectedRows.length? window.csvSelectedRows : ((window.LAST_RESULTS && window.LAST_RESULTS.length)? window.LAST_RESULTS : (window._csvRows||[])));
+          const rows = sourceRows.slice(0,200);
+          if(!rows || !rows.length){ notifications && notifications.toast && notifications.toast('No rows selected','warn'); return; }
+          const payload=[]; for(const r of rows){ const cr=_rowToCloudResource(r); if(cr){ payload.push(cr); } }
+          if(payload.length){ await _postCloudResources(payload); if(window.notifications && notifications.toast){ notifications.toast(`Posted ${payload.length} cloud resources`, 'success'); } }
+        }catch(e){ if(window.notifications && notifications.toast){ notifications.toast('Failed to send cloud resources','error'); } }
+      });
+    }catch(_){ } })();
+
+    // Network Graph helpers
+    async function _postNetworkFlows(flows){
+      try { await (window.safeFetch || fetch)('/api/v1/graph/network/ingest',{ method:'POST', headers: { 'content-type':'application/json', ..._authHeaders() }, body: JSON.stringify(flows) }); } catch(_){ }
+    }
+    function _rowToNetworkFlow(row){
+      const src = row.src || row.source || row.src_ip || row.client || '';
+      const dst = row.dst || row.destination || row.dst_ip || row.server || '';
+      if(!src || !dst) return null;
+      const port = parseInt(row.port || row.dport || row.dst_port || 0, 10) || 0;
+      const proto = (row.proto || row.protocol || '').toString();
+      const bytes = parseInt(row.bytes || row.size || row.len || 0, 10) || 0;
+      const src_subnet = row.src_subnet || '';
+      const dst_subnet = row.dst_subnet || '';
+      return { src, dst, port, proto, bytes, src_subnet, dst_subnet };
+    }
+    (function networkBulk(){ try{
+      const btn = document.getElementById('btnSendNetwork'); if(!btn) return;
+      btn.addEventListener('click', async function(){
+        try{
+          const sourceRows = (window.csvSelectedRows && window.csvSelectedRows.length? window.csvSelectedRows : ((window.LAST_RESULTS && window.LAST_RESULTS.length)? window.LAST_RESULTS : (window._csvRows||[])));
+          const rows = sourceRows.slice(0,200);
+          if(!rows || !rows.length){ notifications && notifications.toast && notifications.toast('No rows selected','warn'); return; }
+          const payload=[]; for(const r of rows){ const f=_rowToNetworkFlow(r); if(f){ payload.push(f); } }
+          if(payload.length){ await _postNetworkFlows(payload); if(window.notifications && notifications.toast){ notifications.toast(`Posted ${payload.length} network flows`, 'success'); } }
+        }catch(e){ if(window.notifications && notifications.toast){ notifications.toast('Failed to send network flows','error'); } }
+      });
+    }catch(_){ } })();
+
+    // Preview / Explain wiring
+    (function previewExplain(){ try{
+      const btn = document.getElementById('btnExplain'); if(!btn) return;
+      const modal = document.getElementById('csvDrillModal'); const body = document.getElementById('csvDrillBody'); const anchor = document.getElementById('csvExplainAnchor');
+      function renderExplain(obj){
+        try{
+          body.innerHTML = '';
+          const addSection = (title, content) => {
+            const h = document.createElement('div'); h.style.marginTop='8px'; h.innerHTML = `<strong>${title}</strong>`;
+            const pre = document.createElement('pre'); pre.style.maxHeight='220px'; pre.style.overflow='auto'; pre.style.background='var(--bg-tertiary)'; pre.style.padding='8px'; pre.style.borderRadius='6px'; pre.textContent = JSON.stringify(content, null, 2);
+            body.appendChild(h); body.appendChild(pre);
+          };
+          if(obj.scoring){
+            const s = obj.scoring;
+            const wrap = document.createElement('div'); wrap.style.marginTop='8px';
+            wrap.innerHTML = '<strong>Scoring</strong>';
+            const comp = document.createElement('div'); comp.style.display='flex'; comp.style.flexDirection='column'; comp.style.gap='6px'; comp.style.marginTop='6px';
+            for(const [k,v] of Object.entries(s.components||{})){
+              const row = document.createElement('div'); row.style.display='flex'; row.style.alignItems='center'; row.style.gap='8px';
+              const label = document.createElement('div'); label.style.width='160px'; label.style.fontSize='12px'; label.textContent = k;
+              const barWrap = document.createElement('div'); barWrap.style.flex='1'; barWrap.style.background='var(--bg-tertiary)'; barWrap.style.borderRadius='6px'; barWrap.style.height='14px';
+              const bar = document.createElement('div'); bar.style.height='100%'; bar.style.width = Math.round((v||0)*100) + '%'; bar.style.background = 'linear-gradient(90deg,#ff6b6b,#ffb86b)'; bar.style.borderRadius='6px';
+              barWrap.appendChild(bar);
+              const pct = document.createElement('div'); pct.style.width='46px'; pct.style.fontSize='12px'; pct.textContent = Math.round((v||0)*100) + '%';
+              row.appendChild(label); row.appendChild(barWrap); row.appendChild(pct);
+              comp.appendChild(row);
+            }
+            wrap.appendChild(comp);
+            body.appendChild(wrap);
+          }
+          if(obj.mitre) addSection('MITRE', obj.mitre);
+          if(obj.stride) addSection('STRIDE', obj.stride);
+          if(obj.pasta) addSection('PASTA', obj.pasta);
+          if(obj.dread) addSection('DREAD', obj.dread);
+          if(obj.mapping_details) addSection('Mappings', obj.mapping_details);
+        }catch(e){ body.innerText = 'Failed to render explain'; }
+      }
+      btn.addEventListener('click', async function(){
+        try{
+          // build preview payload from first selected row or first table row
+          const rows = (window.csvSelectedRows && window.csvSelectedRows.length? window.csvSelectedRows : ((window.LAST_RESULTS && window.LAST_RESULTS.length)? window.LAST_RESULTS : (window._csvRows||[])));
+          const sel = rows && rows.length? rows[0] : null;
+          if(!sel){ notifications && notifications.toast && notifications.toast('No row selected for preview','warn'); return; }
+          const graph = (document.getElementById('graphSelector')||{value:'identity'}).value || 'identity';
+          let url = '/api/v1/graph/'+graph+'/preview?detail=summary';
+          let payload = {};
+          if(graph === 'identity') payload = _rowToIdentity(sel);
+          else if(graph === 'cloud') payload = _rowToCloudResource(sel) || {};
+          else payload = _rowToNetworkFlow(sel) || {};
+          const resp = await (window.safeFetch || fetch)(url, { method:'POST', headers: { 'content-type':'application/json', ..._authHeaders() }, body: JSON.stringify(payload) });
+          if(!resp.ok){ const txt = await resp.text(); notifications && notifications.toast && notifications.toast('Preview failed','error'); body.innerText = txt; modal.style.display='flex'; return; }
+          const data = await resp.json(); renderExplain(data); anchor.href = ''; anchor.innerText = '';
+          modal.style.display='flex';
+        }catch(e){ if(window.notifications && notifications.toast){ notifications.toast('Preview error','error'); } }
+      });
+    }catch(_){ } })();
+  </script>
+  <script>
+  // ---------------- HopGraph Correlation (Single CSV) -----------------
+  (function hopgraphCorrelate(){ try {
+    const btn = document.getElementById('btnCorrelateHopGraph'); if(!btn) return;
+    btn.addEventListener('click', async function(){
+      try {
+        const sourceRows = (window.csvSelectedRows && window.csvSelectedRows.length? window.csvSelectedRows : ((window.LAST_RESULTS && window.LAST_RESULTS.length)? window.LAST_RESULTS : (window._csvRows||[])));
+        if(!sourceRows.length){ if(window.notifications && notifications.toast){ notifications.toast('No rows selected','warn'); } return; }
+        const rows = sourceRows.slice(0,400).map(function(r){ return (r && r.raw) ? r.raw : r; });
+        const mapping = window.__CSV_CURRENT_MAPPING || (sourceRows[0] && sourceRows[0].mapping) || {};
+        const body = {
+          rows: rows,
+          mapping: mapping,
+          correlate: true,
+          ewma: true,
+          adaptive_ewma: true,
+          weights: { diversity: true, mapping: true }
+        };
+        const buildResp = await (window.safeFetch || fetch)('/api/v1/graph/session/build', { method:'POST', headers:{ 'Content-Type':'application/json', ..._authHeaders() }, body: JSON.stringify(body) });
+        let buildJson={}; try{ buildJson = await buildResp.json().catch(()=>({})); }catch(_){ }
+        document.getElementById('correlationPanel').style.display='block';
+        if(!buildResp.ok){ document.getElementById('corrSummary').textContent='Build failed: '+buildResp.status+' '+(buildJson.detail||''); return; }
+        const summary = buildJson.summary || buildJson;
+        try{ window.LAST_CORR_SUMMARY = summary; }catch(_){ }
+        const factors = summary.factors || [];
+        const conf = summary.confidence; const verdict = summary.verdict;
+        const sid = (summary.session_ids||[]);
+        let txt = sid.length ? ('Session IDs: '+sid.join(', ')+'\n') : '';
+        txt += 'Verdict: '+verdict+'  Confidence: '+conf+'\n';
+        txt += 'Factors:\n'+(factors.map(f => typeof f==='string'? ' - '+f : ' - '+(f.factor||f.name)+'('+ (f.score||'') +')').join('\n') || ' (none)');
+        const corr = summary.correlation || {}; const pairs=[]; Object.keys(corr).forEach(a => { Object.keys(corr[a]||{}).forEach(b => { const v=corr[a][b]; if(v>0) pairs.push(`${a}<->${b}:${v}`); }); });
+        txt += '\nPairs: '+(pairs.slice(0,20).join(', ')||'none');
+        document.getElementById('corrSummary').textContent = txt;
+        // Mini chain from path_scores
+        const ps = summary.path_scores || {}; const keys = Object.keys(ps).sort((a,b)=> (ps[b].score||0)-(ps[a].score||0));
+        if(keys.length){
+          const topKey = keys[0]; const scObj = ps[topKey];
+          const anomalies = scObj.anomalies || [];
+          const contrib = scObj.contributions || {};
+          const parts = Object.keys(contrib).slice(0,6);
+          const chain = (parts.length? parts.join(' -> ') : topKey.replace(/__/,' -> ')) + `\nScore=${(scObj.score||0).toFixed(3)} Anom=${anomalies.join(',')||'none'}`;
+          document.getElementById('corrMiniChain').textContent = chain;
+          let pathTxt = keys.slice(0,5).map(k => `${k}  score=${(ps[k].score||0).toFixed(3)} anom=${(ps[k].anomalies||[]).length}`).join('\n');
+          document.getElementById('corrPathScores').textContent = pathTxt || 'None.';
+          // Make each path clickable for remediation lookup
+          try {
+            const host = document.getElementById('corrPathScores');
+            const lines = keys.slice(0,10).map(k => {
+              const sc = ps[k];
+              return `<span class='corr-path-item' data-path='${k}' style='display:block;cursor:pointer;'>${k} :: ${(sc.score||0).toFixed(3)} (${(sc.anomalies||[]).length} anom)</span>`;
+            }).join('');
+            host.innerHTML = lines;
+            host.querySelectorAll('.corr-path-item').forEach(el => {
+              el.addEventListener('click', async () => {
+                const chain = el.getAttribute('data-path');
+                if(!chain) return;
+                const box = document.getElementById('corrRemLookup');
+                box.textContent = 'Fetching remediation for '+chain+'...';
+                try {
+                  const r = await (window.safeFetch || fetch)('/api/v1/remediation/suggest?path='+encodeURIComponent(chain));
+                  let j = {}; try { j = await r.json(); } catch(_){ }
+                  if(!r.ok){ box.textContent = 'Lookup failed: '+r.status; return; }
+                  const acts = j.actions || [];
+                  const rat = j.rationale || [];
+                  const lines2 = [];
+                  lines2.push('Chain: '+chain);
+                  lines2.push('Severity: '+(j.severity||'n/a'));
+                  if(acts.length){ lines2.push('Actions:'); acts.forEach(a => lines2.push(' - '+a)); }
+                  if(rat.length){ lines2.push('Rationale:'); rat.slice(0,5).forEach(rn => lines2.push(' * '+rn)); }
+                  box.textContent = lines2.join('\n');
+                } catch(e){ box.textContent = 'Error: '+(e.message||e); }
+              });
+            });
+          } catch(_){ }
+        } else {
+          document.getElementById('corrMiniChain').textContent='No path scores available.';
+          document.getElementById('corrPathScores').textContent='None.';
+        }
+        // Shared risk ranking using threat_ranking.js
+        try {
+          const riskDiv = document.getElementById('corrRiskRank');
+          if(riskDiv){
+            if(window.ThreatRanking && typeof ThreatRanking.computeRiskRankings==='function'){
+              const topN = parseInt(localStorage.getItem('threat_top_n')||'5',10) || 5;
+              const ranks = ThreatRanking.computeRiskRankings(summary, topN);
+              riskDiv.textContent = ranks.length ? ranks.map((r,i)=>`${i+1}. ${r.key} risk=${r.risk.toFixed(3)} path=${r.score.toFixed(3)} anom=${r.anomalies}` ).join('\n') : 'No rankings.';
+              // remediation hints (top entry)
+              const remDiv = document.getElementById('corrRemediation');
+              if(remDiv){ remDiv.textContent = (ranks[0] && ranks[0].remediation && ranks[0].remediation.length) ? ranks[0].remediation.map(h=>'- '+h).join('\n') : 'No specific hints.'; }
+            } else { riskDiv.textContent='Ranking module unavailable.'; }
+          }
+        } catch(_){ }
+      } catch(e){ document.getElementById('corrSummary').textContent='Correlation error: '+(e.message||e); document.getElementById('correlationPanel').style.display='block'; }
+    });
+  } catch(_){ } })();
+  // Deep Analyze: ingest selected rows then build hopgraph and save summary for report enrichment
+  (function deepAnalyze(){ try{
+    const btn = document.getElementById('btnAnalyzePipeline'); if(!btn) return;
+    try{ btn.dataset.daModal = 'true'; }catch(_){}
+    btn.addEventListener('click', async function(){
+      try{
+        const sourceRows = (window.csvSelectedRows && window.csvSelectedRows.length? window.csvSelectedRows : ((window.LAST_RESULTS && window.LAST_RESULTS.length)? window.LAST_RESULTS : (window._csvRows||[])));
+        const rows = sourceRows.slice(0,400);
+        if(!rows.length){ if(window.notifications && notifications.toast) notifications.toast('No rows selected for deep analyze','warn'); return; }
+        // Show options modal and mapping preview
+        showDeepAnalyzeModal(rows);
+      }catch(e){ if(window.notifications && notifications.toast) notifications.toast('Deep analyze failed','error'); }
+    });
+  }catch(_){ } })();
+
+  // Deep Analyze modal helpers
+  function showDeepAnalyzeModal(rows){
+    try{
+      const modal = document.getElementById('deepAnalyzeModal'); if(!modal) return;
+      const preview = document.getElementById('daMappingPreview'); preview.innerHTML='';
+      // Build header mapping editor from first row
+      const first = rows[0]||{}; const keys = Object.keys(first);
+      const canonicalOptions = ['--none--','user','host','ip','file_hash','process','file_path','http_user_agent','dns_query'];
+      // Add preset save/load controls and Smart Detect All
+      const presetBar = document.createElement('div'); presetBar.style.display='flex'; presetBar.style.gap='8px'; presetBar.style.marginBottom='8px';
+      const presetInput = document.createElement('input'); presetInput.placeholder='Preset name'; presetInput.style.padding='6px'; presetBar.appendChild(presetInput);
+      const saveBtn = document.createElement('button'); saveBtn.className='btn'; saveBtn.textContent='Save Preset'; presetBar.appendChild(saveBtn);
+      const smartBtn = document.createElement('button'); smartBtn.className='btn'; smartBtn.textContent='Smart Detect All'; presetBar.appendChild(smartBtn);
+      const loadSelect = document.createElement('select'); loadSelect.style.padding='6px'; loadSelect.className='btn'; presetBar.appendChild(loadSelect);
+      preview.appendChild(presetBar);
+      // load presets from localStorage
+      function refreshPresets(){ loadSelect.innerHTML=''; const s = JSON.parse(localStorage.getItem('csv_da_presets')||'{}'); Object.keys(s).forEach(k=>{ const o=document.createElement('option'); o.value=k; o.textContent=k; loadSelect.appendChild(o); }); }
+      refreshPresets();
+      saveBtn.onclick = function(){ const name = (presetInput.value||'').trim(); if(!name) return; const s = JSON.parse(localStorage.getItem('csv_da_presets')||'{}'); const obj = {}; preview.querySelectorAll('.map-row').forEach(r=>{ const col = r.dataset.col; const val = r.querySelector('select').value; obj[col]=val; }); s[name]=obj; localStorage.setItem('csv_da_presets', JSON.stringify(s)); refreshPresets(); };
+      loadSelect.onchange = function(){ const s = JSON.parse(localStorage.getItem('csv_da_presets')||'{}'); const sel = loadSelect.value; if(!sel) return; const obj = s[sel]||{}; preview.querySelectorAll('.map-row').forEach(r=>{ const col = r.dataset.col; const selv = obj[col]||'--none--'; r.querySelector('select').value = selv; }); };
+      keys.forEach(k => {
+        const row = document.createElement('div'); row.className='map-row'; row.dataset.col = k; row.style.display='flex'; row.style.alignItems='center'; row.style.gap='8px'; row.style.padding='6px 4px';
+        const chk = document.createElement('input'); chk.type='checkbox'; chk.checked=true; chk.dataset.col = k; chk.style.flex='0 0 20px';
+        const label = document.createElement('div'); label.style.flex='1'; label.textContent = k + ' — sample: ' + String(first[k]||'').slice(0,80);
+        const sel = document.createElement('select'); sel.style.minWidth='160px'; sel.className='btn'; canonicalOptions.forEach(o=>{ const op = document.createElement('option'); op.value=o; op.textContent=o; sel.appendChild(op); });
+        // attempt to auto-select best match (enhanced patterns)
+        const l = k.toLowerCase();
+        if(/process|proc|exe|executable|cmd|command/.test(l)) sel.value='process';
+        else if(/path|file_path|filepath|file|location/.test(l)) sel.value='file_path';
+        else if(/hash|sha256|sha1|md5|checksum|digest/.test(l)) sel.value='file_hash';
+        else if(/host|hostname|computer|machine|endpoint|asset/.test(l)) sel.value='host';
+        else if(/user|username|account|principal|identity/.test(l)) sel.value='user';
+        else if(/ip|ipv4|ip_addr|address/.test(l)) sel.value='ip';
+        else if(/dns|domain|query/.test(l)) sel.value='dns_query';
+        else if(/agent|browser|ua/.test(l)) sel.value='http_user_agent';
+        else sel.value='--none--';
+        row.appendChild(chk); row.appendChild(label); row.appendChild(sel); preview.appendChild(row);
+      });
+      document.getElementById('daClose').onclick = ()=> modal.style.display='none';
+      document.getElementById('daCancel').onclick = ()=> modal.style.display='none';
+      // Local cost estimator for modal-specific LLM limit controls (renamed IDs)
+      try {
+        const daLimit = document.getElementById('da_llmLimit');
+        const daCostEl = document.getElementById('da_llmCostEstimate');
+        function daEstimate(){
+          try {
+            if(!daLimit || !daCostEl) return;
+            const val = parseInt(daLimit.value,10) || 25;
+            const rows = (window.LAST_RESULTS||[]).filter(r => { try { return (r && r.verdict && /MALICIOUS|SUSPICIOUS|THREAT/i.test(r.verdict)); } catch(_) { return false; } });
+            const count = (val === 0) ? rows.length : Math.min(rows.length, val);
+            const cost = (count * 0.003).toFixed(3);
+            daCostEl.textContent = 'Est. cost: $'+cost;
+          } catch(_) { if(daCostEl) daCostEl.textContent = 'Est. cost: n/a'; }
+        }
+        if(daLimit){ daLimit.addEventListener('change', daEstimate); daEstimate(); }
+      } catch(_) { }
+      // Smart detect button: re-run auto-detection across all map rows
+      smartBtn.addEventListener('click', function(){
+        preview.querySelectorAll('.map-row').forEach(function(r){
+          try{
+            const col = r.dataset.col || '';
+            const sel = r.querySelector('select');
+            const l = String(col).toLowerCase();
+            if(/process|proc|exe|executable|cmd|command/.test(l)) sel.value='process';
+            else if(/path|file_path|filepath|file|location/.test(l)) sel.value='file_path';
+            else if(/hash|sha256|sha1|md5|checksum|digest/.test(l)) sel.value='file_hash';
+            else if(/host|hostname|computer|machine|endpoint|asset/.test(l)) sel.value='host';
+            else if(/user|username|account|principal|identity/.test(l)) sel.value='user';
+            else if(/ip|ipv4|ip_addr|address/.test(l)) sel.value='ip';
+            else if(/dns|domain|query/.test(l)) sel.value='dns_query';
+            else if(/agent|browser|ua/.test(l)) sel.value='http_user_agent';
+            else sel.value='--none--';
+          }catch(_){ }
+        });
+      });
+      document.getElementById('daConfirm').onclick = function(){
+        const mode = document.querySelector('input[name="da_mode"]:checked').value;
+        const auto = document.getElementById('da_auto_llm').checked;
+        // Build mapping from dropdowns
+        const mapping = {};
+        preview.querySelectorAll('.map-row').forEach(r=>{
+          const col = r.dataset.col; const sel = r.querySelector('select').value; if(sel && sel!=='--none--') mapping[sel] = col;
+        });
+        modal.style.display='none';
+        try{
+          if(typeof window.initiateDeepAnalyze === 'function'){
+            window.initiateDeepAnalyze({ analyze_mode: mode, mapping: mapping, auto_llm: !!auto });
+          } else if(window.notifications && notifications.toast){
+            notifications.toast('Deep Analyze module unavailable','error');
+          }
+        }catch(e){
+          console.warn('deep analyze modal launch', e);
+          if(window.notifications && notifications.toast) notifications.toast('Deep Analyze error','error');
+        }
+      };
+      modal.style.display='flex';
+      // Safety: do not auto-close the modal automatically; let user dismiss it.
+    }catch(e){ console.warn('showDeepAnalyzeModal', e); }
+  }
+  </script>
+  <script>
+  // Lightweight RA header sniff and panel render for CSV Analyzer
+  (function raHeaderSniff(){ try {
+    var fileInput = document.getElementById('fileInput'); if(!fileInput) return;
+    fileInput.addEventListener('change', async function(){
+      try {
+        var f = fileInput.files && fileInput.files[0]; if(!f || !/\.csv$/i.test(f.name)) return;
+        var text = await f.text();
+        var headerLine = (text.split(/\r?\n/)[0] || '').trim(); if(!headerLine) return;
+        var cols = headerLine.split(/[,;\t]/).map(function(c){ return (c||'').trim(); }).filter(Boolean);
+        if (isRAHeaders(cols)) renderRASignalsFromHeaders(cols);
+      } catch(_){ }
+    });
+
+    function isRAHeaders(cols){
+      try {
+        var lc = (cols||[]).map(function(c){ return String(c||'').toLowerCase(); });
+        var hasProto = lc.some(function(c){ return /(protocol|proto|vpn|rdp|bastion)/.test(c); });
+        var hasUser = lc.some(function(c){ return /(user|account|principal)/.test(c); });
+        var hasSrc = lc.some(function(c){ return /(src|source).*ip|src_ip|client/.test(c); });
+        var hasDst = lc.some(function(c){ return /(dst|dest|destination|host|server)/.test(c); });
+        var hasPort = lc.some(function(c){ return /(port|dst_port|dport)/.test(c); });
+        return [hasProto, hasUser, hasSrc, hasDst, hasPort].filter(Boolean).length >= 3;
+      } catch(_) { return false; }
+    }
+    function renderRASignalsFromHeaders(cols){
+      try {
+        var panel = document.getElementById('raSignalsPanel'); var box = document.getElementById('raSignalsSummary');
+        var lc = (cols||[]).map(function(c){ return String(c||'').toLowerCase(); });
+        var found = [];
+        if (lc.some(function(c){ return /(protocol|proto)/.test(c); })) found.push('protocol');
+        if (lc.some(function(c){ return /(vpn|rdp|bastion)/.test(c); })) found.push('source=remote_access');
+        if (lc.some(function(c){ return /(user|account|principal)/.test(c); })) found.push('user');
+        if (lc.some(function(c){ return /(src|source).*ip|src_ip|client/.test(c); })) found.push('src_ip');
+        if (lc.some(function(c){ return /(dst|dest|destination|host|server)/.test(c); })) found.push('dest_host');
+        if (lc.some(function(c){ return /(port|dst_port|dport)/.test(c); })) found.push('dest_port');
+        if (lc.some(function(c){ return /(mfa|2fa)/.test(c); })) found.push('mfa_used');
+        if (!found.length) { box.textContent = 'No obvious RA headers detected.'; }
+        else {
+          var lines = [];
+          lines.push('Detected RA-like headers: ' + found.join(', '));
+          if (found.indexOf('mfa_used') >= 0) lines.push('Note: MFA column allows quick MFA coverage insights.');
+          lines.push('Tip: Use Send to Network/Identity to post into graphs, or batch via Multi-Source Correlator.');
+          box.textContent = lines.join('\n');
+        }
+        panel.style.display = 'block';
+      } catch(_){ }
+    }
+  } catch(_){ } })();
+  </script>
+  <script>
+  // LLM controls: estimate cost, generate more, aggregate cost polling
+  (function llmControls(){ try{
+    const limitEl = document.getElementById('llmLimit');
+    const estEl = document.getElementById('llmCostEstimate');
+    const aggEl = document.getElementById('llmAggregateCost');
+    const genBtn = document.getElementById('btnGenerateMore');
+    if(!limitEl || !estEl || !aggEl || !genBtn) return;
+    genBtn.style.display = 'inline-flex';
+
+    async function estimate(){
+      try{
+        const lines = parseInt(limitEl.value,10) || 25;
+        const q = '/api/v1/llm/cost_estimate?lines='+encodeURIComponent(lines);
+        const r = await (window.safeFetch || fetch)(q, { headers: _authHeaders() });
+        if(!r.ok) { estEl.textContent = 'Est. cost: n/a'; return; }
+        const j = await r.json();
+        const cost = (j.estimated_cost || j.cost || 0).toFixed(6);
+        estEl.textContent = 'Est. cost: $'+cost;
+      }catch(e){ estEl.textContent = 'Est. cost: n/a'; }
+    }
+
+    async function fetchAggregate(){
+      try{
+        const url = '/api/v1/metrics/llm_costs';
+        const r = await (window.safeFetch || fetch)(url, { headers: _authHeaders() });
+        if(!r.ok){ aggEl.textContent = 'Total cost: $0.000'; return; }
+        const j = await r.json();
+        const ext = (j.external && j.external.total_cost) ? j.external.total_cost : (j.external_total_cost || 0);
+        const loc = (j.local && j.local.gpu_time_cost) ? j.local.gpu_time_cost : 0;
+        const total = (Number(ext||0) + Number(loc||0)).toFixed(6);
+        aggEl.textContent = 'Total cost: $'+ total;
+      }catch(e){ aggEl.textContent = 'Total cost: $0.000'; }
+    }
+
+    limitEl.addEventListener('change', estimate);
+    genBtn.addEventListener('click', async function(){
+      try{
+        genBtn.disabled = true; genBtn.textContent = 'Queuing...';
+        const limit = parseInt(limitEl.value,10) || 25;
+        const aid = (window.__LAST_ASSESSMENT_ID || localStorage.getItem('last_assessment_id')) || null;
+        const body = { limit: limit };
+        if(aid) body.assessment_id = aid;
+        const resp = await (window.safeFetch || fetch)('/api/v1/assessments/generate_llm_summaries', { method: 'POST', headers: Object.assign({'Content-Type':'application/json'}, _authHeaders()), body: JSON.stringify(body) });
+        if(!resp.ok){ if(window.notifications&&notifications.toast) notifications.toast('Generate failed','error'); genBtn.textContent='Generate More'; genBtn.disabled=false; return; }
+        const j = await resp.json().catch(()=>({}));
+        if(window.notifications && notifications.toast) notifications.toast('LLM summaries queued','success');
+        await fetchAggregate(); await estimate();
+        genBtn.textContent = 'Generate More'; genBtn.disabled = false;
+      }catch(e){ genBtn.textContent='Generate More'; genBtn.disabled=false; if(window.notifications && notifications.toast) notifications.toast('Generate error','error'); }
+    });
+
+    // initial load
+    estimate(); fetchAggregate();
+    // poll aggregate every 30s
+    setInterval(fetchAggregate, 30000);
+  }catch(_){ } })();
+  </script>
+
+  <div id="llmSidebar" class="llm-sidebar">
+    <div class="llm-sidebar-header">
+      <div>
+        <h3>LLM Tier 1 Summary</h3>
+        <div id="llmSidebarMeta" class="text-muted"></div>
+      </div>
+      <div style="display:flex; gap:6px; align-items:center;">
+        <button class="btn" id="llmSidebarDetach" type="button" title="Toggle dock / pop-out">Detach</button>
+        <button class="close-btn" id="llmSidebarClose" aria-label="Close Tier 1 summary">&times;</button>
+      </div>
+    </div>
+    <div id="llmSidebarBody" class="llm-sidebar-body" tabindex="0">
+      <p class="text-muted">Select a suspicious row and click “LLM T1”.</p>
+    </div>
+    <div class="llm-sidebar-footer">
+      <span id="llmSidebarCost" class="cost">$0.0000</span>
+      <button class="btn btn-primary" id="llmSidebarT2">T2: Investigate</button>
+    </div>
+  </div>
+</body>
+</html>
+

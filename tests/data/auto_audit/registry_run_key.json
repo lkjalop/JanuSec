@@ -1,0 +1,8 @@
+{
+  "event_id": "evt-reg-run-001",
+  "registry_run_key_set": true,
+  "process_path": "C:\\Windows\\Temp\\malicious.exe",
+  "temp_path_exe": true
+  , "registry_key": "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\\Bad",
+  "process": "evil.exe"
+}

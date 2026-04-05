@@ -1,0 +1,31 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "panels": [
+    {
+      "type": "graph",
+      "title": "Precision (TP / (TP+FP)) - Last 28 days",
+      "id": 1,
+      "datasource": null,
+      "targets": [
+        {
+          "expr": "sum by (day) (tp) / (sum by (day) (tp) + sum by (day) (fp))",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "graph",
+      "title": "A vs B Variant Precision",
+      "id": 2,
+      "datasource": null,
+      "targets": [
+        { "expr": "sum by (variant,day) (tp) / (sum by (variant,day) (tp) + sum by (variant,day) (fp))", "refId": "A" }
+      ]
+    }
+  ],
+  "title": "FP Reduction - Precision Overview",
+  "schemaVersion": 16,
+  "version": 1
+}

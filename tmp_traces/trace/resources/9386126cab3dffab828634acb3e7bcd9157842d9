@@ -1,0 +1,7 @@
+# Page snapshot
+
+```yaml
+- generic [active] [ref=e1]:
+  - heading "CSV Analyzer (shim)" [level=2] [ref=e2]
+  - button "Choose File" [ref=e3]
+```

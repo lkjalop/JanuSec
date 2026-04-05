@@ -1,0 +1,16 @@
+{
+  "type": "bundle",
+  "id": "bundle--sample",
+  "objects": [
+    {
+      "type": "attack-pattern",
+      "id": "attack-pattern--T1003",
+      "name": "Credential Dumping",
+      "description": "Adversaries may attempt to obtain credentials...",
+      "x_mitre_platforms": ["Windows", "Linux"],
+      "kill_chain_phases": [{"phase_name": "privilege-escalation"}],
+      "x_mitre_detection": "Detect by monitoring unusual process memory access",
+      "x_mitre_mitigations": "Use LSASS protections"
+    }
+  ]
+}

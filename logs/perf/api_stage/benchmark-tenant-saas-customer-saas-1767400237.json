@@ -1,0 +1,142 @@
+{
+  "cases": [
+    {
+      "name": "saas_runbook_abuse",
+      "ok": true,
+      "duration_ms": 29.543,
+      "missing_factors": [],
+      "reported_factors": [
+        "api:automation_runbook_abuse"
+      ]
+    },
+    {
+      "name": "saas_bulk_phish_campaign",
+      "ok": true,
+      "duration_ms": 24.151,
+      "missing_factors": [],
+      "reported_factors": [
+        "api:business_flow_policy_gap",
+        "api:phish_campaign_bulk_send"
+      ]
+    },
+    {
+      "name": "saas_llm_prompt_injection",
+      "ok": true,
+      "duration_ms": 21.559,
+      "missing_factors": [],
+      "reported_factors": [
+        "api:llm_atlas_risk"
+      ]
+    },
+    {
+      "name": "owner_mismatch",
+      "ok": true,
+      "duration_ms": 23.597,
+      "missing_factors": [],
+      "reported_factors": [
+        "api:bola_resource_mismatch"
+      ]
+    },
+    {
+      "name": "owner_match",
+      "ok": true,
+      "duration_ms": 25.486,
+      "missing_factors": [],
+      "reported_factors": []
+    },
+    {
+      "name": "missing_headers",
+      "ok": true,
+      "duration_ms": 22.946,
+      "missing_factors": [],
+      "reported_factors": [
+        "api:missing_security_headers"
+      ]
+    },
+    {
+      "name": "unknown_route_inventory",
+      "ok": true,
+      "duration_ms": 22.382,
+      "missing_factors": [],
+      "reported_factors": [
+        "api:inventory_route_unknown"
+      ]
+    },
+    {
+      "name": "business_flow_policy_gap",
+      "ok": true,
+      "duration_ms": 22.236,
+      "missing_factors": [],
+      "reported_factors": [
+        "api:business_flow_policy_gap"
+      ]
+    },
+    {
+      "name": "business_flow_anomaly_high_risk",
+      "ok": true,
+      "duration_ms": 23.156,
+      "missing_factors": [],
+      "reported_factors": [
+        "api:business_flow_anomaly",
+        "api:business_flow_policy_gap"
+      ]
+    },
+    {
+      "name": "supply_chain_modification",
+      "ok": true,
+      "duration_ms": 29.906,
+      "missing_factors": [],
+      "reported_factors": [
+        "api:supply_chain_pipeline_modification"
+      ]
+    },
+    {
+      "name": "automation_runbook_abuse",
+      "ok": true,
+      "duration_ms": 24.716,
+      "missing_factors": [],
+      "reported_factors": [
+        "api:automation_runbook_abuse"
+      ]
+    },
+    {
+      "name": "phish_bulk_campaign",
+      "ok": true,
+      "duration_ms": 22.076,
+      "missing_factors": [],
+      "reported_factors": [
+        "api:business_flow_policy_gap",
+        "api:phish_campaign_bulk_send"
+      ]
+    },
+    {
+      "name": "llm_atlas_risk",
+      "ok": true,
+      "duration_ms": 21.509,
+      "missing_factors": [],
+      "reported_factors": [
+        "api:llm_atlas_risk"
+      ]
+    },
+    {
+      "name": "ransomware_backup_delete",
+      "ok": true,
+      "duration_ms": 30.423,
+      "missing_factors": [],
+      "reported_factors": [
+        "api:ransomware_api_activity"
+      ]
+    }
+  ],
+  "metrics": {
+    "count": 14,
+    "avg_ms": 24.549,
+    "p95_ms": 29.906
+  },
+  "tenant": "tenant-saas",
+  "pipeline_profile": "customer-saas",
+  "vector_sources": [
+    "tests\\data\\api_security_auth_harness_saas.json",
+    "tests\\data\\api_security_auth_harness.json"
+  ]
+}

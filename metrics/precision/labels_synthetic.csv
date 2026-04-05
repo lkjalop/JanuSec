@@ -1,0 +1,32 @@
+# event_id,label
+# Synthetic labeling: 5% TP rate distribution approximation
+synth0,tp
+synth1,fp
+synth2,fp
+synth3,fp
+synth4,fp
+synth5,tp
+synth6,fp
+synth7,fp
+synth8,fp
+synth9,fp
+synth10,tp
+synth11,fp
+synth12,fp
+synth13,fp
+synth14,fp
+synth15,fp
+synth16,fp
+synth17,tp
+synth18,fp
+synth19,fp
+synth20,fp
+synth21,fp
+synth22,fp
+synth23,tp
+synth24,fp
+synth25,fp
+synth26,fp
+synth27,fp
+synth28,fp
+synth29,tp

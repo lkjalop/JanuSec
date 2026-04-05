@@ -1,0 +1,27 @@
+[
+  {
+    "row_index": 0,
+    "sheet": "EntraAudit",
+    "user": "admin.ops@contoso.com",
+    "app": "Azure Portal",
+    "resource": "Privileged Role Administrator",
+    "action": "Add eligible member to role",
+    "event_type": "directoryAudit",
+    "service_principal": "portal-automation",
+    "approved_change": true,
+    "change_ticket": "CAB-2026-0412",
+    "resource_sensitivity": 0.2,
+    "ts": 1700004000
+  },
+  {
+    "row_index": 1,
+    "sheet": "EntraSignin",
+    "user": "admin.ops@contoso.com",
+    "app": "Azure Portal",
+    "ip": "198.51.100.40",
+    "event_type": "interactiveSignIn",
+    "approved_change": true,
+    "asset_criticality": 0.2,
+    "ts": 1700004060
+  }
+]

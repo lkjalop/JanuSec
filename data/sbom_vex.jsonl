@@ -1,0 +1,1 @@
+{"sbom_id": "sbom-1", "statements": [{"component": "log4j", "cve": "CVE-2024-0001", "status": "not_affected", "justification": "test", "version_range": ">=2.0.0,<3.0.0"}]}

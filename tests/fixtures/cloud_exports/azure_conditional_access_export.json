@@ -1,0 +1,9 @@
+[
+  {
+    "createdDateTime": "2026-03-20T01:16:00Z",
+    "userPrincipalName": "alice@contoso.com",
+    "policyName": "Require phishing-resistant MFA",
+    "appDisplayName": "Azure Portal",
+    "result": "failure"
+  }
+]

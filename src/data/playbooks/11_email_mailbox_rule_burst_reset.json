@@ -1,0 +1,11 @@
+{
+  "name": "email-mailbox-rule-burst-remediation",
+  "trigger": {"factor": "email:mailbox_rule_burst"},
+  "dry_run": true,
+  "steps": [
+    {"type": "open_case", "params": {"title": "Mailbox rule burst detected"}},
+    {"type": "disable_mailbox_rule", "params": {"user": "user@example.com", "rule_name": "suspicious-forward"}},
+    {"type": "reset_credentials", "params": {"user": "user@example.com"}},
+    {"type": "notify", "params": {"webhook_url": "https://example.invalid/webhook", "msg": "Mailbox rule disabled and creds reset"}}
+  ]
+}

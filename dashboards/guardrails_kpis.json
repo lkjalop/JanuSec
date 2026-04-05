@@ -1,0 +1,37 @@
+{
+  "__inputs": [],
+  "__requires": [{"type":"grafana","id":"grafana","name":"Grafana","version":"9.5.0"},{"type":"panel","id":"graph","name":"Graph","version":"9.5.0"},{"type":"panel","id":"bargauge","name":"Bar gauge","version":"9.5.0"}],
+  "title": "Guardrails & Dispatch KPIs",
+  "timezone": "browser",
+  "panels": [
+    {"type":"bargauge","title":"Rate Limit KPIs","gridPos":{"h":8,"w":12,"x":0,"y":0},
+     "options":{"orientation":"horizontal","displayMode":"lcd","reduceOptions":{"calcs":["lastNotNull"]}},
+     "targets":[
+       {"expr":"janusec_rate_limit_rate_limited_pct"},
+       {"expr":"janusec_rate_limit_errors_5xx_pct"},
+       {"expr":"janusec_rate_limit_avg_wait_to_execute"},
+       {"expr":"janusec_rate_limit_dlq_depth"},
+       {"expr":"janusec_rate_limit_p95_step_latency"}
+     ]},
+    {"type":"graph","title":"Rate-limit dropped (per min)","gridPos":{"h":8,"w":12,"x":12,"y":0},
+     "targets":[{"expr":"rate(rate_limit_dropped_total[5m])"},{"expr":"rate(janusec_rate_limit_dropped_total[5m])"}]},
+    {"type":"graph","title":"Dispatch latency","gridPos":{"h":8,"w":12,"x":0,"y":8},
+     "targets":[{"expr":"histogram_quantile(0.95, sum(rate(decision_dispatch_latency_seconds_bucket[5m])) by (le))"}]},
+    {"type":"bargauge","title":"Failure taxonomy (by type)","gridPos":{"h":8,"w":12,"x":12,"y":8},
+     "options":{"orientation":"horizontal","displayMode":"lcd","reduceOptions":{"calcs":["lastNotNull"]}},
+     "targets":[{"expr":"sum by (type) (playbook_failures_total)"},{"expr":"sum by (type) (janusec_playbook_failures_total)"}]},
+    {"type":"bargauge","title":"Policy blocked (by connector)","gridPos":{"h":8,"w":12,"x":0,"y":16},
+     "options":{"orientation":"horizontal","displayMode":"lcd","reduceOptions":{"calcs":["lastNotNull"]}},
+     "targets":[{"expr":"sum by (connector) (policy_blocked_total)"},{"expr":"sum by (connector) (janusec_policy_blocked_total)"}]},
+    {"type":"bargauge","title":"SLO gauges","gridPos":{"h":8,"w":12,"x":12,"y":16},
+     "options":{"orientation":"horizontal","displayMode":"lcd","reduceOptions":{"calcs":["lastNotNull"]}},
+     "targets":[
+       {"expr":"janusec_slo_success_rate"},
+       {"expr":"janusec_slo_errors_5xx_rate"},
+       {"expr":"janusec_guardrail_mttc_seconds"}
+     ]}
+  ],
+  "schemaVersion": 36,
+  "version": 1,
+  "refresh": "10s"
+}

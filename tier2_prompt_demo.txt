@@ -1,0 +1,147 @@
+You are a THREAT HUNTER performing DEEP INVESTIGATION.
+Analyze this artifact with full context and provide a comprehensive 60-100 line report.
+
+======================================================================
+SECTION 1: WHAT IS IT? WHY SUSPICIOUS?
+======================================================================
+Domain: ENDPOINT (confidence: 0.85)
+
+Artifact: powershell.exe
+Host: WORKSTATION-042
+User: admin
+SHA256: 9bf41199f05fa1de...
+
+Key Suspicion Factors:
+  1. process_injection
+  2. unsigned_binary
+  3. cmdline_obfuscation
+
+======================================================================
+SECTION 2: HISTORICAL CONTEXT (CRITICAL!)
+======================================================================
+⚠️ WARNING: Similar incidents detected in past 90 days:
+
+  Incident #1 (14 days ago):
+    - Outcome: CONFIRMED_MALICIOUS
+    - Process: powershell.exe
+    - Host: WORKSTATION-042
+    - Notes: Emotet dropper. Injected into explorer.exe, established C2 to 185.220.101.45. Host isolated and reim
+
+DECISION IMPACT:
+  ⛔ CRITICAL: Previous instance was CONFIRMED MALICIOUS
+  ⛔ Recommendation: Auto-escalate to Tier 3, isolate host immediately
+
+======================================================================
+SECTION 3: ATTACK SCENARIO & BUSINESS IMPACT
+======================================================================
+Attack Stage: Execution
+  Description: Suspicious execution behavior
+  Techniques: PowerShell or script abuse
+  Business Impact: Potential pivot or malware staging
+  Urgency: MEDIUM
+
+======================================================================
+SECTION 4: STEP-BY-STEP FORENSIC COLLECTION PLAYBOOK
+======================================================================
+Domain: ENDPOINT - Tools optimized for this investigation type
+
+  • KAPE
+    Purpose: Fast forensic artifact collection
+    Command: kape.exe --tsource C: --tdest D:\Evidence --module RegistryASEPs,RegistryHives
+
+  • RegRipper
+    Purpose: Registry hive parsing
+    Command: rip.exe -r NTUSER.DAT -p userassist
+
+  • Registry Explorer
+    Purpose: GUI registry browsing
+    Command: RegistryExplorer.exe
+
+  • Volatility 3
+    Purpose: Memory forensics
+    Command: vol.py -f memdump.raw windows.pslist
+
+  • FTK Imager
+    Purpose: Disk imaging
+    Command: ftkimager.exe --source PhysicalDrive0 --dest D:\image.dd
+
+======================================================================
+SECTION 5: REQUIRED LOGS (MITRE-Mapped)
+======================================================================
+MITRE T1055: Process Injection
+  Why: Process injection requires opening a target process handle and creating remote threads.
+  Required Logs:
+    • Sysmon Event 10 (Process Access)
+    • Sysmon Event 8 (CreateRemoteThread)
+    • Event 4688 (Process Creation with command line)
+    • EDR process telemetry
+
+MITRE T1059.001: PowerShell
+  Why: PowerShell has dedicated telemetry that captures script content.
+  Required Logs:
+    • PowerShell 4104 (Script Block Logging)
+    • PowerShell 4103 (Module Logging)
+    • Event 4688 (powershell.exe creation)
+    • Sysmon Event 1 (powershell.exe)
+
+======================================================================
+SECTION 6: DECISION CRITERIA
+======================================================================
+DREAD Score: 8.5/10
+
+ALLOWLIST if ALL of:
+  - Signed by trusted publisher
+  - No historical malicious outcomes
+  - DREAD < 4.0
+  - Known legitimate process path
+
+ESCALATE to Tier 3 if ANY of:
+  - Historical confirmed malicious match
+  - DREAD >= 7.0
+  - Credential dumping or lateral movement indicators
+  - Active C2 communication
+
+======================================================================
+SECTION 7: FULL ARTIFACT DATA
+======================================================================
+{
+  "process_name": "powershell.exe",
+  "host": "WORKSTATION-042",
+  "user": "admin",
+  "sha256": "9bf41199f05fa1de8be5b84c6ef6e0a37f7b3d3f7a6e5d4c3b2a1f0e9d8c7b6a",
+  "factors": [
+    "process_injection",
+    "unsigned_binary",
+    "cmdline_obfuscation"
+  ],
+  "file_path": "C:/Windows/Temp/update.ps1"
+}
+
+======================================================================
+SECTION 8: PIPELINE ENRICHMENT
+======================================================================
+{
+  "dread": 8.5,
+  "mitre": [
+    "T1055",
+    "T1059.001"
+  ],
+  "correlation": 0.82,
+  "attack_patterns": null
+}
+
+======================================================================
+INSTRUCTIONS
+======================================================================
+Based on ALL context above, provide:
+  1. Verdict: INVESTIGATE / ESCALATE / SHELF / BENIGN
+  2. Confidence: 0-100%
+  3. Reasoning: 2-3 sentences explaining decision
+  4. Next Steps: 3-5 specific actions for analyst
+  5. Hunt Query: KQL/SPL to find similar artifacts
+
+CRITICAL:
+  - Do NOT hallucinate - only use provided data
+  - Do NOT re-derive MITRE/DREAD - already calculated
+  - Do reference historical outcomes if present
+  - Do provide copy-paste commands from playbook

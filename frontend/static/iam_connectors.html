@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>IAM Connectors</title>
+  <link rel="stylesheet" href="/static/css/tokens.css"/>
+  <link rel="stylesheet" href="/static/css/components.css"/>
+  <style>
+    .actions-row{display:flex;flex-wrap:wrap;gap:var(--space-2);margin-bottom:var(--space-3)}
+    .btn{background:var(--color-bg-tertiary);border:1px solid var(--color-border);color:var(--color-text-secondary);padding:6px 12px;border-radius:var(--radius-sm);cursor:pointer;font-size:var(--font-size-sm)}
+    .btn:hover{background:var(--color-bg-hover);color:var(--color-text-primary)}
+    .connector-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:var(--space-3)}
+    .connector-card .panel-header{display:flex;justify-content:space-between;align-items:flex-start;gap:var(--space-2)}
+    .badge{padding:2px 8px;font-size:var(--font-size-xs);border-radius:999px;background:var(--color-bg-hover);color:var(--color-text-secondary)}
+    .field-group{display:flex;flex-direction:column;margin-top:var(--space-2)}
+    .field-group input{background:var(--color-bg-secondary);border:1px solid var(--color-border);color:var(--color-text-primary);padding:7px;border-radius:var(--radius-sm)}
+    .field-group label{font-size:var(--font-size-xs);color:var(--color-text-muted);margin-bottom:4px}
+    .hint{font-size:var(--font-size-xs);color:var(--color-text-muted)}
+    .meta-block{margin-top:var(--space-2);font-size:var(--font-size-xs);line-height:1.5;color:var(--color-text-secondary)}
+    .meta-block code{background:var(--color-bg-secondary);padding:2px 4px;border-radius:var(--radius-xs);font-size:var(--font-size-xs)}
+    .panel.warning{border-color:#a1662f;background:#21160d}
+    .loading{padding:var(--space-3);text-align:center;color:var(--color-text-muted)}
+    .status-pill{display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;font-size:var(--font-size-xs);min-height:20px}
+    .status-pill.ok{background:#17391d;color:#9ee6a4;border:1px solid #2c5b33}
+    .status-pill.warn{background:#3b1c11;color:#ffb38c;border:1px solid #a1662f}
+    .heartbeat-block{margin-top:var(--space-3);padding:10px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-bg-tertiary)}
+    .heartbeat-block label{font-size:var(--font-size-xs);color:var(--color-text-muted)}
+    .heartbeat-inline{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:6px}
+    .heartbeat-inline input{width:120px}
+    .missing-alert{margin-bottom:8px;padding:8px;border-radius:var(--radius-sm);border:1px solid #a1662f;background:#2b180c}
+    .missing-alert strong{display:block;margin-bottom:4px}
+    .ticket-pill{display:inline-flex;align-items:center;border-radius:999px;padding:2px 8px;font-size:10px;margin:2px 4px 0 0;border:1px solid #1f3947;background:#142029;color:#b7d5ff}
+    .ticket-pill.ok{border-color:#1f5130;background:#102114;color:#8de39b}
+    .ticket-pill.error{border-color:#8f3d2a;background:#35120b;color:#ffb089}
+  </style>
+</head>
+<body class="with-topbar">
+  <a href="#contentRoot" class="skip-link">Skip to content</a>
+  <div class="page-root" id="contentRoot">
+    <div class="actions-row">
+      <a class="btn" href="/static/janusec-platform-complete-LIVE.html">ƒ+? Console</a>
+      <a class="btn" href="/static/hunt_network.html">Network Hunt</a>
+      <a class="btn" href="/static/hunt_endpoint.html">Endpoint Hunt</a>
+      <a class="btn" href="/static/metrics.html">Metrics</a>
+      <a class="btn" href="/static/sbom.html">SBOM</a>
+      <a class="btn" href="/static/iam.html">IAM Risk</a>
+    </div>
+    <h2 class="mt-0">IAM Connectors & Credentials</h2>
+    <p class="text-muted" style="max-width:860px">
+      Provide real API credentials and webhook secrets for Okta, Azure AD, SailPoint, Active Directory, Ping, OneLogin and related IAM sources.
+      Secrets are stored server-side under <code>artifacts/config/iam_connectors.json</code> and never echoed back—each card only reports whether a secret exists.
+      After saving, restart the relevant connector workers or refresh the CSV multi-analyzer so HopGraph sessions can pull the telemetry in real time.
+    </p>
+    <div id="missingLogsPanel" class="panel warning" style="display:none;margin-bottom:var(--space-3)">
+      <h3 class="mt-0">Missing IAM Telemetry</h3>
+      <div class="hint">These connectors are outside their heartbeat TTL. Validate credentials, replay logs, or pause ingestion before SOAR playbooks escalate.</div>
+      <div id="missingLogsList" class="small" style="margin-top:var(--space-2)"></div>
+    </div>
+    <div id="connectorsGrid" class="connector-grid" aria-live="polite">
+      <div class="panel loading">Loading connector definitions…</div>
+    </div>
+    <div class="panel warning" style="margin-top:var(--space-4)">
+      <h3 class="mt-0">Deployment checklist</h3>
+      <ul style="margin:var(--space-2) 0 var(--space-1) 1.2rem">
+        <li>Configure <strong>real Okta / Azure credentials in environment variables</strong> (e.g. <code>OKTA_API_TOKEN</code>, <code>AAD_CLIENT_SECRET</code>) before toggling webhooks or pollers. The backend re-reads env on restart.</li>
+        <li><strong>Wire tenant-specific headers/secrets</strong> for production webhooks. Use the generated callback URLs plus your tenant’s <code>x-api-key</code> so IAM events land in the right runtime partition.</li>
+        <li>HopGraph &amp; the 21-stage pipeline automatically consume these connector events. Missing telemetry triggers the amber “Missing logs” indicator below.</li>
+      </ul>
+      <p class="hint">Need additional connectors (e.g. Duo, CyberArk)? Drop the API keys here now and extend the <code>CONNECTOR_DEFINITIONS</code> helper later without changing the UI.</p>
+    </div>
+  </div>
+  <script>
+    const state = { connectors: [], tenant: null, missingAlerts: [] };
+    const API_ROOT = '/api/v1/iam/connectors';
+    function escapeHtml(val) {
+        if (val === undefined || val === null) return '';
+        return String(val).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    function ticketProviders(ticket) {
+        if (!ticket) return [];
+        const providers = ticket.providers || (ticket.result && ticket.result.providers);
+        return Array.isArray(providers) ? providers : [];
+    }
+
+    function renderTicketMeta(ticket) {
+        if (!ticket) return '';
+        const providers = ticketProviders(ticket);
+        if (!providers.length) {
+            const status = ticket.status || (ticket.result && ticket.result.status) || 'pending';
+            return `<div class="hint">SOAR ticket ${escapeHtml(ticket.action || 'ticket.create')} status: ${escapeHtml(status)}</div>`;
+        }
+        const pills = providers.map(entry => {
+            const label = entry.provider || 'provider';
+            const state = entry.error || (entry.result && (entry.result.status || entry.result.code)) || 'sent';
+            const klass = entry.error ? 'ticket-pill error' : 'ticket-pill ok';
+            return `<span class="ticket-pill ${klass}">${escapeHtml(`${label}: ${state}`)}</span>`;
+        }).join('');
+        return `<div class="hint">Auto-ticket dispatched (${escapeHtml(ticket.action || 'ticket.create')}): ${pills}</div>`;
+    }
+
+    function authHeaders() {
+        const headers = {'Content-Type': 'application/json'};
+        const key = localStorage.getItem('apiKey') || 'devkey123';
+        headers['x-api-key'] = key;
+        const tenant = localStorage.getItem('tenantId');
+        if (tenant) headers['x-tenant-id'] = tenant;
+        return headers;
+    }
+
+    function showToast(msg, duration) {
+        const d = duration || 3200;
+        try {
+            if (window.notifications?.showToast) {
+                window.notifications.showToast(msg, d);
+                return;
+            }
+        } catch (_) {}
+        console.log('[toast]', msg);
+    }
+
+    function buildField(def, connectorId, valueObj) {
+        const inputId = `${connectorId}__${def.name}`;
+        const stored = valueObj?.[def.name];
+        const isSecret = !!(def.secret || /secret|token|password|key/i.test(def.name));
+        let value = '';
+        let placeholder = def.placeholder || '';
+        let secretHint = '';
+        if (isSecret) {
+            const present = stored && stored.present;
+            if (present) {
+                placeholder = '••••• stored – leave blank to keep';
+                secretHint = '<span class="hint">Secret stored. Enter a new value to rotate or leave blank to keep.</span>';
+            }
+        } else if (stored !== undefined && stored !== null) {
+            value = stored;
+        }
+        return `
+          <div class="field-group">
+            <label for="${inputId}">${def.label}${def.required ? ' *' : ''}</label>
+            <input id="${inputId}" data-field="${def.name}" data-connector="${connectorId}" type="${isSecret ? 'password' : def.type || 'text'}" value="${value || ''}" placeholder="${placeholder}" autocomplete="off"/>
+            ${secretHint}
+          </div>
+        `;
+    }
+
+    function describeHealth(health) {
+        if (!health) return '';
+        if (health.missing_log) {
+            const idle = typeof health.seconds_since_event === 'number' ? formatAgo(health.seconds_since_event) : 'unknown';
+            return `Missing logs (${idle} idle)`;
+        }
+        if (typeof health.seconds_since_event === 'number') {
+            if (typeof health.seconds_until_deadline === 'number' && health.seconds_until_deadline > 0) {
+                return `Healthy (${formatAgo(health.seconds_until_deadline)} until TTL)`;
+            }
+            return `Last ingest ${formatAgo(health.seconds_since_event)} ago`;
+        }
+        return 'Awaiting telemetry';
+    }
+
+    function formatAgo(seconds) {
+        if (seconds == null) return 'never';
+        if (seconds < 60) return `${Math.round(seconds)}s`;
+        if (seconds < 3600) return `${Math.round(seconds / 60)}m`;
+        if (seconds < 86400) return `${Math.round(seconds / 3600)}h`;
+        return `${Math.round(seconds / 86400)}d`;
+    }
+
+    function connectorTemplate(conn) {
+        const config = conn.config || {};
+        const fieldMarkup = (conn.fields || []).map(f => buildField(f, conn.id, config)).join('');
+        const webhook = conn.webhook;
+        const api = conn.api || {};
+        const envEntries = api.env ? Object.entries(api.env) : [];
+        const health = conn.health || null;
+        const statusText = describeHealth(health);
+        const statusPill = statusText ? `<span class="status-pill ${health?.missing_log ? 'warn' : 'ok'}">${statusText}</span>` : '';
+        const ttlInputId = `${conn.id}__ttl_input`;
+        const ttlStatusId = `${conn.id}__ttl_status`;
+        const ttlSeconds = Math.round(health?.ttl_seconds ?? health?.default_ttl ?? 300);
+        const heartbeatBlock = health ? `
+          <div class="heartbeat-block">
+            <label>Heartbeat TTL (seconds)</label>
+            <div class="heartbeat-inline">
+              <input id="${ttlInputId}" type="number" min="60" step="30" value="${ttlSeconds}" data-heartbeat-input="${conn.id}" autocomplete="off"/>
+              <button class="btn" data-action="save-heartbeat" data-connector="${conn.id}" data-input="${ttlInputId}" data-status="${ttlStatusId}">Update TTL</button>
+              ${health.override_ttl ? `<button class="btn" data-action="reset-heartbeat" data-connector="${conn.id}" data-input="${ttlInputId}" data-status="${ttlStatusId}">Reset to default</button>` : ''}
+            </div>
+            <div class="hint" id="${ttlStatusId}">${health.ttl_source === 'override' ? `Override ${Math.round(health.ttl_seconds || ttlSeconds)}s` : `Using default ${Math.round(health.default_ttl || ttlSeconds)}s`}</div>
+          </div>` : '';
+        const webhookBlock = webhook ? `
+          <div class="meta-block">
+            <strong>Webhook:</strong> <code>${webhook.endpoint}</code><br/>
+            ${webhook.headers ? `<span class="hint">Required headers: ${webhook.headers.join(', ')}</span><br/>` : ''}
+            <span class="hint">${webhook.notes || ''}</span>
+          </div>` : '';
+        const apiBlock = api.poll_endpoint ? `
+          <div class="meta-block">
+            <strong>Polling endpoint:</strong> <code>${api.poll_endpoint}</code>
+          </div>` : '';
+        const envBlock = envEntries.length ? `
+          <div class="meta-block">
+            <strong>Environment variables</strong>
+            <ul style="margin:4px 0 0 1.2rem">
+              ${envEntries.map(([field, env]) => `<li><code>${env}</code> ← ${field}</li>`).join('')}
+            </ul>
+          </div>` : '';
+        return `
+          <section class="panel connector-card" data-connector-card="${conn.id}">
+            <div class="panel-header">
+              <div>
+                <h3 class="mt-0 mb-0">${conn.label}</h3>
+                <p class="text-muted" style="margin:4px 0 0">${conn.description || ''}</p>
+              </div>
+              <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">
+                <span class="badge">${conn.category || ''}</span>
+                ${statusPill}
+              </div>
+            </div>
+            <div class="panel-body">
+              ${fieldMarkup}
+              ${apiBlock}
+              ${webhookBlock}
+              ${envBlock}
+              ${heartbeatBlock}
+              <div class="actions-row" style="margin-top:var(--space-2)">
+                <button class="btn" data-action="save" data-connector="${conn.id}">Save Credentials</button>
+                ${webhook ? `<button class="btn" data-action="copy-webhook" data-endpoint="${webhook.endpoint}">Copy Webhook URL</button>` : ''}
+              </div>
+            </div>
+          </section>
+        `;
+    }
+
+    function renderConnectors() {
+        const grid = document.getElementById('connectorsGrid');
+        if (!state.connectors.length) {
+            grid.innerHTML = '<div class="panel">No connectors defined yet.</div>';
+            return;
+        }
+        grid.innerHTML = state.connectors.map(connectorTemplate).join('');
+        grid.querySelectorAll('[data-action="save"]').forEach(btn => {
+            btn.addEventListener('click', () => submitConnector(btn.dataset.connector));
+        });
+        grid.querySelectorAll('[data-action="copy-webhook"]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const endpoint = btn.dataset.endpoint;
+                if (!endpoint) return;
+                const fullUrl = `${location.origin}${endpoint}`;
+                navigator.clipboard?.writeText(fullUrl).then(() => showToast('Webhook URL copied')).catch(() => {
+                    showToast('Webhook URL: ' + fullUrl, 5000);
+                });
+            });
+        });
+        grid.querySelectorAll('[data-action="save-heartbeat"]').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const connectorId = btn.dataset.connector;
+                const input = document.getElementById(btn.dataset.input || '');
+                if (!connectorId || !input) return;
+                const raw = input.value.trim();
+                if (!raw) {
+                    showToast('Enter a TTL value (>=60 seconds)', 4000);
+                    return;
+                }
+                const ttl = Number(raw);
+                if (!Number.isFinite(ttl) || ttl < 60) {
+                    showToast('TTL must be at least 60 seconds', 4000);
+                    return;
+                }
+                const statusEl = btn.dataset.status ? document.getElementById(btn.dataset.status) : null;
+                await submitHeartbeat(connectorId, ttl, statusEl);
+            });
+        });
+        grid.querySelectorAll('[data-action="reset-heartbeat"]').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const connectorId = btn.dataset.connector;
+                const input = document.getElementById(btn.dataset.input || '');
+                if (!connectorId || !input) return;
+                const statusEl = btn.dataset.status ? document.getElementById(btn.dataset.status) : null;
+                await submitHeartbeat(connectorId, null, statusEl);
+                const conf = state.connectors.find(c => c.id === connectorId);
+                const fallback = Math.round(conf?.health?.default_ttl ?? 300);
+                input.value = fallback;
+            });
+        });
+    }
+
+    function renderMissingAlerts(alerts) {
+        const panel = document.getElementById('missingLogsPanel');
+        const list = document.getElementById('missingLogsList');
+        if (!panel || !list) return;
+        if (!alerts || !alerts.length) {
+            panel.style.display = 'none';
+            list.innerHTML = '';
+            return;
+        }
+        panel.style.display = 'block';
+        list.innerHTML = alerts.map(alert => {
+            const idle = typeof alert.seconds_since_event === 'number' ? formatAgo(alert.seconds_since_event) : 'unknown';
+            const ttl = typeof alert.ttl_seconds === 'number' ? formatAgo(alert.ttl_seconds) : 'n/a';
+            const recs = (alert.recommendations || []).map(r => `<li>${r}</li>`).join('');
+            return `<div class="missing-alert">
+                <strong>${alert.label || alert.connector}</strong>
+                <div class="hint">Idle ${idle} • TTL ${ttl}</div>
+                <ul style="margin:6px 0 0 1.1rem">${recs || '<li>Investigate ingestion worker</li>'}</ul>
+                ${renderTicketMeta(alert.auto_ticket)}
+            </div>`;
+        }).join('');
+    }
+
+    function collectConfig(connectorId) {
+        const card = document.querySelector(`[data-connector-card="${connectorId}"]`);
+        if (!card) return {};
+        const config = {};
+        card.querySelectorAll('input[data-field]').forEach(input => {
+            const name = input.dataset.field;
+            const isSecret = input.type === 'password';
+            const value = input.value.trim();
+            if (isSecret && !value) return;
+            config[name] = value;
+        });
+        return config;
+    }
+
+    async function submitHeartbeat(connectorId, ttlValue, statusEl) {
+        try {
+            const payload = {connector: connectorId, tenant_id: state.tenant, ttl_seconds: ttlValue};
+            const res = await (window.safeFetch || fetch)(`${API_ROOT}/heartbeat`, {
+                method: 'POST',
+                headers: authHeaders(),
+                body: JSON.stringify(payload),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                throw new Error(data.detail || res.statusText);
+            }
+            if (statusEl) {
+                statusEl.textContent = data.overridden
+                    ? `Override ${Math.round(data.ttl_seconds || 0)}s`
+                    : `Using default ${Math.round(data.default_ttl || 0)}s`;
+            }
+            showToast('Heartbeat TTL updated');
+            await loadConnectors();
+        } catch (err) {
+            if (statusEl) statusEl.textContent = `Update failed: ${err?.message || err}`;
+            showToast(`Heartbeat update failed: ${err?.message || err}`, 4000);
+        }
+    }
+
+    async function submitConnector(connectorId) {
+        try {
+            const config = collectConfig(connectorId);
+            const payload = {connector: connectorId, tenant_id: state.tenant, config};
+            const res = await (window.safeFetch || fetch)(`${API_ROOT}/config`, {
+                method: 'POST',
+                headers: authHeaders(),
+                body: JSON.stringify(payload),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                showToast(`Save failed: ${data.detail || res.status}`, 4000);
+                return;
+            }
+            if (data.saved === false) {
+                showToast('No changes detected', 2500);
+            } else {
+                showToast('Connector saved');
+                await loadConnectors();
+            }
+        } catch (err) {
+            showToast(`Save error: ${err?.message || err}`, 4000);
+        }
+    }
+
+    async function loadConnectors() {
+        const grid = document.getElementById('connectorsGrid');
+        grid.innerHTML = '<div class="panel loading">Loading connector definitions…</div>';
+        try {
+            const res = await (window.safeFetch || fetch)(`${API_ROOT}/status?include_health=1`, {
+                headers: authHeaders(),
+            });
+            if (!res.ok) {
+                const text = await res.text();
+                throw new Error(text || res.statusText);
+            }
+            const data = await res.json();
+            state.connectors = data.connectors || [];
+            state.tenant = data.tenant || localStorage.getItem('tenantId') || 'default';
+            state.missingAlerts = data.missing_alerts || [];
+            renderConnectors();
+            renderMissingAlerts(state.missingAlerts);
+        } catch (err) {
+            grid.innerHTML = `<div class="panel">Failed to load connectors: ${err?.message || err}</div>`;
+            renderMissingAlerts([]);
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', loadConnectors);
+  </script>
+  <script src="/static/js/notifications.js"></script>
+</body>
+</html>

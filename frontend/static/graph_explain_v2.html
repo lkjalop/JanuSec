@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Attack Graph (Interactive)</title>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <style>
+    body{ font-family:Inter,Segoe UI, system-ui; background:#0B0E14; color:#E8EBF0; margin:0; padding:20px 260px 40px 260px; }
+    header{ display:flex; justify-content:space-between; align-items:center; margin-bottom:12px }
+    .controls{ display:flex; gap:8px; align-items:center }
+    .btn{ background:transparent;border:1px solid rgba(255,255,255,0.06);padding:8px 12px;color:#E8EBF0;border-radius:6px;cursor:pointer }
+    #graph{ width:100%; height:720px; background:#071018; border:1px solid rgba(255,255,255,0.04); border-radius:8px }
+    .node circle { stroke: #111; stroke-width: 1.5px; }
+    .tooltip { position:absolute; background:#111; border:1px solid #333; padding:8px; border-radius:6px; color:#fff; font-size:13px; pointer-events:none; display:none }
+    /* Minimap */
+    #minimap{ position:absolute; right:36px; bottom:36px; width:200px; height:140px; background:rgba(10,12,16,0.9); border:1px solid rgba(255,255,255,0.04); border-radius:6px; padding:6px; z-index:2000 }
+    #minimap canvas{ width:100%; height:100%; display:block }
+    .legend{ display:flex; gap:8px; align-items:center }
+    .legend .item{ display:flex; gap:6px; align-items:center; font-size:12px; color:#A8B3C3 }
+    .highlighted{ filter: drop-shadow(0 0 6px rgba(74,99,231,0.6)); }
+    .faded{ opacity:0.12 !important }
+  </style>
+</head>
+<body>
+  <header>
+    <h2 style="margin:0">Interactive Attack Graph (Lite)</h2>
+    <div class="controls">
+      <select id="severityFilter"><option value="all">All Severities</option><option value="critical">Critical</option><option value="high">High+</option></select>
+      <select id="timeRange"><option value="24h">24h</option><option value="7d">7d</option></select>
+        <button id="exportPNG" class="btn">Export PNG</button>
+        <button id="exportJSON" class="btn">Export JSON</button>
+        <button id="playTimeline" class="btn">Play Replay</button>
+        <input id="timelineRange" type="range" min="0" max="100" value="0" style="width:180px" aria-label="Timeline scrubber">
+    </div>
+  </header>
+
+  <div id="graph"></div>
+  <div id="minimap" aria-hidden="false" title="Minimap overview"><canvas id="minimapCanvas"></canvas></div>
+  <div id="tooltip" class="tooltip"></div>
+
+  <div style="position:relative;margin-top:8px;display:flex;gap:12px;align-items:center">
+    <div class="legend" id="graphLegend" aria-hidden="false"></div>
+    <label style="color:#A8B3C3;font-size:13px;"><input type="checkbox" id="clusterToggle"> Cluster by type</label>
+    <label style="color:#A8B3C3;font-size:13px;"><input type="checkbox" id="deterministicToggle"> Deterministic layout (seed)</label>
+    <button id="exportSVG" class="btn">Export SVG</button>
+    <button id="exportJSON" class="btn">Export JSON</button>
+  </div>
+
+  <script>
+  async function loadGraph(){
+    // Try to fetch an explain artifact; fallback to sample graph
+    let data = null;
+    try{ const r = await fetch('/api/v1/graph/explain/sample', { headers: { 'x-api-key': localStorage.getItem('apiKey')||'devkey123' } }); if(r.ok) data = await r.json(); }catch(e){}
+    if(!data){ data = sampleGraph(); }
+    renderGraph(data.nodes || [], data.edges || []);
+  }
+
+  function sampleGraph(){ return {
+      nodes: [ {id:'n1', label:'Process: explorer.exe', type:'process', importance:1, risk:'low'}, {id:'n2', label:'File: payload.exe', type:'file', importance:1.2, risk:'high'}, {id:'n3', label:'Host: WS-001', type:'host', importance:1.6, risk:'critical'}, {id:'n4', label:'Network: evil.com', type:'network', importance:1.0, risk:'high'} ],
+      edges: [ {source:'n1', target:'n2', weight:1}, {source:'n2', target:'n3', weight:1}, {source:'n3', target:'n4', weight:1} ] } }
+
+  function renderGraph(nodes, links){
+    const width = document.getElementById('graph').clientWidth;
+    const height = document.getElementById('graph').clientHeight;
+    const svg = d3.select('#graph').append('svg').attr('width', '100%').attr('height', height).attr('viewBox', `0 0 ${width} ${height}`).attr('role','application').attr('aria-label','Attack Graph');
+    const g = svg.append('g');
+
+    const colorMap = { process:'#4A63E7', file:'#e67e22', network:'#9b59b6', host:'#e74c3c', user:'#1abc9c' };
+    // Contrast helper: ensure at least 4.5:1 against background
+    function ensureContrast(hex, bg='#071018'){
+      try{
+        const toRgb = (h)=>{ const s = h.replace('#',''); return [parseInt(s.substring(0,2),16), parseInt(s.substring(2,4),16), parseInt(s.substring(4,6),16)]; };
+        const lum = (rgb)=>{ const s = rgb.map(c=>{ const v = c/255; return v<=0.03928? v/12.92 : Math.pow((v+0.055)/1.055,2.4); }); return 0.2126*s[0]+0.7152*s[1]+0.0722*s[2]; };
+        const a = lum(toRgb(hex)); const b = lum(toRgb(bg)); const ratio = (Math.max(a,b)+0.05)/(Math.min(a,b)+0.05);
+        if(ratio >= 4.5) return hex;
+        // lighten color to increase contrast
+        const lighten = (h,amt)=>{ const s=h.replace('#',''); return '#'+[0,2,4].map((i)=>{ const v = Math.min(255, Math.round(parseInt(s.substring(i,i+2),16) + amt)); return v.toString(16).padStart(2,'0'); }).join(''); };
+        return lighten(hex,40);
+      }catch(e){ return hex; }
+    }
+
+    const simulation = d3.forceSimulation(nodes)
+      .force('link', d3.forceLink(links).id(d=>d.id).distance(120).strength(1))
+      .force('charge', d3.forceManyBody().strength(-300))
+      .force('center', d3.forceCenter(width/2, height/2))
+      .force('collision', d3.forceCollide().radius(d=> (d.importance||1)*18 ));
+
+    // draw curved links with gradients for direction + weight
+    const defs = svg.append('defs');
+    links.forEach((l,i)=>{
+      const gid = `grad-${i}`;
+      const grad = defs.append('linearGradient').attr('id', gid).attr('gradientUnits','userSpaceOnUse');
+      grad.append('stop').attr('offset','0%').attr('stop-color', colorMap[(l.source && l.source.type)||l.type] || '#95a5a6').attr('stop-opacity',1);
+      grad.append('stop').attr('offset','100%').attr('stop-color', colorMap[(l.target && l.target.type)||l.type] || '#95a5a6').attr('stop-opacity',1);
+      l._gradId = gid;
+    });
+    const link = g.append('g').attr('stroke-opacity',0.9).selectAll('path').data(links).enter().append('path').attr('fill','none').attr('stroke', d=>`url(#${d._gradId})`).attr('stroke-width', d=> Math.max(1,d.weight||1)).attr('class','edge');
+
+    // clustering support: create synthetic cluster nodes when enabled
+    let clustered = false;
+    const expandedTypes = new Set();
+
+    function buildView(clusteredFlag){
+      // produce viewNodes/viewLinks from original nodes/links, considering expandedTypes
+      if(!clusteredFlag){
+        return { viewNodes: nodes.map(n=>Object.assign({},n)), viewLinks: links.map(l=>Object.assign({},l)) };
+      }
+      // cluster by type, but preserve expanded types
+      const map = {}; const typeToClusterId = {};
+      nodes.forEach(n=>{ const k = n.type||'other'; if(expandedTypes.has(k)) return; if(!map[k]) map[k]={ id:`cluster-${k}`, type:k, label:`${k} (0)`, members:[], importance:0 }; map[k].members.push(n); map[k].importance += (n.importance||1); });
+      Object.keys(map).forEach(k=>{ map[k].label = `${k} (${map[k].members.length})`; typeToClusterId[k] = map[k].id; });
+      const viewNodes = [];
+      // include clusters and expanded members and non-clustered members
+      nodes.forEach(n=>{ if(typeToClusterId[n.type]){ /* handled by cluster */ } else { viewNodes.push(Object.assign({},n)); } });
+      Object.values(map).forEach(c=> viewNodes.push(Object.assign({},c)));
+      // build viewLinks by mapping endpoints to cluster IDs when applicable
+      const viewLinksMap = new Map();
+      links.forEach(l=>{
+        const s = (l.source && (l.source.id||l.source)) || l.source;
+        const t = (l.target && (l.target.id||l.target)) || l.target;
+        const sNode = nodes.find(n=>n.id===s);
+        const tNode = nodes.find(n=>n.id===t);
+        const sKey = sNode && typeToClusterId[sNode.type] ? typeToClusterId[sNode.type] : s;
+        const tKey = tNode && typeToClusterId[tNode.type] ? typeToClusterId[tNode.type] : t;
+        const key = `${sKey}→${tKey}`;
+        if(!viewLinksMap.has(key)) viewLinksMap.set(key, { source:sKey, target:tKey, weight:0 });
+        viewLinksMap.get(key).weight += (l.weight||1);
+      });
+      const viewLinks = Array.from(viewLinksMap.values());
+      return { viewNodes, viewLinks };
+    }
+
+    // containers for dynamic update
+    const linkLayer = g.append('g').attr('class','links');
+    const nodeLayer = g.append('g').attr('class','nodes');
+
+    let view = buildView(clustered);
+    let viewNodes = view.viewNodes;
+    let viewLinks = view.viewLinks;
+
+    function draw(){
+      // rebuild defs for gradients
+      defs.selectAll('*').remove();
+      viewLinks.forEach((l,i)=>{ const gid = `grad-${i}`; const grad = defs.append('linearGradient').attr('id', gid).attr('gradientUnits','userSpaceOnUse'); grad.append('stop').attr('offset','0%').attr('stop-color', colorMap[(l.source && l.source.type)||l.type] || '#95a5a6'); grad.append('stop').attr('offset','100%').attr('stop-color', colorMap[(l.target && l.target.type)||l.type] || '#95a5a6'); l._gradId = gid; });
+
+      // links
+      const linksSel = linkLayer.selectAll('path.edge').data(viewLinks, d=>`${d.source}→${d.target}`);
+      linksSel.exit().remove();
+      linksSel.enter().append('path').attr('class','edge').attr('fill','none').attr('stroke', d=>`url(#${d._gradId})`).attr('stroke-width', d=> Math.max(1,d.weight||1));
+
+      // nodes
+      const nodesSel = nodeLayer.selectAll('g.node').data(viewNodes, d=>d.id);
+      nodesSel.exit().remove();
+      const entered = nodesSel.enter().append('g').attr('class','node').attr('tabindex',0).attr('role','button').attr('aria-label', d=> (d.label||d.id)).call(d3.drag().on('start', dragstarted).on('drag', dragged).on('end', dragended));
+      entered.append('circle').attr('r', d=> (d.importance||1)*10 ).attr('fill', d=> ensureContrast(colorMap[d.type]||'#95a5a6'));
+      entered.append('text').text(d=>d.label).attr('x',14).attr('y',4).style('font-size','12px').style('fill','#E8EBF0');
+
+      // merge and attach events
+      const allNodes = entered.merge(nodesSel);
+      allNodes.on('mouseover', (event,d)=>{ const t = document.getElementById('tooltip'); t.style.display='block'; t.innerHTML = `<strong>${d.label}</strong><br/>Type: ${d.type || d.type || 'cluster'}<br/>Members: ${d.members? d.members.length: 'n/a'}`; }).on('mousemove', (event)=>{ const t = document.getElementById('tooltip'); t.style.left = (event.pageX+12)+'px'; t.style.top = (event.pageY+12)+'px'; }).on('mouseout', ()=>{ const t = document.getElementById('tooltip'); t.style.display='none'; });
+      allNodes.on('click', (event,d)=>{ event.stopPropagation(); if(d.id && d.id.startsWith('cluster-')){ // toggle expansion for this type
+          const typ = d.type; if(expandedTypes.has(typ)){ expandedTypes.delete(typ); } else { expandedTypes.add(typ); } view = buildView(clustered); viewNodes = view.viewNodes; viewLinks = view.viewLinks; restartSimulation(); draw(); } else { togglePin(d); highlightPaths(d); } });
+      allNodes.on('keydown', (event,d)=>{ if(event.key==='Enter'){ event.preventDefault(); if(d.id && d.id.startsWith('cluster-')){ const typ = d.type; expandedTypes.add(typ); view = buildView(clustered); viewNodes = view.viewNodes; viewLinks = view.viewLinks; restartSimulation(); draw(); } else toggleExpand(d); } if(event.key===' '||event.key==='Spacebar'){ event.preventDefault(); togglePin(d); } });
+
+      // links events
+      linkLayer.selectAll('path.edge').on('mouseover', (event,d)=>{ /* optional link tooltip */ }).on('mouseout', ()=>{});
+    }
+
+    // simulation managed separately to allow restart
+    let simulationView = d3.forceSimulation().force('link', d3.forceLink().id(d=>d.id).distance(120).strength(1)).force('charge', d3.forceManyBody().strength(-300)).force('center', d3.forceCenter(width/2, height/2)).force('collision', d3.forceCollide().radius(d=> (d.importance||1)*18 ));
+
+    function restartSimulation(){
+      simulationView.nodes(viewNodes);
+      simulationView.force('link').links(viewLinks);
+      simulationView.alpha(1).restart();
+      simulationView.on('tick', ()=>{
+        linkLayer.selectAll('path.edge').attr('d', d=>{ const s = viewNodes.find(n=>n.id===d.source) || {x:0,y:0}; const t = viewNodes.find(n=>n.id===d.target) || {x:0,y:0}; const sx=s.x, sy=s.y, tx=t.x, ty=t.y; const qx = sx + (tx-sx)*0.5 + (ty-sy)*0.12; const qy = sy + (ty-sy)*0.5 - (tx-sx)*0.12; return `M${sx},${sy} Q${qx},${qy} ${tx},${ty}`; });
+        nodeLayer.selectAll('g.node').attr('transform', d=>`translate(${d.x},${d.y})`);
+        updateMinimap();
+      });
+    }
+
+    // initial draw + start
+    draw(); view = buildView(clustered); viewNodes = view.viewNodes; viewLinks = view.viewLinks; restartSimulation();
+
+    svg.call(d3.zoom().on('zoom', (event)=>{ g.attr('transform', event.transform); updateMinimap(); }));
+
+    // make container focusable to allow keyboard navigation
+    const graphDiv = document.getElementById('graph'); graphDiv.setAttribute('tabindex', '0'); graphDiv.setAttribute('role','application');
+
+    // tick with curved link path generation
+    simulation.on('tick', ()=>{
+      link.attr('d', d=>{
+        const sx = d.source.x, sy = d.source.y, tx = d.target.x, ty = d.target.y;
+        const dx = tx - sx, dy = ty - sy; const qx = sx + dx*0.5 + (dy*0.12); const qy = sy + dy*0.5 - (dx*0.12);
+        return `M${sx},${sy} Q${qx},${qy} ${tx},${ty}`;
+      });
+      node.attr('transform', d=>`translate(${d.x},${d.y})`);
+      updateMinimap();
+    });
+
+    // highlight and path logic
+    function highlightPaths(center){
+      // compute 1-hop and multi-hop upstream/downstream sets
+      const idMap = new Map(nodes.map(n=>[n.id,n]));
+      const out = new Set(); const inSet = new Set();
+      function walkOut(id){ (links.filter(l=> (l.source.id||l.source) === id).forEach(l=>{ const t = (l.target.id||l.target); if(!out.has(t)){ out.add(t); walkOut(t); } })); }
+      function walkIn(id){ (links.filter(l=> (l.target.id||l.target) === id).forEach(l=>{ const s = (l.source.id||l.source); if(!inSet.has(s)){ inSet.add(s); walkIn(s); } })); }
+      walkOut(center.id); walkIn(center.id);
+      // fade unrelated
+      g.selectAll('.node').classed('faded', true); g.selectAll('.edge').classed('faded', true);
+      // highlight center
+      g.selectAll('.node').filter(d=> d.id === center.id).classed('faded', false).classed('highlighted', true);
+      // highlight upstream
+      g.selectAll('.node').filter(d=> inSet.has(d.id)).classed('faded', false).classed('highlighted', true);
+      // highlight downstream
+      g.selectAll('.node').filter(d=> out.has(d.id)).classed('faded', false).classed('highlighted', true);
+      // highlight edges connecting highlighted nodes
+      g.selectAll('.edge').filter(d=> inSet.has(d.source.id||d.source) || out.has(d.target.id||d.target) || (d.source.id===center.id||d.target.id===center.id)).classed('faded', false).classed('highlighted', true);
+    }
+
+    function clearHighlights(){ g.selectAll('.node').classed('faded', false).classed('highlighted', false); g.selectAll('.edge').classed('faded', false).classed('highlighted', false); }
+
+    // pinning and expand stubs
+    let _pinned = null;
+    function togglePin(d){ if(_pinned && _pinned.id===d.id){ _pinned=null; clearHighlights(); } else { _pinned=d; highlightPaths(d); } }
+    function toggleExpand(d){ // future: expand cluster or show details
+      alert('Expand: '+(d.id||d.label));
+    }
+
+    // Timeline replay / scrubber
+    let _timeline = { frames: [], playing: false, idx:0, timer:null };
+    function buildTimelineFrom(center){
+      // build simple breadth-first levels outward as frames
+      const q = [center.id]; const seen = new Set([center.id]); const frames = [];
+      while(q.length){ const level = []; const next = []; q.forEach(id=>{ level.push(id); links.forEach(l=>{ const s=(l.source.id||l.source), t=(l.target.id||l.target); if(s===id && !seen.has(t)){ seen.add(t); next.push(t); } if(t===id && !seen.has(s)){ seen.add(s); next.push(s); } }); }); frames.push(Array.from(level)); q.length = 0; next.forEach(x=> q.push(x)); }
+      // build list of nodes cumulative per frame
+      const framesCum = frames.map((f,i)=> Array.from(new Set(frames.slice(0,i+1).flat())) );
+      _timeline.frames = framesCum; _timeline.idx = 0; document.getElementById('timelineRange').max = Math.max(0, _timeline.frames.length-1); document.getElementById('timelineRange').value = 0;
+    }
+
+    function renderTimelineFrame(i){ clearHighlights(); if(!_timeline.frames.length) return; const ids = _timeline.frames[i]; g.selectAll('.node').classed('faded', true).classed('highlighted', false); g.selectAll('.edge').classed('faded', true).classed('highlighted', false);
+      g.selectAll('.node').filter(d=> ids.includes(d.id)).classed('faded', false).classed('highlighted', true);
+      // highlight edges between highlighted nodes
+      g.selectAll('.edge').filter(d=> ids.includes(d.source.id||d.source) && ids.includes(d.target.id||d.target)).classed('faded', false).classed('highlighted', true);
+      document.getElementById('timelineRange').value = i; _timeline.idx = i;
+    }
+
+    function playTimeline(){ if(_timeline.playing){ _timeline.playing=false; clearInterval(_timeline.timer); document.getElementById('playTimeline').innerText = 'Play Replay'; return; } if(!_timeline.frames.length) return; _timeline.playing=true; document.getElementById('playTimeline').innerText='Pause'; _timeline.timer = setInterval(()=>{ _timeline.idx = Math.min(_timeline.frames.length-1, _timeline.idx+1); renderTimelineFrame(_timeline.idx); if(_timeline.idx >= _timeline.frames.length-1){ clearInterval(_timeline.timer); _timeline.playing=false; document.getElementById('playTimeline').innerText='Play Replay'; } }, 700); }
+
+    document.getElementById('playTimeline').addEventListener('click', ()=>{ if(!_pinned){ alert('Select (click) a node to anchor replay.'); return; } buildTimelineFrom(_pinned); playTimeline(); });
+    document.getElementById('timelineRange').addEventListener('input', (e)=>{ const v = Number(e.target.value); renderTimelineFrame(v); });
+
+    function dragstarted(event,d){ if(!event.active) simulation.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; }
+    function dragged(event,d){ d.fx = event.x; d.fy = event.y; }
+    function dragended(event,d){ if(!event.active) simulation.alphaTarget(0); d.fx = null; d.fy = null; }
+
+    document.getElementById('exportJSON').addEventListener('click', ()=>{ const payload = { nodes: nodes.map(n=> ({ id:n.id, label:n.label, type:n.type, importance:n.importance, metadata:n })) , links: links.map(l=> ({ source: (l.source.id||l.source), target:(l.target.id||l.target), weight:l.weight, metadata:l })) }; const blob = new Blob([JSON.stringify(payload,null,2)],{type:'application/json'}); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href=url; a.download='attack_graph.json'; a.click(); });
+    document.getElementById('exportSVG').addEventListener('click', ()=>{ const svgEl = svg.node(); const serializer = new XMLSerializer(); const str = serializer.serializeToString(svgEl); const blob = new Blob([str], {type: 'image/svg+xml'}); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'attack_graph.svg'; a.click(); });
+
+    // Export PNG retained for compatibility
+    document.getElementById('exportPNG')?.addEventListener('click', ()=>{ const svgEl = svg.node(); const serializer = new XMLSerializer(); const str = serializer.serializeToString(svgEl); const img = new Image(); img.onload = ()=>{ const c = document.createElement('canvas'); c.width = width; c.height = height; const ctx = c.getContext('2d'); ctx.drawImage(img,0,0); c.toBlob(b=>{ const url = URL.createObjectURL(b); const a=document.createElement('a'); a.href=url; a.download='attack_graph.png'; a.click(); }); }; img.src = 'data:image/svg+xml;base64,'+btoa(unescape(encodeURIComponent(str))); });
+
+    // clustering toggle handler (in-place update)
+    document.getElementById('clusterToggle').addEventListener('change', (e)=>{ clustered = e.target.checked; expandedTypes.clear(); view = buildView(clustered); viewNodes = view.viewNodes; viewLinks = view.viewLinks; draw(); restartSimulation(); });
+
+    // deterministic layout toggle: re-seed forces (keeps view, restarts sim)
+    document.getElementById('deterministicToggle').addEventListener('change',(e)=>{ if(e.target.checked){ viewNodes.forEach((n,i)=>{ const seed = Array.from((n.id||String(i))).reduce((a,c)=> a*31 + c.charCodeAt(0), 1); n.x = (seed % width); n.y = ((seed*7) % height); }); } restartSimulation(); });
+
+    // minimap rendering
+    const mmCanvas = document.getElementById('minimapCanvas'); const mmCtx = mmCanvas.getContext('2d');
+    function updateMinimap(){
+      try{
+        mmCanvas.width = mmCanvas.clientWidth;
+        mmCanvas.height = mmCanvas.clientHeight;
+        mmCtx.clearRect(0,0,mmCanvas.width, mmCanvas.height);
+        const scaleX = mmCanvas.width/width;
+        const scaleY = mmCanvas.height/height;
+        // draw links (using current view nodes/links)
+        mmCtx.strokeStyle = 'rgba(200,200,200,0.08)';
+        viewLinks.forEach(l=>{
+          const sNode = viewNodes.find(n=>n.id===l.source) || {x:0,y:0};
+          const tNode = viewNodes.find(n=>n.id===l.target) || {x:0,y:0};
+          const sx = (sNode.x||0)*scaleX, sy = (sNode.y||0)*scaleY, tx = (tNode.x||0)*scaleX, ty = (tNode.y||0)*scaleY;
+          mmCtx.beginPath(); mmCtx.moveTo(sx,sy); mmCtx.quadraticCurveTo((sx+tx)/2, (sy+ty)/2, tx, ty); mmCtx.stroke();
+        });
+        // draw nodes
+        mmCtx.fillStyle='rgba(255,255,255,0.08)';
+        viewNodes.forEach(n=>{ mmCtx.beginPath(); mmCtx.arc((n.x||0)*scaleX, (n.y||0)*scaleY, Math.max(1, (n.importance||1)), 0, Math.PI*2); mmCtx.fill(); });
+        // draw viewport rectangle corresponding to current transform
+        try{
+          const transform = d3.zoomTransform(svg.node());
+          const vx = -transform.x/transform.k;
+          const vy = -transform.y/transform.k;
+          const vw = width/transform.k;
+          const vh = height/transform.k;
+          mmCtx.strokeStyle = 'rgba(120,160,255,0.6)'; mmCtx.lineWidth = 1.2;
+          mmCtx.strokeRect(vx*scaleX, vy*scaleY, vw*scaleX, vh*scaleY);
+        }catch(e){}
+      }catch(e){}
+    }
+
+    // click-to-pan on minimap: center main view on clicked point
+    mmCanvas.addEventListener('click', (ev)=>{
+      try{
+        const rect = mmCanvas.getBoundingClientRect();
+        const sx = (ev.clientX - rect.left);
+        const sy = (ev.clientY - rect.top);
+        const scaleX = mmCanvas.width/width;
+        const scaleY = mmCanvas.height/height;
+        const tx = sx/scaleX;
+        const ty = sy/scaleY;
+        const transform = d3.zoomTransform(svg.node()); const k = transform.k || 1;
+        const cx = width/2 - tx*k; const cy = height/2 - ty*k;
+        const newTransform = d3.zoomIdentity.translate(cx, cy).scale(k);
+        svg.transition().duration(350).call(d3.zoom().transform, newTransform);
+      }catch(e){}
+    });
+
+    // initial minimap paint
+    updateMinimap();
+  }
+
+  loadGraph();
+  </script>
+</body>
+</html>

@@ -1,0 +1,137 @@
+{
+  "identity:kerberos_s4u_abuse": "Kerberos S4U/NTLM edge anomalies indicating potential ticket abuse and lateral path enablement.",
+  "identity:mfa_fatigue_mismatch": "MFA push fatigue or factor mismatch (device/geo/method) and weak token binding signals.",
+  "identity:role_mutation_burst": "Burst of high-impact group/role add/remove operations with elevated blast radius.",
+  "identity:conditional_access_drift": "Conditional Access policy drift vs. asset/user criticality exposing auth strength gaps.",
+  "identity:session_stitching_anomaly": "Cross-system session stitching inconsistency (IdP/VPN/EDR/SaaS) breaking identity provenance.",
+
+  "endpoint:code_sign_trust_anomaly": "Code-signing trust chain anomaly (publisher/cert/binary) or suspicious timestamp drift.",
+  "endpoint:dll_sideload_rare_path": "DLL search-order hijack indicators: uncommon load path and unsigned module rarity.",
+  "endpoint:driver_load_rare_signature": "Rare or untrusted kernel driver/module load with suspicious behavior tags.",
+  "endpoint:lateral_exec_remote_tool": "Remote execution tools (PsExec/WMI/SCHTASKS/WinRM/SSH) tied to user/session provenance.",
+  "endpoint:persistence_surface_multi": "Unified persistence footprint (autoruns/services/tasks/keys) indicating durable foothold.",
+
+  "net:ja3_ja4_novel_pair": "Novel JA3/JA4 client-server parameter pairing suggestive of bespoke tooling.",
+  "net:sni_dns_nx_spike": "SNI↔DNS mismatch or NXDOMAIN spike correlated with tunneling heuristics.",
+  "net:tls_cert_chain_anomaly": "TLS certificate chain irregularities (CN/O/AKI/SKI, CT/OCSP/CRL) and issuer rarity.",
+  "net:flow_microcluster_exfil": "Low-and-slow flow micro-clusters with diurnal EWMA deviations consistent with exfiltration.",
+  "net:port_protocol_misuse": "Port/protocol misuse (e.g., DNS over 443) correlated to identity/asset edges.",
+
+  "cloud:cross_account_trust_chain": "Cross-account trust chains (assume-role/external IDs) enabling privilege paths.",
+  "cloud:kms_secrets_access_anomaly": "Unusual decrypt/list operations on KMS/Secrets/Vault linked to exfil paths.",
+  "cloud:serverless_trigger_exposure": "Public or risky serverless triggers exposing sensitive downstream resources.",
+  "cloud:container_ctrlplane_risky_binding": "Container control plane RBAC/Policy bindings granting excessive privileges.",
+  "cloud:egress_path_risk": "Cloud egress path patterns (NAT/IGW/PrivateLink) aligned with data-access sequences.",
+
+  "remote:handshake_reuse_key": "RDP/SSH handshake fingerprint reuse or host-key anomalies across sessions.",
+  "remote:vpn_mfa_mode_anomaly": "VPN MFA mode/bypass anomalies (device trust, split tunnel) tied to identity.",
+  "remote:jump_host_chain": "Jump-host chain traced (VPN→bastion→target) with command lineage into endpoint ops.",
+  "remote:remote_tooling_session": "Remote administration tooling session (RMM/AnyDesk/TeamViewer) linked to user sessions.",
+  "remote:geo_velocity_asn_risk": "Geo-velocity anomalies joined with ASN reputation and concurrent sessions across providers.",
+
+  "api:schema_drift_high_risk": "High-risk API surface change (OpenAPI diff) exposing authZ gaps/sensitive params.",
+  "api:client_fp_replay": "Client fingerprint and token-binding mismatch indicating token replay or reuse.",
+  "api:waf_ids_signal_join": "WAF/IDS detections joined to session graph for actor/endpoint explainability.",
+  "api:mtls_client_cert_drift": "mTLS client cert identity/issuer drift impacting service principal linkage.",
+  "api:key_lifecycle_anomaly": "API key lifecycle anomalies (leak heuristics, origin shifts, stale→burst patterns).",
+
+  "data:query_shape_rare_sequence": "Unusual query-shape sequence per principal preceding egress activity.",
+  "data:inventory_sensitivity_link": "Data inventory graph linking datasets/tables/columns to sensitivity and ownership.",
+  "data:egress_reconciliation_gap": "Egress reconciliation gap between object access and NAT/Proxy flow records.",
+  "data:snapshot_diff_unexpected": "Unexpected dataset snapshot/diff (size/checksum/schema) indicating covert replication.",
+  "data:secrets_access_anomaly": "Secrets store access anomaly tied to endpoint/cloud execution and identity paths.",
+
+  "email:auth_alignment_fail": "SPF/DKIM/DMARC misalignment with sender reputation and homograph joins.",
+  "email:sandbox_lineage_c2": "Attachment/link sandbox lineage connected to known C2 infrastructure.",
+  "email:mailbox_rule_burst": "Suspicious mailbox rule/forwarding bursts joined to subsequent account activity.",
+  "email:oauth_consent_suspicious": "Suspicious OAuth consent grants (scope/publisher) linked to cloud actions.",
+  "email:reply_chain_hijack": "Reply-chain hijack indicators and bounce/notification loop storms with identity pivots."
+ ,"identity:pass_the_cookie_reuse": "Session or token reuse across devices/ASNs indicating token replay (pass-the-cookie)."
+ ,"identity:oauth_refresh_storm": "Abnormal refresh token burst per principal suggesting token abuse or automation."
+ ,"identity:service_principal_key_aged": "Service principal or app secret is stale/never-rotated and actively used."
+ ,"identity:privilege_escalation_path_found": "Privilege escalation path discovered (role→permission graph shortest path to target)."
+ ,"identity:impossible_mfa_device_change": "MFA device change across geo/providers within minutes (device binding anomaly)."
+ ,"endpoint:injection_suspicious_memory": "Suspicious memory behaviors (RWX, hollowing, injection artifacts) indicating process injection."
+ ,"endpoint:lolbin_chain_mshta_rundll32": "Suspicious LOLBIN chain (mshta + rundll32) suggestive of proxy execution."
+ ,"endpoint:tamper_edr_registration": "Tampering with EDR agent/service/driver registration or disabling protections."
+ ,"endpoint:credential_dump_tool_artifacts": "LSASS/credential dumping artifacts (handles, image loads, library combinations)."
+ ,"endpoint:unsigned_driver_install_flow": "Attempted unsigned driver install / kernel module flow detected."
+ ,"net:doh_tunnel_candidate": "DNS-over-HTTPS anomalies relative to baseline resolvers (tunneling candidate)."
+ ,"net:socks_proxy_behavior_detected": "SOCKS-like proxy handshake/flow semantics observed."
+ ,"net:dga_domain_features": "Domain exhibits DGA features (entropy, n-gram, NXDOMAIN rate)."
+ ,"net:tor_outbound_contact": "Outbound contact consistent with Tor (directory/exit heuristics, ASN overlap)."
+ ,"net:ip_fragment_evasion_pattern": "Fragmentation/TCP option patterns consistent with evasion."
+ ,"cloud:iam_policy_shadow_admin": "Over-permissive IAM policies (wildcards/privileged actions) effectively grant admin."
+ ,"cloud:pre_signed_url_abuse": "Frequent pre-signed URL creation/access suggesting data exfil or exposure."
+ ,"cloud:metadata_service_abuse": "Cloud instance metadata service abuse (IMDSv1 spikes, atypical call chains)."
+ ,"cloud:cross_region_replication_unapproved": "Unapproved cross-region replication or drift in replication configuration."
+ ,"cloud:security_group_broad_egress": "Security group permits any-to-any egress on sensitive resources."
+ ,"remote:rdp_bruteforce_distributed": "Distributed/lateralized RDP brute-force attempts detected."
+ ,"remote:ssh_password_auth_enabled_risk": "SSH password authentication enabled in high-risk contexts."
+ ,"remote:legacy_vpn_proto_in_use": "Legacy/weak VPN protocols or cipher suites in use (PPTP/L2TP)."
+ ,"remote:bastion_sudo_escalation_sequence": "Bastion session followed by sudo/escalation chain on downstream hosts."
+ ,"remote:reused_ssh_private_key_fingerprint": "SSH private key fingerprint reused across hosts/tenants."
+ ,"api:bola_detected": "BOLA/IDOR detected (object-level authorization exposure)."
+ ,"api:rate_limit_bypass_pattern": "Rate-limit bypass signatures (header tricks, rotation, parallelization)."
+ ,"api:jwt_alg_confusion_none": "JWT algorithm confusion or 'none' usage attempt."
+ ,"api:mass_assignment_attempt": "Mass assignment attempt detected (unmodeled field mutations)."
+ ,"api:insecure_deserialization_gadget": "Insecure deserialization gadget or serializer abuse indicators."
+ ,"data:pseudonymization_gap_detected": "Sensitive data accessed without masking/pseudonymization where required."
+ ,"data:pii_bulk_export_attempt": "Bulk read of PII tables followed by egress sequence."
+ ,"data:tls_in_transit_missing": "Missing encryption in transit for data flows (policy mismatch)."
+ ,"data:encryption_at_rest_mismatch": "Encryption-at-rest misconfiguration or key mismatch."
+ ,"data:data_tag_mismatch_access": "Principal accesses data tagged stricter than their authorization level."
+ ,"email:display_name_impersonation": "Display name impersonation detected vs. domain/auth alignment."
+ ,"email:thread_hijack_lateral_spread": "Thread hijack leading to lateral spread across org mailboxes."
+ ,"email:credential_harvest_landing_detected": "Credential harvest landing page linked to subsequent auth reuse."
+ ,"email:qr_phish_lure": "QR-based phishing lure with sandbox lineage to malicious infrastructure."
+ ,"email:oauth_device_code_abuse": "OAuth device-code grant phishing and anomalous scopes."
+
+ ,"identity:password_spray_slow_burn": "Slow/medium password spray across varied ASNs/providers with success hints."
+ ,"identity:delegated_admin_grant_spike": "Spike in delegated admin grants or consented roles beyond baseline."
+ ,"identity:stale_session_reuse_chain": "Stale session reuse across devices/ASNs suggesting token/session theft."
+ ,"identity:idp_app_impersonation_risk": "Lookalike IdP app/client registrations mimicking trusted publishers."
+ ,"identity:impossible_travel_with_device_bind": "Geo hop plus device binding change within short window."
+
+ ,"endpoint:edr_uninstall_or_tamper_flow": "EDR uninstall/disable/tamper sequence observed on endpoint."
+ ,"endpoint:signed_binary_proxy_abuse": "Abuse of signed binaries for proxy execution/living-off-the-land."
+ ,"endpoint:lsa_protection_disabled": "LSA/credential guard protections disabled or downgraded."
+ ,"endpoint:persistence_masquerade_service": "Masqueraded service name/path indicating stealth persistence."
+ ,"endpoint:rare_parent_child_combo": "Rare parent-child process lineage combination on host."
+
+ ,"net:quic_fingerprint_novelty": "Novel/rare QUIC/JA4-X fingerprints not seen in baseline."
+ ,"net:tls_version_downgrade_attempt": "Suspicious TLS version/cipher downgrade characteristics."
+ ,"net:dot_tunnel_candidate": "DNS-over-TLS tunnel candidate (resolver, SNI, ALPN anomalies)."
+ ,"net:cdn_fronting_suspect": "Potential domain/CDN fronting to conceal C2 destinations."
+ ,"net:ssh_banner_anomaly": "Atypical SSH banners/kex params across hosts/sessions."
+
+ ,"cloud:resource_policy_escalation_path": "Resource policy changes open escalation paths to privileged actions."
+ ,"cloud:logging_gap_or_disable": "Logging/trail/config disabled or significant coverage gap detected."
+ ,"cloud:public_storage_acl_change": "Storage ACLs changed to public or overly broad access."
+ ,"cloud:lambda_secret_leak_env": "Secrets present in function env/params or accessed unusually."
+ ,"cloud:k8s_api_anon_access_attempt": "Anonymous/unauthenticated Kubernetes API access attempts."
+
+ ,"remote:rdp_nla_disabled": "RDP with NLA disabled on exposed or sensitive hosts."
+ ,"remote:anydesk_id_reuse": "Remote tool/AnyDesk IDs reused across users/hosts."
+ ,"remote:ssh_agent_forwarding_misuse": "SSH agent forwarding used across multi-hop chains."
+ ,"remote:vpn_split_tunnel_exfil": "High egress over split-tunnel VPN indicative of exfil."
+ ,"remote:clipboard_file_transfer_burst": "Burst of clipboard/file transfer events over remote sessions."
+
+ ,"api:graphql_introspection_exposed": "GraphQL introspection exposed to untrusted clients."
+ ,"api:cors_wildcard_with_creds": "CORS wildcard origins combined with credentialed requests."
+ ,"api:pii_in_params_detected": "PII patterns observed in URL/query/body parameters."
+ ,"api:oauth_pkce_missing_pattern": "Public clients missing PKCE enforcement and code verifier."
+ ,"api:weak_hsts_tls_policy": "Weak/missing HSTS or deprecated TLS configuration."
+
+ ,"data:staging_table_exfil_flow": "Staging table creation followed by copy/export out of environment."
+ ,"data:dlp_policy_bypass_attempt": "DLP deny followed by alternate path indicating bypass attempt."
+ ,"data:backup_snapshot_external_share": "Backups/snapshots shared externally or cross-account."
+ ,"data:key_usage_anomaly_kms": "Abnormal KMS/key usage frequency or operation mix."
+ ,"data:row_level_policy_gap": "Row-level security policy gaps relative to access patterns."
+
+ ,"email:smtp_auth_residential_asn": "SMTP auth from residential/hosting ASNs atypical for organization."
+ ,"email:shortener_chain_bypass": "Multi-hop URL shortener chain ending in risky domain."
+ ,"email:dkim_flap_campaign_pattern": "DKIM on/off (flap) pattern correlated with campaign activity."
+ ,"email:risky_publisher_oauth_app": "OAuth apps from risky publishers with broad scopes."
+ ,"email:sender_tld_spike_high_risk": "Spike of high-risk sender TLDs in mail stream."
+}

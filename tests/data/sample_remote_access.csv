@@ -1,0 +1,3 @@
+src_ip,user,dest_host,dest_port,protocol,timestamp
+1.2.3.4,alice,host1,443,vpn,2025-11-02T12:00:00Z
+8.8.8.8,bob,host2,3389,rdp,2025-11-02T12:05:00Z

@@ -1,0 +1,2242 @@
+{
+  "entries": [
+    {
+      "ts": 1767401379,
+      "tenant": "tenant-private-preview",
+      "pipeline_profile": "customer-private-preview",
+      "pipeline_meta": {
+        "customer_name": "Customer Private Preview",
+        "pipelines": [
+          "customer-private-preview"
+        ],
+        "fixture_vectors": [
+          "tests\\data\\api_security_auth_harness.json",
+          "tests\\data\\api_security_auth_harness_private.json"
+        ],
+        "artifact_base_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+        "notes": "Preview tenant covering ransomware backup tampering and high-value payout anomalies."
+      },
+      "files": {
+        "benchmark": "benchmark-tenant-private-preview-customer-private-preview-1767401379.json",
+        "soak": "soak-tenant-private-preview-customer-private-preview-1767401379.json"
+      },
+      "metrics": {
+        "count": 14,
+        "avg_ms": 30.053,
+        "p95_ms": 41.386
+      },
+      "soak_metrics": {
+        "count": 100,
+        "avg_ms": 30.034,
+        "p95_ms": 69.365,
+        "failures": 0,
+        "throughput_eps": 33.3,
+        "tenant": "tenant-private-preview",
+        "pipeline_profile": "customer-private-preview"
+      },
+      "vector_sources": [
+        "tests\\data\\api_security_auth_harness_private.json",
+        "tests\\data\\api_security_auth_harness.json"
+      ],
+      "github_run_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+      "openapi": {
+        "file": "openapi\\openapi-e212ddc91338.json",
+        "hash": "e212ddc9133829b523175e64497d7577785308eaac8af09fbcfa0476f3bdaa05",
+        "source": "docs\\api\\openapi.json"
+      },
+      "inventory_assert": "inventory-assert-tenant-private-preview-customer-private-preview-1767401379.json"
+    },
+    {
+      "ts": 1767401375,
+      "tenant": "tenant-saas",
+      "pipeline_profile": "customer-saas",
+      "pipeline_meta": {
+        "customer_name": "Customer SaaS Automation",
+        "pipelines": [
+          "customer-saas-shared"
+        ],
+        "fixture_vectors": [
+          "tests\\data\\api_security_auth_harness.json",
+          "tests\\data\\api_security_auth_harness_saas.json"
+        ],
+        "artifact_base_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+        "notes": "Automation + messaging APIs exercising runbook, phishing, and LLM misuse vectors."
+      },
+      "files": {
+        "benchmark": "benchmark-tenant-saas-customer-saas-1767401375.json",
+        "soak": "soak-tenant-saas-customer-saas-1767401375.json"
+      },
+      "metrics": {
+        "count": 14,
+        "avg_ms": 23.363,
+        "p95_ms": 25.94
+      },
+      "soak_metrics": {
+        "count": 130,
+        "avg_ms": 29.877,
+        "p95_ms": 71.483,
+        "failures": 0,
+        "throughput_eps": 33.47,
+        "tenant": "tenant-saas",
+        "pipeline_profile": "customer-saas"
+      },
+      "vector_sources": [
+        "tests\\data\\api_security_auth_harness_saas.json",
+        "tests\\data\\api_security_auth_harness.json"
+      ],
+      "github_run_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+      "openapi": {
+        "file": "openapi\\openapi-e212ddc91338.json",
+        "hash": "e212ddc9133829b523175e64497d7577785308eaac8af09fbcfa0476f3bdaa05",
+        "source": "docs\\api\\openapi.json"
+      },
+      "inventory_assert": "inventory-assert-tenant-saas-customer-saas-1767401375.json"
+    },
+    {
+      "ts": 1767401370,
+      "tenant": "tenant-delta",
+      "pipeline_profile": "customer-delta",
+      "pipeline_meta": {
+        "customer_name": "Customer Delta Retail",
+        "pipelines": [
+          "customer-delta-core"
+        ],
+        "fixture_vectors": [
+          "tests\\data\\api_security_auth_harness.json",
+          "tests\\data\\api_security_auth_harness_delta.json"
+        ],
+        "artifact_base_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+        "notes": "Retail payout and supply-chain APIs with vendor onboarding overrides."
+      },
+      "files": {
+        "benchmark": "benchmark-tenant-delta-customer-delta-1767401370.json",
+        "soak": "soak-tenant-delta-customer-delta-1767401370.json"
+      },
+      "metrics": {
+        "count": 14,
+        "avg_ms": 26.294,
+        "p95_ms": 30.676
+      },
+      "soak_metrics": {
+        "count": 140,
+        "avg_ms": 29.57,
+        "p95_ms": 47.8,
+        "failures": 0,
+        "throughput_eps": 33.82,
+        "tenant": "tenant-delta",
+        "pipeline_profile": "customer-delta"
+      },
+      "vector_sources": [
+        "tests\\data\\api_security_auth_harness_delta.json",
+        "tests\\data\\api_security_auth_harness.json"
+      ],
+      "github_run_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+      "openapi": {
+        "file": "openapi\\openapi-e212ddc91338.json",
+        "hash": "e212ddc9133829b523175e64497d7577785308eaac8af09fbcfa0476f3bdaa05",
+        "source": "docs\\api\\openapi.json"
+      },
+      "inventory_assert": "inventory-assert-tenant-delta-customer-delta-1767401370.json"
+    },
+    {
+      "ts": 1767401366,
+      "tenant": "tenant-gamma",
+      "pipeline_profile": "customer-gamma",
+      "pipeline_meta": {
+        "customer_name": "Customer Gamma SaaS",
+        "pipelines": [
+          "customer-gamma-shared"
+        ],
+        "fixture_vectors": [
+          "tests\\data\\api_security_auth_harness.json",
+          "tests\\data\\api_security_auth_harness_gamma.json"
+        ],
+        "artifact_base_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+        "notes": "AI/LLM tenant uses MITRE ATLAS override fixtures."
+      },
+      "files": {
+        "benchmark": "benchmark-tenant-gamma-customer-gamma-1767401366.json",
+        "soak": "soak-tenant-gamma-customer-gamma-1767401366.json"
+      },
+      "metrics": {
+        "count": 14,
+        "avg_ms": 32.905,
+        "p95_ms": 72.071
+      },
+      "soak_metrics": {
+        "count": 120,
+        "avg_ms": 30.568,
+        "p95_ms": 53.633,
+        "failures": 0,
+        "throughput_eps": 32.71,
+        "tenant": "tenant-gamma",
+        "pipeline_profile": "customer-gamma"
+      },
+      "vector_sources": [
+        "tests\\data\\api_security_auth_harness_gamma.json",
+        "tests\\data\\api_security_auth_harness.json"
+      ],
+      "github_run_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+      "openapi": {
+        "file": "openapi\\openapi-e212ddc91338.json",
+        "hash": "e212ddc9133829b523175e64497d7577785308eaac8af09fbcfa0476f3bdaa05",
+        "source": "docs\\api\\openapi.json"
+      },
+      "inventory_assert": "inventory-assert-tenant-gamma-customer-gamma-1767401366.json"
+    },
+    {
+      "ts": 1767401361,
+      "tenant": "tenant-bravo",
+      "pipeline_profile": "customer-bravo",
+      "pipeline_meta": {
+        "customer_name": "Customer Bravo FinServ",
+        "pipelines": [
+          "customer-bravo-core"
+        ],
+        "fixture_vectors": [
+          "tests\\data\\api_security_auth_harness.json",
+          "tests\\data\\api_security_auth_harness_bravo.json"
+        ],
+        "artifact_base_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+        "notes": "Payments/billing fixture pack extends shared harness with ledger flows."
+      },
+      "files": {
+        "benchmark": "benchmark-tenant-bravo-customer-bravo-1767401361.json",
+        "soak": "soak-tenant-bravo-customer-bravo-1767401361.json"
+      },
+      "metrics": {
+        "count": 14,
+        "avg_ms": 27.233,
+        "p95_ms": 34.789
+      },
+      "soak_metrics": {
+        "count": 150,
+        "avg_ms": 27.387,
+        "p95_ms": 34.951,
+        "failures": 0,
+        "throughput_eps": 36.51,
+        "tenant": "tenant-bravo",
+        "pipeline_profile": "customer-bravo"
+      },
+      "vector_sources": [
+        "tests\\data\\api_security_auth_harness_bravo.json",
+        "tests\\data\\api_security_auth_harness.json"
+      ],
+      "github_run_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+      "openapi": {
+        "file": "openapi\\openapi-e212ddc91338.json",
+        "hash": "e212ddc9133829b523175e64497d7577785308eaac8af09fbcfa0476f3bdaa05",
+        "source": "docs\\api\\openapi.json"
+      },
+      "inventory_assert": "inventory-assert-tenant-bravo-customer-bravo-1767401361.json"
+    },
+    {
+      "ts": 1767401356,
+      "tenant": "tenant-alpha",
+      "pipeline_profile": "customer-alpha",
+      "pipeline_meta": {
+        "customer_name": "Customer Alpha Healthcare",
+        "pipelines": [
+          "customer-alpha-prod",
+          "customer-alpha-dr"
+        ],
+        "fixture_vectors": [
+          "tests\\data\\api_security_auth_harness.json",
+          "tests\\data\\api_security_auth_harness_alpha.json"
+        ],
+        "artifact_base_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+        "notes": "HIPAA tier requires PHI-aware overrides plus shared harness vectors."
+      },
+      "files": {
+        "benchmark": "benchmark-tenant-alpha-customer-alpha-1767401356.json",
+        "soak": "soak-tenant-alpha-customer-alpha-1767401356.json"
+      },
+      "metrics": {
+        "count": 14,
+        "avg_ms": 31.755,
+        "p95_ms": 36.449
+      },
+      "soak_metrics": {
+        "count": 180,
+        "avg_ms": 29.607,
+        "p95_ms": 40.275,
+        "failures": 0,
+        "throughput_eps": 33.78,
+        "tenant": "tenant-alpha",
+        "pipeline_profile": "customer-alpha"
+      },
+      "vector_sources": [
+        "tests\\data\\api_security_auth_harness_alpha.json",
+        "tests\\data\\api_security_auth_harness.json"
+      ],
+      "github_run_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+      "openapi": {
+        "file": "openapi\\openapi-e212ddc91338.json",
+        "hash": "e212ddc9133829b523175e64497d7577785308eaac8af09fbcfa0476f3bdaa05",
+        "source": "docs\\api\\openapi.json"
+      },
+      "inventory_assert": "inventory-assert-tenant-alpha-customer-alpha-1767401356.json"
+    },
+    {
+      "ts": 1767400241,
+      "tenant": "tenant-private-preview",
+      "pipeline_profile": "customer-private-preview",
+      "pipeline_meta": {
+        "customer_name": "Customer Private Preview",
+        "pipelines": [
+          "customer-private-preview"
+        ],
+        "fixture_vectors": [
+          "tests\\data\\api_security_auth_harness.json",
+          "tests\\data\\api_security_auth_harness_private.json"
+        ],
+        "artifact_base_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+        "notes": "Preview tenant covering ransomware backup tampering and high-value payout anomalies."
+      },
+      "files": {
+        "benchmark": "benchmark-tenant-private-preview-customer-private-preview-1767400241.json",
+        "soak": "soak-tenant-private-preview-customer-private-preview-1767400241.json"
+      },
+      "metrics": {
+        "count": 14,
+        "avg_ms": 25.943,
+        "p95_ms": 30.844
+      },
+      "soak_metrics": {
+        "count": 100,
+        "avg_ms": 32.099,
+        "p95_ms": 66.999,
+        "failures": 0,
+        "throughput_eps": 31.15,
+        "tenant": "tenant-private-preview",
+        "pipeline_profile": "customer-private-preview"
+      },
+      "vector_sources": [
+        "tests\\data\\api_security_auth_harness_private.json",
+        "tests\\data\\api_security_auth_harness.json"
+      ],
+      "github_run_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+      "inventory_assert": "inventory-assert-tenant-private-preview-customer-private-preview-1767400241.json"
+    },
+    {
+      "ts": 1767400237,
+      "tenant": "tenant-saas",
+      "pipeline_profile": "customer-saas",
+      "pipeline_meta": {
+        "customer_name": "Customer SaaS Automation",
+        "pipelines": [
+          "customer-saas-shared"
+        ],
+        "fixture_vectors": [
+          "tests\\data\\api_security_auth_harness.json",
+          "tests\\data\\api_security_auth_harness_saas.json"
+        ],
+        "artifact_base_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+        "notes": "Automation + messaging APIs exercising runbook, phishing, and LLM misuse vectors."
+      },
+      "files": {
+        "benchmark": "benchmark-tenant-saas-customer-saas-1767400237.json",
+        "soak": "soak-tenant-saas-customer-saas-1767400237.json"
+      },
+      "metrics": {
+        "count": 14,
+        "avg_ms": 24.549,
+        "p95_ms": 29.906
+      },
+      "soak_metrics": {
+        "count": 130,
+        "avg_ms": 32.392,
+        "p95_ms": 50.625,
+        "failures": 0,
+        "throughput_eps": 30.87,
+        "tenant": "tenant-saas",
+        "pipeline_profile": "customer-saas"
+      },
+      "vector_sources": [
+        "tests\\data\\api_security_auth_harness_saas.json",
+        "tests\\data\\api_security_auth_harness.json"
+      ],
+      "github_run_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+      "inventory_assert": "inventory-assert-tenant-saas-customer-saas-1767400237.json"
+    },
+    {
+      "ts": 1767400232,
+      "tenant": "tenant-delta",
+      "pipeline_profile": "customer-delta",
+      "pipeline_meta": {
+        "customer_name": "Customer Delta Retail",
+        "pipelines": [
+          "customer-delta-core"
+        ],
+        "fixture_vectors": [
+          "tests\\data\\api_security_auth_harness.json",
+          "tests\\data\\api_security_auth_harness_delta.json"
+        ],
+        "artifact_base_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+        "notes": "Retail payout and supply-chain APIs with vendor onboarding overrides."
+      },
+      "files": {
+        "benchmark": "benchmark-tenant-delta-customer-delta-1767400232.json",
+        "soak": "soak-tenant-delta-customer-delta-1767400232.json"
+      },
+      "metrics": {
+        "count": 14,
+        "avg_ms": 24.238,
+        "p95_ms": 27.514
+      },
+      "soak_metrics": {
+        "count": 140,
+        "avg_ms": 29.014,
+        "p95_ms": 47.071,
+        "failures": 0,
+        "throughput_eps": 34.47,
+        "tenant": "tenant-delta",
+        "pipeline_profile": "customer-delta"
+      },
+      "vector_sources": [
+        "tests\\data\\api_security_auth_harness_delta.json",
+        "tests\\data\\api_security_auth_harness.json"
+      ],
+      "github_run_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+      "inventory_assert": "inventory-assert-tenant-delta-customer-delta-1767400232.json"
+    },
+    {
+      "ts": 1767400228,
+      "tenant": "tenant-gamma",
+      "pipeline_profile": "customer-gamma",
+      "pipeline_meta": {
+        "customer_name": "Customer Gamma SaaS",
+        "pipelines": [
+          "customer-gamma-shared"
+        ],
+        "fixture_vectors": [
+          "tests\\data\\api_security_auth_harness.json",
+          "tests\\data\\api_security_auth_harness_gamma.json"
+        ],
+        "artifact_base_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+        "notes": "AI/LLM tenant uses MITRE ATLAS override fixtures."
+      },
+      "files": {
+        "benchmark": "benchmark-tenant-gamma-customer-gamma-1767400228.json",
+        "soak": "soak-tenant-gamma-customer-gamma-1767400228.json"
+      },
+      "metrics": {
+        "count": 14,
+        "avg_ms": 41.25,
+        "p95_ms": 92.651
+      },
+      "soak_metrics": {
+        "count": 120,
+        "avg_ms": 30.075,
+        "p95_ms": 51.477,
+        "failures": 0,
+        "throughput_eps": 33.25,
+        "tenant": "tenant-gamma",
+        "pipeline_profile": "customer-gamma"
+      },
+      "vector_sources": [
+        "tests\\data\\api_security_auth_harness_gamma.json",
+        "tests\\data\\api_security_auth_harness.json"
+      ],
+      "github_run_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+      "inventory_assert": "inventory-assert-tenant-gamma-customer-gamma-1767400228.json"
+    },
+    {
+      "ts": 1767400223,
+      "tenant": "tenant-bravo",
+      "pipeline_profile": "customer-bravo",
+      "pipeline_meta": {
+        "customer_name": "Customer Bravo FinServ",
+        "pipelines": [
+          "customer-bravo-core"
+        ],
+        "fixture_vectors": [
+          "tests\\data\\api_security_auth_harness.json",
+          "tests\\data\\api_security_auth_harness_bravo.json"
+        ],
+        "artifact_base_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+        "notes": "Payments/billing fixture pack extends shared harness with ledger flows."
+      },
+      "files": {
+        "benchmark": "benchmark-tenant-bravo-customer-bravo-1767400223.json",
+        "soak": "soak-tenant-bravo-customer-bravo-1767400223.json"
+      },
+      "metrics": {
+        "count": 14,
+        "avg_ms": 26.053,
+        "p95_ms": 31.458
+      },
+      "soak_metrics": {
+        "count": 150,
+        "avg_ms": 26.901,
+        "p95_ms": 33.063,
+        "failures": 0,
+        "throughput_eps": 37.17,
+        "tenant": "tenant-bravo",
+        "pipeline_profile": "customer-bravo"
+      },
+      "vector_sources": [
+        "tests\\data\\api_security_auth_harness_bravo.json",
+        "tests\\data\\api_security_auth_harness.json"
+      ],
+      "github_run_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+      "inventory_assert": "inventory-assert-tenant-bravo-customer-bravo-1767400223.json"
+    },
+    {
+      "ts": 1767400218,
+      "tenant": "tenant-alpha",
+      "pipeline_profile": "customer-alpha",
+      "pipeline_meta": {
+        "customer_name": "Customer Alpha Healthcare",
+        "pipelines": [
+          "customer-alpha-prod",
+          "customer-alpha-dr"
+        ],
+        "fixture_vectors": [
+          "tests\\data\\api_security_auth_harness.json",
+          "tests\\data\\api_security_auth_harness_alpha.json"
+        ],
+        "artifact_base_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+        "notes": "HIPAA tier requires PHI-aware overrides plus shared harness vectors."
+      },
+      "files": {
+        "benchmark": "benchmark-tenant-alpha-customer-alpha-1767400218.json",
+        "soak": "soak-tenant-alpha-customer-alpha-1767400218.json"
+      },
+      "metrics": {
+        "count": 14,
+        "avg_ms": 31.922,
+        "p95_ms": 36.673
+      },
+      "soak_metrics": {
+        "count": 180,
+        "avg_ms": 26.566,
+        "p95_ms": 34.32,
+        "failures": 0,
+        "throughput_eps": 37.64,
+        "tenant": "tenant-alpha",
+        "pipeline_profile": "customer-alpha"
+      },
+      "vector_sources": [
+        "tests\\data\\api_security_auth_harness_alpha.json",
+        "tests\\data\\api_security_auth_harness.json"
+      ],
+      "github_run_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+      "inventory_assert": "inventory-assert-tenant-alpha-customer-alpha-1767400218.json"
+    },
+    {
+      "ts": 1767400149,
+      "tenant": "tenant-private-preview",
+      "pipeline_profile": "customer-private-preview",
+      "pipeline_meta": {
+        "customer_name": "Customer Private Preview",
+        "pipelines": [
+          "customer-private-preview"
+        ],
+        "fixture_vectors": [
+          "tests\\data\\api_security_auth_harness.json",
+          "tests\\data\\api_security_auth_harness_private.json"
+        ],
+        "artifact_base_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+        "notes": "Preview tenant covering ransomware backup tampering and high-value payout anomalies."
+      },
+      "files": {
+        "benchmark": "benchmark-tenant-private-preview-customer-private-preview-1767400149.json",
+        "soak": "soak-tenant-private-preview-customer-private-preview-1767400149.json"
+      },
+      "metrics": {
+        "count": 14,
+        "avg_ms": 26.389,
+        "p95_ms": 37.097
+      },
+      "soak_metrics": {
+        "count": 100,
+        "avg_ms": 27.234,
+        "p95_ms": 38.176,
+        "failures": 0,
+        "throughput_eps": 36.72,
+        "tenant": "tenant-private-preview",
+        "pipeline_profile": "customer-private-preview"
+      },
+      "vector_sources": [
+        "tests\\data\\api_security_auth_harness_private.json",
+        "tests\\data\\api_security_auth_harness.json"
+      ],
+      "github_run_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+      "inventory_assert": "inventory-assert-tenant-private-preview-customer-private-preview-1767400149.json"
+    },
+    {
+      "ts": 1767400144,
+      "tenant": "tenant-saas",
+      "pipeline_profile": "customer-saas",
+      "pipeline_meta": {
+        "customer_name": "Customer SaaS Automation",
+        "pipelines": [
+          "customer-saas-shared"
+        ],
+        "fixture_vectors": [
+          "tests\\data\\api_security_auth_harness.json",
+          "tests\\data\\api_security_auth_harness_saas.json"
+        ],
+        "artifact_base_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+        "notes": "Automation + messaging APIs exercising runbook, phishing, and LLM misuse vectors."
+      },
+      "files": {
+        "benchmark": "benchmark-tenant-saas-customer-saas-1767400144.json",
+        "soak": "soak-tenant-saas-customer-saas-1767400144.json"
+      },
+      "metrics": {
+        "count": 14,
+        "avg_ms": 27.056,
+        "p95_ms": 32.27
+      },
+      "soak_metrics": {
+        "count": 130,
+        "avg_ms": 31.841,
+        "p95_ms": 55.273,
+        "failures": 0,
+        "throughput_eps": 31.41,
+        "tenant": "tenant-saas",
+        "pipeline_profile": "customer-saas"
+      },
+      "vector_sources": [
+        "tests\\data\\api_security_auth_harness_saas.json",
+        "tests\\data\\api_security_auth_harness.json"
+      ],
+      "github_run_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+      "inventory_assert": "inventory-assert-tenant-saas-customer-saas-1767400144.json"
+    },
+    {
+      "ts": 1767400140,
+      "tenant": "tenant-delta",
+      "pipeline_profile": "customer-delta",
+      "pipeline_meta": {
+        "customer_name": "Customer Delta Retail",
+        "pipelines": [
+          "customer-delta-core"
+        ],
+        "fixture_vectors": [
+          "tests\\data\\api_security_auth_harness.json",
+          "tests\\data\\api_security_auth_harness_delta.json"
+        ],
+        "artifact_base_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+        "notes": "Retail payout and supply-chain APIs with vendor onboarding overrides."
+      },
+      "files": {
+        "benchmark": "benchmark-tenant-delta-customer-delta-1767400140.json",
+        "soak": "soak-tenant-delta-customer-delta-1767400140.json"
+      },
+      "metrics": {
+        "count": 14,
+        "avg_ms": 26.2,
+        "p95_ms": 31.878
+      },
+      "soak_metrics": {
+        "count": 140,
+        "avg_ms": 27.668,
+        "p95_ms": 34.39,
+        "failures": 0,
+        "throughput_eps": 36.14,
+        "tenant": "tenant-delta",
+        "pipeline_profile": "customer-delta"
+      },
+      "vector_sources": [
+        "tests\\data\\api_security_auth_harness_delta.json",
+        "tests\\data\\api_security_auth_harness.json"
+      ],
+      "github_run_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+      "inventory_assert": "inventory-assert-tenant-delta-customer-delta-1767400140.json"
+    },
+    {
+      "ts": 1767400135,
+      "tenant": "tenant-gamma",
+      "pipeline_profile": "customer-gamma",
+      "pipeline_meta": {
+        "customer_name": "Customer Gamma SaaS",
+        "pipelines": [
+          "customer-gamma-shared"
+        ],
+        "fixture_vectors": [
+          "tests\\data\\api_security_auth_harness.json",
+          "tests\\data\\api_security_auth_harness_gamma.json"
+        ],
+        "artifact_base_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+        "notes": "AI/LLM tenant uses MITRE ATLAS override fixtures."
+      },
+      "files": {
+        "benchmark": "benchmark-tenant-gamma-customer-gamma-1767400135.json",
+        "soak": "soak-tenant-gamma-customer-gamma-1767400135.json"
+      },
+      "metrics": {
+        "count": 14,
+        "avg_ms": 47.738,
+        "p95_ms": 95.858
+      },
+      "soak_metrics": {
+        "count": 120,
+        "avg_ms": 36.566,
+        "p95_ms": 45.233,
+        "failures": 0,
+        "throughput_eps": 27.35,
+        "tenant": "tenant-gamma",
+        "pipeline_profile": "customer-gamma"
+      },
+      "vector_sources": [
+        "tests\\data\\api_security_auth_harness_gamma.json",
+        "tests\\data\\api_security_auth_harness.json"
+      ],
+      "github_run_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+      "inventory_assert": "inventory-assert-tenant-gamma-customer-gamma-1767400135.json"
+    },
+    {
+      "ts": 1767400130,
+      "tenant": "tenant-bravo",
+      "pipeline_profile": "customer-bravo",
+      "pipeline_meta": {
+        "customer_name": "Customer Bravo FinServ",
+        "pipelines": [
+          "customer-bravo-core"
+        ],
+        "fixture_vectors": [
+          "tests\\data\\api_security_auth_harness.json",
+          "tests\\data\\api_security_auth_harness_bravo.json"
+        ],
+        "artifact_base_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+        "notes": "Payments/billing fixture pack extends shared harness with ledger flows."
+      },
+      "files": {
+        "benchmark": "benchmark-tenant-bravo-customer-bravo-1767400130.json",
+        "soak": "soak-tenant-bravo-customer-bravo-1767400130.json"
+      },
+      "metrics": {
+        "count": 14,
+        "avg_ms": 33.689,
+        "p95_ms": 52.0
+      },
+      "soak_metrics": {
+        "count": 150,
+        "avg_ms": 28.867,
+        "p95_ms": 36.322,
+        "failures": 0,
+        "throughput_eps": 34.64,
+        "tenant": "tenant-bravo",
+        "pipeline_profile": "customer-bravo"
+      },
+      "vector_sources": [
+        "tests\\data\\api_security_auth_harness_bravo.json",
+        "tests\\data\\api_security_auth_harness.json"
+      ],
+      "github_run_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+      "inventory_assert": "inventory-assert-tenant-bravo-customer-bravo-1767400130.json"
+    },
+    {
+      "ts": 1767400125,
+      "tenant": "tenant-alpha",
+      "pipeline_profile": "customer-alpha",
+      "pipeline_meta": {
+        "customer_name": "Customer Alpha Healthcare",
+        "pipelines": [
+          "customer-alpha-prod",
+          "customer-alpha-dr"
+        ],
+        "fixture_vectors": [
+          "tests\\data\\api_security_auth_harness.json",
+          "tests\\data\\api_security_auth_harness_alpha.json"
+        ],
+        "artifact_base_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+        "notes": "HIPAA tier requires PHI-aware overrides plus shared harness vectors."
+      },
+      "files": {
+        "benchmark": "benchmark-tenant-alpha-customer-alpha-1767400125.json",
+        "soak": "soak-tenant-alpha-customer-alpha-1767400125.json"
+      },
+      "metrics": {
+        "count": 14,
+        "avg_ms": 30.43,
+        "p95_ms": 31.514
+      },
+      "soak_metrics": {
+        "count": 180,
+        "avg_ms": 25.492,
+        "p95_ms": 32.437,
+        "failures": 0,
+        "throughput_eps": 39.23,
+        "tenant": "tenant-alpha",
+        "pipeline_profile": "customer-alpha"
+      },
+      "vector_sources": [
+        "tests\\data\\api_security_auth_harness_alpha.json",
+        "tests\\data\\api_security_auth_harness.json"
+      ],
+      "github_run_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+      "inventory_assert": "inventory-assert-tenant-alpha-customer-alpha-1767400125.json"
+    },
+    {
+      "ts": 1767400027,
+      "tenant": "tenant-private-preview",
+      "pipeline_profile": "customer-private-preview",
+      "pipeline_meta": {
+        "customer_name": "Customer Private Preview",
+        "pipelines": [
+          "customer-private-preview"
+        ],
+        "fixture_vectors": [
+          "tests\\data\\api_security_auth_harness.json",
+          "tests\\data\\api_security_auth_harness_private.json"
+        ],
+        "artifact_base_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+        "notes": "Preview tenant covering ransomware backup tampering and high-value payout anomalies."
+      },
+      "files": {
+        "benchmark": "benchmark-tenant-private-preview-customer-private-preview-1767400027.json",
+        "soak": "soak-tenant-private-preview-customer-private-preview-1767400027.json"
+      },
+      "metrics": {
+        "count": 14,
+        "avg_ms": 55.894,
+        "p95_ms": 119.027
+      },
+      "soak_metrics": {
+        "count": 100,
+        "avg_ms": 29.99,
+        "p95_ms": 42.552,
+        "failures": 0,
+        "throughput_eps": 33.34,
+        "tenant": "tenant-private-preview",
+        "pipeline_profile": "customer-private-preview"
+      },
+      "vector_sources": [
+        "tests\\data\\api_security_auth_harness_private.json",
+        "tests\\data\\api_security_auth_harness.json"
+      ],
+      "github_run_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+      "inventory_assert": "inventory-assert-tenant-private-preview-customer-private-preview-1767400027.json"
+    },
+    {
+      "ts": 1767400022,
+      "tenant": "tenant-saas",
+      "pipeline_profile": "customer-saas",
+      "pipeline_meta": {
+        "customer_name": "Customer SaaS Automation",
+        "pipelines": [
+          "customer-saas-shared"
+        ],
+        "fixture_vectors": [
+          "tests\\data\\api_security_auth_harness.json",
+          "tests\\data\\api_security_auth_harness_saas.json"
+        ],
+        "artifact_base_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+        "notes": "Automation + messaging APIs exercising runbook, phishing, and LLM misuse vectors."
+      },
+      "files": {
+        "benchmark": "benchmark-tenant-saas-customer-saas-1767400022.json",
+        "soak": "soak-tenant-saas-customer-saas-1767400022.json"
+      },
+      "metrics": {
+        "count": 14,
+        "avg_ms": 25.554,
+        "p95_ms": 28.503
+      },
+      "soak_metrics": {
+        "count": 130,
+        "avg_ms": 30.407,
+        "p95_ms": 45.591,
+        "failures": 0,
+        "throughput_eps": 32.89,
+        "tenant": "tenant-saas",
+        "pipeline_profile": "customer-saas"
+      },
+      "vector_sources": [
+        "tests\\data\\api_security_auth_harness_saas.json",
+        "tests\\data\\api_security_auth_harness.json"
+      ],
+      "github_run_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+      "inventory_assert": "inventory-assert-tenant-saas-customer-saas-1767400022.json"
+    },
+    {
+      "ts": 1767400018,
+      "tenant": "tenant-delta",
+      "pipeline_profile": "customer-delta",
+      "pipeline_meta": {
+        "customer_name": "Customer Delta Retail",
+        "pipelines": [
+          "customer-delta-core"
+        ],
+        "fixture_vectors": [
+          "tests\\data\\api_security_auth_harness.json",
+          "tests\\data\\api_security_auth_harness_delta.json"
+        ],
+        "artifact_base_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+        "notes": "Retail payout and supply-chain APIs with vendor onboarding overrides."
+      },
+      "files": {
+        "benchmark": "benchmark-tenant-delta-customer-delta-1767400018.json",
+        "soak": "soak-tenant-delta-customer-delta-1767400018.json"
+      },
+      "metrics": {
+        "count": 14,
+        "avg_ms": 31.521,
+        "p95_ms": 38.294
+      },
+      "soak_metrics": {
+        "count": 140,
+        "avg_ms": 29.414,
+        "p95_ms": 37.545,
+        "failures": 0,
+        "throughput_eps": 34.0,
+        "tenant": "tenant-delta",
+        "pipeline_profile": "customer-delta"
+      },
+      "vector_sources": [
+        "tests\\data\\api_security_auth_harness_delta.json",
+        "tests\\data\\api_security_auth_harness.json"
+      ],
+      "github_run_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+      "inventory_assert": "inventory-assert-tenant-delta-customer-delta-1767400018.json"
+    },
+    {
+      "ts": 1767400013,
+      "tenant": "tenant-gamma",
+      "pipeline_profile": "customer-gamma",
+      "pipeline_meta": {
+        "customer_name": "Customer Gamma SaaS",
+        "pipelines": [
+          "customer-gamma-shared"
+        ],
+        "fixture_vectors": [
+          "tests\\data\\api_security_auth_harness.json",
+          "tests\\data\\api_security_auth_harness_gamma.json"
+        ],
+        "artifact_base_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+        "notes": "AI/LLM tenant uses MITRE ATLAS override fixtures."
+      },
+      "files": {
+        "benchmark": "benchmark-tenant-gamma-customer-gamma-1767400013.json",
+        "soak": "soak-tenant-gamma-customer-gamma-1767400013.json"
+      },
+      "metrics": {
+        "count": 14,
+        "avg_ms": 29.103,
+        "p95_ms": 34.936
+      },
+      "soak_metrics": {
+        "count": 120,
+        "avg_ms": 38.979,
+        "p95_ms": 100.278,
+        "failures": 0,
+        "throughput_eps": 25.65,
+        "tenant": "tenant-gamma",
+        "pipeline_profile": "customer-gamma"
+      },
+      "vector_sources": [
+        "tests\\data\\api_security_auth_harness_gamma.json",
+        "tests\\data\\api_security_auth_harness.json"
+      ],
+      "github_run_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+      "inventory_assert": "inventory-assert-tenant-gamma-customer-gamma-1767400013.json"
+    },
+    {
+      "ts": 1767400008,
+      "tenant": "tenant-bravo",
+      "pipeline_profile": "customer-bravo",
+      "pipeline_meta": {
+        "customer_name": "Customer Bravo FinServ",
+        "pipelines": [
+          "customer-bravo-core"
+        ],
+        "fixture_vectors": [
+          "tests\\data\\api_security_auth_harness.json",
+          "tests\\data\\api_security_auth_harness_bravo.json"
+        ],
+        "artifact_base_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+        "notes": "Payments/billing fixture pack extends shared harness with ledger flows."
+      },
+      "files": {
+        "benchmark": "benchmark-tenant-bravo-customer-bravo-1767400008.json",
+        "soak": "soak-tenant-bravo-customer-bravo-1767400008.json"
+      },
+      "metrics": {
+        "count": 14,
+        "avg_ms": 25.528,
+        "p95_ms": 28.969
+      },
+      "soak_metrics": {
+        "count": 150,
+        "avg_ms": 29.541,
+        "p95_ms": 36.755,
+        "failures": 0,
+        "throughput_eps": 33.85,
+        "tenant": "tenant-bravo",
+        "pipeline_profile": "customer-bravo"
+      },
+      "vector_sources": [
+        "tests\\data\\api_security_auth_harness_bravo.json",
+        "tests\\data\\api_security_auth_harness.json"
+      ],
+      "github_run_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+      "inventory_assert": "inventory-assert-tenant-bravo-customer-bravo-1767400008.json"
+    },
+    {
+      "ts": 1767400002,
+      "tenant": "tenant-alpha",
+      "pipeline_profile": "customer-alpha",
+      "pipeline_meta": {
+        "customer_name": "Customer Alpha Healthcare",
+        "pipelines": [
+          "customer-alpha-prod",
+          "customer-alpha-dr"
+        ],
+        "fixture_vectors": [
+          "tests\\data\\api_security_auth_harness.json",
+          "tests\\data\\api_security_auth_harness_alpha.json"
+        ],
+        "artifact_base_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+        "notes": "HIPAA tier requires PHI-aware overrides plus shared harness vectors."
+      },
+      "files": {
+        "benchmark": "benchmark-tenant-alpha-customer-alpha-1767400002.json",
+        "soak": "soak-tenant-alpha-customer-alpha-1767400002.json"
+      },
+      "metrics": {
+        "count": 14,
+        "avg_ms": 32.236,
+        "p95_ms": 34.011
+      },
+      "soak_metrics": {
+        "count": 180,
+        "avg_ms": 27.419,
+        "p95_ms": 35.651,
+        "failures": 0,
+        "throughput_eps": 36.47,
+        "tenant": "tenant-alpha",
+        "pipeline_profile": "customer-alpha"
+      },
+      "vector_sources": [
+        "tests\\data\\api_security_auth_harness_alpha.json",
+        "tests\\data\\api_security_auth_harness.json"
+      ],
+      "github_run_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+      "inventory_assert": "inventory-assert-tenant-alpha-customer-alpha-1767400002.json"
+    },
+    {
+      "ts": 1767399617,
+      "tenant": "tenant-private-preview",
+      "pipeline_profile": "customer-private-preview",
+      "pipeline_meta": {
+        "customer_name": "Customer Private Preview",
+        "pipelines": [
+          "customer-private-preview"
+        ],
+        "fixture_vectors": [
+          "tests\\data\\api_security_auth_harness.json",
+          "tests\\data\\api_security_auth_harness_private.json"
+        ],
+        "artifact_base_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+        "notes": "Preview tenant covering ransomware backup tampering and high-value payout anomalies."
+      },
+      "files": {
+        "benchmark": "benchmark-tenant-private-preview-customer-private-preview-1767399617.json",
+        "soak": "soak-tenant-private-preview-customer-private-preview-1767399617.json"
+      },
+      "metrics": {
+        "count": 14,
+        "avg_ms": 25.785,
+        "p95_ms": 28.551
+      },
+      "soak_metrics": {
+        "count": 100,
+        "avg_ms": 28.683,
+        "p95_ms": 36.869,
+        "failures": 0,
+        "throughput_eps": 34.86,
+        "tenant": "tenant-private-preview",
+        "pipeline_profile": "customer-private-preview"
+      },
+      "vector_sources": [
+        "tests\\data\\api_security_auth_harness_private.json",
+        "tests\\data\\api_security_auth_harness.json"
+      ],
+      "github_run_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+      "inventory_assert": "inventory-assert-tenant-private-preview-customer-private-preview-1767399617.json"
+    },
+    {
+      "ts": 1767399612,
+      "tenant": "tenant-saas",
+      "pipeline_profile": "customer-saas",
+      "pipeline_meta": {
+        "customer_name": "Customer SaaS Automation",
+        "pipelines": [
+          "customer-saas-shared"
+        ],
+        "fixture_vectors": [
+          "tests\\data\\api_security_auth_harness.json",
+          "tests\\data\\api_security_auth_harness_saas.json"
+        ],
+        "artifact_base_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+        "notes": "Automation + messaging APIs exercising runbook, phishing, and LLM misuse vectors."
+      },
+      "files": {
+        "benchmark": "benchmark-tenant-saas-customer-saas-1767399612.json",
+        "soak": "soak-tenant-saas-customer-saas-1767399612.json"
+      },
+      "metrics": {
+        "count": 14,
+        "avg_ms": 25.299,
+        "p95_ms": 31.597
+      },
+      "soak_metrics": {
+        "count": 130,
+        "avg_ms": 31.42,
+        "p95_ms": 65.568,
+        "failures": 0,
+        "throughput_eps": 31.83,
+        "tenant": "tenant-saas",
+        "pipeline_profile": "customer-saas"
+      },
+      "vector_sources": [
+        "tests\\data\\api_security_auth_harness_saas.json",
+        "tests\\data\\api_security_auth_harness.json"
+      ],
+      "github_run_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+      "inventory_assert": "inventory-assert-tenant-saas-customer-saas-1767399612.json"
+    },
+    {
+      "ts": 1767399608,
+      "tenant": "tenant-delta",
+      "pipeline_profile": "customer-delta",
+      "pipeline_meta": {
+        "customer_name": "Customer Delta Retail",
+        "pipelines": [
+          "customer-delta-core"
+        ],
+        "fixture_vectors": [
+          "tests\\data\\api_security_auth_harness.json",
+          "tests\\data\\api_security_auth_harness_delta.json"
+        ],
+        "artifact_base_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+        "notes": "Retail payout and supply-chain APIs with vendor onboarding overrides."
+      },
+      "files": {
+        "benchmark": "benchmark-tenant-delta-customer-delta-1767399608.json",
+        "soak": "soak-tenant-delta-customer-delta-1767399608.json"
+      },
+      "metrics": {
+        "count": 14,
+        "avg_ms": 27.075,
+        "p95_ms": 33.068
+      },
+      "soak_metrics": {
+        "count": 140,
+        "avg_ms": 27.926,
+        "p95_ms": 40.287,
+        "failures": 0,
+        "throughput_eps": 35.81,
+        "tenant": "tenant-delta",
+        "pipeline_profile": "customer-delta"
+      },
+      "vector_sources": [
+        "tests\\data\\api_security_auth_harness_delta.json",
+        "tests\\data\\api_security_auth_harness.json"
+      ],
+      "github_run_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+      "inventory_assert": "inventory-assert-tenant-delta-customer-delta-1767399608.json"
+    },
+    {
+      "ts": 1767399604,
+      "tenant": "tenant-gamma",
+      "pipeline_profile": "customer-gamma",
+      "pipeline_meta": {
+        "customer_name": "Customer Gamma SaaS",
+        "pipelines": [
+          "customer-gamma-shared"
+        ],
+        "fixture_vectors": [
+          "tests\\data\\api_security_auth_harness.json",
+          "tests\\data\\api_security_auth_harness_gamma.json"
+        ],
+        "artifact_base_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+        "notes": "AI/LLM tenant uses MITRE ATLAS override fixtures."
+      },
+      "files": {
+        "benchmark": "benchmark-tenant-gamma-customer-gamma-1767399604.json",
+        "soak": "soak-tenant-gamma-customer-gamma-1767399604.json"
+      },
+      "metrics": {
+        "count": 14,
+        "avg_ms": 26.791,
+        "p95_ms": 33.757
+      },
+      "soak_metrics": {
+        "count": 120,
+        "avg_ms": 29.373,
+        "p95_ms": 37.596,
+        "failures": 0,
+        "throughput_eps": 34.04,
+        "tenant": "tenant-gamma",
+        "pipeline_profile": "customer-gamma"
+      },
+      "vector_sources": [
+        "tests\\data\\api_security_auth_harness_gamma.json",
+        "tests\\data\\api_security_auth_harness.json"
+      ],
+      "github_run_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+      "inventory_assert": "inventory-assert-tenant-gamma-customer-gamma-1767399604.json"
+    },
+    {
+      "ts": 1767399599,
+      "tenant": "tenant-bravo",
+      "pipeline_profile": "customer-bravo",
+      "pipeline_meta": {
+        "customer_name": "Customer Bravo FinServ",
+        "pipelines": [
+          "customer-bravo-core"
+        ],
+        "fixture_vectors": [
+          "tests\\data\\api_security_auth_harness.json",
+          "tests\\data\\api_security_auth_harness_bravo.json"
+        ],
+        "artifact_base_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+        "notes": "Payments/billing fixture pack extends shared harness with ledger flows."
+      },
+      "files": {
+        "benchmark": "benchmark-tenant-bravo-customer-bravo-1767399599.json",
+        "soak": "soak-tenant-bravo-customer-bravo-1767399599.json"
+      },
+      "metrics": {
+        "count": 14,
+        "avg_ms": 26.902,
+        "p95_ms": 34.864
+      },
+      "soak_metrics": {
+        "count": 150,
+        "avg_ms": 25.909,
+        "p95_ms": 33.62,
+        "failures": 0,
+        "throughput_eps": 38.6,
+        "tenant": "tenant-bravo",
+        "pipeline_profile": "customer-bravo"
+      },
+      "vector_sources": [
+        "tests\\data\\api_security_auth_harness_bravo.json",
+        "tests\\data\\api_security_auth_harness.json"
+      ],
+      "github_run_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+      "inventory_assert": "inventory-assert-tenant-bravo-customer-bravo-1767399599.json"
+    },
+    {
+      "ts": 1767399594,
+      "tenant": "tenant-alpha",
+      "pipeline_profile": "customer-alpha",
+      "pipeline_meta": {
+        "customer_name": "Customer Alpha Healthcare",
+        "pipelines": [
+          "customer-alpha-prod",
+          "customer-alpha-dr"
+        ],
+        "fixture_vectors": [
+          "tests\\data\\api_security_auth_harness.json",
+          "tests\\data\\api_security_auth_harness_alpha.json"
+        ],
+        "artifact_base_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+        "notes": "HIPAA tier requires PHI-aware overrides plus shared harness vectors."
+      },
+      "files": {
+        "benchmark": "benchmark-tenant-alpha-customer-alpha-1767399594.json",
+        "soak": "soak-tenant-alpha-customer-alpha-1767399594.json"
+      },
+      "metrics": {
+        "count": 14,
+        "avg_ms": 34.07,
+        "p95_ms": 36.092
+      },
+      "soak_metrics": {
+        "count": 180,
+        "avg_ms": 28.607,
+        "p95_ms": 35.913,
+        "failures": 0,
+        "throughput_eps": 34.96,
+        "tenant": "tenant-alpha",
+        "pipeline_profile": "customer-alpha"
+      },
+      "vector_sources": [
+        "tests\\data\\api_security_auth_harness_alpha.json",
+        "tests\\data\\api_security_auth_harness.json"
+      ],
+      "github_run_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+      "inventory_assert": "inventory-assert-tenant-alpha-customer-alpha-1767399594.json"
+    },
+    {
+      "ts": 1767399381,
+      "tenant": "tenant-private-preview",
+      "pipeline_profile": "customer-private-preview",
+      "pipeline_meta": {
+        "customer_name": "Customer Private Preview",
+        "pipelines": [
+          "customer-private-preview"
+        ],
+        "fixture_vectors": [
+          "tests\\data\\api_security_auth_harness.json",
+          "tests\\data\\api_security_auth_harness_private.json"
+        ],
+        "artifact_base_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+        "notes": "Preview tenant covering ransomware backup tampering and high-value payout anomalies."
+      },
+      "files": {
+        "benchmark": "benchmark-tenant-private-preview-customer-private-preview-1767399381.json",
+        "soak": "soak-tenant-private-preview-customer-private-preview-1767399381.json"
+      },
+      "metrics": {
+        "count": 14,
+        "avg_ms": 10.006,
+        "p95_ms": 11.64
+      },
+      "soak_metrics": {
+        "count": 100,
+        "avg_ms": 13.428,
+        "p95_ms": 13.864,
+        "failures": 100,
+        "throughput_eps": 74.47,
+        "tenant": "tenant-private-preview",
+        "pipeline_profile": "customer-private-preview"
+      },
+      "vector_sources": [
+        "tests\\data\\api_security_auth_harness_private.json",
+        "tests\\data\\api_security_auth_harness.json"
+      ],
+      "github_run_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+      "inventory_assert": "inventory-assert-tenant-private-preview-customer-private-preview-1767399381.json"
+    },
+    {
+      "ts": 1767399379,
+      "tenant": "tenant-saas",
+      "pipeline_profile": "customer-saas",
+      "pipeline_meta": {
+        "customer_name": "Customer SaaS Automation",
+        "pipelines": [
+          "customer-saas-shared"
+        ],
+        "fixture_vectors": [
+          "tests\\data\\api_security_auth_harness.json",
+          "tests\\data\\api_security_auth_harness_saas.json"
+        ],
+        "artifact_base_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+        "notes": "Automation + messaging APIs exercising runbook, phishing, and LLM misuse vectors."
+      },
+      "files": {
+        "benchmark": "benchmark-tenant-saas-customer-saas-1767399379.json",
+        "soak": "soak-tenant-saas-customer-saas-1767399379.json"
+      },
+      "metrics": {
+        "count": 14,
+        "avg_ms": 10.554,
+        "p95_ms": 11.889
+      },
+      "soak_metrics": {
+        "count": 130,
+        "avg_ms": 13.902,
+        "p95_ms": 16.448,
+        "failures": 130,
+        "throughput_eps": 71.93,
+        "tenant": "tenant-saas",
+        "pipeline_profile": "customer-saas"
+      },
+      "vector_sources": [
+        "tests\\data\\api_security_auth_harness_saas.json",
+        "tests\\data\\api_security_auth_harness.json"
+      ],
+      "github_run_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+      "inventory_assert": "inventory-assert-tenant-saas-customer-saas-1767399379.json"
+    },
+    {
+      "ts": 1767399376,
+      "tenant": "tenant-delta",
+      "pipeline_profile": "customer-delta",
+      "pipeline_meta": {
+        "customer_name": "Customer Delta Retail",
+        "pipelines": [
+          "customer-delta-core"
+        ],
+        "fixture_vectors": [
+          "tests\\data\\api_security_auth_harness.json",
+          "tests\\data\\api_security_auth_harness_delta.json"
+        ],
+        "artifact_base_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+        "notes": "Retail payout and supply-chain APIs with vendor onboarding overrides."
+      },
+      "files": {
+        "benchmark": "benchmark-tenant-delta-customer-delta-1767399376.json",
+        "soak": "soak-tenant-delta-customer-delta-1767399376.json"
+      },
+      "metrics": {
+        "count": 14,
+        "avg_ms": 23.734,
+        "p95_ms": 24.541
+      },
+      "soak_metrics": {
+        "count": 140,
+        "avg_ms": 21.214,
+        "p95_ms": 31.974,
+        "failures": 49,
+        "throughput_eps": 47.14,
+        "tenant": "tenant-delta",
+        "pipeline_profile": "customer-delta"
+      },
+      "vector_sources": [
+        "tests\\data\\api_security_auth_harness_delta.json",
+        "tests\\data\\api_security_auth_harness.json"
+      ],
+      "github_run_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+      "inventory_assert": "inventory-assert-tenant-delta-customer-delta-1767399376.json"
+    },
+    {
+      "ts": 1767399372,
+      "tenant": "tenant-gamma",
+      "pipeline_profile": "customer-gamma",
+      "pipeline_meta": {
+        "customer_name": "Customer Gamma SaaS",
+        "pipelines": [
+          "customer-gamma-shared"
+        ],
+        "fixture_vectors": [
+          "tests\\data\\api_security_auth_harness.json",
+          "tests\\data\\api_security_auth_harness_gamma.json"
+        ],
+        "artifact_base_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+        "notes": "AI/LLM tenant uses MITRE ATLAS override fixtures."
+      },
+      "files": {
+        "benchmark": "benchmark-tenant-gamma-customer-gamma-1767399372.json",
+        "soak": "soak-tenant-gamma-customer-gamma-1767399372.json"
+      },
+      "metrics": {
+        "count": 14,
+        "avg_ms": 24.3,
+        "p95_ms": 24.97
+      },
+      "soak_metrics": {
+        "count": 120,
+        "avg_ms": 28.079,
+        "p95_ms": 35.691,
+        "failures": 0,
+        "throughput_eps": 35.61,
+        "tenant": "tenant-gamma",
+        "pipeline_profile": "customer-gamma"
+      },
+      "vector_sources": [
+        "tests\\data\\api_security_auth_harness_gamma.json",
+        "tests\\data\\api_security_auth_harness.json"
+      ],
+      "github_run_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+      "inventory_assert": "inventory-assert-tenant-gamma-customer-gamma-1767399372.json"
+    },
+    {
+      "ts": 1767399367,
+      "tenant": "tenant-bravo",
+      "pipeline_profile": "customer-bravo",
+      "pipeline_meta": {
+        "customer_name": "Customer Bravo FinServ",
+        "pipelines": [
+          "customer-bravo-core"
+        ],
+        "fixture_vectors": [
+          "tests\\data\\api_security_auth_harness.json",
+          "tests\\data\\api_security_auth_harness_bravo.json"
+        ],
+        "artifact_base_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+        "notes": "Payments/billing fixture pack extends shared harness with ledger flows."
+      },
+      "files": {
+        "benchmark": "benchmark-tenant-bravo-customer-bravo-1767399367.json",
+        "soak": "soak-tenant-bravo-customer-bravo-1767399367.json"
+      },
+      "metrics": {
+        "count": 14,
+        "avg_ms": 30.508,
+        "p95_ms": 41.849
+      },
+      "soak_metrics": {
+        "count": 150,
+        "avg_ms": 25.961,
+        "p95_ms": 29.908,
+        "failures": 0,
+        "throughput_eps": 38.52,
+        "tenant": "tenant-bravo",
+        "pipeline_profile": "customer-bravo"
+      },
+      "vector_sources": [
+        "tests\\data\\api_security_auth_harness_bravo.json",
+        "tests\\data\\api_security_auth_harness.json"
+      ],
+      "github_run_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+      "inventory_assert": "inventory-assert-tenant-bravo-customer-bravo-1767399367.json"
+    },
+    {
+      "ts": 1767399362,
+      "tenant": "tenant-alpha",
+      "pipeline_profile": "customer-alpha",
+      "pipeline_meta": {
+        "customer_name": "Customer Alpha Healthcare",
+        "pipelines": [
+          "customer-alpha-prod",
+          "customer-alpha-dr"
+        ],
+        "fixture_vectors": [
+          "tests\\data\\api_security_auth_harness.json",
+          "tests\\data\\api_security_auth_harness_alpha.json"
+        ],
+        "artifact_base_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+        "notes": "HIPAA tier requires PHI-aware overrides plus shared harness vectors."
+      },
+      "files": {
+        "benchmark": "benchmark-tenant-alpha-customer-alpha-1767399362.json",
+        "soak": "soak-tenant-alpha-customer-alpha-1767399362.json"
+      },
+      "metrics": {
+        "count": 14,
+        "avg_ms": 38.693,
+        "p95_ms": 29.735
+      },
+      "soak_metrics": {
+        "count": 180,
+        "avg_ms": 26.909,
+        "p95_ms": 32.818,
+        "failures": 0,
+        "throughput_eps": 37.16,
+        "tenant": "tenant-alpha",
+        "pipeline_profile": "customer-alpha"
+      },
+      "vector_sources": [
+        "tests\\data\\api_security_auth_harness_alpha.json",
+        "tests\\data\\api_security_auth_harness.json"
+      ],
+      "github_run_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+      "inventory_assert": "inventory-assert-tenant-alpha-customer-alpha-1767399362.json"
+    },
+    {
+      "ts": 1767313551,
+      "tenant": "tenant-gamma",
+      "pipeline_profile": "customer-gamma",
+      "pipeline_meta": {
+        "customer_name": "Customer Gamma SaaS",
+        "pipelines": [
+          "customer-gamma-shared"
+        ],
+        "fixture_vectors": [
+          "tests\\data\\api_security_auth_harness.json",
+          "tests\\data\\api_security_auth_harness_gamma.json"
+        ],
+        "artifact_base_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+        "notes": "AI/LLM tenant uses MITRE ATLAS override fixtures."
+      },
+      "files": {
+        "benchmark": "benchmark-tenant-gamma-customer-gamma-1767313551.json",
+        "soak": "soak-tenant-gamma-customer-gamma-1767313551.json"
+      },
+      "metrics": {
+        "count": 14,
+        "avg_ms": 26.288,
+        "p95_ms": 30.419
+      },
+      "soak_metrics": {
+        "count": 120,
+        "avg_ms": 27.29,
+        "p95_ms": 35.548,
+        "failures": 0,
+        "throughput_eps": 36.64,
+        "tenant": "tenant-gamma",
+        "pipeline_profile": "customer-gamma"
+      },
+      "vector_sources": [
+        "tests\\data\\api_security_auth_harness_gamma.json",
+        "tests\\data\\api_security_auth_harness.json"
+      ],
+      "github_run_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml"
+    },
+    {
+      "ts": 1767313545,
+      "tenant": "tenant-bravo",
+      "pipeline_profile": "customer-bravo",
+      "pipeline_meta": {
+        "customer_name": "Customer Bravo FinServ",
+        "pipelines": [
+          "customer-bravo-core"
+        ],
+        "fixture_vectors": [
+          "tests\\data\\api_security_auth_harness.json",
+          "tests\\data\\api_security_auth_harness_bravo.json"
+        ],
+        "artifact_base_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+        "notes": "Payments/billing fixture pack extends shared harness with ledger flows."
+      },
+      "files": {
+        "benchmark": "benchmark-tenant-bravo-customer-bravo-1767313545.json",
+        "soak": "soak-tenant-bravo-customer-bravo-1767313545.json"
+      },
+      "metrics": {
+        "count": 14,
+        "avg_ms": 26.018,
+        "p95_ms": 30.791
+      },
+      "soak_metrics": {
+        "count": 150,
+        "avg_ms": 32.605,
+        "p95_ms": 67.696,
+        "failures": 0,
+        "throughput_eps": 30.67,
+        "tenant": "tenant-bravo",
+        "pipeline_profile": "customer-bravo"
+      },
+      "vector_sources": [
+        "tests\\data\\api_security_auth_harness_bravo.json",
+        "tests\\data\\api_security_auth_harness.json"
+      ],
+      "github_run_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml"
+    },
+    {
+      "ts": 1767313540,
+      "tenant": "tenant-alpha",
+      "pipeline_profile": "customer-alpha",
+      "pipeline_meta": {
+        "customer_name": "Customer Alpha Healthcare",
+        "pipelines": [
+          "customer-alpha-prod",
+          "customer-alpha-dr"
+        ],
+        "fixture_vectors": [
+          "tests\\data\\api_security_auth_harness.json",
+          "tests\\data\\api_security_auth_harness_alpha.json"
+        ],
+        "artifact_base_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+        "notes": "HIPAA tier requires PHI-aware overrides plus shared harness vectors."
+      },
+      "files": {
+        "benchmark": "benchmark-tenant-alpha-customer-alpha-1767313540.json",
+        "soak": "soak-tenant-alpha-customer-alpha-1767313540.json"
+      },
+      "metrics": {
+        "count": 14,
+        "avg_ms": 41.604,
+        "p95_ms": 27.488
+      },
+      "soak_metrics": {
+        "count": 180,
+        "avg_ms": 26.386,
+        "p95_ms": 34.299,
+        "failures": 0,
+        "throughput_eps": 37.9,
+        "tenant": "tenant-alpha",
+        "pipeline_profile": "customer-alpha"
+      },
+      "vector_sources": [
+        "tests\\data\\api_security_auth_harness_alpha.json",
+        "tests\\data\\api_security_auth_harness.json"
+      ],
+      "github_run_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml"
+    },
+    {
+      "ts": 1767313383,
+      "tenant": "tenant-gamma",
+      "pipeline_profile": "customer-gamma",
+      "pipeline_meta": {
+        "customer_name": "Customer Gamma SaaS",
+        "pipelines": [
+          "customer-gamma-shared"
+        ],
+        "fixture_vectors": [
+          "tests\\data\\api_security_auth_harness.json",
+          "tests\\data\\api_security_auth_harness_gamma.json"
+        ],
+        "artifact_base_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+        "notes": "AI/LLM tenant uses MITRE ATLAS override fixtures."
+      },
+      "files": {
+        "benchmark": "benchmark-tenant-gamma-customer-gamma-1767313383.json",
+        "soak": "soak-tenant-gamma-customer-gamma-1767313383.json"
+      },
+      "metrics": {
+        "count": 14,
+        "avg_ms": 10.283,
+        "p95_ms": 12.052
+      },
+      "soak_metrics": {
+        "count": 120,
+        "avg_ms": 18.701,
+        "p95_ms": 78.25,
+        "failures": 120,
+        "throughput_eps": 53.47,
+        "tenant": "tenant-gamma",
+        "pipeline_profile": "customer-gamma"
+      },
+      "vector_sources": [
+        "tests\\data\\api_security_auth_harness_gamma.json",
+        "tests\\data\\api_security_auth_harness.json"
+      ],
+      "github_run_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml"
+    },
+    {
+      "ts": 1767313380,
+      "tenant": "tenant-bravo",
+      "pipeline_profile": "customer-bravo",
+      "pipeline_meta": {
+        "customer_name": "Customer Bravo FinServ",
+        "pipelines": [
+          "customer-bravo-core"
+        ],
+        "fixture_vectors": [
+          "tests\\data\\api_security_auth_harness.json",
+          "tests\\data\\api_security_auth_harness_bravo.json"
+        ],
+        "artifact_base_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+        "notes": "Payments/billing fixture pack extends shared harness with ledger flows."
+      },
+      "files": {
+        "benchmark": "benchmark-tenant-bravo-customer-bravo-1767313380.json",
+        "soak": "soak-tenant-bravo-customer-bravo-1767313380.json"
+      },
+      "metrics": {
+        "count": 14,
+        "avg_ms": 32.054,
+        "p95_ms": 51.831
+      },
+      "soak_metrics": {
+        "count": 150,
+        "avg_ms": 19.258,
+        "p95_ms": 29.309,
+        "failures": 58,
+        "throughput_eps": 51.93,
+        "tenant": "tenant-bravo",
+        "pipeline_profile": "customer-bravo"
+      },
+      "vector_sources": [
+        "tests\\data\\api_security_auth_harness_bravo.json",
+        "tests\\data\\api_security_auth_harness.json"
+      ],
+      "github_run_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml"
+    },
+    {
+      "ts": 1767313374,
+      "tenant": "tenant-alpha",
+      "pipeline_profile": "customer-alpha",
+      "pipeline_meta": {
+        "customer_name": "Customer Alpha Healthcare",
+        "pipelines": [
+          "customer-alpha-prod",
+          "customer-alpha-dr"
+        ],
+        "fixture_vectors": [
+          "tests\\data\\api_security_auth_harness.json",
+          "tests\\data\\api_security_auth_harness_alpha.json"
+        ],
+        "artifact_base_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+        "notes": "HIPAA tier requires PHI-aware overrides plus shared harness vectors."
+      },
+      "files": {
+        "benchmark": "benchmark-tenant-alpha-customer-alpha-1767313374.json",
+        "soak": "soak-tenant-alpha-customer-alpha-1767313374.json"
+      },
+      "metrics": {
+        "count": 14,
+        "avg_ms": 38.693,
+        "p95_ms": 25.885
+      },
+      "soak_metrics": {
+        "count": 180,
+        "avg_ms": 28.683,
+        "p95_ms": 65.161,
+        "failures": 0,
+        "throughput_eps": 34.86,
+        "tenant": "tenant-alpha",
+        "pipeline_profile": "customer-alpha"
+      },
+      "vector_sources": [
+        "tests\\data\\api_security_auth_harness_alpha.json",
+        "tests\\data\\api_security_auth_harness.json"
+      ],
+      "github_run_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml"
+    },
+    {
+      "ts": 1767313228,
+      "tenant": "tenant-gamma",
+      "pipeline_profile": "customer-gamma",
+      "pipeline_meta": {
+        "customer_name": "Customer Gamma SaaS",
+        "pipelines": [
+          "customer-gamma-shared"
+        ],
+        "fixture_vectors": [
+          "tests\\data\\api_security_auth_harness.json",
+          "tests\\data\\api_security_auth_harness_gamma.json"
+        ],
+        "artifact_base_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+        "notes": "AI/LLM tenant uses MITRE ATLAS override fixtures."
+      },
+      "files": {
+        "benchmark": "benchmark-tenant-gamma-customer-gamma-1767313228.json",
+        "soak": "soak-tenant-gamma-customer-gamma-1767313228.json"
+      },
+      "metrics": {
+        "count": 14,
+        "avg_ms": 10.535,
+        "p95_ms": 13.153
+      },
+      "soak_metrics": {
+        "count": 120,
+        "avg_ms": 10.667,
+        "p95_ms": 13.25,
+        "failures": 120,
+        "throughput_eps": 93.75,
+        "tenant": "tenant-gamma",
+        "pipeline_profile": "customer-gamma"
+      },
+      "vector_sources": [
+        "tests\\data\\api_security_auth_harness_gamma.json",
+        "tests\\data\\api_security_auth_harness.json"
+      ],
+      "github_run_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml"
+    },
+    {
+      "ts": 1767313224,
+      "tenant": "tenant-bravo",
+      "pipeline_profile": "customer-bravo",
+      "pipeline_meta": {
+        "customer_name": "Customer Bravo FinServ",
+        "pipelines": [
+          "customer-bravo-core"
+        ],
+        "fixture_vectors": [
+          "tests\\data\\api_security_auth_harness.json",
+          "tests\\data\\api_security_auth_harness_bravo.json"
+        ],
+        "artifact_base_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+        "notes": "Payments/billing fixture pack extends shared harness with ledger flows."
+      },
+      "files": {
+        "benchmark": "benchmark-tenant-bravo-customer-bravo-1767313224.json",
+        "soak": "soak-tenant-bravo-customer-bravo-1767313224.json"
+      },
+      "metrics": {
+        "count": 14,
+        "avg_ms": 24.23,
+        "p95_ms": 27.636
+      },
+      "soak_metrics": {
+        "count": 150,
+        "avg_ms": 26.526,
+        "p95_ms": 65.705,
+        "failures": 58,
+        "throughput_eps": 37.7,
+        "tenant": "tenant-bravo",
+        "pipeline_profile": "customer-bravo"
+      },
+      "vector_sources": [
+        "tests\\data\\api_security_auth_harness_bravo.json",
+        "tests\\data\\api_security_auth_harness.json"
+      ],
+      "github_run_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml"
+    },
+    {
+      "ts": 1767313219,
+      "tenant": "tenant-alpha",
+      "pipeline_profile": "customer-alpha",
+      "pipeline_meta": {
+        "customer_name": "Customer Alpha Healthcare",
+        "pipelines": [
+          "customer-alpha-prod",
+          "customer-alpha-dr"
+        ],
+        "fixture_vectors": [
+          "tests\\data\\api_security_auth_harness.json",
+          "tests\\data\\api_security_auth_harness_alpha.json"
+        ],
+        "artifact_base_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+        "notes": "HIPAA tier requires PHI-aware overrides plus shared harness vectors."
+      },
+      "files": {
+        "benchmark": "benchmark-tenant-alpha-customer-alpha-1767313219.json",
+        "soak": "soak-tenant-alpha-customer-alpha-1767313219.json"
+      },
+      "metrics": {
+        "count": 14,
+        "avg_ms": 91.551,
+        "p95_ms": 143.063
+      },
+      "soak_metrics": {
+        "count": 180,
+        "avg_ms": 25.115,
+        "p95_ms": 29.893,
+        "failures": 0,
+        "throughput_eps": 39.82,
+        "tenant": "tenant-alpha",
+        "pipeline_profile": "customer-alpha"
+      },
+      "vector_sources": [
+        "tests\\data\\api_security_auth_harness_alpha.json",
+        "tests\\data\\api_security_auth_harness.json"
+      ],
+      "github_run_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml"
+    },
+    {
+      "ts": 1767313151,
+      "tenant": "tenant-gamma",
+      "pipeline_profile": "customer-gamma",
+      "pipeline_meta": {
+        "customer_name": "Customer Gamma SaaS",
+        "pipelines": [
+          "customer-gamma-shared"
+        ],
+        "fixture_vectors": [
+          "tests\\data\\api_security_auth_harness.json",
+          "tests\\data\\api_security_auth_harness_gamma.json"
+        ],
+        "artifact_base_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+        "notes": "AI/LLM tenant uses MITRE ATLAS override fixtures."
+      },
+      "files": {
+        "benchmark": "benchmark-tenant-gamma-customer-gamma-1767313151.json",
+        "soak": "soak-tenant-gamma-customer-gamma-1767313151.json"
+      },
+      "metrics": {
+        "count": 14,
+        "avg_ms": 10.165,
+        "p95_ms": 11.141
+      },
+      "soak_metrics": {
+        "count": 120,
+        "avg_ms": 18.382,
+        "p95_ms": 71.081,
+        "failures": 120,
+        "throughput_eps": 54.4,
+        "tenant": "tenant-gamma",
+        "pipeline_profile": "customer-gamma"
+      },
+      "vector_sources": [
+        "tests\\data\\api_security_auth_harness_gamma.json",
+        "tests\\data\\api_security_auth_harness.json"
+      ],
+      "github_run_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml"
+    },
+    {
+      "ts": 1767313148,
+      "tenant": "tenant-bravo",
+      "pipeline_profile": "customer-bravo",
+      "pipeline_meta": {
+        "customer_name": "Customer Bravo FinServ",
+        "pipelines": [
+          "customer-bravo-core"
+        ],
+        "fixture_vectors": [
+          "tests\\data\\api_security_auth_harness.json",
+          "tests\\data\\api_security_auth_harness_bravo.json"
+        ],
+        "artifact_base_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+        "notes": "Payments/billing fixture pack extends shared harness with ledger flows."
+      },
+      "files": {
+        "benchmark": "benchmark-tenant-bravo-customer-bravo-1767313148.json",
+        "soak": "soak-tenant-bravo-customer-bravo-1767313148.json"
+      },
+      "metrics": {
+        "count": 14,
+        "avg_ms": 23.22,
+        "p95_ms": 24.106
+      },
+      "soak_metrics": {
+        "count": 150,
+        "avg_ms": 19.907,
+        "p95_ms": 32.18,
+        "failures": 58,
+        "throughput_eps": 50.23,
+        "tenant": "tenant-bravo",
+        "pipeline_profile": "customer-bravo"
+      },
+      "vector_sources": [
+        "tests\\data\\api_security_auth_harness_bravo.json",
+        "tests\\data\\api_security_auth_harness.json"
+      ],
+      "github_run_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml"
+    },
+    {
+      "ts": 1767313142,
+      "tenant": "tenant-alpha",
+      "pipeline_profile": "customer-alpha",
+      "pipeline_meta": {
+        "customer_name": "Customer Alpha Healthcare",
+        "pipelines": [
+          "customer-alpha-prod",
+          "customer-alpha-dr"
+        ],
+        "fixture_vectors": [
+          "tests\\data\\api_security_auth_harness.json",
+          "tests\\data\\api_security_auth_harness_alpha.json"
+        ],
+        "artifact_base_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+        "notes": "HIPAA tier requires PHI-aware overrides plus shared harness vectors."
+      },
+      "files": {
+        "benchmark": "benchmark-tenant-alpha-customer-alpha-1767313142.json",
+        "soak": "soak-tenant-alpha-customer-alpha-1767313142.json"
+      },
+      "metrics": {
+        "count": 14,
+        "avg_ms": 41.003,
+        "p95_ms": 35.141
+      },
+      "soak_metrics": {
+        "count": 180,
+        "avg_ms": 28.936,
+        "p95_ms": 52.284,
+        "failures": 0,
+        "throughput_eps": 34.56,
+        "tenant": "tenant-alpha",
+        "pipeline_profile": "customer-alpha"
+      },
+      "vector_sources": [
+        "tests\\data\\api_security_auth_harness_alpha.json",
+        "tests\\data\\api_security_auth_harness.json"
+      ],
+      "github_run_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml"
+    },
+    {
+      "ts": 1767313090,
+      "tenant": "tenant-gamma",
+      "pipeline_profile": "customer-gamma",
+      "pipeline_meta": {
+        "customer_name": "Customer Gamma SaaS",
+        "pipelines": [
+          "customer-gamma-shared"
+        ],
+        "fixture_vectors": [
+          "tests\\data\\api_security_auth_harness.json",
+          "tests\\data\\api_security_auth_harness_gamma.json"
+        ],
+        "artifact_base_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+        "notes": "AI/LLM tenant uses MITRE ATLAS override fixtures."
+      },
+      "files": {
+        "benchmark": "benchmark-tenant-gamma-customer-gamma-1767313090.json",
+        "soak": "soak-tenant-gamma-customer-gamma-1767313090.json"
+      },
+      "metrics": {
+        "count": 14,
+        "avg_ms": 10.788,
+        "p95_ms": 12.66
+      },
+      "soak_metrics": {
+        "count": 120,
+        "avg_ms": 18.907,
+        "p95_ms": 69.501,
+        "failures": 120,
+        "throughput_eps": 52.89,
+        "tenant": "tenant-gamma",
+        "pipeline_profile": "customer-gamma"
+      },
+      "vector_sources": [
+        "tests\\data\\api_security_auth_harness_gamma.json",
+        "tests\\data\\api_security_auth_harness.json"
+      ],
+      "github_run_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml"
+    },
+    {
+      "ts": 1767313087,
+      "tenant": "tenant-bravo",
+      "pipeline_profile": "customer-bravo",
+      "pipeline_meta": {
+        "customer_name": "Customer Bravo FinServ",
+        "pipelines": [
+          "customer-bravo-core"
+        ],
+        "fixture_vectors": [
+          "tests\\data\\api_security_auth_harness.json",
+          "tests\\data\\api_security_auth_harness_bravo.json"
+        ],
+        "artifact_base_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+        "notes": "Payments/billing fixture pack extends shared harness with ledger flows."
+      },
+      "files": {
+        "benchmark": "benchmark-tenant-bravo-customer-bravo-1767313087.json",
+        "soak": "soak-tenant-bravo-customer-bravo-1767313087.json"
+      },
+      "metrics": {
+        "count": 14,
+        "avg_ms": 24.52,
+        "p95_ms": 27.697
+      },
+      "soak_metrics": {
+        "count": 150,
+        "avg_ms": 20.929,
+        "p95_ms": 32.771,
+        "failures": 58,
+        "throughput_eps": 47.78,
+        "tenant": "tenant-bravo",
+        "pipeline_profile": "customer-bravo"
+      },
+      "vector_sources": [
+        "tests\\data\\api_security_auth_harness_bravo.json",
+        "tests\\data\\api_security_auth_harness.json"
+      ],
+      "github_run_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml"
+    },
+    {
+      "ts": 1767313081,
+      "tenant": "tenant-alpha",
+      "pipeline_profile": "customer-alpha",
+      "pipeline_meta": {
+        "customer_name": "Customer Alpha Healthcare",
+        "pipelines": [
+          "customer-alpha-prod",
+          "customer-alpha-dr"
+        ],
+        "fixture_vectors": [
+          "tests\\data\\api_security_auth_harness.json",
+          "tests\\data\\api_security_auth_harness_alpha.json"
+        ],
+        "artifact_base_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+        "notes": "HIPAA tier requires PHI-aware overrides plus shared harness vectors."
+      },
+      "files": {
+        "benchmark": "benchmark-tenant-alpha-customer-alpha-1767313081.json",
+        "soak": "soak-tenant-alpha-customer-alpha-1767313081.json"
+      },
+      "metrics": {
+        "count": 14,
+        "avg_ms": 39.852,
+        "p95_ms": 28.944
+      },
+      "soak_metrics": {
+        "count": 180,
+        "avg_ms": 29.5,
+        "p95_ms": 54.888,
+        "failures": 0,
+        "throughput_eps": 33.9,
+        "tenant": "tenant-alpha",
+        "pipeline_profile": "customer-alpha"
+      },
+      "vector_sources": [
+        "tests\\data\\api_security_auth_harness_alpha.json",
+        "tests\\data\\api_security_auth_harness.json"
+      ],
+      "github_run_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml"
+    },
+    {
+      "ts": 1767312930,
+      "tenant": "tenant-gamma",
+      "pipeline_profile": "customer-gamma",
+      "pipeline_meta": {
+        "customer_name": "Customer Gamma SaaS",
+        "pipelines": [
+          "customer-gamma-shared"
+        ],
+        "fixture_vectors": [
+          "tests\\data\\api_security_auth_harness.json",
+          "tests\\data\\api_security_auth_harness_gamma.json"
+        ],
+        "artifact_base_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+        "notes": "AI/LLM tenant uses MITRE ATLAS override fixtures."
+      },
+      "files": {
+        "benchmark": "benchmark-tenant-gamma-customer-gamma-1767312930.json",
+        "soak": "soak-tenant-gamma-customer-gamma-1767312930.json"
+      },
+      "metrics": {
+        "count": 14,
+        "avg_ms": 100.255,
+        "p95_ms": 195.094
+      },
+      "soak_metrics": {
+        "count": 120,
+        "avg_ms": 14.946,
+        "p95_ms": 19.248,
+        "failures": 120,
+        "throughput_eps": 66.91,
+        "tenant": "tenant-gamma",
+        "pipeline_profile": "customer-gamma"
+      },
+      "vector_sources": [
+        "tests\\data\\api_security_auth_harness_gamma.json",
+        "tests\\data\\api_security_auth_harness.json"
+      ],
+      "github_run_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml"
+    },
+    {
+      "ts": 1767312924,
+      "tenant": "tenant-bravo",
+      "pipeline_profile": "customer-bravo",
+      "pipeline_meta": {
+        "customer_name": "Customer Bravo FinServ",
+        "pipelines": [
+          "customer-bravo-core"
+        ],
+        "fixture_vectors": [
+          "tests\\data\\api_security_auth_harness.json",
+          "tests\\data\\api_security_auth_harness_bravo.json"
+        ],
+        "artifact_base_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+        "notes": "Payments/billing fixture pack extends shared harness with ledger flows."
+      },
+      "files": {
+        "benchmark": "benchmark-tenant-bravo-customer-bravo-1767312924.json",
+        "soak": "soak-tenant-bravo-customer-bravo-1767312924.json"
+      },
+      "metrics": {
+        "count": 14,
+        "avg_ms": 35.196,
+        "p95_ms": 38.518
+      },
+      "soak_metrics": {
+        "count": 150,
+        "avg_ms": 27.852,
+        "p95_ms": 42.686,
+        "failures": 58,
+        "throughput_eps": 35.9,
+        "tenant": "tenant-bravo",
+        "pipeline_profile": "customer-bravo"
+      },
+      "vector_sources": [
+        "tests\\data\\api_security_auth_harness_bravo.json",
+        "tests\\data\\api_security_auth_harness.json"
+      ],
+      "github_run_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml"
+    },
+    {
+      "ts": 1767312917,
+      "tenant": "tenant-alpha",
+      "pipeline_profile": "customer-alpha",
+      "pipeline_meta": {
+        "customer_name": "Customer Alpha Healthcare",
+        "pipelines": [
+          "customer-alpha-prod",
+          "customer-alpha-dr"
+        ],
+        "fixture_vectors": [
+          "tests\\data\\api_security_auth_harness.json",
+          "tests\\data\\api_security_auth_harness_alpha.json"
+        ],
+        "artifact_base_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+        "notes": "HIPAA tier requires PHI-aware overrides plus shared harness vectors."
+      },
+      "files": {
+        "benchmark": "benchmark-tenant-alpha-customer-alpha-1767312917.json",
+        "soak": "soak-tenant-alpha-customer-alpha-1767312917.json"
+      },
+      "metrics": {
+        "count": 14,
+        "avg_ms": 43.843,
+        "p95_ms": 38.065
+      },
+      "soak_metrics": {
+        "count": 180,
+        "avg_ms": 34.014,
+        "p95_ms": 83.665,
+        "failures": 0,
+        "throughput_eps": 29.4,
+        "tenant": "tenant-alpha",
+        "pipeline_profile": "customer-alpha"
+      },
+      "vector_sources": [
+        "tests\\data\\api_security_auth_harness_alpha.json",
+        "tests\\data\\api_security_auth_harness.json"
+      ],
+      "github_run_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml"
+    }
+  ]
+}

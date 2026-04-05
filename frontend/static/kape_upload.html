@@ -1,0 +1,31 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>KAPE Upload</title>
+  <style>body{background:#0b0f14;color:#cdd7e0;font-family:Inter,Arial; padding:20px}</style>
+</head>
+<body>
+  <h2>KAPE Upload</h2>
+  <input type="file" id="f" />
+  <label><input type="checkbox" id="async"> Async process</label>
+  <label><input type="checkbox" id="sandbox"> Trigger static sandbox</label>
+  <button id="u">Upload</button>
+  <pre id="out"></pre>
+  <script>
+    const btn = document.getElementById('u');
+    const inp = document.getElementById('f');
+    const out = document.getElementById('out');
+    btn.onclick = async ()=>{
+      if(!inp.files.length){ out.textContent='Select a file'; return; }
+      const fd = new FormData();
+      fd.append('file', inp.files[0]);
+      const asyncFlag = document.getElementById('async').checked ? 'true' : 'false';
+      const sandboxFlag = document.getElementById('sandbox').checked ? 'true' : 'false';
+      const query = `?async_process=${asyncFlag}&trigger_sandbox=${sandboxFlag}`;
+      const res = await fetch('/api/v1/kape/upload'+query, {method:'POST', body: fd, headers: {'x-api-key': localStorage.apiKey || 'devkey123'}});
+      const j = await res.json(); out.textContent = JSON.stringify(j, null, 2);
+    }
+  </script>
+</body>
+</html>

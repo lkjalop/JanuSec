@@ -1,0 +1,9 @@
+{
+  "id": "evt-graph-1",
+  "host": "host-a",
+  "user": "alice",
+  "process": {"name": "cmd.exe"},
+  "details": {},
+  "graph_lateral_chain_len": 4,
+  "graph_lateral_chain_hosts": 3
+}

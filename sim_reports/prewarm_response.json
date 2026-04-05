@@ -1,0 +1,4 @@
+{
+  "ok": true,
+  "response_preview": "{'text': \"Let's get started!\\n\\nTo prewarm\", 'model': 'llama3:8b', 'meta': {'provider': 'ollama', 'eval_count': 8, 'total_duration_ms': 2500110700, 'elapsed_s': 4.188754320144653}}"
+}

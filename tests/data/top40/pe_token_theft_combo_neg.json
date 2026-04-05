@@ -1,0 +1,4 @@
+{
+  "impersonation": false,
+  "target_process": "svchost.exe"
+}

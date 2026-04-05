@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Identity Graph</title>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; background:#0e1117; color:#e6e6e6; margin:0; padding:1rem; }
+    input, button { padding:0.5rem; margin-right:0.5rem; }
+    #graph { width:100%; height:600px; background:#161b22; border:1px solid #2a3142; border-radius:6px; position:relative; }
+  </style>
+</head>
+<body>
+  <h2>Identity HopGraph</h2>
+  <p>Explore identity pivots and lateral movement. Try a user node like <code>user:alice@corp.com</code>.</p>
+  <input id="node" placeholder="user:alice@corp.com" size="40" />
+  <button onclick="runExplain()">Visualize</button>
+  <span id="id-state" style="margin-left:12px; font-weight:600; color:#cbd5e1"></span>
+  <a href="/static/graph_explain.html" style="margin-left:10px;color:#58a6ff">Advanced View</a>
+  <div id="graph" style="margin-top:12px"></div>
+  <div id="id-factors" style="margin-top:16px">
+    <h3>Recent Identity Factors</h3>
+    <div class="muted">Shows recent decisions containing identity:* factors.</div>
+    <table id="id-factors-table" style="width:100%;border-collapse:collapse;font-size:12px;margin-top:8px">
+      <thead>
+        <tr>
+          <th style="border:1px solid #2a3142;padding:6px;text-align:left">Time</th>
+          <th style="border:1px solid #2a3142;padding:6px;text-align:left">Event</th>
+          <th style="border:1px solid #2a3142;padding:6px;text-align:left">Factors</th>
+          <th style="border:1px solid #2a3142;padding:6px;text-align:left">Verdict</th>
+        </tr>
+      </thead>
+      <tbody id="id-factors-body">
+        <tr><td colspan="4" style="border:1px solid #2a3142;padding:6px" class="muted">Loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div id="id-paths" style="margin-top:18px">
+    <h3>Top Risk Paths (Identity)</h3>
+    <div class="muted">From Identity HopGraph: shows highest-risk paths and tags.</div>
+    <table id="id-paths-table" style="width:100%;border-collapse:collapse;font-size:12px;margin-top:8px">
+      <thead>
+        <tr>
+          <th style="border:1px solid #2a3142;padding:6px;text-align:left">Risk</th>
+          <th style="border:1px solid #2a3142;padding:6px;text-align:left">Path</th>
+          <th style="border:1px solid #2a3142;padding:6px;text-align:left">MITRE</th>
+          <th style="border:1px solid #2a3142;padding:6px;text-align:left">STRIDE</th>
+          <th style="border:1px solid #2a3142;padding:6px;text-align:left">PASTA</th>
+          <th style="border:1px solid #2a3142;padding:6px;text-align:left">DREAD</th>
+        </tr>
+      </thead>
+      <tbody id="id-paths-body">
+        <tr><td colspan="6" style="border:1px solid #2a3142;padding:6px" class="muted">Enter a user above and click Visualize.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div id="id-timeline" style="margin-top:18px">
+    <h3>Identity Timeline</h3>
+    <div class="muted">Recent edges for this identity (most recent first).</div>
+    <table id="id-timeline-table" style="width:100%;border-collapse:collapse;font-size:12px;margin-top:8px">
+      <thead>
+        <tr>
+          <th style="border:1px solid #2a3142;padding:6px;text-align:left">Time</th>
+          <th style="border:1px solid #2a3142;padding:6px;text-align:left">Type</th>
+          <th style="border:1px solid #2a3142;padding:6px;text-align:left">Destination</th>
+          <th style="border:1px solid #2a3142;padding:6px;text-align:left">Weight</th>
+        </tr>
+      </thead>
+      <tbody id="id-timeline-body">
+        <tr><td colspan="4" style="border:1px solid #2a3142;padding:6px" class="muted">No identity loaded.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <script>
+    let sim = null;
+    function authHeaders(){ try { const key = localStorage.getItem('apiKey') || 'devkey123'; return {'x-api-key': key}; } catch(_) { return {}; } }
+    function nodeType(id){ if(id.startsWith('user:')) return 'user'; if(id.startsWith('host:')) return 'host'; if(id.startsWith('process:')) return 'process'; return 'unknown'; }
+    function color(t){ return ({user:'#1abc9c', host:'#3498db', process:'#9b59b6', unknown:'#95a5a6'})[t] || '#95a5a6'; }
+    async function runExplain(){
+      const raw = (document.getElementById('node').value||'').trim(); if(!raw) return;
+      const n = raw;
+      try { localStorage.setItem('lastIdentityViewed', n.startsWith('user:')? n : `user:${n}`); } catch(_) {}
+      const r = await fetch(`/api/v1/graph/explain?node=${encodeURIComponent(n)}`, { headers: authHeaders() });
+      const j = await r.json();
+      render(j);
+      loadIdentityFactors();
+      // Also load identity top paths for this user
+      let user = raw.startsWith('user:') ? raw : `user:${raw}`;
+      loadIdentityPaths(user);
+      loadIdentitySummary(user);
+      loadIdentityTimeline(user);
+    }
+    // Prefill from last viewed identity if available
+    (function prefill(){ try{ var last = localStorage.getItem('lastIdentityViewed'); if(last){ var el=document.getElementById('node'); if(el && !el.value){ el.value = last; } } }catch(_){ } })();
+    function render(data){
+      const el = document.getElementById('graph'); el.innerHTML='';
+      if(!data.chains || !data.chains.length){ el.textContent='No chains found.'; return; }
+      const chain = data.chains[0];
+      const nodes=[]; const links=[]; const map=new Map();
+      (chain.hops||[]).forEach(h=>{ if(!map.has(h.src)) map.set(h.src,{id:h.src,type:nodeType(h.src)}); if(!map.has(h.dst)) map.set(h.dst,{id:h.dst,type:nodeType(h.dst)}); links.push({source:h.src,target:h.dst}); });
+      nodes.push(...map.values());
+      const svg = d3.select('#graph').append('svg').attr('width','100%').attr('height','100%');
+      const g = svg.append('g'); svg.call(d3.zoom().on('zoom', (e)=>g.attr('transform', e.transform)));
+      sim = d3.forceSimulation(nodes).force('link', d3.forceLink(links).id(d=>d.id).distance(140)).force('charge', d3.forceManyBody().strength(-350)).force('center', d3.forceCenter(el.clientWidth/2, el.clientHeight/2));
+      const link = g.selectAll('line').data(links).enter().append('line').attr('stroke','#4a5568').attr('stroke-width',2).attr('stroke-opacity',.6);
+      const node = g.selectAll('g').data(nodes).enter().append('g').call(d3.drag().on('start', dragstarted).on('drag', dragged).on('end', dragended));
+      node.append('circle').attr('r',10).attr('fill', d=>color(d.type));
+      node.append('text').attr('dy',-15).attr('text-anchor','middle').style('font-size','11px').text(d=>d.id.length>30? d.id.slice(0,27)+'…':d.id);
+      sim.on('tick', ()=>{ link.attr('x1', d=>d.source.x).attr('y1', d=>d.source.y).attr('x2', d=>d.target.x).attr('y2', d=>d.target.y); node.attr('transform', d=>`translate(${d.x},${d.y})`); });
+    }
+    function dragstarted(e,d){ if(!e.active) sim.alphaTarget(0.3).restart(); d.fx=d.x; d.fy=d.y; }
+    function dragged(e,d){ d.fx=e.x; d.fy=e.y; }
+    function dragended(e,d){ if(!e.active) sim.alphaTarget(0); d.fx=null; d.fy=null; }
+
+    async function loadIdentityFactors(){
+      const tbody = document.getElementById('id-factors-body');
+      try {
+        const r = await fetch('/api/v1/decisions/recent?limit=100', { headers: authHeaders() });
+        const j = r.ok ? await r.json() : {};
+        const rows = (j.decisions || j.rows || j.events || [])
+          .map(d => ({ ts: d.ts || d.timestamp || null, id: d.event_id || d.id, verdict: d.verdict || '', factors: d.reasons || d.factors || [] }))
+          .filter(d => Array.isArray(d.factors) && d.factors.some(f => String(f).startsWith('identity:')))
+          .slice(0, 25);
+        if (!rows.length){ tbody.innerHTML = '<tr><td colspan="4" style="border:1px solid #2a3142;padding:6px" class="muted">No recent identity factors.</td></tr>'; return; }
+        tbody.innerHTML = rows.map(rw => {
+          const when = rw.ts ? new Date((typeof rw.ts === 'number'? rw.ts*1000 : rw.ts)).toLocaleString() : '';
+          const ids = rw.id ? String(rw.id) : '';
+          const f = rw.factors.filter(f => String(f).startsWith('identity:')).join(', ');
+          return `<tr>
+            <td style="border:1px solid #2a3142;padding:6px">${when}</td>
+            <td style="border:1px solid #2a3142;padding:6px">${ids}</td>
+            <td style="border:1px solid #2a3142;padding:6px">${f}</td>
+            <td style="border:1px solid #2a3142;padding:6px">${rw.verdict}</td>
+          </tr>`;
+        }).join('');
+      } catch (e) {
+        tbody.innerHTML = '<tr><td colspan="4" style="border:1px solid #2a3142;padding:6px">Failed to load identity factors</td></tr>';
+      }
+    }
+    // initial fetch of identity factors for landing
+    loadIdentityFactors();
+
+    async function loadIdentityPaths(user){
+      const tbody = document.getElementById('id-paths-body');
+      try {
+        const r = await fetch(`/api/v1/graph/identity/paths?user=${encodeURIComponent(user)}&limit=5`, { headers: authHeaders() });
+        if(!r.ok){ tbody.innerHTML = '<tr><td colspan="6" style="border:1px solid #2a3142;padding:6px">Failed to load paths</td></tr>'; return; }
+        const j = await r.json();
+        const rows = (j.paths||[]).map(p => {
+          const risk = (typeof p.risk === 'number') ? p.risk.toFixed(2) : '';
+          const pathStr = (p.path||[]).join(' → ');
+          const mitre = (p.mitre||[]).join(', ');
+          const stride = (p.stride||[]).join(', ');
+          const pasta = p.pasta || '';
+          const d = p.dread||{}; const dread = ['damage','repro','exploit','affected','discover'].map(k=> (k in d? `${k[0].toUpperCase()+k.slice(1)}:${d[k]}` : '')).filter(Boolean).join(' ');
+          return `<tr>
+            <td style="border:1px solid #2a3142;padding:6px">${risk}</td>
+            <td style="border:1px solid #2a3142;padding:6px">${pathStr}</td>
+            <td style="border:1px solid #2a3142;padding:6px">${mitre}</td>
+            <td style="border:1px solid #2a3142;padding:6px">${stride}</td>
+            <td style="border:1px solid #2a3142;padding:6px">${pasta}</td>
+            <td style="border:1px solid #2a3142;padding:6px">${dread}</td>
+          </tr>`;
+        });
+        tbody.innerHTML = rows.length ? rows.join('') : '<tr><td colspan="6" style="border:1px solid #2a3142;padding:6px" class="muted">No paths found for this user.</td></tr>';
+      } catch (e) {
+        tbody.innerHTML = '<tr><td colspan="6" style="border:1px solid #2a3142;padding:6px">Error loading paths</td></tr>';
+      }
+    }
+    async function loadIdentitySummary(user){
+      const el = document.getElementById('id-state');
+      try {
+        const r = await fetch(`/api/v1/identity/summary?user=${encodeURIComponent(user)}`, { headers: authHeaders() });
+        if(!r.ok){ el.textContent = ''; return; }
+        const j = await r.json();
+        const st = j.state || 'Benign';
+        const risk = typeof j.risk === 'number' ? j.risk.toFixed(2) : '';
+        let color = '#93a0b1';
+        if(st==='Suspicious') color = '#E0C446';
+        if(st==='Threat') color = '#E54848';
+        el.innerHTML = `<span style="color:${color}">State: ${st}</span> <span style="opacity:.8">Risk: ${risk}</span>`;
+      } catch(_){ el.textContent=''; }
+    }
+    async function loadIdentityTimeline(user){
+      const tbody = document.getElementById('id-timeline-body');
+      try {
+        const r = await fetch(`/api/v1/identity/${encodeURIComponent(user)}/timeline?limit=50`, { headers: authHeaders() });
+        if(!r.ok){ tbody.innerHTML = '<tr><td colspan="4" style="border:1px solid #2a3142;padding:6px">Failed to load timeline</td></tr>'; return; }
+        const j = await r.json();
+        const rows = (j.recent||[]).map(x => {
+          const when = x.ts ? new Date(x.ts*1000).toLocaleString() : '';
+          return `<tr>
+            <td style="border:1px solid #2a3142;padding:6px">${when}</td>
+            <td style="border:1px solid #2a3142;padding:6px">${(x.etype||'')}</td>
+            <td style="border:1px solid #2a3142;padding:6px">${(x.dst||'')}</td>
+            <td style="border:1px solid #2a3142;padding:6px">${(typeof x.weight==='number'? x.weight.toFixed(2):'')}</td>
+          </tr>`;
+        });
+        tbody.innerHTML = rows.length ? rows.join('') : '<tr><td colspan="4" style="border:1px solid #2a3142;padding:6px" class="muted">No recent edges for this user.</td></tr>';
+      } catch(e) {
+        tbody.innerHTML = '<tr><td colspan="4" style="border:1px solid #2a3142;padding:6px">Error loading timeline</td></tr>';
+      }
+    }
+  </script>
+</body>
+</html>

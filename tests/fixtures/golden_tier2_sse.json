@@ -1,0 +1,7 @@
+{
+  "mock_response": {
+    "text": "{\"verdict\": {\"summary\": \"Suspected compromise\", \"confidence\": 0.85}, \"evidence\": {\"items\": [{\"type\": \"domain\", \"value\": \"malicious.example.com\", \"confidence\": 0.9}]}}",
+    "model": "mock-1",
+    "meta": {}
+  }
+}

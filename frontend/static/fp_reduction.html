@@ -1,0 +1,114 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>FP Reduction Dashboard</title>
+  <style>
+    body{font-family:system-ui,Segoe UI,Roboto,Arial;background:#0f1720;color:#E8EBF0}
+    .card{background:#0b1220;border:1px solid #233043;padding:16px;border-radius:8px;margin:20px}
+    table{width:100%;border-collapse:collapse}
+    th,td{padding:6px;border-bottom:1px solid #1f2a36}
+    .small{font-size:12px;color:#9aa6b2}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>FP Reduction</h2>
+    <div class="small">Select tenant and test</div>
+    <label>Tenant: <input id="tenant" value="test-tenant"/></label>
+    <label style="margin-left:8px">Test: <input id="test" value="shadow-1"/></label>
+    <button id="load">Load</button>
+    <div id="content" style="margin-top:12px">Loading...</div>
+    <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:12px">
+      <div style="flex:1 1 600px;background:transparent;padding:10px">
+        <h4 style="margin:6px 0">Precision Trend</h4>
+        <canvas id="precisionChart" width="800" height="300"></canvas>
+      </div>
+      <div style="flex:1 1 400px;background:transparent;padding:10px">
+        <h4 style="margin:6px 0">A/B Variant Precision</h4>
+        <canvas id="abChart" width="400" height="300"></canvas>
+      </div>
+    </div>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script>
+    async function load(){
+      const t = document.getElementById('tenant').value || '';
+      const test = document.getElementById('test').value || '';
+      const now = new Date();
+      const end = now.toISOString().slice(0,10);
+      const start = end;
+      const url = `/api/v1/dashboard/fp_reduction?tenant_id=${encodeURIComponent(t)}&test_id=${encodeURIComponent(test)}&start=${start}&end=${end}`;
+      const r = await fetch(url);
+      const j = await r.json();
+      let out = '<h3>Daily</h3>';
+      if(j.daily && j.daily.length){
+        out += '<table><tr><th>Day</th><th>TP</th><th>FP</th><th>FN</th><th>Precision</th></tr>';
+        for(const row of j.daily){
+          out += `<tr><td>${row.day}</td><td>${row.tp}</td><td>${row.fp}</td><td>${row.fn}</td><td>${row.precision===null?'-':(Math.round(row.precision*10000)/100)+'%'}</td></tr>`;
+        }
+        out += '</table>';
+      } else { out += '<div class="small">No daily rows</div>'; }
+      out += '<h3 style="margin-top:12px">A/B</h3>';
+      if(j.ab && j.ab.length){
+        for(const a of j.ab){
+          out += `<div><strong>Variant ${a.variant}</strong>`;
+          out += '<table><tr><th>Day</th><th>TP</th><th>FP</th><th>FN</th></tr>';
+          for(const r of a.rows){
+            out += `<tr><td>${r.day}</td><td>${r.tp}</td><td>${r.fp}</td><td>${r.fn}</td></tr>`;
+          }
+          out += '</table></div>';
+        }
+      } else { out += '<div class="small">No AB rows</div>'; }
+      document.getElementById('content').innerHTML = out;
+
+      // Build charts if Chart.js available
+      try{
+        const precisionCtx = document.getElementById('precisionChart').getContext('2d');
+        const abCtx = document.getElementById('abChart').getContext('2d');
+        // Prepare precision trend series
+        const labels = (j.daily || []).map(d => d.day);
+        const precisionData = (j.daily || []).map(d => (d.precision == null ? NaN : Math.round(d.precision*10000)/100));
+        // Destroy existing charts if present
+        if(window._precisionChartInstance){ try{ window._precisionChartInstance.destroy(); }catch(e){} }
+        if(window._abChartInstance){ try{ window._abChartInstance.destroy(); }catch(e){} }
+        window._precisionChartInstance = new Chart(precisionCtx, {
+          type: 'line',
+          data: {
+            labels: labels,
+            datasets: [{
+              label: 'Precision %',
+              data: precisionData,
+              borderColor: '#4A63E7',
+              backgroundColor: 'rgba(74,99,231,0.12)',
+              spanGaps: true,
+              tension: 0.2,
+            }]
+          },
+          options: { responsive: true, plugins: {legend:{display:false}}, scales: {y: { beginAtZero: true }} }
+        });
+
+        // A/B variant precision: compute precision per variant over window
+        const variants = (j.ab || []).map(a=>a.variant);
+        const abDatasets = (j.ab || []).map((a, idx) => {
+          // compute precision % aggregated across rows
+          let tp = 0, fp = 0;
+          for(const row of (a.rows||[])){
+            tp += (row.tp||0);
+            fp += (row.fp||0);
+          }
+          const prec = (tp+fp) ? Math.round((tp/(tp+fp))*10000)/100 : NaN;
+          return { label: `Variant ${a.variant}`, data: [prec], backgroundColor: idx%2? '#E76F51':'#2A9D8F' };
+        });
+        window._abChartInstance = new Chart(abCtx, {
+          type: 'bar',
+          data: { labels: ['Precision %'], datasets: abDatasets },
+          options: { responsive:true, plugins:{legend:{position:'bottom'}} , scales:{ y: { beginAtZero:true } } }
+        });
+      }catch(e){ console.warn('Chart render failed', e); }
+    }
+    document.getElementById('load').addEventListener('click', load);
+    window.addEventListener('load', load);
+  </script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+[
+  {
+    "message_id": "msg-aws-bec-001",
+    "timestamp": "2025-03-15T02:39:00Z",
+    "supplier_name": "Atlas Freight",
+    "trusted_supplier_domain": "atlasfreight.example",
+    "known_bank_account": "BSB 032-111 / ACCT 00111992",
+    "approved_change": false
+  }
+]

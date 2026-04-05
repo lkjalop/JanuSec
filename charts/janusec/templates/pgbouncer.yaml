@@ -1,0 +1,97 @@
+{{- if .Values.pgbouncer.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.pgbouncer.service.name }}
+  labels:
+    app.kubernetes.io/name: pgbouncer
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: pgbouncer
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - name: pgbouncer
+      port: {{ .Values.pgbouncer.service.port }}
+      targetPort: 6432
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pgbouncer
+  labels:
+    app.kubernetes.io/name: pgbouncer
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: pgbouncer
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: pgbouncer
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      containers:
+        - name: pgbouncer
+          image: {{ .Values.pgbouncer.image }}
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: PGBOUNCER_MAX_CLIENT_CONN
+              value: "{{ .Values.pgbouncer.config.maxClientConn }}"
+            - name: PGBOUNCER_DEFAULT_POOL_SIZE
+              value: "{{ .Values.pgbouncer.config.defaultPoolSize }}"
+            - name: DB_HOST
+              value: {{ .Values.pgbouncer.config.dbHost | quote }}
+            - name: DB_PORT
+              value: "{{ .Values.pgbouncer.config.dbPort }}"
+            - name: DB_NAME
+              value: {{ .Values.pgbouncer.config.dbName | quote }}
+            - name: DB_USER
+              value: {{ .Values.pgbouncer.config.dbUser | quote }}
+            {{- if .Values.pgbouncer.config.dbPasswordSecret }}
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.pgbouncer.config.dbPasswordSecret }}
+                  key: DB_PASSWORD
+            {{- end }}
+          ports:
+            - containerPort: 6432
+              name: pgbouncer
+          args:
+            - |
+              /bin/sh -c '
+              cat > /etc/pgbouncer/pgbouncer.ini <<EOF
+              [databases]
+              {{ .Values.pgbouncer.config.dbName }} = host=${DB_HOST} port=${DB_PORT} dbname=${DB_NAME} user=${DB_USER} password=${DB_PASSWORD}
+
+              [pgbouncer]
+              listen_port = 6432
+              listen_addr = 0.0.0.0
+              auth_type = md5
+              max_client_conn = ${PGBOUNCER_MAX_CLIENT_CONN}
+              default_pool_size = ${PGBOUNCER_DEFAULT_POOL_SIZE}
+              ignore_startup_parameters = extra_float_digits
+              EOF
+              exec pgbouncer /etc/pgbouncer/pgbouncer.ini
+              '
+---
+{{- if and .Values.pgbouncer.auth.enabled (not .Values.pgbouncer.auth.existingSecret) .Values.pgbouncer.auth.password }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: pgbouncer-auth
+type: Opaque
+stringData:
+  DB_PASSWORD: {{ .Values.pgbouncer.auth.password | quote }}
+{{- end }}
+{{- end }}

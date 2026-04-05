@@ -1,0 +1,11 @@
+[
+  {
+    "message_id": "msg-shopsquire-001",
+    "timestamp": "2025-03-21T02:15:20Z",
+    "from": "accounts@ingramfake.com.au",
+    "to": "finance@shopsquire.example",
+    "delivery_action": "delivered",
+    "gateway_verdict": "suspicious",
+    "attachment_name": "Harbourside_Acquisition_Details_CONFIDENTIAL.xlsm"
+  }
+]

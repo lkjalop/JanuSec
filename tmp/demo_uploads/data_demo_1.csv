@@ -1,0 +1,3 @@
+event_id,db_user,query,record_count,src_ip,timestamp
+data-1,reporter,SELECT * FROM users WHERE id=1,1,10.0.0.5,2025-11-12T00:00:30Z
+data-2,exporter,SELECT * FROM secrets,1000,10.0.0.6,2025-11-12T00:02:20Z

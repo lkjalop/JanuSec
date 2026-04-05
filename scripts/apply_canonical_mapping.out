@@ -1,0 +1,21 @@
+Uncommented decorator in owner D:\AI\Threat_thy_sniffer\src\core\correlation\rules\week2\lsass_openprocess.py
+Uncommented decorator in owner D:\AI\Threat_thy_sniffer\src\core\correlation\rules\batch_more\additional_30.py
+Uncommented decorator in owner D:\AI\Threat_thy_sniffer\src\core\correlation\rules\weekX\expanded_batch.py
+Commented duplicate decorator for pe_token_theft_combo in D:\AI\Threat_thy_sniffer\src\core\correlation\rules\top40_priority.py
+Uncommented decorator in owner D:\AI\Threat_thy_sniffer\src\core\correlation\rules\batch_more\additional_30.py
+Commented duplicate decorator for col_keylogger_detected_exfil in D:\AI\Threat_thy_sniffer\src\core\correlation\rules\top30_priority.py
+Uncommented decorator in owner D:\AI\Threat_thy_sniffer\src\core\correlation\rules\top40_priority.py
+Commented duplicate decorator for imp_shadowcopy_delete in D:\AI\Threat_thy_sniffer\src\core\correlation\rules\top40_priority.py
+Commented duplicate decorator for c2_dns_tunnel_exfil in D:\AI\Threat_thy_sniffer\src\core\correlation\rules\top20_priority.py
+Commented duplicate decorator for defense_evasion_amsi_bypass_combo in D:\AI\Threat_thy_sniffer\src\core\correlation\rules\top20_priority.py
+Commented duplicate decorator for graph_lateral_chain_burst in D:\AI\Threat_thy_sniffer\src\core\correlation\rules\top20_priority.py
+Uncommented decorator in owner D:\AI\Threat_thy_sniffer\src\core\correlation\rules\graph\lateral_chain_burst.py
+Commented duplicate decorator for exec_office_macro_chain in D:\AI\Threat_thy_sniffer\src\core\correlation\rules\top20_priority.py
+Uncommented decorator in owner D:\AI\Threat_thy_sniffer\src\core\correlation\rules\week1\office_macro_chain.py
+Commented duplicate decorator for c2_http_small_periodic_payload in D:\AI\Threat_thy_sniffer\src\core\correlation\rules\top20_priority.py
+Commented duplicate decorator for c2_ssl_odd_sni_beacon in D:\AI\Threat_thy_sniffer\src\core\correlation\rules\top20_priority.py
+Commented duplicate decorator for lateral_smb_admin_burst in D:\AI\Threat_thy_sniffer\src\core\correlation\rules\top20_priority.py
+Commented duplicate decorator for exfil_ftp_large_payload in D:\AI\Threat_thy_sniffer\src\core\correlation\rules\top20_priority.py
+Commented duplicate decorator for persistence_service_binary_change in D:\AI\Threat_thy_sniffer\src\core\correlation\rules\top20_priority.py
+Commented duplicate decorator for exfil_stealth_cloud_metadata in D:\AI\Threat_thy_sniffer\src\core\correlation\rules\top30_priority.py
+Canonical mapping applied

@@ -1,0 +1,15 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "FUNCTIONS_WORKER_RUNTIME": "python",
+    "EVENTHUB_CONNECTION": "Endpoint=sb://YOUR_NAMESPACE.servicebus.windows.net/;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=...",
+    "EVENTHUB_NAME": "defender-exports",
+    "EVENTHUB_CONSUMER_GROUP": "$Default",
+
+    "PLATFORM_API_BASE": "http://localhost:8080",
+    "PLATFORM_API_KEY": "devkey123",
+    "TENANT_ID": "default",
+    "DLQ_PATH": "artifacts/dlq/azure_defender.jsonl"
+  }
+}

@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Approvals</title>
+<style>body{background:#0B0E14;color:#E8EBF0;font-family:Inter,Segoe UI,sans-serif}.wrap{max-width:900px;margin:20px auto;padding:12px}.card{background:#151922;border:1px solid #2A3142;border-radius:8px;margin-bottom:16px;padding:12px}.row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}.btn{padding:8px 14px;background:#1C2230;border:1px solid #2A3142;border-radius:6px;color:#E8EBF0;cursor:pointer}.input{padding:8px;background:#1C2230;border:1px solid #2A3142;border-radius:6px;color:#E8EBF0}table{border-collapse:collapse;width:100%}th,td{border:1px solid #2A3142;padding:6px 8px;font-size:12px}</style></head>
+<body><div class="wrap">
+  <div class="row"><a class="btn" href="/static/janusec-platform-complete-LIVE.html">← Console</a></div>
+  <h2>Approval Gate</h2>
+  <div class="card">
+    <div class="row">
+      <input id="target" class="input" placeholder="Target ID (event_id or incident_id)" style="flex:1">
+      <select id="status" class="input"><option>pending</option><option>approved</option><option>rejected</option></select>
+      <input id="user" class="input" placeholder="Your name">
+      <button class="btn" onclick="setApproval()">Set</button>
+      <button class="btn" onclick="fetchStatus()">Fetch Status</button>
+    </div>
+  </div>
+  <div class="card"><h3>Status</h3><pre id="out">Idle</pre></div>
+  <div class="card"><h3>Audit</h3><button class="btn" onclick="loadAudit()">Refresh</button><div id="audit"></div></div>
+</div>
+<script>
+// Non-blocking notification shim for headless tests
+function safeNotify(msg, level){
+  try{
+    if(window.showNotification) return showNotification(msg, level);
+    if(window.notifications && typeof window.notifications.showToast === 'function') return window.notifications.showToast(msg, 4000);
+    console.log('notify:', level||'info', msg);
+  }catch(e){ console.log('notify-fail', e, msg); }
+}
+
+function safeNotify(msg, level){ try{ if(window.showNotification) return showNotification(msg, level); if(window.notifications && typeof window.notifications.showToast === 'function') return window.notifications.showToast(msg, 4000); console.log('notify:', level||'info', msg); }catch(e){ console.log('notify-fail', e, msg); } }
+
+function H(){ try{ const k=localStorage.getItem('apiKey')||'devkey123'; return {'x-api-key':k}; }catch(_){return {'x-api-key':'devkey123'} } }
+async function fetchStatus(){ const id=document.getElementById('target').value; if(!id){ safeNotify('Enter target id','error'); return; } const r=await fetch('/api/v1/approvals/status?target_id='+encodeURIComponent(id),{headers:H()}); const j=await r.json(); document.getElementById('out').textContent=JSON.stringify(j,null,2); }
+async function setApproval(){ const id=document.getElementById('target').value, st=document.getElementById('status').value, user=document.getElementById('user').value||'analyst'; const r=await fetch('/api/v1/approvals/set?'+new URLSearchParams({target_id:id,status:st,user}).toString(),{method:'POST',headers:H()}); const j=await r.json(); document.getElementById('out').textContent=JSON.stringify(j,null,2); }
+async function loadAudit(){ const r=await fetch('/api/v1/approvals/audit',{headers:H()}); const j=await r.json(); const div=document.getElementById('audit'); const rows=(j.items||[]).slice().reverse().map(x=>`<div style='margin:4px 0'>${new Date((x.ts||0)*1000).toLocaleString()} — <b>${x.target_id}</b> → ${x.status} by ${x.user}</div>`).join(''); div.innerHTML = rows || 'No audit entries'; }
+</script>
+  <script src="/static/js/notifications.js"></script>
+</body></html>

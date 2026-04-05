@@ -1,0 +1,26 @@
+id: iam_priv_escalation
+title: IAM privilege escalation (AttachUserPolicy + console login)
+description: Detect sequence where a root or highly privileged entity attaches policies and then signs into console.
+author: automation
+tags: [T1078, T1531]
+conditions:
+  - field: eventName
+    op: eq
+    value: AttachUserPolicy
+  - field: userIdentity.type
+    op: in
+    value: [Root, IAMUser]
+joins:
+  - name: followup
+    via: same_user
+    node_type: cloud_event
+    filters:
+      - field: eventName
+        op: regex
+        value: ConsoleLogin|ConsoleSignin
+    max_hops: 1
+    join_type: inner
+score: 0.9
+actions:
+  - type: create_alert
+    message: "Possible IAM privilege escalation via policy attachment"

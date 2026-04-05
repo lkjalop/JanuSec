@@ -1,0 +1,48 @@
+name: CI - TFIDF Tests
+
+on:
+  push:
+    paths:
+      - 'src/enrichment/**'
+      - 'tests/**'
+  pull_request:
+    paths:
+      - 'src/enrichment/**'
+      - 'tests/**'
+
+jobs:
+  tfidf:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest scikit-learn joblib
+      - name: Run TF-IDF tests
+        run: |
+          pytest -q tests/test_tfidf_seeder.py
+      - name: Build model from CRQ and evaluate
+        env:
+          TFIDF_TEST_FRACTION: '0.2'
+          TFIDF_MIN_PRECISION: '0.5'
+        run: |
+          python - <<'PY'
+import json, os
+from src.enrichment.tfidf import seed_and_build_from_disk
+metrics = seed_and_build_from_disk()
+print('metrics=', metrics)
+minp = float(os.getenv('TFIDF_MIN_PRECISION','0.5'))
+prec = metrics.get('precision') if metrics else None
+if prec is None:
+    print('No test metrics produced; failing')
+    raise SystemExit(2)
+if float(prec) < minp:
+    print(f'Precision {prec} < required {minp}; failing')
+    raise SystemExit(3)
+print('Precision OK:', prec)
+PY

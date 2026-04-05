@@ -1,0 +1,453 @@
+import os
+import sqlite3
+import time
+from typing import List, Dict, Optional
+
+DB_PATH = os.environ.get('PRECISION_METRICS_DB', 'data/precision_metrics.db')
+
+
+class PrecisionMetricsRepo:
+    """Lightweight precision/FP metrics repository using SQLite.
+
+    This is intentionally simple to avoid tight coupling to the platform DB
+    during initial rollout. It stores per-event adjudication results so
+    dashboards and A/B test code can compute precision/recall and suppression
+    effectiveness.
+    """
+
+    def __init__(self, db_path: Optional[str] = None):
+        self.db_path = db_path or DB_PATH
+
+    def _connect(self):
+        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
+        conn = sqlite3.connect(self.db_path, timeout=5)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    def init_db(self):
+        sql = '''
+        CREATE TABLE IF NOT EXISTS precision_metrics (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_id TEXT NOT NULL,
+            rule_name TEXT,
+            is_tp INTEGER NOT NULL, -- 1 = true positive, 0 = false positive
+            ts INTEGER NOT NULL,
+            ab_test_id TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_precision_ts ON precision_metrics(ts);
+        CREATE INDEX IF NOT EXISTS idx_precision_rule ON precision_metrics(rule_name);
+        '''
+        conn = self._connect()
+        try:
+            conn.executescript(sql)
+            conn.commit()
+        finally:
+            conn.close()
+
+    def record(self, event_id: str, is_tp: bool, rule_name: Optional[str] = None, ab_test_id: Optional[str] = None, ts: Optional[int] = None):
+        ts = int(ts or time.time())
+        conn = self._connect()
+        try:
+            conn.execute(
+                'INSERT INTO precision_metrics (event_id, rule_name, is_tp, ts, ab_test_id) VALUES (?,?,?,?,?)',
+                (event_id, rule_name, 1 if is_tp else 0, ts, ab_test_id),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def fp_reduction_trend(self, start_ts: int, end_ts: int) -> List[Dict]:
+        """Return daily precision/FP counts between two timestamps.
+
+        Returns list of {day_ts, tp, fp, total, precision}
+        """
+        conn = self._connect()
+        try:
+            cur = conn.execute(
+                """
+                SELECT (ts / 86400) * 86400 AS day_ts,
+                       SUM(is_tp) as tp,
+                       SUM(1 - is_tp) as fp,
+                       COUNT(*) as total
+                FROM precision_metrics
+                WHERE ts >= ? AND ts <= ?
+                GROUP BY day_ts
+                ORDER BY day_ts ASC
+                """,
+                (start_ts, end_ts),
+            )
+            rows = cur.fetchall()
+            out = []
+            for r in rows:
+                tp = r['tp'] or 0
+                fp = r['fp'] or 0
+                total = r['total'] or 0
+                precision = tp / total if total else None
+                out.append({'day_ts': r['day_ts'], 'tp': tp, 'fp': fp, 'total': total, 'precision': precision})
+            return out
+        finally:
+            conn.close()
+
+    def ab_test_results(self, ab_test_id: str) -> Dict:
+        conn = self._connect()
+        try:
+            cur = conn.execute(
+                'SELECT SUM(is_tp) as tp, SUM(1-is_tp) as fp, COUNT(*) as total FROM precision_metrics WHERE ab_test_id = ?',
+                (ab_test_id,)
+            )
+            r = cur.fetchone()
+            tp = r['tp'] or 0
+            fp = r['fp'] or 0
+            total = r['total'] or 0
+            precision = tp / total if total else None
+            return {'ab_test_id': ab_test_id, 'tp': tp, 'fp': fp, 'total': total, 'precision': precision}
+        finally:
+            conn.close()
+
+
+def _example_usage():
+    repo = PrecisionMetricsRepo()
+    repo.init_db()
+    repo.record('evt-1', True, 'corr_office_macro_ps')
+    print(repo.fp_reduction_trend(0, int(time.time())))
+
+
+if __name__ == '__main__':
+    _example_usage()
+import os
+import sqlite3
+from typing import Optional, List, Dict, Any
+from datetime import datetime, date
+
+DB_PATH_ENV = "PRECISION_METRICS_DB"
+
+
+def get_db_path() -> str:
+    return os.environ.get(DB_PATH_ENV, os.path.join("data", "precision_metrics.db"))
+
+
+def ensure_db() -> None:
+    path = get_db_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    conn = sqlite3.connect(path)
+    cur = conn.cursor()
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS precision_metrics (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            rule_id TEXT NOT NULL,
+            is_true_positive INTEGER NOT NULL,
+            recorded_at TIMESTAMP NOT NULL
+        )
+        """
+    )
+    conn.commit()
+    conn.close()
+
+
+def record_rule_result(rule_id: str, is_true_positive: bool, when: Optional[datetime] = None) -> None:
+    """Record whether an alert generated by a rule was a true positive.
+
+    rule_id: identifier of the correlation rule
+    is_true_positive: True -> TP, False -> FP
+    """
+    ensure_db()
+    path = get_db_path()
+    conn = sqlite3.connect(path)
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT INTO precision_metrics (rule_id, is_true_positive, recorded_at) VALUES (?, ?, ?)",
+        (rule_id, 1 if is_true_positive else 0, (when or datetime.utcnow()).isoformat()),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_daily_trend(days: int = 30) -> List[Dict[str, Any]]:
+    """Return aggregated daily precision/trend for the last `days` days.
+
+    Returns list of {date: 'YYYY-MM-DD', tp: int, fp: int, precision: float}
+    """
+    ensure_db()
+    path = get_db_path()
+    conn = sqlite3.connect(path)
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT date(recorded_at) as dm,
+               SUM(is_true_positive) as tp,
+               COUNT(*) - SUM(is_true_positive) as fp
+        FROM precision_metrics
+        WHERE recorded_at >= date('now','-%d day')
+        GROUP BY dm
+        ORDER BY dm DESC
+        """ % (days - 1)
+    )
+    rows = cur.fetchall()
+    conn.close()
+    out = []
+    for dm, tp, fp in rows:
+        total = (tp or 0) + (fp or 0)
+        precision = (tp / total) if total > 0 else None
+        out.append({"date": dm, "tp": tp or 0, "fp": fp or 0, "precision": precision})
+    return out
+
+
+def get_rule_precision(rule_id: str, days: int = 30) -> Dict[str, Any]:
+    ensure_db()
+    path = get_db_path()
+    conn = sqlite3.connect(path)
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT SUM(is_true_positive) as tp, COUNT(*) as total FROM precision_metrics WHERE rule_id=? AND recorded_at >= date('now','-%d day')",
+        (rule_id, days - 1),
+    )
+    row = cur.fetchone()
+    conn.close()
+    tp = row[0] or 0
+    total = row[1] or 0
+    return {"rule_id": rule_id, "tp": tp, "total": total, "precision": (tp / total) if total > 0 else None}
+from typing import Optional, List, Dict, Tuple
+from datetime import date, datetime
+import sqlite3
+
+# Lightweight repository for precision/recall metrics. Uses existing DB connection
+# patterns in the codebase; adapt DB wiring to your app (this is a focused example).
+
+class PrecisionMetricsRepo:
+    """Repository to store and query daily precision/recall metrics and A/B test results."""
+
+    def __init__(self, db_path: str):
+        self.db_path = db_path
+        # ensure directory exists and table created
+        try:
+            conn = self._conn()
+            cur = conn.cursor()
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS precision_metrics (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    day TEXT NOT NULL,
+                    tenant_id TEXT,
+                    tp INTEGER,
+                    fp INTEGER,
+                    fn INTEGER,
+                    tn INTEGER,
+                    created_at TEXT
+                )
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS ab_test_results (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    test_id TEXT,
+                    tenant_id TEXT,
+                    variant TEXT,
+                    tp INTEGER,
+                    fp INTEGER,
+                    fn INTEGER,
+                    started_at TEXT,
+                    ended_at TEXT,
+                    created_at TEXT
+                )
+                """
+            )
+            conn.commit()
+            conn.close()
+        except Exception:
+            pass
+
+    def _conn(self):
+        # Ensure the directory for the SQLite DB exists to avoid 'unable to open database file'
+        try:
+            dir_name = os.path.dirname(self.db_path)
+            if dir_name:
+                os.makedirs(dir_name, exist_ok=True)
+        except Exception:
+            # Best-effort; if this fails, the subsequent connect will raise and be handled by callers
+            pass
+        conn = sqlite3.connect(self.db_path)
+        return conn
+
+    # Lightweight in-memory fallback store for A/B tests in environments without writable DB
+    _mem_ab: Dict[Tuple[str, str], Dict[str, Dict[str, int]]] = {}
+
+    def insert_daily_metrics(self, day: date, tenant_id: str, tp: int, fp: int, fn: int, tn: Optional[int] = None) -> None:
+        conn = self._conn()
+        cur = conn.cursor()
+        # Ensure table exists even if init-time creation was skipped
+        try:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS precision_metrics (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    day TEXT NOT NULL,
+                    tenant_id TEXT,
+                    tp INTEGER,
+                    fp INTEGER,
+                    fn INTEGER,
+                    tn INTEGER,
+                    created_at TEXT
+                )
+                """
+            )
+        except Exception:
+            pass
+        # Remove any existing entry for this tenant/day to behave like an upsert
+        try:
+            cur.execute("DELETE FROM precision_metrics WHERE day = ? AND tenant_id = ?", (day.isoformat(), tenant_id))
+        except Exception:
+            pass
+        cur.execute(
+            """
+            INSERT INTO precision_metrics (day, tenant_id, tp, fp, fn, tn, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (day.isoformat(), tenant_id, tp, fp, fn, tn if tn is not None else -1, datetime.utcnow().isoformat()),
+        )
+        conn.commit()
+        conn.close()
+
+    def get_daily_metrics(self, tenant_id: str, start: date, end: date) -> List[Dict]:
+        conn = self._conn()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT day, tp, fp, fn, tn, created_at FROM precision_metrics
+            WHERE tenant_id = ? AND day BETWEEN ? AND ?
+            ORDER BY day ASC
+            """,
+            (tenant_id, start.isoformat(), end.isoformat()),
+        )
+        rows = cur.fetchall()
+        conn.close()
+        results = []
+        for r in rows:
+            day_s, tp, fp, fn, tn, created_at = r
+            precision = tp / (tp + fp) if (tp + fp) > 0 else None
+            recall = tp / (tp + fn) if (tp + fn) > 0 else None
+            results.append({
+                'day': day_s,
+                'tp': tp,
+                'fp': fp,
+                'fn': fn,
+                'tn': tn,
+                'precision': precision,
+                'recall': recall,
+                'created_at': created_at,
+            })
+        return results
+
+    def insert_ab_test_result(self, test_id: str, tenant_id: str, variant: str, tp: int, fp: int, fn: int, started_at: datetime, ended_at: Optional[datetime] = None) -> None:
+        conn = self._conn()
+        cur = conn.cursor()
+        # Ensure table exists even if init-time creation was skipped
+        try:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS ab_test_results (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    test_id TEXT,
+                    tenant_id TEXT,
+                    variant TEXT,
+                    tp INTEGER,
+                    fp INTEGER,
+                    fn INTEGER,
+                    started_at TEXT,
+                    ended_at TEXT,
+                    created_at TEXT
+                )
+                """
+            )
+        except Exception:
+            pass
+        sa = None
+        ea = None
+        try:
+            sa = started_at.isoformat() if hasattr(started_at, 'isoformat') else (str(started_at) if started_at is not None else None)
+        except Exception:
+            sa = None
+        try:
+            ea = ended_at.isoformat() if (ended_at is not None and hasattr(ended_at, 'isoformat')) else (str(ended_at) if ended_at is not None else None)
+        except Exception:
+            ea = None
+        try:
+            cur.execute(
+                """
+                INSERT INTO ab_test_results (test_id, tenant_id, variant, tp, fp, fn, started_at, ended_at, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (test_id, tenant_id, variant, tp, fp, fn, sa, ea, datetime.utcnow().isoformat()),
+            )
+            conn.commit()
+        except Exception:
+            # Swallow DB write errors; rely on in-memory fallback
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+        # Update in-memory fallback as well
+        key = (tenant_id, test_id)
+        bucket = self._mem_ab.setdefault(key, {})
+        stats = bucket.setdefault(variant, {'tp': 0, 'fp': 0, 'fn': 0})
+        stats['tp'] += int(tp or 0)
+        stats['fp'] += int(fp or 0)
+        stats['fn'] += int(fn or 0)
+
+    def get_ab_test_summary(self, tenant_id: str, test_id: str) -> List[Dict]:
+        results: List[Dict] = []
+        try:
+            conn = self._conn()
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT variant, SUM(tp), SUM(fp), SUM(fn), MIN(started_at), MAX(ended_at) FROM ab_test_results
+                WHERE tenant_id = ? AND test_id = ?
+                GROUP BY variant
+                """,
+                (tenant_id, test_id),
+            )
+            rows = cur.fetchall()
+            conn.close()
+            for r in rows:
+                variant, tp, fp, fn, started_at, ended_at = r
+                precision = tp / (tp + fp) if (tp + fp) > 0 else None
+                recall = tp / (tp + fn) if (tp + fn) > 0 else None
+                results.append({
+                    'variant': variant,
+                    'tp': tp,
+                    'fp': fp,
+                    'fn': fn,
+                    'precision': precision,
+                    'recall': recall,
+                    'started_at': started_at,
+                    'ended_at': ended_at,
+                })
+        except Exception:
+            # Fall back to in-memory summary if DB unavailable
+            pass
+        if not results:
+            mem_bucket = self._mem_ab.get((tenant_id, test_id), {})
+            for variant, agg in mem_bucket.items():
+                tp = int(agg.get('tp') or 0)
+                fp = int(agg.get('fp') or 0)
+                fn = int(agg.get('fn') or 0)
+                precision = tp / (tp + fp) if (tp + fp) > 0 else None
+                recall = tp / (tp + fn) if (tp + fn) > 0 else None
+                results.append({
+                    'variant': variant,
+                    'tp': tp,
+                    'fp': fp,
+                    'fn': fn,
+                    'precision': precision,
+                    'recall': recall,
+                    'started_at': None,
+                    'ended_at': None,
+                })
+        return results

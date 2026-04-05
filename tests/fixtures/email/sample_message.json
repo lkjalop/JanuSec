@@ -1,0 +1,12 @@
+{
+  "id": "msg-1",
+  "date": "2025-12-17T12:00:00Z",
+  "from": "alice@example.com",
+  "to": ["bob@example.com"],
+  "subject": "Hello",
+  "body": "Hi Bob, please see cc 4111111111111111 and call 123-45-6789",
+  "attachments": [{"name": "report.pdf", "content": "PDFDATA"}],
+  "headers": {"DKIM-Signature": "v=1; a=rsa-sha256; b=abc123;"},
+  "source_ip": "192.168.1.5",
+  "from_domain": "example.com"
+}

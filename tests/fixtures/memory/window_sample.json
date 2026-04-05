@@ -1,0 +1,12 @@
+{
+  "windows.pslist": [
+    {"ImageFileName": "svchost.exe", "PID": 1000, "path": "C:\\\\Windows\\\\System32\\\\svchost.exe"}
+  ],
+  "windows.dlllist": [
+    {"BaseDllName": "kernel32.dll", "PID": 1000}
+  ],
+  "windows.netscan": [
+    {"Process": "svchost.exe", "ForeignAddr": "192.0.2.44:443", "Info": "system"}
+  ],
+  "windows.malfind": []
+}

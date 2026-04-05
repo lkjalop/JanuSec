@@ -1,0 +1,28 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>KAPE Jobs</title>
+  <style>body{background:#0b0e14;color:#e6eef6;font-family:Segoe UI,Arial;padding:20px}table{width:100%;border-collapse:collapse}th,td{padding:8px;border-bottom:1px solid #233;}</style>
+</head>
+<body>
+  <h2>KAPE Jobs</h2>
+  <button id="refresh">Refresh</button>
+  <table id="jobs"><thead><tr><th>Job ID</th><th>Status</th><th>Uploaded</th><th>Filename</th><th>Result</th></tr></thead><tbody></tbody></table>
+  <script>
+    async function load(){
+      const res = await fetch('/api/v1/kape/jobs', {headers: {'x-api-key': localStorage.apiKey || 'devkey123'}})
+      const j = await res.json()
+      const tbody = document.querySelector('#jobs tbody')
+      tbody.innerHTML = ''
+      for(const job of (j.jobs||[])){
+        const tr = document.createElement('tr')
+        tr.innerHTML = `<td>${job.id}</td><td>${job.status}</td><td>${new Date((job.ts||0)*1000).toLocaleString()}</td><td>${(job.payload||{}).filename||''}</td><td>${job.result?JSON.stringify(job.result):''}</td>`
+        tbody.appendChild(tr)
+      }
+    }
+    document.getElementById('refresh').addEventListener('click', load)
+    load()
+  </script>
+</body>
+</html>

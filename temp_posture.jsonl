@@ -1,0 +1,1 @@
+{"ts": 1, "tenant_id": "t1", "id": "a", "type": "cloud:public_bucket", "resource": "s3://x", "severity": "critical"}

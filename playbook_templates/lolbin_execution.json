@@ -1,0 +1,48 @@
+{
+  "alert_type": "lolbin_execution",
+  "summary": "Living-off-the-land binary (PowerShell, WMIC, MSHTA, CertUtil) abusing signed Microsoft utilities to run attacker payloads (MITRE T1218).",
+  "severity": "high",
+  "mitre": [
+    "T1218",
+    "T1059.001",
+    "T1106"
+  ],
+  "cisa_kev": [
+    "CVE-2023-36033"
+  ],
+  "cvss_reference": 8.0,
+  "epss": 0.38,
+  "references": [
+    "https://lolbas-project.github.io/",
+    "https://attack.mitre.org/techniques/T1218/"
+  ],
+  "steps": [
+    {
+      "order": 1,
+      "action": "Collect full command line, parent process, and script block logging",
+      "rationale": "Determines payload delivery and credential scope.",
+      "automated": true,
+      "automation_id": "lolbin_cmdline_dump"
+    },
+    {
+      "order": 2,
+      "action": "Review Scheduled Tasks, RunOnce, and WMI subscriptions for persistence",
+      "rationale": "LOLBins often stage via native schedulers.",
+      "tool_suggestion": "Velociraptor Windows.Persist.Triage",
+      "automated": false
+    },
+    {
+      "order": 3,
+      "action": "Trace outbound connections spawned by LOLBin process",
+      "rationale": "Maps C2 to blocklists; aligns with MITRE T1071/T1105.",
+      "tool_suggestion": "Zeek conn log or EDR netflow pivot",
+      "automated": true
+    },
+    {
+      "order": 4,
+      "action": "Reinforce Constrained Language Mode / AMSI policy on host group",
+      "rationale": "Prevents script abuse reoccurrence on same fleet.",
+      "automated": false
+    }
+  ]
+}

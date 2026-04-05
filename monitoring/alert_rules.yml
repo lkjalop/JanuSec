@@ -1,0 +1,57 @@
+groups:
+  - name: janusec-baseline
+    interval: 1m
+    rules:
+      - alert: HighIngestErrorRate
+        expr: rate(ingest_events_total{outcome="blocked"}[5m]) + rate(ingest_events_total{outcome="escalated"}[5m]) == 0 and rate(ingest_events_total{outcome="accepted"}[5m]) > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Pipeline producing no actionable outcomes"
+          description: "Accepted events but no escalations or blocks in last 10m; investigate factor extraction or thresholds."
+
+      - alert: QueueOrLatencyBacklog
+        expr: histogram_quantile(0.95, sum(rate(ingest_batch_latency_seconds_bucket[5m])) by (le)) > 2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Ingest batch latency p95 high"
+          description: "Batch ingestion latency p95 above 2s for 5m."
+
+      - alert: HighSimBlockRatio
+        expr: (sum(rate(decisions_total{decision="sim_block"}[10m])))/(sum(rate(decisions_total[10m])) ) > 0.85
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Simulated block ratio high"
+          description: ">85% of decisions are simulated blocks; validate thresholds before enforcement."
+
+      - alert: LowSimPrecision
+        expr: avg_over_time(sim_block_precision_estimate[15m]) < 0.2
+        for: 15m
+        labels:
+          severity: info
+        annotations:
+          summary: "Sim-block precision proxy low"
+          description: "Escalate/(sim_block+escalate) < 0.2; many simulated blocks may be noise."
+
+      - alert: EscalationAgeP95High
+        expr: escalation_age_seconds_p95 > 14400
+        for: 15m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Escalation p95 age exceeds 4h"
+          description: "Open escalations not being resolved promptly."
+
+      - alert: DryRunLingering
+        expr: sum(rate(decisions_total{reason="dry_run"}[1h])) > 0 and time() - process_start_time_seconds > 172800
+        for: 1h
+        labels:
+          severity: info
+        annotations:
+          summary: "Dry-run mode still active after 48h"
+          description: "Consider moving to phased enforcement if metrics stable."

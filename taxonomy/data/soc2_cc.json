@@ -1,0 +1,12 @@
+[
+  {"framework": "SOC2", "control_id": "CC1.1", "title": "Control Environment", "keywords": ["ethics","integrity","commitment"]},
+  {"framework": "SOC2", "control_id": "CC2.1", "title": "Communication and Information", "keywords": ["communication","roles","responsibilities"]},
+  {"framework": "SOC2", "control_id": "CC3.1", "title": "Risk Assessment", "keywords": ["risk assessment","likelihood","impact"]},
+  {"framework": "SOC2", "control_id": "CC4.1", "title": "Monitoring Activities", "keywords": ["monitoring","internal control","oversight"]},
+  {"framework": "SOC2", "control_id": "CC5.1", "title": "Control Activities", "keywords": ["policies","procedures","preventive","detective"]},
+  {"framework": "SOC2", "control_id": "CC6.6", "title": "Logical and Physical Access Controls", "keywords": ["access","authorization","authentication","mfa"]},
+  {"framework": "SOC2", "control_id": "CC7.2", "title": "System Operations", "keywords": ["operations","anomalies","events","alerts"]},
+  {"framework": "SOC2", "control_id": "CC7.3", "title": "Change Management", "keywords": ["change management","sdlc","deployment"]},
+  {"framework": "SOC2", "control_id": "CC8.1", "title": "Change Detection and Mitigation", "keywords": ["vulnerability","patching","remediation"]}
+]
+

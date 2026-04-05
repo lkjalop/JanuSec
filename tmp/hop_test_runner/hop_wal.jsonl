@@ -1,0 +1,2 @@
+{"op": "edge", "src": "proc:a", "dst": "ip:1.2.3.4", "etype": "connects_to", "srcv": "event", "ts": 2000.0, "attrs": {}, "w": 1.0}
+{"op":"edge","src":"proc:a","dst":"ip:1.2.3.4","etype":"connects_to","srcv":"event","ts":2000.0,"attrs":{},"w":1.0,"seq":1}

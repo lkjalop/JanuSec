@@ -1,0 +1,11 @@
+[
+  {
+    "id": "gray-1",
+    "description": "User alice authenticates to two hosts and runs a remote tool",
+    "events": [
+      {"user":"alice","host":"host-1","edge_type":"auth"},
+      {"user":"alice","host":"host-2","edge_type":"auth"},
+      {"user":"alice","proc":"psexec","edge_type":"proc"}
+    ]
+  }
+]

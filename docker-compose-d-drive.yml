@@ -1,0 +1,97 @@
+version: '3.9'
+services:
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_DB: janusec
+    volumes:
+      - D:\AI\Threat_thy_sniffer\data\postgres:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "5432:5432"
+    networks:
+      - janusec-network
+
+  app:
+    image: janusec-platform
+    environment:
+      APP_DB_DSN: postgresql://postgres:postgres@db:5432/janusec
+      API_KEYS_JSON: '[{"key":"devkey123","scopes":["nlp.query","factors.search","feedback.write","*"]}]'
+      ACCESS_LOG_SAMPLE_RATE: 0.5
+      ENABLE_CSV_UPLOAD: "true"
+      FAST_LIVE_MODE: "1"
+      PERSIST_BACKEND: "postgresql"
+    depends_on:
+      - db
+    ports:
+      - "8080:8080"
+    volumes:
+      - D:\AI\Threat_thy_sniffer\data\zeek:/app/zeek_data:ro
+      - D:\AI\Threat_thy_sniffer\data\logs:/app/logs
+      - D:\AI\Threat_thy_sniffer\frontend\static:/app/frontend/static:ro
+    networks:
+      - janusec-network
+
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./ops/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - D:\AI\Threat_thy_sniffer\data\prometheus:/prometheus
+    ports:
+      - "9090:9090"
+    depends_on:
+      - app
+    networks:
+      - janusec-network
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_INSTALL_PLUGINS: grafana-piechart-panel,grafana-worldmap-panel
+    volumes:
+      - D:\AI\Threat_thy_sniffer\data\grafana:/var/lib/grafana
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      - prometheus
+    networks:
+      - janusec-network
+
+  # Zeek log processor (optional - for live data feeding)
+  zeek-feeder:
+    image: janusec-platform
+    environment:
+      API_BASE: "http://app:8080"
+      ZEEK_LOGS_PATH: "/zeek_data"
+      TENANT_ID: "demo"
+    volumes:
+      - D:\AI\Threat_thy_sniffer\data\zeek:/zeek_data:ro
+    depends_on:
+      - app
+    networks:
+      - janusec-network
+    entrypoint: ["python", "/app/scripts/zeek_tail_forwarder.py", "--logs", "/zeek_data", "--api", "http://app:8080", "--state", "/zeek_data/forward_state.json"]
+    restart: unless-stopped
+
+networks:
+  janusec-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: D:\AI\Threat_thy_sniffer\data\postgres
+  grafana_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: D:\AI\Threat_thy_sniffer\data\grafana

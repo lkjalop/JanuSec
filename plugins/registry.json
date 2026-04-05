@@ -1,0 +1,10 @@
+{
+  "version": "2025.10.0",
+  "soar_actions": [
+    {"name": "isolate_endpoint", "module": "src.soar.actions.isolate", "enabled": true},
+    {"name": "disable_user", "module": "src.soar.actions.disable_user", "enabled": true}
+  ],
+  "factor_extractors": [
+    {"name": "powershell_analyzer", "module": "src.ingestion.extractors.powershell", "enabled": true}
+  ]
+}

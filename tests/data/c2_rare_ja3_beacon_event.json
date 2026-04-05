@@ -1,0 +1,7 @@
+{
+  "event_id": "evt-c2-ja3-1",
+  "host": "host-103",
+  "timestamp": "2025-10-12T13:02:00Z",
+  "net:outbound_ja3_rare": true,
+  "beacon_like_periodicity": true
+}

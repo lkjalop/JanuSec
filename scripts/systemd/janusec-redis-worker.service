@@ -1,0 +1,15 @@
+[Unit]
+Description=JanuSec Redis Streams Worker
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+WorkingDirectory=/opt/janusec
+Environment=REDIS_URL=redis://127.0.0.1:6379/0
+ExecStart=/usr/bin/python3 /opt/janusec/scripts/redis_streams_consumer.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

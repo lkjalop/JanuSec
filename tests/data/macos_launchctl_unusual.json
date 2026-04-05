@@ -1,0 +1,3 @@
+{
+  "command_line": "launchctl bootstrap gui/501 /Users/alice/Library/LaunchAgents/evil.plist"
+}

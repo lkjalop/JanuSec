@@ -1,0 +1,23 @@
+[
+  {
+    "row_index": 0,
+    "sheet": "AzureAudit",
+    "activityDateTime": "2026-03-20T02:00:00Z",
+    "activityDisplayName": "Add eligible member to role",
+    "initiatedBy": {"user": {"userPrincipalName": "admin.ops@contoso.com"}},
+    "targetResources": [{"displayName": "Privileged Role Administrator"}],
+    "result": "success",
+    "approved_change": true,
+    "change_ticket": "CAB-2026-0501"
+  },
+  {
+    "row_index": 1,
+    "sheet": "AzureConditionalAccess",
+    "createdDateTime": "2026-03-20T02:01:00Z",
+    "userPrincipalName": "admin.ops@contoso.com",
+    "policyName": "Require phishing-resistant MFA",
+    "appDisplayName": "Azure Portal",
+    "result": "success",
+    "approved_change": true
+  }
+]

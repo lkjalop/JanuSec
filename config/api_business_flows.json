@@ -1,0 +1,38 @@
+[
+  {
+    "name": "payout_flow",
+    "path_prefix": "/api/v1/payouts",
+    "methods": ["POST"],
+    "required_scopes": ["payments:write", "payments:approve"]
+  },
+  {
+    "name": "transfer_flow",
+    "path_prefix": "/api/v1/transfers",
+    "methods": ["POST"],
+    "required_scopes": ["transfers:approve"]
+  },
+  {
+    "name": "registry_publish_flow",
+    "path_prefix": "/api/v1/registry",
+    "methods": ["POST", "PUT"],
+    "required_scopes": ["supply_chain:publish"]
+  },
+  {
+    "name": "vendor_payout_flow",
+    "path_prefix": "/api/v1/vendors/payouts",
+    "methods": ["POST"],
+    "required_scopes": ["payments:write", "payments:approve"]
+  },
+  {
+    "name": "runbook_execution_flow",
+    "path_prefix": "/api/v1/runbooks",
+    "methods": ["POST"],
+    "required_scopes": ["automation:invoke"]
+  },
+  {
+    "name": "bulk_messaging_flow",
+    "path_prefix": "/api/v1/messages/bulk",
+    "methods": ["POST"],
+    "required_scopes": ["messaging:bulk_send"]
+  }
+]

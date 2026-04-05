@@ -1,0 +1,7 @@
+{
+  "count": 20,
+  "avg_ms": 51.284,
+  "p95_ms": 110.927,
+  "failures": 0,
+  "throughput_eps": 19.5
+}

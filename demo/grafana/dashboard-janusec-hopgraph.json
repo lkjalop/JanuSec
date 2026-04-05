@@ -1,0 +1,48 @@
+{
+  "dashboard": {
+    "id": null,
+    "uid": "janusec-hopgraph",
+    "title": "JanuSec HopGraph & EWMA Dashboard",
+    "tags": ["janusec","demo"],
+    "timezone": "browser",
+    "schemaVersion": 36,
+    "version": 0,
+    "refresh": "5s",
+    "panels": [
+      {
+        "type": "graph",
+        "title": "EWMA Score (avg over 5m)",
+        "gridPos": {"x":0,"y":0,"w":12,"h":6},
+        "targets": [{"expr":"avg_over_time(janusec_ewma_score[5m])","refId":"A"}]
+      },
+      {
+        "type": "graph",
+        "title": "Raw Alerts vs Incidents (rate/1m)",
+        "gridPos": {"x":12,"y":0,"w":12,"h":6},
+        "targets": [
+          {"expr":"rate(janusec_alerts_raw_total[1m])","refId":"A"},
+          {"expr":"rate(janusec_incidents_created_total[1m])","refId":"B"}
+        ]
+      },
+      {
+        "type": "table",
+        "title": "Top HopGraph Cluster Sizes",
+        "gridPos": {"x":0,"y":6,"w":12,"h":6},
+        "targets": [{"expr":"topk(10, janusec_hopgraph_cluster_size)","refId":"A"}]
+      },
+      {
+        "type": "stat",
+        "title": "Alert Reduction (raw - filtered)",
+        "gridPos": {"x":12,"y":6,"w":12,"h":3},
+        "targets": [{"expr":"rate(janusec_alerts_raw_total[5m]) - rate(janusec_filtered_alerts_total[5m])","refId":"A"}]
+      },
+      {
+        "type": "graph",
+        "title": "HopGraph Explain Latency (s)",
+        "gridPos": {"x":12,"y":9,"w":12,"h":3},
+        "targets": [{"expr":"avg_over_time(hopgraph_explain_chain_latency_seconds[5m])","refId":"A"}]
+      }
+    ]
+  },
+  "overwrite": false
+}

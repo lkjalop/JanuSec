@@ -1,0 +1,8 @@
+{
+  "id": "monitor_notify",
+  "title": "Monitor and Notify",
+  "steps": [
+    {"action": "increase_monitoring", "desc": "Increase logging and alerting for entities", "type": "monitoring"},
+    {"action": "notify_team", "desc": "Notify security team with summary", "type": "notification"}
+  ]
+}

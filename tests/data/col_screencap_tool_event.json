@@ -1,0 +1,7 @@
+{
+  "event_id": "evt-col-screencap-1",
+  "host": "host-102",
+  "timestamp": "2025-10-12T13:01:00Z",
+  "screencap_tool_exec": true,
+  "screenshot_upload": true
+}

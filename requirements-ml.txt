@@ -1,0 +1,15 @@
+"""ML / Analysis Extras
+Install alongside core requirements when enabling advanced model-driven features.
+"""
+
+# Core scientific / ML heavy stack (kept separate to reduce base footprint)
+scikit-learn>=1.3.0
+scipy>=1.11.0
+transformers>=4.42.0
+torch>=2.2.0
+notebook>=7.0.0
+matplotlib>=3.7.0
+seaborn>=0.12.0
+
+# Optional performance / profiling tools
+memory-profiler>=0.61.0

@@ -1,0 +1,17 @@
+[
+  {
+    "message_id": "msg-azure-bec-001",
+    "timestamp": "2025-03-15T02:10:00Z",
+    "from": "accounts@ingramfake.com.au",
+    "to": "alex.mercer@contoso.dev",
+    "reply_to": "accounts@ingramfake.com.au",
+    "sender_display_name": "Ingram Fake Accounts",
+    "subject": "Updated banking details before March remittance",
+    "body": "Please review the attached workbook before processing the next remittance. Updated bank details are included. Urgent action is required.",
+    "spf_result": "fail",
+    "dkim_result": "fail",
+    "dmarc_result": "fail",
+    "supplier_name": "Ingram Micro",
+    "trusted_supplier_domain": "ingrammicro.com.au"
+  }
+]

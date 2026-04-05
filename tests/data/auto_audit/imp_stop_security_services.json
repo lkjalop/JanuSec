@@ -1,0 +1,7 @@
+{
+  "event_id": "evt-stop-svc-001",
+  "action": "service_stop",
+  "service_name": "WindowsDefender",
+  "service_display_name": "Windows Defender Antivirus"
+  , "service_name_alt": "Windows Defender"
+}

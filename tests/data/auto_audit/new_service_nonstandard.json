@@ -1,0 +1,7 @@
+{
+  "event_id": "evt-new-svc-001",
+  "service_name": "weirdsvc",
+  "service_bin_path": "C:\\ProgramData\\weirdsvc\\weird.exe",
+  "nonstandard_install_path": true
+  , "binary_path": "C:\\Users\\Alice\\AppData\\Local\\Temp\\evil.exe"
+}

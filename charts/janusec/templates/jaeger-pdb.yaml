@@ -1,0 +1,13 @@
+{{- if and .Values.pdb.enabled .Values.jaeger.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: jaeger-pdb
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: jaeger
+      app.kubernetes.io/component: allinone
+{{- end }}
+

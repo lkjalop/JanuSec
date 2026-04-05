@@ -1,0 +1,35 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>KAPE Upload</title>
+  <style>body{background:#0f1720;color:#e6eef6;font-family:Segoe UI,Arial;padding:20px}label{display:block;margin:8px 0}</style>
+</head>
+<body>
+  <h2>KAPE Upload</h2>
+  <form id="f" enctype="multipart/form-data">
+    <label>File: <input type="file" name="file"></label>
+    <label><input type="checkbox" name="async_process"> Async process (enqueue)</label>
+    <label><input type="checkbox" name="trigger_sandbox"> Trigger static sandbox</label>
+    <button type="submit">Upload</button>
+  </form>
+  <pre id="out"></pre>
+  <script>
+    const out = document.getElementById('out')
+    document.getElementById('f').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const fd = new FormData(e.target)
+      const async_process = e.target.async_process.checked ? 'true' : 'false'
+      const trigger = e.target.trigger_sandbox.checked ? 'true' : 'false'
+      out.textContent = 'Uploading...'
+      try {
+        const res = await fetch('/api/v1/kape/upload?async_process=' + async_process + '&trigger_sandbox=' + trigger, {method:'POST', body:fd, headers:{'x-api-key': localStorage.apiKey || 'devkey123'}})
+        const j = await res.json()
+        out.textContent = JSON.stringify(j, null, 2)
+      } catch (err) {
+        out.textContent = String(err)
+      }
+    })
+  </script>
+</body>
+</html>

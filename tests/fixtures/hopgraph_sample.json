@@ -1,0 +1,12 @@
+{
+  "nodes": {
+    "host:demo-host": {"id":"host:demo-host","created_ts":1700000000.0},
+    "process:demo.exe:1234": {"id":"process:demo.exe:1234","created_ts":1700000000.0},
+    "ip:10.0.0.5": {"id":"ip:10.0.0.5","created_ts":1700000000.0}
+  },
+  "adj": {
+    "host:demo-host": [["process:demo.exe:1234","runs",1700000000.0,"event",1.0]],
+    "process:demo.exe:1234": [["ip:10.0.0.5","connects_to",1700000000.0,"event",1.0]]
+  },
+  "saved_ts": 1
+}

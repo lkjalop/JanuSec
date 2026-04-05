@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>CSV Deep Analysis</title>
+  <link rel="stylesheet" href="/static/css/theme.css" />
+  <style>
+    body{ margin:0; padding:20px 28px; background:var(--bg-primary); color:var(--text-primary); }
+    h2{ margin:0 0 8px; }
+    .panel{ background:var(--bg-secondary); border:1px solid var(--border); border-radius:8px; padding:16px 20px; box-shadow:0 2px 6px rgba(0,0,0,.35); margin-bottom:16px; }
+    .grid{ display:grid; grid-template-columns: repeat(auto-fit,minmax(280px,1fr)); gap:12px; }
+    .k{ color:var(--text-muted); font-size:12px; }
+    table{ width:100%; border-collapse:collapse; font-size:13px; }
+    td,th{ border:1px solid var(--border); padding:6px 8px; text-align:left; }
+    th{ background:var(--bg-tertiary); }
+    .pill{ background:var(--accent); color:#fff; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:600; }
+    .badge{ display:inline-block; border:1px solid var(--border); border-radius:999px; padding:2px 8px; font-size:11px; }
+    .muted{ color:var(--text-muted); font-size:12px; }
+    .row{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  </style>
+</head>
+<body>
+  <div class="row" style="justify-content:space-between; margin-bottom:8px;">
+    <div>
+      <a href="/static/csv_analyzer.html" class="badge">← Back to CSV Analyzer</a>
+    </div>
+    <div class="muted">Use Deep Analyze from CSV Analyzer to populate this page.</div>
+  </div>
+  <h2>Deep Analysis</h2>
+  <div class="row" style="margin:6px 0 10px;">
+    <a class="badge" target="_blank" rel="noopener" href="/api/v1/report/ingestion?format=html&include_model=true&include_scenarios=true">Open Investigation Report</a>
+  </div>
+  <div id="summary" class="panel"></div>
+  <div class="grid">
+    <div class="panel">
+      <h3 style="margin:0 0 6px">DREAD</h3>
+      <div id="dread"></div>
+    </div>
+    <div class="panel">
+      <h3 style="margin:0 0 6px">MITRE ATT&CK</h3>
+      <div id="mitre"></div>
+    </div>
+    <div class="panel">
+      <h3 style="margin:0 0 6px">STRIDE</h3>
+      <div id="stride"></div>
+    </div>
+    <div class="panel">
+      <h3 style="margin:0 0 6px">PASTA</h3>
+      <div id="pasta"></div>
+    </div>
+    <div class="panel">
+      <h3 style="margin:0 0 6px">CVSS (estimate)</h3>
+      <div id="cvss"></div>
+    </div>
+    <div class="panel">
+      <h3 style="margin:0 0 6px">Compliance Controls</h3>
+      <div id="compliance"></div>
+    </div>
+    <div class="panel">
+      <h3 style="margin:0 0 6px">Rationale & Playbooks</h3>
+      <div id="rationales"></div>
+      <div class="muted" style="margin-top:8px">Recommended Playbooks / Policies:</div>
+      <ul id="playbooks" class="k"></ul>
+    </div>
+  </div>
+
+  <script>
+    function computeDreadBreakdown(factors){
+      var map = {
+        rare_process:       {D:3, R:1, E:1, A:1, Di:1},
+        rare_signed_binary: {D:2, R:1, E:1, A:0, Di:1},
+        unsigned_sensitive_path: {D:3, R:1, E:1, A:0, Di:2},
+        repeat_hash:        {D:2, R:2, E:1, A:1, Di:1},
+        multi_host_path:    {D:2, R:1, E:1, A:2, Di:1},
+        novel_global:       {D:3, R:1, E:1, A:2, Di:1},
+        wmi_activity:       {D:1, R:1, E:2, A:0, Di:1},
+        service_creation:   {D:3, R:1, E:1, A:0, Di:1},
+        psremoting:         {D:1, R:1, E:2, A:0, Di:1},
+        scheduled_tasks:    {D:1, R:1, E:1, A:0, Di:1},
+        lolbin:             {D:3, R:1, E:3, A:0, Di:1}
+      };
+      var comps = {D:0, R:0, E:0, A:0, Di:0};
+      var maxPerComp = {D:0, R:0, E:0, A:0, Di:0};
+      Object.keys(map).forEach(function(k){ var t=map[k]; Object.keys(t).forEach(function(c){ maxPerComp[c]+=t[c]; }); });
+      (factors||[]).forEach(function(f){ var s=String(f||'').toLowerCase(); Object.keys(map).forEach(function(tok){ if(s.includes(tok.replace(/_/g,' '))||s.includes(tok)){ var t=map[tok]; Object.keys(t).forEach(function(c){ comps[c]+=t[c]; }); } }); });
+      var normalized={}; Object.keys(comps).forEach(function(k){ var raw=maxPerComp[k]?(comps[k]/maxPerComp[k])*10:0; normalized[k]=Math.min(10, Math.round(raw*10)/10); });
+      var overall=Math.min(10, Math.round(((normalized.D+normalized.R+normalized.E+normalized.A+normalized.Di)/5)*10)/10);
+      var level= overall<=3? 'low' : (overall<=6? 'medium':'high');
+      return { score: overall, level: level, breakdown: { Damage: normalized.D, Repro: normalized.R, Exploitability: normalized.E, Affected: normalized.A, Discoverability: normalized.Di } };
+    }
+
+    function mitreHints(f){
+      try{
+        if(!f||!f.length) return [];
+        var map=[
+          {match:/process create|process_create|processcreate|processcreate/i, tech:'T1059'},
+          {match:/service|service_creation|service install/i, tech:'T1543.003'},
+          {match:/wmi|wmic|wmiregister/i, tech:'T1047'},
+          {match:/scheduled|task|schtask/i, tech:'T1053'},
+          {match:/credential|kerberos|tgs|tgt/i, tech:'T1558'},
+          {match:/lolbin|regsvr32|rundll32|mshta|bitsadmin/i, tech:'T1218'},
+          {match:/repeat_hash|multi_host|novel_global|rare_process/i, tech:'T1602'}
+        ];
+        var found=new Set();
+        f.forEach(function(s){ var t=String(s||''); map.forEach(function(m){ if(m.match.test(t)) found.add(m.tech); }); });
+        return Array.from(found);
+      }catch(_){ return []; }
+    }
+
+    function strideFromFactors(f){
+      var map={
+        rare_process:['Repudiation','Tampering'],
+        lolbin:['Elevation of Privilege','Execution'],
+        service_creation:['Elevation of Privilege'],
+        wmi_activity:['Elevation of Privilege','Tampering'],
+        scheduled_tasks:['Persistence'],
+        repeat_hash:['Information Disclosure','Persistence'],
+        unsigned_sensitive_path:['Tampering'],
+        novel_global:['Spoofing','Information Disclosure']
+      };
+      var out=new Set();
+      (f||[]).forEach(function(s){ var k=String(s||'').toLowerCase().replace(/\s+/g,'_'); (map[k]||[]).forEach(function(v){ out.add(v); }); });
+      return Array.from(out);
+    }
+
+    function pastaStages(f){
+      var map={
+        lolbin:['Stage 5: Vulnerability & Attack Analysis','Stage 6: Risk Analysis'],
+        service_creation:['Stage 6: Risk Analysis'],
+        wmi_activity:['Stage 5: Vulnerability & Attack Analysis'],
+        scheduled_tasks:['Stage 5: Vulnerability & Attack Analysis'],
+        repeat_hash:['Stage 7: Risk Management'],
+        novel_global:['Stage 4: Attack Enumeration']
+      };
+      var out=new Set(); (f||[]).forEach(function(s){ var k=String(s||'').toLowerCase().replace(/\s+/g,'_'); (map[k]||[]).forEach(function(v){ out.add(v); }); }); return Array.from(out);
+    }
+
+    function cvssEstimate(dread){
+      try{ var s=(dread&&dread.score)||0; var sev = s>=8? 'Critical' : (s>=6? 'High' : (s>=4? 'Medium' : (s>0? 'Low':'None'))); return sev+' (~'+s.toFixed(1)+')'; }catch(_){ return 'N/A'; }
+    }
+
+    function complianceFromFactors(f){
+      var map={
+        lolbin:['NIST SI-7 (Software, Firmware, and Information Integrity)','CIS 8 v8 10.6 (Script Control)'],
+        repeat_hash:['NIST IR-5 (Incident Monitoring)','ISO 27001 A.12.4 (Logging and monitoring)'],
+        unsigned_sensitive_path:['CIS 8 v8 2.3 (Secure Configurations)']
+      };
+      var set=new Set(); (f||[]).forEach(function(s){ var k=String(s||'').toLowerCase().replace(/\s+/g,'_'); (map[k]||[]).forEach(function(v){ set.add(v); }); });
+      return Array.from(set);
+    }
+
+    function render(){
+      var list=[]; try{ list = JSON.parse(localStorage.getItem('csv_last_results')||'[]'); }catch(_){ }
+      var idx = 0; try{ idx = parseInt(localStorage.getItem('csv_deep_row')||'0',10)||0; }catch(_){ }
+      var rec = list[idx] || list[0] || null;
+      var sum = document.getElementById('summary');
+      if(!rec){ sum.innerHTML = '<div class="muted">No analysis input found. Return to CSV Analyzer and click Deep Analyze.</div>'; return; }
+      var f = Array.from(new Set(rec.factors||[]));
+      var dread = rec._dread || computeDreadBreakdown(f);
+      sum.innerHTML = '<div><span class="pill">'+(rec.verdict||'')+'</span> '+(rec.process_name||'')+' on '+(rec.host||'')+'</div>'
+        + '<div class="muted">'+(rec.file_path||'')+' • '+(rec.sha256||'')+'</div>'
+        + '<div class="muted">Signals: '+(f.join(', ')||'(none)')+'</div>';
+      var d = document.getElementById('dread');
+      d.innerHTML = '<div><strong>Score:</strong> '+dread.score+' ('+dread.level+')</div>'
+        + '<table><tbody>'
+        + '<tr><td>Damage</td><td>'+dread.breakdown.Damage+'</td></tr>'
+        + '<tr><td>Reproducibility</td><td>'+dread.breakdown.Repro+'</td></tr>'
+        + '<tr><td>Exploitability</td><td>'+dread.breakdown.Exploitability+'</td></tr>'
+        + '<tr><td>Affected Users</td><td>'+dread.breakdown.Affected+'</td></tr>'
+        + '<tr><td>Discoverability</td><td>'+dread.breakdown.Discoverability+'</td></tr>'
+        + '</tbody></table>';
+      var m = document.getElementById('mitre');
+      var mit = mitreHints(f); m.innerHTML = mit.length? ('Techniques: '+mit.join(', ')) : '<span class="muted">No direct hints</span>';
+      var s = document.getElementById('stride'); var st = strideFromFactors(f); s.innerHTML = st.length? st.map(function(x){return '<span class="badge">'+x+'</span>';}).join(' ') : '<span class="muted">No STRIDE mapping</span>';
+      var p = document.getElementById('pasta'); var ps = pastaStages(f); p.innerHTML = ps.length? ('Stages: '+ps.join(', ')) : '<span class="muted">No PASTA mapping</span>';
+      var cv = document.getElementById('cvss'); cv.innerHTML = cvssEstimate(dread);
+      var c = document.getElementById('compliance'); var cc = complianceFromFactors(f); c.innerHTML = cc.length? ('<ul>'+cc.map(function(x){return '<li>'+x+'</li>';}).join('')+'</ul>') : '<span class="muted">No compliance control mapping available</span>';
+      // Risk ablation (server)
+      try{
+        var eid = rec && rec.raw && (rec.raw.event_id||rec.raw.EventID);
+        if(eid){
+          fetch('/api/v1/risk/'+encodeURIComponent(eid)+'/explain?include_ablation=1', { headers: Object.assign({'Accept':'application/json'}, (function(){ try{ return {'x-api-key': (localStorage.getItem('apiKey')||'devkey123')}; }catch(_){ return {'x-api-key':'devkey123'} } })()) })
+          .then(r=> r.ok? r.json(): null).then(j=>{
+            try{
+              const abl = Array.isArray(j && j.ablation)? j.ablation: [];
+              if(abl.length){
+                const host = document.createElement('div'); host.className='panel';
+                host.innerHTML = '<h3 style="margin:0 0 6px">Risk Ablation (server)</h3>'+
+                  '<table><thead><tr><th>Factor</th><th>Δscore</th><th>New Score</th></tr></thead><tbody>'+
+                  abl.slice(0,8).map(a=> '<tr><td>'+String(a.factor||'')+'</td><td>'+Number(a.delta||0).toFixed(3)+'</td><td>'+Number(a.new_score||0).toFixed(3)+'</td></tr>').join('')+
+                  '</tbody></table>';
+                document.body.appendChild(host);
+              }
+            }catch(_){ }
+          }).catch(()=>{});
+        }
+      }catch(_){ }
+      var rationales = {
+        'lolbin': 'Living-off-the-land binary used for scriptable execution — often bypasses application controls.',
+        'service_creation': 'New or modified service may indicate persistence or privilege elevation.',
+        'wmi_activity': 'Remote execution or system management activity — confirm source and intent.',
+        'scheduled_tasks': 'Task scheduling can be used for persistence or delayed execution.',
+        'repeat_hash': 'Known suspicious hash repeating across hosts suggests lateral movement or propagation.',
+        'unsigned_sensitive_path': 'Unsigned binary executed from sensitive Windows path.'
+      };
+      var rdiv = document.getElementById('rationales');
+      var rs = f.map(function(x){ return '<li><strong>'+x+'</strong>: '+(rationales[x]||'No rationale available')+'</li>'; }).join('');
+      rdiv.innerHTML = rs? ('<ul>'+rs+'</ul>') : '<span class="muted">No factors to explain</span>';
+      var pb = document.getElementById('playbooks');
+      var items = [];
+      if(f.includes('service_creation')||f.includes('unsigned_sensitive_path')) items.push({t:'Isolate Host', href:'/static/janusec-platform-complete-LIVE.html'});
+      if(f.includes('lolbin')||f.includes('wmi_activity')||f.includes('scheduled_tasks')) items.push({t:'Contain Execution (Script Control)', href:'/static/approvals.html'});
+      if(mit.length) items.push({t:'Block C2 / Egress Filter', href:'/static/integrations.html'});
+      if(!items.length) items.push({t:'Open LIVE Console', href:'/static/janusec-platform-complete-LIVE.html'});
+      pb.innerHTML = items.map(function(i){ return '<li><a target="_blank" rel="noopener" href="'+i.href+'">'+i.t+'</a></li>'; }).join('');
+    }
+
+    if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', render); else render();
+  </script>
+</body>
+</html>

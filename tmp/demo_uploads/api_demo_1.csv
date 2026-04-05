@@ -1,0 +1,3 @@
+event_id,client_id,endpoint,method,status,src_ip,timestamp
+api-1,svc-client-1,/api/login,POST,200,10.0.0.5,2025-11-12T00:00:02Z
+api-2,svc-client-2,/api/data,GET,200,10.0.0.8,2025-11-12T00:05:00Z

@@ -1,0 +1,21 @@
+{
+  "event_id": "6f8a9e2e-1d4a-4f9a-9d33-0b9f6a2e1a1b",
+  "timestamp": "2025-11-13T12:00:00Z",
+  "sensor_id": "pi-01",
+  "sensor_type": "ssh",
+  "event_type": "auth_attempt",
+  "src_ip": "203.0.113.42",
+  "src_port": 53210,
+  "dst_ip": "198.51.100.5",
+  "dst_port": 22,
+  "dst_service": "ssh",
+  "user": "honeypot_user",
+  "artifact": null,
+  "raw_hash": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  "payload_ref": "s3://sultry-raw/pi-01/2025-11-13/6f8a9e2e.json",
+  "schema_version": "sultry.v1",
+  "meta": {
+    "ssh_client": "OpenSSH_8.6",
+    "auth_method": "password"
+  }
+}

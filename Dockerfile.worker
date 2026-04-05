@@ -1,0 +1,8 @@
+# Minimal Dockerfile for Redis Streams consumer worker
+FROM python:3.11-slim
+WORKDIR /app
+COPY requirements.txt /app/
+RUN pip install --no-cache-dir -r requirements.txt
+COPY . /app
+ENV REDIS_URL=redis://redis:6379/0
+CMD ["python", "scripts/redis_streams_consumer.py"]

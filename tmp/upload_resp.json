@@ -1,0 +1,14 @@
+HTTP/1.1 200 OK
+date: Wed, 12 Nov 2025 07:03:23 GMT
+server: uvicorn
+content-length: 197
+content-type: application/json
+x-request-id: req-1762931003230
+strict-transport-security: max-age=31536000; includeSubDomains
+x-content-type-options: nosniff
+x-frame-options: DENY
+referrer-policy: no-referrer
+permissions-policy: geolocation=(), microphone=(), camera=()
+content-security-policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; media-src 'self' blob:; worker-src 'self' blob:; frame-ancestors 'self'
+
+{"status":"processed","session":{"session_id":"sess-fdbfe81a4eec4af985d1122e5f585dcd","created_ts":1762931003,"kind":"unknown","mapping":"auto","total_rows":0,"forwarded":0,"failed":0,"errors":[]}}

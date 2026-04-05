@@ -1,0 +1,4 @@
+event_id,timestamp,client_ip,method,path,status,user_agent,response_size,verdict,factors
+api-1,2025-11-08T08:12:30Z,198.51.100.12,POST,/api/v1/upload,200,"curl/7.82.0",512,SUSPICIOUS,"api:rare_method_combo,http:user_agent_rare"
+api-2,2025-11-08T08:13:05Z,198.51.100.13,GET,/login,302,"Mozilla/5.0",1280,PASS,"normal_api"
+api-3,2025-11-08T08:14:50Z,198.51.100.12,POST,/api/v1/data/export,200,"curl/7.82.0",204800,SUSPICIOUS,"data_exfiltration,api:unusual_export"

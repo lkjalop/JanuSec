@@ -1,0 +1,98 @@
+{{- if .Values.jaeger.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: jaeger-query
+  labels:
+    app.kubernetes.io/name: jaeger
+    app.kubernetes.io/component: query
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: jaeger
+    app.kubernetes.io/component: allinone
+  ports:
+    - name: http-query
+      port: {{ .Values.jaeger.service.queryPort }}
+      targetPort: 16686
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: jaeger-collector
+  labels:
+    app.kubernetes.io/name: jaeger
+    app.kubernetes.io/component: collector
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: jaeger
+    app.kubernetes.io/component: allinone
+  ports:
+    - name: otlp-http
+      port: {{ .Values.jaeger.service.otlpHttp }}
+      targetPort: 4318
+    - name: otlp-grpc
+      port: {{ .Values.jaeger.service.otlpGrpc }}
+      targetPort: 4317
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jaeger-all-in-one
+  labels:
+    app.kubernetes.io/name: jaeger
+    app.kubernetes.io/component: allinone
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: jaeger
+      app.kubernetes.io/component: allinone
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: jaeger
+        app.kubernetes.io/component: allinone
+    spec:
+      containers:
+        - name: jaeger
+          image: {{ .Values.jaeger.image }}
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          ports:
+            - containerPort: 16686
+            - containerPort: 4318
+            - containerPort: 4317
+          env:
+            - name: COLLECTOR_OTLP_ENABLED
+              value: "true"
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      {{- if .Values.jaeger.persistence.enabled }}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: jaeger-data
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: jaeger-data
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: {{ .Values.jaeger.persistence.size }}
+  storageClassName: {{ .Values.jaeger.persistence.storageClass | quote }}
+      {{- else }}
+      volumes:
+        - name: data
+          emptyDir: {}
+      {{- end }}
+{{- end }}

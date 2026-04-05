@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en" class="theme-dark">
+<head>
+  <meta charset="utf-8" />
+  <title>Factors Top-20 by Domain</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <style>
+    :root{ --bg:#0B0E14; --card:#141A24; --border:#2C3746; --text:#E8EBF0; --muted:#A8B3C3 }
+    body{ font-family:Inter,system-ui,Segoe UI, sans-serif; background:var(--bg); color:var(--text); margin:0; }
+    header{ padding:22px 26px 16px 300px; }
+    h1{ font-size:18px; margin:0 0 6px 0 }
+    p.lead{ margin:0 0 12px 0; color:var(--muted); font-size:13px }
+    .container{ padding:0 26px 40px 300px }
+    .controls{ display:flex; gap:12px; align-items:center; margin-bottom:12px }
+    .controls input[type='search']{ padding:8px 10px; border-radius:6px; border:1px solid rgba(255,255,255,0.04); background:transparent; color:var(--text) }
+    .controls select{ padding:8px; border-radius:6px; background:transparent; color:var(--text); border:1px solid rgba(255,255,255,0.04) }
+    .layout{ display:flex; gap:12px }
+    .legend{ width:220px; min-width:180px }
+    .legend .item{ display:flex; align-items:center; gap:8px; padding:6px 8px; border-radius:6px; margin-bottom:6px; background:rgba(255,255,255,0.01) }
+    .legend .swatch{ width:14px; height:14px; border-radius:3px }
+    .grid{ flex:1; display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:12px }
+    .card{ background:var(--card); border:1px solid var(--border); padding:12px; border-radius:8px }
+    .card h3{ margin:0 0 8px 0; font-size:14px }
+    .bar{ transition:width 180ms ease; }
+    .label{ font-size:12px; color:var(--muted) }
+    .tooltip{ position:absolute; background:#111; border:1px solid #333; padding:8px; border-radius:6px; color:#fff; font-size:12px; pointer-events:none; display:none; z-index:2000 }
+    .skeleton{ background:linear-gradient(90deg, rgba(255,255,255,0.02), rgba(255,255,255,0.035), rgba(255,255,255,0.02)); height:80px; border-radius:6px }
+    .vis-controls{ display:flex; gap:8px; align-items:center }
+    .btn{ background:transparent;border:1px solid rgba(255,255,255,0.04);color:var(--text);padding:6px 10px;border-radius:6px;cursor:pointer }
+    /* accessibility focus */
+    .focus-visible:focus { outline:3px solid rgba(74,99,231,0.2); }
+  </style>
+</head>
+<body>
+  <script> // insert nav include
+    (function(){ try{ const xhr=new XMLHttpRequest(); xhr.open('GET','/static/components/nav.html',true); xhr.onload=function(){ if(xhr.status===200){ const div=document.createElement('div'); div.innerHTML = xhr.responseText; document.body.appendChild(div); } }; xhr.send(); }catch(e){console.warn('Nav include failed',e);} })();
+  </script>
+
+  <header>
+    <h1>Top-20 Factors by Domain</h1>
+    <p class="lead">Canonical factor taxonomy — top factors per domain by configured weight. Use search, filter, and keyboard to explore.</p>
+  </header>
+
+  <div class="container">
+    <div class="controls">
+      <div class="vis-controls">
+        <input id="searchInput" type="search" placeholder="Search factors..." aria-label="Search factors" />
+        <select id="domainSelect" aria-label="Select domain"><option value="all">All Domains</option></select>
+        <select id="sortSelect" aria-label="Sort factors"><option value="weight_desc">Weight ↓</option><option value="name_asc">Name A→Z</option></select>
+      </div>
+      <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+        <button id="exportJSON" class="btn">Export JSON</button>
+        <button id="exportCSV" class="btn">Export CSV</button>
+      </div>
+    </div>
+
+    <div class="layout">
+      <aside class="legend" aria-label="Domain legend" id="legend"></aside>
+      <main class="grid" id="grid" role="list" aria-live="polite"></main>
+    </div>
+
+    <div id="tooltip" class="tooltip" role="status" aria-atomic="true"></div>
+  </div>
+
+  <div id="factorModal" role="dialog" aria-modal="true" aria-hidden="true" style="display:none;position:fixed;left:0;top:0;right:0;bottom:0;align-items:center;justify-content:center;background:rgba(0,0,0,0.6);z-index:3000;"> 
+    <div style="background:#0F1724;border:1px solid #2C3746;padding:18px;border-radius:10px;max-width:780px;width:94%;color:#E8EBF0;max-height:80%;overflow:auto;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <h2 id="modalTitle" style="margin:0;font-size:16px"></h2>
+        <button id="modalClose" class="btn">Close</button>
+      </div>
+      <div id="modalBody" style="font-size:13px;line-height:1.4"></div>
+      <div id="modalActions" style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap"></div>
+    </div>
+  </div>
+
+  <script>
+  (function(){
+    // Small utility helpers
+    const COLORS = {
+      endpoint:'#4A63E7', network:'#5BBF93', iam:'#F7A046', cloud:'#7F6BEE', data:'#D96C6C', email:'#E0C34F', ai:'#57B1E6', remote:'#C678DD', other:'#8892A0'
+    };
+
+    function escapeHtml(s){ if(!s) return ''; return s.replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c])); }
+    function debounce(fn, wait){ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a), wait); }; }
+
+    const gridEl = document.getElementById('grid');
+    const legendEl = document.getElementById('legend');
+    const tooltip = document.getElementById('tooltip');
+    const modal = document.getElementById('factorModal');
+    const modalClose = document.getElementById('modalClose');
+    const modalTitle = document.getElementById('modalTitle');
+    const modalBody = document.getElementById('modalBody');
+    const modalActions = document.getElementById('modalActions');
+
+    let state = { domains:[], factors:[], byDomain:{}, activeDomain:'all', search:'', sort:'weight_desc' };
+    const CACHE_KEY='janu: factors:v1';
+
+    async function fetchFactors(){
+      const headers = { 'x-api-key': (localStorage.getItem('apiKey')||'devkey123') };
+      try{
+        const r = await fetch('/api/v1/factors',{ headers });
+        if(!r.ok) throw new Error('status '+r.status);
+        const j = await r.json();
+        localStorage.setItem(CACHE_KEY, JSON.stringify({ ts:Date.now(), data:j }));
+        return j;
+      }catch(e){
+        const cached = localStorage.getItem(CACHE_KEY);
+        if(cached) return JSON.parse(cached).data;
+        throw e;
+      }
+    }
+
+    function buildByDomain(factors){ const by={}; factors.forEach(f=>{ const d=f.domain||'other'; (by[d]=by[d]||[]).push(f); }); Object.keys(by).forEach(k=>by[k].sort((a,b)=> (b.weight||0)-(a.weight||0))); return by; }
+
+    function renderLegend(domains, byDomain){ legendEl.innerHTML=''; const keys = Object.keys(byDomain).sort(); keys.forEach(k=>{ const itm=document.createElement('div'); itm.className='item'; const sw=document.createElement('div'); sw.className='swatch'; sw.style.background = COLORS[k]||COLORS.other; itm.appendChild(sw); const txt=document.createElement('div'); txt.innerHTML=`<div style="font-size:13px">${escapeHtml(k)}</div><div style="font-size:11px;color:var(--muted)">${(byDomain[k]||[]).length} factors</div>`; itm.appendChild(txt); legendEl.appendChild(itm); }); }
+
+    function renderGrid(){ gridEl.innerHTML=''; const domainKeys = state.activeDomain==='all'? Object.keys(state.byDomain) : [state.activeDomain];
+      domainKeys.forEach(domain=>{
+        const list = (state.byDomain[domain]||[]).slice(0,20);
+        const card = document.createElement('div'); card.className='card'; card.setAttribute('role','listitem');
+        const title = document.createElement('h3'); title.textContent = domain; card.appendChild(title);
+        const svgNS = 'http://www.w3.org/2000/svg';
+        const svg = document.createElementNS(svgNS,'svg'); svg.setAttribute('width','100%'); const h = Math.max(120, list.length*22); svg.setAttribute('height',h); card.appendChild(svg);
+        // compute scale
+        const maxW = card.clientWidth-140; const maxWeight = d3.max(list,d=>d.weight||0) || 1; const x = d3.scaleLinear().domain([0,maxWeight]).range([0, Math.max(80, maxW)]);
+        const g = d3.select(svg).append('g').attr('transform','translate(8,8)');
+        const row = g.selectAll('g.row').data(list).enter().append('g').attr('class','row').attr('transform',(d,i)=>`translate(0,${i*22})`).attr('tabindex',0).attr('role','button').attr('aria-label',d=>`${d.name||d.id} weight ${Number(d.weight||0).toFixed(2)}`);
+        row.append('text').attr('x',0).attr('y',12).attr('class','label').text(d=>d.name||d.id).style('font-size','12px');
+        row.append('rect').attr('class','bar').attr('x',120).attr('y',0).attr('height',14).attr('width',d=>x(d.weight||0)).attr('fill', COLORS[domain]||COLORS.other);
+        row.append('text').attr('x',110).attr('y',12).attr('class','label').text(d=> (d.weight||0).toFixed(2) ).style('font-size','11px');
+        // interactions
+        row.on('mouseenter',(event,d)=>{ showTooltip(event,d); }).on('mousemove', (event)=>{ positionTooltip(event); }).on('mouseleave', hideTooltip).on('click',(event,d)=>{ openModal(d,event.currentTarget); }).on('keydown',(event,d)=>{ if(event.key==='Enter'||event.key===' '){ event.preventDefault(); openModal(d,event.currentTarget); } if(event.key==='ArrowDown'||event.key==='ArrowUp'){ const next = event.key==='ArrowDown'? event.currentTarget.nextSibling : event.currentTarget.previousSibling; if(next) next.focus(); } });
+        gridEl.appendChild(card);
+      });
+    }
+
+    function showTooltip(event,d){ tooltip.style.display='block'; tooltip.innerHTML = `<strong>${escapeHtml(d.name||d.id)}</strong><br/>Domain: ${escapeHtml(d.domain||'') }<br/>Weight: ${Number(d.weight||0).toFixed(3)}<br/>MITRE: ${escapeHtml((d.mitre||[]).slice(0,3).join(', '))}`; positionTooltip(event); }
+    function positionTooltip(event){ const x=event.pageX+12, y=event.pageY+12; tooltip.style.left = x+'px'; tooltip.style.top = y+'px'; }
+    function hideTooltip(){ tooltip.style.display='none'; }
+
+    function openModal(d,triggerEl){ modal.style.display='flex'; modal.setAttribute('aria-hidden','false'); modalTitle.textContent = d.name||d.id; modalBody.innerHTML = `<strong>ID:</strong> ${escapeHtml(d.id)}<br/><strong>Domain:</strong> ${escapeHtml(d.domain)}<br/><strong>Weight:</strong> ${Number(d.weight||0).toFixed(3)}<br/><strong>MITRE:</strong> ${(d.mitre||[]).join(', ')||'n/a'}<br/>${d.description?'<strong>Description:</strong> '+escapeHtml(d.description):''}`; modalActions.innerHTML=''; const mitreUrl = d.mitre && d.mitre.length ? `https://attack.mitre.org/techniques/${d.mitre[0]}` : null; if(mitreUrl){ const a=document.createElement('a'); a.className='btn'; a.href=mitreUrl; a.target='_blank'; a.textContent='Open MITRE'; modalActions.appendChild(a); }
+      const copyBtn = document.createElement('button'); copyBtn.className='btn'; copyBtn.textContent='Copy JSON'; copyBtn.onclick = ()=>{ navigator.clipboard.writeText(JSON.stringify(d,null,2)); alert('Copied'); }; modalActions.appendChild(copyBtn);
+      // focus handling
+      modalClose.focus(); modal._trigger = triggerEl;
+    }
+    function closeModal(){ modal.style.display='none'; modal.setAttribute('aria-hidden','true'); if(modal._trigger) modal._trigger.focus(); }
+    modalClose.addEventListener('click', closeModal);
+    modal.addEventListener('keydown',(e)=>{ if(e.key==='Escape'){ closeModal(); } });
+    modal.addEventListener('click',(e)=>{ if(e.target===modal) closeModal(); });
+
+    function applyControls(){ document.getElementById('searchInput').addEventListener('input', debounce((e)=>{ state.search=e.target.value.toLowerCase(); applyFiltersAndRender(); },250));
+      document.getElementById('domainSelect').addEventListener('change',(e)=>{ state.activeDomain=e.target.value; applyFiltersAndRender(); });
+      document.getElementById('sortSelect').addEventListener('change',(e)=>{ state.sort=e.target.value; applyFiltersAndRender(); });
+      document.getElementById('exportJSON').addEventListener('click', ()=>{ const data = { domains: state.domains, factors: state.factors }; const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='factors.json'; a.click(); });
+      document.getElementById('exportCSV').addEventListener('click', ()=>{ const rows = ['id,name,domain,weight']; state.factors.forEach(f=> rows.push(`${f.id},"${(f.name||'').replace(/"/g,'""')}",${f.domain},${f.weight||0}`)); const blob=new Blob([rows.join('\n')],{type:'text/csv'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='factors.csv'; a.click(); });
+    }
+
+    function applyFiltersAndRender(){ // filter & sort into state.byDomain
+      const search = state.search.trim().toLowerCase(); const by = {}; state.factors.forEach(f=>{ const name = (f.name||'').toLowerCase(); const id = (f.id||'').toLowerCase(); if(search && !(name.includes(search)||id.includes(search))) return; const d = f.domain||'other'; (by[d]=by[d]||[]).push(f); }); Object.keys(by).forEach(k=>{ if(state.sort==='weight_desc') by[k].sort((a,b)=> (b.weight||0)-(a.weight||0)); else by[k].sort((a,b)=> (a.name||'').localeCompare(b.name||'')); }); state.byDomain = by; renderLegend(state.domains, state.byDomain); renderGrid(); }
+
+    function populateDomainSelect(){ const sel = document.getElementById('domainSelect'); sel.innerHTML = '<option value="all">All Domains</option>'; state.domains.forEach(d=>{ const o=document.createElement('option'); o.value=d; o.textContent=d; sel.appendChild(o); }); }
+
+    async function init(){ gridEl.innerHTML = '<div class="skeleton"></div>'; try{ const data = await fetchFactors(); state.domains = data.domains || Object.keys(buildByDomain(data.factors||{})); state.factors = data.factors || []; state.byDomain = buildByDomain(state.factors); populateDomainSelect(); applyControls(); applyFiltersAndRender(); }catch(e){ gridEl.innerHTML = '<div style="color:#f66">Failed to load factors.</div>'; console.error('factors load',e); }
+    }
+
+    // responsive handling
+    window.addEventListener('resize', debounce(()=>{ applyFiltersAndRender(); },150));
+
+    init();
+  })();
+  </script>
+</body>
+</html>

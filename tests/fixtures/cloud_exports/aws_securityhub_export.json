@@ -1,0 +1,9 @@
+[
+  {
+    "Id": "arn:aws:securityhub:ap-southeast-2::finding/example",
+    "Severity": {"Label": "HIGH"},
+    "Title": "Unusual console login after IAM change",
+    "UpdatedAt": "2026-03-20T01:45:00Z",
+    "Resources": [{"Type": "AwsIamUser", "Id": "arn:aws:iam::123456789012:user/Alice"}]
+  }
+]

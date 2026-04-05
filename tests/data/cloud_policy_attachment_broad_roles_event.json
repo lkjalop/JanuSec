@@ -1,0 +1,13 @@
+{
+  "iam_policy_attach": true,
+  "role_scope_broad": true,
+  "organization_wide_role": true,
+  "actor_service_account_unusual": true,
+  "domain": "cloud",
+  "provider": "aws",
+  "eventSource": "iam.amazonaws.com",
+  "eventName": "AttachRolePolicy",
+  "roleName": "OrgAdmin",
+  "policy": "AdministratorAccess",
+  "factors": ["iam_policy_attach", "role_scope_broad", "organization_wide_role", "actor_service_account_unusual"]
+}

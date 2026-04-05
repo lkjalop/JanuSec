@@ -1,0 +1,34 @@
+id: office_macro_chain
+title: Office macro -> dropper -> cmdline chain
+description: Detect chain where an Office macro drops a script/binary and spawns a suspicious cmdline.
+author: automation
+tags: [T1204, T1059]
+condition_groups:
+  - type: node_property
+    node_type: file
+    filters:
+      - field: filename
+        op: regex
+        value: "\\.(doc|docm|xls|xlsm|ppt|pptm)$"
+      - field: content_signatures
+        op: contains
+        value: vbaProject.bin
+    joins:
+      - name: created_proc
+        via: created_process
+        node_type: process
+        max_hops: 2
+        mapping:
+          process: pid
+        join_type: inner
+  - type: node_property
+    node_type: process
+    filters:
+      - field: cmdline
+        op: contains
+        value: powershell
+    confidence: 0.8
+score: 0.85
+actions:
+  - type: create_alert
+    message: "Office macro created a powershell process — likely dropper"

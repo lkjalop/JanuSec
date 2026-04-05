@@ -1,0 +1,10 @@
+[
+  {
+    "message_id": "msg-azure-bec-001",
+    "timestamp": "2025-03-15T02:14:43Z",
+    "user": "alex.mercer@contoso.dev",
+    "clicked_url": "https://secure-sync-checkin.net/verify?id=2911",
+    "result": "opened_attachment_landing_page",
+    "src_ip": "185.220.101.47"
+  }
+]

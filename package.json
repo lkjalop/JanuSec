@@ -1,0 +1,38 @@
+{
+  "name": "threat_thy_sniffer",
+  "version": "1.0.0",
+  "description": "> Version: **0.9.0-pre (Pre-Production Validation Update – 2025-09-22)**  \r > Status: \"Ready With Conditions\" (synthetic & harness-based validation complete, live traffic calibration pending)",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs",
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "test:js": "node tests/js/run_tests.js",
+    "test:ui": "npx playwright test --reporter=list",
+    "test:ui:headed": "npx playwright test --headed",
+    "postinstall": "npx playwright install --with-deps",
+    "playwright:ci": "npx playwright install --with-deps"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.45.0",
+    "jsdom": "^22.1.0",
+    "node-fetch": "^2.6.7"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lkjalop/JanuSec.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/lkjalop/JanuSec/issues"
+  },
+  "homepage": "https://github.com/lkjalop/JanuSec#readme",
+  "dependencies": {
+    "eslint": "^9.39.1",
+    "eslint-plugin-import": "^2.32.0"
+  }
+}

@@ -1,0 +1,51 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Retrain Admin</title>
+</head>
+<body>
+  <h1>Retrain Outbox Admin</h1>
+  <div>
+    <label>Process Limit: <input id="limit" type="number" value="100" /></label>
+    <button id="drain">Drain Retrain Queue</button>
+  </div>
+  <div id="result"></div>
+  <h2>Training Files</h2>
+  <ul id="files"></ul>
+
+  <script>
+  async function drain(){
+    const l = parseInt(document.getElementById('limit').value||'100');
+    const resp = await fetch('/api/v1/assessments/admin/consume_retrain', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({limit:l})});
+    const j = await resp.json();
+    document.getElementById('result').innerText = JSON.stringify(j);
+    loadFiles();
+  }
+  async function loadFiles(){
+    const resp = await fetch('/static/'); // list static dir for demo - fallback
+    // fallback: hit a simple listing endpoint isn't available; instead try to fetch known path
+    const ul = document.getElementById('files'); ul.innerHTML='';
+    try{
+      const base = '/data/training/';
+      // we don't have a listing endpoint; attempt to fetch a likely file name
+      // Show download link for latest file by timestamp (best-effort)
+      // This is a best-effort demo UI; refresh after drain to see new file in server's static folder.
+      const now = Date.now();
+      const candidate = `/data/training/retrain_${Math.floor(now/1000)}.ndjson`;
+      const r = await fetch(candidate, {method:'HEAD'});
+      if(r.ok){
+        const li = document.createElement('li');
+        const a = document.createElement('a'); a.href = candidate; a.innerText = candidate; li.appendChild(a); ul.appendChild(li);
+      } else {
+        const li = document.createElement('li'); li.innerText = 'No training files discovered. Run drain to create one.'; ul.appendChild(li);
+      }
+    }catch(e){
+      const li = document.createElement('li'); li.innerText = 'Listing not available in demo.'; ul.appendChild(li);
+    }
+  }
+  document.getElementById('drain').addEventListener('click', drain);
+  loadFiles();
+  </script>
+</body>
+</html>

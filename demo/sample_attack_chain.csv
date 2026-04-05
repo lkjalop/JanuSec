@@ -1,0 +1,14 @@
+timestamp,event_type,user,src_ip,src_country,dst_host,dst_port,protocol,mfa_used,subject,from_email,to_email,spf,dkim,command,severity,description
+2024-01-15T08:30:00Z,email,alice@company.com,,,,,smtp,,,Urgent: Update Payment Method,paypa1.com,alice@company.com,fail,none,,high,Phishing email with homograph domain
+2024-01-15T08:42:00Z,vpn,alice@company.com,203.0.113.45,US,vpn-gateway.company.com,443,vpn,true,,,,,,,,normal,VPN login from Seattle office
+2024-01-15T14:18:00Z,vpn,alice@company.com,185.34.12.89,RU,vpn-gateway.company.com,443,vpn,false,,,,,,,,critical,VPN login from Russia - impossible travel detected
+2024-01-15T14:19:00Z,rdp,alice@company.com,10.0.5.42,,db-prod-01.company.internal,3389,rdp,false,,,,,,,,high,RDP to production database server
+2024-01-15T14:23:00Z,database,alice@company.com,10.0.5.42,,db-prod-01,3306,mysql,,,,,,,SELECT * FROM customer_pii WHERE 1=1,critical,Large PII query without WHERE clause
+2024-01-15T14:25:00Z,network,alice@company.com,10.0.5.42,RU,185.34.12.89,443,https,,,,,,,,,critical,500MB upload to Russian IP address
+2024-01-16T22:15:00Z,ssh,bob@company.com,192.168.1.55,US,bastion-prod-01,22,ssh,true,,,,,,,,normal,Bastion access after hours
+2024-01-16T22:16:00Z,command,bob@company.com,192.168.1.55,,bastion-prod-01,,,,,,,,,sudo mysqldump customers > /tmp/dump.sql,high,Database dump via sudo
+2024-01-16T22:20:00Z,cloud,bob@company.com,192.168.1.55,,s3://staging-bucket-public,,,,,,,,,aws s3 cp /tmp/dump.sql s3://staging-bucket-public/,critical,Upload to public S3 bucket
+2024-01-17T10:00:00Z,api,attacker@external.com,45.67.89.12,CN,api.company.com,443,https,,,,,,,GET /api/v1/users?limit=50000,high,Mass API scraping from China
+2024-01-17T10:05:00Z,api,attacker@external.com,45.67.89.12,CN,api.company.com,443,https,,,,,,,GET /api/v1/users (50000 records returned),critical,API rate limit exceeded - 500 req/min
+2024-01-19T16:45:00Z,email,finance@company.com,,,,,smtp,,,URGENT: Wire Transfer Needed,ceo@company.com.phish,finance@company.com,softfail,fail,,high,BEC attempt - typosquatting CEO domain
+2024-01-19T17:00:00Z,application,finance@company.com,10.0.2.15,,wire-transfer-portal,443,https,true,,,,,,initiate_wire amount=250000 to=external_account,critical,Large wire transfer initiated after suspicious email

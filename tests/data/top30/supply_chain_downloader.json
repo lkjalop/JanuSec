@@ -1,0 +1,4 @@
+{
+  "downloader": true,
+  "package_target": "malicious_installer.msi"
+}

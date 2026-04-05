@@ -1,0 +1,20 @@
+{
+  "backend": "local",
+  "last_status": "error",
+  "last_poll_ts": 1767350383.3313482,
+  "last_ok_ts": 1767350383.3313482,
+  "last_error": null,
+  "last_tamper_detail": {
+    "ts": 1767350383.441946,
+    "scope": "simulate",
+    "version": -1,
+    "backend": "local",
+    "detail": "managed_hsm_proof"
+  },
+  "poll_interval": null,
+  "alert_count": 1,
+  "customer_webhook_count": 0,
+  "last_proof": "mock-hsm::health::0::1767350383",
+  "last_tamper_ts": 1767350383.441946,
+  "enabled": false
+}

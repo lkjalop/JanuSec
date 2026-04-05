@@ -1,0 +1,4 @@
+{
+  "process": "bash",
+  "cwd": "/tmp/evil"
+}

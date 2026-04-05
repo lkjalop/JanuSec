@@ -1,0 +1,11 @@
+# Ruff configuration (incremental tightening)
+line-length = 120
+select = ["E", "F", "I", "B", "UP"]
+ignore = [
+  # Temporarily ignore unused imports in __init__ patterns, etc.
+  "F401",
+]
+
+[lint.isort]
+combine-as-imports = true
+force-single-line = false

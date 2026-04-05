@@ -1,0 +1,103 @@
+{
+  "attestation_id": "attest-c32bf8a6ce",
+  "host": "host-a",
+  "os_family": "windows",
+  "case_id": "case1",
+  "tenant_id": "tenant",
+  "issued_at": 1774289406.7431483,
+  "expires_at": 1774289407.7431483,
+  "steps": [
+    {
+      "title": "Acquire Windows Memory",
+      "tool": "WinPMem",
+      "command": "winpmem.exe --format raw --output E:\\evidence\\host-a_memory.raw",
+      "notes": "Run as SYSTEM; disable antivirus tamper protection temporarily if needed"
+    },
+    {
+      "title": "Acquire Windows Memory",
+      "tool": "Belkasoft RAM Capturer",
+      "command": "ramcapturer.exe /drive E:",
+      "notes": "Generates AFF4 dump suitable for Volatility 3"
+    },
+    {
+      "title": "Register Dump with Memory Pipeline",
+      "tool": "Memory pipeline upload",
+      "command": "curl -H \"x-api-key: ${API_KEY}\" -F \"dump=@{host}_memory.raw\" -F \"host={host}\" -F \"case={case_id}\" https://{api_host}/api/v1/forensics/memory/upload\n",
+      "notes": "Pipeline handles encryption at rest and TTL cleanup"
+    },
+    {
+      "title": "Volatility 3 Triage",
+      "tool": "Volatility pslist",
+      "command": "vol.py -f host-a_memory.raw windows.pslist --output=json --output-file pslist.json",
+      "notes": null
+    },
+    {
+      "title": "Volatility 3 Triage",
+      "tool": "Volatility malfind",
+      "command": "vol.py -f host-a_memory.raw windows.malfind --dump --output-file malfind_dump",
+      "notes": null
+    },
+    {
+      "title": "Volatility 3 Triage",
+      "tool": "Volatility dlllist",
+      "command": "vol.py -f host-a_memory.raw windows.dlllist --output=json --output-file dlllist.json",
+      "notes": null
+    },
+    {
+      "title": "Extract Suspicious Artifacts",
+      "tool": "Volatility procdump",
+      "command": "vol.py -f {host}_memory.raw windows.dumpfiles -p {pid} --dump-dir dumps/",
+      "notes": null
+    },
+    {
+      "title": "Extract Suspicious Artifacts",
+      "tool": "Sigcheck",
+      "command": "sigcheck64.exe -accepteula -h dumps\\*.exe",
+      "notes": null
+    },
+    {
+      "title": "Correlate with Sysmon/ETW",
+      "tool": "Sysmon export",
+      "command": "wevtutil qe \"Microsoft-Windows-Sysmon/Operational\" /q:\"*[System[(EventID=1 or EventID=3)]]\" /f:text /c:2000\n",
+      "notes": null
+    },
+    {
+      "title": "Correlate with Sysmon/ETW",
+      "tool": "ETW trace",
+      "command": "logman start mem_trace -p \"Microsoft-Windows-Kernel-Process\" -ets",
+      "notes": null
+    }
+  ],
+  "courier": {
+    "profile": "default",
+    "attestation_id": "attest-c32bf8a6ce",
+    "chain_of_custody": [
+      "Field analyst captures memory image (WinPMem/AVML/osxpmem).",
+      "Courier uploads via janusec-cli courier upload with MFA.",
+      "Pipeline validates checksum + attestation signature."
+    ],
+    "expected_artifacts": [
+      "Memory dump file",
+      "Acquisition log output",
+      "Courier attestation signature"
+    ]
+  },
+  "status": "issued",
+  "evidence": [
+    {
+      "ts": 1774296606.7450626,
+      "event": "heartbeat",
+      "operator": null,
+      "checksum": null,
+      "metadata": {}
+    }
+  ],
+  "revoked": false,
+  "sla_breach": true,
+  "alerts": [
+    {
+      "ts": 1774296606.7450626,
+      "kind": "sla_breach"
+    }
+  ]
+}

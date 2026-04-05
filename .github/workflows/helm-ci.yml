@@ -1,0 +1,47 @@
+name: Helm CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  helm:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.14.4
+
+      - name: Lint chart
+        run: |
+          helm lint charts/janusec
+
+      - name: Template chart (dev values)
+        run: |
+          helm template janusec charts/janusec -f charts/janusec/values.yaml > /tmp/janusec-render.yaml
+
+      # Optional: push to a Helm OCI registry
+      # - name: Login Helm registry
+      #   run: |
+      #     echo ${{ secrets.HELM_REGISTRY_PASSWORD }} | helm registry login ${{ secrets.HELM_REGISTRY_HOST }} --username ${{ secrets.HELM_REGISTRY_USERNAME }} --password-stdin
+      # - name: Package & Push
+      #   run: |
+      #     helm package charts/janusec
+      #     helm push janusec-*.tgz oci://${{ secrets.HELM_REGISTRY_HOST }}/charts
+
+      # Optional: deploy using kubectl (requires kubeconfig secret)
+      # - name: Set up kubectl
+      #   uses: azure/setup-kubectl@v4
+      # - name: Write kubeconfig
+      #   run: |
+      #     mkdir -p $HOME/.kube
+      #     echo "${{ secrets.KUBECONFIG_BASE64 }}" | base64 -d > $HOME/.kube/config
+      # - name: Deploy
+      #   run: |
+      #     helm upgrade --install janusec charts/janusec -f charts/janusec/values-production.yaml --namespace ${{ secrets.KUBE_NAMESPACE }} --create-namespace

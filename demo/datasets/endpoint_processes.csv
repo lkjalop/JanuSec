@@ -1,0 +1,4 @@
+event_id,timestamp,host,user,process_name,command_line,sha256,verdict,factors
+ep-1,2025-11-08T08:12:34Z,host-01,alice,suspicious.exe,"powershell.exe -enc XXX",a1b2c3d4e5f6,SUSPICIOUS,"file_high_entropy,process_child_spawn"
+ep-2,2025-11-08T08:13:00Z,host-02,bob,cmd.exe,"cmd.exe /c whoami",d4e5f6a1b2c3,PASS,"process_child_spawn"
+ep-3,2025-11-08T08:15:12Z,host-01,alice,installer.exe,"installer.exe /S",b2c3d4e5f6a1,SUSPICIOUS,"file_high_entropy,registry_run_key"

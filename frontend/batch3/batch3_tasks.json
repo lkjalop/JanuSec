@@ -1,0 +1,7 @@
+[
+  { "id": 1, "status": "in-progress", "title": "SW: further optimization (stale-while-revalidate tuning)" },
+  { "id": 2, "status": "not-started", "title": "Lazy-load charts + graph viewers" },
+  { "id": 3, "status": "not-started", "title": "Implement telemetry.js (local)" },
+  { "id": 4, "status": "not-started", "title": "Add feature flags UI" },
+  { "id": 5, "status": "not-started", "title": "Add Playwright tests for Batch 3 features" }
+]

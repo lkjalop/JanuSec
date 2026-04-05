@@ -1,0 +1,10 @@
+[
+  {
+    "message_id": "msg-aws-bec-001",
+    "timestamp": "2025-03-15T02:41:00Z",
+    "to": "ap@acme-industrial.example",
+    "delivery_action": "delivered",
+    "mailbox_folder": "Inbox",
+    "transport_rule": "none"
+  }
+]

@@ -1,0 +1,6 @@
+{
+  "resources": [
+    {"event": {"timestamp": 1733730000, "aid": "host-1", "UserName": "carol"}},
+    {"event": {"timestamp": 1733730600, "aid": "host-2", "UserName": "dave"}}
+  ]
+}

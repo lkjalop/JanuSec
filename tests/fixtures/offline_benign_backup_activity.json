@@ -1,0 +1,24 @@
+[
+  {
+    "row_index": 0,
+    "sheet": "Network",
+    "host": "backup-node-01",
+    "src_ip": "10.20.1.5",
+    "dst_ip": "10.20.1.50",
+    "dst_port": 443,
+    "payload_len": 1048576,
+    "ts": 1700003000,
+    "asset_criticality": 0.3
+  },
+  {
+    "row_index": 1,
+    "sheet": "Endpoint",
+    "host": "backup-node-01",
+    "process_name": "veeamagent.exe",
+    "parent_process": "services.exe",
+    "process_path": "C:\\Program Files\\Veeam\\Endpoint Backup\\veeamagent.exe",
+    "command_line": "veeamagent.exe backup",
+    "signed_vendor": "Veeam Software Group GmbH",
+    "ts": 1700003060
+  }
+]

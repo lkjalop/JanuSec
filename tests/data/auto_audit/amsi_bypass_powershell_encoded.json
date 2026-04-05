@@ -1,0 +1,6 @@
+{
+  "event_id": "evt-amsi-001",
+  "process_name": "powershell.exe",
+  "command_line": "powershell -EncodedCommand SGVsbG8=",
+  "amsi_disabled": true
+}

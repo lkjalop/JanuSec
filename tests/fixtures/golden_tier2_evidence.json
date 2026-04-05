@@ -1,0 +1,3 @@
+{
+  "evidence": {"items": [{"type": "domain", "value": "malicious.example.com", "confidence": 0.9}]}
+}

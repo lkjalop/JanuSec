@@ -1,0 +1,36 @@
+Changes implemented (files and rationale):
+
+- src/integrations/tenable_client.py
+  - New Tenable client stub with VPR caching and config/status/sync. Enables offline VPR enrichment.
+
+- src/integrations/qualys_client.py
+  - New Qualys client stub supporting demo config/status/sync flows.
+
+- src/api/integrations_endpoints.py
+  - Added static Tenable/Qualys routes before generic {name}/config to avoid scope shadowing.
+  - Keeps existing MISP/OpenCTI endpoints intact.
+
+- src/integrations/misp_client.py, src/integrations/opencti_client.py
+  - Introduced CLIENT singletons to align with integrations_endpoints imports.
+
+- src/api/sbom_endpoints.py
+  - Merges Tenable VPR best-effort into SBOM vulnerabilities (vpr/vpr_score fields).
+
+- src/modules/sbom_vuln_mapper.py
+  - Emits non-scoring factor vuln:cvss_max:<n> for timeline visibility; keeps scoring unchanged.
+
+- frontend/static/sbom.html
+  - Added VPR column; explain panel shows VPR; runtime injection of a VPR >= 9 filter.
+  - Adjusted colspan to reflect new VPR column.
+
+- Tests added
+  - tests/test_cvss_max_persistence.py: verifies cvss_max persistence across reloads.
+  - tests/test_vuln_corr_rules.py: validates new vuln-aware correlation rules.
+  - tests/test_tenable_vpr_enrichment.py: confirms Tenable VPR enrichment appears in /sbom/vulns.
+  - tests/test_qualys_tenable_endpoints.py: config/status/sync API sanity for Tenable/Qualys.
+
+Key behavioral outcomes:
+- CVSS max tracked and visible, without unintended scoring impact.
+- VPR displayed in SBOM UI; optional VPR>=9 filtering supported.
+- Tenable/Qualys endpoints available for demo flows; Tenable exposes VPR to SBOM.
+

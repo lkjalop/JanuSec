@@ -1,0 +1,4 @@
+{
+  "parent_process": "notepad.exe",
+  "child_process": "powershell.exe"
+}

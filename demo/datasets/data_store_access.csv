@@ -1,0 +1,4 @@
+event_id,timestamp,actor,db,table,query,rows_returned,bytes_transferred,verdict,factors
+data-1,2025-11-08T08:16:20Z,svc-app,customers,personally_identifiable,"SELECT * FROM customers WHERE email LIKE '%@example.com'",1200,1500000,SUSPICIOUS,"data_exfiltration,heuristics_rare_indicator"
+data-2,2025-11-08T08:17:22Z,svc-app,customers,orders,"SELECT order_id,amount FROM orders WHERE status='shipped'",45,4500,PASS,"normal_query"
+data-3,2025-11-08T08:18:05Z,bob,customers,credentials,"SELECT password_hash FROM credentials WHERE user='alice'",1,120,SUSPICIOUS,"unauthorized_db_access,playbook:incident_response"

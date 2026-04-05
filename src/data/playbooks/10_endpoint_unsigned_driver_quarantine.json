@@ -1,0 +1,11 @@
+{
+  "name": "endpoint-unsigned-driver-quarantine",
+  "trigger": {"factor": "endpoint:unsigned_driver_install_flow"},
+  "dry_run": true,
+  "steps": [
+    {"type": "open_case", "params": {"title": "Unsigned driver installation detected"}},
+    {"type": "quarantine_file", "params": {"file_hash": "0000000000000000000000000000000000000000000000000000000000000000", "endpoints": ["host-001", "host-002"]}},
+    {"type": "notify", "params": {"webhook_url": "https://example.invalid/webhook", "msg": "Quarantine initiated for unsigned driver deployment"}}
+  ]
+}
+

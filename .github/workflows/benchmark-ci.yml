@@ -1,0 +1,32 @@
+name: benchmark-ci
+
+on:
+  push:
+    branches: [ feature/*, main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  tiny-benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt || true
+      - name: Generate tiny dataset
+        run: |
+          python -m scripts.generate_synthetic_benchmarks --out-prefix ci_tiny --sizes 50 --seed 1
+      - name: Run benchmark
+        run: |
+          python -m scripts.benchmark_hopgraph --dataset data/benchmarking/benchmarks/ci_tiny_50 --out data/benchmarking/results/ci_tiny_50_results.json --seed 1 --runs 2
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: data/benchmarking/results/ci_tiny_50_results.json

@@ -1,0 +1,41 @@
+{
+  "cases": [
+    {
+      "name": "gamma_llm_misuse",
+      "ok": true,
+      "duration_ms": 105.81,
+      "missing_factors": [],
+      "reported_factors": [
+        "api:inventory_route_unknown",
+        "api:llm_atlas_risk"
+      ]
+    },
+    {
+      "name": "gamma_token_usage_anomaly",
+      "ok": true,
+      "duration_ms": 48.976,
+      "missing_factors": [],
+      "reported_factors": [
+        "api:automation_runbook_abuse",
+        "api:inventory_route_unknown"
+      ]
+    },
+    {
+      "name": "gamma_missing_headers",
+      "ok": true,
+      "duration_ms": 42.89,
+      "missing_factors": [],
+      "reported_factors": [
+        "api:inventory_route_unknown",
+        "api:missing_security_headers"
+      ]
+    }
+  ],
+  "metrics": {
+    "count": 3,
+    "avg_ms": 65.892,
+    "p95_ms": 48.976
+  },
+  "tenant": "tenant-gamma",
+  "pipeline_profile": "customer-gamma"
+}

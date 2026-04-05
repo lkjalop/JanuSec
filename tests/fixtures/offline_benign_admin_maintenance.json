@@ -1,0 +1,28 @@
+[
+  {
+    "row_index": 0,
+    "sheet": "Endpoint",
+    "host": "admin-jump-01",
+    "user": "itadmin@corp.local",
+    "process_name": "mmc.exe",
+    "parent_process": "services.exe",
+    "process_path": "C:\\Windows\\System32\\mmc.exe",
+    "command_line": "mmc.exe compmgmt.msc",
+    "signed_vendor": "Microsoft Corporation",
+    "asset_criticality": 0.2,
+    "ts": 1700001000
+  },
+  {
+    "row_index": 1,
+    "sheet": "Endpoint",
+    "host": "admin-jump-01",
+    "user": "itadmin@corp.local",
+    "process_name": "ServerManager.exe",
+    "parent_process": "mmc.exe",
+    "process_path": "C:\\Windows\\System32\\ServerManager.exe",
+    "command_line": "ServerManager.exe",
+    "signed_vendor": "Microsoft Corporation",
+    "asset_criticality": 0.2,
+    "ts": 1700001060
+  }
+]

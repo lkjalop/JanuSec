@@ -1,0 +1,9 @@
+﻿[
+  {"framework": "NIST_CSF", "control_id": "ID.AM-1", "title": "Physical devices and systems inventoried", "keywords": ["asset","inventory","devices"]},
+  {"framework": "NIST_CSF", "control_id": "ID.AM-2", "title": "Software platforms and applications inventoried", "keywords": ["software","inventory","applications"]},
+  {"framework": "NIST_CSF", "control_id": "PR.AC-1", "title": "Identities and credentials are issued, managed, verified", "keywords": ["identity","credential","mfa"]},
+  {"framework": "NIST_CSF", "control_id": "PR.DS-1", "title": "Data-at-rest is protected", "keywords": ["encryption","data at rest","key management"]} ,  {"framework": "NIST_CSF", "control_id": "PR.PT-1", "title": "Audit/log records are determined, documented, implemented", "keywords": ["logging","audit","monitoring"]},
+  {"framework": "NIST_CSF", "control_id": "DE.AE-1", "title": "Anomalous activity is detected", "keywords": ["anomaly","detection","monitoring"]},
+  {"framework": "NIST_CSF", "control_id": "RS.RP-1", "title": "Response plan is executed during or after an incident", "keywords": ["incident response","plan","playbook"]}
+]
+

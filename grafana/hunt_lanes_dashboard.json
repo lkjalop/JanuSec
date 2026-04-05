@@ -1,0 +1,49 @@
+{
+  "title": "Hunt Lanes Phase 1",
+  "editable": true,
+  "schemaVersion": 39,
+  "version": 1,
+  "panels": [
+    {
+      "type": "graph",
+      "title": "Lane Emissions per Minute",
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "rate(hunt_lane_events_total[5m])", "legendFormat": "{{lane}}" }
+      ],
+      "id": 1
+    },
+    {
+      "type": "graph",
+      "title": "Lane Latency p95 (ms)",
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "histogram_quantile(0.95, sum(rate(hunt_lane_latency_ms_bucket[5m])) by (le,lane))", "legendFormat": "{{lane}}" }
+      ],
+      "id": 2
+    },
+    {
+      "type": "stat",
+      "title": "Distinct JA3 Hashes",
+      "datasource": "Prometheus",
+      "targets": [ { "expr": "ja3_distinct_hashes" } ],
+      "id": 3
+    },
+    {
+      "type": "stat",
+      "title": "JA3 Baseline Size",
+      "datasource": "Prometheus",
+      "targets": [ { "expr": "ja3_baseline_size" } ],
+      "id": 4
+    },
+    {
+      "type": "graph",
+      "title": "Pipeline vs Hunt Lane Stage Latency",
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "histogram_quantile(0.95, sum(rate(pipeline_stage_latency_ms_bucket[5m])) by (le,stage))", "legendFormat": "{{stage}}" }
+      ],
+      "id": 5
+    }
+  ]
+}

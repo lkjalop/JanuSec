@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Admin Controls</title>
+  <style>
+    :root { --bg:#0B0E14; --panel:#151922; --muted:#A8B2C3; --text:#E8EBF0; --border:#2A3142; --accent:#4A63E7; --accent2:#5B72F0; --ok:#52C41A; --err:#E54D4D; }
+    body{background:var(--bg);color:var(--text);font-family:Inter, Segoe UI, sans-serif;margin:0}
+    .wrap{max-width:1100px;margin:20px auto;padding:12px}
+    .row{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+    .btn{padding:8px 12px;background:#1C2230;border:1px solid var(--border);border-radius:6px;color:var(--text);cursor:pointer}
+    .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+    .card{background:var(--panel);border:1px solid var(--border);border-radius:8px;margin-bottom:16px;padding:12px}
+    .title{font-size:18px;font-weight:600;margin:6px 0 12px}
+    .sub{font-size:12px;color:var(--muted);margin-bottom:8px}
+    .grid{display:grid;grid-template-columns:220px 1fr;gap:8px;align-items:center}
+    input[type="text"],input[type="number"],select{padding:8px 10px;background:#1C2230;border:1px solid var(--border);border-radius:6px;color:var(--text)}
+    .pill{display:inline-block;padding:3px 8px;border-radius:999px;border:1px solid var(--border);background:#1C2230;color:var(--muted);font-size:11px;margin:2px 4px 2px 0}
+    .note{font-size:12px;color:var(--muted)}
+    .kv{display:grid;grid-template-columns:220px 1fr;gap:8px}
+    .notif{position:fixed;right:16px;bottom:16px;background:#1C2230;border:1px solid var(--accent);padding:10px 12px;border-radius:8px;min-width:280px}
+  </style>
+  <script>
+    function apiHeaders() {
+      try {
+        const k = localStorage.getItem('apiKey') || 'devkey123';
+        const ak = localStorage.getItem('adminKey') || '';
+        return ak ? { 'x-api-key': k, 'x-admin-key': ak } : { 'x-api-key': k };
+      } catch { return { 'x-api-key': 'devkey123' }; }
+    }
+    function toast(msg, ok){
+      const n = document.createElement('div');
+      n.className = 'notif';
+      n.style.borderColor = ok===false ? 'var(--err)' : 'var(--accent)';
+      n.innerText = msg;
+      document.body.appendChild(n);
+      setTimeout(()=>{ n.remove(); }, 3500);
+    }
+    async function saveAdminKey(){
+      const v = (document.getElementById('adminKey')||{}).value || '';
+      localStorage.setItem('adminKey', v);
+      toast('Admin key saved', true);
+    }
+    async function fetchRateLimits(){
+      try {
+        const r = await fetch('/api/v1/admin/rate_limits/tenant', { headers: apiHeaders() });
+        const j = await r.json();
+        if (!r.ok) throw new Error(j.detail||'forbidden');
+        document.getElementById('rlEnabled').checked = !!j.enabled;
+        document.getElementById('rlMax').value = j.max;
+        document.getElementById('rlWindow').value = j.window_seconds;
+        const stats = j.tenant_counts || {};
+        const s = document.getElementById('rlStats');
+        s.innerHTML = '';
+        const keys = Object.keys(stats);
+        if (!keys.length) { s.innerHTML = '<div class="note">No active tenants in window</div>'; return; }
+        keys.sort().forEach(k=>{
+          const d = document.createElement('div');
+          d.className='kv';
+          d.innerHTML = `<div>${k}</div><div>${stats[k]} req in window</div>`;
+          s.appendChild(d);
+        });
+      } catch(e) { toast('Fetch rate limits failed: '+(e.message||e), false); }
+    }
+    async function updateRateLimits(){
+      try {
+        const enabled = document.getElementById('rlEnabled').checked;
+        const max = parseInt(document.getElementById('rlMax').value||'0',10);
+        const window_seconds = parseInt(document.getElementById('rlWindow').value||'0',10);
+        const r = await fetch('/api/v1/admin/rate_limits/tenant', { method:'POST', headers: { 'Content-Type': 'application/json', ...apiHeaders() }, body: JSON.stringify({ enabled, max, window_seconds }) });
+        const j = await r.json();
+        if (!r.ok) throw new Error(j.detail||'update_failed');
+        toast('Tenant rate limits updated', true);
+      } catch(e) { toast('Update failed: '+(e.message||e), false); }
+    }
+    async function setObserveFlag(){
+      try {
+        const name = (document.getElementById('obsName')||{}).value||'';
+        const observed = document.getElementById('obsObserved').checked;
+        if (!name) { toast('Factor name is required', false); return; }
+        const r = await fetch('/api/v1/admin/factors/observe', { method:'POST', headers: { 'Content-Type':'application/json', ...apiHeaders() }, body: JSON.stringify({ name, observed }) });
+        const j = await r.json();
+        if (!r.ok) throw new Error(j.detail||'set_failed');
+        toast(`Factor '${j.name}' set to ${j.observed ? 'OBSERVE' : 'ENFORCE'}`, true);
+      } catch(e) { toast('Observe flag failed: '+(e.message||e), false); }
+    }
+    async function applyPreset(name, observed){
+      try{
+        const r = await fetch('/api/v1/admin/factors/observe_preset', { method:'POST', headers:{ 'Content-Type':'application/json', ...apiHeaders() }, body: JSON.stringify({ name, observed }) });
+        const j = await r.json();
+        if(!r.ok) throw new Error(j.detail||'preset_failed');
+        toast(`Preset '${j.preset}' -> ${observed?'OBSERVE':'ENFORCE'} (${(j.factors||[]).length} factors)`, true);
+      }catch(e){ toast('Preset failed: '+(e.message||e), false); }
+    }
+    window.addEventListener('DOMContentLoaded', ()=>{
+      const saved = localStorage.getItem('adminKey')||'';
+      if (saved) document.getElementById('adminKey').value = saved;
+      fetchRateLimits().catch(()=>{});
+    });
+  </script>
+  </head>
+<body>
+  <div class="wrap">
+    <div class="row">
+      <a class="btn" href="/static/janusec-platform-complete-LIVE.html">← Console</a>
+      <a class="btn" href="/static/metrics.html">Metrics</a>
+      <a class="btn" href="/static/integrations.html">Integrations</a>
+      <a class="btn" href="/static/sbom.html">SBOM</a>
+    </div>
+
+    <div class="card">
+      <div class="title">Admin API Access</div>
+      <div class="sub">Provide the Admin API Key (x-admin-key). Stored locally in your browser only.</div>
+      <div class="grid" style="max-width:700px;">
+        <div>Admin Key</div>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <input id="adminKey" type="text" placeholder="enter admin key" style="flex:1;min-width:280px;" />
+          <button class="btn" onclick="saveAdminKey()">Save</button>
+        </div>
+      </div>
+      <div class="note" style="margin-top:8px;">Note: Many API routes also require x-api-key. This page sends both if available.</div>
+    </div>
+
+    <div class="card">
+      <div class="title">Per-Tenant Rate Limits</div>
+      <div class="grid" style="max-width:720px;">
+        <div>Enabled</div>
+        <div><input id="rlEnabled" type="checkbox" /></div>
+        <div>Max Requests</div>
+        <div><input id="rlMax" type="number" min="1" step="1" placeholder="e.g. 600"/></div>
+        <div>Window (seconds)</div>
+        <div><input id="rlWindow" type="number" min="1" step="1" placeholder="e.g. 60"/></div>
+      </div>
+      <div class="row" style="margin-top:10px;">
+        <button class="btn" onclick="fetchRateLimits()">Fetch</button>
+        <button class="btn primary" onclick="updateRateLimits()">Update</button>
+      </div>
+      <div id="rlStats" class="card" style="background:#1C2230; margin-top:10px;"></div>
+    </div>
+
+    <div class="card">
+      <div class="title">Observe-Mode Flags</div>
+      <div class="sub">Temporarily set any factor to OBSERVE (no scoring) for safe-rollout and tuning. Provide factor name and desired state.</div>
+      <div class="grid" style="max-width:720px;">
+        <div>Factor Name</div>
+        <div><input id="obsName" type="text" placeholder="e.g. endpoint:lolbin_mshta" /></div>
+        <div>Observed (no scoring)</div>
+        <div><input id="obsObserved" type="checkbox" /></div>
+      </div>
+      <div class="row" style="margin-top:10px;">
+        <button class="btn primary" onclick="setObserveFlag()">Apply</button>
+      </div>
+      <div class="sub" style="margin-top:10px;">Presets</div>
+      <div class="row" style="margin-top:6px;">
+        <button class="btn" onclick="applyPreset('quiet_noisy_factors', true)">Quiet noisy factors</button>
+        <button class="btn" onclick="applyPreset('quiet_noisy_factors', false)">Restore noisy factors</button>
+        <button class="btn" onclick="applyPreset('quiet_network_exploration', true)">Quiet net exploration</button>
+        <button class="btn" onclick="applyPreset('quiet_network_exploration', false)">Restore net exploration</button>
+      </div>
+      <div class="note" style="margin-top:10px;">Tip: Factor names appear in the investigation details modal (Factors tab) as pills.</div>
+    </div>
+
+    <div class="card">
+      <div class="title">Identity/ML/Privacy Toggles</div>
+      <div class="sub">Controls map to runtime feature flags (persisted in flags.json) and influence identity analysis.</div>
+      <div class="grid" style="max-width:720px;">
+        <div>Enable Isolation Model (ML)</div>
+        <div><input id="flagIso" type="checkbox" /></div>
+        <div>Enable Temporal Periodicity</div>
+        <div><input id="flagLs" type="checkbox" /></div>
+        <div>Default Privacy Mode</div>
+        <div>
+          <select id="flagPrivacy" style="min-width:220px;">
+            <option value="">inherit (env)</option>
+            <option value="none">none</option>
+            <option value="mask">mask</option>
+          </select>
+        </div>
+      </div>
+      <div class="row" style="margin-top:10px;">
+        <button class="btn" onclick="fetchFlags()">Fetch</button>
+        <button class="btn primary" onclick="saveFlags()">Save</button>
+      </div>
+      <div class="note" style="margin-top:8px;">API: <span class="pill">GET /api/v1/admin/flags</span>, <span class="pill">POST /api/v1/admin/flags/set</span></div>
+    </div>
+
+    <div class="card">
+      <div class="title">Notes</div>
+      <div class="note">- These controls call: <span class="pill">GET/POST /api/v1/admin/rate_limits/tenant</span> and <span class="pill">POST /api/v1/admin/factors/observe</span>.</div>
+      <div class="note">- Ensure the backend is started with an ADMIN_API_KEY environment variable.</div>
+    </div>
+
+    <div class="card">
+      <div class="title">Local UI Maintenance</div>
+      <div class="sub">Clear cached UI state in your browser (non-destructive).</div>
+      <div class="row">
+        <button class="btn" onclick="try{ localStorage.removeItem('lastIdentityViewed'); toast('Cleared last viewed identity', true); }catch(e){ toast('Failed to clear', false); }">Clear Last Viewed Identity</button>
+      </div>
+    </div>
+  </div>
+  <script src="/static/js/notifications.js"></script>
+  <script>
+    async function fetchFlags(){
+      try{
+        const r = await fetch('/api/v1/admin/flags', { headers: apiHeaders() });
+        const j = await r.json(); if(!r.ok) throw new Error(j.detail||'forbidden');
+        const eff = j.effective||{}; const ov = j.overrides||{};
+        const vIso = ov.ENABLE_ISO_ML ?? eff.ENABLE_ISO_ML ?? false;
+        const vLs  = ov.ENABLE_LS_TEMPORAL ?? eff.ENABLE_LS_TEMPORAL ?? false;
+        const vPriv= ov.PRIVACY_DEFAULT_MODE ?? eff.PRIVACY_DEFAULT_MODE ?? '';
+        document.getElementById('flagIso').checked = !!vIso;
+        document.getElementById('flagLs').checked = !!vLs;
+        const sel = document.getElementById('flagPrivacy'); if(sel){ sel.value = String(vPriv||''); }
+        toast('Loaded flags', true);
+      }catch(e){ toast('Fetch flags failed: '+(e.message||e), false); }
+    }
+    async function _setFlag(name, value){
+      const body = { name, value, persist: true };
+      const r = await fetch('/api/v1/admin/flags/set', { method:'POST', headers:{ 'Content-Type':'application/json', ...apiHeaders() }, body: JSON.stringify(body) });
+      const j = await r.json(); if(!r.ok) throw new Error(j.detail||'set_failed');
+    }
+    async function saveFlags(){
+      try{
+        const iso = !!document.getElementById('flagIso').checked;
+        const ls  = !!document.getElementById('flagLs').checked;
+        const priv= String(document.getElementById('flagPrivacy').value||'');
+        await _setFlag('ENABLE_ISO_ML', iso);
+        await _setFlag('ENABLE_LS_TEMPORAL', ls);
+        await _setFlag('PRIVACY_DEFAULT_MODE', priv);
+        toast('Flags updated', true);
+      }catch(e){ toast('Save flags failed: '+(e.message||e), false); }
+    }
+  </script>
+</body>
+</html>

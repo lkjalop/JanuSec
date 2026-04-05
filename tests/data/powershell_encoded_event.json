@@ -1,0 +1,4 @@
+{
+  "command_line": "powershell -enc SGVsbG9Xb3JsZCE=",
+  "process": "powershell.exe"
+}

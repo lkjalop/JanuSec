@@ -1,0 +1,63 @@
+[build-system]
+requires = ["setuptools>=67.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "janusec-platform"
+version = "0.1.0"
+description = "JanuSec Adaptive Threat Decision Platform"
+authors = [{name="Security Engineering Team"}]
+license = {text = "Proprietary"}
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["prometheus-client>=0.15.0"]
+keywords = ["security","threat-detection","pipeline"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: Other/Proprietary License"
+]
+
+[project.optional-dependencies]
+ml = ["scikit-learn>=1.3.0", "transformers>=4.42.0", "torch>=2.2.0", "datasketch>=1.6.0"]
+pcap = ["scapy>=2.5.0"]
+evtx = ["python-evtx>=0.7.4"]
+threat_intel = ["pymisp>=2.4.183", "httpx>=0.27.0"]
+
+[project.optional-dependencies.analyzers]
+pcap = ["scapy>=2.5.0"]
+threat_intel = ["pymisp>=2.4.183", "httpx>=0.27.0"]
+ml = ["scikit-learn>=1.3.0", "transformers>=4.42.0", "torch>=2.2.0"]
+evtx = ["python-evtx>=0.7.4"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+addopts = "--cov=src --cov-report=term-missing --cov-fail-under=65"
+
+[tool.coverage.run]
+source = ["src"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+skip_empty = true
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+extend-select = ["E","F","I","UP","B"]
+ignore = [
+  # Too strict for now; phase in later
+  "E501",
+]
+
+[tool.mypy]
+python_version = "3.11"
+strict = false
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_unreachable = true
+ignore_missing_imports = true
+disallow_untyped_defs = false
+exclude = [
+  "tests/",
+]

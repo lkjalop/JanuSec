@@ -1,0 +1,4 @@
+  File "<string>", line 12
+    }
+    ^
+SyntaxError: (unicode error) 'unicodeescape' codec can't decode bytes in position 15-16: truncated \uXXXX escape

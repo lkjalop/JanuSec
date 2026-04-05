@@ -1,0 +1,13 @@
+{
+    "ewma":  true,
+    "ewma_alpha":  0.6,
+    "correlate":  true,
+    "mapping":  {
+                    "host":  "host",
+                    "user":  "user",
+                    "file_hash":  "process"
+                },
+    "session_ids":  [
+                        "sess-fdbfe81a4eec4af985d1122e5f585dcd"
+                    ]
+}

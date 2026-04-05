@@ -1,0 +1,16 @@
+groups:
+  - name: janusec-precision.rules
+    rules:
+      - alert: JanusecPrecisionDrop
+        expr: |
+          # Use the daily precision gauge produced by the app. If you prefer a rolling window,
+          # replace with an appropriate rate()/avg_over_time() expression against the underlying
+          # `janusec_precision_daily` metric series.
+          janusec_precision_daily < 0.6
+        for: 6h
+        labels:
+          severity: warning
+          team: secops
+        annotations:
+          summary: "Precision dropped for Janusec ({{ $labels.tenant_id }})"
+          description: "Daily precision for tenant {{ $labels.tenant_id }} on {{ $labels.day }} is below threshold: {{ $value }}. Investigate false positive surge or model regression."

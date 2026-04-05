@@ -1,0 +1,12 @@
+{
+  "id": "msg-002",
+  "ts": 1700000100,
+  "from": "mallory@evil.com",
+  "to": ["admin@example.com"],
+  "subject": "Please review",
+  "body": "Contact: mallory@evil.com. Payment key: deadbeefdeadbeefdeadbeefdeadbeef",
+  "headers": {
+    "Received": "from suspicious.evil.com (suspicious.evil.com [5.6.7.8])"
+  },
+  "return_path": "service@example.com"
+}

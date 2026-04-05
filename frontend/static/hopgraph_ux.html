@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>HopGraph UX</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="/static/janusec.css" />
+  <style>
+    body{ background:#0B0E14; color:#E8EBF0; font-family:Inter, system-ui, sans-serif; }
+    .wrap{ max-width:1200px; margin:24px auto; padding:0 16px; }
+    .card{ background:#141A24; border:1px solid #2C3746; border-radius:8px; padding:16px; margin-bottom:16px; }
+    .pill{ padding:3px 8px; border-radius:999px; font-size:11px; background:#202A37; border:1px solid #2C3746; color:#C2CBD6; display:inline-block; margin:2px 4px 2px 0; }
+    input, textarea, select{ background:#0B0E14; color:#E8EBF0; border:1px solid #2C3746; border-radius:6px; padding:8px; }
+    button{ background:#202A37; color:#E8EBF0; border:1px solid #2C3746; border-radius:6px; padding:8px 12px; cursor:pointer; }
+    button.primary{ background:#4A63E7; border-color:#4A63E7; color:#fff; }
+    table{ border-collapse:collapse; width:100%; }
+    th, td{ border:1px solid #2C3746; padding:6px 8px; font-size:12px; }
+    th{ background:#1D2531; text-align:left; }
+    .grid{ display:grid; grid-template-columns: 1fr 1fr; gap:12px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h2>HopGraph UX</h2>
+    <div class="card">
+      <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+        <input id="sessionA" placeholder="session id A" style="min-width:220px;" />
+        <input id="sessionB" placeholder="session id B" style="min-width:220px;" />
+        <button id="btnLoad" class="primary">Load</button>
+        <a href="/static/csv_multi_analyzer.html" target="_blank">Open CSV Correlator</a>
+      </div>
+      <div id="meta" style="margin-top:8px; font-size:12px; color:#93A0B1;"></div>
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <div style="font-weight:600; margin-bottom:6px;">Overlap Matrix (raw)</div>
+        <div id="overlapRaw">No data</div>
+      </div>
+      <div class="card">
+        <div style="font-weight:600; margin-bottom:6px;">Overlap Matrix (EWMA)</div>
+        <div id="overlapEwma">No data</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+        <span id="chipAlpha" class="pill">alpha: –</span>
+        <span id="chipAdaptive" class="pill">Adaptive: –</span>
+        <span id="chipWeightsMap" class="pill">w(mapping): –</span>
+        <span id="chipWeightsDiv" class="pill">w(diversity): –</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div style="font-weight:600; margin-bottom:6px;">Quick Pivot</div>
+      <div style="display:grid; grid-template-columns: repeat(5, 1fr); gap:8px;">
+        <input id="pvUser" placeholder="user" />
+        <input id="pvHost" placeholder="host" />
+        <input id="pvProcess" placeholder="process" />
+        <input id="pvHash" placeholder="hash" />
+        <input id="pvDomain" placeholder="domain" />
+      </div>
+      <div style="margin-top:8px; display:flex; gap:8px;">
+        <button id="btnPivot">Apply</button>
+      </div>
+      <div id="pivotResults" style="margin-top:8px; font-size:12px; color:#93A0B1;">No results</div>
+    </div>
+  </div>
+
+  <script>
+    function authHeaders(){ try{ const key = (localStorage.getItem('apiKey') || 'devkey123'); const h = { 'x-api-key': key }; const tenant = localStorage.getItem('tenantId'); if(tenant) h['X-Tenant-ID']=tenant; return h; }catch(_){ return { 'x-api-key': 'devkey123' }; } }
+    function esc(s){ return String(s||'').replace(/[&<>"]+/g, '_'); }
+    function fmtMatrix(m){ try{ const keys = Object.keys(m||{}); if(!keys.length) return 'No matrix'; let html='<table><tr><th>Pair</th><th>Count</th></tr>'; keys.slice(0,20).forEach(k=>{ const v = m[k]; html += `<tr><td>${esc(k)}</td><td>${esc(JSON.stringify(v))}</td></tr>`; }); html += '</table>'; return html; }catch(_){ return 'No matrix'; } }
+    async function loadSessions(){
+      const a = document.getElementById('sessionA').value.trim();
+      const b = document.getElementById('sessionB').value.trim();
+      if(!a && !b){ document.getElementById('meta').textContent = 'Provide at least one session id'; return; }
+      document.getElementById('meta').textContent = 'Loading…';
+      try{
+        const body = { session_ids: [a,b].filter(Boolean), correlate: true, ewma: true };
+        const r = await fetch('/api/v1/graph/session/build', { method:'POST', headers:{ 'Content-Type':'application/json', ...authHeaders() }, body: JSON.stringify(body) });
+        const j = await r.json().catch(()=>({}));
+        if(!r.ok){ document.getElementById('meta').textContent = 'Build failed'; return; }
+        const sum = j.summary || j;
+        document.getElementById('overlapRaw').innerHTML = fmtMatrix(sum.correlation||{});
+        document.getElementById('overlapEwma').innerHTML = fmtMatrix(sum.correlation_smoothed||{});
+        document.getElementById('chipAlpha').textContent = 'alpha: ' + (sum.ewma_alpha!=null ? sum.ewma_alpha : '–');
+        const sc = sum.scoring_config || {};
+        const adaptive = sc.adaptive_ewma && (sc.adaptive_ewma.enabled===true || sc.adaptive_ewma===true);
+        document.getElementById('chipAdaptive').textContent = 'Adaptive: ' + (adaptive ? 'on' : 'off');
+        const w = sc.weights || {};
+        document.getElementById('chipWeightsMap').textContent = 'w(mapping): ' + (w.mapping!=null ? Number(w.mapping).toFixed(2) : '–');
+        document.getElementById('chipWeightsDiv').textContent = 'w(diversity): ' + (w.diversity!=null ? Number(w.diversity).toFixed(2) : '–');
+        document.getElementById('meta').textContent = 'OK';
+      }catch(e){ document.getElementById('meta').textContent = 'Exception'; }
+    }
+    async function applyPivot(){
+      try{
+        const filters = {
+          user: document.getElementById('pvUser').value.trim(),
+          host: document.getElementById('pvHost').value.trim(),
+          process: document.getElementById('pvProcess').value.trim(),
+          file_hash: document.getElementById('pvHash').value.trim(),
+          domain: document.getElementById('pvDomain').value.trim(),
+        };
+        const r = await fetch('/api/v1/decisions/recent?limit=100', { headers: authHeaders() });
+        const j = await r.json().catch(()=>({}));
+        const rows = j.decisions || j.rows || j.events || [];
+        const match = (row)=>{
+          try{
+            const ctx = row.context || row.hopgraph_context || {};
+            if(filters.user && ctx.user && String(ctx.user).indexOf(filters.user)===-1) return false;
+            if(filters.host && ctx.host && String(ctx.host).indexOf(filters.host)===-1) return false;
+            if(filters.process && ctx.process && String(ctx.process).indexOf(filters.process)===-1) return false;
+            if(filters.file_hash && ctx.file_hash && String(ctx.file_hash).indexOf(filters.file_hash)===-1) return false;
+            if(filters.domain && ctx.domain && String(ctx.domain).indexOf(filters.domain)===-1) return false;
+            return true;
+          }catch(_){ return true; }
+        };
+        const filtered = rows.filter(match).slice(0,20);
+        document.getElementById('pivotResults').innerHTML = filtered.length ? filtered.map(d=> `<div style='border:1px solid #2C3746; border-radius:6px; padding:8px; margin-bottom:6px;'><div style='font-weight:600;'>${esc(d.verdict||'decision')}</div><div style='font-size:12px; color:#93A0B1;'>conf ${esc(String(d.confidence||''))} • ${esc(JSON.stringify(d.context||d.hopgraph_context||{}))}</div></div>`).join('') : 'No results';
+      }catch(_){ document.getElementById('pivotResults').textContent = 'Pivot failed'; }
+    }
+    document.getElementById('btnLoad').addEventListener('click', loadSessions);
+    document.getElementById('btnPivot').addEventListener('click', applyPivot);
+  </script>
+</body>
+</html>

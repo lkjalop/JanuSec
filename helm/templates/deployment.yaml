@@ -1,0 +1,22 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "janusec.fullname" . }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ include "janusec.name" . }}
+  template:
+    metadata:
+      labels:
+        app: {{ include "janusec.name" . }}
+    spec:
+      containers:
+        - name: janusec
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          env:
+            - name: JNS_DB_DSN
+              value: "{{ .Values.postgres.dsn | default "" }}"
+          ports:
+            - containerPort: {{ .Values.service.port }}

@@ -1,0 +1,61 @@
+image:
+  repository: ghcr.io/lkjalop/janusec-api
+  tag: "v0.1.0"
+  pullPolicy: IfNotPresent
+
+replicaCount: 2
+
+service:
+  type: ClusterIP
+  port: 8080
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+
+ingress:
+  enabled: true
+  className: nginx
+  host: REPLACE_YOUR_HOSTNAME
+  tls:
+    enabled: true
+    secretName: janusec-tls
+
+env:
+  - name: ACCESS_LOG_SAMPLE_RATE
+    value: "0.1"
+  - name: EVENT_QUEUE_MAX
+    value: "5000"
+  - name: ENABLE_CSV_UPLOAD
+    value: "true"
+  - name: DEFAULT_FRONTEND
+    value: "console"
+  - name: ALLOWED_ORIGINS
+    value: "https://REPLACE_YOUR_HOSTNAME"
+
+# Optionally mount secrets containing sensitive env vars (API_KEYS_JSON, JWT_SECRET, DB creds, webhook secrets)
+envFromSecrets: []
+
+oauth2Proxy:
+  enabled: true
+  image: quay.io/oauth2-proxy/oauth2-proxy:v7.5.1
+  servicePort: 4180
+  provider: oidc
+  emailDomains: ["*"]
+  oidc:
+    issuerURL: REPLACE_ISSUER_URL
+    clientID: REPLACE_CLIENT_ID
+    clientSecret: REPLACE_CLIENT_SECRET
+    scope: "openid email profile"
+  cookieSecret: REPLACE_BASE64_32B
+  redirectURL: https://REPLACE_YOUR_HOSTNAME/oauth2/callback
+
+hpa:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 70

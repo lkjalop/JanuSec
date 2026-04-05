@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "patterns": [
+    {
+      "name": "priv_escalation_lateral_exfil",
+      "description": "Role or privilege mutation followed by lateral remote exec then microcluster exfil flows",
+      "sequence": ["identity:role_mutation_burst", "endpoint:lateral_exec_remote_tool", "net:flow_microcluster_exfil"],
+      "max_span_seconds": 10800,
+      "min_confidence": 0.65
+    },
+    {
+      "name": "persistence_beacon_chain",
+      "description": "Persistence surface expansion preceding novel JA3/JA4 beacon indicating C2 establishment",
+      "sequence": ["endpoint:persistence_surface_multi", "net:ja3_ja4_novel_pair"],
+      "max_span_seconds": 7200,
+      "min_confidence": 0.6
+    },
+    {
+      "name": "credential_abuse_session_stitch",
+      "description": "Session stitching anomaly preceding role mutation burst indicates credential abuse pivot",
+      "sequence": ["identity:session_stitching_anomaly", "identity:role_mutation_burst"],
+      "max_span_seconds": 5400,
+      "min_confidence": 0.6
+    }
+  ]
+}

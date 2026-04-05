@@ -1,0 +1,17 @@
+[
+  {"framework": "ISO27001", "control_id": "A.5.1", "title": "Information security policies", "keywords": ["policy","information security","isms"], "domain_code": "A.5"},
+  {"framework": "ISO27001", "control_id": "A.5.2", "title": "Review of the policies for information security", "keywords": ["policy","review","approval"], "domain_code": "A.5"},
+  {"framework": "ISO27001", "control_id": "A.6.1", "title": "Organizational roles and responsibilities", "keywords": ["roles","responsibilities","organization"], "domain_code": "A.6"},
+  {"framework": "ISO27001", "control_id": "A.6.2", "title": "Segregation of duties", "keywords": ["segregation","duties","separation"], "domain_code": "A.6"},
+  {"framework": "ISO27001", "control_id": "A.8.1", "title": "Inventory of information and other associated assets", "keywords": ["asset","inventory","classification"], "domain_code": "A.8"},
+  {"framework": "ISO27001", "control_id": "A.9.1", "title": "Access control policy", "keywords": ["access","control","policy","authorization"], "domain_code": "A.9"},
+  {"framework": "ISO27001", "control_id": "A.9.2", "title": "User access management", "keywords": ["user","provisioning","deprovision","review"], "domain_code": "A.9"},
+  {"framework": "ISO27001", "control_id": "A.12.1", "title": "Operational procedures and responsibilities", "keywords": ["procedures","operations","change management"], "domain_code": "A.12"},
+  {"framework": "ISO27001", "control_id": "A.12.4", "title": "Logging and monitoring", "keywords": ["logging","monitoring","audit log","siem"], "domain_code": "A.12"},
+  {"framework": "ISO27001", "control_id": "A.13.1", "title": "Network security management", "keywords": ["network","segmentation","firewall","zero trust"], "domain_code": "A.13"},
+  {"framework": "ISO27001", "control_id": "A.13.2", "title": "Information transfer", "keywords": ["transfer","egress","encryption","dlp"], "domain_code": "A.13"},
+  {"framework": "ISO27001", "control_id": "A.14.2", "title": "Security in development and support processes", "keywords": ["sdlc","secure development","change"], "domain_code": "A.14"},
+  {"framework": "ISO27001", "control_id": "A.16.1", "title": "Management of information security incidents and improvements", "keywords": ["incident","response","ir","playbook"], "domain_code": "A.16"},
+  {"framework": "ISO27001", "control_id": "A.18.1", "title": "Compliance with legal and contractual requirements", "keywords": ["compliance","legal","contractual"], "domain_code": "A.18"}
+]
+

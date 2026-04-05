@@ -1,0 +1,83 @@
+{{- if .Values.redisHa.enabled }}
+# NOTE: Minimal Redis HA (Sentinel) for demos. For production, prefer a
+# dedicated chart (e.g., bitnami/redis) and managed persistence.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.redisHa.service.name }}
+  labels:
+    app.kubernetes.io/name: redis-ha
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  ports:
+    - name: redis
+      port: {{ .Values.redisHa.service.port }}
+    - name: sentinel
+      port: {{ .Values.redisHa.sentinel.port }}
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: redis-ha
+    app.kubernetes.io/instance: {{ .Release.Name }}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: redis-ha
+  labels:
+    app.kubernetes.io/name: redis-ha
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  serviceName: {{ .Values.redisHa.service.name }}
+  replicas: {{ .Values.redisHa.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: redis-ha
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: redis-ha
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      containers:
+        - name: redis
+          image: {{ .Values.redisHa.image }}
+          ports:
+            - containerPort: {{ .Values.redisHa.service.port }}
+              name: redis
+            - containerPort: {{ .Values.redisHa.sentinel.port }}
+              name: sentinel
+          command: ["/bin/sh","-c"]
+          args:
+            - |
+              set -e
+              # Basic master/replica based on ordinal 0 as master
+              if [ "$(hostname | awk -F- '{print $NF}')" = "0" ]; then
+                redis-server --protected-mode no --port {{ .Values.redisHa.service.port }} --appendonly no --save "" &
+              else
+                redis-server --protected-mode no --port {{ .Values.redisHa.service.port }} --replicaof redis-ha-0.redis-ha.{{ .Release.Namespace }}.svc.cluster.local {{ .Values.redisHa.service.port }} --appendonly no --save "" &
+              fi
+              # Run sentinel
+              redis-sentinel --port {{ .Values.redisHa.sentinel.port }} --protected-mode no --sentinel monitor mymaster redis-ha-0.redis-ha.{{ .Release.Namespace }}.svc.cluster.local {{ .Values.redisHa.service.port }} 2
+              wait -n
+          resources:
+            {{- toYaml .Values.redisHa.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      {{- if .Values.redisHa.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: {{ .Values.redisHa.persistence.size }}
+        storageClassName: {{ .Values.redisHa.persistence.storageClass | quote }}
+      {{- else }}
+      volumes:
+        - name: data
+          emptyDir: {}
+      {{- end }}
+{{- end }}

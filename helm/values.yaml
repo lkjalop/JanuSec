@@ -1,0 +1,23 @@
+replicaCount: 1
+
+image:
+  repository: janusec/janusec
+  tag: latest
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 8000
+
+postgres:
+  enabled: false
+  dsn: ""
+  useK8sSecret: true
+  secretName: janusec-postgres
+
+neo4j:
+  enabled: false
+
+embedding:
+  enabled: true
+  workers: 1

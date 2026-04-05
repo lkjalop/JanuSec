@@ -1,0 +1,8 @@
+{
+  "subject": "Payment details changed - please update your bank account",
+  "from": "billing@vendor.com",
+  "from_domain": "new-vendor-payments.com",
+  "dkim_result": "pass",
+  "thread_context": {"reply_chain": [{"from_domain": "vendor.com"}]},
+  "indicators": {"urgency_language": true}
+}

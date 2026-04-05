@@ -1,0 +1,5 @@
+{
+  "source_type": "office_macro",
+  "network_outbound": true,
+  "dest": "http://malicious.example.com"
+}

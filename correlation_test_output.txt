@@ -1,0 +1,22 @@
+........................................F
+================================== FAILURES ===================================
+____________________ test_top50_rules_registered_and_fire _____________________
+
+    def test_top50_rules_registered_and_fire():
+        rules = [
+            'suspicious_rundll32_usage', 'one_drive_unauthorized_sync', 'staged_scripts_in_temp',
+            'suspicious_certutil_usage', 'wevtutil_clear_events', 'autorun_registry_persistence',
+            'suspicious_schtasks_create', 'powershell_encoded_command', 'suspicious_at_command',
+            'netstat_listening_high_ports'
+        ]
+        for r in rules:
+>           assert r in CORRELATION_RULES.list(), f'{r} not registered'
+E           AssertionError: suspicious_rundll32_usage not registered
+E           assert 'suspicious_rundll32_usage' in [CorrelationRule(name='suspicious_ssh_from_unusual_port', mitre=['T1021'], factors_required=['ip', 'port'], window_sec...w_seconds=3600, severity='medium', confidence_boost=0.2, stride=None, dread=None, tags=None, sensor_domains=None), ...]
+E            +  where [CorrelationRule(name='suspicious_ssh_from_unusual_port', mitre=['T1021'], factors_required=['ip', 'port'], window_sec...w_seconds=3600, severity='medium', confidence_boost=0.2, stride=None, dread=None, tags=None, sensor_domains=None), ...] = list()
+E            +    where list = <src.core.correlation.rules.registry.RuleRegistry object at 0x000001F22F7A1C90>.list
+
+tests\test_top50_rules.py:18: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_top50_rules.py::test_top50_rules_registered_and_fire - Asse...
+!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!

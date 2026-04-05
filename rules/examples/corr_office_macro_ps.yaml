@@ -1,0 +1,24 @@
+id: corr_office_macro_ps
+title: Office Macro -> PowerShell spawn
+description: Detect when an Office macro spawns PowerShell and then makes network connections.
+enabled: true
+version: '0.1'
+tags: ['office','macro','powershell','execution']
+conditions:
+  - field: event.source
+    op: eq
+    value: office_macro
+joins:
+  - name: office_to_proc
+    join_type: inner
+    mapping:
+      user: user
+      host: host
+      process: process
+    max_hops: 2
+actions:
+  - id: create_incident
+    title: Create Incident
+    severity: high
+    mitre: ['T1059.001','T1059']
+    description: 'Macro spawned PowerShell; escalate to analyst review.'

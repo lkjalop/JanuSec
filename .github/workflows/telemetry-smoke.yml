@@ -1,0 +1,123 @@
+name: Telemetry Smoke Checks
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  smoke:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt || echo "no requirements.txt"
+          pip install uvicorn fastapi prometheus_client pyyaml requests
+
+      - name: Start server
+        shell: powershell
+        run: |
+          $env:DEFAULT_FRONTEND='console'
+          Start-Process -NoNewWindow -FilePath "python" -ArgumentList "-m","uvicorn","src.api.app:app","--host","127.0.0.1","--port","8080" -PassThru | Out-File server.txt
+          Start-Sleep -Seconds 5
+
+      - name: Verify metrics
+        shell: pwsh
+        run: |
+          $r = Invoke-WebRequest -Uri 'http://127.0.0.1:8080/metrics' -UseBasicParsing -TimeoutSec 10
+          if (-not $r.Content.Contains('# HELP python_info')) { throw 'metrics content missing python_info' }
+          if ($r.StatusCode -ne 200) { throw "metrics returned $($r.StatusCode)" }
+
+      - name: Save metrics sample
+        shell: pwsh
+        run: |
+          $r = Invoke-WebRequest -Uri 'http://127.0.0.1:8080/metrics' -UseBasicParsing -TimeoutSec 10
+          New-Item -ItemType Directory -Force -Path artifacts | Out-Null
+          $lines = ($r.Content -split "`n")[0..200] -join "`n"
+          Set-Content -Path artifacts/metrics.txt -Value $lines
+
+      - name: Upload metrics artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: metrics-sample
+          path: artifacts/metrics.txt
+
+      - name: Verify AB endpoints
+        shell: pwsh
+        run: |
+          $headers = @{ 'x-api-key' = 'devkey123' }
+          $s = Invoke-WebRequest -Headers $headers -Uri 'http://127.0.0.1:8080/api/v1/metrics/ab_test_summary?tenant_id=default&test_id=example-test' -UseBasicParsing -TimeoutSec 10
+          if ($s.StatusCode -ne 200) { throw "summary returned $($s.StatusCode)" }
+          $d = Invoke-WebRequest -Headers $headers -Uri 'http://127.0.0.1:8080/api/v1/metrics/ab_test_daily?tenant_id=default&test_id=example-test&start_ts=2024-01-01T00:00:00Z&end_ts=2030-01-01T00:00:00Z' -UseBasicParsing -TimeoutSec 10
+          if ($d.StatusCode -ne 200) { throw "daily returned $($d.StatusCode)" }
+
+      - name: Verify AB winner endpoint
+        shell: pwsh
+        run: |
+          $headers = @{ 'x-api-key' = 'devkey123' }
+          $w = Invoke-WebRequest -Headers $headers -Uri 'http://127.0.0.1:8080/api/v1/metrics/ab_test_winner?tenant_id=default&test_id=example-test' -UseBasicParsing -TimeoutSec 10
+          if ($w.StatusCode -ne 200) { throw "winner returned $($w.StatusCode)" }
+          if (-not $w.Content) { throw 'winner endpoint empty response' }
+          $json = $w.Content | ConvertFrom-Json
+          # Basic payload assertions
+          if (-not $json.winner) { throw 'missing key: winner' }
+          if (-not $json.variants) { throw 'missing key: variants' }
+          if (-not $json.confidence) { throw 'missing key: confidence' }
+
+      - name: Save AB endpoint responses
+        shell: pwsh
+        run: |
+          $headers = @{ 'x-api-key' = 'devkey123' }
+          New-Item -ItemType Directory -Force -Path artifacts | Out-Null
+          (Invoke-WebRequest -Headers $headers -Uri 'http://127.0.0.1:8080/api/v1/metrics/ab_test_summary?tenant_id=default&test_id=example-test' -UseBasicParsing -TimeoutSec 10).Content | Set-Content artifacts/ab_summary.json
+          (Invoke-WebRequest -Headers $headers -Uri 'http://127.0.0.1:8080/api/v1/metrics/ab_test_daily?tenant_id=default&test_id=example-test&start_ts=2024-01-01T00:00:00Z&end_ts=2030-01-01T00:00:00Z' -UseBasicParsing -TimeoutSec 10).Content | Set-Content artifacts/ab_daily.json
+          (Invoke-WebRequest -Headers $headers -Uri 'http://127.0.0.1:8080/api/v1/metrics/ab_test_winner?tenant_id=default&test_id=example-test' -UseBasicParsing -TimeoutSec 10).Content | Set-Content artifacts/ab_winner.json
+
+      - name: Upload AB artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ab-endpoints
+          path: artifacts/ab_*.json
+
+  amtool-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Pull Alertmanager image
+        run: docker pull prom/alertmanager:latest
+      - name: Run amtool check-config (sample)
+        run: |
+          docker run --rm -v "$PWD/deployment/prometheus:/conf" prom/alertmanager:latest amtool check-config /conf/alertmanager_sample.yml
+      - name: Run amtool check-config (merge snippet)
+        run: |
+          docker run --rm -v "$PWD/deployment/prometheus:/conf" prom/alertmanager:latest amtool check-config /conf/alertmanager_merge_snippet.yml
+
+      - name: Parse deployment YAML/JSON
+        run: |
+          python - << 'PY'
+          import yaml, json, pathlib
+          base = pathlib.Path('deployment')
+          files = [
+            base/'prometheus'/'alertmanager_sample.yml',
+            base/'prometheus'/'alertmanager_merge_snippet.yml',
+            base/'prometheus'/'precision_alerts.yml',
+            base/'grafana'/'janusec_precision_dashboard.json',
+          ]
+          for f in files:
+            if f.suffix == '.yml':
+              yaml.safe_load(f.read_text())
+            else:
+              json.loads(f.read_text())
+          print('parsed ok')
+          PY

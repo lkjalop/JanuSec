@@ -1,0 +1,7 @@
+[
+  {"framework": "EU_AI_ACT", "control_id": "ART9.1", "title": "Risk management system established", "keywords": ["risk management","policy","process"]},
+  {"framework": "EU_AI_ACT", "control_id": "ART10.1", "title": "Data and data governance requirements applied", "keywords": ["dataset","data governance","quality"]},
+  {"framework": "EU_AI_ACT", "control_id": "ART9.4", "title": "Post-market monitoring and logging", "keywords": ["monitoring","logging","post-market"]},
+  {"framework": "EU_AI_ACT", "control_id": "ART13.1", "title": "Transparency and provision of information", "keywords": ["transparency","documentation","instructions"]}
+]
+

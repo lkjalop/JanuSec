@@ -1,0 +1,29 @@
+id: email_bec_chain
+title: Business Email Compromise (BEC) chain
+description: Detect an external sender email that later triggers wire-instruction or account-change artifacts.
+author: automation
+tags: [T1598]
+condition_groups:
+  - type: node_property
+    node_type: email
+    filters:
+      - field: from_domain
+        op: regex
+        value: (gmail|yahoo|hotmail)\\.com$
+      - field: subject
+        op: regex
+        value: (?i)(invoice|payment|wire)
+    joins:
+      - name: thread_artifact
+        via: email_thread
+        node_type: artifact
+        filters:
+          - field: artifact_type
+            op: eq
+            value: account_change
+        max_hops: 3
+        join_type: inner
+score: 0.6
+actions:
+  - type: create_alert
+    message: "Potential BEC flow: external supplier email -> account change artifacts"

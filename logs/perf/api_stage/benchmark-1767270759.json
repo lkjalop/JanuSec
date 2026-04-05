@@ -1,0 +1,57 @@
+{
+  "cases": [
+    {
+      "name": "owner_mismatch",
+      "ok": true,
+      "duration_ms": 230.353,
+      "missing_factors": [],
+      "reported_factors": [
+        "api:bola_resource_mismatch",
+        "api:inventory_route_unknown"
+      ]
+    },
+    {
+      "name": "owner_match",
+      "ok": true,
+      "duration_ms": 25.247,
+      "missing_factors": [],
+      "reported_factors": [
+        "api:inventory_route_unknown"
+      ]
+    },
+    {
+      "name": "missing_headers",
+      "ok": true,
+      "duration_ms": 25.927,
+      "missing_factors": [],
+      "reported_factors": [
+        "api:inventory_route_unknown",
+        "api:missing_security_headers"
+      ]
+    },
+    {
+      "name": "unknown_route_inventory",
+      "ok": true,
+      "duration_ms": 24.285,
+      "missing_factors": [],
+      "reported_factors": [
+        "api:inventory_route_unknown"
+      ]
+    },
+    {
+      "name": "business_flow_policy_gap",
+      "ok": true,
+      "duration_ms": 22.895,
+      "missing_factors": [],
+      "reported_factors": [
+        "api:business_flow_policy_gap",
+        "api:inventory_route_unknown"
+      ]
+    }
+  ],
+  "metrics": {
+    "count": 5,
+    "avg_ms": 65.741,
+    "p95_ms": 25.927
+  }
+}

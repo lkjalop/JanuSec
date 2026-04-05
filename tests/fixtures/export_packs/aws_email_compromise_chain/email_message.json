@@ -1,0 +1,17 @@
+[
+  {
+    "message_id": "msg-aws-bec-001",
+    "timestamp": "2025-03-15T02:40:00Z",
+    "from": "accounts@ingramfake.com.au",
+    "to": "ops@acme.example",
+    "reply_to": "accounts@ingramfake.com.au",
+    "sender_display_name": "Ingram Fake Accounts",
+    "subject": "Updated supplier remittance instructions",
+    "body": "Please review the attached payment workbook and update the supplier profile before the next wire transfer. Urgent action is required.",
+    "spf_result": "fail",
+    "dkim_result": "fail",
+    "dmarc_result": "fail",
+    "supplier_name": "Ingram Micro",
+    "trusted_supplier_domain": "ingrammicro.com.au"
+  }
+]

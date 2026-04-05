@@ -1,0 +1,30 @@
+<nav class="sidebar" aria-label="Main navigation" style="width:260px;position:fixed;left:0;top:0;bottom:0;background:var(--bg-secondary,#0F1724);padding:18px;border-right:1px solid rgba(255,255,255,0.03);z-index:1000;">
+  <div style="display:flex;gap:12px;align-items:center;margin-bottom:12px;">
+    <img src="/static/img/janusec-logo.svg" alt="JanuSec" style="height:32px;"/>
+    <strong style="font-size:14px;color:var(--text-primary,#E8EBF0)">JanuSec</strong>
+  </div>
+  <div style="margin-bottom:12px;">
+    <input id="navSearchBox" type="search" placeholder="Search dashboards... (Ctrl+K)" style="width:100%;padding:8px;border-radius:6px;border:1px solid rgba(255,255,255,0.03);background:transparent;color:var(--text-primary,#E8EBF0);"/>
+  </div>
+  <div style="display:flex;flex-direction:column;gap:6px;font-size:13px;">
+    <a class="nav-item" href="/static/executive.html" style="color:var(--text-secondary,#B4BCC8);text-decoration:none;">Executive</a>
+    <a class="nav-item" href="/static/hunt_network.html" style="color:var(--text-secondary,#B4BCC8);text-decoration:none;">Network Hunt</a>
+    <a class="nav-item" href="/static/hunt_endpoint.html" style="color:var(--text-secondary,#B4BCC8);text-decoration:none;">Endpoint Hunt</a>
+    <a class="nav-item" href="/static/graph_explain.html" style="color:var(--text-secondary,#B4BCC8);text-decoration:none;">Graph Explain</a>
+    <a class="nav-item" href="/static/csv_analyzer.html" style="color:var(--text-secondary,#B4BCC8);text-decoration:none;">CSV Analyzer</a>
+    <a class="nav-item" href="/static/csv_multi_analyzer.html" style="color:var(--text-secondary,#B4BCC8);text-decoration:none;">Multi-Source Correlator</a>
+    <a class="nav-item" href="/static/factors_top20.html" style="color:var(--text-secondary,#B4BCC8);text-decoration:none;">Factors Top-20</a>
+    <a class="nav-item" href="/static/mitre.html" style="color:var(--text-secondary,#B4BCC8);text-decoration:none;">MITRE Heatmap</a>
+    <a class="nav-item" href="/static/csv_analyzer_shim.html" style="color:var(--text-secondary,#B4BCC8);text-decoration:none;">CSV Analyzer (shim)</a>
+    <a class="nav-item" href="/static/admin.html" style="color:var(--text-secondary,#B4BCC8);text-decoration:none;">Admin Controls</a>
+    <a class="nav-item" href="/static/settings.html" style="color:var(--text-secondary,#B4BCC8);text-decoration:none;">Settings</a>
+  </div>
+  <script>
+    // Ctrl+K to focus search
+    document.addEventListener('keydown', (e)=>{
+      if ((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='k'){
+        e.preventDefault(); const el = document.getElementById('navSearchBox'); if(el) el.focus();
+      }
+    });
+  </script>
+</nav>

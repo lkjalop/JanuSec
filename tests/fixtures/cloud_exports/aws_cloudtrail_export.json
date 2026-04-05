@@ -1,0 +1,10 @@
+[
+  {
+    "eventTime": "2026-03-20T01:35:00Z",
+    "eventSource": "iam.amazonaws.com",
+    "eventName": "CreateAccessKey",
+    "sourceIPAddress": "203.0.113.5",
+    "userIdentity": {"arn": "arn:aws:iam::123456789012:user/Alice"},
+    "awsRegion": "ap-southeast-2"
+  }
+]

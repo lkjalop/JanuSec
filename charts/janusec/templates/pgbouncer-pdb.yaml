@@ -1,0 +1,13 @@
+{{- if and .Values.pdb.enabled .Values.pgbouncer.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: pgbouncer-pdb
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: pgbouncer
+      app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end }}
+

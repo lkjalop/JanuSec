@@ -1,0 +1,6 @@
+{
+  "process_name": "mimikatz.exe",
+  "target_process": "lsass.exe",
+  "caller_user": "INDEPENDENT_USER",
+  "action": "open"
+}

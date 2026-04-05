@@ -1,0 +1,11 @@
+{
+  "windows.pslist": [
+    {"ImageFileName": "armproc.exe", "PID": 500, "path": "C:\\\\Tools\\\\armproc.exe"}
+  ],
+  "windows.netscan": [
+    {"Process": "armproc.exe", "ForeignAddr": "198.51.100.9:8443", "Info": "arm-scan"}
+  ],
+  "windows.malfind": [
+    {"PID": 500, "Tag": "ARM", "Protection": "PAGE_EXECUTE_READWRITE", "Process": "armproc.exe"}
+  ]
+}

@@ -1,0 +1,34 @@
+id: A1_lateral_pivot
+version: 1
+scenario: "Pass-the-hash pivot with remote process spawn and outbound TLS beacon"
+tenant: demo
+stages:
+  - t: 0s
+    event_type: auth
+    id: a1-auth-1
+    user: svc-backup
+    src_host: hostA
+    dst_host: hostB
+    outcome: success
+  - t: 25s
+    event_type: proc
+    id: a1-proc-1
+    host: hostB
+    parent: wmiprvse.exe
+    child: powershell.exe
+    cmd: "powershell -enc <redacted>"
+  - t: 40s
+    event_type: net
+    id: a1-net-1
+    src_host: hostB
+    dst_ip: 203.0.113.44
+    ja3: deadbeef1234abcd
+    bytes_out: 12000
+labels:
+  expected_factors:
+    - lane_proc_parent_chain
+    - lane_ja3_rare
+  optional_correlation:
+    - corr_lateral_pivot_possible
+sla:
+  first_detection_within: 45s

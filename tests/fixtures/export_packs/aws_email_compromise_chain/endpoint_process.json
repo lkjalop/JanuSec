@@ -1,0 +1,10 @@
+[
+  {
+    "timestamp": "2025-03-15T02:56:00Z",
+    "host": "ec2-finops-01",
+    "user": "ops-user",
+    "process_name": "cmd.exe",
+    "process_path": "C:\\Users\\Public\\svchost.ps1",
+    "command_line": "cmd.exe /c powershell.exe -ExecutionPolicy Bypass -WindowStyle Hidden -File C:\\Users\\Public\\svchost.ps1"
+  }
+]

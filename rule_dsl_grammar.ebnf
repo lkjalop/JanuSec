@@ -1,0 +1,55 @@
+(* Rule DSL Grammar Specification *)
+(* This EBNF defines a detection expression language for factor rules. *)
+(* Features: logical operators, comparison, sequence/temporal, absence, rate/statistical, lookup/enrichment functions. *)
+
+rule            = expression ;
+expression      = or_expr ;
+or_expr         = and_expr , { "OR" , and_expr } ;
+and_expr        = unary_expr , { "AND" , unary_expr } ;
+unary_expr      = [ "NOT" ] , primary ;
+
+primary         = comparison
+                | sequence_expr
+                | absence_expr
+                | rate_expr
+                | zscore_expr
+                | lookup_expr
+                | exists_expr
+                | paren_expr ;
+
+paren_expr      = "(" , expression , ")" ;
+
+comparison      = field_path , comp_op , value ;
+comp_op         = "==" | "!=" | ">" | ">=" | "<" | "<=" | "~" | "IN" ;
+value           = number | string | list ;
+list            = "[" , value , { "," , value } , "]" ;
+
+field_path      = identifier , { "." , identifier } ;
+identifier      = letter , { letter | digit | "_" } ;
+number          = ["-"], digit , { digit | "." } ;
+string          = '"' , { character - '"' } , '"' ;
+
+sequence_expr   = "SEQ" , "[" , seq_step , { "," , seq_step } , "]" , within_clause ;
+seq_step        = field_path , comp_op , value ;
+within_clause   = "WITHIN" , time_window ;
+
+absence_expr    = "ABSENCE" , "[" , field_path , comp_op , value , "]" , within_clause ;
+
+rate_expr       = "RATE" , "(" , field_path , "," , time_window , ")" , comp_op , number ;
+zscore_expr     = "ZSCORE" , "(" , field_path , "," , time_window , ")" , comp_op , number ;
+lookup_expr     = "LOOKUP" , "." , identifier , "(" , field_path , ")" , comp_op , value ;
+exists_expr     = "EXISTS" , field_path ;
+
+time_window     = number , time_unit ;
+time_unit       = "s" | "m" | "h" | "d" ;
+
+(* Semantics:
+   - SEQ[ a==1, b>5 ] WITHIN 5m: ordered occurrence of events matching steps in order within window.
+   - ABSENCE[ field == "x" ] WITHIN 10m: no event satisfying predicate in window.
+   - RATE(field,5m) > 20: occurrences per window exceed threshold.
+   - ZSCORE(field,1h) > 3: anomaly based on historical mean/std.
+   - LOOKUP.asn_rarity(src.ip) > 0.8: use enrichment function returning numeric probability/score.
+   - field ~ "substring": containment match.
+   - field IN ["A","B"]: membership.
+   - EXISTS field.path: field presence.
+*)

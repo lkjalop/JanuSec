@@ -1,0 +1,13 @@
+HTTP/1.1 400 Bad Request
+date: Tue, 11 Nov 2025 01:46:09 GMT
+server: uvicorn
+content-length: 55
+content-type: application/json
+x-request-id: req-1762825570383
+strict-transport-security: max-age=31536000; includeSubDomains
+x-content-type-options: nosniff
+x-frame-options: DENY
+referrer-policy: no-referrer
+permissions-policy: geolocation=(), microphone=(), camera=()
+content-security-policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; media-src 'self' blob:; worker-src 'self' blob:; frame-ancestors 'self'
+

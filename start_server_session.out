@@ -1,0 +1,307 @@
+========================================
+Starting JanuSec Platform
+========================================
+
+[1/4] Checking dependencies...
+[2/4] Configuring environment...
+INFO: Generated API key for this session: 
+[3/4] Checking database...
+[4/4] Starting server...
+
+========================================
+Server will start at: http://localhost:8080
+Frontend UI (LIVE) at: http://localhost:8080/
+Direct LIVE route: http://localhost:8080/live
+API Docs at: http://localhost:8080/docs
+========================================
+Optional helper scripts once the server is listening:
+  python scripts\prewarm_ollama.py --model llama3:8b
+  python scripts\verify_loop_closure.py --server http://localhost:8080
+
+Press Ctrl+C to stop the server
+
+[env] Loaded settings from D:\AI\Threat_thy_sniffer\.env
+==================================================
+Starting JanuSec Platform
+==================================================
+
+Server: http://0.0.0.0:8080
+Console: http://0.0.0.0:8080/console
+CSV Upload: http://0.0.0.0:8080/api/v1/csv/upload-page
+API Docs: http://0.0.0.0:8080/docs
+
+Press Ctrl+C to stop
+==================================================
+{"ts":"2025-12-02T12:24:31.773648Z","level":"INFO","logger":"src.api.app","msg":"PLATFORM_LITE_INIT active: skipping initialize_platform_components heavy init"}
+{"ts":"2025-12-02T12:24:32.215393Z","level":"INFO","logger":"src.api.app","msg":"register_core_routers called (full=True)"}
+{"ts":"2025-12-02T12:24:32.247610Z","level":"INFO","logger":"src.api.app","msg":"Included decisions_router into app (lite)"}
+{"ts":"2025-12-02T12:24:32.251567Z","level":"INFO","logger":"src.api.app","msg":"Included hopgraph_stream_router into app"}
+{"ts":"2025-12-02T12:24:32.253298Z","level":"INFO","logger":"src.api.app","msg":"Included config_router into app (lite)"}
+{"ts":"2025-12-02T12:24:32.253298Z","level":"INFO","logger":"src.api.app","msg":"Included assessments_router into app (lite)"}
+{"ts":"2025-12-02T12:24:32.262559Z","level":"INFO","logger":"src.api.app","msg":"Included report_router into app (lite)"}
+{"ts":"2025-12-02T12:24:32.279058Z","level":"INFO","logger":"src.api.app","msg":"Included tier2_router into app (lite)"}
+{"ts":"2025-12-02T12:24:32.376262Z","level":"INFO","logger":"src.api.app","msg":"Included integrations_router into app (lite)"}
+{"ts":"2025-12-02T12:24:32.495533Z","level":"INFO","logger":"src.api.app","msg":"Included intel_router into app (lite)"}
+{"ts":"2025-12-02T12:24:32.528740Z","level":"INFO","logger":"src.api.app","msg":"Included deep_analyze_router into app (lite)"}
+{"ts":"2025-12-02T12:24:32.532735Z","level":"INFO","logger":"src.api.app","msg":"Included endpoint_malware router (lite)"}
+{"ts":"2025-12-02T12:24:32.550322Z","level":"INFO","logger":"src.api.app","msg":"Included router decisions"}
+{"ts":"2025-12-02T12:24:32.557075Z","level":"INFO","logger":"src.api.app","msg":"Included router hopgraph_stream"}
+{"ts":"2025-12-02T12:24:32.942151Z","level":"INFO","logger":"src.api.app","msg":"Included router risk"}
+{"ts":"2025-12-02T12:24:33.042398Z","level":"INFO","logger":"src.api.app","msg":"Included router temporal"}
+{"ts":"2025-12-02T12:24:33.124350Z","level":"INFO","logger":"src.api.app","msg":"Included router upload"}
+{"ts":"2025-12-02T12:24:33.175177Z","level":"INFO","logger":"src.api.app","msg":"Included router stream_ingest"}
+{"ts":"2025-12-02T12:24:33.225914Z","level":"INFO","logger":"src.api.app","msg":"Included router csv"}
+{"ts":"2025-12-02T12:24:33.277249Z","level":"INFO","logger":"src.api.app","msg":"Included router soar"}
+{"ts":"2025-12-02T12:24:33.347429Z","level":"INFO","logger":"src.api.app","msg":"Included router dashboard"}
+{"ts":"2025-12-02T12:24:33.479966Z","level":"INFO","logger":"src.api.app","msg":"Included router integrations"}
+{"ts":"2025-12-02T12:24:33.541389Z","level":"INFO","logger":"src.api.app","msg":"Included router metrics_status"}
+{"ts":"2025-12-02T12:24:33.581010Z","level":"INFO","logger":"src.api.app","msg":"Included router custody"}
+{"ts":"2025-12-02T12:24:33.734213Z","level":"INFO","logger":"src.api.app","msg":"Included router artifact"}
+{"ts":"2025-12-02T12:24:33.786652Z","level":"INFO","logger":"src.api.app","msg":"Included router nlp"}
+{"ts":"2025-12-02T12:24:33.876831Z","level":"INFO","logger":"src.api.app","msg":"Included router sbom"}
+{"ts":"2025-12-02T12:24:33.880822Z","level":"INFO","logger":"src.api.app","msg":"Included router ebpf"}
+{"ts":"2025-12-02T12:24:33.886628Z","level":"INFO","logger":"src.api.app","msg":"Included router identity_reporting"}
+{"ts":"2025-12-02T12:24:33.993054Z","level":"INFO","logger":"src.api.app","msg":"Included router compliance"}
+{"ts":"2025-12-02T12:24:34.019673Z","level":"INFO","logger":"src.api.app","msg":"Included router report"}
+{"ts":"2025-12-02T12:24:34.110211Z","level":"INFO","logger":"src.api.app","msg":"Included router automations"}
+{"ts":"2025-12-02T12:24:34.135799Z","level":"INFO","logger":"src.api.app","msg":"Included router feedback"}
+{"ts":"2025-12-02T12:24:34.234718Z","level":"INFO","logger":"src.api.app","msg":"Included router dev"}
+{"ts":"2025-12-02T12:24:34.286540Z","level":"INFO","logger":"src.api.app","msg":"Included router admin_rules"}
+{"ts":"2025-12-02T12:24:34.362546Z","level":"INFO","logger":"src.api.app","msg":"Included router decision_feedback"}
+{"ts":"2025-12-02T12:24:34.364587Z","level":"INFO","logger":"src.api.app","msg":"Included router factors"}
+{"ts":"2025-12-02T12:24:34.376421Z","level":"INFO","logger":"src.api.app","msg":"Included router suppression_admin"}
+{"ts":"2025-12-02T12:24:34.389329Z","level":"INFO","logger":"src.api.app","msg":"Included router unified_ingest"}
+{"ts":"2025-12-02T12:24:34.469885Z","level":"INFO","logger":"src.api.app","msg":"Included router risk_config_admin"}
+{"ts":"2025-12-02T12:24:34.503107Z","level":"INFO","logger":"src.api.app","msg":"Included router scenario_replay"}
+{"ts":"2025-12-02T12:24:34.591440Z","level":"INFO","logger":"src.api.app","msg":"Included router network_ingest"}
+{"ts":"2025-12-02T12:24:34.593445Z","level":"INFO","logger":"src.api.app","msg":"Included router cloud_ingest"}
+{"ts":"2025-12-02T12:24:34.594441Z","level":"INFO","logger":"src.api.app","msg":"Included router app_ingest"}
+{"ts":"2025-12-02T12:24:34.596442Z","level":"INFO","logger":"src.api.app","msg":"Included router identity_ingest"}
+{"ts":"2025-12-02T12:24:34.598440Z","level":"INFO","logger":"src.api.app","msg":"Included router decision_confidence"}
+{"ts":"2025-12-02T12:24:34.600441Z","level":"INFO","logger":"src.api.app","msg":"Included router node_factors"}
+{"ts":"2025-12-02T12:24:34.603091Z","level":"INFO","logger":"src.api.app","msg":"Included router emitted_factors"}
+{"ts":"2025-12-02T12:24:34.626602Z","level":"INFO","logger":"src.api.app","msg":"Included router graph_session"}
+{"ts":"2025-12-02T12:24:34.692544Z","level":"INFO","logger":"src.api.app","msg":"Included router suggestions"}
+{"ts":"2025-12-02T12:24:34.742084Z","level":"INFO","logger":"src.api.app","msg":"Included router config"}
+{"ts":"2025-12-02T12:24:34.819758Z","level":"INFO","logger":"src.api.app","msg":"Included router assessments"}
+{"ts":"2025-12-02T12:24:34.840571Z","level":"INFO","logger":"src.api.app","msg":"Included router tier2"}
+{"ts":"2025-12-02T12:24:35.141553Z","level":"INFO","logger":"src.api.app","msg":"Included router playbooks"}
+{"ts":"2025-12-02T12:24:35.249771Z","level":"INFO","logger":"src.api.app","msg":"Included router identity_hopgraph_facade"}
+{"ts":"2025-12-02T12:24:35.309014Z","level":"INFO","logger":"src.api.app","msg":"Included router cooccurrence_admin"}
+{"ts":"2025-12-02T12:24:35.386401Z","level":"INFO","logger":"src.api.app","msg":"Included router endpoint_malware"}
+{"ts":"2025-12-02T12:24:35.418737Z","level":"INFO","logger":"src.api.app","msg":"Included router isms"}
+{"ts":"2025-12-02T12:24:35.482711Z","level":"INFO","logger":"src.api.app","msg":"Included SLO metrics router"}
+{"ts":"2025-12-02T12:25:23.219598Z","level":"INFO","logger":"src.api.app","msg":"Route inventory audit: 323 routes, 12 allowlisted, 323 extras"}
+{"ts":"2025-12-02T12:25:23.226071Z","level":"WARNING","logger":"src.api.app","msg":"Routes not in allowlist (first 25): /api/v1/actions/audit POST, /api/v1/admin/autogen/toggle POST, /api/v1/admin/cooccurrence/pruner/start POST, /api/v1/admin/cooccurrence/pruner/status GET, /api/v1/admin/cooccurrence/pruner/stop POST, /api/v1/admin/rules GET, /api/v1/admin/rules POST, /api/v1/admin/rules/reset POST, /api/v1/admin/scoring/weights POST, /api/v1/admin/suppression/ GET, /api/v1/admin/suppression/reload POST, /api/v1/admin/suppression/set POST, /api/v1/ai/force_external POST, /api/v1/analysis/session/start POST, /api/v1/analysis/session/{session_id}/cancel POST, /api/v1/analysis/session/{session_id}/status GET, /api/v1/api_keys/audit GET, /api/v1/api_keys/rotate POST, /api/v1/api_security/ingest POST, /api/v1/api_security/summary GET, /api/v1/app/ingest POST, /api/v1/artifacts/analyze_batch POST, /api/v1/artifacts/list GET, /api/v1/assessments/admin/consume_retrain POST, /api/v1/assessments/assessments/{assessment_id}/evidence/{cache_key} GET"}
+{"ts":"2025-12-02T12:25:23.228021Z","level":"INFO","logger":"src.api.app","msg":"Mounting React frontend at /react from D:\\AI\\Threat_thy_sniffer\\frontend\\react\\dist"}
+{"ts":"2025-12-02T12:25:23.230420Z","level":"INFO","logger":"src.api.app","msg":"Mounting SPA frontend at /spa from D:\\AI\\Threat_thy_sniffer\\frontend\\spa"}
+{"ts":"2025-12-02T12:25:23.885904Z","level":"INFO","logger":"src.api.app","msg":"Included unified ingestion controller router"}
+{"ts":"2025-12-02T12:25:27.901763Z","level":"INFO","logger":"src.tasks.llm_feedback_job","msg":"Registered LLM feedback scheduler (interval=86400)"}
+{"ts":"2025-12-02T12:25:27.902776Z","level":"INFO","logger":"src.embedding.scheduler","msg":"Registered embedding scheduler (interval=300)"}
+{"ts":"2025-12-02T12:25:27.912800Z","level":"INFO","logger":"api.app","msg":"PLATFORM_LITE_INIT active: skipping initialize_platform_components heavy init"}
+{"ts":"2025-12-02T12:25:27.963005Z","level":"INFO","logger":"api.app","msg":"register_core_routers called (full=True)"}
+{"ts":"2025-12-02T12:25:27.993584Z","level":"INFO","logger":"api.app","msg":"Included decisions_router into app (lite)"}
+{"ts":"2025-12-02T12:25:28.001086Z","level":"INFO","logger":"api.app","msg":"Included hopgraph_stream_router into app"}
+{"ts":"2025-12-02T12:25:28.004088Z","level":"INFO","logger":"api.app","msg":"Included config_router into app (lite)"}
+{"ts":"2025-12-02T12:25:28.005079Z","level":"INFO","logger":"api.app","msg":"Included assessments_router into app (lite)"}
+{"ts":"2025-12-02T12:25:28.011086Z","level":"INFO","logger":"api.app","msg":"Included report_router into app (lite)"}
+{"ts":"2025-12-02T12:25:28.030010Z","level":"INFO","logger":"api.app","msg":"Included tier2_router into app (lite)"}
+{"ts":"2025-12-02T12:25:28.146788Z","level":"INFO","logger":"api.app","msg":"Included integrations_router into app (lite)"}
+{"ts":"2025-12-02T12:25:28.179748Z","level":"INFO","logger":"api.app","msg":"Included intel_router into app (lite)"}
+{"ts":"2025-12-02T12:25:28.243086Z","level":"INFO","logger":"api.app","msg":"Included deep_analyze_router into app (lite)"}
+{"ts":"2025-12-02T12:25:28.251955Z","level":"INFO","logger":"api.app","msg":"Included endpoint_malware router (lite)"}
+{"ts":"2025-12-02T12:25:28.279701Z","level":"INFO","logger":"api.app","msg":"Included router decisions"}
+{"ts":"2025-12-02T12:25:28.287269Z","level":"INFO","logger":"api.app","msg":"Included router hopgraph_stream"}
+{"ts":"2025-12-02T12:25:28.296307Z","level":"INFO","logger":"api.app","msg":"Included router risk"}
+{"ts":"2025-12-02T12:25:28.308136Z","level":"INFO","logger":"api.app","msg":"Included router temporal"}
+{"ts":"2025-12-02T12:25:28.353251Z","level":"INFO","logger":"api.app","msg":"Included router upload"}
+{"ts":"2025-12-02T12:25:28.370816Z","level":"INFO","logger":"api.app","msg":"Included router stream_ingest"}
+{"ts":"2025-12-02T12:25:28.435136Z","level":"INFO","logger":"api.app","msg":"Included router csv"}
+{"ts":"2025-12-02T12:25:28.827445Z","level":"INFO","logger":"api.app","msg":"Included router soar"}
+{"ts":"2025-12-02T12:25:29.153816Z","level":"INFO","logger":"api.app","msg":"Included router dashboard"}
+{"ts":"2025-12-02T12:25:29.262832Z","level":"INFO","logger":"api.app","msg":"Included router integrations"}
+{"ts":"2025-12-02T12:25:29.355296Z","level":"INFO","logger":"api.app","msg":"Included router metrics_status"}
+{"ts":"2025-12-02T12:25:29.428358Z","level":"INFO","logger":"api.app","msg":"Included router custody"}
+{"ts":"2025-12-02T12:25:29.476468Z","level":"INFO","logger":"api.app","msg":"Included router artifact"}
+{"ts":"2025-12-02T12:25:29.513214Z","level":"INFO","logger":"api.app","msg":"Included router nlp"}
+{"ts":"2025-12-02T12:25:29.585976Z","level":"INFO","logger":"api.app","msg":"Included router sbom"}
+{"ts":"2025-12-02T12:25:29.634773Z","level":"INFO","logger":"api.app","msg":"Included router ebpf"}
+{"ts":"2025-12-02T12:25:29.742079Z","level":"INFO","logger":"api.app","msg":"Included router identity_reporting"}
+{"ts":"2025-12-02T12:25:29.942144Z","level":"INFO","logger":"api.app","msg":"Included router compliance"}
+{"ts":"2025-12-02T12:25:29.994485Z","level":"INFO","logger":"api.app","msg":"Included router report"}
+{"ts":"2025-12-02T12:25:30.057514Z","level":"INFO","logger":"api.app","msg":"Included router automations"}
+{"ts":"2025-12-02T12:25:30.171247Z","level":"INFO","logger":"api.app","msg":"Included router feedback"}
+{"ts":"2025-12-02T12:25:30.259341Z","level":"INFO","logger":"api.app","msg":"Included router dev"}
+{"ts":"2025-12-02T12:25:30.396092Z","level":"INFO","logger":"api.app","msg":"Included router admin_rules"}
+{"ts":"2025-12-02T12:25:30.466682Z","level":"INFO","logger":"api.app","msg":"Included router decision_feedback"}
+{"ts":"2025-12-02T12:25:30.535723Z","level":"INFO","logger":"api.app","msg":"Included router factors"}
+{"ts":"2025-12-02T12:25:30.623925Z","level":"INFO","logger":"api.app","msg":"Included router suppression_admin"}
+{"ts":"2025-12-02T12:25:30.793829Z","level":"INFO","logger":"api.app","msg":"Included router unified_ingest"}
+{"ts":"2025-12-02T12:25:31.209792Z","level":"INFO","logger":"api.app","msg":"Included router risk_config_admin"}
+{"ts":"2025-12-02T12:25:31.219946Z","level":"INFO","logger":"api.app","msg":"Included router scenario_replay"}
+{"ts":"2025-12-02T12:25:31.220934Z","level":"INFO","logger":"api.app","msg":"Included router network_ingest"}
+{"ts":"2025-12-02T12:25:31.222940Z","level":"INFO","logger":"api.app","msg":"Included router cloud_ingest"}
+{"ts":"2025-12-02T12:25:31.223937Z","level":"INFO","logger":"api.app","msg":"Included router app_ingest"}
+{"ts":"2025-12-02T12:25:31.225936Z","level":"INFO","logger":"api.app","msg":"Included router identity_ingest"}
+{"ts":"2025-12-02T12:25:31.227938Z","level":"INFO","logger":"api.app","msg":"Included router decision_confidence"}
+{"ts":"2025-12-02T12:25:31.229149Z","level":"INFO","logger":"api.app","msg":"Included router node_factors"}
+{"ts":"2025-12-02T12:25:31.234681Z","level":"INFO","logger":"api.app","msg":"Included router emitted_factors"}
+{"ts":"2025-12-02T12:25:31.258804Z","level":"INFO","logger":"api.app","msg":"Included router graph_session"}
+{"ts":"2025-12-02T12:25:31.266763Z","level":"INFO","logger":"api.app","msg":"Included router suggestions"}
+{"ts":"2025-12-02T12:25:31.268725Z","level":"INFO","logger":"api.app","msg":"Included router config"}
+{"ts":"2025-12-02T12:25:31.270724Z","level":"INFO","logger":"api.app","msg":"Included router assessments"}
+{"ts":"2025-12-02T12:25:31.284053Z","level":"INFO","logger":"api.app","msg":"Included router tier2"}
+{"ts":"2025-12-02T12:25:31.295821Z","level":"INFO","logger":"api.app","msg":"Included router playbooks"}
+{"ts":"2025-12-02T12:25:31.309086Z","level":"INFO","logger":"api.app","msg":"Included router identity_hopgraph_facade"}
+{"ts":"2025-12-02T12:25:31.317505Z","level":"INFO","logger":"api.app","msg":"Included router cooccurrence_admin"}
+{"ts":"2025-12-02T12:25:31.322505Z","level":"INFO","logger":"api.app","msg":"Included router endpoint_malware"}
+{"ts":"2025-12-02T12:25:31.345763Z","level":"INFO","logger":"api.app","msg":"Included router isms"}
+{"ts":"2025-12-02T12:25:31.349294Z","level":"INFO","logger":"api.app","msg":"Included SLO metrics router"}
+{"ts":"2025-12-02T12:25:31.400461Z","level":"INFO","logger":"api.app","msg":"Route inventory audit: 323 routes, 12 allowlisted, 323 extras"}
+{"ts":"2025-12-02T12:25:31.401461Z","level":"WARNING","logger":"api.app","msg":"Routes not in allowlist (first 25): /api/v1/actions/audit POST, /api/v1/admin/autogen/toggle POST, /api/v1/admin/cooccurrence/pruner/start POST, /api/v1/admin/cooccurrence/pruner/status GET, /api/v1/admin/cooccurrence/pruner/stop POST, /api/v1/admin/rules GET, /api/v1/admin/rules POST, /api/v1/admin/rules/reset POST, /api/v1/admin/scoring/weights POST, /api/v1/admin/suppression/ GET, /api/v1/admin/suppression/reload POST, /api/v1/admin/suppression/set POST, /api/v1/ai/force_external POST, /api/v1/analysis/session/start POST, /api/v1/analysis/session/{session_id}/cancel POST, /api/v1/analysis/session/{session_id}/status GET, /api/v1/api_keys/audit GET, /api/v1/api_keys/rotate POST, /api/v1/api_security/ingest POST, /api/v1/api_security/summary GET, /api/v1/app/ingest POST, /api/v1/artifacts/analyze_batch POST, /api/v1/artifacts/list GET, /api/v1/assessments/admin/consume_retrain POST, /api/v1/assessments/assessments/{assessment_id}/evidence/{cache_key} GET"}
+{"ts":"2025-12-02T12:25:31.403466Z","level":"INFO","logger":"api.app","msg":"Mounting React frontend at /react from D:\\AI\\Threat_thy_sniffer\\frontend\\react\\dist"}
+{"ts":"2025-12-02T12:25:31.404464Z","level":"INFO","logger":"api.app","msg":"Mounting SPA frontend at /spa from D:\\AI\\Threat_thy_sniffer\\frontend\\spa"}
+{"ts":"2025-12-02T12:25:31.609591Z","level":"INFO","logger":"api.app","msg":"Included unified ingestion controller router"}
+[hint] If the server exits immediately, retry with --no-reload to disable the watcher on Windows.
+[startup] reload=True (source: default (enabled))  log_level=info
+[env] Loaded settings from D:\AI\Threat_thy_sniffer\.env
+{"ts":"2025-12-02T12:25:39.908969Z","level":"INFO","logger":"src.api.app","msg":"PLATFORM_LITE_INIT active: skipping initialize_platform_components heavy init"}
+{"ts":"2025-12-02T12:25:40.028181Z","level":"INFO","logger":"src.api.app","msg":"register_core_routers called (full=True)"}
+{"ts":"2025-12-02T12:25:40.093548Z","level":"INFO","logger":"src.api.app","msg":"Included decisions_router into app (lite)"}
+{"ts":"2025-12-02T12:25:40.145106Z","level":"INFO","logger":"src.api.app","msg":"Included hopgraph_stream_router into app"}
+{"ts":"2025-12-02T12:25:40.259482Z","level":"INFO","logger":"src.api.app","msg":"Included config_router into app (lite)"}
+{"ts":"2025-12-02T12:25:40.365459Z","level":"INFO","logger":"src.api.app","msg":"Included assessments_router into app (lite)"}
+{"ts":"2025-12-02T12:25:40.427891Z","level":"INFO","logger":"src.api.app","msg":"Included report_router into app (lite)"}
+{"ts":"2025-12-02T12:25:40.550866Z","level":"INFO","logger":"src.api.app","msg":"Included tier2_router into app (lite)"}
+{"ts":"2025-12-02T12:25:40.690773Z","level":"INFO","logger":"src.api.app","msg":"Included integrations_router into app (lite)"}
+{"ts":"2025-12-02T12:25:40.853280Z","level":"INFO","logger":"src.api.app","msg":"Included intel_router into app (lite)"}
+{"ts":"2025-12-02T12:25:41.027277Z","level":"INFO","logger":"src.api.app","msg":"Included deep_analyze_router into app (lite)"}
+{"ts":"2025-12-02T12:25:41.120760Z","level":"INFO","logger":"src.api.app","msg":"Included endpoint_malware router (lite)"}
+{"ts":"2025-12-02T12:25:41.245853Z","level":"INFO","logger":"src.api.app","msg":"Included router decisions"}
+{"ts":"2025-12-02T12:25:41.293245Z","level":"INFO","logger":"src.api.app","msg":"Included router hopgraph_stream"}
+{"ts":"2025-12-02T12:25:41.350847Z","level":"INFO","logger":"src.api.app","msg":"Included router risk"}
+{"ts":"2025-12-02T12:25:41.436360Z","level":"INFO","logger":"src.api.app","msg":"Included router temporal"}
+{"ts":"2025-12-02T12:25:41.531052Z","level":"INFO","logger":"src.api.app","msg":"Included router upload"}
+{"ts":"2025-12-02T12:25:41.591570Z","level":"INFO","logger":"src.api.app","msg":"Included router stream_ingest"}
+{"ts":"2025-12-02T12:25:41.694486Z","level":"INFO","logger":"src.api.app","msg":"Included router csv"}
+{"ts":"2025-12-02T12:25:41.852671Z","level":"INFO","logger":"src.api.app","msg":"Included router soar"}
+{"ts":"2025-12-02T12:25:41.939262Z","level":"INFO","logger":"src.api.app","msg":"Included router dashboard"}
+{"ts":"2025-12-02T12:25:42.194388Z","level":"INFO","logger":"src.api.app","msg":"Included router integrations"}
+{"ts":"2025-12-02T12:25:42.316723Z","level":"INFO","logger":"src.api.app","msg":"Included router metrics_status"}
+{"ts":"2025-12-02T12:25:42.485975Z","level":"INFO","logger":"src.api.app","msg":"Included router custody"}
+{"ts":"2025-12-02T12:25:42.532769Z","level":"INFO","logger":"src.api.app","msg":"Included router artifact"}
+{"ts":"2025-12-02T12:25:42.566094Z","level":"INFO","logger":"src.api.app","msg":"Included router nlp"}
+{"ts":"2025-12-02T12:25:42.977667Z","level":"INFO","logger":"src.api.app","msg":"Included router sbom"}
+{"ts":"2025-12-02T12:25:42.987722Z","level":"INFO","logger":"src.api.app","msg":"Included router ebpf"}
+{"ts":"2025-12-02T12:25:42.997238Z","level":"INFO","logger":"src.api.app","msg":"Included router identity_reporting"}
+{"ts":"2025-12-02T12:25:43.151922Z","level":"INFO","logger":"src.api.app","msg":"Included router compliance"}
+{"ts":"2025-12-02T12:25:43.160925Z","level":"INFO","logger":"src.api.app","msg":"Included router report"}
+{"ts":"2025-12-02T12:25:43.172766Z","level":"INFO","logger":"src.api.app","msg":"Included router automations"}
+{"ts":"2025-12-02T12:25:43.217519Z","level":"INFO","logger":"src.api.app","msg":"Included router feedback"}
+{"ts":"2025-12-02T12:25:43.220514Z","level":"INFO","logger":"src.api.app","msg":"Included router dev"}
+{"ts":"2025-12-02T12:25:43.225516Z","level":"INFO","logger":"src.api.app","msg":"Included router admin_rules"}
+{"ts":"2025-12-02T12:25:43.235522Z","level":"INFO","logger":"src.api.app","msg":"Included router decision_feedback"}
+{"ts":"2025-12-02T12:25:43.236525Z","level":"INFO","logger":"src.api.app","msg":"Included router factors"}
+{"ts":"2025-12-02T12:25:43.249687Z","level":"INFO","logger":"src.api.app","msg":"Included router suppression_admin"}
+{"ts":"2025-12-02T12:25:43.261117Z","level":"INFO","logger":"src.api.app","msg":"Included router unified_ingest"}
+{"ts":"2025-12-02T12:25:43.275159Z","level":"INFO","logger":"src.api.app","msg":"Included router risk_config_admin"}
+{"ts":"2025-12-02T12:25:43.284879Z","level":"INFO","logger":"src.api.app","msg":"Included router scenario_replay"}
+{"ts":"2025-12-02T12:25:43.285880Z","level":"INFO","logger":"src.api.app","msg":"Included router network_ingest"}
+{"ts":"2025-12-02T12:25:43.286880Z","level":"INFO","logger":"src.api.app","msg":"Included router cloud_ingest"}
+{"ts":"2025-12-02T12:25:43.287880Z","level":"INFO","logger":"src.api.app","msg":"Included router app_ingest"}
+{"ts":"2025-12-02T12:25:43.288881Z","level":"INFO","logger":"src.api.app","msg":"Included router identity_ingest"}
+{"ts":"2025-12-02T12:25:43.290882Z","level":"INFO","logger":"src.api.app","msg":"Included router decision_confidence"}
+{"ts":"2025-12-02T12:25:43.292878Z","level":"INFO","logger":"src.api.app","msg":"Included router node_factors"}
+{"ts":"2025-12-02T12:25:43.294416Z","level":"INFO","logger":"src.api.app","msg":"Included router emitted_factors"}
+{"ts":"2025-12-02T12:25:43.322409Z","level":"INFO","logger":"src.api.app","msg":"Included router graph_session"}
+{"ts":"2025-12-02T12:25:43.332959Z","level":"INFO","logger":"src.api.app","msg":"Included router suggestions"}
+{"ts":"2025-12-02T12:25:43.334956Z","level":"INFO","logger":"src.api.app","msg":"Included router config"}
+{"ts":"2025-12-02T12:25:43.336957Z","level":"INFO","logger":"src.api.app","msg":"Included router assessments"}
+{"ts":"2025-12-02T12:25:43.352521Z","level":"INFO","logger":"src.api.app","msg":"Included router tier2"}
+{"ts":"2025-12-02T12:25:43.370199Z","level":"INFO","logger":"src.api.app","msg":"Included router playbooks"}
+{"ts":"2025-12-02T12:25:43.380682Z","level":"INFO","logger":"src.api.app","msg":"Included router identity_hopgraph_facade"}
+{"ts":"2025-12-02T12:25:43.387932Z","level":"INFO","logger":"src.api.app","msg":"Included router cooccurrence_admin"}
+{"ts":"2025-12-02T12:25:43.392937Z","level":"INFO","logger":"src.api.app","msg":"Included router endpoint_malware"}
+{"ts":"2025-12-02T12:25:43.420946Z","level":"INFO","logger":"src.api.app","msg":"Included router isms"}
+{"ts":"2025-12-02T12:25:43.422940Z","level":"INFO","logger":"src.api.app","msg":"Included SLO metrics router"}
+{"ts":"2025-12-02T12:25:47.427271Z","level":"INFO","logger":"src.api.app","msg":"Route inventory audit: 323 routes, 12 allowlisted, 323 extras"}
+{"ts":"2025-12-02T12:25:47.643693Z","level":"WARNING","logger":"src.api.app","msg":"Routes not in allowlist (first 25): /api/v1/actions/audit POST, /api/v1/admin/autogen/toggle POST, /api/v1/admin/cooccurrence/pruner/start POST, /api/v1/admin/cooccurrence/pruner/status GET, /api/v1/admin/cooccurrence/pruner/stop POST, /api/v1/admin/rules GET, /api/v1/admin/rules POST, /api/v1/admin/rules/reset POST, /api/v1/admin/scoring/weights POST, /api/v1/admin/suppression/ GET, /api/v1/admin/suppression/reload POST, /api/v1/admin/suppression/set POST, /api/v1/ai/force_external POST, /api/v1/analysis/session/start POST, /api/v1/analysis/session/{session_id}/cancel POST, /api/v1/analysis/session/{session_id}/status GET, /api/v1/api_keys/audit GET, /api/v1/api_keys/rotate POST, /api/v1/api_security/ingest POST, /api/v1/api_security/summary GET, /api/v1/app/ingest POST, /api/v1/artifacts/analyze_batch POST, /api/v1/artifacts/list GET, /api/v1/assessments/admin/consume_retrain POST, /api/v1/assessments/assessments/{assessment_id}/evidence/{cache_key} GET"}
+{"ts":"2025-12-02T12:25:47.652355Z","level":"INFO","logger":"src.api.app","msg":"Mounting React frontend at /react from D:\\AI\\Threat_thy_sniffer\\frontend\\react\\dist"}
+{"ts":"2025-12-02T12:25:47.654267Z","level":"INFO","logger":"src.api.app","msg":"Mounting SPA frontend at /spa from D:\\AI\\Threat_thy_sniffer\\frontend\\spa"}
+{"ts":"2025-12-02T12:25:47.989475Z","level":"INFO","logger":"src.api.app","msg":"Included unified ingestion controller router"}
+{"ts":"2025-12-02T12:25:49.085379Z","level":"INFO","logger":"src.tasks.llm_feedback_job","msg":"Registered LLM feedback scheduler (interval=86400)"}
+{"ts":"2025-12-02T12:25:49.086381Z","level":"INFO","logger":"src.embedding.scheduler","msg":"Registered embedding scheduler (interval=300)"}
+{"ts":"2025-12-02T12:25:49.099476Z","level":"INFO","logger":"api.app","msg":"PLATFORM_LITE_INIT active: skipping initialize_platform_components heavy init"}
+{"ts":"2025-12-02T12:25:49.142499Z","level":"INFO","logger":"api.app","msg":"register_core_routers called (full=True)"}
+{"ts":"2025-12-02T12:25:49.181912Z","level":"INFO","logger":"api.app","msg":"Included decisions_router into app (lite)"}
+{"ts":"2025-12-02T12:25:49.186902Z","level":"INFO","logger":"api.app","msg":"Included hopgraph_stream_router into app"}
+{"ts":"2025-12-02T12:25:49.188901Z","level":"INFO","logger":"api.app","msg":"Included config_router into app (lite)"}
+{"ts":"2025-12-02T12:25:49.189914Z","level":"INFO","logger":"api.app","msg":"Included assessments_router into app (lite)"}
+{"ts":"2025-12-02T12:25:49.193540Z","level":"INFO","logger":"api.app","msg":"Included report_router into app (lite)"}
+{"ts":"2025-12-02T12:25:49.210193Z","level":"INFO","logger":"api.app","msg":"Included tier2_router into app (lite)"}
+{"ts":"2025-12-02T12:25:49.289447Z","level":"INFO","logger":"api.app","msg":"Included integrations_router into app (lite)"}
+{"ts":"2025-12-02T12:25:49.310082Z","level":"INFO","logger":"api.app","msg":"Included intel_router into app (lite)"}
+{"ts":"2025-12-02T12:25:49.352547Z","level":"INFO","logger":"api.app","msg":"Included deep_analyze_router into app (lite)"}
+{"ts":"2025-12-02T12:25:49.357558Z","level":"INFO","logger":"api.app","msg":"Included endpoint_malware router (lite)"}
+{"ts":"2025-12-02T12:25:49.376911Z","level":"INFO","logger":"api.app","msg":"Included router decisions"}
+{"ts":"2025-12-02T12:25:49.382428Z","level":"INFO","logger":"api.app","msg":"Included router hopgraph_stream"}
+{"ts":"2025-12-02T12:25:49.388683Z","level":"INFO","logger":"api.app","msg":"Included router risk"}
+{"ts":"2025-12-02T12:25:49.397959Z","level":"INFO","logger":"api.app","msg":"Included router temporal"}
+{"ts":"2025-12-02T12:25:49.426272Z","level":"INFO","logger":"api.app","msg":"Included router upload"}
+{"ts":"2025-12-02T12:25:49.431707Z","level":"INFO","logger":"api.app","msg":"Included router stream_ingest"}
+{"ts":"2025-12-02T12:25:49.479373Z","level":"INFO","logger":"api.app","msg":"Included router csv"}
+{"ts":"2025-12-02T12:25:49.498311Z","level":"INFO","logger":"api.app","msg":"Included router soar"}
+{"ts":"2025-12-02T12:25:49.513833Z","level":"INFO","logger":"api.app","msg":"Included router dashboard"}
+{"ts":"2025-12-02T12:25:49.581283Z","level":"INFO","logger":"api.app","msg":"Included router integrations"}
+{"ts":"2025-12-02T12:25:49.601613Z","level":"INFO","logger":"api.app","msg":"Included router metrics_status"}
+{"ts":"2025-12-02T12:25:49.606948Z","level":"INFO","logger":"api.app","msg":"Included router custody"}
+{"ts":"2025-12-02T12:25:49.616260Z","level":"INFO","logger":"api.app","msg":"Included router artifact"}
+{"ts":"2025-12-02T12:25:49.619261Z","level":"INFO","logger":"api.app","msg":"Included router nlp"}
+{"ts":"2025-12-02T12:25:49.632312Z","level":"INFO","logger":"api.app","msg":"Included router sbom"}
+{"ts":"2025-12-02T12:25:49.636364Z","level":"INFO","logger":"api.app","msg":"Included router ebpf"}
+{"ts":"2025-12-02T12:25:49.641749Z","level":"INFO","logger":"api.app","msg":"Included router identity_reporting"}
+{"ts":"2025-12-02T12:25:49.758557Z","level":"INFO","logger":"api.app","msg":"Included router compliance"}
+{"ts":"2025-12-02T12:25:49.764076Z","level":"INFO","logger":"api.app","msg":"Included router report"}
+{"ts":"2025-12-02T12:25:49.771146Z","level":"INFO","logger":"api.app","msg":"Included router automations"}
+{"ts":"2025-12-02T12:25:49.802946Z","level":"INFO","logger":"api.app","msg":"Included router feedback"}
+{"ts":"2025-12-02T12:25:49.807950Z","level":"INFO","logger":"api.app","msg":"Included router dev"}
+{"ts":"2025-12-02T12:25:49.814816Z","level":"INFO","logger":"api.app","msg":"Included router admin_rules"}
+{"ts":"2025-12-02T12:25:49.821820Z","level":"INFO","logger":"api.app","msg":"Included router decision_feedback"}
+{"ts":"2025-12-02T12:25:49.822814Z","level":"INFO","logger":"api.app","msg":"Included router factors"}
+{"ts":"2025-12-02T12:25:49.835502Z","level":"INFO","logger":"api.app","msg":"Included router suppression_admin"}
+{"ts":"2025-12-02T12:25:49.854261Z","level":"INFO","logger":"api.app","msg":"Included router unified_ingest"}
+{"ts":"2025-12-02T12:25:49.872289Z","level":"INFO","logger":"api.app","msg":"Included router risk_config_admin"}
+{"ts":"2025-12-02T12:25:49.883180Z","level":"INFO","logger":"api.app","msg":"Included router scenario_replay"}
+{"ts":"2025-12-02T12:25:49.885214Z","level":"INFO","logger":"api.app","msg":"Included router network_ingest"}
+{"ts":"2025-12-02T12:25:49.887214Z","level":"INFO","logger":"api.app","msg":"Included router cloud_ingest"}
+{"ts":"2025-12-02T12:25:49.889171Z","level":"INFO","logger":"api.app","msg":"Included router app_ingest"}
+{"ts":"2025-12-02T12:25:49.891174Z","level":"INFO","logger":"api.app","msg":"Included router identity_ingest"}
+{"ts":"2025-12-02T12:25:49.893126Z","level":"INFO","logger":"api.app","msg":"Included router decision_confidence"}
+{"ts":"2025-12-02T12:25:49.893126Z","level":"INFO","logger":"api.app","msg":"Included router node_factors"}
+{"ts":"2025-12-02T12:25:49.901841Z","level":"INFO","logger":"api.app","msg":"Included router emitted_factors"}
+{"ts":"2025-12-02T12:25:49.932198Z","level":"INFO","logger":"api.app","msg":"Included router graph_session"}
+{"ts":"2025-12-02T12:25:49.940190Z","level":"INFO","logger":"api.app","msg":"Included router suggestions"}
+{"ts":"2025-12-02T12:25:49.943195Z","level":"INFO","logger":"api.app","msg":"Included router config"}
+{"ts":"2025-12-02T12:25:49.943561Z","level":"INFO","logger":"api.app","msg":"Included router assessments"}
+{"ts":"2025-12-02T12:25:49.963123Z","level":"INFO","logger":"api.app","msg":"Included router tier2"}
+{"ts":"2025-12-02T12:25:49.978126Z","level":"INFO","logger":"api.app","msg":"Included router playbooks"}
+{"ts":"2025-12-02T12:25:49.993370Z","level":"INFO","logger":"api.app","msg":"Included router identity_hopgraph_facade"}
+{"ts":"2025-12-02T12:25:50.003586Z","level":"INFO","logger":"api.app","msg":"Included router cooccurrence_admin"}
+{"ts":"2025-12-02T12:25:50.008584Z","level":"INFO","logger":"api.app","msg":"Included router endpoint_malware"}
+{"ts":"2025-12-02T12:25:50.036251Z","level":"INFO","logger":"api.app","msg":"Included router isms"}
+{"ts":"2025-12-02T12:25:50.039254Z","level":"INFO","logger":"api.app","msg":"Included SLO metrics router"}
+{"ts":"2025-12-02T12:25:50.090785Z","level":"INFO","logger":"api.app","msg":"Route inventory audit: 323 routes, 12 allowlisted, 323 extras"}
+{"ts":"2025-12-02T12:25:50.141015Z","level":"WARNING","logger":"api.app","msg":"Routes not in allowlist (first 25): /api/v1/actions/audit POST, /api/v1/admin/autogen/toggle POST, /api/v1/admin/cooccurrence/pruner/start POST, /api/v1/admin/cooccurrence/pruner/status GET, /api/v1/admin/cooccurrence/pruner/stop POST, /api/v1/admin/rules GET, /api/v1/admin/rules POST, /api/v1/admin/rules/reset POST, /api/v1/admin/scoring/weights POST, /api/v1/admin/suppression/ GET, /api/v1/admin/suppression/reload POST, /api/v1/admin/suppression/set POST, /api/v1/ai/force_external POST, /api/v1/analysis/session/start POST, /api/v1/analysis/session/{session_id}/cancel POST, /api/v1/analysis/session/{session_id}/status GET, /api/v1/api_keys/audit GET, /api/v1/api_keys/rotate POST, /api/v1/api_security/ingest POST, /api/v1/api_security/summary GET, /api/v1/app/ingest POST, /api/v1/artifacts/analyze_batch POST, /api/v1/artifacts/list GET, /api/v1/assessments/admin/consume_retrain POST, /api/v1/assessments/assessments/{assessment_id}/evidence/{cache_key} GET"}
+{"ts":"2025-12-02T12:25:50.143016Z","level":"INFO","logger":"api.app","msg":"Mounting React frontend at /react from D:\\AI\\Threat_thy_sniffer\\frontend\\react\\dist"}
+{"ts":"2025-12-02T12:25:50.143649Z","level":"INFO","logger":"api.app","msg":"Mounting SPA frontend at /spa from D:\\AI\\Threat_thy_sniffer\\frontend\\spa"}
+{"ts":"2025-12-02T12:25:50.340284Z","level":"INFO","logger":"api.app","msg":"Included unified ingestion controller router"}
+{"ts":"2025-12-02T12:25:51.669268Z","level":"INFO","logger":"webhook_guard","msg":"WebhookGuardMiddleware using DB at :memory:"}
+INFO:     127.0.0.1:55693 - "GET /api/v1/status/dashboard HTTP/1.1" 401 Unauthorized
+{"ts":"2025-12-02T12:26:42.346211Z","level":"INFO","logger":"src.api.app","msg":"Serving LIVE Console frontend at root","correlation_id":"req-1764678402337","tenant_id":"default"}
+INFO:     127.0.0.1:55734 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55764 - "GET /api/v1/status/dashboard HTTP/1.1" 401 Unauthorized
+INFO:     127.0.0.1:56088 - "GET /api/v1/status/dashboard HTTP/1.1" 401 Unauthorized
+INFO:     127.0.0.1:56108 - "GET /api/v1/status/dashboard HTTP/1.1" 401 Unauthorized
+INFO:     127.0.0.1:56125 - "GET /api/v1/status/dashboard HTTP/1.1" 401 Unauthorized
+INFO:     127.0.0.1:56149 - "GET /api/v1/status/dashboard HTTP/1.1" 401 Unauthorized
+INFO:     127.0.0.1:56600 - "GET /api/v1/dev/info HTTP/1.1" 401 Unauthorized

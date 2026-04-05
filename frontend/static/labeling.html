@@ -1,0 +1,96 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Labeling Upload</title>
+  <style>body{background:#0f1720;color:#d1d5db;font-family:Inter,Segoe UI,Arial;padding:20px} .btn{background:#2563eb;color:white;padding:8px 12px;border-radius:6px;border:none}</style>
+</head>
+<body>
+  <h2>Labeling Upload</h2>
+  <form id="f" enctype="multipart/form-data">
+    <input id="file" type="file" accept=".csv" />
+    <button id="upload" class="btn" type="button">Upload CSV</button>
+  </form>
+  <p>CSV columns: decision_id,label,evidence,query_template,tenant_id</p>
+  <h3>Recent labels</h3>
+  <div id="list">Loading...</div>
+  <div style="margin-top:8px">
+    <button id="prev" class="btn" style="background:#475569">Prev</button>
+    <span id="pageinfo" style="margin:0 8px">Page 1</span>
+    <button id="next" class="btn" style="background:#475569">Next</button>
+  </div>
+  <div id="previewModal" style="display:none;position:fixed;left:20%;top:20%;width:60%;background:#021025;padding:16px;border-radius:8px;border:1px solid #334155">
+    <button id="closePreview" class="btn" style="background:#ef4444;margin-bottom:8px">Close</button>
+    <h4>Evidence Preview</h4>
+    <pre id="previewContent" style="white-space:pre-wrap;color:#cbd5e1"></pre>
+  </div>
+  <div id="editModal" style="display:none;position:fixed;left:25%;top:25%;width:50%;background:#021025;padding:16px;border-radius:8px;border:1px solid #334155">
+    <button id="closeEdit" class="btn" style="background:#ef4444;margin-bottom:8px">Close</button>
+    <h4>Edit Label</h4>
+    <form id="editForm">
+      <input type="hidden" id="edit_id" />
+      <div style="margin-bottom:8px"><label>Label: <input id="edit_label" /></label></div>
+      <div style="margin-bottom:8px"><label>Evidence: <input id="edit_evidence" style="width:100%" /></label></div>
+      <div style="margin-bottom:8px"><label>Query Template: <input id="edit_query" style="width:100%" /></label></div>
+      <button id="saveEdit" type="button" class="btn">Save</button>
+    </form>
+  </div>
+  <script>
+    async function refresh(){
+      const res = await fetch('/api/v1/labeling/list');
+      const j = await res.json();
+      const el = document.getElementById('list');
+      if(!j.ok){ el.innerText='no data'; return }
+        // pagination
+        window._label_rows = j.rows || [];
+        window._label_page = window._label_page || 0;
+        const pageSize = 20;
+        const start = window._label_page * pageSize;
+        const page = window._label_rows.slice(start, start+pageSize);
+        el.innerHTML = '<table border=0 cellpadding=6 style="width:100%"><tr><th>decision</th><th>label</th><th>evidence</th><th>query</th></tr>' + page.map((r,idx) => {
+          const evid = (r.evidence||'').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+          const q = (r.query_template||'').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+          return '<tr><td>'+ (r.decision_id||'') +'</td><td>'+ (r.label||'') +'</td><td><button data-idx="'+(start+idx)+'" class="viewE">View</button></td><td>'+ q +'</td><td><button data-idx="'+(start+idx)+'" class="editBtn">Edit</button></td></tr>'
+        }).join('') + '</table>';
+        document.getElementById('pageinfo').innerText = 'Page ' + (window._label_page+1) + ' / ' + Math.max(1, Math.ceil((window._label_rows||[]).length / pageSize));
+        Array.from(document.getElementsByClassName('viewE')).forEach(b => b.addEventListener('click', (ev)=>{
+          const idx = parseInt(ev.currentTarget.getAttribute('data-idx'));
+          const row = window._label_rows[idx];
+          if(!row) return;
+          document.getElementById('previewContent').innerText = (row.evidence || '');
+          document.getElementById('previewModal').style.display = 'block';
+        }));
+        Array.from(document.getElementsByClassName('editBtn')).forEach(b => b.addEventListener('click', (ev)=>{
+          const idx = parseInt(ev.currentTarget.getAttribute('data-idx'));
+          const row = window._label_rows[idx];
+          if(!row) return;
+          const id = row.id || row.ID || row.Id || row.id;
+          document.getElementById('edit_id').value = id;
+          document.getElementById('edit_label').value = row.label || '';
+          document.getElementById('edit_evidence').value = row.evidence || '';
+          document.getElementById('edit_query').value = row.query_template || '';
+          document.getElementById('editModal').style.display = 'block';
+        }));
+
+        document.getElementById('closeEdit').addEventListener('click', ()=>{ document.getElementById('editModal').style.display = 'none'; });
+        document.getElementById('saveEdit').addEventListener('click', async ()=>{
+          const payload = { label_id: parseInt(document.getElementById('edit_id').value), label: document.getElementById('edit_label').value, evidence: document.getElementById('edit_evidence').value, query_template: document.getElementById('edit_query').value };
+          try{
+            const res = await fetch('/api/v1/labeling/edit', {method:'PATCH', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload)});
+            if(res.ok){ alert('Saved'); document.getElementById('editModal').style.display='none'; refresh(); } else { alert('Save failed'); }
+          }catch(e){ alert('Save error'); }
+        });
+    }
+    document.getElementById('upload').addEventListener('click', async ()=>{
+      const file = document.getElementById('file').files[0];
+      if(!file) return alert('choose a file');
+      const fd = new FormData(); fd.append('file', file);
+      const res = await fetch('/api/v1/labeling/import/csv', {method:'POST', body: fd});
+      const j = await res.json();
+      alert('Inserted: '+ (j.inserted||0) + '\nErrors: '+ (j.errors? j.errors.length : 0));
+      await refresh();
+    });
+    refresh();
+  </script>
+</body>
+</html>

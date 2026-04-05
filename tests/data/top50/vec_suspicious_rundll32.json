@@ -1,0 +1,4 @@
+{
+  "process": "C:\\Windows\\System32\\rundll32.exe",
+  "cmdline": "rundll32.exe some.dll,EntryPoint /s"
+}

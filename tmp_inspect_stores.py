@@ -1,0 +1,10 @@
+import importlib, sys
+m = importlib.import_module('src.api.app')
+print('app module:', m, id(m))
+app_state = getattr(getattr(m,'app',None),'state',None)
+print('app.state.INCIDENT_STORE exists:', hasattr(app_state, 'INCIDENT_STORE'))
+print('app.state.INCIDENT_STORE id:', id(getattr(app_state, 'INCIDENT_STORE', None)))
+sm = importlib.import_module('src.api.server')
+print('server module:', sm, id(sm))
+print('server._INCIDENT_STORE id:', id(sm.__dict__.get('_INCIDENT_STORE')))
+print('sys.modules keys sample:', [k for k in list(sys.modules.keys()) if 'api' in k][:60])

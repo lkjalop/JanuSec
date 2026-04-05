@@ -1,0 +1,7 @@
+{
+  "id": "evt-ps-amsi-1",
+  "host": "host-d",
+  "user": "dave",
+  "command_line": "powershell -NoProfile -Command \"[Ref].Assembly.GetType('System.Management.Automation.AmsiUtils')\"; Bypass",
+  "net:beacon_periodic": true
+}

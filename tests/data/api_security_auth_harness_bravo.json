@@ -1,0 +1,47 @@
+[
+  {
+    "name": "bravo_business_flow_anomaly",
+    "event": {
+      "tenant_id": "tenant-bravo",
+      "uri": "/api/v1/payouts/batch",
+      "method": "POST",
+      "auth_user": "finance-bravo",
+      "business_flow": "payout",
+      "transaction_amount": 300000,
+      "risk_score": 0.9,
+      "geo_anomaly": true
+    },
+    "expected": {
+      "factors_contains": ["api:business_flow_anomaly"]
+    }
+  },
+  {
+    "name": "bravo_runbook_abuse",
+    "event": {
+      "tenant_id": "tenant-bravo",
+      "uri": "/api/v1/runbooks/execute",
+      "method": "POST",
+      "auth_user": "automation-bravo",
+      "auth_context": {
+        "scopes": ["automation:invoke"]
+      }
+    },
+    "expected": {
+      "factors_contains": ["api:automation_runbook_abuse"]
+    }
+  },
+  {
+    "name": "bravo_phish_bulk",
+    "event": {
+      "tenant_id": "tenant-bravo",
+      "uri": "/api/v1/messages/bulk/send",
+      "method": "POST",
+      "auth_user": "marketing-bravo",
+      "bulk_recipients": 500,
+      "template_name": "phish-training"
+    },
+    "expected": {
+      "factors_contains": ["api:phish_campaign_bulk_send"]
+    }
+  }
+]

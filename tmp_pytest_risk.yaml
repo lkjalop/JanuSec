@@ -1,0 +1,2 @@
+net:beacon_periodic: 0.1
+dns:tunnel_suspected: 0.05

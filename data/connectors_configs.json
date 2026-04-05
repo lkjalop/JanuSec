@@ -1,0 +1,10 @@
+{
+  "purview": {
+    "allow_bodies": false,
+    "tenant_policies": {
+      "tenant-a": {
+        "allow_bodies": false
+      }
+    }
+  }
+}

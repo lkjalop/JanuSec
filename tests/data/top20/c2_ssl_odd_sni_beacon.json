@@ -1,0 +1,4 @@
+{
+  "tls": true,
+  "sni": "weird_name_~_123"
+}

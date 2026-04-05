@@ -1,0 +1,4 @@
+{
+  "process": "powershell.exe",
+  "command_line": "powershell -NoProfile -Command \"Write-Host 'Hello'\""
+}

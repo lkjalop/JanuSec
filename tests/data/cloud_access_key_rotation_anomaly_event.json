@@ -1,0 +1,13 @@
+{
+  "iam_create_access_key": true,
+  "key_age_days": 180,
+  "active_key_count": 2,
+  "mfa_enabled": false,
+  "off_hours": true,
+  "domain": "cloud",
+  "provider": "aws",
+  "eventSource": "iam.amazonaws.com",
+  "eventName": "CreateAccessKey",
+  "userName": "developer-alice",
+  "factors": ["iam_create_access_key", "key_age_days", "active_key_count", "off_hours"]
+}

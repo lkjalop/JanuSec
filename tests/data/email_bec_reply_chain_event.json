@@ -1,0 +1,18 @@
+{
+  "thread_context": {
+    "participants": ["ceo", "finance", "vendor"],
+    "recent_replies": ["Re: Invoice update", "Please wire to new account immediately"],
+    "reply_chain": [
+      {"from_domain": "vendor.com", "reply_to_domain": "vendor-payments.com"},
+      {"from_domain": "vendor-payments.com", "reply_to_domain": "vendor-payments.com"}
+    ]
+  },
+  "attachments": [
+    {"filename": "invoice_update.docm"}
+  ],
+  "indicators": {
+    "urgency_language": true,
+    "reply_to_mismatch": true
+  },
+  "factors": ["bec_reply_chain", "vendor_spoof", "urgency_language", "reply_to_mismatch"]
+}

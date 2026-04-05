@@ -1,0 +1,76 @@
+{
+  "mitre": {
+    "T1059": {
+      "stride": [
+        "Tampering"
+      ],
+      "dread": 6.5,
+      "cvss": 7.2,
+      "controls": [
+        "NIST:SI-3",
+        "ISO27001:A.12.2.1",
+        "CIS-10.4"
+      ]
+    },
+    "T1190": {
+      "stride": [
+        "Elevation of Privilege"
+      ],
+      "dread": 7.2,
+      "cvss": 8.8,
+      "controls": [
+        "NIST:SI-2",
+        "ISO27001:A.12.6.1",
+        "CIS-7.4"
+      ]
+    },
+    "T1566": {
+      "stride": [
+        "Spoofing"
+      ],
+      "dread": 6.8,
+      "cvss": 7.5,
+      "controls": [
+        "NIST:AT-2",
+        "ISO27001:A.6.3",
+        "CIS-14.3"
+      ]
+    },
+    "T1021": {
+      "stride": [
+        "Elevation of Privilege"
+      ],
+      "dread": 6.9,
+      "cvss": 7.0,
+      "controls": [
+        "NIST:AC-17",
+        "ISO27001:A.13.1.1",
+        "CIS-12.6"
+      ]
+    },
+    "T1041": {
+      "stride": [
+        "Information Disclosure"
+      ],
+      "dread": 7.1,
+      "cvss": 7.4,
+      "controls": [
+        "NIST:SC-7",
+        "ISO27001:A.13.2.1",
+        "CIS-13.9"
+      ]
+    },
+    "T1053": {
+      "stride": [
+        "Tampering"
+      ],
+      "dread": 6.4,
+      "cvss": 6.8,
+      "controls": [
+        "NIST:SI-4",
+        "ISO27001:A.12.4.1",
+        "CIS-8.2"
+      ]
+    }
+  }
+}

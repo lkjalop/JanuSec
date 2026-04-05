@@ -1,0 +1,14 @@
+{
+  "responses": [
+    {
+      "contains": "summarize",
+      "response": {"text": "This is a mocked summary.", "model": "mock-1", "meta": {}}
+    }
+    ,
+    {
+      "contains": "malicious.example.com",
+      "response": {"text": "{\"verdict\": {\"summary\": \"Suspected compromise\", \"confidence\": 0.85}, \"evidence\": {\"items\": [{\"type\": \"domain\", \"value\": \"malicious.example.com\", \"confidence\": 0.9}]}}", "model": "mock-1", "meta": {}}
+    }
+  ],
+  "default": {"text": "Default mocked response.", "model": "mock-1", "meta": {}}
+}

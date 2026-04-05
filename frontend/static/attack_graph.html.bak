@@ -1,0 +1,230 @@
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Attack Graph Reconstruction (HopGraph)</title>
+<style>
+body{background:#0B0E14;color:#E8EBF0;font-family:Inter,Segoe UI,sans-serif;margin:0;padding:0}
+.wrap{max-width:1250px;margin:20px auto;padding:14px}
+.btn{padding:8px 14px;background:#1C2230;border:1px solid #2A3142;border-radius:6px;color:#E8EBF0;cursor:pointer;font-size:13px}
+.btn:hover{background:#223042}
+.card{background:#151922;border:1px solid #2A3142;border-radius:8px;margin-bottom:16px;padding:14px}
+.row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+.small{font-size:11px;color:#A8B2C3}
+svg{width:100%;height:520px;background:#10141C;border:1px solid #2A3142;border-radius:8px}
+.node{cursor:pointer}
+.label{font-size:11px;fill:#E8EBF0;font-family:Consolas,monospace}
+.badge{display:inline-block;padding:4px 8px;border-radius:999px;background:#1C2230;border:1px solid #2A3142;font-size:11px;margin:2px 4px 2px 0}
+.phase{background:#233155;border-color:#233155}
+.domain-email{background:#4A63E7}
+.domain-remote{background:#FF8A3C;color:#0B0E14}
+.domain-iam{background:#C779D0}
+.domain-network{background:#4DA6FF;color:#0B0E14}
+.domain-endpoint{background:#3FA860;color:#0B0E14}
+.domain-data{background:#E0C446;color:#0B0E14}
+.domain-api{background:#E54848}
+.domain-cloud{background:#666DFF}
+.code{font-family:Consolas,monospace;font-size:11px}
+@media(max-width:960px){svg{height:640px}}
+</style></head>
+<body>
+<div class="wrap">
+  <div class="row">
+    <a class="btn" href="/static/janusec-platform-complete-LIVE.html">← Console</a>
+    <button class="btn" id="btnBuildDemo">Build Demo Session</button>
+    <button class="btn" id="btnAdaptive">Adaptive EWMA</button>
+    <button class="btn" id="btnExplain">Explain Graph</button>
+  </div>
+  <h2 style="margin:10px 0 4px">Attack Graph Reconstruction (HopGraph)</h2>
+  <div class="small">Lightweight visualization of correlated multi-domain events. Demo builds a session via /api/v1/graph/session/build and renders domain-phase hops (email → endpoint → network → data exfil). Explanation blends MITRE, STRIDE and DREAD weighting stubs.</div>
+  <div class="card">
+    <h3 style="margin:0 0 6px">Graph</h3>
+    <svg id="graphSvg" viewBox="0 0 1200 520"></svg>
+    <div id="metricsBar" style="margin-top:10px;font-size:12px;color:#A8B2C3"></div>
+  </div>
+  <div class="card">
+    <h3 style="margin:0 0 6px">Session Summary</h3>
+    <div id="sessionSummary" class="small">No session yet.</div>
+    <pre id="rawSession" class="code" style="margin-top:8px; max-height:220px; overflow:auto; background:#10141C; padding:8px; border:1px solid #2A3142; border-radius:6px"></pre>
+    <div class="small" style="margin-top:10px">Saved Sessions (TTL aware)</div>
+    <div id="sessionList" class="small" style="margin-top:4px"></div>
+    <div style="margin-top:8px" class="small">Session Controls: <button class="btn" id="btnRefreshSessions">Refresh</button> <button class="btn" id="btnClearExpired">Clear Expired</button></div>
+  </div>
+  <div class="card">
+    <h3 style="margin:0 0 6px">Explanation</h3>
+    <div id="explainPanel" class="small">Click "Explain Graph" to generate an AI-style narrative using threat modeling layers (heuristic stub).</div>
+    <pre id="rawExplain" class="code" style="margin-top:8px; max-height:200px; overflow:auto; background:#10141C; padding:8px; border:1px solid #2A3142; border-radius:6px"></pre>
+    <div class="small" style="margin-top:10px">Adaptive EWMA Alpha Curve</div>
+    <div style="display:flex;gap:8px;align-items:center;margin-top:6px">
+      <label class="small">EWMA Alpha:</label>
+      <input id="alphaSlider" type="range" min="0" max="1" step="0.01" value="0.6" style="flex:1" />
+      <input id="alphaValue" type="number" min="0" max="1" step="0.01" value="0.6" style="width:70px;background:#0B0E14;color:#E8EBF0;border:1px solid #2A3142;padding:6px;border-radius:6px" />
+    </div>
+    <pre id="alphaCurve" class="code" style="margin-top:6px; max-height:160px; overflow:auto; background:#10141C; padding:6px; border:1px solid #2A3142; border-radius:6px"></pre>
+    <div style="margin-top:8px" class="small">Replay Controls: <select id="replaySelect" style="margin-left:8px"></select> <button class="btn" id="btnReplay">Replay</button></div>
+  </div>
+</div>
+<script>
+function H(){ try{ return {'x-api-key': localStorage.getItem('apiKey')||'devkey123'} }catch(_){ return {'x-api-key':'devkey123'} } }
+let _session = null; let _adaptive = false;
+// Demo nodes & phases (will be overridden if backend returns correlation summary with factors)
+const PHASES = ['Initial Access','Execution','Persistence','Privilege Esc','Defense Evasion','Lateral Movement','Exfiltration'];
+const DOMAIN_ORDER = ['email','remote','iam','network','endpoint','data','api','cloud'];
+function buildDemoPayload(){
+  return {
+    session_ids: ['demo-email','demo-endpoint','demo-network'],
+    correlate: true,
+    ewma: true,
+    mapping: { user:'user', host:'host', sha256:'file_hash' },
+    // omit alpha when adaptive toggle on
+    ...( _adaptive ? {} : { ewma_alpha: Number((document.getElementById('alphaValue')||{value:0.6}).value) } )
+  };
+}
+async function buildSession(){
+  try{
+    const payload = buildDemoPayload();
+    const r = await fetch('/api/v1/graph/session/build', { method:'POST', headers: { 'Content-Type':'application/json', ...H() }, body: JSON.stringify(payload) });
+    const j = await r.json(); if(!r.ok){ sessionSummary.textContent = 'Error building session: '+(j.detail||r.status); return; }
+    _session = j; renderSession(j);
+  }catch(e){ sessionSummary.textContent='Session error'; }
+}
+function renderSession(j){
+  const sdiv = document.getElementById('sessionSummary');
+  sdiv.textContent = `Correlation pairs: ${(Object.keys(j.correlation||{}).length)} • Alpha: ${j.ewma_alpha} • Factors: ${(j.factors||[]).length}`;
+  document.getElementById('rawSession').textContent = JSON.stringify(j,null,2);
+  drawGraph(j);
+  // Metrics bar
+  try{
+    const dd = j.domain_diversity_score; const ms = j.mapping_semantics_score; const conf = j.confidence; const verdict = j.verdict;
+    document.getElementById('metricsBar').textContent = `Verdict: ${verdict} • Confidence ${conf} • Domain Diversity ${dd} • Mapping Semantics ${ms}`;
+  }catch(_){ }
+  loadSessionList();
+}
+function nodeColor(domain){
+  switch(domain){
+    case 'email': return '#4A63E7';
+    case 'remote': return '#FF8A3C';
+    case 'iam': return '#C779D0';
+    case 'network': return '#4DA6FF';
+    case 'endpoint': return '#3FA860';
+    case 'data': return '#E0C446';
+    case 'api': return '#E54848';
+    case 'cloud': return '#666DFF';
+    default: return '#999';
+  }
+}
+function drawGraph(j){
+  const svg = document.getElementById('graphSvg');
+  while(svg.firstChild) svg.removeChild(svg.firstChild);
+  const width = 1200, height = 520; const padding = 40;
+  const domains = DOMAIN_ORDER.slice();
+  // Layout horizontally
+  const gap = (width - padding*2) / (domains.length-1);
+  const yBase = height/2;
+  const nodes = domains.map((d,i)=>({ id:d, x: padding + i*gap, y: yBase + ( (i%2? -60:60) ) }));
+  // Edges from email → endpoint → network → data (demo path)
+  const path = ['email','endpoint','network','data'];
+  const edges = path.slice(1).map((target,idx)=>({ source: path[idx], target }));
+  // Draw edges
+  edges.forEach(e=>{
+    const s = nodes.find(n=>n.id===e.source); const t = nodes.find(n=>n.id===e.target);
+    if(!s||!t) return; const line = document.createElementNS('http://www.w3.org/2000/svg','line');
+    line.setAttribute('x1',s.x); line.setAttribute('y1',s.y); line.setAttribute('x2',t.x); line.setAttribute('y2',t.y);
+    line.setAttribute('stroke','#2A3142'); line.setAttribute('stroke-width','2'); line.setAttribute('marker-end','url(#arrow)'); svg.appendChild(line);
+  });
+  // Arrow marker
+  const defs = document.createElementNS('http://www.w3.org/2000/svg','defs');
+  const marker = document.createElementNS('http://www.w3.org/2000/svg','marker'); marker.setAttribute('id','arrow'); marker.setAttribute('viewBox','0 0 10 10'); marker.setAttribute('refX','7'); marker.setAttribute('refY','5'); marker.setAttribute('markerWidth','6'); marker.setAttribute('markerHeight','6'); marker.setAttribute('orient','auto');
+  const poly = document.createElementNS('http://www.w3.org/2000/svg','path'); poly.setAttribute('d','M0 0 L10 5 L0 10 Z'); poly.setAttribute('fill','#2A3142'); marker.appendChild(poly); defs.appendChild(marker); svg.appendChild(defs);
+  // Draw nodes
+  nodes.forEach(n=>{
+    const g = document.createElementNS('http://www.w3.org/2000/svg','g'); g.setAttribute('class','node');
+    const circle = document.createElementNS('http://www.w3.org/2000/svg','circle'); circle.setAttribute('cx',n.x); circle.setAttribute('cy',n.y); circle.setAttribute('r',34); circle.setAttribute('fill',nodeColor(n.id)); circle.setAttribute('stroke','#0B0E14'); circle.setAttribute('stroke-width','2');
+    const text = document.createElementNS('http://www.w3.org/2000/svg','text'); text.setAttribute('x',n.x); text.setAttribute('y',n.y+4); text.setAttribute('text-anchor','middle'); text.setAttribute('class','label'); text.textContent=n.id;
+    g.appendChild(circle); g.appendChild(text); svg.appendChild(g);
+  });
+  // Annotate phases for path nodes
+  path.forEach((d,i)=>{
+    const node = nodes.find(n=>n.id===d); if(!node) return; const phase = PHASES[i]||'Phase';
+    const text = document.createElementNS('http://www.w3.org/2000/svg','text'); text.setAttribute('x',node.x); text.setAttribute('y',node.y-46); text.setAttribute('text-anchor','middle'); text.setAttribute('class','label'); text.textContent=phase; text.style.fontSize='10px'; text.style.fill='#A8B2C3'; svg.appendChild(text);
+  });
+}
+function explainGraph(){
+  if(!_session){ document.getElementById('explainPanel').textContent='Build a session first.'; return; }
+  // Heuristic explanation using session factors
+  const f = _session.factors||[]; const dread = (f.filter(x=>/dread:/.test(x)).length); const kev = f.some(x=>/vuln:kev_listed/.test(x));
+  const narrative = [
+    'Attack progression follows multi-domain path: email → endpoint → network → data exfil.',
+    'Correlated artifacts aggregated via HopGraph; EWMA alpha '+_session.ewma_alpha+'.',
+    'Framework overlays: MITRE Initial Access (T1566 phishing assumed), Execution (T1059), Lateral hints, Exfiltration (T1041 surrogate).',
+    'STRIDE dimensions represented: Tampering (macro payload), Information Disclosure (data node), Repudiation minimal.',
+    'DREAD score proxy (factor count heuristic): '+ dread +' high-impact indicators.',
+    kev ? 'KEV listed vulnerability increases exploitability and urgency.' : 'No KEV-listed vulns surfaced in this path.',
+    'Recommended playbooks: (1) Email quarantine & user reset, (2) Endpoint isolate & forensic capture, (3) Network egress block for IOC domains, (4) Data access review & revoke risky tokens.',
+    'Confidence derived from overlap density '+Object.keys(_session.correlation||{}).length+' and factor entropy '+(f.length)+'.'
+  ].join('\n');
+  document.getElementById('explainPanel').textContent='Narrative generated.';
+  document.getElementById('rawExplain').textContent=narrative;
+}
+async function loadSessionList(){
+  try{
+    const r = await fetch('/api/v1/graph/session/list', { headers: H() });
+    const j = await r.json();
+    if(!r.ok){ return; }
+    const el = document.getElementById('sessionList');
+    el.innerHTML = '';
+    (j.sessions||[]).forEach(s=>{
+      const div = document.createElement('div');
+      div.textContent = `${s.session_id} • ${s.verdict} • conf ${s.confidence} • age ${s.age_seconds}s` + (s.expired? ' • expired':'');
+      el.appendChild(div);
+    });
+    // populate replay select
+    try{
+      const sel = document.getElementById('replaySelect'); sel.innerHTML = '';
+      (j.sessions||[]).forEach(s=>{ const opt = document.createElement('option'); opt.value = s.session_id; opt.textContent = `${s.session_id} • ${s.verdict} • ${s.age_seconds}s` + (s.expired? ' • expired':'' ); sel.appendChild(opt); });
+    }catch(e){ }
+  }catch(e){ }
+}
+// Session controls
+document.getElementById('btnRefreshSessions').onclick = loadSessionList;
+document.getElementById('btnClearExpired').onclick = async ()=>{
+  try{
+    const r = await fetch('/api/v1/graph/session/cleanup?expired=true', { method: 'POST', headers: H() });
+    const j = await r.json();
+    loadSessionList();
+    alert('Cleanup completed: '+(j.removed||0)+' removed');
+  }catch(e){ alert('Cleanup failed'); }
+};
+
+// EWMA slider wiring
+try{
+  const alphaSlider = document.getElementById('alphaSlider'); const alphaValue = document.getElementById('alphaValue');
+  alphaSlider.oninput = ()=>{ alphaValue.value = alphaSlider.value; };
+  alphaValue.onchange = ()=>{ alphaSlider.value = alphaValue.value; };
+}catch(e){}
+
+// Replay button
+document.getElementById('btnReplay').onclick = async ()=>{
+  const sel = document.getElementById('replaySelect'); if(!sel || !sel.value){ alert('Select a session to replay'); return; }
+  try{
+    const r = await fetch('/api/v1/graph/session/'+encodeURIComponent(sel.value), { headers: H() });
+    const j = await r.json(); if(!r.ok){ alert('Replay failed'); return; }
+    _session = j.summary || j;
+    renderSession(_session);
+    alert('Replayed: '+sel.value);
+  }catch(e){ alert('Replay error'); }
+};
+async function loadAlphaCurve(){
+  try{
+    const r = await fetch('/api/v1/graph/session/alpha_curve', { headers: H() });
+    const j = await r.json();
+    if(!r.ok) return;
+    document.getElementById('alphaCurve').textContent = JSON.stringify(j.curve||[], null, 2);
+  }catch(e){ }
+}
+// Wire buttons
+ document.getElementById('btnBuildDemo').onclick = buildSession;
+ document.getElementById('btnAdaptive').onclick = ()=>{ _adaptive=!_adaptive; document.getElementById('btnAdaptive').textContent = _adaptive? 'Adaptive ON':'Adaptive EWMA'; };
+ document.getElementById('btnExplain').onclick = explainGraph;
+ // Initial draw (empty baseline)
+ drawGraph({});
+ loadAlphaCurve();
+</script>
+</body></html>

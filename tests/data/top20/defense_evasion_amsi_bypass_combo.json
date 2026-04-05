@@ -1,0 +1,4 @@
+{
+  "action": "amsi_bypass",
+  "post_activity": "powershell_exec"
+}

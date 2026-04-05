@@ -1,0 +1,861 @@
+[
+  {
+    "source_file": "email.csv",
+    "raw": {
+      "message_id": "<msg-1@phish.example>",
+      "from": "ceo@trusted.example",
+      "to": "alice@company.local",
+      "subject": "Important: Invoice Attached",
+      "body": "Please review the attached invoice and enable macros in the document. The file is at http://203.0.113.45/report.doc",
+      "ts": "1700000000.0"
+    },
+    "enrichment": {
+      "canonical": {
+        "src_host": "ceo@trusted.example",
+        "dst_email": "alice@company.local",
+        "url": "http://203.0.113.45/report.doc",
+        "score": 0.3
+      },
+      "steps": [
+        {
+          "stage": 1,
+          "action": "parse",
+          "result": {
+            "message_id": "<msg-1@phish.example>",
+            "from": "ceo@trusted.example",
+            "to": "alice@company.local",
+            "subject": "Important: Invoice Attached",
+            "body": "Please review the attached invoice and enable macros in the document. The file is at http://203.0.113.45/report.doc",
+            "ts": "1700000000.0"
+          },
+          "ts": 1766521201.52672
+        },
+        {
+          "stage": 2,
+          "action": "extract_url",
+          "result": {
+            "url": "http://203.0.113.45/report.doc"
+          },
+          "ts": 1766521201.52672
+        },
+        {
+          "stage": 3,
+          "action": "heuristic_score",
+          "result": {
+            "score": 0.3
+          },
+          "ts": 1766521201.52672
+        },
+        {
+          "stage": 4,
+          "action": "map_to_canonical",
+          "result": {
+            "src_host": "ceo@trusted.example",
+            "dst_email": "alice@company.local",
+            "url": "http://203.0.113.45/report.doc",
+            "score": 0.3
+          },
+          "ts": 1766521201.52672
+        },
+        {
+          "stage": 5,
+          "action": "ingest",
+          "result": {
+            "status": "ok"
+          },
+          "ts": 1766521201.52672
+        }
+      ]
+    }
+  },
+  {
+    "source_file": "email.csv",
+    "raw": {
+      "message_id": "<msg-2@phish.example>",
+      "from": "it@trusted.example",
+      "to": "bob@company.local",
+      "subject": "Update Required",
+      "body": "Please update your credentials at http://198.51.100.22/login",
+      "ts": "1700000050.0"
+    },
+    "enrichment": {
+      "canonical": {
+        "src_host": "it@trusted.example",
+        "dst_email": "bob@company.local",
+        "url": "http://198.51.100.22/login",
+        "score": 0.3
+      },
+      "steps": [
+        {
+          "stage": 1,
+          "action": "parse",
+          "result": {
+            "message_id": "<msg-2@phish.example>",
+            "from": "it@trusted.example",
+            "to": "bob@company.local",
+            "subject": "Update Required",
+            "body": "Please update your credentials at http://198.51.100.22/login",
+            "ts": "1700000050.0"
+          },
+          "ts": 1766521201.52672
+        },
+        {
+          "stage": 2,
+          "action": "extract_url",
+          "result": {
+            "url": "http://198.51.100.22/login"
+          },
+          "ts": 1766521201.52672
+        },
+        {
+          "stage": 3,
+          "action": "heuristic_score",
+          "result": {
+            "score": 0.3
+          },
+          "ts": 1766521201.52672
+        },
+        {
+          "stage": 4,
+          "action": "map_to_canonical",
+          "result": {
+            "src_host": "it@trusted.example",
+            "dst_email": "bob@company.local",
+            "url": "http://198.51.100.22/login",
+            "score": 0.3
+          },
+          "ts": 1766521201.52672
+        },
+        {
+          "stage": 5,
+          "action": "ingest",
+          "result": {
+            "status": "ok"
+          },
+          "ts": 1766521201.52672
+        }
+      ]
+    }
+  },
+  {
+    "source_file": "edr.csv",
+    "raw": {
+      "host": "host-a.example.local",
+      "event_type": "proc_start",
+      "process": "evilproc.exe",
+      "cmdline": "C:\\\\Users\\\\alice\\\\evilproc.exe --run",
+      "file_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "ts": "1700000020.0"
+    },
+    "enrichment": {
+      "canonical": {
+        "file_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "score": 0.4
+      },
+      "steps": [
+        {
+          "stage": 1,
+          "action": "parse",
+          "result": {
+            "host": "host-a.example.local",
+            "event_type": "proc_start",
+            "process": "evilproc.exe",
+            "cmdline": "C:\\\\Users\\\\alice\\\\evilproc.exe --run",
+            "file_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "ts": "1700000020.0"
+          },
+          "ts": 1766521201.52672
+        },
+        {
+          "stage": 3,
+          "action": "heuristic_score",
+          "result": {
+            "score": 0.4
+          },
+          "ts": 1766521201.52672
+        },
+        {
+          "stage": 4,
+          "action": "map_to_canonical",
+          "result": {
+            "file_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "score": 0.4
+          },
+          "ts": 1766521201.52672
+        },
+        {
+          "stage": 5,
+          "action": "ingest",
+          "result": {
+            "status": "ok"
+          },
+          "ts": 1766521201.52672
+        }
+      ]
+    }
+  },
+  {
+    "source_file": "edr.csv",
+    "raw": {
+      "host": "host-a.example.local",
+      "event_type": "file_write",
+      "process": "evilproc.exe",
+      "cmdline": "C:\\\\Users\\\\alice\\\\doc.doc",
+      "file_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "ts": "1700000025.0"
+    },
+    "enrichment": {
+      "canonical": {
+        "file_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "score": 0.4
+      },
+      "steps": [
+        {
+          "stage": 1,
+          "action": "parse",
+          "result": {
+            "host": "host-a.example.local",
+            "event_type": "file_write",
+            "process": "evilproc.exe",
+            "cmdline": "C:\\\\Users\\\\alice\\\\doc.doc",
+            "file_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "ts": "1700000025.0"
+          },
+          "ts": 1766521201.52672
+        },
+        {
+          "stage": 3,
+          "action": "heuristic_score",
+          "result": {
+            "score": 0.4
+          },
+          "ts": 1766521201.52672
+        },
+        {
+          "stage": 4,
+          "action": "map_to_canonical",
+          "result": {
+            "file_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "score": 0.4
+          },
+          "ts": 1766521201.52672
+        },
+        {
+          "stage": 5,
+          "action": "ingest",
+          "result": {
+            "status": "ok"
+          },
+          "ts": 1766521201.52672
+        }
+      ]
+    }
+  },
+  {
+    "source_file": "edr.csv",
+    "raw": {
+      "host": "host-b.example.local",
+      "event_type": "proc_start",
+      "process": "wmiexec.exe",
+      "cmdline": "C:\\\\Windows\\\\System32\\\\wmiexec.exe -i",
+      "file_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "ts": "1700000100.0"
+    },
+    "enrichment": {
+      "canonical": {
+        "file_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "score": 0.4
+      },
+      "steps": [
+        {
+          "stage": 1,
+          "action": "parse",
+          "result": {
+            "host": "host-b.example.local",
+            "event_type": "proc_start",
+            "process": "wmiexec.exe",
+            "cmdline": "C:\\\\Windows\\\\System32\\\\wmiexec.exe -i",
+            "file_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "ts": "1700000100.0"
+          },
+          "ts": 1766521201.52672
+        },
+        {
+          "stage": 3,
+          "action": "heuristic_score",
+          "result": {
+            "score": 0.4
+          },
+          "ts": 1766521201.52672
+        },
+        {
+          "stage": 4,
+          "action": "map_to_canonical",
+          "result": {
+            "file_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "score": 0.4
+          },
+          "ts": 1766521201.52672
+        },
+        {
+          "stage": 5,
+          "action": "ingest",
+          "result": {
+            "status": "ok"
+          },
+          "ts": 1766521201.52672
+        }
+      ]
+    }
+  },
+  {
+    "source_file": "network.csv",
+    "raw": {
+      "src_ip": "10.1.1.5",
+      "dst_ip": "203.0.113.45",
+      "dst_port": "443",
+      "proto": "tcp",
+      "ts": "1700000000.0"
+    },
+    "enrichment": {
+      "canonical": {
+        "dst_ip": "203.0.113.45",
+        "score": 0.0
+      },
+      "steps": [
+        {
+          "stage": 1,
+          "action": "parse",
+          "result": {
+            "src_ip": "10.1.1.5",
+            "dst_ip": "203.0.113.45",
+            "dst_port": "443",
+            "proto": "tcp",
+            "ts": "1700000000.0"
+          },
+          "ts": 1766521201.5276947
+        },
+        {
+          "stage": 3,
+          "action": "heuristic_score",
+          "result": {
+            "score": 0.0
+          },
+          "ts": 1766521201.5276947
+        },
+        {
+          "stage": 4,
+          "action": "map_to_canonical",
+          "result": {
+            "dst_ip": "203.0.113.45",
+            "score": 0.0
+          },
+          "ts": 1766521201.5276947
+        },
+        {
+          "stage": 5,
+          "action": "ingest",
+          "result": {
+            "status": "ok"
+          },
+          "ts": 1766521201.5276947
+        }
+      ]
+    }
+  },
+  {
+    "source_file": "network.csv",
+    "raw": {
+      "src_ip": "10.1.1.5",
+      "dst_ip": "198.51.100.22",
+      "dst_port": "445",
+      "proto": "tcp",
+      "ts": "1700000030.0"
+    },
+    "enrichment": {
+      "canonical": {
+        "dst_ip": "198.51.100.22",
+        "score": 0.0
+      },
+      "steps": [
+        {
+          "stage": 1,
+          "action": "parse",
+          "result": {
+            "src_ip": "10.1.1.5",
+            "dst_ip": "198.51.100.22",
+            "dst_port": "445",
+            "proto": "tcp",
+            "ts": "1700000030.0"
+          },
+          "ts": 1766521201.5276947
+        },
+        {
+          "stage": 3,
+          "action": "heuristic_score",
+          "result": {
+            "score": 0.0
+          },
+          "ts": 1766521201.5276947
+        },
+        {
+          "stage": 4,
+          "action": "map_to_canonical",
+          "result": {
+            "dst_ip": "198.51.100.22",
+            "score": 0.0
+          },
+          "ts": 1766521201.5276947
+        },
+        {
+          "stage": 5,
+          "action": "ingest",
+          "result": {
+            "status": "ok"
+          },
+          "ts": 1766521201.5276947
+        }
+      ]
+    }
+  },
+  {
+    "source_file": "network.csv",
+    "raw": {
+      "src_ip": "10.1.1.6",
+      "dst_ip": "203.0.113.45",
+      "dst_port": "443",
+      "proto": "tcp",
+      "ts": "1700000100.0"
+    },
+    "enrichment": {
+      "canonical": {
+        "dst_ip": "203.0.113.45",
+        "score": 0.0
+      },
+      "steps": [
+        {
+          "stage": 1,
+          "action": "parse",
+          "result": {
+            "src_ip": "10.1.1.6",
+            "dst_ip": "203.0.113.45",
+            "dst_port": "443",
+            "proto": "tcp",
+            "ts": "1700000100.0"
+          },
+          "ts": 1766521201.5276947
+        },
+        {
+          "stage": 3,
+          "action": "heuristic_score",
+          "result": {
+            "score": 0.0
+          },
+          "ts": 1766521201.5276947
+        },
+        {
+          "stage": 4,
+          "action": "map_to_canonical",
+          "result": {
+            "dst_ip": "203.0.113.45",
+            "score": 0.0
+          },
+          "ts": 1766521201.5276947
+        },
+        {
+          "stage": 5,
+          "action": "ingest",
+          "result": {
+            "status": "ok"
+          },
+          "ts": 1766521201.5276947
+        }
+      ]
+    }
+  },
+  {
+    "source_file": "network.csv",
+    "raw": {
+      "src_ip": "10.1.1.5",
+      "dst_ip": "10.1.1.10",
+      "dst_port": "3389",
+      "proto": "tcp",
+      "ts": "1700000200.0"
+    },
+    "enrichment": {
+      "canonical": {
+        "dst_ip": "10.1.1.10",
+        "score": 0.0
+      },
+      "steps": [
+        {
+          "stage": 1,
+          "action": "parse",
+          "result": {
+            "src_ip": "10.1.1.5",
+            "dst_ip": "10.1.1.10",
+            "dst_port": "3389",
+            "proto": "tcp",
+            "ts": "1700000200.0"
+          },
+          "ts": 1766521201.5276947
+        },
+        {
+          "stage": 3,
+          "action": "heuristic_score",
+          "result": {
+            "score": 0.0
+          },
+          "ts": 1766521201.5276947
+        },
+        {
+          "stage": 4,
+          "action": "map_to_canonical",
+          "result": {
+            "dst_ip": "10.1.1.10",
+            "score": 0.0
+          },
+          "ts": 1766521201.5276947
+        },
+        {
+          "stage": 5,
+          "action": "ingest",
+          "result": {
+            "status": "ok"
+          },
+          "ts": 1766521201.5276947
+        }
+      ]
+    }
+  },
+  {
+    "source_file": "c2.csv",
+    "raw": {
+      "src_ip": "10.1.1.5",
+      "dst_ip": "203.0.113.45",
+      "dst_port": "443",
+      "payload_len": "512",
+      "ts": "1700000045.0"
+    },
+    "enrichment": {
+      "canonical": {
+        "dst_ip": "203.0.113.45",
+        "score": 0.0
+      },
+      "steps": [
+        {
+          "stage": 1,
+          "action": "parse",
+          "result": {
+            "src_ip": "10.1.1.5",
+            "dst_ip": "203.0.113.45",
+            "dst_port": "443",
+            "payload_len": "512",
+            "ts": "1700000045.0"
+          },
+          "ts": 1766521201.5276947
+        },
+        {
+          "stage": 3,
+          "action": "heuristic_score",
+          "result": {
+            "score": 0.0
+          },
+          "ts": 1766521201.5276947
+        },
+        {
+          "stage": 4,
+          "action": "map_to_canonical",
+          "result": {
+            "dst_ip": "203.0.113.45",
+            "score": 0.0
+          },
+          "ts": 1766521201.5276947
+        },
+        {
+          "stage": 5,
+          "action": "ingest",
+          "result": {
+            "status": "ok"
+          },
+          "ts": 1766521201.5276947
+        }
+      ]
+    }
+  },
+  {
+    "source_file": "c2.csv",
+    "raw": {
+      "src_ip": "10.1.1.5",
+      "dst_ip": "203.0.113.45",
+      "dst_port": "443",
+      "payload_len": "1024",
+      "ts": "1700000075.0"
+    },
+    "enrichment": {
+      "canonical": {
+        "dst_ip": "203.0.113.45",
+        "score": 0.0
+      },
+      "steps": [
+        {
+          "stage": 1,
+          "action": "parse",
+          "result": {
+            "src_ip": "10.1.1.5",
+            "dst_ip": "203.0.113.45",
+            "dst_port": "443",
+            "payload_len": "1024",
+            "ts": "1700000075.0"
+          },
+          "ts": 1766521201.5276947
+        },
+        {
+          "stage": 3,
+          "action": "heuristic_score",
+          "result": {
+            "score": 0.0
+          },
+          "ts": 1766521201.5276947
+        },
+        {
+          "stage": 4,
+          "action": "map_to_canonical",
+          "result": {
+            "dst_ip": "203.0.113.45",
+            "score": 0.0
+          },
+          "ts": 1766521201.5276947
+        },
+        {
+          "stage": 5,
+          "action": "ingest",
+          "result": {
+            "status": "ok"
+          },
+          "ts": 1766521201.5276947
+        }
+      ]
+    }
+  },
+  {
+    "source_file": "c2.csv",
+    "raw": {
+      "src_ip": "10.1.1.6",
+      "dst_ip": "198.51.100.22",
+      "dst_port": "8080",
+      "payload_len": "256",
+      "ts": "1700000150.0"
+    },
+    "enrichment": {
+      "canonical": {
+        "dst_ip": "198.51.100.22",
+        "score": 0.0
+      },
+      "steps": [
+        {
+          "stage": 1,
+          "action": "parse",
+          "result": {
+            "src_ip": "10.1.1.6",
+            "dst_ip": "198.51.100.22",
+            "dst_port": "8080",
+            "payload_len": "256",
+            "ts": "1700000150.0"
+          },
+          "ts": 1766521201.5276947
+        },
+        {
+          "stage": 3,
+          "action": "heuristic_score",
+          "result": {
+            "score": 0.0
+          },
+          "ts": 1766521201.5276947
+        },
+        {
+          "stage": 4,
+          "action": "map_to_canonical",
+          "result": {
+            "dst_ip": "198.51.100.22",
+            "score": 0.0
+          },
+          "ts": 1766521201.5276947
+        },
+        {
+          "stage": 5,
+          "action": "ingest",
+          "result": {
+            "status": "ok"
+          },
+          "ts": 1766521201.5276947
+        }
+      ]
+    }
+  },
+  {
+    "source_file": "endpoint.csv",
+    "raw": {
+      "host": "host-a.example.local",
+      "process": "explorer.exe",
+      "process_path": "C:\\Windows\\explorer.exe",
+      "pid": "1234",
+      "ts": "1700000000.0",
+      "sha256": "d41d8cd98f00b204e9800998ecf8427e"
+    },
+    "enrichment": {
+      "canonical": {
+        "score": 0.0
+      },
+      "steps": [
+        {
+          "stage": 1,
+          "action": "parse",
+          "result": {
+            "host": "host-a.example.local",
+            "process": "explorer.exe",
+            "process_path": "C:\\Windows\\explorer.exe",
+            "pid": "1234",
+            "ts": "1700000000.0",
+            "sha256": "d41d8cd98f00b204e9800998ecf8427e"
+          },
+          "ts": 1766521201.52883
+        },
+        {
+          "stage": 3,
+          "action": "heuristic_score",
+          "result": {
+            "score": 0.0
+          },
+          "ts": 1766521201.52883
+        },
+        {
+          "stage": 4,
+          "action": "map_to_canonical",
+          "result": {
+            "score": 0.0
+          },
+          "ts": 1766521201.52883
+        },
+        {
+          "stage": 5,
+          "action": "ingest",
+          "result": {
+            "status": "ok"
+          },
+          "ts": 1766521201.52883
+        }
+      ]
+    }
+  },
+  {
+    "source_file": "endpoint.csv",
+    "raw": {
+      "host": "host-a.example.local",
+      "process": "evilproc.exe",
+      "process_path": "C:\\Users\\alice\\evilproc.exe",
+      "pid": "4321",
+      "ts": "1700000020.0",
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "enrichment": {
+      "canonical": {
+        "score": 0.0
+      },
+      "steps": [
+        {
+          "stage": 1,
+          "action": "parse",
+          "result": {
+            "host": "host-a.example.local",
+            "process": "evilproc.exe",
+            "process_path": "C:\\Users\\alice\\evilproc.exe",
+            "pid": "4321",
+            "ts": "1700000020.0",
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          "ts": 1766521201.52883
+        },
+        {
+          "stage": 3,
+          "action": "heuristic_score",
+          "result": {
+            "score": 0.0
+          },
+          "ts": 1766521201.52883
+        },
+        {
+          "stage": 4,
+          "action": "map_to_canonical",
+          "result": {
+            "score": 0.0
+          },
+          "ts": 1766521201.52883
+        },
+        {
+          "stage": 5,
+          "action": "ingest",
+          "result": {
+            "status": "ok"
+          },
+          "ts": 1766521201.52883
+        }
+      ]
+    }
+  },
+  {
+    "source_file": "endpoint.csv",
+    "raw": {
+      "host": "host-b.example.local",
+      "process": "wmiexec.exe",
+      "process_path": "C:\\Windows\\System32\\wmiexec.exe",
+      "pid": "2222",
+      "ts": "1700000100.0",
+      "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    "enrichment": {
+      "canonical": {
+        "score": 0.0
+      },
+      "steps": [
+        {
+          "stage": 1,
+          "action": "parse",
+          "result": {
+            "host": "host-b.example.local",
+            "process": "wmiexec.exe",
+            "process_path": "C:\\Windows\\System32\\wmiexec.exe",
+            "pid": "2222",
+            "ts": "1700000100.0",
+            "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          "ts": 1766521201.52883
+        },
+        {
+          "stage": 3,
+          "action": "heuristic_score",
+          "result": {
+            "score": 0.0
+          },
+          "ts": 1766521201.52883
+        },
+        {
+          "stage": 4,
+          "action": "map_to_canonical",
+          "result": {
+            "score": 0.0
+          },
+          "ts": 1766521201.52883
+        },
+        {
+          "stage": 5,
+          "action": "ingest",
+          "result": {
+            "status": "ok"
+          },
+          "ts": 1766521201.52883
+        }
+      ]
+    }
+  }
+]

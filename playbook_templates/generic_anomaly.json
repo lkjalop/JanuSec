@@ -1,0 +1,42 @@
+{
+  "alert_type": "generic_anomaly",
+  "summary": "Catch-all response when heuristics cannot classify the alert. Focus on scoping, evidence gathering, and deciding whether to escalate.",
+  "severity": "medium",
+  "mitre": [
+    "T1036",
+    "T1057"
+  ],
+  "cisa_kev": [],
+  "cvss_reference": 6.5,
+  "epss": 0.2,
+  "references": [
+    "https://attack.mitre.org/",
+    "https://www.first.org/cvss/"
+  ],
+  "steps": [
+    {
+      "order": 1,
+      "action": "Validate host ownership and business context",
+      "rationale": "Determines blast radius and urgency before actions.",
+      "automated": false
+    },
+    {
+      "order": 2,
+      "action": "Pull correlated alerts for same host/user over last 24h",
+      "rationale": "Surfaces campaign context or misclassification.",
+      "automated": true
+    },
+    {
+      "order": 3,
+      "action": "Request missing telemetry (EDR, Sysmon, identity logs)",
+      "rationale": "Collects data needed to confirm or close.",
+      "automated": false
+    },
+    {
+      "order": 4,
+      "action": "Document findings and escalate if any credential abuse observed",
+      "rationale": "Ensures Tier 2 has summary plus evidence pointers.",
+      "automated": false
+    }
+  ]
+}

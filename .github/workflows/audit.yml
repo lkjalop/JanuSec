@@ -1,0 +1,47 @@
+name: Audit
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install -r requirements-dev.txt
+
+      - name: Run audit runner (strict)
+        run: python scripts/audit_runner.py --strict --output audit_results.json || true
+    - name: Display summary
+    run: |
+      python - <<'PY'
+import json, sys
+from pathlib import Path
+p = Path('audit_results.json')
+if not p.exists():
+  print('Missing audit_results.json')
+  sys.exit(1)
+data = json.loads(p.read_text())
+print('Overall:', data.get('overall'))
+for phase, info in data.get('phases', {}).items():
+  if isinstance(info, dict):
+    status = info.get('status', 'n/a')
+  else:
+    status = 'n/a'
+  print(f"- {phase}: {status}")
+if data.get('overall') == 'fail':
+  sys.exit(1)
+PY

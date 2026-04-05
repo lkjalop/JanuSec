@@ -1,0 +1,3 @@
+user,host,process,sha256,domain
+alice,host1,cmd.exe,abcd1234,example.com
+bob,host2,powershell.exe,efgh5678,example.com

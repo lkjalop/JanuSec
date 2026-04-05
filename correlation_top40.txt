@@ -1,0 +1,19 @@
+..........                                                               [100%]
+============================== warnings summary ===============================
+src\api\report_forwarding_endpoints.py:185
+  D:\AI\Threat_thy_sniffer\src\api\report_forwarding_endpoints.py:185: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'example'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    persona: str = Field(..., example='soc_analyst')
+
+src\api\report_forwarding_endpoints.py:186
+  D:\AI\Threat_thy_sniffer\src\api\report_forwarding_endpoints.py:186: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'example'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    top_n: int = Field(..., example=5)
+
+src\api\report_forwarding_endpoints.py:215
+  D:\AI\Threat_thy_sniffer\src\api\report_forwarding_endpoints.py:215: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'example'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    persona: str = Field(..., example='executive')
+
+src\api\report_forwarding_endpoints.py:216
+  D:\AI\Threat_thy_sniffer\src\api\report_forwarding_endpoints.py:216: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'example'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    top_n: int = Field(..., example=3)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html

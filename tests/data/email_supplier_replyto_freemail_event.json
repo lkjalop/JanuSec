@@ -1,0 +1,6 @@
+{
+  "subject": "Invoice attached",
+  "from": "invoices@trusted-supplier.com",
+  "reply_to": "supplier.help@gmail.com",
+  "indicators": {"reply_to_mismatch": true}
+}

@@ -1,0 +1,10 @@
+{
+  "id": "containment_forensics",
+  "title": "Containment and Forensics",
+  "steps": [
+    {"action": "isolate_hosts", "desc": "Isolate affected hosts from network", "type": "containment"},
+    {"action": "snapshot_memory", "desc": "Collect memory and process dumps", "type": "forensics"},
+    {"action": "collect_artifacts", "desc": "Collect suspicious files and logs", "type": "forensics"},
+    {"action": "notify_incident", "desc": "Notify incident response team", "type": "notification"}
+  ]
+}

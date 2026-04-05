@@ -1,0 +1,12 @@
+[
+  {
+    "createdDateTime": "2026-03-20T01:15:00Z",
+    "userPrincipalName": "alice@contoso.com",
+    "appDisplayName": "Azure Portal",
+    "ipAddress": "198.51.100.77",
+    "status": {"errorCode": 0},
+    "clientAppUsed": "Browser",
+    "riskDetail": "none",
+    "location": {"city": "Sydney", "countryOrRegion": "AU"}
+  }
+]

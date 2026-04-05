@@ -1,0 +1,7 @@
+{
+  "id": "evt-ad-1",
+  "host": "host-j",
+  "user": "judy",
+  "ldap_query": true,
+  "net:lateral_probe": true
+}

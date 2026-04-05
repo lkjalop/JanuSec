@@ -1,0 +1,225 @@
+{
+  "version": 3,
+  "generated": "2026-01-18T00:00:00Z",
+  "frameworks": [
+    "mitre",
+    "nist_csf",
+    "cis_v8",
+    "iso_27001",
+    "stride",
+    "kill_chain",
+    "d3fend"
+  ],
+  "note": "Auto-generated condensed cross-mapping: single best-fit per framework; null when unmapped.",
+  "factors": [
+    {
+      "key": "endpoint:rare_lineage",
+      "description": "Uncommon parent->child process lineage",
+      "mitre": "T1059",
+      "nist_csf": "DE.CM-7",
+      "cis_v8": "8.2",
+      "iso_27001": "A.12.4.1",
+      "stride": "Elevation of Privilege",
+      "kill_chain": "Execution",
+      "d3fend": null
+    },
+    {
+      "key": "vuln:cvss_critical",
+      "description": "Component CVSS base score >=9.0",
+      "mitre": "T1190",
+      "nist_csf": "PR.IP-12",
+      "cis_v8": "7.7",
+      "iso_27001": "A.12.6.1",
+      "stride": "Elevation of Privilege",
+      "kill_chain": "Exploitation",
+      "d3fend": "D3-VMA"
+    },
+    {
+      "key": "vuln:kev_listed",
+      "description": "CVE present in CISA KEV catalog",
+      "mitre": "T1190",
+      "nist_csf": "DE.CM-8",
+      "cis_v8": "6.6",
+      "iso_27001": "A.12.6.1",
+      "stride": "Elevation of Privilege",
+      "kill_chain": "Reconnaissance",
+      "d3fend": "D3-VMA"
+    },
+    {
+      "key": "vuln:epss_high",
+      "description": "EPSS predicted exploit prob >=0.7",
+      "mitre": "T1190",
+      "nist_csf": "DE.CM-8",
+      "cis_v8": "6.6",
+      "iso_27001": "A.12.6.1",
+      "stride": "Elevation of Privilege",
+      "kill_chain": "Exploitation",
+      "d3fend": "D3-VMA"
+    },
+    {
+      "key": "sbom:cve_critical",
+      "description": "SBOM component critical CVE detected",
+      "mitre": "T1190",
+      "nist_csf": "DE.CM-7",
+      "cis_v8": "7.7",
+      "iso_27001": "A.12.6.1",
+      "stride": "Elevation of Privilege",
+      "kill_chain": "Exploitation",
+      "d3fend": null
+    },
+    {
+      "key": "sbom:cve_high",
+      "description": "SBOM component high severity CVE",
+      "mitre": "T1190",
+      "nist_csf": "DE.CM-7",
+      "cis_v8": "7.3",
+      "iso_27001": "A.12.6.1",
+      "stride": "Elevation of Privilege",
+      "kill_chain": "Exploitation",
+      "d3fend": null
+    },
+    {
+      "key": "exploit:kev",
+      "description": "Known exploited vulnerability (KEV)",
+      "mitre": "T1190",
+      "nist_csf": "DE.CM-8",
+      "cis_v8": "6.6",
+      "iso_27001": "A.12.6.1",
+      "stride": "Elevation of Privilege",
+      "kill_chain": "Exploitation",
+      "d3fend": null
+    },
+    {
+      "key": "exploit:high_epss",
+      "description": "High EPSS exploitation likelihood",
+      "mitre": "T1190",
+      "nist_csf": "DE.CM-8",
+      "cis_v8": "6.6",
+      "iso_27001": "A.12.6.1",
+      "stride": "Elevation of Privilege",
+      "kill_chain": "Exploitation",
+      "d3fend": null
+    },
+    {
+      "key": "sbom:supply_chain_drift",
+      "description": "Unexpected or risky supply chain component",
+      "mitre": "T1195",
+      "nist_csf": "ID.SC-4",
+      "cis_v8": "15.1",
+      "iso_27001": "A.15.1.1",
+      "stride": "Tampering",
+      "kill_chain": "Reconnaissance",
+      "d3fend": null
+    },
+    {
+      "key": "baseline_allow",
+      "description": "Benign baseline suppression factor",
+      "mitre": null,
+      "nist_csf": "PR.DS-1",
+      "cis_v8": null,
+      "iso_27001": "A.8.2.1",
+      "stride": "Information Disclosure",
+      "kill_chain": null,
+      "d3fend": null
+    },
+    {
+      "key": "process_high_risk",
+      "description": "Process frequently abused by adversaries",
+      "mitre": "T1569",
+      "nist_csf": "DE.AE-1",
+      "cis_v8": "2.6",
+      "iso_27001": "A.12.2.1",
+      "stride": "Tampering",
+      "kill_chain": "Execution",
+      "d3fend": null
+    },
+    {
+      "key": "playbook:incident_response",
+      "description": "Playbook: incident response workflow",
+      "mitre": null,
+      "nist_csf": null,
+      "cis_v8": null,
+      "iso_27001": "A.16.1.1",
+      "stride": null,
+      "kill_chain": null,
+      "d3fend": null
+    },
+    {
+      "key": "playbook:cloud_breach",
+      "description": "Playbook: cloud breach response",
+      "mitre": null,
+      "nist_csf": null,
+      "cis_v8": null,
+      "iso_27001": "A.16.1.1",
+      "stride": null,
+      "kill_chain": null,
+      "d3fend": null
+    },
+    {
+      "key": "supply_chain:third_party_risk",
+      "description": "Supply chain: third-party risk detected",
+      "mitre": null,
+      "nist_csf": "ID.SC-5",
+      "cis_v8": "15.2",
+      "iso_27001": "A.15.1.1",
+      "stride": "Tampering",
+      "kill_chain": null,
+      "d3fend": null
+    },
+    {
+      "key": "supply_chain:dependency_update_lag",
+      "description": "Supply chain: outdated dependency lag",
+      "mitre": null,
+      "nist_csf": null,
+      "cis_v8": null,
+      "iso_27001": "A.12.6.1",
+      "stride": null,
+      "kill_chain": null,
+      "d3fend": null
+    },
+    {
+      "key": "maestro:initial_access",
+      "description": "MAESTRO phase: initial access detected",
+      "mitre": "T1566",
+      "nist_csf": null,
+      "cis_v8": null,
+      "iso_27001": null,
+      "stride": "Spoofing",
+      "kill_chain": "Initial Access",
+      "d3fend": null
+    },
+    {
+      "key": "maestro:lateral_movement",
+      "description": "MAESTRO phase: lateral movement",
+      "mitre": "T1021",
+      "nist_csf": null,
+      "cis_v8": null,
+      "iso_27001": null,
+      "stride": "Elevation of Privilege",
+      "kill_chain": "Lateral Movement",
+      "d3fend": null
+    },
+    {
+      "key": "maestro:exfiltration",
+      "description": "MAESTRO phase: exfiltration",
+      "mitre": "T1041",
+      "nist_csf": null,
+      "cis_v8": null,
+      "iso_27001": null,
+      "stride": "Information Disclosure",
+      "kill_chain": "Exfiltration",
+      "d3fend": null
+    },
+    {
+      "key": "maestro:persistence",
+      "description": "MAESTRO phase: persistence",
+      "mitre": "T1053",
+      "nist_csf": null,
+      "cis_v8": null,
+      "iso_27001": null,
+      "stride": "Tampering",
+      "kill_chain": "Persistence",
+      "d3fend": null
+    }
+  ]
+}

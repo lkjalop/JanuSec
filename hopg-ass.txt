@@ -1,0 +1,159 @@
+can you please action this off
+
+Target Domains & Canonical Mapping
+Domains (8):
+
+Email (phishing, BEC, malicious attachment, credential harvesting)
+Remote Access (VPN, RDP, SSH, bastion usage, lateral login attempts)
+IAM (auth logs, MFA events, policy changes, privilege escalations)
+Network (flow logs, DNS, proxy, firewall, IDS events)
+Endpoint (process creation, file writes, hash loads, persistence keys)
+Data Movement (DLP events, large transfers, unusual repositories)
+API (REST/GraphQL usage, anomalies in rate, schema abuse, sensitive method access)
+Other / Shared (cloud control-plane, container orchestration, config drift, generic telemetry)
+Canonical Event Schema (draft):
+
+timestamp, tenant, source_type (email|remote|iam|network|endpoint|data|api|other)
+user, user_role, host, process, pid
+src_ip, dst_ip, src_port, dst_port, protocol
+domain, uri, api_endpoint, method
+file_hash, file_name, attachment_type
+auth_method, mfa_result, privilege_level_before, privilege_level_after
+data_volume_bytes, direction (inbound|outbound), repository (bucket/db)
+action, status, outcome, error_code
+threat_tags (list), raw_message_id (email), subject, mailbox
+policy_id, config_change_type
+
+geo_src, geo_dst, asn, reputation_score
+correlation_ids (list of batch/session ids)
+Factor Library Expansion (Goal ≈120)
+Indicative factor distribution (approximate counts):
+
+Email (15): suspicious_sender_domain, high_risk_tld, attachment_macro, credential_harvest_pattern, homoglyph_domain, reply_chain_hijack, SPF_fail, DKIM_fail, DMARC_fail, bulk_delivery_spike, url_shortener_risk, AMP_redirect_chain, malicious_file_hash_hit, unusual_internal_sender, mailbox_forward_rule_added.
+Remote Access (15): vpn_bruteforce_pattern, impossible_travel_login, multi_fail_then_success, rdp_high_frequency, ssh_unknown_key, legacy_protocol_use, geo_anomaly_access, concurrent_sessions_same_user, dormant_account_access, timezone_mismatch, new_device_fingerprint, excessive_reconnects, MFA_bypass_pattern, bastion_lateral_sequence, port_knock_detected.
+
+IAM (15): privilege_escalation, policy_change_sensitive, mfa_disabled, role_chaining_spike, orphan_role_usage, excessive_token_refresh, anomalous_assume_role, admin_action_outside_window, password_reset_storm, key_creation_spike, secret_access_anomaly, conditional_policy_added, failed_admin_action_repeat, inactive_role_reactivation, shadow_admin_detection.
+Network (20): lateral_move_edge_sequence, dns_nxdomain_spike (already partially), high_entropy_domain, beaconing_interval_regular, unusual_port_access, east_west_traffic_spike, large_icmp_payloads, protocol_tunneling_pattern, anomalous_tls_ja3, rare_asn_access (with KEV candidate tag), multi_failed_connection_same_destination, uplink_ratio_spike, internal_scan_pattern, dns_txt_embedding, proxy_evasion_sequence, sudden_c2_domain_contact, encrypted_payload_size_anomaly, suspicious_http_method_mix, tor_exit_contact, geo_distributed_small_flows.
+Endpoint (15): suspicious_process_injection, loads_hash_gt_sequence, unsigned_binary_exec_high_freq, persistence_registry_change, privilege_escalation_via_spawn_chain, unusual_parent_process, script_engine_obfuscation, rare_driver_load, new_autorun_entry, multi_failed_file_access, exe_from_temp_dir, living_off_the_land_tool_use, memory_dump_tool_detect, suspicious_powershell_flags, credential_store_access.
+Data Movement (10): outbound_volume_spike, sensitive_table_enumeration, staging_directory_population, compression_before_transfer, exfil_via_cloud_storage, anomalous_bucket_access_pattern, repeated_access_denied_then_success, large_email_attachment_exfil, multi_channel_exfil_attempt, unusual_time_data_pull.
+API (15): rate_limit_near_breach, schema_mutation_attempt, error_response_fuzzing_pattern, high_ratio_5xx_to_2xx, auth_token_reuse_across_ips, method_uniformity_anomaly, bulk_object_enumeration, mass_download_pattern, privilege_exposed_endpoint_access, version_downgrade_attempt, pii_field_access_spike, search_pattern_regex_fuzz, nested_query_depth_excess, atypical_graphql_introspection, repeated_deprecated_endpoint_use.
+Other / Cross-domain (15): corr_domain_pivot_sequence (exists), multi_stage_escalation_chain, privilege_chaining_cross_system, multi_vector_delivery (email→endpoint), c2_established_sequence, staged_payload_from_email, port_scan_then_auth_attempt, data_staging_then_exfil, detection_evasion_combo, kill_chain_gap_filler, cross_geo_lateral_move, beacon_then_exfil, multi_factor_convergence, intel_feed_hit_cluster, sequence_entropy_high.
+Sum: 125 (trim or adjust 5 later; target ~120).
+
+Kill Chain Reconstruction (Functional Approach)
+Process:
+
+Temporal Binning: group factors into windows (e.g., 5m slices).
+Stage Classification: map factors to kill chain stages (Recon, Weaponization, Delivery, Exploitation, Installation, C2, Actions on Objectives).
+Sequence Graph: edges stage_i -> stage_j where j occurs after i within max Δt threshold and shares correlated nodes (host, user, process, hash).
+Confidence Scoring: combine factor weights (base domain reliability) × path continuity × entropy of stage transitions.
+Output: ordered list with (stage, start_ts, end_ts, supporting_factors, primary_nodes, confidence, gap_notes).
+Enhancements:
+
+Stage Gap Detection: look for missing expected transitions (e.g., Delivery without observed Exploitation) to flag probable hidden activities.
+Cross-Domain Stitching: ensure edges weighted by domain diversity (higher confidence when multiple domains corroborate same stage).
+
+Multi-Framework Explanation Orchestrator
+Translation Layers:
+
+MITRE ATT&CK: map each factor to Technique IDs (e.g., credential harvesting -> T1056.*).
+DREAD: compute per node or per kill chain stage using heuristics:
+Damage Potential (data volume exfil or privileged actions),
+Reproducibility (pattern regularity),
+Exploitability (presence of known vuln edges),
+Affected Users (tenant breadth),
+Discoverability (stealth metrics low).
+PASTA: stage mapping (1–7) from factor categories: threat modeling, enumeration, vulnerability, exploitation, detection, validation, remediation.
+CVSS: produce partial vector suggestion (e.g., AV:N, AC:L, PR:L, UI:N, S:U/C:H/I:M/A:L) based on combined factors (rare ASN, privilege escalation, exfil).
+MAESTRO (sequence orchestration): treat factor ordering as operational steps with dependencies; highlight concurrency.
+KEV Tagging: mark edges/factors referencing exploited CVE lists or rare ASN factors with KEV candidate tags.
+Compliance Control Impact: map to control families (e.g., NIST AC-2, AU-6, SI-4) via factor taxonomy (privilege_escalation -> Access Control; data_exfil -> Data Protection).
+Playbooks: for each stage produce recommended immediate actions (isolate host, rotate credentials, block domain, enforce MFA, quarantine mailbox).
+Data Model for Explanations:
+
+
+explanation = {  'kill_chain': [...],  'mitre_techniques': [{'factor':'credential_harvest_pattern','techniques':['T1056.001']}],  'dread_scores': {'overall':7.8,'per_stage':{'exploitation':8.2}},  'pasta_stages': [{'stage':5,'factors':['c2_established_sequence']}],  'cvss_vector_hint': 'CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:M/A:L (confidence:0.72)',  'maestro_sequence': [...],  'kev_tags': ['CVE-2024-XXXXX candidate','rare_asn_access'],  'compliance_impacts': [{'control':'NIST AC-2','reason':'orphan_role_usage'}],  'playbook_recommendations': [...],  'supporting_graph': {/* subgraph nodes+edges */},  'factor_coverage': {'total':32,'by_domain':{'email':5,'network':9,...}}}
+Implementation Backlog (Functional Focus)
+(Already placed in todo list tool — statuses all not-started.)
+
+Domain log ingestion: build per-domain parser modules + header inference + CanonicalEvent dataclass; integrate into upload endpoint, store batch metadata.
+Multi-upload correlation sessions: implement /api/v1/graph/session/build for multi-domain batches; attach domain-specific factor extraction passes; compute EWMA overlap; persist session summary JSON.
+Canonical schema: finalize schema; create mapping registry domain_mapping_registry.py with sample templates for common log sources (e.g., O365 email CSV, VPN radius logs, AWS CloudTrail, Zeek).
+Factor library expansion: iterative modules factors_email.py, factors_network.py, etc. Each exposes extract_factors(events, hopgraph, runtime_cfg) -> List[FactorEmit].
+Kill chain reconstruction: new module killchain_reconstruct.py with reconstruct(events, factors, hopgraph) returning ordered chain; add deterministic test with synthetic timeline.
+Framework alignment: explanation_orchestrator.py merges kill chain, factors, and mapping tables (Technique mapping YAML, compliance mapping JSON, playbook templates).
+Report/UI: extend janusec-platform-complete-LIVE.html sidebar with “Correlator” → dynamic fetch of session explanation; build timeline and factor heatmap panels.
+Proof harness: data sample multi-domain logs + tests/test_full_attack_chain.py verifying factor coverage and expected kill chain stages.
+Metrics & coverage: add gauge/counters: factor_emit_total{domain,factor}, killchain_stage_detected_total{stage}, explanation_latency_seconds, multi_upload_session_build_seconds.
+Deferred hardening backlog: maintain doc for later security tasks (rate limiting, ingestion quotas, robust validation, memory caps).
+Proof Strategy (Showing It Works)
+Artifacts:
+
+Synthetic Scenario 1: Phishing email (email) → endpoint execution (endpoint) → privilege escalation (IAM) → lateral movement (network) → data exfil (data) → C2 confirmation (network/API).
+Provide curated logs per domain with timestamps engineered to form coherent chain.
+Expected factors list and kill chain path (Delivery → Exploitation → Installation → C2 → Actions).
+Synthetic Scenario 2: Remote brute force leading to stolen API token then mass download.
+Tests assert presence of remote_bruteforce_pattern, privilege_escalation, mass_download_pattern, data_exfil_volume_spike.
+Coverage Test: Count factors emitted ≥ threshold (e.g., at least 40 in combined scenarios).
+Deterministic Replay Test: Build session, snapshot, replay, ensure identical factor set & kill chain sequence.
+Unit/Integration Tests (examples):
+
+test_domain_mapping_email_basic.py: CSV header mapping yields canonical fields.
+test_factor_email_phishing.py: multi suspicious signals produce factor phishing_campaign_cluster.
+test_killchain_sequence_construction.py: ordered factors yield correct stage ordering with confidence bounds.
+test_explanation_framework_mapping.py: factors map to MITRE techniques and produce CVSS vector stub.
+test_session_roundtrip_deterministic.py: snapshot + WAL replay retains kill chain reconstruction output.
+Metrics Validation:
+
+After scenario ingestion, factor_emit_total per domain > 0.
+killchain_stage_detected_total{stage} includes required sequence.
+Explanation latency histogram shows values within expected range (<1.5s synthetic).
+Accelerated Implementation Path (Recommended Order)
+Canonical schema & mapping registry.
+Per-domain parsers + single-upload normalization.
+Multi-upload session builder (foundation).
+Factor extraction modules (incremental; start with 5–8 factors per domain, iterate).
+Kill chain reconstruction engine.
+Explanation orchestrator (start with MITRE + Playbooks, then add DREAD/CVSS/Compliance).
+UI wiring + report generation.
+Expand factor library to ~120 total.
+Proof harness & coverage tests.
+Observability metrics.
+Quick Data Shape Contract (for robustness)
+CanonicalEvent (inputs):
+
+Must include timestamp (epoch float or ISO8601) and domain type.
+Optional fields may be None; factor extractors must handle absence gracefully.
+Outputs:
+Factors: list[{name, node_ids, confidence, ts, domain}]
+KillChain: list[{stage, start_ts, end_ts, factors[], confidence}]
+Errors:
+Skip silently if malformed record; attach ingest_error_total metric for observability.
+Edge Cases & Resilience (Functional Focus)
+Sparse Domain Coverage: Only network + endpoint logs present — kill chain should degrade gracefully, annotate missing stages.
+Time Skew: Events out of order by small deltas — sequence builder uses sorted timestamps with tolerance window.
+High Cardinality Users: Suppress identical factor repeats per user within debounce period (e.g., 2 minutes) to reduce noise (functional but not heavy guard).
+Partial Data Volume: Data exfil detection thresholds adapt if only subset of flows ingested.
+Minimal Initial Factor Set (Bootstrapping)
+To reduce upfront complexity:
+
+Implement 5 factors per domain first (total 40) then expand.
+Example starting list:
+Email: suspicious_sender_domain, attachment_macro, url_shortener_risk, SPF_fail, mailbox_forward_rule_added
+Remote: vpn_bruteforce_pattern, impossible_travel_login, rdp_high_frequency, new_device_fingerprint, bastion_lateral_sequence
+IAM: privilege_escalation, role_chaining_spike, mfa_disabled, password_reset_storm, orphan_role_usage
+Network: dns_nxdomain_spike, lateral_move_edge_sequence, beaconing_interval_regular, unusual_port_access, anomalous_tls_ja3
+Endpoint: suspicious_process_injection, loads_hash_gt_sequence, unsigned_binary_exec_high_freq, unusual_parent_process, living_off_the_land_tool_use
+Data: outbound_volume_spike, compression_before_transfer, large_email_attachment_exfil, staging_directory_population, unusual_time_data_pull
+API: rate_limit_near_breach, bulk_object_enumeration, auth_token_reuse_across_ips, error_response_fuzzing_pattern, mass_download_pattern
+Cross-Domain: corr_domain_pivot_sequence, multi_stage_escalation_chain, data_staging_then_exfil, privilege_chaining_cross_system, intel_feed_hit_cluster
+Immediate Next Concrete Work
+If you want me to start implementing now, I’d begin with:
+
+Create src/correlation/canonical_event.py (dataclass) & src/correlation/domain_mapping_registry.py.
+Add per-domain parser skeletons in src/correlation/parsers/.
+Implement a minimal factor extractor for Email & Network to validate pipeline.
+Add integration test for ingesting mixed domain batches and emitting at least one kill chain stage.
+Let me know if you’d like me to proceed directly with those code additions next, or adjust the plan (e.g., prioritize a different domain set or explanation framework first).
+
+Ready to execute the next step—just say the word which slice you want implemented first.

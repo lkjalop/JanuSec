@@ -1,0 +1,9 @@
+[
+  {
+    "message_id": "msg-aws-bec-001",
+    "timestamp": "2025-03-15T02:41:00Z",
+    "to": "ops@acme.example",
+    "attachment_name": "Wire_Transfer_Authorization_Form.pdf",
+    "attachment_path": "tests/fixtures/email_replay/shopsquire_supplier_bec/artifacts/Wire_Transfer_Authorization_Form.pdf"
+  }
+]

@@ -1,0 +1,4 @@
+event_id,timestamp,host,src_ip,src_port,query,rcode,ttl,verdict,factors
+dns-1,2025-11-08T08:12:35Z,host-01,10.0.0.5,53211,exfil-abc123.example.com,NXDOMAIN,60,SUSPICIOUS,"network_nxdomain_spike,dns_exfil_candidate"
+dns-2,2025-11-08T08:12:36Z,host-02,10.0.0.6,53212,login.example.com,A,300,PASS,"normal_dns"
+dns-3,2025-11-08T08:14:10Z,host-03,10.0.0.5,53213,data-1.exfil.example.com,NXDOMAIN,45,SUSPICIOUS,"network_nxdomain_spike,dns_exfil_candidate"

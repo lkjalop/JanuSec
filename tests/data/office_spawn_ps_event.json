@@ -1,0 +1,4 @@
+{
+  "parent_process": "excel.exe",
+  "child_process": "powershell.exe"
+}

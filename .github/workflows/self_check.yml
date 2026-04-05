@@ -1,0 +1,27 @@
+name: Self Check
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  run-self-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: |
+          python -m pip install -r requirements.txt || true
+      - name: Run self_check script
+        run: |
+          python scripts/run_self_check.py
+      - name: Upload self_check artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: self_check_output
+          path: self_check_output.json

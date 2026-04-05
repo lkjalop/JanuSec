@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Training Aids</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root{ --bg:#0B0E14; --bg2:#141A24; --bg3:#1D2531; --border:#2C3746; --text:#E8EBF0; --muted:#93A0B1; --accent:#4A63E7; }
+    body{ background:var(--bg); color:var(--text); font-family:Inter, system-ui, sans-serif; }
+    .wrap{ max-width:1100px; margin:20px auto; padding:0 16px; }
+    .card{ background:var(--bg2); border:1px solid var(--border); border-radius:8px; padding:12px; margin-bottom:12px; }
+    textarea, input{ background:var(--bg); color:var(--text); border:1px solid var(--border); border-radius:6px; padding:8px; width:100%; }
+    button{ background:var(--bg3); color:var(--text); border:1px solid var(--border); border-radius:6px; padding:8px 12px; cursor:pointer; }
+    button.primary{ background:var(--accent); border-color:var(--accent); color:#fff; }
+    .row{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    .pill{ padding:3px 8px; border-radius:999px; background:var(--bg3); border:1px solid var(--border); font-size:11px; color:#C2CBD6; display:inline-block; }
+    .stage-btn{ transition:background .2s, color .2s; }
+    .stage-btn.active{ background:var(--accent); border-color:var(--accent); color:#fff; }
+    .stage-content ul{ padding-left:18px; margin:8px 0; }
+    .stage-content li{ margin-bottom:4px; color:var(--muted); }
+    .stage-title{ font-weight:600; margin-bottom:4px; }
+    .stage-desc{ color:var(--muted); font-size:13px; margin-bottom:6px; }
+    .muted{ color:var(--muted); font-size:12px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h2>Training Aids</h2>
+
+    <div class="card">
+      <div style="font-weight:600; margin-bottom:6px;">Persona Templates</div>
+      <div class="row">
+        <button class="pill" data-preset="bec">BEC</button>
+        <button class="pill" data-preset="lateral">Lateral Movement</button>
+        <button class="pill" data-preset="c2">Beacon/C2</button>
+      </div>
+      <textarea id="personaText" placeholder="Persona template..." style="min-height:120px; margin-top:8px;"></textarea>
+      <div class="row" style="margin-top:8px;">
+        <button id="btnPersonaSave" class="primary">Save</button>
+        <button id="btnPersonaCopy">Copy</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div style="font-weight:600; margin-bottom:6px;">A/B Prompt Variants</div>
+      <div class="row"><input id="variantName" placeholder="experiment name (optional)" /></div>
+      <div class="row" style="align-items:flex-start;">
+        <div style="flex:1;">
+          <div class="pill">Variant A</div>
+          <textarea id="promptA" style="min-height:160px;"></textarea>
+          <div class="row" style="margin-top:6px;"><span class="pill" id="tokA">tokens: 0</span><button id="btnCopyA">Copy</button></div>
+        </div>
+        <div style="flex:1;">
+          <div class="pill">Variant B</div>
+          <textarea id="promptB" style="min-height:160px;"></textarea>
+          <div class="row" style="margin-top:6px;"><span class="pill" id="tokB">tokens: 0</span><button id="btnCopyB">Copy</button></div>
+        </div>
+      </div>
+      <div class="row" style="margin-top:8px;">
+        <button id="btnSaveAB" class="primary">Save Variants</button>
+        <button id="btnLoadAB">Load Variants</button>
+      </div>
+      <div class="muted" style="margin-top:6px;">Estimates tokens by word-count*1.3 for quick cost sanity checks.</div>
+    </div>
+
+    <div class="card" id="ransomwareCard">
+      <div style="font-weight:600; margin-bottom:6px;">Advanced Ransomware Detection Blueprint</div>
+      <div class="muted" style="margin-bottom:8px;">Use these cues to enrich ingestion pipelines, Tier 1/2 LLM workflows, reports, and HopGraph reconstruction while flagging missing evidence.</div>
+      <div class="row" style="margin-bottom:8px; flex-wrap:wrap;">
+        <button class="pill stage-btn active" data-stage="pipeline">Pipeline</button>
+        <button class="pill stage-btn" data-stage="tier1">Tier 1 LLM</button>
+        <button class="pill stage-btn" data-stage="tier2">Tier 2 LLM</button>
+        <button class="pill stage-btn" data-stage="report">Reporting</button>
+        <button class="pill stage-btn" data-stage="hopgraph">HopGraph</button>
+        <button class="pill stage-btn" data-stage="missing">Missing Logs</button>
+        <button class="pill stage-btn" data-stage="enhancements">Optional Enhancements</button>
+      </div>
+      <div id="ransomwareStageContent" class="stage-content"></div>
+      <div class="row" style="margin-top:8px;">
+        <button id="btnCopyStage" class="primary">Copy Stage Guidance</button>
+      </div>
+      <div style="margin-top:12px; font-weight:600;">Tier Narrative / Report Drop-In</div>
+      <textarea id="ransomwareNarrative" style="min-height:150px; margin-top:6px;"></textarea>
+      <div class="row" style="margin-top:8px;">
+        <button id="btnNarrativeCopy">Copy Narrative</button>
+      </div>
+    </div>
+
+    <div class="card" id="frameworkCard">
+      <div style="font-weight:600; margin-bottom:6px;">Framework Alignment (Business Insights)</div>
+      <div class="muted" style="margin-bottom:6px;">Map ransomware telemetry to MITRE ATT&CK, CVSS/KEV, STRIDE, MAESTRO, and PASTA to guide investigation priorities.</div>
+      <div id="frameworkMatrix"></div>
+      <div class="row" style="margin-top:10px;">
+        <button id="btnCopyFrameworks">Copy Framework Summary</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const presets = {
+      bec: `Role: Senior Security Analyst\nGoal: Explain BEC patterns and indicators.\nOutput: Bulleted risks, top indicators, mitigation actions.`,
+      lateral: `Role: IR Lead\nGoal: Analyze potential lateral movement.\nOutput: Timeline, process tree anomalies, host-user pivots.`,
+      c2: `Role: Threat Hunter\nGoal: Evaluate beacon/C2 evidence from network logs.\nOutput: Periodicity, JA3/JA3S, domain/IP rarity, actions.`
+    };
+    function setText(id, v){ const el=document.getElementById(id); if(el) el.value=v; }
+    function getText(id){ const el=document.getElementById(id); return el? el.value: ''; }
+    function estTokens(s){ if(!s) return 0; const words=(s.trim().split(/\s+/).length||0); return Math.ceil(words*1.3); }
+    function saveLocal(k,v){ try{ localStorage.setItem(k, v); }catch(_){ } }
+    function loadLocal(k){ try{ return localStorage.getItem(k)||''; }catch(_){ return ''; } }
+
+    document.querySelectorAll('[data-preset]').forEach(b=> b.addEventListener('click', ()=>{ const key=b.getAttribute('data-preset'); setText('personaText', presets[key]||''); }));
+    document.getElementById('btnPersonaSave').addEventListener('click', ()=>{ saveLocal('persona_template', getText('personaText')); alert('Saved'); });
+    document.getElementById('btnPersonaCopy').addEventListener('click', ()=>{ try{ navigator.clipboard.writeText(getText('personaText')); alert('Copied'); }catch(_){ } });
+
+    function updateTokens(){ document.getElementById('tokA').textContent = 'tokens: '+estTokens(getText('promptA')); document.getElementById('tokB').textContent = 'tokens: '+estTokens(getText('promptB')); }
+    document.getElementById('promptA').addEventListener('input', updateTokens);
+    document.getElementById('promptB').addEventListener('input', updateTokens);
+    document.getElementById('btnCopyA').addEventListener('click', ()=>{ try{ navigator.clipboard.writeText(getText('promptA')); }catch(_){ } });
+    document.getElementById('btnCopyB').addEventListener('click', ()=>{ try{ navigator.clipboard.writeText(getText('promptB')); }catch(_){ } });
+    document.getElementById('btnSaveAB').addEventListener('click', ()=>{ const name=(document.getElementById('variantName').value||'default'); saveLocal('ab_'+name+'_A', getText('promptA')); saveLocal('ab_'+name+'_B', getText('promptB')); alert('Saved'); });
+    document.getElementById('btnLoadAB').addEventListener('click', ()=>{ const name=(document.getElementById('variantName').value||'default'); setText('promptA', loadLocal('ab_'+name+'_A')); setText('promptB', loadLocal('ab_'+name+'_B')); updateTokens(); });
+
+    const ransomwareContent = {
+      pipeline: {
+        title: 'Pipeline & Telemetry Enrichment',
+        desc: 'Wire detections into ingestion, scoring, and incident generation fabrics so Tier 1 can see high-confidence factors immediately.',
+        items: [
+          'Instrument entropy scoring on file writes per host/time bucket; persist baseline/variance to HopGraph session payloads.',
+          'Detect VSS tamper (shadow copy deletes, vssadmin invocations, WMI volume shadow ops) and emit dedicated `factor:ransom.vss_tamper` nodes.',
+          'Track rapid file modification rates with sliding windows; feed anomalies into `/api/v1/decisions/recent` via `_merge_decision_meta` for UI parity.',
+          'Combine entropy + VSS + high-rate writes into a composite `ransomware_confidence` metric surfaced in `dependency_status` and scoring config.',
+          'Push missing detections into `/api/v1/graph/session/build` mapping stats so analysts can see canonical field coverage gaps.'
+        ]
+      },
+      tier1: {
+        title: 'Tier 1 LLM Summary Hooks',
+        desc: 'Provide concise cues so Tier 1 assistants highlight blast radius and next actions within 90 seconds.',
+        items: [
+          'Surface “entropy surge + VSS tamper” as a pre-built chip; include host/user/process, file-path prefixes, and percentile delta.',
+          'Auto-suggest Tier 1 narrative: “Potential ransomware sequence detected; confirm if MDF or SMB shares seeing similar entropy uplift.”',
+          'Flag whether isolation already triggered; if not, suggest “Issue containment command or escalate to Tier 2 for host quarantine.”',
+          'Call out dependency health state (“HopGraph healthy 2m ago”) so Tier 1 trusts correlation context.'
+        ]
+      },
+      tier2: {
+        title: 'Tier 2 LLM Deep Dive',
+        desc: 'Give investigation copilots enough structure to link nodes, propose hypotheses, and request additional telemetry.',
+        items: [
+          'Expose entropy buckets, VSS command lineage, and file hash clusters via `mapping_semantics` weight contributions.',
+          'Add recommended reconstruction plan: “Pivot to SMB logs for share-level modification rate, request EDR timeline for PID reuse.”',
+          'Highlight replayed HopGraph factors or queued batches so Tier 2 knows if results lag behind real time.',
+          'Attach recommended `POST /api/v1/incidents/{id}/recommendations/act` payload template for quarantine guidance.'
+        ]
+      },
+      report: {
+        title: 'Report Generator Anchors',
+        desc: 'Pre-seed `/api/v1/report/ingestion` narrative sections so exports reflect ransomware-specific evidence.',
+        items: [
+          'Add “Advanced Ransomware Factors” section summarizing entropy deltas, VSS tamper attempts, and impacted hosts.',
+          'Include remediation readiness checklist (network isolation, VSS restore validation, endpoint patch posture).',
+          'Document optional agent hooks (hash dedupe, EDR integration) as backlog vs. done to show maturity curve.',
+          'Feed domain diversity + mapping semantics scores into the Scoring Config card so leadership sees weighting decisions.'
+        ]
+      },
+      hopgraph: {
+        title: 'HopGraph Attack Reconstruction',
+        desc: 'Ensure graph sessions clearly depict ransomware stages and weave in EWMA smoothing for volatility handling.',
+        items: [
+          'When building sessions, auto-tag sequences with `ransom_stage` (initial access, encryption prep, detonation).',
+          'Store entropy/VSS metrics as node attributes so Adaptive EWMA can lower alpha during volatile bursts.',
+          'Link file-hash dedupe results to infected hosts and propagate to recommendation_catalog for post-incident hardening.',
+          'Record replay history + queued_factor_batches so analysts know if any ransomware nodes were replayed during degraded mode.'
+        ]
+      },
+      missing: {
+        title: 'Related Missing Logs / Evidence Requests',
+        desc: 'Prompt analysts to request additional telemetry when coverage gaps appear.',
+        items: [
+          'Windows Security logs (event IDs 4663, 4732) for file permission changes tied to suspected host list.',
+          'EDR or Sysmon operational logs for process ancestry and command-line capture of vssadmin/wmic usage.',
+          'NAS / SMB audit trails for rapid file rename/delete operations on shared drives.',
+          'Backup controller telemetry (Veeam, Rubrik, Cohesity) for failed or cancelled jobs matching incident timeline.',
+          'Identity provider risk signals (Azure AD risky sign-ins, Okta anomaly events) for lateral movement context.'
+        ]
+      },
+      enhancements: {
+        title: 'Optional Enhancements & Automations',
+        desc: 'Future hooks that raise fidelity and shorten response cycles.',
+        items: [
+          'Endpoint agent hooks for hash-level deduplication and sandbox triage results piped into mapping stats.',
+          'EDR integration for auto-quarantine when composite ransomware factor exceeds threshold with confidence >0.82.',
+          'Shadow copy recreation validation using TEST_HELPERS to simulate VSS tamper for regression coverage.',
+          'Expose `SCORING_WEIGHTS_JSON` overrides through admin scoring UI for quick tuning of ransomware weights.'
+        ]
+      }
+    };
+
+    function renderRansomwareStage(stageKey){
+      const container=document.getElementById('ransomwareStageContent');
+      if(!container) return;
+      const data=ransomwareContent[stageKey] || ransomwareContent['pipeline'];
+      container.innerHTML=`<div class="stage-title">${data.title}</div>
+        <div class="stage-desc">${data.desc}</div>
+        <ul>${data.items.map(item=>`<li>${item}</li>`).join('')}</ul>`;
+    }
+
+    function stageText(stageKey){
+      const data=ransomwareContent[stageKey];
+      if(!data) return '';
+      const bullets=data.items.map(item=>`- ${item}`).join('\n');
+      return `${data.title}\n${data.desc}\n${bullets}`;
+    }
+
+    document.querySelectorAll('.stage-btn').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        document.querySelectorAll('.stage-btn').forEach(b=>b.classList.remove('active'));
+        btn.classList.add('active');
+        const stage=btn.getAttribute('data-stage');
+        renderRansomwareStage(stage);
+        document.getElementById('btnCopyStage').setAttribute('data-stage', stage);
+      });
+    });
+
+    document.getElementById('btnCopyStage').addEventListener('click', ()=>{
+      const stage=document.getElementById('btnCopyStage').getAttribute('data-stage') || 'pipeline';
+      try{ navigator.clipboard.writeText(stageText(stage)); }catch(_){ }
+    });
+
+    const ransomwareNarrative = `Advanced ransomware detection initiative couples entropy scoring, VSS tamper monitoring, and rapid file-modification analytics to raise HopGraph confidence across Tier 1/2 flows.\n\nPipeline impact: entropy/VSS telemetry is persisted in graph sessions, merged into /decisions metadata, and surfaced inside Multi-Domain Health + Scoring Config panels.\nTier cues: Tier 1 summaries highlight “entropy surge + shadow-copy tamper” with containment prompts, while Tier 2 assistants receive reconstruction prompts, replay history, and recommendation_act payloads.\nReporting: /api/v1/report/ingestion gains an “Advanced Ransomware Factors” section with remediation readiness checklists and backlog callouts.\nHopGraph/Attack reconstruction: EWMA smoothing adapts via volatility-aware alpha to keep ransomware stages legible.\nEvidence gaps: automatically list missing logs (Windows Security, Sysmon, NAS audit, backup controllers, IdP risk) so analysts can request additional data before finalizing incidents.\nOptional: integrate endpoint agent hooks for hash dedupe and direct EDR quarantine triggers when composite ransomware confidence exceeds defined thresholds.\nFramework tie-in: MITRE (T1486, T1490, T1059), CVSS 9.8+ encryption vectors, KEV-listed CVEs exploited by current ransomware kits, STRIDE Tampering/Information Disclosure, MAESTRO Goals 2.4/3.3, and PASTA Stages 4-6.`;
+    const narrativeEl=document.getElementById('ransomwareNarrative');
+    if(narrativeEl){ narrativeEl.value=ransomwareNarrative; }
+    document.getElementById('btnNarrativeCopy').addEventListener('click', ()=>{ try{ navigator.clipboard.writeText(ransomwareNarrative); }catch(_){ } });
+
+    const frameworkData = [
+      {
+        name: 'MITRE ATT&CK',
+        focus: 'Technique coverage',
+        details: [
+          'T1486 Data Encrypted for Impact (encryption surge).',
+          'T1490 Inhibit System Recovery (shadow copy deletion).',
+          'T1059 Command Shell (vssadmin, wbadmin).'
+        ],
+        action: 'Tag HopGraph factors with technique IDs so LLM summaries automatically cite MITRE context.'
+      },
+      {
+        name: 'CVSS + KEV',
+        focus: 'Vulnerability pressure',
+        details: [
+          'CVSS v3 scores ≥9.0 tied to exposed VSS services or backup APIs.',
+          'KEV catalog references (e.g., CVE-2023-34362) for ransomware entry points.'
+        ],
+        action: 'Expose cvss_score + kev_reference fields inside /decisions payload to prioritize patch/hardening steps.'
+      },
+      {
+        name: 'STRIDE',
+        focus: 'Threat modeling',
+        details: [
+          'Tampering: File rewrite spikes, VSS tamper semantics.',
+          'Information Disclosure: Shadow copy dumps used before encryption.'
+        ],
+        action: 'Map entropy/VSS detections to STRIDE categories so risk leaders see business-impact translation.'
+      },
+      {
+        name: 'MAESTRO',
+        focus: 'Mission success checkpoints',
+        details: [
+          'Goal 2.4 (Establish persistence) flagged when ransomware establishes scheduled tasks/services.',
+          'Goal 3.3 (Exfiltrate high-value data) tied to SMB/NAS audit deltas.'
+        ],
+        action: 'Document MAESTRO goals in the report generator to show adversary milestone coverage.'
+      },
+      {
+        name: 'PASTA',
+        focus: 'Business risk tie-in',
+        details: [
+          'Stage 4 (Threat Analysis): correlate entropy anomalies with asset criticality.',
+          'Stage 6 (Attack Modeling): combine HopGraph replay history + Tier 2 recon narratives.'
+        ],
+        action: 'Surface PASTA stages in Tier 2 prompts so exec-ready briefs highlight business exposure.'
+      }
+    ];
+
+    const frameworkMatrix = document.getElementById('frameworkMatrix');
+    if(frameworkMatrix){
+      frameworkMatrix.innerHTML = frameworkData.map(entry => `
+        <div style="border:1px solid var(--border); border-radius:8px; padding:10px; margin-bottom:8px;">
+          <div style="font-weight:600;">${entry.name}</div>
+          <div class="muted" style="font-size:12px;">${entry.focus}</div>
+          <ul style="margin:6px 0 0 1.2rem; font-size:12px; color:var(--muted);">
+            ${entry.details.map(detail => `<li>${detail}</li>`).join('')}
+          </ul>
+          <div class="muted" style="margin-top:6px; font-size:12px;">${entry.action}</div>
+        </div>
+      `).join('');
+    }
+    const frameworkSummary = frameworkData.map(entry => `${entry.name} (${entry.focus}): ${entry.details.join(' | ')}. Next: ${entry.action}`).join('\n');
+    document.getElementById('btnCopyFrameworks').addEventListener('click', ()=>{ try{ navigator.clipboard.writeText(frameworkSummary); }catch(_){ } });
+
+    setText('personaText', loadLocal('persona_template'));
+    updateTokens();
+    renderRansomwareStage('pipeline');
+    document.getElementById('btnCopyStage').setAttribute('data-stage','pipeline');
+  </script>
+</body>
+</html>

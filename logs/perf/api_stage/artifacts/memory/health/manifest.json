@@ -1,0 +1,59 @@
+{
+  "entries": [
+    {
+      "fixture": "linux.json",
+      "job_id": "mem-5d2590dab627",
+      "host": "linux-mem-host",
+      "platform": "linux",
+      "volatility_plugins": [],
+      "rekall_plugins": [
+        "pslist"
+      ],
+      "sandbox_status": "submitted",
+      "sandbox_adapters": [
+        "joe",
+        "anyrun"
+      ],
+      "timeline_length": 3,
+      "factors": []
+    },
+    {
+      "fixture": "macos.json",
+      "job_id": "mem-6434f7fcd071",
+      "host": "mac-mem-host",
+      "platform": "macos",
+      "volatility_plugins": [],
+      "rekall_plugins": [
+        "tasks"
+      ],
+      "sandbox_status": "submitted",
+      "sandbox_adapters": [
+        "joe",
+        "anyrun"
+      ],
+      "timeline_length": 2,
+      "factors": []
+    },
+    {
+      "fixture": "windows.json",
+      "job_id": "mem-ae77fb27ed8f",
+      "host": "win-mem-host",
+      "platform": "windows",
+      "volatility_plugins": [],
+      "rekall_plugins": [
+        "dlllist",
+        "pslist"
+      ],
+      "sandbox_status": "submitted",
+      "sandbox_adapters": [
+        "joe",
+        "anyrun"
+      ],
+      "timeline_length": 4,
+      "factors": [
+        "memory:suspicious_injection",
+        "malware:credential_theft"
+      ]
+    }
+  ]
+}

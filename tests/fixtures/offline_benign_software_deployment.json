@@ -1,0 +1,25 @@
+[
+  {
+    "row_index": 0,
+    "sheet": "Endpoint",
+    "host": "sccm-node-01",
+    "process_name": "msiexec.exe",
+    "parent_process": "ccmexec.exe",
+    "process_path": "C:\\Windows\\System32\\msiexec.exe",
+    "path": "C:\\Windows\\ccmcache\\7\\vendor-agent.msi",
+    "command_line": "msiexec.exe /i C:\\Windows\\ccmcache\\7\\vendor-agent.msi /qn",
+    "signed_vendor": "Microsoft Corporation",
+    "ts": 1700002000
+  },
+  {
+    "row_index": 1,
+    "sheet": "Endpoint",
+    "host": "sccm-node-01",
+    "process_name": "TrustedInstaller.exe",
+    "parent_process": "services.exe",
+    "process_path": "C:\\Windows\\servicing\\TrustedInstaller.exe",
+    "command_line": "TrustedInstaller.exe",
+    "signed_vendor": "Microsoft Corporation",
+    "ts": 1700002060
+  }
+]

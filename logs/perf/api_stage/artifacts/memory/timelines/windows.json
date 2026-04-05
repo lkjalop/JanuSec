@@ -1,0 +1,28 @@
+{
+  "fixture": "windows.json",
+  "platform": "windows",
+  "timeline_entries": [
+    {
+      "ts": 1767398598.895905,
+      "kind": "process",
+      "source": "volatility",
+      "platform": "windows",
+      "summary": "Process lsass.exe (PID 520) present in memory"
+    },
+    {
+      "ts": 1767398598.895905,
+      "kind": "injection",
+      "source": "volatility",
+      "platform": "windows",
+      "summary": "Malfind hit in lsass.exe (PID 520)"
+    },
+    {
+      "ts": 1767398598.895905,
+      "kind": "network",
+      "source": "volatility",
+      "platform": "windows",
+      "summary": "Process lsass.exe communicating with 198.51.100.10:443"
+    }
+  ],
+  "registry": {}
+}

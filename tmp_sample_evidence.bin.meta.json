@@ -1,0 +1,1 @@
+{"evidence_path": "tmp_sample_evidence.bin", "collected_by": "analyst@example.com", "collection_method": "manual_upload", "authorization_ticket": "TICKET-123", "collected_ts": 1767093515, "sha256": "671985eb92347edde76f5415c80c9c69a2c575f0942e5ae1c0905ce57626259d", "hmac_sha256": null, "storage": {"backend": "local", "path": "D:\\AI\\Threat_thy_sniffer\\tmp_sample_evidence.bin"}}

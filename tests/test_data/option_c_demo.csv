@@ -1,0 +1,11 @@
+﻿process_name,host,user,sha256,src_ip,dst_ip,dst_port,factors,verdict
+powershell.exe,WORKSTATION-042,admin,9bf41199f05fa1de8be5b84c6ef6e0a37f7b3d3f7a6e5d4c3b2a1f0e9d8c7b6a,,,,"process_injection,unsigned_binary,cmdline_obfuscation",suspicious
+svchost.exe,SERVER-087,SYSTEM,,10.50.30.12,8.8.8.8,53,"suspicious_dns,beaconing",suspicious
+chrome.exe,LAPTOP-055,jsmith,f3e2d1c0b9a8978665544332211ffeeddccbbaa998877665544332211ff00ee,,104.16.123.96,443,"data_exfiltration,c2_communication,dga_domain",malicious
+mimikatz.exe,WORKSTATION-042,admin,deadbeef1234567890abcdef1234567890abcdef1234567890abcdef12345678,,,,"credential_dumping,lsass_access,privilege_escalation",malicious
+taskmgr.exe,WORKSTATION-099,helpdesk,00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff,,,,rare_binary,benign
+nmap.exe,KALI-01,pentester,,,192.168.1.0,22,"port_scan,rare_port",suspicious
+rundll32.exe,WORKSTATION-077,user1,,,,,dll_hijack,suspicious
+explorer.exe,DESKTOP-123,user2,,,,,parent_child_anomaly,benign
+notepad.exe,LAPTOP-999,admin,,,,,suspicious_path,benign
+netcat.exe,SERVER-055,admin,,10.10.10.5,attacker.com,4444,"c2_communication,outbound_connection",malicious

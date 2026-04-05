@@ -1,0 +1,22 @@
+{
+  "result": {
+    "status": "ok",
+    "proof": {
+      "proof": "mock-hsm::health::0::1767350383",
+      "backend": "local"
+    }
+  },
+  "snapshot": {
+    "backend": "local",
+    "last_status": "ok",
+    "last_poll_ts": 1767350383.3313482,
+    "last_ok_ts": 1767350383.3313482,
+    "last_error": null,
+    "last_tamper_detail": null,
+    "poll_interval": null,
+    "alert_count": 0,
+    "customer_webhook_count": 0,
+    "last_proof": "mock-hsm::health::0::1767350383",
+    "enabled": false
+  }
+}

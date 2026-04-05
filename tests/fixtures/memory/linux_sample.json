@@ -1,0 +1,13 @@
+{
+  "linux.pslist": [
+    {"comm": "sshd", "pid": 1122, "ppid": 1},
+    {"comm": "cron", "pid": 776, "ppid": 1}
+  ],
+  "linux.lsof": [
+    {"process": "sshd", "path": "/usr/lib/ssh/sshd", "fd": "3r"}
+  ],
+  "windows.malfind": [],
+  "linux.netstat": [
+    {"Process": "sshd", "ForeignAddr": "203.0.113.5:443"}
+  ]
+}

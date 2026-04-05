@@ -1,0 +1,7 @@
+{
+  "id": "evt-ps-1",
+  "host": "host-b",
+  "user": "bob",
+  "process": {"name": "powershell.exe"},
+  "command_line": "powershell -NoProfile -EncodedCommand QABQAGEAcgBzAGUAawAgAC0AZQBuAGMA... (long)"
+}

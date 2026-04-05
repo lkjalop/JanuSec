@@ -1,0 +1,8 @@
+{
+  "name": "c2_block",
+  "steps": [
+    {"type": "intel.check", "inputs": {"artifact": "${ioc}"}},
+    {"type": "network.block", "inputs": {"ioc": "${ioc}"}},
+    {"type": "notify.slack", "inputs": {"text": "Blocked IOC ${ioc}"}}
+  ]
+}

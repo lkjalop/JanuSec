@@ -1,0 +1,37 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "FP Reduction Dashboard (Placeholder)",
+    "panels": [
+      {
+        "type": "text",
+        "title": "Instructions",
+        "gridPos": { "h": 4, "w": 24, "x": 0, "y": 0 },
+        "options": {
+          "content": "This dashboard is a placeholder. The `precision_metrics` API endpoints provide FP/TP counts. For Grafana integration, create a datasource (SQLite/Postgres) or proxy the API to a TSDB for time-series panels.",
+          "mode": "markdown"
+        }
+      },
+      {
+        "type": "stat",
+        "title": "Precision (Last 7 days)",
+        "gridPos": { "h": 6, "w": 8, "x": 0, "y": 5 },
+        "targets": []
+      },
+      {
+        "type": "stat",
+        "title": "FP Count (Last 7 days)",
+        "gridPos": { "h": 6, "w": 8, "x": 8, "y": 5 },
+        "targets": []
+      },
+      {
+        "type": "stat",
+        "title": "TP Count (Last 7 days)",
+        "gridPos": { "h": 6, "w": 8, "x": 16, "y": 5 },
+        "targets": []
+      }
+    ],
+    "schemaVersion": 30
+  },
+  "overwrite": false
+}

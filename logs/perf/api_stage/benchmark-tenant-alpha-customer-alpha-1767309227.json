@@ -1,0 +1,40 @@
+{
+  "cases": [
+    {
+      "name": "alpha_owner_mismatch",
+      "ok": true,
+      "duration_ms": 477.612,
+      "missing_factors": [],
+      "reported_factors": [
+        "api:bola_resource_mismatch",
+        "api:inventory_route_unknown"
+      ]
+    },
+    {
+      "name": "alpha_supply_chain_publish",
+      "ok": true,
+      "duration_ms": 58.704,
+      "missing_factors": [],
+      "reported_factors": [
+        "api:inventory_route_unknown",
+        "api:supply_chain_pipeline_modification"
+      ]
+    },
+    {
+      "name": "alpha_inventory_gap",
+      "ok": true,
+      "duration_ms": 46.364,
+      "missing_factors": [],
+      "reported_factors": [
+        "api:inventory_route_unknown"
+      ]
+    }
+  ],
+  "metrics": {
+    "count": 3,
+    "avg_ms": 194.226,
+    "p95_ms": 58.704
+  },
+  "tenant": "tenant-alpha",
+  "pipeline_profile": "customer-alpha"
+}

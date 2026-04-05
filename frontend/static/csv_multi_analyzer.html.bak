@@ -1,0 +1,1325 @@
+<!doctype html>
+<html lang="en" class="theme-dark">
+<head>
+<meta charset="utf-8" />
+<title>Multi-Source Log Correlator</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<link rel="preconnect" href="/" />
+<!-- Added XLSX parsing support via SheetJS for Excel uploads -->
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="/static/js/threat_ranking.js"></script>
+<!-- Offline fallback loader: attempts local vendor copy if CDN blocked -->
+<script>
+(function(){
+  function attemptFallback(){
+    if(window.XLSX) return; // CDN succeeded
+    var s=document.createElement('script');
+    s.src='/static/vendor/xlsx.full.min.js';
+    s.onload=function(){ console.log('Offline SheetJS loaded'); };
+    s.onerror=function(){ console.warn('Offline SheetJS fallback missing. Place xlsx.full.min.js under frontend/static/vendor/.'); };
+    document.head.appendChild(s);
+  }
+  // Wait a moment for CDN load, then fallback
+  setTimeout(attemptFallback, 1500);
+})();
+</script>
+<style>
+:root { --bg:#0B0E14; --bg2:#141A24; --bg3:#1D2531; --border:#2C3746; --accent:#4A63E7; --text:#E8EBF0; --muted:#93A0B1; --danger:#E54848; --warn:#FF8A3C; --ok:#3FA860; }
+body { margin:0; font-family: Inter, 'Segoe UI', system-ui, sans-serif; background:var(--bg); color:var(--text); }
+header { padding:16px 20px; background:var(--bg2); border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; }
+.h1 { font-size:18px; font-weight:600; }
+.container { padding:20px; max-width:1400px; margin:0 auto; }
+.panel { background:var(--bg2); border:1px solid var(--border); border-radius:8px; padding:16px; margin-bottom:20px; }
+.row { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+.btn { background:var(--bg3); border:1px solid var(--border); color:var(--text); padding:8px 14px; border-radius:6px; cursor:pointer; font-size:13px; display:inline-flex; align-items:center; gap:6px; }
+.btn:hover { background:#222C39; }
+.btn-primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+.btn-primary:hover { background:#5C74F2; }
+.small { font-size:12px; color:var(--muted); }
+.badge { background:var(--bg3); border:1px solid var(--border); padding:3px 8px; border-radius:14px; font-size:11px; display:inline-block; margin-right:6px; }
+input[type=file] { display:none; }
+.source-pill { background:var(--bg3); border:1px solid var(--border); border-radius:6px; padding:6px 8px; font-size:11px; display:inline-flex; gap:6px; align-items:center; }
+select, input[type=text], textarea { background:var(--bg3); border:1px solid var(--border); color:var(--text); padding:6px 8px; border-radius:6px; font-family:inherit; font-size:13px; }
+.table { width:100%; border-collapse:collapse; font-size:12px; }
+.table th, .table td { border:1px solid var(--border); padding:6px 8px; text-align:left; }
+.table th { background:var(--bg3); }
+.grid-3 { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:16px; }
+.metric { background:var(--bg3); padding:12px; border:1px solid var(--border); border-radius:8px; }
+.metric h4 { margin:0 0 6px; font-size:13px; font-weight:600; }
+.muted { color:var(--muted); font-size:11px; }
+.pre { font-family:Consolas,monospace; font-size:11px; background:var(--bg3); padding:8px; border:1px solid var(--border); border-radius:6px; white-space:pre; overflow:auto; max-height:260px; }
+.status-ok { color:var(--ok); }
+.status-warn { color:var(--warn); }
+.status-danger { color:var(--danger); }
+.flex-col { display:flex; flex-direction:column; gap:8px; }
+.tag { background:var(--accent); color:#fff; padding:2px 6px; border-radius:4px; font-size:10px; }
+hr { border:none; border-top:1px solid var(--border); margin:20px 0; }
+#graphCanvas { width:100%; height:420px; background:var(--bg3); border:1px solid var(--border); border-radius:8px; position:relative; }
+.legend { font-size:11px; display:flex; gap:12px; flex-wrap:wrap; }
+.legend span { display:inline-flex; align-items:center; gap:4px; }
+.legend .dot { width:12px; height:12px; border-radius:50%; background:var(--accent); }
+.inline-note { font-size:11px; color:var(--muted); }
+.error-line { color:var(--danger); font-size:11px; }
+.warn-line { color:var(--warn); font-size:11px; }
+</style>
+<script>
+window.authHeaders = window.authHeaders || function(){ try { const key = localStorage.getItem('apiKey') || 'devkey123'; return { 'x-api-key': key }; } catch(_){ return { 'x-api-key':'devkey123' }; } };
+</script>
+</head>
+<body>
+<header>
+  <div class="h1">Multi-Source Log Correlator</div>
+  <div class="row" style="gap:8px;">
+    <button class="btn" id="btnSelectFiles">Select Files</button>
+    <button class="btn" id="btnClear">Clear</button>
+    <button class="btn btn-primary" id="btnBuildGraph" disabled>Build HopGraph</button>
+  </div>
+</header>
+<div style="display:flex; align-items:flex-start;">
+  <!-- Sidebar for Threat Rankings & Mini Chain -->
+  <aside id="threatSidebar" style="width:300px; padding:16px 14px; border-right:1px solid var(--border); background:var(--bg2); min-height:calc(100vh - 60px); display:none; position:sticky; top:0;">
+    <h3 style="margin:0 0 10px; font-size:15px;">Threat Overview</h3>
+    <div class="row" style="gap:6px; margin-bottom:8px;">
+      <button class="btn btn-primary" data-topn="5" id="btnTop5" style="padding:4px 10px; font-size:11px;">Top 5</button>
+      <button class="btn" data-topn="10" id="btnTop10" style="padding:4px 10px; font-size:11px;">10</button>
+      <button class="btn" data-topn="15" id="btnTop15" style="padding:4px 10px; font-size:11px;">15</button>
+    </div>
+    <div id="threatRankList" class="pre" style="font-size:11px; height:180px; overflow:auto;">No rankings yet.</div>
+    <h4 style="margin:14px 0 6px; font-size:13px;">Mini Attack Chain</h4>
+    <div id="miniChain" class="pre" style="font-size:11px; white-space:pre; line-height:1.4; height:160px; overflow:auto;">Not built.</div>
+    <h4 style="margin:14px 0 6px; font-size:13px;">Remediation Hints</h4>
+    <div id="remediationHints" class="pre" style="font-size:11px; max-height:140px; overflow:auto;">—</div>
+    <h4 style="margin:14px 0 6px; font-size:13px;">Key Factors</h4>
+    <div id="sidebarFactors" class="pre" style="font-size:11px; max-height:160px; overflow:auto;">None.</div>
+    <h4 style="margin:14px 0 6px; font-size:13px;">Metrics</h4>
+    <div id="sidebarMetrics" class="pre" style="font-size:11px;">—</div>
+  </aside>
+  <div class="container" style="flex:1;">
+  <div class="panel" id="uploadPanel">
+    <div class="small" style="margin-bottom:8px;">Upload multiple heterogeneous security logs (CSV, JSON, XLSX, LOG, PCAP, EVTX). Annotate source types, normalize, and build a correlation graph with explainable factors.</div>
+    <input id="fileInput" type="file" multiple accept=".csv,.json,.log,.pcap,.evtx,.xls,.xlsx,.xlsm,.ods,.zip,.gz" />
+    <div class="row" style="margin-top:8px;">
+      <select id="defaultSourceType">
+        <option value="auto">Auto-detect source</option>
+        <option value="firewall">Firewall</option>
+        <option value="endpoint">Endpoint/EDR</option>
+        <option value="network">Network (Zeek)</option>
+        <option value="xdr">XDR Summary</option>
+        <option value="identity">Identity / IAM</option>
+        <option value="cloud">Cloud Audit</option>
+        <option value="dns">DNS</option>
+        <option value="data">Data Access (DB)</option>
+        <option value="other">Other</option>
+      </select>
+      <button class="btn" id="btnAnnotateAll" title="Apply selected source type to all pending files">Apply Type to All</button>
+      <label style="display:flex; align-items:center; gap:6px; font-size:11px;">
+        <input type="checkbox" id="chkFastMode" /> Fast parse (client pre-scan)
+      </label>
+      <label style="display:flex; align-items:center; gap:6px; font-size:11px;">
+        <input type="checkbox" id="chkEWMA" checked /> Enable EWMA smoothing
+      </label>
+      <label style="display:flex; align-items:center; gap:6px; font-size:11px;">
+        <span class="small">EWMA alpha</span>
+        <input id="ewmaAlpha" type="number" step="0.05" min="0" max="1" value="0.6" style="width:80px;" />
+      </label>
+    </div>
+    <div id="fileList" class="flex-col" style="margin-top:12px;"></div>
+    <div id="uploadErrors" class="flex-col" style="margin-top:12px;"></div>
+  </div>
+  <div class="panel" id="pathScoresPanel">
+    <h3>Pair Path Scores</h3>
+    <div id="pathScores" class="grid-3"></div>
+  </div>
+
+  <div class="panel" id="emailSignalsPanel" style="display:none;">
+    <h3 style="margin:0 0 6px; font-size:15px;">Email Authentication Signals</h3>
+    <div id="emailSignalsSummary" class="pre">No email signals found yet.</div>
+  </div>
+
+  <div class="panel" id="dataSignalsPanel" style="display:none;">
+    <h3 style="margin:0 0 6px; font-size:15px;">Data Signals</h3>
+    <div id="dataSignalsSummary" class="pre">No data signals found yet.</div>
+  </div>
+
+  <div class="panel" id="raSignalsPanel" style="display:none;">
+    <h3 style="margin:0 0 6px; font-size:15px;">Remote Access Signals</h3>
+    <div id="raSignalsSummary" class="pre">No remote access signals found yet.</div>
+  </div>
+
+  <div class="panel" id="normalizationPanel" style="display:none;">
+    <h3 style="margin:0 0 10px; font-size:15px;">Normalization & Mapping</h3>
+    <div class="small">Auto-detected columns are mapped into canonical fields. Adjust if needed before graph build.</div>
+    <div class="row" style="margin:8px 0; gap:8px;">
+      <label class="small">Apply preset:</label>
+      <select id="presetSelect">
+        <option value="">Choose…</option>
+        <option value="edr">Endpoint/EDR</option>
+        <option value="vpn">VPN</option>
+        <option value="api">API Gateway</option>
+        <option value="cloudtrail">CloudTrail</option>
+        <option value="email">Email</option>
+        <option value="zeek">Network (Zeek)</option>
+      </select>
+      <button class="btn" id="btnApplyPreset">Apply</button>
+      <span class="inline-note">Presets set common column→canonical mappings; you can edit after applying.</span>
+    </div>
+    <div id="mappingContainer" class="flex-col" style="margin-top:12px;"></div>
+    <button class="btn" id="btnFinalizeMapping">Finalize Mapping</button>
+    <hr />
+    <div id="rowPreviewControls" class="row" style="gap:8px; display:none;">
+      <span class="small">Row Filter:</span>
+      <button class="btn btn-primary" id="multiFilterAll">All</button>
+      <button class="btn" id="multiFilterSuspicious">Suspicious</button>
+      <button class="btn" id="multiFilterPassed">Passed</button>
+      <span id="multiRowsSummary" class="small" style="margin-left:8px;">Rows: 0</span>
+      <div style="flex:1"></div>
+      <span class="small">Selected: <span id="multiSelCount">0</span></span>
+      <button class="btn" id="multiSelectAll" title="Select all visible rows">Select All</button>
+      <button class="btn" id="multiClearSel" title="Clear selection">Clear</button>
+      <button class="btn" id="multiMarkGood" title="Disposition good">Mark Good</button>
+      <button class="btn" id="multiMarkReview" title="Disposition review">Mark Review</button>
+      <button class="btn" id="multiMarkThreat" title="Disposition threat" style="border-color:var(--danger);">Mark Threat</button>
+      <button class="btn" id="multiExportCsv" title="Export filtered preview to CSV">Export Filtered</button>
+    </div>
+    <div id="rowPreviewPanel" style="display:none; margin-top:12px; max-height:320px; overflow:auto; border:1px solid var(--border); border-radius:6px;">
+      <table class="table" id="multiRowsTable" style="font-size:11px;">
+        <thead><tr style="position:sticky; top:0; background:var(--bg3);">
+          <th>#</th>
+          <th>Sel</th>
+          <th>User</th>
+          <th>Host</th>
+          <th>Process</th>
+          <th>Path</th>
+          <th>Hash</th>
+          <th>Verdict</th>
+          <th>DREAD</th>
+          <th>Signals</th>
+          <th>Actions</th>
+        </tr></thead>
+        <tbody id="multiRowsBody"><tr><td colspan="11" class="small">No rows parsed yet.</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="panel" id="summaryPanel" style="display:none;">
+    <h3 style="margin:0 0 10px; font-size:15px;">Event Summary</h3>
+    <div class="grid-3" id="metricGrid"></div>
+    <hr />
+    <div class="row" style="margin-bottom:10px; gap:12px;">
+      <button class="btn" id="btnToggleIncident" title="Auto-generate incident when confidence passes threshold" style="background:#2b3443;">Auto-Incident: OFF</button>
+      <span class="small">Toggle auto-incident (confidence≥0.75 + mapping/diversity factors)</span>
+    </div>
+    <div id="factorHintPanel" class="pre" style="margin:8px 0; font-size:11px; padding:8px;">Factor Hints:
+      - multi_source_correlation: multiple batches share ≥1 canonical field values
+      - entity_diversity_high: broad canonical coverage across sessions
+      - mapping_semantics_rich: strong presence of high-value fields (user, host, process, file_hash, domain)
+      - mapping_semantics_bonus: ≥4 high-value fields
+      - ewma_smoothing_applied: temporal smoothing applied to overlap matrix
+    </div>
+    <h4 style="margin:0 0 8px;">Correlation Matrix (Preview)</h4>
+    <div id="correlationMatrix" class="pre">Pending build...</div>
+    <div class="inline-note">Entities joined across sources (hosts, users, IPs, file hashes). Rare outbound ASN and high NXDOMAIN heuristics appear here.</div>
+  </div>
+
+  <div class="panel" id="graphPanel" style="display:none;">
+    <h3 style="margin:0 0 10px; font-size:15px;">HopGraph Visualization</h3>
+    <div id="graphCanvas">Loading graph...</div>
+    <div class="legend" style="margin-top:10px;">
+      <span><span class="dot" style="background:#4A63E7"></span> Host</span>
+      <span><span class="dot" style="background:#FF8A3C"></span> Process</span>
+      <span><span class="dot" style="background:#3FA860"></span> User</span>
+      <span><span class="dot" style="background:#C779D0"></span> File Hash</span>
+      <span><span class="dot" style="background:#4DA6FF"></span> Remote IP</span>
+    </div>
+    <hr />
+    <h4 style="margin:0 0 6px;">Explainable Factors & Risk Narrative</h4>
+    <div id="riskNarrative" class="pre">Not built yet.</div>
+    <div id="frameworkMapping" class="pre" style="margin-top:10px;">Framework mapping (MITRE / STRIDE / DREAD / PASTA / CVSS / KEV / EPSS) will appear here.</div>
+    <hr />
+    <h4 style="margin:10px 0 6px;">Correlation Heatmap</h4>
+    <div id="heatmap" class="pre">Not built yet.</div>
+    <h4 style="margin:10px 0 6px;">Entity Intersections</h4>
+    <div id="intersections" class="pre">Not built yet.</div>
+    <hr />
+    <h4 style="margin:10px 0 6px;">Rarity & Baseline (EWMA)</h4>
+    <div class="small">Rare values per canonical field with EWMA deltas vs. local baseline.</div>
+    <div id="rarityList" class="pre">No rarity computed yet.</div>
+    <h4 style="margin:10px 0 6px;">Factor Overlay</h4>
+    <div class="small">Factors emitted with brief reasons and referenced fields.</div>
+    <div id="factorOverlay" class="pre">No factors available.</div>
+  </div>
+
+  <div class="panel" id="nextActionsPanel" style="display:none;">
+    <h3 style="margin:0 0 10px; font-size:15px;">Playbook Guidance</h3>
+    <ol style="font-size:12px; line-height:1.5; padding-left:18px;" id="playbookList">
+      <li>Validate high-confidence factors (rare ASN + SNI mismatch + lateral connections).</li>
+      <li>Pivot on user and host nodes with highest anomaly density.</li>
+      <li>Contain affected endpoints; isolate suspicious processes.</li>
+      <li>Check credential access anomalies vs IAM baselines.</li>
+      <li>Generate incident via <code>/api/v1/incidents</code> if multi-stage chain confirmed.</li>
+    </ol>
+  </div>
+  </div>
+</div>
+
+<script>
+(function init(){
+  const fileInput = document.getElementById('fileInput');
+  const btnSelect = document.getElementById('btnSelectFiles');
+  const btnClear = document.getElementById('btnClear');
+  const fileList = document.getElementById('fileList');
+  const errorsEl = document.getElementById('uploadErrors');
+  const btnBuildGraph = document.getElementById('btnBuildGraph');
+  const btnAnnotateAll = document.getElementById('btnAnnotateAll');
+  const defaultTypeSel = document.getElementById('defaultSourceType');
+  const chkEWMA = document.getElementById('chkEWMA');
+  let pendingFiles = []; // {file, sourceType}
+  let sessions = []; // returned session ids from server
+  let canonicalRows = []; // normalized subset (client preview only)
+  let rawRows = []; // raw parsed rows from first file (for verdict filtering)
+  let FILTER_MODE = 'all';
+  let SELECTED_PREVIEW = new Set();
+  let currentHeaders = [];
+  let graphSessionId = null;
+  let currentMapping = {}; // column -> canonical
+  const PRESETS = {
+    edr: {
+      user: 'user', username: 'user', account: 'user',
+      computer: 'host', hostname: 'host', device: 'host',
+      parent: 'process', ppid: 'process', parent_image: 'process',
+      process: 'process', image: 'process', exe: 'process',
+      sha256: 'file_hash', md5: 'file_hash', hash: 'file_hash',
+      ip: 'ip', src_ip: 'ip', source_ip: 'ip',
+      dst_ip: 'ip_dst', dest_ip: 'ip_dst', destination_ip: 'ip_dst',
+      domain: 'domain', dns: 'domain', sni: 'domain'
+    },
+    vpn: { user: 'user', username: 'user', src_ip: 'ip', ip: 'ip', asn: 'other', device: 'host' },
+    api: { client_id: 'user', user: 'user', path: 'other', ip: 'ip', src_ip: 'ip', host: 'host', domain: 'domain' },
+    cloudtrail: { userIdentity: 'user', sourceIPAddress: 'ip', awsRegion: 'other', eventSource: 'other', recipientAccountId: 'other' },
+    email: { sender: 'user', from: 'user', src_ip: 'ip', ip: 'ip', domain: 'domain', subject: 'other' },
+    zeek: { id_orig_h: 'ip', id_resp_h: 'ip_dst', uid: 'other', id_orig_p: 'other', id_resp_p: 'other', host: 'host', server_name: 'domain' }
+  };
+
+  btnSelect.addEventListener('click', () => fileInput.click());
+  btnClear.addEventListener('click', () => { pendingFiles = []; sessions = []; canonicalRows = []; graphSessionId = null; fileList.innerHTML=''; errorsEl.innerHTML=''; disableBuild(); hidePanels(); });
+  document.getElementById('btnApplyPreset').addEventListener('click', () => {
+    const preset = document.getElementById('presetSelect').value;
+    if(!preset || !PRESETS[preset]) return;
+    // apply only to visible detected columns
+    const cols = Object.keys(currentMapping || {});
+    const rules = PRESETS[preset];
+    cols.forEach(c => {
+      const lc = String(c).toLowerCase();
+      if (rules[lc] && (!currentMapping[c] || currentMapping[c] === 'other')) {
+        currentMapping[c] = rules[lc];
+      } else {
+        // fuzzy contains match for common tokens
+        for (const k of Object.keys(rules)){
+          if (lc.includes(k)) { currentMapping[c] = rules[k]; break; }
+        }
+      }
+    });
+    renderMappingEditor(cols);
+  });
+  btnAnnotateAll.addEventListener('click', () => { const t = defaultTypeSel.value; pendingFiles.forEach(p=> p.sourceType = t); renderFileList(); });
+
+  function hidePanels(){ ['normalizationPanel','summaryPanel','graphPanel','nextActionsPanel'].forEach(id=> document.getElementById(id).style.display='none'); }
+  function enableBuild(){ btnBuildGraph.disabled = false; }
+  function disableBuild(){ btnBuildGraph.disabled = true; }
+
+  fileInput.addEventListener('change', async () => {
+    Array.from(fileInput.files).forEach(f => pendingFiles.push({ file: f, sourceType: defaultTypeSel.value }));
+    renderFileList();
+    if(pendingFiles.length) enableBuild();
+    // Attempt simple CSV header detection for first CSV file
+    const firstCsv = pendingFiles.find(p=>/\.csv$/i.test(p.file.name));
+    if(firstCsv){
+      try {
+        const text = await firstCsv.file.text();
+        const lines = text.split(/\r?\n/);
+        const headerLine = lines[0]||'';
+        const cols = headerLine.split(/[,;\t]/).map(c=>c.trim()).filter(Boolean);
+        currentMapping = {};
+        cols.forEach(c => { currentMapping[c] = suggestCanonical(c); });
+        currentHeaders = cols.slice();
+        renderMappingEditor(cols);
+        showPanel('normalizationPanel');
+        // Parse up to 600 body rows for preview
+        rawRows = [];
+        for(let i=1;i<Math.min(lines.length,601);i++){
+          const rowLine = lines[i]; if(!rowLine) continue; const parts = rowLine.split(/[,;\t]/);
+          const obj = {}; cols.forEach((c,idx)=>{ obj[c]=parts[idx]||''; }); rawRows.push(obj);
+        }
+        buildRowPreview();
+        // Heuristic: auto-suggest Data Access when DB-like headers are present
+        try {
+          if (isDataAccessHeaders(cols)){
+            if (defaultTypeSel.value === 'auto') defaultTypeSel.value = 'data';
+            try { firstCsv.sourceType = 'data'; } catch(_){ }
+            renderFileList();
+            pushWarn('Detected database-style headers; suggested source type: Data Access (DB).');
+            renderDataSignalsFromHeaders(cols);
+          }
+          // Heuristic: flag Remote Access when headers look like VPN/RDP/Bastion
+          if (isRemoteAccessHeaders(cols)){
+            try { firstCsv.sourceType = firstCsv.sourceType==='auto' ? 'network' : firstCsv.sourceType; } catch(_){ }
+            renderFileList();
+            pushWarn('Detected remote-access style headers (vpn/rdp/bastion).');
+            renderRemoteAccessSignalsFromHeaders(cols);
+          }
+        } catch(_){ }
+      } catch(e){ /* ignore */ }
+    } else {
+      // Fallback: attempt XLSX/XLS/ODS header extraction for first spreadsheet file
+      const firstSheet = pendingFiles.find(p=>/\.(xlsx|xlsm|xls|ods)$/i.test(p.file.name));
+      if(firstSheet && typeof XLSX !== 'undefined'){
+        try {
+          const parsed = await extractXlsxHeaders(firstSheet.file);
+          const headers = parsed.headers;
+          if(headers && headers.length){
+            currentMapping = {};
+            headers.forEach(h => { currentMapping[h] = suggestCanonical(h); });
+            currentHeaders = headers.slice();
+            renderMappingEditor(headers);
+            showPanel('normalizationPanel');
+            renderSheetSelector(parsed.sheetNames, parsed.activeSheet, firstSheet.file);
+            // Extract up to 600 data rows for preview
+            try {
+              const wbData = await firstSheet.file.arrayBuffer();
+              const wb = XLSX.read(new Uint8Array(wbData), { type:'array' });
+              const sheet = wb.Sheets[parsed.activeSheet];
+              const rows = XLSX.utils.sheet_to_json(sheet, { header:1 });
+              rawRows = [];
+              for(let r=1;r<Math.min(rows.length,601);r++){
+                const arr = rows[r]; if(!arr) continue; const obj={}; headers.forEach((h,idx)=>{ obj[h]=arr[idx]||''; }); rawRows.push(obj);
+              }
+              buildRowPreview();
+            } catch(e){ pushWarn('Row extraction failed for sheet: '+(e.message||e)); }
+            // Heuristics
+            try {
+              if (isDataAccessHeaders(headers)){
+                if (defaultTypeSel.value === 'auto') defaultTypeSel.value = 'data';
+                try { firstSheet.sourceType = 'data'; } catch(_){ }
+                renderFileList();
+                pushWarn('Detected database-style headers in spreadsheet; suggested source type: Data Access (DB).');
+                renderDataSignalsFromHeaders(headers);
+              }
+              if (isRemoteAccessHeaders(headers)){
+                try { firstSheet.sourceType = firstSheet.sourceType==='auto' ? 'network' : firstSheet.sourceType; } catch(_){ }
+                renderFileList();
+                pushWarn('Detected remote-access style headers in spreadsheet.');
+                renderRemoteAccessSignalsFromHeaders(headers);
+              }
+            } catch(_){ }
+          } else {
+            pushWarn('Spreadsheet uploaded but no headers detected. Ensure first row contains column names.');
+          }
+        } catch(e){ pushError('Spreadsheet parse failed: '+(e.message||e)); }
+      } else if (firstSheet && typeof XLSX === 'undefined') {
+        pushWarn('XLSX library not loaded; cannot parse Excel file. Convert to CSV as fallback.');
+      }
+    } // end file type handling within change listener
+  }); // end fileInput change listener
+
+  async function extractXlsxHeaders(file){
+    return new Promise((resolve, reject) => {
+      try {
+        const reader = new FileReader();
+        reader.onerror = () => reject(new Error('FileReader error'));
+        reader.onload = e => {
+          try {
+            const data = new Uint8Array(e.target.result);
+            const wb = XLSX.read(data, { type: 'array' });
+            const sheetNames = wb.SheetNames || [];
+            const sheetName = sheetNames[0];
+            if(!sheetName){ return resolve({ headers: [], sheetNames: [], activeSheet: null }); }
+            const sheet = wb.Sheets[sheetName];
+            const rows = XLSX.utils.sheet_to_json(sheet, { header:1 });
+            const headers = (rows && rows[0]) ? rows[0].map(h => String(h).trim()).filter(Boolean) : [];
+            resolve({ headers, sheetNames, activeSheet: sheetName });
+          } catch(err){ reject(err); }
+        };
+        reader.readAsArrayBuffer(file);
+      } catch(e){ reject(e); }
+    });
+  }
+
+  function renderSheetSelector(sheetNames, active, file){
+    try {
+      if(!Array.isArray(sheetNames) || !sheetNames.length) return;
+      let host = document.getElementById('sheetSelectHost');
+      if(!host){
+        host = document.createElement('div');
+        host.id='sheetSelectHost';
+        host.className='row';
+        host.style.margin='12px 0';
+        const panel = document.getElementById('normalizationPanel');
+        panel.insertBefore(host, panel.querySelector('#mappingContainer'));
+      }
+      host.innerHTML = `<label class='small'>Sheet:</label><select id='sheetSelect'></select><span class='inline-note'>Switch active sheet to re-map headers</span>`;
+      const sel = host.querySelector('#sheetSelect');
+      sheetNames.forEach(n => {
+        const opt = document.createElement('option'); opt.value=n; opt.textContent=n; if(n===active) opt.selected=true; sel.appendChild(opt);
+      });
+      sel.addEventListener('change', async () => {
+        try {
+          const data = await file.arrayBuffer();
+          const wb = XLSX.read(new Uint8Array(data), { type:'array' });
+          const sheet = wb.Sheets[sel.value];
+          if(!sheet){ pushWarn('Selected sheet not found.'); return; }
+          const rows = XLSX.utils.sheet_to_json(sheet, { header:1 });
+          const headers = (rows && rows[0]) ? rows[0].map(h => String(h).trim()).filter(Boolean) : [];
+          currentMapping = {};
+          headers.forEach(h => currentMapping[h] = suggestCanonical(h));
+          renderMappingEditor(headers);
+          // Re-run heuristics for newly selected sheet
+          if (isDataAccessHeaders(headers)) renderDataSignalsFromHeaders(headers);
+          if (isRemoteAccessHeaders(headers)) renderRemoteAccessSignalsFromHeaders(headers);
+        } catch(e){ pushError('Sheet switch failed: '+(e.message||e)); }
+      });
+    } catch(e){ /* ignore */ }
+  }
+
+  function renderFileList(){
+    fileList.innerHTML = '';
+    if(!pendingFiles.length){ fileList.innerHTML = '<div class="small">No files selected.</div>'; return; }
+    pendingFiles.forEach((pf, idx) => {
+      const div = document.createElement('div'); div.className='source-pill';
+      div.innerHTML = `<strong>${pf.file.name}</strong> (${Math.round(pf.file.size/1024)} KB) <select data-idx='${idx}' class='stype'>
+        <option value='auto' ${pf.sourceType==='auto'?'selected':''}>auto</option>
+        <option value='firewall' ${pf.sourceType==='firewall'?'selected':''}>firewall</option>
+        <option value='endpoint' ${pf.sourceType==='endpoint'?'selected':''}>endpoint</option>
+        <option value='network' ${pf.sourceType==='network'?'selected':''}>network</option>
+        <option value='xdr' ${pf.sourceType==='xdr'?'selected':''}>xdr</option>
+        <option value='identity' ${pf.sourceType==='identity'?'selected':''}>identity</option>
+        <option value='cloud' ${pf.sourceType==='cloud'?'selected':''}>cloud</option>
+        <option value='dns' ${pf.sourceType==='dns'?'selected':''}>dns</option>
+        <option value='data' ${pf.sourceType==='data'?'selected':''}>data</option>
+        <option value='other' ${pf.sourceType==='other'?'selected':''}>other</option>
+      </select>`;
+      fileList.appendChild(div);
+    });
+    fileList.querySelectorAll('select.stype').forEach(sel => sel.addEventListener('change', e => {
+      const i = Number(e.target.getAttribute('data-idx')); pendingFiles[i].sourceType = e.target.value;
+    }));
+  }
+
+  function suggestCanonical(col){
+    const lc = col.toLowerCase();
+    if(/ip(_addr)?$/.test(lc) || lc==='src_ip') return 'ip';
+    if(lc==='dest_ip' || lc==='dst_ip') return 'ip_dst';
+    if(lc.includes('user')) return 'user';
+    if(lc.includes('host')) return 'host';
+    if(lc.includes('proc') || lc.includes('process')) return 'process';
+    if(lc.includes('hash') || lc==='sha256') return 'file_hash';
+    if(lc==='domain' || lc.includes('dns')) return 'domain';
+    return 'other';
+  }
+
+  function renderMappingEditor(cols){
+    const cont = document.getElementById('mappingContainer');
+    cont.innerHTML = '';
+    if(!cols || !cols.length){ cont.innerHTML = '<div class="small">No columns detected.</div>'; return; }
+    cols.forEach(c => {
+      const row = document.createElement('div'); row.style.display='flex'; row.style.gap='8px'; row.style.alignItems='center';
+      row.innerHTML = `<code style='min-width:160px;'>${c}</code> → <select data-col='${c}' class='mapSel'>
+        <option value='ip' ${currentMapping[c]==='ip'?'selected':''}>ip</option>
+        <option value='ip_dst' ${currentMapping[c]==='ip_dst'?'selected':''}>ip_dst</option>
+        <option value='user' ${currentMapping[c]==='user'?'selected':''}>user</option>
+        <option value='host' ${currentMapping[c]==='host'?'selected':''}>host</option>
+        <option value='process' ${currentMapping[c]==='process'?'selected':''}>process</option>
+        <option value='file_hash' ${currentMapping[c]==='file_hash'?'selected':''}>file_hash</option>
+        <option value='domain' ${currentMapping[c]==='domain'?'selected':''}>domain</option>
+        <option value='other' ${currentMapping[c]==='other'?'selected':''}>other</option>
+      </select>`;
+      cont.appendChild(row);
+    });
+    cont.querySelectorAll('select.mapSel').forEach(sel => sel.addEventListener('change', e => {
+      const col = e.target.getAttribute('data-col'); currentMapping[col] = e.target.value;
+    }));
+    // Show row preview controls if rows parsed
+    if(rawRows && rawRows.length){ document.getElementById('rowPreviewControls').style.display='flex'; document.getElementById('rowPreviewPanel').style.display='block'; }
+  }
+
+  btnBuildGraph.addEventListener('click', async () => {
+    if(!pendingFiles.length){ return; }
+    showPanel('summaryPanel'); document.getElementById('correlationMatrix').textContent = 'Computing preview...';
+    const fd = new FormData(); pendingFiles.forEach(pf => fd.append('files', pf.file, pf.file.name));
+    try {
+      // Provide correlation header to encourage grouped synthetic session linking in backend
+      const uploadResp = await fetch('/api/v1/upload/files', { method:'POST', headers: { ...authHeaders(), 'X-Correlation-Analyze':'multi-csv' }, body: fd });
+      let json = {}; try{ json = await uploadResp.json().catch(()=>({})); }catch(_){ }
+      if(!uploadResp.ok){ pushError('Upload failed: '+uploadResp.status+' '+(json.detail||json.error||'')); return; }
+      sessions = Array.isArray(json.sessions)? json.sessions : (json.sessions? [json.sessions]: []);
+      buildCorrelationPreview();
+      await buildHopGraph();
+    }catch(e){ pushError('Upload error: '+(e.message||e)); }
+  });
+
+  function pushError(msg){ const line = document.createElement('div'); line.className='error-line'; line.textContent = msg; errorsEl.appendChild(line); }
+  function pushWarn(msg){ const line = document.createElement('div'); line.className='warn-line'; line.textContent = msg; errorsEl.appendChild(line); }
+
+  function showPanel(id){ document.getElementById(id).style.display='block'; }
+
+  function buildCorrelationPreview(){
+    const matrixEl = document.getElementById('correlationMatrix');
+    // Placeholder until backend correlation implemented
+    matrixEl.textContent = 'Sessions: '+sessions.join(', ')+'\n';
+    matrixEl.textContent += 'Joined entity counts (stub) -> hosts: ?, users: ?, processes: ?, file_hashes: ?, remote_ips: ?\n';
+    matrixEl.textContent += 'Rare outbound ASN (stub): none detected yet\n';
+    matrixEl.textContent += 'NXDOMAIN anomaly (stub): n/a\n';
+  }
+
+  function renderCorrelationSmoothed(summary){
+    const matrixEl = document.getElementById('correlationMatrix');
+    const sm = summary && summary.correlation_smoothed ? summary.correlation_smoothed : null;
+    if(!sm){ return; }
+    // Render as simple table
+    let html = '';
+    const rows = Object.keys(sm);
+    html += 'Smoothed correlation (EWMA):\n';
+    rows.forEach(a => {
+      const cols = Object.keys(sm[a] || {});
+      html += a + ': ' + cols.map(b => `${b}=${sm[a][b]}`).join(', ') + '\n';
+    });
+    matrixEl.textContent = html;
+  }
+
+  function renderCorrelationHeatmap(summary){
+    try{
+      const container = document.getElementById('heatmap');
+      const mat = (summary && (summary.correlation_smoothed || summary.correlation)) || {};
+      const keys = Object.keys(mat||{});
+      if(!keys.length){ container.textContent = 'No correlation available.'; return; }
+      // Collect all unique keys
+      const colsSet = new Set();
+      keys.forEach(r => Object.keys(mat[r]||{}).forEach(c => colsSet.add(c)));
+      const cols = Array.from(new Set([...keys, ...colsSet]));
+      // Compute max to scale color
+      let maxv = 0; keys.forEach(r => Object.values(mat[r]||{}).forEach(v => { const n=Number(v)||0; if(n>maxv) maxv=n; }));
+      maxv = Math.max(1, maxv);
+      // Build table
+      let html = '<table class="table" id="heatmapTable"><thead><tr><th>Batch</th>' + cols.map(c=>`<th>${c}</th>`).join('') + '</tr></thead><tbody>';
+      keys.forEach(r => {
+        html += `<tr><th>${r}</th>`;
+        cols.forEach(c => {
+          const val = Number((mat[r]||{})[c]||0);
+          const pct = Math.min(100, Math.round((val/maxv)*100));
+          const bg = `linear-gradient(90deg, rgba(74,99,231,0.9) ${pct}%, rgba(0,0,0,0) ${pct}%)`;
+          const cellMeta = `data-a='${r}' data-b='${c}' data-val='${val}'`;
+          html += `<td class="heatmap-cell" ${cellMeta} style="cursor:pointer;background:${bg}" title="${r} ↔ ${c}: ${val} overlaps">${val}</td>`;
+        });
+        html += '</tr>';
+      });
+      html += '</tbody></table>';
+      container.innerHTML = html;
+      // attach drill-down
+      container.querySelectorAll('.heatmap-cell').forEach(cell => {
+        cell.addEventListener('click', () => {
+          const a = cell.getAttribute('data-a');
+          const b = cell.getAttribute('data-b');
+          const v = cell.getAttribute('data-val');
+          showOverlapDetails(summary, a, b, v);
+        });
+      });
+    }catch(e){ try{ document.getElementById('heatmap').textContent = 'Failed to render heatmap'; }catch(_){} }
+  }
+
+  function showOverlapDetails(summary, a, b, v){
+    try {
+      const panel = document.getElementById('factorOverlay');
+      const factors = summary.factors || [];
+      const related = [];
+      factors.forEach(f => {
+        const name = f.name || f.factor || ''; if(/mapping|diversity|correlation/i.test(name)) related.push(name);
+      });
+      const lines = [];
+      lines.push(`Drill-down: ${a} ↔ ${b}`);
+      lines.push(`Overlapping canonical fields count: ${v}`);
+      if(related.length) lines.push('Related factors: '+related.join(', '));
+      const details = (summary.overlap_details && summary.overlap_details[a] && summary.overlap_details[a][b]) || null;
+      if(details){
+        Object.keys(details).forEach(f => {
+          lines.push(` • ${f}: ${details[f].join(', ')}`);
+        });
+      } else {
+        lines.push('No detailed value intersections available.');
+      }
+      panel.textContent = lines.join('\n');
+    } catch(e){ /* ignore */ }
+  }
+  let autoIncidentEnabled = false;
+  document.getElementById('btnToggleIncident').addEventListener('click', () => {
+    autoIncidentEnabled = !autoIncidentEnabled;
+    const btn = document.getElementById('btnToggleIncident');
+    btn.textContent = 'Auto-Incident: ' + (autoIncidentEnabled ? 'ON' : 'OFF');
+    btn.style.background = autoIncidentEnabled ? 'var(--accent)' : '#2b3443';
+  });
+
+  function renderIntersectionsTable(summary){
+    try{
+      const container = document.getElementById('intersections');
+      const mat = (summary && (summary.correlation_smoothed || summary.correlation)) || {};
+      const rows = [];
+      Object.keys(mat||{}).forEach(a => {
+        Object.entries(mat[a]||{}).forEach(([b, v]) => rows.push({a,b,v:Number(v)||0}));
+      });
+      if(!rows.length){ container.textContent = 'No intersections.'; return; }
+      rows.sort((x,y)=>y.v - x.v);
+      let html = '<table class="table"><thead><tr><th>Batch A</th><th>Batch B</th><th>Overlapping Entities (fields)</th></tr></thead><tbody>';
+      rows.forEach(r => { html += `<tr><td>${r.a}</td><td>${r.b}</td><td>${r.v}</td></tr>`; });
+      html += '</tbody></table>';
+      container.innerHTML = html;
+    }catch(e){ try{ document.getElementById('intersections').textContent = 'Failed to render intersections'; }catch(_){} }
+  }
+
+  function _ewmaStore(){
+    try{ return JSON.parse(localStorage.getItem('csvMultiEwma') || '{}'); }catch(_){ return {}; }
+  }
+  function _saveEwmaStore(s){ try{ localStorage.setItem('csvMultiEwma', JSON.stringify(s)); }catch(_){ }
+  }
+  function renderRarityPanel(rows, summary){
+    try{
+      const cont = document.getElementById('rarityList');
+      if(!rows || !rows.length){ cont.textContent = 'No rows normalized yet.'; return; }
+      const fields = ['user','host','ip','ip_dst','domain','process','file_hash'];
+      const counts = {};
+      rows.forEach(r => fields.forEach(f => { const v = r && r[f]; if(!v) return; const k=f+"::"+String(v); counts[k]=(counts[k]||0)+1; }));
+      const alpha = parseFloat(document.getElementById('ewmaAlpha').value || '0.6');
+      const store = _ewmaStore();
+      const deltas = [];
+      Object.entries(counts).forEach(([k,c]) => {
+        const prev = (store[k] && store[k].v) || 0;
+        const now = alpha * c + (1-alpha) * prev;
+        store[k] = { v: now, t: Date.now()/1000 };
+        deltas.push({ key:k, count:c, prev, delta: (c - prev) });
+      });
+      _saveEwmaStore(store);
+      deltas.sort((a,b)=> (a.count - b.count) || (Math.abs(b.delta) - Math.abs(a.delta)) );
+      const top = deltas.slice(0, Math.min(20, deltas.length));
+      let out = '';
+      top.forEach(d => {
+        const disp = `${d.key} (${d.count}, ${(d.delta>=0?'+':'')}${d.delta.toFixed(2)})`;
+        out += `<span class="badge" data-pivot="${d.key}">${disp}</span> `;
+      });
+      cont.innerHTML = out || 'No rarity computed.';
+      // attach pivot clicks
+      cont.querySelectorAll('[data-pivot]').forEach(el => {
+        el.addEventListener('click', () => drawPivot(el.getAttribute('data-pivot')));
+      });
+    }catch(e){ try{ document.getElementById('rarityList').textContent = 'Failed to compute rarity.'; }catch(_){} }
+  }
+
+  function drawPivot(key){
+    try{
+      const el = document.getElementById('graphCanvas');
+      const prev = el.getAttribute('data-prev') || '';
+      el.setAttribute('data-prev', key);
+      el.innerHTML = `<div style="padding:8px; font-size:12px;">Pivot focus: ${key}.<br/><span class="small">(Demo) Render neighborhood edges for this value across sessions.</span></div>`;
+    }catch(_){ }
+  }
+
+  function renderFactorOverlay(summary){
+    try{
+      const div = document.getElementById('factorOverlay');
+      const factors = summary.factors || [];
+      if(!Array.isArray(factors) || !factors.length){ div.textContent = 'No factors available.'; return; }
+      let out = '';
+      factors.forEach(f => {
+        const name = f.factor || f.name || 'factor';
+        const score = (typeof f.score==='number') ? f.score.toFixed(2) : 'n/a';
+        const reason = f.reason || f.explain || '';
+        const refs = [];
+        ['user','host','ip','ip_dst','domain','process','file_hash'].forEach(k => { if(String(reason).toLowerCase().includes(k)) refs.push(k); });
+        out += `- ${name} (score=${score}) refs=[${refs.join(', ')}]`+ (reason? `\n  ${reason}`:'') + '\n';
+      });
+      div.textContent = out.trim();
+    }catch(e){ try{ document.getElementById('factorOverlay').textContent = 'Failed to render overlay.'; }catch(_){} }
+  }
+
+  function inferVerdict(raw){
+    try {
+      if(!raw || typeof raw !== 'object') return '';
+      const vfields = ['verdict','Verdict','decision','Decision','result','Result','tag','Tag'];
+      for(const f of vfields){ if(raw[f]){ const s=String(raw[f]).trim(); if(s) return s; } }
+      if(raw.malicious || raw.Malicious || raw.is_malicious) return 'MALICIOUS';
+      if(raw.suspicious || raw.Suspicious || raw.is_suspicious) return 'SUSPICIOUS';
+      if(raw.avPositives || raw.av_positives || raw.avPos){ const av=parseInt(String(raw.avPositives||raw.av_positives||raw.avPos||0).replace(/[^0-9]/g,''),10); if(av>3) return 'MALICIOUS'; if(av>0) return 'SUSPICIOUS'; }
+      if(raw.threatWeight || raw.threatweight || raw.ThreatWeight){ const tw=parseFloat(String(raw.threatWeight||raw.threatweight||raw.ThreatWeight||0).replace(/[^0-9\.\-]/g,'')); if(tw>=7) return 'MALICIOUS'; if(tw>=4) return 'SUSPICIOUS'; }
+      const text = Object.values(raw).join(' ').toLowerCase();
+      if(/suspicious|malicious|threat|ransom|c2|trojan/.test(text)) return 'SUSPICIOUS';
+      return '';
+    }catch(_){ return ''; }
+  }
+
+  function computeDread(factors, raw){
+    try {
+      let base=0; (factors||[]).forEach(f=>{ const s=String(f).toLowerCase(); if(s.includes('lolbin')) base+=2; if(s.includes('unsigned')||s.includes('sensitive')) base+=1; if(s.includes('novel')||s.includes('global')) base+=1; if(s.includes('multi')||s.includes('repeat')) base+=1; });
+      let av=0, tw=0; if(raw){ try{ av=parseInt(String(raw.avPositives||raw.av_positives||raw.avPos||0).replace(/[^0-9]/g,''),10)||0; }catch(_){ } try{ tw=parseFloat(String(raw.threatWeight||raw.threatweight||raw.ThreatWeight||0).replace(/[^0-9\.\-]/g,''))||0; }catch(_){ } }
+      const avScore=Math.min(5,av); const twScore=Math.min(5,Math.round(tw/2)); const total=base+avScore+twScore; const norm=Math.min(10,Math.round(total)); return { score:norm, level: norm<=3?'low':(norm<=6?'medium':'high') };
+    }catch(_){ return {score:0,level:'low'}; }
+  }
+
+  function verdictCategory(v){ const s=String(v||'').toUpperCase(); if(!s) return 'NEUTRAL'; if(/GOOD|BENIGN|CONTROLLED/.test(s)) return 'PASS'; if(/MALICIOUS|SUSPICIOUS|THREAT/.test(s)) return 'FAIL'; return 'NEUTRAL'; }
+
+  function buildRowPreview(){
+    try {
+      const body = document.getElementById('multiRowsBody'); if(!body) return;
+      if(!rawRows.length){ body.innerHTML='<tr><td colspan="11" class="small">No rows parsed yet.</td></tr>'; return; }
+      const enriched = rawRows.slice(0,600).map((r,origIdx)=>{
+        const verdict = inferVerdict(r);
+        const factors = [];
+        try { const proc = (r.process_name||r.process||'').toLowerCase(); if(/rundll32|regsvr32|mshta/.test(proc)) factors.push('lolbin'); }catch(_){ }
+        if(/\\windows\\system32/i.test(String(r.file_path||r.path||''))) factors.push('unsigned_sensitive_path');
+        if(/suspicious|malicious/.test(String(verdict))) factors.push('novel_global');
+        const dread = computeDread(factors, r);
+        return { raw:r, verdict, factors, dread, idx:origIdx };
+      });
+      const filtered = enriched.filter(rec => {
+        const cat = verdictCategory(rec.verdict);
+        if(FILTER_MODE==='suspicious') return cat==='FAIL';
+        if(FILTER_MODE==='passed') return cat==='PASS';
+        return true;
+      });
+      let html='';
+      filtered.forEach((rec,visIdx)=>{
+        const r=rec.raw; const cat=verdictCategory(rec.verdict);
+        let rowStyle=''; if(cat==='PASS') rowStyle='style="background:rgba(63,168,96,0.15)"'; else if(cat==='FAIL') rowStyle='style="background:rgba(229,72,72,0.18)"';
+        const checked = SELECTED_PREVIEW.has(rec.idx) ? ' checked' : '';
+        html+=`<tr ${rowStyle}>`+
+              `<td>${visIdx+1}</td>`+
+              `<td><input type="checkbox" class="multi-row-select" data-idx="${rec.idx}"${checked} /></td>`+
+              `<td>${escapeHtml(r.user||r.username||'')}</td>`+
+              `<td>${escapeHtml(r.host||r.hostname||'')}</td>`+
+              `<td>${escapeHtml(r.process_name||r.process||'')}</td>`+
+              `<td>${escapeHtml(r.file_path||r.path||'')}</td>`+
+              `<td>${escapeHtml(r.sha256||r.hash||'')}</td>`+
+              `<td>${escapeHtml(rec.verdict||'')}</td>`+
+              `<td>${rec.dread.score}</td>`+
+              `<td>${escapeHtml(rec.factors.join(', '))}</td>`+
+              `<td><button class="btn multi-row-details" data-idx="${rec.idx}" style="padding:2px 6px;font-size:10px;">Details</button> `+
+              `<button class="btn multi-row-explain" data-idx="${rec.idx}" style="padding:2px 6px;font-size:10px;">Explain</button></td>`+
+              `</tr>`;
+      });
+      body.innerHTML = html || '<tr><td colspan="11" class="small">No rows match filter.</td></tr>';
+      attachRowPreviewDelegates();
+      const sum = document.getElementById('multiRowsSummary'); if(sum) sum.textContent='Rows: '+filtered.length+' / '+enriched.length;
+      document.getElementById('rowPreviewControls').style.display='flex';
+      document.getElementById('rowPreviewPanel').style.display='block';
+    } catch(e){ try{ document.getElementById('multiRowsBody').innerHTML='<tr><td colspan="11" class="small">Row preview error</td></tr>'; }catch(_){ } }
+  }
+
+  function escapeHtml(s){ return String(s||'').replace(/[&<>"']/g, function(ch){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'})[ch]; }); }
+
+  // Filter button handlers
+  document.addEventListener('DOMContentLoaded', function(){ try {
+    const allBtn=document.getElementById('multiFilterAll'); const susBtn=document.getElementById('multiFilterSuspicious'); const passBtn=document.getElementById('multiFilterPassed');
+    // restore persisted filter mode
+    try { const saved = localStorage.getItem('multi_csv_filter_mode'); if(saved && ['all','suspicious','passed'].includes(saved)) { FILTER_MODE = saved; const target = saved==='all'?allBtn:(saved==='suspicious'?susBtn:passBtn); setFilterActive(target); } }catch(_){ }
+    if(allBtn) allBtn.addEventListener('click', ()=>{ FILTER_MODE='all'; setFilterActive(allBtn); localStorage.setItem('multi_csv_filter_mode','all'); buildRowPreview(); });
+    if(susBtn) susBtn.addEventListener('click', ()=>{ FILTER_MODE='suspicious'; setFilterActive(susBtn); localStorage.setItem('multi_csv_filter_mode','suspicious'); buildRowPreview(); });
+    if(passBtn) passBtn.addEventListener('click', ()=>{ FILTER_MODE='passed'; setFilterActive(passBtn); localStorage.setItem('multi_csv_filter_mode','passed'); buildRowPreview(); });
+    // bulk selection controls
+    const selAll=document.getElementById('multiSelectAll'); if(selAll) selAll.addEventListener('click', ()=>{ try { document.querySelectorAll('#multiRowsBody .multi-row-select').forEach(cb=>{ cb.checked=true; SELECTED_PREVIEW.add(parseInt(cb.getAttribute('data-idx'),10)); }); updateSelectionCount(); }catch(_){ } });
+    const selClear=document.getElementById('multiClearSel'); if(selClear) selClear.addEventListener('click', ()=>{ SELECTED_PREVIEW.clear(); document.querySelectorAll('#multiRowsBody .multi-row-select').forEach(cb=> cb.checked=false); updateSelectionCount(); });
+    const markGood=document.getElementById('multiMarkGood'); if(markGood) markGood.addEventListener('click', ()=>bulkDisposition('good'));
+    const markReview=document.getElementById('multiMarkReview'); if(markReview) markReview.addEventListener('click', ()=>bulkDisposition('review'));
+    const markThreat=document.getElementById('multiMarkThreat'); if(markThreat) markThreat.addEventListener('click', ()=>bulkDisposition('threat'));
+    const exportBtn=document.getElementById('multiExportCsv'); if(exportBtn) exportBtn.addEventListener('click', exportFilteredCsv);
+  }catch(_){ }});
+
+  function setFilterActive(btn){ try { ['multiFilterAll','multiFilterSuspicious','multiFilterPassed'].forEach(id=>{ const el=document.getElementById(id); if(!el) return; el.classList.remove('btn-primary'); }); if(btn) btn.classList.add('btn-primary'); }catch(_){ }
+  }
+
+  function updateSelectionCount(){ try { const el=document.getElementById('multiSelCount'); if(el) el.textContent=SELECTED_PREVIEW.size; }catch(_){ } }
+
+  function attachRowPreviewDelegates(){
+    try {
+      document.querySelectorAll('#multiRowsBody .multi-row-select').forEach(cb => {
+        cb.addEventListener('change', e => { const idx=parseInt(e.target.getAttribute('data-idx'),10); if(!isNaN(idx)){ if(e.target.checked) SELECTED_PREVIEW.add(idx); else SELECTED_PREVIEW.delete(idx); updateSelectionCount(); } });
+      });
+      document.querySelectorAll('#multiRowsBody .multi-row-details').forEach(btn => {
+        btn.addEventListener('click', e => { const idx=parseInt(e.target.getAttribute('data-idx'),10); showRowModal(idx); });
+      });
+      document.querySelectorAll('#multiRowsBody .multi-row-explain').forEach(btn => {
+        btn.addEventListener('click', e => { const idx=parseInt(e.target.getAttribute('data-idx'),10); fetchRowExplain(idx); });
+      });
+    }catch(_){ }
+  }
+
+  async function bulkDisposition(disposition){
+    try {
+      if(!SELECTED_PREVIEW.size){ pushWarn('No rows selected'); return; }
+      const payload=[]; SELECTED_PREVIEW.forEach(idx => { const raw=rawRows[idx]||{}; payload.push({ event_id: raw.event_id||raw.EventID||null, row_index: idx, disposition, source:'multi-csv', ts: Date.now()/1000 }); });
+      const r = await fetch('/api/v1/telemetry/dispositions', { method:'POST', headers:{ 'Content-Type':'application/json', ...authHeaders() }, body: JSON.stringify(payload) });
+      if(r.ok){ pushWarn('Applied '+disposition+' to '+payload.length+' rows'); } else { pushError('Disposition failed: '+r.status); }
+    } catch(e){ pushError('Disposition error: '+(e.message||e)); }
+  }
+
+  function exportFilteredCsv(){
+    try {
+      if(!rawRows.length){ pushWarn('No rows to export'); return; }
+      const enriched = rawRows.slice(0,600).map(r=>{ const verdict=inferVerdict(r); const factors=[]; try{ const p=(r.process_name||r.process||'').toLowerCase(); if(/rundll32|regsvr32|mshta/.test(p)) factors.push('lolbin'); }catch(_){ } if(/\\windows\\system32/i.test(String(r.file_path||r.path||''))) factors.push('unsigned_sensitive_path'); if(/suspicious|malicious/.test(String(verdict))) factors.push('novel_global'); const dread=computeDread(factors,r); return { raw:r, verdict, signals:factors.join(';'), dread:dread.score }; });
+      const filtered = enriched.filter(rec => { const cat=verdictCategory(rec.verdict); if(FILTER_MODE==='suspicious') return cat==='FAIL'; if(FILTER_MODE==='passed') return cat==='PASS'; return true; });
+      const headers=[...currentHeaders,'verdict','dread','signals'];
+      const lines=[headers.join(',')];
+      filtered.forEach(rec => { const row=[]; headers.forEach(h => { if(h==='verdict') row.push(JSON.stringify(rec.verdict||'')); else if(h==='dread') row.push(rec.dread); else if(h==='signals') row.push(JSON.stringify(rec.signals||'')); else row.push(JSON.stringify(rec.raw[h]||'')); }); lines.push(row.join(',')); });
+      const blob=new Blob([lines.join('\n')+'\n'], { type:'text/csv' });
+      const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='multi_filtered_preview.csv'; document.body.appendChild(a); a.click(); setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); },1500);
+    } catch(e){ pushError('Export failed: '+(e.message||e)); }
+  }
+
+  function ensureRowModal(){
+    let modal=document.getElementById('multiRowModal');
+    if(!modal){
+      modal=document.createElement('div'); modal.id='multiRowModal'; modal.style.position='fixed'; modal.style.top='0'; modal.style.left='0'; modal.style.right='0'; modal.style.bottom='0'; modal.style.background='rgba(0,0,0,0.55)'; modal.style.display='none'; modal.style.alignItems='center'; modal.style.justifyContent='center'; modal.innerHTML='<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;width:520px;max-width:92%;padding:18px;font-size:12px;max-height:80%;overflow:auto;">'+
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;"><strong>Row Details</strong><button id="multiRowModalClose" class="btn" style="padding:4px 10px;font-size:11px;">Close</button></div>'+
+        '<pre id="multiRowModalBody" style="background:var(--bg3);padding:8px;border:1px solid var(--border);border-radius:6px;white-space:pre-wrap;max-height:380px;overflow:auto;"></pre>'+
+        '<div id="multiRowExplainWrap" style="margin-top:10px;"><strong>Explain</strong><pre id="multiRowExplainBody" style="background:var(--bg3);padding:8px;border:1px solid var(--border);border-radius:6px;white-space:pre-wrap;max-height:260px;overflow:auto;">No explain fetched.</pre></div>'+
+        '</div>';
+      document.body.appendChild(modal);
+      modal.addEventListener('click', e => { if(e.target===modal) hideRowModal(); });
+      document.getElementById('multiRowModalClose').addEventListener('click', hideRowModal);
+    }
+    return modal;
+  }
+  function showRowModal(idx){ try { const modal=ensureRowModal(); const raw=rawRows[idx]; if(!raw){ return; } const body=document.getElementById('multiRowModalBody'); body.textContent=JSON.stringify(raw,null,2); document.getElementById('multiRowExplainBody').textContent='No explain fetched.'; modal.style.display='flex'; }catch(_){ } }
+  function hideRowModal(){ try { const modal=document.getElementById('multiRowModal'); if(modal) modal.style.display='none'; }catch(_){ } }
+  async function fetchRowExplain(idx){
+    try {
+      showRowModal(idx);
+      const raw=rawRows[idx]||{}; const eid=raw.event_id||raw.EventID; if(!eid){ document.getElementById('multiRowExplainBody').textContent='No event_id available for explain.'; return; }
+      const r=await fetch('/api/v1/decisions/'+encodeURIComponent(eid)+'/explain', { headers:{ ...authHeaders() } });
+      if(!r.ok){ document.getElementById('multiRowExplainBody').textContent='Explain failed: '+r.status; return; }
+      const j=await r.json(); document.getElementById('multiRowExplainBody').textContent=JSON.stringify(j,null,2);
+    } catch(e){ try { document.getElementById('multiRowExplainBody').textContent='Explain error: '+(e.message||e); }catch(_){ } }
+  }
+
+  async function buildHopGraph(){
+    if(!sessions.length){ pushWarn('No sessions returned; graph build skipped'); return; }
+    try {
+      const body = { session_ids: sessions, correlate: true, ewma: chkEWMA.checked, ewma_alpha: parseFloat(document.getElementById('ewmaAlpha').value || '0.6'), mapping: currentMapping };
+      const r = await fetch('/api/v1/graph/session/build', { method:'POST', headers:{ 'Content-Type':'application/json', ...authHeaders() }, body: JSON.stringify(body) });
+      let j = {}; try{ j = await r.json().catch(()=>({})); }catch(_){ }
+      if(!r.ok){ pushError('Graph build failed: '+r.status+' '+(j.detail||j.error||'')); return; }
+      graphSessionId = j.session_id || j.graph_session_id || j.id || null;
+      showPanel('graphPanel'); showPanel('nextActionsPanel');
+      const summaryObj = j.summary || j;
+      renderRiskNarrative(summaryObj);
+      renderGraph(j.graph || j.hopgraph || (j.summary && j.summary.graph || {}));
+      renderFrameworkMapping(j.frameworks || j.mapping || {});
+      renderCorrelationSmoothed(j.summary || j);
+      renderCorrelationHeatmap(j.summary || j);
+      renderIntersectionsTable(j.summary || j);
+      renderEmailSignals(j.summary || j || {});
+      renderDataSignals(j.summary || j || {});
+      renderRemoteAccessSignals(j.summary || j || {});
+      renderRarityPanel(canonicalRows || [], j.summary || j || {});
+      renderFactorOverlay(summaryObj || {});
+      await fetchExplainAndMetrics(graphSessionId, summaryObj);
+      maybeAutoIncident(summaryObj || {});
+      renderPathScores(summaryObj || {});
+      renderThreatSidebar(summaryObj || {});
+    }catch(e){ pushError('Graph build error: '+(e.message||e)); }
+  }
+
+  async function fetchExplainAndMetrics(sessionId, summary){
+    try {
+      if(!sessionId) return;
+      // Fetch explain narrative for volatility & breakdown
+      const exResp = await fetch(`/api/v1/graph/session/${encodeURIComponent(sessionId)}/explain`, { headers: { ...authHeaders() } });
+      let ex = {}; try{ ex = await exResp.json().catch(()=>({})); }catch(_){ }
+      renderMetrics(summary, ex);
+      enhanceRiskNarrative(summary, ex);
+    } catch(e){ pushWarn('Explain fetch failed: '+(e.message||e)); }
+  }
+
+  function renderMetrics(summary, explain){
+    try {
+      const grid = document.getElementById('metricGrid'); if(!grid) return;
+      grid.innerHTML='';
+      const items = [];
+      const conf = typeof summary.confidence==='number'? summary.confidence.toFixed(3):'n/a';
+      items.push({label:'Confidence', value: conf});
+      items.push({label:'Verdict', value: summary.verdict || 'n/a'});
+      if(summary.ewma_alpha !== undefined) items.push({label:'EWMA α', value: summary.ewma_alpha===null?'—': String(summary.ewma_alpha)});
+      if(explain && typeof explain.volatility==='number') items.push({label:'Volatility', value: explain.volatility.toFixed(3)});
+      if(summary.domain_diversity_score!==undefined) items.push({label:'Domain Diversity', value: Number(summary.domain_diversity_score).toFixed(3)});
+      if(summary.mapping_semantics_score!==undefined) items.push({label:'Mapping Semantics', value: Number(summary.mapping_semantics_score).toFixed(3)});
+      if(summary.path_length!==undefined) items.push({label:'Path Length', value: summary.path_length});
+      if(summary.distinct_phase_count!==undefined) items.push({label:'Distinct Phases', value: summary.distinct_phase_count});
+      const cb = summary.confidence_breakdown || {};
+      if(cb && Object.keys(cb).length){ items.push({label:'Base Conf', value: (cb.base!==undefined? cb.base.toFixed(3):'n/a')}); }
+      items.forEach(m => {
+        const box = document.createElement('div'); box.className='metric';
+        box.innerHTML = `<h4>${m.label}</h4><div>${m.value}</div>`;
+        grid.appendChild(box);
+      });
+    } catch(_){ }
+  }
+
+  function enhanceRiskNarrative(summary, explain){
+    try {
+      const div = document.getElementById('riskNarrative'); if(!div) return;
+      const existing = div.textContent || '';
+      const extra = [];
+      if(explain && explain.volatility !== undefined){ extra.push(`Volatility=${explain.volatility.toFixed(3)}`); }
+      const cb = (summary.confidence_breakdown || {});
+      if(cb.chain_bonus) extra.push(`ChainBonus=${Number(cb.chain_bonus).toFixed(3)}`);
+      if(cb.mapping_bonus) extra.push(`MappingBonus=${Number(cb.mapping_bonus).toFixed(3)}`);
+      if(cb.co_occurrence_adjustment) extra.push(`CoOccAdj=${Number(cb.co_occurrence_adjustment).toFixed(3)}`);
+      if(cb.diversity_weight) extra.push(`DiversityWeight=${Number(cb.diversity_weight).toFixed(3)}`);
+      if(cb.mapping_weight) extra.push(`MappingWeight=${Number(cb.mapping_weight).toFixed(3)}`);
+      if(extra.length){ div.textContent = existing + '\nBreakdown: ' + extra.join(', '); }
+      // Elevate SUSPECT verdict styling
+      if((summary.verdict||'').toUpperCase()==='SUSPECT'){
+        div.textContent = div.textContent.replace('Verdict: SUSPECT', 'Verdict: SUSPECT (elevated detector signals)');
+      }
+    } catch(_){ }
+  }
+
+  // ---------------- Refactored Threat Sidebar (shared module) ----------------
+  let lastSummaryForSidebar = null;
+  // Expose render for tests
+  window.renderThreatSidebar = renderThreatSidebar;
+  function renderThreatSidebar(summary){
+    try {
+      lastSummaryForSidebar = summary;
+      const sidebar = document.getElementById('threatSidebar');
+      if(!sidebar) return; sidebar.style.display='block';
+      const storedTop = parseInt(localStorage.getItem('threat_top_n')||'5',10);
+      const topN = [5,10,15].includes(storedTop) ? storedTop : 5;
+      setTopNActive(topN);
+      const rankings = (window.ThreatRanking && typeof ThreatRanking.computeRiskRankings==='function') ? ThreatRanking.computeRiskRankings(summary, topN) : [];
+      const listEl = document.getElementById('threatRankList');
+      listEl.textContent = rankings.length ? rankings.map((r,i)=>`${i+1}. ${r.key} risk=${r.risk.toFixed(3)} path=${r.score.toFixed(3)} anom=${r.anomalies}`).join('\n') : 'No risk rankings.';
+      // Mini chain
+      const miniEl = document.getElementById('miniChain');
+      if(rankings.length){
+        const chainStr = (window.ThreatRanking && ThreatRanking.bestChainString) ? ThreatRanking.bestChainString(rankings[0], summary) : rankings[0].key.replace(/__/,' -> ');
+        miniEl.textContent = chainStr + `\nRisk=${rankings[0].risk.toFixed(3)}`;
+        // Remediation hints from top entry
+        try {
+          const remEl = document.getElementById('remediationHints');
+          const hints = rankings[0].remediation || [];
+          remEl.textContent = hints.length ? hints.map(h=>'- '+h).join('\n') : 'No specific hints.';
+        } catch(_){ }
+      } else { miniEl.textContent = 'Not built.'; }
+      // Factors
+      try {
+        const fEl = document.getElementById('sidebarFactors');
+        const factors = summary.factors || [];
+        const names = factors.map(f => typeof f==='string'? f : (f.factor||f.name||'factor'));
+        fEl.textContent = Array.from(new Set(names)).slice(0,12).join('\n') || 'None.';
+      } catch(_){ }
+      // Metrics
+      try {
+        const mEl = document.getElementById('sidebarMetrics');
+        const cb = summary.confidence_breakdown || {};
+        mEl.textContent = [
+          `conf=${(summary.confidence||0).toFixed(3)}`,
+          cb.base!==undefined? `base=${Number(cb.base).toFixed(3)}`:null,
+          cb.chain_bonus? `chain=${Number(cb.chain_bonus).toFixed(3)}`:null,
+          cb.mapping_bonus? `mapB=${Number(cb.mapping_bonus).toFixed(3)}`:null,
+          cb.co_occurrence_adjustment? `coOcc=${Number(cb.co_occurrence_adjustment).toFixed(3)}`:null
+        ].filter(Boolean).join(' ');
+      } catch(_){ }
+    } catch(e){ /* silent */ }
+  }
+  function setTopNActive(n){
+    ['btnTop5','btnTop10','btnTop15'].forEach(id=>{ const b=document.getElementById(id); if(!b) return; b.classList.remove('btn-primary'); });
+    const map={5:'btnTop5',10:'btnTop10',15:'btnTop15'}; const target=document.getElementById(map[n]); if(target) target.classList.add('btn-primary');
+  }
+  function attachTopNHandlers(){
+    ['btnTop5','btnTop10','btnTop15'].forEach(id => {
+      const el=document.getElementById(id); if(!el) return;
+      el.addEventListener('click', ()=>{
+        const n=parseInt(el.getAttribute('data-topn')||'5',10);
+        localStorage.setItem('threat_top_n', n);
+        setTopNActive(n);
+        if(lastSummaryForSidebar) renderThreatSidebar(lastSummaryForSidebar);
+      });
+    });
+  }
+  attachTopNHandlers();
+
+  async function maybeAutoIncident(summary){
+    try {
+      if(!autoIncidentEnabled) return;
+      const conf = Number(summary.confidence || 0);
+      const factors = summary.factors || [];
+      const factorNames = factors.map(f => (f && (f.name||f.factor))||'');
+      const hasMapping = factorNames.some(n => /mapping_semantics_rich|mapping_semantics_bonus/.test(n));
+      const hasDiversity = factorNames.some(n => /entity_diversity_high/.test(n));
+      const hasCorrelation = factorNames.some(n => /multi_source_correlation/.test(n));
+      if(conf >= 0.75 && hasMapping && hasDiversity && hasCorrelation){
+        // Fire incident
+        const body = { source: 'multi-correlator', session_id: summary.session_id || 'unknown', confidence: conf, factors: factorNames.slice(0,20) };
+        try {
+          const r = await fetch('/api/v1/incidents', { method:'POST', headers:{ 'Content-Type':'application/json', ...authHeaders() }, body: JSON.stringify(body) });
+          if(r.ok){ pushWarn('Auto-incident generated (confidence '+conf.toFixed(2)+').'); }
+        } catch(_){ }
+      }
+    } catch(_){ }
+  }
+
+  function renderRiskNarrative(data){
+    const div = document.getElementById('riskNarrative');
+    const factors = data.factors || data.explainable_factors || [];
+    const conf = typeof data.confidence === 'number' ? data.confidence.toFixed(2) : 'n/a';
+    const verdict = data.verdict || (conf==='n/a' ? 'pending' : (conf>0.75?'escalate': (conf>0.4?'watch':'benign')));
+    const lines = [];
+    lines.push('Verdict: '+verdict+' (confidence: '+conf+')');
+    if(factors.length){
+      lines.push('Factors:');
+      factors.slice(0,25).forEach(f => {
+        if(typeof f === 'string') lines.push(' - '+f);
+        else if(f && typeof f === 'object') lines.push(' - '+(f.name||f.factor||'factor')+': '+(f.value||f.score||''));
+      });
+    } else {
+      lines.push('No explainable factors surfaced yet (stub).');
+    }
+    lines.push('Chain Reconstruction (stub): discovery -> lateral movement -> exfil (pending actual edges).');
+    div.textContent = lines.join('\n');
+  }
+
+  function renderFrameworkMapping(map){
+    const div = document.getElementById('frameworkMapping');
+    if(!map || typeof map !== 'object'){ div.textContent = 'No framework mapping yet.'; return; }
+    const lines = [];
+    const frameworks = ['MITRE','STRIDE','DREAD','PASTA','CVSS','KEV','EPSS'];
+    frameworks.forEach(fw => {
+      if(map[fw] || map[fw.toLowerCase()]){
+        const val = map[fw] || map[fw.toLowerCase()];
+        lines.push(fw+': '+JSON.stringify(val));
+      } else {
+        lines.push(fw+': n/a');
+      }
+    });
+    div.textContent = lines.join('\n');
+  }
+
+  function renderEmailSignals(data){
+    try {
+      var panel = document.getElementById('emailSignalsPanel');
+      var box = document.getElementById('emailSignalsSummary');
+      var lines = [];
+      // Prefer server-provided summary
+      var s = data.email_signals_summary || data.email || {};
+      if (s && (s.spf || s.dkim || s.dmarc)){
+        lines.push('SPF: '+(s.spf||'n/a'));
+        lines.push('DKIM: '+(s.dkim||'n/a'));
+        lines.push('DMARC: '+(s.dmarc||'n/a'));
+        if (typeof s.risk === 'number') lines.push('Risk: '+s.risk.toFixed(2));
+      } else {
+        // Fallback: scan factors array if included
+        var factors = data.factors || data.explainable_factors || [];
+        var has = false;
+        (factors||[]).forEach(function(f){
+          var name = (f && (f.name||f.factor||'')) + '';
+          if (/email/i.test(name)) { lines.push('- '+name); has = true; }
+        });
+        if (!has) lines.push('No email signals found.');
+      }
+      if (panel) panel.style.display = 'block';
+      if (box) box.textContent = lines.join('\n');
+    } catch(e){ /* ignore */ }
+  }
+
+  function isDataAccessHeaders(cols){
+    try {
+      const lc = (cols||[]).map(c => (c||'').toString().toLowerCase());
+      const hasDb = lc.some(c => /(database|schema|db)/.test(c));
+      const hasTable = lc.some(c => /(table|tbl)/.test(c));
+      const hasQuery = lc.some(c => /query/.test(c));
+      const hasCount = lc.some(c => /(record_count|rows?|count)/.test(c));
+      const hasSink = lc.some(c => /(sink|destination)/.test(c));
+      return [hasDb, hasTable, hasQuery, hasCount, hasSink].filter(Boolean).length >= 2;
+    } catch(_) { return false; }
+  }
+
+  function renderDataSignalsFromHeaders(cols){
+    try {
+      const panel = document.getElementById('dataSignalsPanel');
+      const box = document.getElementById('dataSignalsSummary');
+      const lc = (cols||[]).map(c => (c||'').toString().toLowerCase());
+      const lines = [];
+      const found = [];
+      if (lc.some(c => /(database|schema|db)/.test(c))) found.push('database/schema');
+      if (lc.some(c => /(table|tbl)/.test(c))) found.push('table');
+      if (lc.some(c => /query/.test(c))) found.push('query');
+      if (lc.some(c => /(record_count|rows?|count)/.test(c))) found.push('record_count');
+      if (lc.some(c => /(sink|destination)/.test(c))) found.push('sink');
+      if (!found.length) { lines.push('No obvious DB headers detected.'); }
+      else {
+        lines.push('Detected DB-like headers: ' + found.join(', '));
+        if (found.includes('record_count')) lines.push('Note: record_count can flag bulk exports.');
+        if (found.includes('query')) lines.push('Note: presence of query text may expose sensitive filters.');
+      }
+      if (panel) panel.style.display = 'block';
+      if (box) box.textContent = lines.join('\n');
+    } catch(_){}
+  }
+
+  function renderDataSignals(data){
+    try {
+      const panel = document.getElementById('dataSignalsPanel');
+      const box = document.getElementById('dataSignalsSummary');
+      const lines = [];
+      const s = data.data_signals_summary || data.data || {};
+      if (s && (s.database || s.table || s.query || s.record_count || s.sink)){
+        if (s.database) lines.push('Database: ' + s.database);
+        if (s.table) lines.push('Table: ' + s.table);
+        if (typeof s.record_count === 'number') lines.push('Record count: ' + s.record_count);
+        if (s.query) lines.push('Query: ' + (''+s.query).slice(0,200) + ((''+s.query).length>200?'…':''));
+        if (s.sink) lines.push('Sink: ' + s.sink);
+        if (typeof s.risk === 'number') lines.push('Risk: ' + s.risk.toFixed(2));
+      } else {
+        const m = data.mapping || {};
+        const ms = data.mapping_stats || {};
+        const headers = Object.keys(m).length ? Object.keys(m) : Object.keys(ms || {});
+        if (headers && headers.length) {
+          const lc = headers.map(h => h.toLowerCase());
+          const found = [];
+          if (lc.some(c => /(database|schema|db)/.test(c))) found.push('database/schema');
+          if (lc.some(c => /(table|tbl)/.test(c))) found.push('table');
+          if (lc.some(c => /query/.test(c))) found.push('query');
+          if (lc.some(c => /(record_count|rows?|count)/.test(c))) found.push('record_count');
+          if (lc.some(c => /(sink|destination)/.test(c))) found.push('sink');
+          if (found.length) lines.push('Detected DB-like fields: ' + found.join(', '));
+        }
+        if (!lines.length) lines.push('No data signals found.');
+      }
+      if (panel) panel.style.display = 'block';
+      if (box) box.textContent = lines.join('\n');
+    } catch(_){}
+  }
+
+  function isRemoteAccessHeaders(cols){
+    try {
+      const lc = (cols||[]).map(c => (c||'').toString().toLowerCase());
+      const hasProto = lc.some(c => /(protocol|proto|vpn|rdp|bastion)/.test(c));
+      const hasUser = lc.some(c => /(user|account|principal)/.test(c));
+      const hasSrc = lc.some(c => /(src|source).*ip|src_ip|client/.test(c));
+      const hasDst = lc.some(c => /(dst|dest|destination|host|server)/.test(c));
+      return [hasProto, hasUser, hasSrc, hasDst].filter(Boolean).length >= 2;
+    } catch(_) { return false; }
+  }
+  function renderRemoteAccessSignalsFromHeaders(cols){
+    try {
+      const panel = document.getElementById('raSignalsPanel');
+      const box = document.getElementById('raSignalsSummary');
+      const lc = (cols||[]).map(c => (c||'').toString().toLowerCase());
+      const found = [];
+      if (lc.some(c => /(vpn|rdp|bastion)/.test(c))) found.push('source=remote_access');
+      if (lc.some(c => /(protocol|proto)/.test(c))) found.push('protocol');
+      if (lc.some(c => /(user|account|principal)/.test(c))) found.push('user');
+      if (lc.some(c => /(src|source).*ip|src_ip|client/.test(c))) found.push('src_ip');
+      if (lc.some(c => /(dst|dest|destination|host|server)/.test(c))) found.push('dest_host');
+      if (lc.some(c => /(mfa|2fa)/.test(c))) found.push('mfa_used');
+      const lines = [];
+      if (found.length) lines.push('Detected remote-access headers: '+found.join(', ')); else lines.push('No obvious RA headers detected.');
+      if (panel) panel.style.display='block'; if (box) box.textContent = lines.join('\n');
+    } catch(_){}
+  }
+  function renderRemoteAccessSignals(data){
+    try {
+      const panel = document.getElementById('raSignalsPanel');
+      const box = document.getElementById('raSignalsSummary');
+      const lines = [];
+      const s = data.remote_access || data.ra || {};
+      // server may set flags via event/factor summaries in future; fallback to factors list
+      if (s && (s.mfa_used || s.impossible_travel || s.geo_out_of_policy || s.dpi_suspect)){
+        if (s.mfa_used !== undefined) lines.push('MFA used: '+s.mfa_used);
+        if (s.impossible_travel) lines.push('Impossible travel: true');
+        if (s.geo_out_of_policy) lines.push('Geo out of policy: true');
+        if (s.dpi_suspect) lines.push('DPI tunnel anomaly suspected');
+      } else {
+        const factors = data.factors || data.explainable_factors || [];
+        let has = false;
+        (factors||[]).forEach(f => {
+          const name = (f && (f.name||f.factor||'')) + '';
+          if (/remote:|impossible_travel|mfa|bastion|dpi/i.test(name)) { lines.push('- '+name); has = true; }
+        });
+        if (!has) lines.push('No remote access signals found.');
+      }
+      if (panel) panel.style.display='block'; if (box) box.textContent = lines.join('\n');
+    } catch(_){}
+  }
+
+  function renderGraph(graph){
+    const canvas = document.getElementById('graphCanvas');
+    canvas.innerHTML = '';
+    // Basic stub: list node counts
+    try {
+      const nodes = graph.nodes || [];
+      const edges = graph.edges || [];
+      const summary = document.createElement('div'); summary.style.position='absolute'; summary.style.top='10px'; summary.style.left='10px'; summary.style.fontSize='11px'; summary.style.background='rgba(0,0,0,0.4)'; summary.style.padding='6px 8px'; summary.style.borderRadius='6px'; summary.style.border='1px solid var(--border)';
+      summary.textContent = `Nodes: ${nodes.length}  Edges: ${edges.length}`;
+      canvas.appendChild(summary);
+      if(!nodes.length){ const empty = document.createElement('div'); empty.style.position='absolute'; empty.style.top='50%'; empty.style.left='50%'; empty.style.transform='translate(-50%, -50%)'; empty.style.fontSize='12px'; empty.textContent = 'Graph empty or not built yet.'; canvas.appendChild(empty); }
+    }catch(e){ canvas.textContent = 'Graph render failed: '+e.message; }
+  }
+
+  function renderPathScores(summary){
+    try {
+      const cont = document.getElementById('pathScores');
+      cont.innerHTML='';
+      const ps = summary.path_scores || {};
+      const keys = Object.keys(ps);
+      if(!keys.length){ cont.textContent='No path scores.'; return; }
+      keys.sort((a,b)=> (ps[b].score||0) - (ps[a].score||0));
+      keys.forEach(k => {
+        const box = document.createElement('div'); box.className='metric';
+        const score = ps[k].score || 0;
+        let html = `<h4>${k}</h4><div class='muted'>Score: ${score.toFixed(3)}</div>`;
+        const contrib = ps[k].contributions || {};
+        const anomalies = ps[k].anomalies || [];
+        if(anomalies && anomalies.length){ html += `<div style='margin:4px 0'><strong>Anomalies:</strong> ${anomalies.join(', ')}</div>`; }
+        Object.keys(contrib).forEach(f => {
+          const c = contrib[f];
+          const val = c.contribution !== undefined ? c.contribution : c.score || 0;
+          html += `<span class='badge'>${f}:${Number(val).toFixed(2)}</span>`;
+        });
+        // Add remediation fetch trigger
+        html += `<div style='margin-top:6px'><button class='btn btn-primary rem-btn' data-path='${k}' style='padding:4px 8px;font-size:10px;'>Remediate</button></div>`;
+        box.innerHTML = html;
+        cont.appendChild(box);
+      });
+      // Attach click handlers to remediation buttons
+      cont.querySelectorAll('.rem-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const chain = btn.getAttribute('data-path');
+          if(!chain) return;
+          try {
+            btn.disabled = true; btn.textContent = 'Fetching...';
+            const r = await fetch('/api/v1/remediation/suggest?path='+encodeURIComponent(chain), { headers: { ...authHeaders() } });
+            let j = {}; try { j = await r.json(); } catch(_){ }
+            if(!r.ok){ alert('Remediation lookup failed: '+r.status); btn.disabled=false; btn.textContent='Remediate'; return; }
+            const hints = j.actions || [];
+            const rationale = j.rationale || [];
+            // Surface in sidebar remediationHints panel (append)
+            try {
+              const remEl = document.getElementById('remediationHints');
+              const lines = [];
+              lines.push('Chain: '+chain);
+              lines.push('Severity: '+(j.severity||'n/a'));
+              if(hints.length){
+                lines.push('Actions:'); hints.forEach(h => lines.push(' - '+h));
+              }
+              if(rationale.length){
+                lines.push('Rationale:'); rationale.slice(0,5).forEach(rn => lines.push(' * '+rn));
+              }
+              const existing = (remEl.textContent||'').trim();
+              remEl.textContent = (existing? existing+'\n\n':'') + lines.join('\n');
+            } catch(_){ }
+            btn.textContent='Added';
+          } catch(e){ btn.disabled=false; btn.textContent='Remediate'; alert('Error: '+(e.message||e)); }
+        });
+      });
+    } catch(e){ try{ document.getElementById('pathScores').textContent='Failed to render path scores'; }catch(_){ } }
+  }
+})();
+</script>
+</body>
+</html>

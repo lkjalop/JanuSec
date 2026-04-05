@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "patterns": [
+    {"name": "backup_window_file_activity", "match_factors": ["data:large_extract","endpoint:unsigned_exec"], "conditions": {"hour_range": [0,5]}},
+    {"name": "patch_tuesday_admin_spike", "match_factors": ["identity:role_mutation_burst","endpoint:lateral_exec_remote_tool"], "conditions": {"hour_range": [2,10]}},
+    {"name": "scheduled_maintenance_access", "match_factors": ["remote:remote_tooling_session"], "conditions": {"hour_range": [1,7]}}
+  ]
+}

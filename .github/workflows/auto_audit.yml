@@ -1,0 +1,56 @@
+name: Auto-audit Tests
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  test-deps:
+    runs-on: ubuntu-latest
+    outputs:
+      venv-cache-key: ${{ steps.set-key.outputs.cache-key }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - name: Create venv
+        run: |
+          python -m venv .venv
+          . .venv/bin/activate
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+      - name: Cache venv
+        id: cache-venv
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: ${{ runner.os }}-venv-${{ hashFiles('**/requirements.txt') }}
+      - name: Set-key output
+        id: set-key
+        run: echo "::set-output name=cache-key::${{ steps.cache-venv.outputs.cache-hit }}"
+
+  auto-audit:
+    needs: test-deps
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [3.10, 3.11]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore venv
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: ${{ runner.os }}-venv-${{ hashFiles('**/requirements.txt') }}
+      - name: Use venv
+        run: |
+          if [ -d .venv ]; then . .venv/bin/activate; fi
+          python -V
+      - name: Run auto-audit runner tests
+        run: |
+          . .venv/bin/activate || true
+          python -m pytest tests/test_auto_audit_runner.py -q -rP

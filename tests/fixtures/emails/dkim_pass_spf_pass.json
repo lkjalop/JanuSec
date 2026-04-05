@@ -1,0 +1,14 @@
+{
+  "id": "msg-001",
+  "ts": 1700000000,
+  "from": "alice@example.com",
+  "to": ["bob@example.com"],
+  "subject": "Hello world",
+  "body": "Hi Bob, reach me at alice@example.com. Here is token a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6",
+  "headers": {
+    "DKIM-Signature": "v=1; a=rsa-sha256; d=example.com; s=selector1; h=from:subject:date:to; bh=G5G2...; b=MIIBIjANBgkq...",
+    "Received": "from mail.example.com (mail.example.com [1.2.3.4])",
+    "Authentication-Results": "mx.example.com; spf=pass smtp.mailfrom=example.com; dkim=pass header.d=example.com; dmarc=pass"
+  },
+  "return_path": "alice@example.com"
+}

@@ -1,0 +1,3 @@
+{
+  "command_line": "systemctl --user enable evil.service"
+}

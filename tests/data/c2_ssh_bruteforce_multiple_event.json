@@ -1,0 +1,7 @@
+{
+  "event_id": "evt-c2-ssh-1",
+  "host": "host-108",
+  "timestamp": "2025-10-12T13:07:00Z",
+  "ssh_failed_login_count": 120,
+  "ssh_success_from_unusual_ip": true
+}

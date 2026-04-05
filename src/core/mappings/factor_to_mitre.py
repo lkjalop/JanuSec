@@ -1,0 +1,431 @@
+"""Mapping from internal factor strings to MITRE ATT&CK technique IDs.
+
+This is a compact mapping adding the requested tactics/techniques for API and
+exfiltration/impact scenarios.
+"""
+FACTOR_TO_MITRE = {
+    # Ransomware / Impact
+    'impact:ransomware': ['T1486'],
+    'impact:data_destruction': ['T1485'],
+    'impact:encrypt_files': ['T1486'],
+
+    # Initial Access
+    'initial:phishing': ['T1566'],
+    'initial:valid_account': ['T1078'],
+    'initial:exploit_public_facing': ['T1190'],
+    'initial:drive_by': ['T1189'],
+
+    # Execution
+    'execution:powershell': ['T1059.001'],
+    'execution:cmd': ['T1059.003'],
+    'execution:scripted_macro': ['T1204.002'],
+
+    # Persistence
+    'persistence:service': ['T1543'],
+    'persistence:scheduled_task': ['T1053.005'],
+    'persistence:registry_run_keys': ['T1547.001'],
+
+    # Privilege Escalation
+    'privilege:token_impersonation': ['T1134'],
+    'privilege:exploit_local': ['T1068'],
+    'privilege:access_token': ['T1134.001'],
+
+    # Defense Evasion
+    'defense_evasion:obfuscated_files': ['T1027'],
+    'defense_evasion:signed_binary_proxy': ['T1218'],
+    'defense_evasion:disable_security_tools': ['T1562'],
+
+    # Credential Access
+    'credential:dump_cache': ['T1003'],
+    'credential:phish': ['T1566.001'],
+    'credential:leak': ['T1081'],
+
+    # Discovery
+    'discovery:network': ['T1046'],
+    'discovery:system_info': ['T1082'],
+    'discovery:network_service_scan': ['T1046'],
+
+    # Lateral Movement
+    'lateral:remote_service': ['T1021'],
+    'lateral:pass_the_hash': ['T1550.002'],
+    'lateral:rpc': ['T1021.004'],
+
+    # Collection
+    'collection:keystroke': ['T1056.001'],
+    'collection:screen_capture': ['T1113'],
+
+    # Command and Control
+    'c2:http': ['T1071.001'],
+    'c2:email': ['T1071.004'],
+    'c2:dns': ['T1071.004'],
+    'c2:custom_protocol': ['T1095'],
+
+    # Exfiltration
+    'exfiltration:c2_channel': ['T1041'],
+    'exfiltration:cloud_storage': ['T1537.001'],
+    'exfiltration:exfil_over_web': ['T1567.002'],
+    'exfiltration:alternate_protocol': ['T1048'],
+
+    # API / Application Layer Attacks
+    'api:bola': ['T1190'],            # BOLA maps to insecure authorization patterns
+    'api:injection': ['T1505'],       # code or command injection / exploit
+    'api:ssrf': ['T1210'],
+    'api:credential_reuse': ['T1078'],
+
+    # Supply Chain / SBOM
+    'sbom:cve_critical': ['T1195'],
+    'sbom:supply_chain_drift': ['T1195.002'],
+
+    # Network anomalies / scanning
+    'net:beacon_periodic': ['T1095','T1071.001'],
+    'net:egress_port_scatter': ['T1046','T1071.001'],
+
+    # Email / Phishing
+    'email:malicious_attachment': ['T1566.001'],
+
+    # Data manipulation / tampering
+    'tamper:logs': ['T1565.001'],
+
+    # Persistence/stealth via scheduled scripts
+    'script:remote_loader': ['T1547','T1053'],
+
+    # Cloud-specific
+    'cloud:public_bucket': ['T1537'],
+    'cloud:sg_open_0_0_0_0': ['T1537.001'],
+
+    # Common correlation outputs
+    'corr:exfil_beacon_cluster': ['T1041','T1071.001'],
+    'corr_ransomware_beacon_chain': ['T1486','T1485'],
+    'corr_stealth_lateral_staging': ['T1021','T1550'],
+
+    # Hunting / tooling signals
+    'endpoint:lolbin_certutil_suspicious': ['T1218.011'],
+    'endpoint:exec_burst': ['T1059'],
+
+    # Identity (set 1 additions already in taxonomy)
+    'identity:kerberos_s4u_abuse': ['T1558','T1550.003'],
+    'identity:mfa_fatigue_mismatch': ['T1621','T1110'],
+    'identity:role_mutation_burst': ['T1098'],
+    'identity:conditional_access_drift': ['T1556'],
+    'identity:session_stitching_anomaly': ['T1078'],
+
+    # Identity (set 2)
+    'identity:pass_the_cookie_reuse': ['T1550.004','T1528'],
+    'identity:oauth_refresh_storm': ['T1528','T1550'],
+    'identity:service_principal_key_aged': ['T1078','T1098'],
+    'identity:privilege_escalation_path_found': ['T1068','T1098'],
+    'identity:impossible_mfa_device_change': ['T1621','T1078'],
+
+    # Endpoint (set 1)
+    'endpoint:code_sign_trust_anomaly': ['T1553.002','T1218'],
+    'endpoint:dll_sideload_rare_path': ['T1574.002'],
+    'endpoint:driver_load_rare_signature': ['T1547.006'],
+    'endpoint:lateral_exec_remote_tool': ['T1021','T1047','T1053.005'],
+    'endpoint:persistence_surface_multi': ['T1547','T1053.005','T1543'],
+
+    # Endpoint (set 2)
+    'endpoint:injection_suspicious_memory': ['T1055'],
+    'endpoint:lolbin_chain_mshta_rundll32': ['T1218.005','T1218.011'],
+    'endpoint:tamper_edr_registration': ['T1562'],
+    'endpoint:credential_dump_tool_artifacts': ['T1003'],
+    'endpoint:unsigned_driver_install_flow': ['T1547.006'],
+
+    # Network (set 1)
+    'net:ja3_ja4_novel_pair': ['T1071.001'],
+    'net:sni_dns_nx_spike': ['T1071.004','T1048'],
+    'net:tls_cert_chain_anomaly': ['T1553'],
+    'net:flow_microcluster_exfil': ['T1041','T1567.002'],
+    'net:port_protocol_misuse': ['T1048','T1090'],
+
+    # Network (set 2)
+    'net:doh_tunnel_candidate': ['T1071.001','T1090'],
+    'net:socks_proxy_behavior_detected': ['T1090'],
+    'net:dga_domain_features': ['T1568'],
+    'net:tor_outbound_contact': ['T1090.003'],
+    'net:ip_fragment_evasion_pattern': ['T1090'],
+
+    # Cloud (set 1)
+    'cloud:cross_account_trust_chain': ['T1078','T1098'],
+    'cloud:kms_secrets_access_anomaly': ['T1552'],
+    'cloud:serverless_trigger_exposure': ['T1190'],
+    'cloud:container_ctrlplane_risky_binding': ['T1611','T1098'],
+    'cloud:egress_path_risk': ['T1041'],
+
+    # Cloud (set 2)
+    'cloud:iam_policy_shadow_admin': ['T1098','T1078'],
+    'cloud:pre_signed_url_abuse': ['T1537.001'],
+    'cloud:metadata_service_abuse': ['T1552.004'],
+    'cloud:cross_region_replication_unapproved': ['T1020','T1567.002'],
+    'cloud:security_group_broad_egress': ['T1041'],
+
+    # Remote Access (set 1)
+    'remote:handshake_reuse_key': ['T1021','T1550'],
+    'remote:vpn_mfa_mode_anomaly': ['T1621','T1078'],
+    'remote:jump_host_chain': ['T1021'],
+    'remote:remote_tooling_session': ['T1219'],
+    'remote:geo_velocity_asn_risk': ['T1078'],
+
+    # Remote Access (set 2)
+    'remote:rdp_bruteforce_distributed': ['T1110','T1021.001'],
+    'remote:ssh_password_auth_enabled_risk': ['T1110','T1021.004'],
+    'remote:legacy_vpn_proto_in_use': ['T1133'],
+    'remote:bastion_sudo_escalation_sequence': ['T1548'],
+    'remote:reused_ssh_private_key_fingerprint': ['T1552.004','T1021.004'],
+
+    # Application/API (set 1)
+    'api:schema_drift_high_risk': ['T1190'],
+    'api:client_fp_replay': ['T1550'],
+    'api:waf_ids_signal_join': ['T1071'],
+    'api:mtls_client_cert_drift': ['T1553'],
+    'api:key_lifecycle_anomaly': ['T1078'],
+
+    # Application/API (set 2)
+    'api:bola_detected': ['T1190'],
+    'api:rate_limit_bypass_pattern': ['T1190','T1071'],
+    'api:jwt_alg_confusion_none': ['T1553'],
+    'api:mass_assignment_attempt': ['T1190'],
+    'api:insecure_deserialization_gadget': ['T1190'],
+
+    # Data (set 1)
+    'data:query_shape_rare_sequence': ['T1020','T1005'],
+    'data:inventory_sensitivity_link': ['T1082'],
+    'data:egress_reconciliation_gap': ['T1041'],
+    'data:snapshot_diff_unexpected': ['T1565'],
+    'data:secrets_access_anomaly': ['T1552'],
+
+    # Data (set 2)
+    'data:pseudonymization_gap_detected': ['T1005'],
+    'data:pii_bulk_export_attempt': ['T1020','T1041'],
+    'data:tls_in_transit_missing': ['T1041'],
+    'data:encryption_at_rest_mismatch': ['T1565'],
+    'data:data_tag_mismatch_access': ['T1005','T1078'],
+
+    # Email (set 1)
+    'email:auth_alignment_fail': ['T1566'],
+    'email:sandbox_lineage_c2': ['T1566.001','T1071.001'],
+    'email:mailbox_rule_burst': ['T1114.003'],
+    'email:oauth_consent_suspicious': ['T1528'],
+    'email:reply_chain_hijack': ['T1566'],
+
+    # Email (set 2)
+    'email:display_name_impersonation': ['T1566'],
+    'email:thread_hijack_lateral_spread': ['T1566','T1114.003'],
+    'email:credential_harvest_landing_detected': ['T1566','T1056'],
+    'email:qr_phish_lure': ['T1566'],
+    'email:oauth_device_code_abuse': ['T1528'],
+
+    # Proposed set 3: Identity
+    'identity:password_spray_slow_burn': ['T1110.003'],
+    'identity:delegated_admin_grant_spike': ['T1098'],
+    'identity:stale_session_reuse_chain': ['T1550.004'],
+    'identity:idp_app_impersonation_risk': ['T1528'],
+    'identity:impossible_travel_with_device_bind': ['T1621','T1078'],
+
+    # Proposed set 3: Endpoint
+    'endpoint:edr_uninstall_or_tamper_flow': ['T1562'],
+    'endpoint:signed_binary_proxy_abuse': ['T1218'],
+    'endpoint:lsa_protection_disabled': ['T1562'],
+    'endpoint:persistence_masquerade_service': ['T1036','T1543'],
+    'endpoint:rare_parent_child_combo': ['T1059'],
+
+    # Proposed set 3: Network
+    'net:quic_fingerprint_novelty': ['T1071.001'],
+    'net:tls_version_downgrade_attempt': ['T1553','T1562'],
+    'net:dot_tunnel_candidate': ['T1071.001','T1090'],
+    'net:cdn_fronting_suspect': ['T1090','T1071.001'],
+    'net:ssh_banner_anomaly': ['T1021.004'],
+
+    # Proposed set 3: Cloud
+    'cloud:resource_policy_escalation_path': ['T1098'],
+    'cloud:logging_gap_or_disable': ['T1562'],
+    'cloud:public_storage_acl_change': ['T1537'],
+    'cloud:lambda_secret_leak_env': ['T1552'],
+    'cloud:k8s_api_anon_access_attempt': ['T1133'],
+
+    # Proposed set 3: Remote Access
+    'remote:rdp_nla_disabled': ['T1021.001','T1562'],
+    'remote:anydesk_id_reuse': ['T1219'],
+    'remote:ssh_agent_forwarding_misuse': ['T1021.004'],
+    'remote:vpn_split_tunnel_exfil': ['T1133','T1041'],
+    'remote:clipboard_file_transfer_burst': ['T1115','T1105'],
+
+    # Proposed set 3: API
+    'api:graphql_introspection_exposed': ['T1190'],
+    'api:cors_wildcard_with_creds': ['T1190'],
+    'api:pii_in_params_detected': ['T1041'],
+    'api:oauth_pkce_missing_pattern': ['T1528'],
+    'api:weak_hsts_tls_policy': ['T1553'],
+
+    # Proposed set 3: Data
+    'data:staging_table_exfil_flow': ['T1020','T1041'],
+    'data:dlp_policy_bypass_attempt': ['T1562'],
+    'data:backup_snapshot_external_share': ['T1020','T1537'],
+    'data:key_usage_anomaly_kms': ['T1552'],
+    'data:row_level_policy_gap': ['T1078'],
+
+    # Proposed set 3: Email
+    'email:smtp_auth_residential_asn': ['T1110'],
+    'email:shortener_chain_bypass': ['T1566'],
+    'email:dkim_flap_campaign_pattern': ['T1566'],
+    'email:risky_publisher_oauth_app': ['T1528'],
+    'email:sender_tld_spike_high_risk': ['T1566'],
+
+    # Default fallbacks for unknown but useful factor prefixes
+    'net': ['T1071'],
+    'endpoint': ['T1059'],
+    'persistence': ['T1543','T1547']
+}
+
+# Minimal, conservative ATT&CK associations for AI-specific factors to aid ATT&CK-only views.
+# These are fallbacks and do not fully capture AI-native attack semantics.
+FACTOR_TO_MITRE.update({
+    'prompt_injection': ['T1204'],                        # User Execution (social/prompt manipulation)
+    'tool_abuse': ['T1219'],                              # Remote Access Tools / tool misuse
+    'sensitive_output_leak': ['T1041'],                   # Exfiltration over C2 (content leakage)
+    'model_evasion_adversarial': ['T1562', 'T1036'],      # Defense Evasion + Masquerading (common evasion behavior)
+    'training_data_poisoning': ['T1565', 'T1565.001'],    # Data Manipulation + Stored Data
+})
+
+# IAM Phase 1 (critical) minimal mappings
+FACTOR_TO_MITRE.update({
+    'iam:ntds_dit_access': ['T1003'],                         # OS Credential Dumping (NTDS)
+    'iam:lsass_memory_read_unusual_process': ['T1003','T1055'],# LSASS dump / memory tampering
+    'iam:skeleton_key_attack': ['T1556'],                      # Modify authentication process
+    'iam:dc_shadow': ['T1098','T1484.001'],                    # Account manipulation / domain policy
+    'iam:adminSDHolder_modification': ['T1098','T1484.001'],   # Privilege/policy manipulation
+})
+
+# IAM Phase 2 mappings
+FACTOR_TO_MITRE.update({
+    'iam:token_manipulation': ['T1134'],                    # Access Token Manipulation
+    'iam:gpo_modification_privilege_escalation': ['T1484.001'],  # Domain Policy Modification
+    'iam:impossible_travel': ['T1078'],                     # Valid Accounts (account takeover)
+    'iam:credential_stuffing_success': ['T1110'],           # Brute Force
+    'iam:honeypot_account_access': ['T1078'],               # Valid Accounts (confirmed)
+})
+
+# IAM Phase 3 and 4 mappings
+FACTOR_TO_MITRE.update({
+    # Phase 3: Kerberos & Persistence (identity)
+    'iam:as_rep_roasting': ['T1558.004'],                   # AS-REP Roasting
+    'iam:kerberos_delegation_abuse': ['T1558'],             # Kerberos Tickets / Delegation abuse
+    'iam:sid_history_injection': ['T1134'],                 # Access Token Manipulation (SIDHistory)
+
+    # Phase 3: Persistence (endpoint)
+    'iam:security_support_provider_dll': ['T1547.006'],     # SSP DLL
+    'iam:authentication_package_modification': ['T1547'],   # Logon Autostart / Auth Packages
+
+    # Phase 4: Azure AD / OAuth / PIM (identity/cloud)
+    'iam:azure_device_code_phishing': ['T1528'],            # Steal App Access Token / OAuth abuse
+    'iam:oauth_consent_grant_suspicious_app': ['T1528'],    # OAuth Consent Abuse
+    'iam:azure_legacy_auth': ['T1078'],                     # Valid Accounts (legacy/basic auth)
+    'iam:conditional_access_bypass': ['T1556'],             # Modify Authentication Process
+    'iam:azure_privileged_role_activation_unusual': ['T1098'],  # Account Manipulation (PIM)
+    'iam:entra_id_risky_sign_in': ['T1078'],                # Valid Accounts / Account Takeover
+})
+
+# IAM Okta / AWS mappings (minimal)
+FACTOR_TO_MITRE.update({
+    'iam:okta_risky_sign_in': ['T1078'],
+    'iam:okta_mfa_policy_drift': ['T1556'],
+    'iam:okta_oauth_consent_suspicious': ['T1528'],
+    'iam:aws_access_key_no_mfa': ['T1078'],
+    'iam:aws_assumerole_anomaly': ['T1098'],
+    'iam:aws_iam_policy_drift': ['T1098'],
+    'iam:aws_sso_oauth_suspicious': ['T1528'],
+})
+
+# IAM GCP mappings (minimal)
+FACTOR_TO_MITRE.update({
+    'iam:gcp_service_account_key_storm': ['T1552'],
+    'iam:gcp_org_policy_bypass': ['T1098'],
+    'iam:gcp_workload_identity_abuse': ['T1552','T1078'],
+})
+
+# Azure ARM and GCP Org/Admin additions
+FACTOR_TO_MITRE.update({
+    # Azure Resource Manager risky ops
+    'iam:azure_arm_setiam_policy_escalation': ['T1098'],
+    'iam:azure_arm_custom_role_priv_escalation': ['T1098','T1068'],
+    'iam:azure_resource_lock_bypass': ['T1562'],
+
+    # GCP org/admin risky ops
+    'iam:gcp_setIamPolicy_org_escalation': ['T1098'],
+    'iam:gcp_serviceusage_high_risk_enable': ['T1098'],
+    'iam:gcp_orgpolicy_constraint_disable': ['T1098','T1556'],
+})
+
+# Intune / Purview mini-detectors
+FACTOR_TO_MITRE.update({
+    'iam:intune_compliance_policy_disabled': ['T1562'],
+    'iam:intune_role_assignment_escalation': ['T1098'],
+    'iam:purview_scan_policy_disabled': ['T1562'],
+    'iam:purview_sensitivity_label_drift': ['T1565'],
+})
+
+# ── Bare-name factor aliases (from extract_factors_from_raw_row) ──────────────
+# These short names are produced by the CSV/upload pipeline.  Add them here so
+# get_all_mappings() returns ATT&CK techniques for report/MITRE sections.
+FACTOR_TO_MITRE.update({
+    'suspicious_process':         ['T1059', 'T1036'],
+    'lolbin':                     ['T1218'],
+    'powershell_execution':       ['T1059.001'],
+    'encoded_command':            ['T1027', 'T1059.001'],
+    'powershell_bypass':          ['T1059.001', 'T1562'],
+    'powershell_download_cradle': ['T1059.001', 'T1105'],
+    'office_child_process':       ['T1566.001', 'T1059'],
+    'temp_execution':             ['T1059', 'T1036.005'],
+    'user_writable_exec':         ['T1036.005', 'T1059'],
+    'known_bad_hash':             ['T1036', 'T1553'],
+    'c2_beacon':                  ['T1071.001', 'T1095', 'T1571'],
+    'network_beacon':             ['T1071.001', 'T1571'],
+    'macro_lure':                 ['T1566.001', 'T1204.002'],
+    'phishing_link':              ['T1566.001', 'T1204.001'],
+    'phishing_lure':              ['T1566.001'],
+    'email_malicious_url':        ['T1566.001', 'T1204.001'],
+    'credential_access':          ['T1003', 'T1056'],
+    'account_discovery':          ['T1087', 'T1069'],
+    'rdp_lateral_movement':       ['T1021.001'],
+    'smb_lateral_movement':       ['T1021.002'],
+    'wmi_lateral_movement':       ['T1047', 'T1021.006'],
+    'windows_update':             [],
+})
+
+# Optional, non-breaking: ATLAS and OWASP LLM Top 10 tags for factors.
+# These are string tags intended for UI/report enrichment and do not alter ATT&CK mapping.
+FACTOR_TO_ATLAS = {
+    'prompt_injection': ['ATLAS:Prompt Injection'],
+    'tool_abuse': ['ATLAS:Insecure Tool/Plugin Use', 'ATLAS:Model Spec Violation'],
+    'sensitive_output_leak': ['ATLAS:Sensitive Information Disclosure'],
+    'model_evasion_adversarial': ['ATLAS:Evasion/Adversarial Examples'],
+    'training_data_poisoning': ['ATLAS:Poisoning']
+}
+
+FACTOR_TO_OWASP_LLM = {
+    'prompt_injection': ['LLM01: Prompt Injection'],
+    'sensitive_output_leak': ['LLM02: Insecure Output Handling','LLM04: Data Leakage','LLM05: Excessive Data Exposure'],
+    'tool_abuse': ['LLM06: Excessive Agency'],
+    'model_evasion_adversarial': ['LLM08: Model Theft/Abuse'],
+    'training_data_poisoning': ['LLM09: Training Data Poisoning']
+}
+
+def get_all_mappings(factors: list[str]) -> dict[str, list[str]]:
+    """Return combined mapping tags: ATT&CK techniques, ATLAS, and OWASP LLM.
+
+    Does not modify existing FACTOR_TO_MITRE usage; provided as a helper.
+    """
+    mitre: set[str] = set()
+    atlas: set[str] = set()
+    owasp: set[str] = set()
+    for f in factors:
+        for t in FACTOR_TO_MITRE.get(f, []):
+            mitre.add(t)
+        for a in FACTOR_TO_ATLAS.get(f, []):
+            atlas.add(a)
+        for o in FACTOR_TO_OWASP_LLM.get(f, []):
+            owasp.add(o)
+    return {
+        'mitre': sorted(mitre),
+        'atlas': sorted(atlas),
+        'owasp_llm': sorted(owasp)
+    }

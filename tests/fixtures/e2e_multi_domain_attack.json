@@ -1,0 +1,14 @@
+{
+  "attack_id": "multi-domain-1",
+  "description": "Simulated multi-domain attack spanning email -> identity -> remote access -> endpoint -> network -> cloud -> data -> app",
+  "events": [
+    {"type": "email", "payload": {"from_addr": "ceo@paypa1.com", "to_addr": "finance@example.com", "subject": "Quarterly results"}},
+    {"type": "identity", "payload": {"user": "finance@example.com", "action": "credential_stuffing"}},
+    {"type": "remote_access", "payload": {"user": "finance@example.com", "host": "vpn.corp.example.com", "session_id": "sess-1"}},
+    {"type": "endpoint", "payload": {"host": "wkstn-22", "process": "unsigned_tool.exe", "command": "unsigned_tool.exe --dump", "user": "finance"}},
+    {"type": "network", "payload": {"src_ip": "198.51.100.23", "dst_ip": "203.0.113.44", "protocol": "tcp", "bytes_out": 8450000 }},
+    {"type": "cloud", "payload": {"resource": "s3://public-bucket", "action": "list"}},
+    {"type": "data_access", "payload": {"db": "payments", "table": "payments.customers", "rows": 50000}},
+    {"type": "app", "payload": {"endpoint": "/api/v1/export", "method": "POST", "status": 200}}
+  ]
+}

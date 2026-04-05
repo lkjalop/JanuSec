@@ -1,0 +1,21 @@
+{
+  "fixture": "windows.json",
+  "job_id": "mem-ae77fb27ed8f",
+  "host": "win-mem-host",
+  "platform": "windows",
+  "volatility_plugins": [],
+  "rekall_plugins": [
+    "dlllist",
+    "pslist"
+  ],
+  "sandbox_status": "submitted",
+  "sandbox_adapters": [
+    "joe",
+    "anyrun"
+  ],
+  "timeline_length": 4,
+  "factors": [
+    "memory:suspicious_injection",
+    "malware:credential_theft"
+  ]
+}

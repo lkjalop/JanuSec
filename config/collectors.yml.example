@@ -1,0 +1,16 @@
+# Collectors configuration (example)
+redis_url: redis://localhost:6379/0
+syslog:
+  udp_port: 514
+  tcp_port: 514
+  tls_port: 6514
+  tls_cert_path: /etc/janusec/certs/syslog.crt
+  tls_key_path: /etc/janusec/certs/syslog.key
+  tls_client_auth: optional
+  stream_name: syslog
+  rate_limit_per_source: 1000
+netflow:
+  udp_port: 2055
+  ipfix_port: 4739
+  stream_name: netflow
+device_mapping_file: config/exporter_device_map.yml

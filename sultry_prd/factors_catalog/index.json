@@ -1,0 +1,9 @@
+{"files":[
+	{"path":"factors_network.json","domain":"network","count":31},
+	{"path":"factors_endpoint.json","domain":"endpoint","count":11},
+	{"path":"factors_deception.json","domain":"deception","count":10},
+	{"path":"factors_identity.json","domain":"identity","count":10},
+	{"path":"factors_cloud.json","domain":"cloud","count":8},
+	{"path":"factors_application.json","domain":"application","count":5},
+	{"path":"factors_supply_chain.json","domain":"supply_chain","count":5}
+],"notes":"Split from full catalog and enriched per-domain entries. Keep individual files <= 400 lines for CI."}

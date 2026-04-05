@@ -1,0 +1,37 @@
+{
+  "title": "Azure Defender Ingest: Gap & Lag",
+  "timezone": "browser",
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Findings Ingested (total)",
+      "targets": [
+        {
+          "expr": "sum(posture_ingest_total)",
+          "legendFormat": "total"
+        }
+      ]
+    },
+    {
+      "type": "graph",
+      "title": "Average Ingest Lag (s) by Tenant",
+      "targets": [
+        {
+          "expr": "posture_ingest_lag_seconds",
+          "legendFormat": "{{tenant}}"
+        }
+      ],
+      "lines": true,
+      "linewidth": 2
+    },
+    {
+      "type": "stat",
+      "title": "Lag Alert",
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}},
+      "targets": [
+        {"expr": "max(posture_ingest_lag_seconds)"}
+      ]
+    }
+  ],
+  "templating": {"list": []}
+}

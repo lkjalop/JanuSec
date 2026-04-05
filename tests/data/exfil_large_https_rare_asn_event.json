@@ -1,0 +1,7 @@
+{
+  "id": "evt-exfil-1",
+  "host": "host-g",
+  "user": "grace",
+  "http_bytes_out": 6000000,
+  "asn_rare": true
+}

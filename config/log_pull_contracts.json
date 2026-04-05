@@ -1,0 +1,143 @@
+{
+  "version": "1.0",
+  "updated": "2026-01-09",
+  "sources": {
+    "identity_auth_logs": {
+      "id": "identity_auth_logs",
+      "domain": "iam",
+      "description": "IdP risky sign-ins, MFA prompts, and device risk evidence.",
+      "required_fields": ["timestamp", "user", "device_id", "risk", "mfa", "geo", "ip"],
+      "acquisition": {"method": "POST", "endpoint": "/api/v1/identity/pull"},
+      "ttl_seconds": 1800,
+      "custody_required": true,
+      "retention_days": 7,
+      "chain_of_custody": {"hash_algo": "sha256", "include_fields": ["users", "start", "end", "tenant_id"]}
+    },
+    "endpoint_edr_heartbeat": {
+      "id": "endpoint_edr_heartbeat",
+      "domain": "endpoint",
+      "description": "Process tree and device health telemetry for suspected hosts.",
+      "required_fields": ["timestamp", "host", "process_tree", "hashes", "parent_pid"],
+      "acquisition": {"method": "POST", "endpoint": "/api/v1/edr/process_tree/pull"},
+      "ttl_seconds": 1800,
+      "custody_required": true,
+      "retention_days": 7,
+      "chain_of_custody": {"hash_algo": "sha256", "include_fields": ["hosts", "center", "window_minutes", "tenant_id"]}
+    },
+    "dns_query_logs": {
+      "id": "dns_query_logs",
+      "domain": "network",
+      "description": "Resolver query history for suspected domains/hosts.",
+      "required_fields": ["timestamp", "domain", "qtype", "answer", "client_ip"],
+      "acquisition": {"method": "POST", "endpoint": "/api/v1/dns/lookup/pull"},
+      "ttl_seconds": 1800,
+      "custody_required": true,
+      "retention_days": 7,
+      "chain_of_custody": {"hash_algo": "sha256", "include_fields": ["hosts", "domains", "start", "end", "tenant_id"]}
+    },
+    "email_delivery_logs": {
+      "id": "email_delivery_logs",
+      "domain": "email",
+      "description": "Email delivery history for targeted recipients.",
+      "required_fields": ["timestamp", "message_id", "sender", "recipient", "disposition"],
+      "acquisition": {"method": "POST", "endpoint": "/api/v1/email/delivery/pull"},
+      "ttl_seconds": 86400,
+      "custody_required": true,
+      "retention_days": 30,
+      "chain_of_custody": {"hash_algo": "sha256", "include_fields": ["recipients", "start", "end", "tenant_id"]}
+    },
+    "email_click_logs": {
+      "id": "email_click_logs",
+      "domain": "email",
+      "description": "URL click telemetry tied to phishing follow-through.",
+      "required_fields": ["timestamp", "user", "url", "device_id"],
+      "acquisition": {"method": "POST", "endpoint": "/api/v1/email/click/pull"},
+      "ttl_seconds": 86400,
+      "custody_required": true,
+      "retention_days": 30,
+      "chain_of_custody": {"hash_algo": "sha256", "include_fields": ["users", "start", "end", "tenant_id"]}
+    },
+    "api_gateway_logs": {
+      "id": "api_gateway_logs",
+      "domain": "api_security",
+      "description": "Gateway request/response logs for sensitive API routes.",
+      "required_fields": ["timestamp", "method", "path", "status", "user", "ip", "request_id"],
+      "export_format": {
+        "format": "jsonl",
+        "schema_version": "1.0",
+        "fields": ["timestamp", "method", "path", "status", "user", "ip", "request_id", "route", "response_bytes"]
+      },
+      "acquisition": {"method": "POST", "endpoint": "/api/v1/api_security/gateway_logs"},
+      "ttl_seconds": 3600,
+      "custody_required": true,
+      "retention_days": 7,
+      "chain_of_custody": {"hash_algo": "sha256", "include_fields": ["routes", "start", "end", "tenant_id"]}
+    },
+    "api_inventory_snapshot": {
+      "id": "api_inventory_snapshot",
+      "domain": "api_security",
+      "description": "Spec/inventory snapshot for route drift analysis.",
+      "required_fields": ["timestamp", "routes", "spec_hash", "source"],
+      "acquisition": {"method": "POST", "endpoint": "/api/v1/api_security/inventory/assert"},
+      "ttl_seconds": 86400,
+      "custody_required": false,
+      "retention_days": 30,
+      "chain_of_custody": {"hash_algo": "sha256", "include_fields": ["spec_hash", "tenant_id"]}
+    },
+    "cspm_findings": {
+      "id": "cspm_findings",
+      "domain": "cspm",
+      "description": "Cloud posture findings used to confirm misconfiguration exposure.",
+      "required_fields": ["timestamp", "provider", "resource_id", "control", "status", "severity"],
+      "acquisition": {"method": "POST", "endpoint": "/api/v1/compliance/posture"},
+      "ttl_seconds": 86400,
+      "custody_required": true,
+      "retention_days": 30,
+      "chain_of_custody": {"hash_algo": "sha256", "include_fields": ["provider", "resource_id", "tenant_id"]}
+    },
+    "cloudtrail_admin_events": {
+      "id": "cloudtrail_admin_events",
+      "domain": "cloud",
+      "description": "CloudTrail admin activity for privilege escalation verification.",
+      "required_fields": ["timestamp", "event_name", "source_ip", "user", "resource"],
+      "acquisition": {"method": "POST", "endpoint": "/api/v1/cloudtrail/admin/pull"},
+      "ttl_seconds": 7200,
+      "custody_required": true,
+      "retention_days": 14,
+      "chain_of_custody": {"hash_algo": "sha256", "include_fields": ["start", "end", "tenant_id"]}
+    },
+    "wef_windows_event_logs": {
+      "id": "wef_windows_event_logs",
+      "domain": "endpoint",
+      "description": "Windows Event Forwarding (WEF) / ETW session logs for suspected hosts. Collects Security and System channels, filtered by event ids or provider GUIDs.",
+      "required_fields": ["timestamp", "event_id", "provider", "host", "user", "message"],
+      "acquisition": {"method": "POST", "endpoint": "/api/v1/connectors/ingest"},
+      "ttl_seconds": 86400,
+      "custody_required": true,
+      "retention_days": 30,
+      "chain_of_custody": {"hash_algo": "sha256", "include_fields": ["hosts", "start", "end", "tenant_id"]}
+    },
+    "etw_provider_traces": {
+      "id": "etw_provider_traces",
+      "domain": "endpoint",
+      "description": "ETW provider traces emitted by kernel or provider sessions (process, file, networking).",
+      "required_fields": ["timestamp", "pid", "tid", "provider", "opcode", "payload"],
+      "acquisition": {"method": "POST", "endpoint": "/api/v1/connectors/ingest"},
+      "ttl_seconds": 86400,
+      "custody_required": true,
+      "retention_days": 30,
+      "chain_of_custody": {"hash_algo": "sha256", "include_fields": ["hosts", "providers", "start", "end", "tenant_id"]}
+    },
+    "email_quarantine_logs": {
+      "id": "email_quarantine_logs",
+      "domain": "email",
+      "description": "Quarantine and disposition logs for suspicious messages.",
+      "required_fields": ["timestamp", "message_id", "recipient", "action", "reason"],
+      "acquisition": {"method": "POST", "endpoint": "/api/v1/email/quarantine/pull"},
+      "ttl_seconds": 86400,
+      "custody_required": true,
+      "retention_days": 30,
+      "chain_of_custody": {"hash_algo": "sha256", "include_fields": ["recipients", "start", "end", "tenant_id"]}
+    }
+  }
+}

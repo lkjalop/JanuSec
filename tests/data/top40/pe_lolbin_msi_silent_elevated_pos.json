@@ -1,0 +1,5 @@
+{
+  "exec_lolbin": "msiexec",
+  "silent_install": true,
+  "elevated": true
+}

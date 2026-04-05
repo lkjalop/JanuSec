@@ -1,0 +1,49 @@
+[
+  {
+    "name": "alpha_owner_mismatch",
+    "event": {
+      "tenant_id": "tenant-alpha",
+      "uri": "/api/v1/users/root/",
+      "method": "GET",
+      "auth_user": "analyst-alpha",
+      "is_owner": false,
+      "status": 200,
+      "headers": {
+        "host": "alpha.api.local",
+        "x-request-id": "alpha-req-01"
+      }
+    },
+    "expected": {
+      "factors_contains": ["api:bola_resource_mismatch"]
+    }
+  },
+  {
+    "name": "alpha_supply_chain_publish",
+    "event": {
+      "tenant_id": "tenant-alpha",
+      "uri": "/api/v1/registry/packages/honeygraph",
+      "method": "POST",
+      "auth_user": "alpha-ci",
+      "supply_chain_stage": "publish",
+      "auth_context": {
+        "scopes": ["supply_chain:publish"]
+      }
+    },
+    "expected": {
+      "factors_contains": ["api:supply_chain_pipeline_modification"]
+    }
+  },
+  {
+    "name": "alpha_inventory_gap",
+    "event": {
+      "tenant_id": "tenant-alpha",
+      "uri": "/api/internal/shadow/admin",
+      "method": "GET",
+      "auth_user": "alpha-support",
+      "status": 200
+    },
+    "expected": {
+      "factors_contains": ["api:inventory_route_unknown"]
+    }
+  }
+]

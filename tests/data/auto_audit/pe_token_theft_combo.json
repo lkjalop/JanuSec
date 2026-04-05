@@ -1,0 +1,8 @@
+{
+  "event_id": "evt-pe-token-001",
+  "process_name": "notepad.exe",
+  "token_duplication": true,
+  "impersonation": true,
+  "impersonation_chain": ["explorer.exe","svchost.exe","target.exe"],
+  "target_process": "lsass.exe"
+}

@@ -1,0 +1,6 @@
+{
+  "id": "evt-persist-1",
+  "host": "host-h",
+  "user": "heidi",
+  "scheduled_task_name": "WinUpdate_auto_sched"
+}

@@ -1,0 +1,8 @@
+{
+  "consecutive_failures": 147,
+  "circuit_open_until": 1775373552,
+  "last_error": "boom",
+  "last_success_ts": null,
+  "last_latency_ms": null,
+  "last_duplicate_count": 0
+}

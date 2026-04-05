@@ -1,0 +1,21 @@
+{
+  "vulnerabilities": [
+    {
+      "id": "vuln-123",
+      "qid": "QID-123",
+      "asset_id": "asset-1",
+      "application": "openssl",
+      "severity": "High",
+      "cvss": "7.5"
+    },
+    {
+      "id": "vuln-456",
+      "qid": "QID-456",
+      "asset_id": "asset-2",
+      "package": "nginx",
+      "severity": "Medium",
+      "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N"
+    }
+  ],
+  "next_url": null
+}

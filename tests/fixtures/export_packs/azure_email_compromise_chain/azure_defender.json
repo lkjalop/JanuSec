@@ -1,0 +1,9 @@
+[
+  {
+    "incidentId": "inc-azure-bec-1",
+    "title": "Suspicious sign-in followed by privilege escalation and command execution",
+    "severity": "high",
+    "createdDateTime": "2025-03-15T02:43:00Z",
+    "alerts": [{ "serviceSource": "Microsoft Defender XDR" }]
+  }
+]

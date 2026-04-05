@@ -1,0 +1,47 @@
+# JanuSec Platform - Terraform Configuration Example
+# Copy this file to terraform.tfvars and customize values
+
+# Azure Configuration
+azure_region        = "australiasoutheast"  # Sydney region (APAC data residency)
+resource_group_name = "janusec-prod-rg"
+environment         = "production"          # Options: dev, staging, production
+
+# Admin Contact
+admin_email = "admin@yourcompany.com.au"
+
+# Slack Integration (optional)
+slack_webhook_url = "https://hooks.slack.com/services/YOUR/WEBHOOK/URL"
+
+# Database Configuration
+postgres_admin_username = "janusec_admin"
+postgres_sku            = "B_Standard_B2s"    # Testing: B_Standard_B2s | Production: GP_Standard_D4s
+postgres_storage_gb     = 32                  # Testing: 32GB | Production: 128GB
+postgres_backup_days    = 35                  # Maximum retention for PITR
+
+# Redis Configuration
+redis_sku      = "Premium"  # Options: Basic, Standard, Premium (Premium recommended for HA)
+redis_family   = "P"        # C for Basic/Standard, P for Premium
+redis_capacity = 1          # P1 = 6GB RAM | P2 = 13GB | P3 = 26GB
+
+# Container Apps Auto-Scaling
+api_min_replicas    = 2   # Minimum API instances (always running)
+api_max_replicas    = 10  # Maximum API instances (scale up under load)
+worker_min_replicas = 1   # Minimum worker instances
+worker_max_replicas = 5   # Maximum worker instances
+
+# Security
+enable_waf = false  # Set to true for production (adds ~$180 AUD/month for WAF)
+
+# Allowed IP ranges for ingress (restrict in production!)
+allowed_ip_ranges = [
+  "0.0.0.0/0",  # WARNING: Allow all IPs (testing only)
+  # "203.0.113.0/24",  # Example: Your office IP range
+  # "198.51.100.0/24", # Example: VPN IP range
+]
+
+# Additional Tags (optional)
+tags = {
+  CostCenter = "Security"
+  Owner      = "CISO"
+  Compliance = "IRAP"
+}

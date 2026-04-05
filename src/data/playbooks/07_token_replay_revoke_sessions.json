@@ -1,0 +1,10 @@
+{
+  "name": "token-replay-revoke-sessions",
+  "trigger": {"factor": "identity:pass_the_cookie_reuse"},
+  "dry_run": true,
+  "steps": [
+    {"type": "open_case", "params": {"title": "Token replay detected"}},
+    {"type": "revoke_sessions", "params": {"user": "demo.user@example.com"}},
+    {"type": "notify", "params": {"webhook_url": "https://example.invalid/webhook", "msg": "Revoked sessions for token replay"}}
+  ]
+}

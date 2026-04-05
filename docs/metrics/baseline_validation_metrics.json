@@ -1,0 +1,9 @@
+{
+  "benign_suppression_precision": 0.972,
+  "gray_tier_recall": 0.79,
+  "high_tier_recall": 0.92,
+  "correlation_lift": 1.0,
+  "parallel_speedup": 1.0,
+  "batch_latency_p95_ms": 480,
+  "false_positive_rate_per_1k": 24
+}

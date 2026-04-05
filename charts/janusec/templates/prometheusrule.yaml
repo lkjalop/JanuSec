@@ -1,0 +1,47 @@
+{{- if .Values.alerts.prometheusRule.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "janusec.fullname" . }}-slo
+  labels:
+    app.kubernetes.io/name: {{ include "janusec.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    {{- with .Values.alerts.prometheusRule.additionalLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: janusec-global-slo
+      rules:
+        - alert: JanusecSLOSuccessRateLow
+          expr: janusec_slo_success_rate < 0.97
+          for: 10m
+          labels: { severity: warning }
+          annotations:
+            summary: Global dispatch success rate below target
+            description: Success rate {{`{{ $value }}`}} < 0.97 (10m).
+        - alert: JanusecGuardrailErrorsHigh
+          expr: janusec_slo_errors_5xx_rate > 0.02
+          for: 10m
+          labels: { severity: warning }
+          annotations:
+            summary: Elevated 5xx error rate in guardrails path
+            description: 5xx rate {{`{{ $value }}`}} > 0.02 (10m).
+    - name: janusec-tenant-slo
+      rules:
+        - alert: JanusecTenantSLOSuccessRateLow
+          expr: janusec_slo_success_rate_tenant{tenant_id=~".+"} < 0.95
+          for: 15m
+          labels: { severity: critical }
+          annotations:
+            summary: Tenant {{`{{ $labels.tenant_id }}`}} success rate below target
+            description: Tenant {{`{{ $labels.tenant_id }}`}} success {{`{{ $value }}`}} < 0.95 (15m).
+        - alert: JanusecTenantMTTCSpiking
+          expr: janusec_guardrail_mttc_seconds_tenant{tenant_id=~".+"} > 5
+          for: 10m
+          labels: { severity: warning }
+          annotations:
+            summary: Tenant {{`{{ $labels.tenant_id }}`}} MTTC elevated
+            description: Tenant {{`{{ $labels.tenant_id }}`}} MTTC {{`{{ $value }}`}}s > 5s (10m).
+{{- end }}
+

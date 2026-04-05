@@ -1,0 +1,2486 @@
+[
+  {
+    "tenant_id": "default",
+    "candidates": [
+      {
+        "weights": {
+          "f2": 0.0,
+          "f1": 0.0
+        },
+        "threshold": 0.5
+      },
+      {
+        "weights": {
+          "f2": 0.0,
+          "f1": 0.5
+        },
+        "threshold": 0.5
+      },
+      {
+        "weights": {
+          "f2": 0.5,
+          "f1": 0.0
+        },
+        "threshold": 0.5
+      },
+      {
+        "weights": {
+          "f2": 0.5,
+          "f1": 0.5
+        },
+        "threshold": 0.5
+      }
+    ],
+    "summary": {
+      "winner_index": 1,
+      "winner": {
+        "index": 1,
+        "candidate": {
+          "weights": {
+            "f2": 0.0,
+            "f1": 0.5
+          },
+          "threshold": 0.5
+        },
+        "metrics": {
+          "tp": 1,
+          "fp": 0,
+          "fn": 0,
+          "tn": 1,
+          "precision": 1.0,
+          "recall": 1.0,
+          "support": 1
+        },
+        "threshold": 0.5
+      },
+      "results": [
+        {
+          "index": 0,
+          "candidate": {
+            "weights": {
+              "f2": 0.0,
+              "f1": 0.0
+            },
+            "threshold": 0.5
+          },
+          "metrics": {
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "tn": 1,
+            "precision": 0.0,
+            "recall": 0.0,
+            "support": 1
+          },
+          "threshold": 0.5
+        },
+        {
+          "index": 1,
+          "candidate": {
+            "weights": {
+              "f2": 0.0,
+              "f1": 0.5
+            },
+            "threshold": 0.5
+          },
+          "metrics": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0,
+            "tn": 1,
+            "precision": 1.0,
+            "recall": 1.0,
+            "support": 1
+          },
+          "threshold": 0.5
+        },
+        {
+          "index": 2,
+          "candidate": {
+            "weights": {
+              "f2": 0.5,
+              "f1": 0.0
+            },
+            "threshold": 0.5
+          },
+          "metrics": {
+            "tp": 0,
+            "fp": 1,
+            "fn": 1,
+            "tn": 0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "support": 1
+          },
+          "threshold": 0.5
+        },
+        {
+          "index": 3,
+          "candidate": {
+            "weights": {
+              "f2": 0.5,
+              "f1": 0.5
+            },
+            "threshold": 0.5
+          },
+          "metrics": {
+            "tp": 1,
+            "fp": 1,
+            "fn": 0,
+            "tn": 0,
+            "precision": 0.5,
+            "recall": 1.0,
+            "support": 1
+          },
+          "threshold": 0.5
+        }
+      ]
+    }
+  },
+  {
+    "tenant_id": "default",
+    "candidates": [
+      {
+        "weights": {
+          "f1": 0.0,
+          "f2": 0.0
+        },
+        "threshold": 0.5
+      },
+      {
+        "weights": {
+          "f1": 0.0,
+          "f2": 0.5
+        },
+        "threshold": 0.5
+      },
+      {
+        "weights": {
+          "f1": 0.5,
+          "f2": 0.0
+        },
+        "threshold": 0.5
+      },
+      {
+        "weights": {
+          "f1": 0.5,
+          "f2": 0.5
+        },
+        "threshold": 0.5
+      }
+    ],
+    "summary": {
+      "winner_index": 2,
+      "winner": {
+        "index": 2,
+        "candidate": {
+          "weights": {
+            "f1": 0.5,
+            "f2": 0.0
+          },
+          "threshold": 0.5
+        },
+        "metrics": {
+          "tp": 1,
+          "fp": 0,
+          "fn": 0,
+          "tn": 1,
+          "precision": 1.0,
+          "recall": 1.0,
+          "support": 1
+        },
+        "threshold": 0.5
+      },
+      "results": [
+        {
+          "index": 0,
+          "candidate": {
+            "weights": {
+              "f1": 0.0,
+              "f2": 0.0
+            },
+            "threshold": 0.5
+          },
+          "metrics": {
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "tn": 1,
+            "precision": 0.0,
+            "recall": 0.0,
+            "support": 1
+          },
+          "threshold": 0.5
+        },
+        {
+          "index": 1,
+          "candidate": {
+            "weights": {
+              "f1": 0.0,
+              "f2": 0.5
+            },
+            "threshold": 0.5
+          },
+          "metrics": {
+            "tp": 0,
+            "fp": 1,
+            "fn": 1,
+            "tn": 0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "support": 1
+          },
+          "threshold": 0.5
+        },
+        {
+          "index": 2,
+          "candidate": {
+            "weights": {
+              "f1": 0.5,
+              "f2": 0.0
+            },
+            "threshold": 0.5
+          },
+          "metrics": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0,
+            "tn": 1,
+            "precision": 1.0,
+            "recall": 1.0,
+            "support": 1
+          },
+          "threshold": 0.5
+        },
+        {
+          "index": 3,
+          "candidate": {
+            "weights": {
+              "f1": 0.5,
+              "f2": 0.5
+            },
+            "threshold": 0.5
+          },
+          "metrics": {
+            "tp": 1,
+            "fp": 1,
+            "fn": 0,
+            "tn": 0,
+            "precision": 0.5,
+            "recall": 1.0,
+            "support": 1
+          },
+          "threshold": 0.5
+        }
+      ]
+    }
+  },
+  {
+    "tenant_id": "default",
+    "candidates": [
+      {
+        "weights": {
+          "f1": 0.0,
+          "f2": 0.0
+        },
+        "threshold": 0.5
+      },
+      {
+        "weights": {
+          "f1": 0.0,
+          "f2": 0.5
+        },
+        "threshold": 0.5
+      },
+      {
+        "weights": {
+          "f1": 0.5,
+          "f2": 0.0
+        },
+        "threshold": 0.5
+      },
+      {
+        "weights": {
+          "f1": 0.5,
+          "f2": 0.5
+        },
+        "threshold": 0.5
+      }
+    ],
+    "summary": {
+      "winner_index": 2,
+      "winner": {
+        "index": 2,
+        "candidate": {
+          "weights": {
+            "f1": 0.5,
+            "f2": 0.0
+          },
+          "threshold": 0.5
+        },
+        "metrics": {
+          "tp": 1,
+          "fp": 0,
+          "fn": 0,
+          "tn": 1,
+          "precision": 1.0,
+          "recall": 1.0,
+          "support": 1
+        },
+        "threshold": 0.5
+      },
+      "results": [
+        {
+          "index": 0,
+          "candidate": {
+            "weights": {
+              "f1": 0.0,
+              "f2": 0.0
+            },
+            "threshold": 0.5
+          },
+          "metrics": {
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "tn": 1,
+            "precision": 0.0,
+            "recall": 0.0,
+            "support": 1
+          },
+          "threshold": 0.5
+        },
+        {
+          "index": 1,
+          "candidate": {
+            "weights": {
+              "f1": 0.0,
+              "f2": 0.5
+            },
+            "threshold": 0.5
+          },
+          "metrics": {
+            "tp": 0,
+            "fp": 1,
+            "fn": 1,
+            "tn": 0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "support": 1
+          },
+          "threshold": 0.5
+        },
+        {
+          "index": 2,
+          "candidate": {
+            "weights": {
+              "f1": 0.5,
+              "f2": 0.0
+            },
+            "threshold": 0.5
+          },
+          "metrics": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0,
+            "tn": 1,
+            "precision": 1.0,
+            "recall": 1.0,
+            "support": 1
+          },
+          "threshold": 0.5
+        },
+        {
+          "index": 3,
+          "candidate": {
+            "weights": {
+              "f1": 0.5,
+              "f2": 0.5
+            },
+            "threshold": 0.5
+          },
+          "metrics": {
+            "tp": 1,
+            "fp": 1,
+            "fn": 0,
+            "tn": 0,
+            "precision": 0.5,
+            "recall": 1.0,
+            "support": 1
+          },
+          "threshold": 0.5
+        }
+      ]
+    }
+  },
+  {
+    "tenant_id": "default",
+    "candidates": [
+      {
+        "weights": {
+          "f1": 0.0,
+          "f2": 0.0
+        },
+        "threshold": 0.5
+      },
+      {
+        "weights": {
+          "f1": 0.0,
+          "f2": 0.5
+        },
+        "threshold": 0.5
+      },
+      {
+        "weights": {
+          "f1": 0.5,
+          "f2": 0.0
+        },
+        "threshold": 0.5
+      },
+      {
+        "weights": {
+          "f1": 0.5,
+          "f2": 0.5
+        },
+        "threshold": 0.5
+      }
+    ],
+    "summary": {
+      "winner_index": 2,
+      "winner": {
+        "index": 2,
+        "candidate": {
+          "weights": {
+            "f1": 0.5,
+            "f2": 0.0
+          },
+          "threshold": 0.5
+        },
+        "metrics": {
+          "tp": 1,
+          "fp": 0,
+          "fn": 0,
+          "tn": 1,
+          "precision": 1.0,
+          "recall": 1.0,
+          "support": 1
+        },
+        "threshold": 0.5
+      },
+      "results": [
+        {
+          "index": 0,
+          "candidate": {
+            "weights": {
+              "f1": 0.0,
+              "f2": 0.0
+            },
+            "threshold": 0.5
+          },
+          "metrics": {
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "tn": 1,
+            "precision": 0.0,
+            "recall": 0.0,
+            "support": 1
+          },
+          "threshold": 0.5
+        },
+        {
+          "index": 1,
+          "candidate": {
+            "weights": {
+              "f1": 0.0,
+              "f2": 0.5
+            },
+            "threshold": 0.5
+          },
+          "metrics": {
+            "tp": 0,
+            "fp": 1,
+            "fn": 1,
+            "tn": 0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "support": 1
+          },
+          "threshold": 0.5
+        },
+        {
+          "index": 2,
+          "candidate": {
+            "weights": {
+              "f1": 0.5,
+              "f2": 0.0
+            },
+            "threshold": 0.5
+          },
+          "metrics": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0,
+            "tn": 1,
+            "precision": 1.0,
+            "recall": 1.0,
+            "support": 1
+          },
+          "threshold": 0.5
+        },
+        {
+          "index": 3,
+          "candidate": {
+            "weights": {
+              "f1": 0.5,
+              "f2": 0.5
+            },
+            "threshold": 0.5
+          },
+          "metrics": {
+            "tp": 1,
+            "fp": 1,
+            "fn": 0,
+            "tn": 0,
+            "precision": 0.5,
+            "recall": 1.0,
+            "support": 1
+          },
+          "threshold": 0.5
+        }
+      ]
+    }
+  },
+  {
+    "tenant_id": "default",
+    "candidates": [
+      {
+        "weights": {
+          "f2": 0.0,
+          "f1": 0.0
+        },
+        "threshold": 0.5
+      },
+      {
+        "weights": {
+          "f2": 0.0,
+          "f1": 0.5
+        },
+        "threshold": 0.5
+      },
+      {
+        "weights": {
+          "f2": 0.5,
+          "f1": 0.0
+        },
+        "threshold": 0.5
+      },
+      {
+        "weights": {
+          "f2": 0.5,
+          "f1": 0.5
+        },
+        "threshold": 0.5
+      }
+    ],
+    "summary": {
+      "winner_index": 1,
+      "winner": {
+        "index": 1,
+        "candidate": {
+          "weights": {
+            "f2": 0.0,
+            "f1": 0.5
+          },
+          "threshold": 0.5
+        },
+        "metrics": {
+          "tp": 1,
+          "fp": 0,
+          "fn": 0,
+          "tn": 1,
+          "precision": 1.0,
+          "recall": 1.0,
+          "support": 1
+        },
+        "threshold": 0.5
+      },
+      "results": [
+        {
+          "index": 0,
+          "candidate": {
+            "weights": {
+              "f2": 0.0,
+              "f1": 0.0
+            },
+            "threshold": 0.5
+          },
+          "metrics": {
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "tn": 1,
+            "precision": 0.0,
+            "recall": 0.0,
+            "support": 1
+          },
+          "threshold": 0.5
+        },
+        {
+          "index": 1,
+          "candidate": {
+            "weights": {
+              "f2": 0.0,
+              "f1": 0.5
+            },
+            "threshold": 0.5
+          },
+          "metrics": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0,
+            "tn": 1,
+            "precision": 1.0,
+            "recall": 1.0,
+            "support": 1
+          },
+          "threshold": 0.5
+        },
+        {
+          "index": 2,
+          "candidate": {
+            "weights": {
+              "f2": 0.5,
+              "f1": 0.0
+            },
+            "threshold": 0.5
+          },
+          "metrics": {
+            "tp": 0,
+            "fp": 1,
+            "fn": 1,
+            "tn": 0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "support": 1
+          },
+          "threshold": 0.5
+        },
+        {
+          "index": 3,
+          "candidate": {
+            "weights": {
+              "f2": 0.5,
+              "f1": 0.5
+            },
+            "threshold": 0.5
+          },
+          "metrics": {
+            "tp": 1,
+            "fp": 1,
+            "fn": 0,
+            "tn": 0,
+            "precision": 0.5,
+            "recall": 1.0,
+            "support": 1
+          },
+          "threshold": 0.5
+        }
+      ]
+    }
+  },
+  {
+    "tenant_id": "default",
+    "candidates": [
+      {
+        "weights": {
+          "f1": 0.0,
+          "f2": 0.0
+        },
+        "threshold": 0.5
+      },
+      {
+        "weights": {
+          "f1": 0.0,
+          "f2": 0.5
+        },
+        "threshold": 0.5
+      },
+      {
+        "weights": {
+          "f1": 0.5,
+          "f2": 0.0
+        },
+        "threshold": 0.5
+      },
+      {
+        "weights": {
+          "f1": 0.5,
+          "f2": 0.5
+        },
+        "threshold": 0.5
+      }
+    ],
+    "summary": {
+      "winner_index": 2,
+      "winner": {
+        "index": 2,
+        "candidate": {
+          "weights": {
+            "f1": 0.5,
+            "f2": 0.0
+          },
+          "threshold": 0.5
+        },
+        "metrics": {
+          "tp": 1,
+          "fp": 0,
+          "fn": 0,
+          "tn": 1,
+          "precision": 1.0,
+          "recall": 1.0,
+          "support": 1
+        },
+        "threshold": 0.5
+      },
+      "results": [
+        {
+          "index": 0,
+          "candidate": {
+            "weights": {
+              "f1": 0.0,
+              "f2": 0.0
+            },
+            "threshold": 0.5
+          },
+          "metrics": {
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "tn": 1,
+            "precision": 0.0,
+            "recall": 0.0,
+            "support": 1
+          },
+          "threshold": 0.5
+        },
+        {
+          "index": 1,
+          "candidate": {
+            "weights": {
+              "f1": 0.0,
+              "f2": 0.5
+            },
+            "threshold": 0.5
+          },
+          "metrics": {
+            "tp": 0,
+            "fp": 1,
+            "fn": 1,
+            "tn": 0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "support": 1
+          },
+          "threshold": 0.5
+        },
+        {
+          "index": 2,
+          "candidate": {
+            "weights": {
+              "f1": 0.5,
+              "f2": 0.0
+            },
+            "threshold": 0.5
+          },
+          "metrics": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0,
+            "tn": 1,
+            "precision": 1.0,
+            "recall": 1.0,
+            "support": 1
+          },
+          "threshold": 0.5
+        },
+        {
+          "index": 3,
+          "candidate": {
+            "weights": {
+              "f1": 0.5,
+              "f2": 0.5
+            },
+            "threshold": 0.5
+          },
+          "metrics": {
+            "tp": 1,
+            "fp": 1,
+            "fn": 0,
+            "tn": 0,
+            "precision": 0.5,
+            "recall": 1.0,
+            "support": 1
+          },
+          "threshold": 0.5
+        }
+      ]
+    }
+  },
+  {
+    "tenant_id": "default",
+    "candidates": [
+      {
+        "weights": {
+          "f2": 0.0,
+          "f1": 0.0
+        },
+        "threshold": 0.5
+      },
+      {
+        "weights": {
+          "f2": 0.0,
+          "f1": 0.5
+        },
+        "threshold": 0.5
+      },
+      {
+        "weights": {
+          "f2": 0.5,
+          "f1": 0.0
+        },
+        "threshold": 0.5
+      },
+      {
+        "weights": {
+          "f2": 0.5,
+          "f1": 0.5
+        },
+        "threshold": 0.5
+      }
+    ],
+    "summary": {
+      "winner_index": 1,
+      "winner": {
+        "index": 1,
+        "candidate": {
+          "weights": {
+            "f2": 0.0,
+            "f1": 0.5
+          },
+          "threshold": 0.5
+        },
+        "metrics": {
+          "tp": 1,
+          "fp": 0,
+          "fn": 0,
+          "tn": 1,
+          "precision": 1.0,
+          "recall": 1.0,
+          "support": 1
+        },
+        "threshold": 0.5
+      },
+      "results": [
+        {
+          "index": 0,
+          "candidate": {
+            "weights": {
+              "f2": 0.0,
+              "f1": 0.0
+            },
+            "threshold": 0.5
+          },
+          "metrics": {
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "tn": 1,
+            "precision": 0.0,
+            "recall": 0.0,
+            "support": 1
+          },
+          "threshold": 0.5
+        },
+        {
+          "index": 1,
+          "candidate": {
+            "weights": {
+              "f2": 0.0,
+              "f1": 0.5
+            },
+            "threshold": 0.5
+          },
+          "metrics": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0,
+            "tn": 1,
+            "precision": 1.0,
+            "recall": 1.0,
+            "support": 1
+          },
+          "threshold": 0.5
+        },
+        {
+          "index": 2,
+          "candidate": {
+            "weights": {
+              "f2": 0.5,
+              "f1": 0.0
+            },
+            "threshold": 0.5
+          },
+          "metrics": {
+            "tp": 0,
+            "fp": 1,
+            "fn": 1,
+            "tn": 0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "support": 1
+          },
+          "threshold": 0.5
+        },
+        {
+          "index": 3,
+          "candidate": {
+            "weights": {
+              "f2": 0.5,
+              "f1": 0.5
+            },
+            "threshold": 0.5
+          },
+          "metrics": {
+            "tp": 1,
+            "fp": 1,
+            "fn": 0,
+            "tn": 0,
+            "precision": 0.5,
+            "recall": 1.0,
+            "support": 1
+          },
+          "threshold": 0.5
+        }
+      ]
+    }
+  },
+  {
+    "tenant_id": "default",
+    "candidates": [
+      {
+        "weights": {
+          "f2": 0.0,
+          "f1": 0.0
+        },
+        "threshold": 0.5
+      },
+      {
+        "weights": {
+          "f2": 0.0,
+          "f1": 0.5
+        },
+        "threshold": 0.5
+      },
+      {
+        "weights": {
+          "f2": 0.5,
+          "f1": 0.0
+        },
+        "threshold": 0.5
+      },
+      {
+        "weights": {
+          "f2": 0.5,
+          "f1": 0.5
+        },
+        "threshold": 0.5
+      }
+    ],
+    "summary": {
+      "winner_index": 1,
+      "winner": {
+        "index": 1,
+        "candidate": {
+          "weights": {
+            "f2": 0.0,
+            "f1": 0.5
+          },
+          "threshold": 0.5
+        },
+        "metrics": {
+          "tp": 1,
+          "fp": 0,
+          "fn": 0,
+          "tn": 1,
+          "precision": 1.0,
+          "recall": 1.0,
+          "support": 1
+        },
+        "threshold": 0.5
+      },
+      "results": [
+        {
+          "index": 0,
+          "candidate": {
+            "weights": {
+              "f2": 0.0,
+              "f1": 0.0
+            },
+            "threshold": 0.5
+          },
+          "metrics": {
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "tn": 1,
+            "precision": 0.0,
+            "recall": 0.0,
+            "support": 1
+          },
+          "threshold": 0.5
+        },
+        {
+          "index": 1,
+          "candidate": {
+            "weights": {
+              "f2": 0.0,
+              "f1": 0.5
+            },
+            "threshold": 0.5
+          },
+          "metrics": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0,
+            "tn": 1,
+            "precision": 1.0,
+            "recall": 1.0,
+            "support": 1
+          },
+          "threshold": 0.5
+        },
+        {
+          "index": 2,
+          "candidate": {
+            "weights": {
+              "f2": 0.5,
+              "f1": 0.0
+            },
+            "threshold": 0.5
+          },
+          "metrics": {
+            "tp": 0,
+            "fp": 1,
+            "fn": 1,
+            "tn": 0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "support": 1
+          },
+          "threshold": 0.5
+        },
+        {
+          "index": 3,
+          "candidate": {
+            "weights": {
+              "f2": 0.5,
+              "f1": 0.5
+            },
+            "threshold": 0.5
+          },
+          "metrics": {
+            "tp": 1,
+            "fp": 1,
+            "fn": 0,
+            "tn": 0,
+            "precision": 0.5,
+            "recall": 1.0,
+            "support": 1
+          },
+          "threshold": 0.5
+        }
+      ]
+    }
+  },
+  {
+    "tenant_id": "default",
+    "candidates": [
+      {
+        "weights": {
+          "f1": 0.0,
+          "f2": 0.0
+        },
+        "threshold": 0.5
+      },
+      {
+        "weights": {
+          "f1": 0.0,
+          "f2": 0.5
+        },
+        "threshold": 0.5
+      },
+      {
+        "weights": {
+          "f1": 0.5,
+          "f2": 0.0
+        },
+        "threshold": 0.5
+      },
+      {
+        "weights": {
+          "f1": 0.5,
+          "f2": 0.5
+        },
+        "threshold": 0.5
+      }
+    ],
+    "summary": {
+      "winner_index": 2,
+      "winner": {
+        "index": 2,
+        "candidate": {
+          "weights": {
+            "f1": 0.5,
+            "f2": 0.0
+          },
+          "threshold": 0.5
+        },
+        "metrics": {
+          "tp": 1,
+          "fp": 0,
+          "fn": 0,
+          "tn": 1,
+          "precision": 1.0,
+          "recall": 1.0,
+          "support": 1
+        },
+        "threshold": 0.5
+      },
+      "results": [
+        {
+          "index": 0,
+          "candidate": {
+            "weights": {
+              "f1": 0.0,
+              "f2": 0.0
+            },
+            "threshold": 0.5
+          },
+          "metrics": {
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "tn": 1,
+            "precision": 0.0,
+            "recall": 0.0,
+            "support": 1
+          },
+          "threshold": 0.5
+        },
+        {
+          "index": 1,
+          "candidate": {
+            "weights": {
+              "f1": 0.0,
+              "f2": 0.5
+            },
+            "threshold": 0.5
+          },
+          "metrics": {
+            "tp": 0,
+            "fp": 1,
+            "fn": 1,
+            "tn": 0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "support": 1
+          },
+          "threshold": 0.5
+        },
+        {
+          "index": 2,
+          "candidate": {
+            "weights": {
+              "f1": 0.5,
+              "f2": 0.0
+            },
+            "threshold": 0.5
+          },
+          "metrics": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0,
+            "tn": 1,
+            "precision": 1.0,
+            "recall": 1.0,
+            "support": 1
+          },
+          "threshold": 0.5
+        },
+        {
+          "index": 3,
+          "candidate": {
+            "weights": {
+              "f1": 0.5,
+              "f2": 0.5
+            },
+            "threshold": 0.5
+          },
+          "metrics": {
+            "tp": 1,
+            "fp": 1,
+            "fn": 0,
+            "tn": 0,
+            "precision": 0.5,
+            "recall": 1.0,
+            "support": 1
+          },
+          "threshold": 0.5
+        }
+      ]
+    }
+  },
+  {
+    "tenant_id": "default",
+    "candidates": [
+      {
+        "weights": {
+          "f2": 0.0,
+          "f1": 0.0
+        },
+        "threshold": 0.5
+      },
+      {
+        "weights": {
+          "f2": 0.0,
+          "f1": 0.5
+        },
+        "threshold": 0.5
+      },
+      {
+        "weights": {
+          "f2": 0.5,
+          "f1": 0.0
+        },
+        "threshold": 0.5
+      },
+      {
+        "weights": {
+          "f2": 0.5,
+          "f1": 0.5
+        },
+        "threshold": 0.5
+      }
+    ],
+    "summary": {
+      "winner_index": 1,
+      "winner": {
+        "index": 1,
+        "candidate": {
+          "weights": {
+            "f2": 0.0,
+            "f1": 0.5
+          },
+          "threshold": 0.5
+        },
+        "metrics": {
+          "tp": 1,
+          "fp": 0,
+          "fn": 0,
+          "tn": 1,
+          "precision": 1.0,
+          "recall": 1.0,
+          "support": 1
+        },
+        "threshold": 0.5
+      },
+      "results": [
+        {
+          "index": 0,
+          "candidate": {
+            "weights": {
+              "f2": 0.0,
+              "f1": 0.0
+            },
+            "threshold": 0.5
+          },
+          "metrics": {
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "tn": 1,
+            "precision": 0.0,
+            "recall": 0.0,
+            "support": 1
+          },
+          "threshold": 0.5
+        },
+        {
+          "index": 1,
+          "candidate": {
+            "weights": {
+              "f2": 0.0,
+              "f1": 0.5
+            },
+            "threshold": 0.5
+          },
+          "metrics": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0,
+            "tn": 1,
+            "precision": 1.0,
+            "recall": 1.0,
+            "support": 1
+          },
+          "threshold": 0.5
+        },
+        {
+          "index": 2,
+          "candidate": {
+            "weights": {
+              "f2": 0.5,
+              "f1": 0.0
+            },
+            "threshold": 0.5
+          },
+          "metrics": {
+            "tp": 0,
+            "fp": 1,
+            "fn": 1,
+            "tn": 0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "support": 1
+          },
+          "threshold": 0.5
+        },
+        {
+          "index": 3,
+          "candidate": {
+            "weights": {
+              "f2": 0.5,
+              "f1": 0.5
+            },
+            "threshold": 0.5
+          },
+          "metrics": {
+            "tp": 1,
+            "fp": 1,
+            "fn": 0,
+            "tn": 0,
+            "precision": 0.5,
+            "recall": 1.0,
+            "support": 1
+          },
+          "threshold": 0.5
+        }
+      ]
+    }
+  },
+  {
+    "tenant_id": "default",
+    "candidates": [
+      {
+        "weights": {
+          "f1": 0.0,
+          "f2": 0.0
+        },
+        "threshold": 0.5
+      },
+      {
+        "weights": {
+          "f1": 0.0,
+          "f2": 0.5
+        },
+        "threshold": 0.5
+      },
+      {
+        "weights": {
+          "f1": 0.5,
+          "f2": 0.0
+        },
+        "threshold": 0.5
+      },
+      {
+        "weights": {
+          "f1": 0.5,
+          "f2": 0.5
+        },
+        "threshold": 0.5
+      }
+    ],
+    "summary": {
+      "winner_index": 2,
+      "winner": {
+        "index": 2,
+        "candidate": {
+          "weights": {
+            "f1": 0.5,
+            "f2": 0.0
+          },
+          "threshold": 0.5
+        },
+        "metrics": {
+          "tp": 1,
+          "fp": 0,
+          "fn": 0,
+          "tn": 1,
+          "precision": 1.0,
+          "recall": 1.0,
+          "support": 1
+        },
+        "threshold": 0.5
+      },
+      "results": [
+        {
+          "index": 0,
+          "candidate": {
+            "weights": {
+              "f1": 0.0,
+              "f2": 0.0
+            },
+            "threshold": 0.5
+          },
+          "metrics": {
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "tn": 1,
+            "precision": 0.0,
+            "recall": 0.0,
+            "support": 1
+          },
+          "threshold": 0.5
+        },
+        {
+          "index": 1,
+          "candidate": {
+            "weights": {
+              "f1": 0.0,
+              "f2": 0.5
+            },
+            "threshold": 0.5
+          },
+          "metrics": {
+            "tp": 0,
+            "fp": 1,
+            "fn": 1,
+            "tn": 0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "support": 1
+          },
+          "threshold": 0.5
+        },
+        {
+          "index": 2,
+          "candidate": {
+            "weights": {
+              "f1": 0.5,
+              "f2": 0.0
+            },
+            "threshold": 0.5
+          },
+          "metrics": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0,
+            "tn": 1,
+            "precision": 1.0,
+            "recall": 1.0,
+            "support": 1
+          },
+          "threshold": 0.5
+        },
+        {
+          "index": 3,
+          "candidate": {
+            "weights": {
+              "f1": 0.5,
+              "f2": 0.5
+            },
+            "threshold": 0.5
+          },
+          "metrics": {
+            "tp": 1,
+            "fp": 1,
+            "fn": 0,
+            "tn": 0,
+            "precision": 0.5,
+            "recall": 1.0,
+            "support": 1
+          },
+          "threshold": 0.5
+        }
+      ]
+    }
+  },
+  {
+    "tenant_id": "default",
+    "candidates": [
+      {
+        "weights": {
+          "f1": 0.0,
+          "f2": 0.0
+        },
+        "threshold": 0.5
+      },
+      {
+        "weights": {
+          "f1": 0.0,
+          "f2": 0.5
+        },
+        "threshold": 0.5
+      },
+      {
+        "weights": {
+          "f1": 0.5,
+          "f2": 0.0
+        },
+        "threshold": 0.5
+      },
+      {
+        "weights": {
+          "f1": 0.5,
+          "f2": 0.5
+        },
+        "threshold": 0.5
+      }
+    ],
+    "summary": {
+      "winner_index": 2,
+      "winner": {
+        "index": 2,
+        "candidate": {
+          "weights": {
+            "f1": 0.5,
+            "f2": 0.0
+          },
+          "threshold": 0.5
+        },
+        "metrics": {
+          "tp": 1,
+          "fp": 0,
+          "fn": 0,
+          "tn": 1,
+          "precision": 1.0,
+          "recall": 1.0,
+          "support": 1
+        },
+        "threshold": 0.5
+      },
+      "results": [
+        {
+          "index": 0,
+          "candidate": {
+            "weights": {
+              "f1": 0.0,
+              "f2": 0.0
+            },
+            "threshold": 0.5
+          },
+          "metrics": {
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "tn": 1,
+            "precision": 0.0,
+            "recall": 0.0,
+            "support": 1
+          },
+          "threshold": 0.5
+        },
+        {
+          "index": 1,
+          "candidate": {
+            "weights": {
+              "f1": 0.0,
+              "f2": 0.5
+            },
+            "threshold": 0.5
+          },
+          "metrics": {
+            "tp": 0,
+            "fp": 1,
+            "fn": 1,
+            "tn": 0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "support": 1
+          },
+          "threshold": 0.5
+        },
+        {
+          "index": 2,
+          "candidate": {
+            "weights": {
+              "f1": 0.5,
+              "f2": 0.0
+            },
+            "threshold": 0.5
+          },
+          "metrics": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0,
+            "tn": 1,
+            "precision": 1.0,
+            "recall": 1.0,
+            "support": 1
+          },
+          "threshold": 0.5
+        },
+        {
+          "index": 3,
+          "candidate": {
+            "weights": {
+              "f1": 0.5,
+              "f2": 0.5
+            },
+            "threshold": 0.5
+          },
+          "metrics": {
+            "tp": 1,
+            "fp": 1,
+            "fn": 0,
+            "tn": 0,
+            "precision": 0.5,
+            "recall": 1.0,
+            "support": 1
+          },
+          "threshold": 0.5
+        }
+      ]
+    }
+  },
+  {
+    "tenant_id": "default",
+    "candidates": [
+      {
+        "weights": {
+          "f1": 0.0,
+          "f2": 0.0
+        },
+        "threshold": 0.5
+      },
+      {
+        "weights": {
+          "f1": 0.0,
+          "f2": 0.5
+        },
+        "threshold": 0.5
+      },
+      {
+        "weights": {
+          "f1": 0.5,
+          "f2": 0.0
+        },
+        "threshold": 0.5
+      },
+      {
+        "weights": {
+          "f1": 0.5,
+          "f2": 0.5
+        },
+        "threshold": 0.5
+      }
+    ],
+    "summary": {
+      "winner_index": 2,
+      "winner": {
+        "index": 2,
+        "candidate": {
+          "weights": {
+            "f1": 0.5,
+            "f2": 0.0
+          },
+          "threshold": 0.5
+        },
+        "metrics": {
+          "tp": 1,
+          "fp": 0,
+          "fn": 0,
+          "tn": 1,
+          "precision": 1.0,
+          "recall": 1.0,
+          "support": 1
+        },
+        "threshold": 0.5
+      },
+      "results": [
+        {
+          "index": 0,
+          "candidate": {
+            "weights": {
+              "f1": 0.0,
+              "f2": 0.0
+            },
+            "threshold": 0.5
+          },
+          "metrics": {
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "tn": 1,
+            "precision": 0.0,
+            "recall": 0.0,
+            "support": 1
+          },
+          "threshold": 0.5
+        },
+        {
+          "index": 1,
+          "candidate": {
+            "weights": {
+              "f1": 0.0,
+              "f2": 0.5
+            },
+            "threshold": 0.5
+          },
+          "metrics": {
+            "tp": 0,
+            "fp": 1,
+            "fn": 1,
+            "tn": 0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "support": 1
+          },
+          "threshold": 0.5
+        },
+        {
+          "index": 2,
+          "candidate": {
+            "weights": {
+              "f1": 0.5,
+              "f2": 0.0
+            },
+            "threshold": 0.5
+          },
+          "metrics": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0,
+            "tn": 1,
+            "precision": 1.0,
+            "recall": 1.0,
+            "support": 1
+          },
+          "threshold": 0.5
+        },
+        {
+          "index": 3,
+          "candidate": {
+            "weights": {
+              "f1": 0.5,
+              "f2": 0.5
+            },
+            "threshold": 0.5
+          },
+          "metrics": {
+            "tp": 1,
+            "fp": 1,
+            "fn": 0,
+            "tn": 0,
+            "precision": 0.5,
+            "recall": 1.0,
+            "support": 1
+          },
+          "threshold": 0.5
+        }
+      ]
+    }
+  },
+  {
+    "tenant_id": "default",
+    "candidates": [
+      {
+        "weights": {
+          "f2": 0.0,
+          "f1": 0.0
+        },
+        "threshold": 0.5
+      },
+      {
+        "weights": {
+          "f2": 0.0,
+          "f1": 0.5
+        },
+        "threshold": 0.5
+      },
+      {
+        "weights": {
+          "f2": 0.5,
+          "f1": 0.0
+        },
+        "threshold": 0.5
+      },
+      {
+        "weights": {
+          "f2": 0.5,
+          "f1": 0.5
+        },
+        "threshold": 0.5
+      }
+    ],
+    "summary": {
+      "winner_index": 1,
+      "winner": {
+        "index": 1,
+        "candidate": {
+          "weights": {
+            "f2": 0.0,
+            "f1": 0.5
+          },
+          "threshold": 0.5
+        },
+        "metrics": {
+          "tp": 1,
+          "fp": 0,
+          "fn": 0,
+          "tn": 1,
+          "precision": 1.0,
+          "recall": 1.0,
+          "support": 1
+        },
+        "threshold": 0.5
+      },
+      "results": [
+        {
+          "index": 0,
+          "candidate": {
+            "weights": {
+              "f2": 0.0,
+              "f1": 0.0
+            },
+            "threshold": 0.5
+          },
+          "metrics": {
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "tn": 1,
+            "precision": 0.0,
+            "recall": 0.0,
+            "support": 1
+          },
+          "threshold": 0.5
+        },
+        {
+          "index": 1,
+          "candidate": {
+            "weights": {
+              "f2": 0.0,
+              "f1": 0.5
+            },
+            "threshold": 0.5
+          },
+          "metrics": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0,
+            "tn": 1,
+            "precision": 1.0,
+            "recall": 1.0,
+            "support": 1
+          },
+          "threshold": 0.5
+        },
+        {
+          "index": 2,
+          "candidate": {
+            "weights": {
+              "f2": 0.5,
+              "f1": 0.0
+            },
+            "threshold": 0.5
+          },
+          "metrics": {
+            "tp": 0,
+            "fp": 1,
+            "fn": 1,
+            "tn": 0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "support": 1
+          },
+          "threshold": 0.5
+        },
+        {
+          "index": 3,
+          "candidate": {
+            "weights": {
+              "f2": 0.5,
+              "f1": 0.5
+            },
+            "threshold": 0.5
+          },
+          "metrics": {
+            "tp": 1,
+            "fp": 1,
+            "fn": 0,
+            "tn": 0,
+            "precision": 0.5,
+            "recall": 1.0,
+            "support": 1
+          },
+          "threshold": 0.5
+        }
+      ]
+    }
+  },
+  {
+    "tenant_id": "default",
+    "candidates": [
+      {
+        "weights": {
+          "f1": 0.0,
+          "f2": 0.0
+        },
+        "threshold": 0.5
+      },
+      {
+        "weights": {
+          "f1": 0.0,
+          "f2": 0.5
+        },
+        "threshold": 0.5
+      },
+      {
+        "weights": {
+          "f1": 0.5,
+          "f2": 0.0
+        },
+        "threshold": 0.5
+      },
+      {
+        "weights": {
+          "f1": 0.5,
+          "f2": 0.5
+        },
+        "threshold": 0.5
+      }
+    ],
+    "summary": {
+      "winner_index": 2,
+      "winner": {
+        "index": 2,
+        "candidate": {
+          "weights": {
+            "f1": 0.5,
+            "f2": 0.0
+          },
+          "threshold": 0.5
+        },
+        "metrics": {
+          "tp": 1,
+          "fp": 0,
+          "fn": 0,
+          "tn": 1,
+          "precision": 1.0,
+          "recall": 1.0,
+          "support": 1
+        },
+        "threshold": 0.5
+      },
+      "results": [
+        {
+          "index": 0,
+          "candidate": {
+            "weights": {
+              "f1": 0.0,
+              "f2": 0.0
+            },
+            "threshold": 0.5
+          },
+          "metrics": {
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "tn": 1,
+            "precision": 0.0,
+            "recall": 0.0,
+            "support": 1
+          },
+          "threshold": 0.5
+        },
+        {
+          "index": 1,
+          "candidate": {
+            "weights": {
+              "f1": 0.0,
+              "f2": 0.5
+            },
+            "threshold": 0.5
+          },
+          "metrics": {
+            "tp": 0,
+            "fp": 1,
+            "fn": 1,
+            "tn": 0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "support": 1
+          },
+          "threshold": 0.5
+        },
+        {
+          "index": 2,
+          "candidate": {
+            "weights": {
+              "f1": 0.5,
+              "f2": 0.0
+            },
+            "threshold": 0.5
+          },
+          "metrics": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0,
+            "tn": 1,
+            "precision": 1.0,
+            "recall": 1.0,
+            "support": 1
+          },
+          "threshold": 0.5
+        },
+        {
+          "index": 3,
+          "candidate": {
+            "weights": {
+              "f1": 0.5,
+              "f2": 0.5
+            },
+            "threshold": 0.5
+          },
+          "metrics": {
+            "tp": 1,
+            "fp": 1,
+            "fn": 0,
+            "tn": 0,
+            "precision": 0.5,
+            "recall": 1.0,
+            "support": 1
+          },
+          "threshold": 0.5
+        }
+      ]
+    }
+  },
+  {
+    "tenant_id": "default",
+    "candidates": [
+      {
+        "weights": {
+          "f2": 0.0,
+          "f1": 0.0
+        },
+        "threshold": 0.5
+      },
+      {
+        "weights": {
+          "f2": 0.0,
+          "f1": 0.5
+        },
+        "threshold": 0.5
+      },
+      {
+        "weights": {
+          "f2": 0.5,
+          "f1": 0.0
+        },
+        "threshold": 0.5
+      },
+      {
+        "weights": {
+          "f2": 0.5,
+          "f1": 0.5
+        },
+        "threshold": 0.5
+      }
+    ],
+    "summary": {
+      "winner_index": 1,
+      "winner": {
+        "index": 1,
+        "candidate": {
+          "weights": {
+            "f2": 0.0,
+            "f1": 0.5
+          },
+          "threshold": 0.5
+        },
+        "metrics": {
+          "tp": 1,
+          "fp": 0,
+          "fn": 0,
+          "tn": 1,
+          "precision": 1.0,
+          "recall": 1.0,
+          "support": 1
+        },
+        "threshold": 0.5
+      },
+      "results": [
+        {
+          "index": 0,
+          "candidate": {
+            "weights": {
+              "f2": 0.0,
+              "f1": 0.0
+            },
+            "threshold": 0.5
+          },
+          "metrics": {
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "tn": 1,
+            "precision": 0.0,
+            "recall": 0.0,
+            "support": 1
+          },
+          "threshold": 0.5
+        },
+        {
+          "index": 1,
+          "candidate": {
+            "weights": {
+              "f2": 0.0,
+              "f1": 0.5
+            },
+            "threshold": 0.5
+          },
+          "metrics": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0,
+            "tn": 1,
+            "precision": 1.0,
+            "recall": 1.0,
+            "support": 1
+          },
+          "threshold": 0.5
+        },
+        {
+          "index": 2,
+          "candidate": {
+            "weights": {
+              "f2": 0.5,
+              "f1": 0.0
+            },
+            "threshold": 0.5
+          },
+          "metrics": {
+            "tp": 0,
+            "fp": 1,
+            "fn": 1,
+            "tn": 0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "support": 1
+          },
+          "threshold": 0.5
+        },
+        {
+          "index": 3,
+          "candidate": {
+            "weights": {
+              "f2": 0.5,
+              "f1": 0.5
+            },
+            "threshold": 0.5
+          },
+          "metrics": {
+            "tp": 1,
+            "fp": 1,
+            "fn": 0,
+            "tn": 0,
+            "precision": 0.5,
+            "recall": 1.0,
+            "support": 1
+          },
+          "threshold": 0.5
+        }
+      ]
+    }
+  },
+  {
+    "tenant_id": "default",
+    "candidates": [
+      {
+        "weights": {
+          "f1": 0.0,
+          "f2": 0.0
+        },
+        "threshold": 0.5
+      },
+      {
+        "weights": {
+          "f1": 0.0,
+          "f2": 0.5
+        },
+        "threshold": 0.5
+      },
+      {
+        "weights": {
+          "f1": 0.5,
+          "f2": 0.0
+        },
+        "threshold": 0.5
+      },
+      {
+        "weights": {
+          "f1": 0.5,
+          "f2": 0.5
+        },
+        "threshold": 0.5
+      }
+    ],
+    "summary": {
+      "winner_index": 2,
+      "winner": {
+        "index": 2,
+        "candidate": {
+          "weights": {
+            "f1": 0.5,
+            "f2": 0.0
+          },
+          "threshold": 0.5
+        },
+        "metrics": {
+          "tp": 1,
+          "fp": 0,
+          "fn": 0,
+          "tn": 1,
+          "precision": 1.0,
+          "recall": 1.0,
+          "support": 1
+        },
+        "threshold": 0.5
+      },
+      "results": [
+        {
+          "index": 0,
+          "candidate": {
+            "weights": {
+              "f1": 0.0,
+              "f2": 0.0
+            },
+            "threshold": 0.5
+          },
+          "metrics": {
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "tn": 1,
+            "precision": 0.0,
+            "recall": 0.0,
+            "support": 1
+          },
+          "threshold": 0.5
+        },
+        {
+          "index": 1,
+          "candidate": {
+            "weights": {
+              "f1": 0.0,
+              "f2": 0.5
+            },
+            "threshold": 0.5
+          },
+          "metrics": {
+            "tp": 0,
+            "fp": 1,
+            "fn": 1,
+            "tn": 0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "support": 1
+          },
+          "threshold": 0.5
+        },
+        {
+          "index": 2,
+          "candidate": {
+            "weights": {
+              "f1": 0.5,
+              "f2": 0.0
+            },
+            "threshold": 0.5
+          },
+          "metrics": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0,
+            "tn": 1,
+            "precision": 1.0,
+            "recall": 1.0,
+            "support": 1
+          },
+          "threshold": 0.5
+        },
+        {
+          "index": 3,
+          "candidate": {
+            "weights": {
+              "f1": 0.5,
+              "f2": 0.5
+            },
+            "threshold": 0.5
+          },
+          "metrics": {
+            "tp": 1,
+            "fp": 1,
+            "fn": 0,
+            "tn": 0,
+            "precision": 0.5,
+            "recall": 1.0,
+            "support": 1
+          },
+          "threshold": 0.5
+        }
+      ]
+    }
+  },
+  {
+    "tenant_id": "default",
+    "candidates": [
+      {
+        "weights": {
+          "f2": 0.0,
+          "f1": 0.0
+        },
+        "threshold": 0.5
+      },
+      {
+        "weights": {
+          "f2": 0.0,
+          "f1": 0.5
+        },
+        "threshold": 0.5
+      },
+      {
+        "weights": {
+          "f2": 0.5,
+          "f1": 0.0
+        },
+        "threshold": 0.5
+      },
+      {
+        "weights": {
+          "f2": 0.5,
+          "f1": 0.5
+        },
+        "threshold": 0.5
+      }
+    ],
+    "summary": {
+      "winner_index": 1,
+      "winner": {
+        "index": 1,
+        "candidate": {
+          "weights": {
+            "f2": 0.0,
+            "f1": 0.5
+          },
+          "threshold": 0.5
+        },
+        "metrics": {
+          "tp": 1,
+          "fp": 0,
+          "fn": 0,
+          "tn": 1,
+          "precision": 1.0,
+          "recall": 1.0,
+          "support": 1
+        },
+        "threshold": 0.5
+      },
+      "results": [
+        {
+          "index": 0,
+          "candidate": {
+            "weights": {
+              "f2": 0.0,
+              "f1": 0.0
+            },
+            "threshold": 0.5
+          },
+          "metrics": {
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "tn": 1,
+            "precision": 0.0,
+            "recall": 0.0,
+            "support": 1
+          },
+          "threshold": 0.5
+        },
+        {
+          "index": 1,
+          "candidate": {
+            "weights": {
+              "f2": 0.0,
+              "f1": 0.5
+            },
+            "threshold": 0.5
+          },
+          "metrics": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0,
+            "tn": 1,
+            "precision": 1.0,
+            "recall": 1.0,
+            "support": 1
+          },
+          "threshold": 0.5
+        },
+        {
+          "index": 2,
+          "candidate": {
+            "weights": {
+              "f2": 0.5,
+              "f1": 0.0
+            },
+            "threshold": 0.5
+          },
+          "metrics": {
+            "tp": 0,
+            "fp": 1,
+            "fn": 1,
+            "tn": 0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "support": 1
+          },
+          "threshold": 0.5
+        },
+        {
+          "index": 3,
+          "candidate": {
+            "weights": {
+              "f2": 0.5,
+              "f1": 0.5
+            },
+            "threshold": 0.5
+          },
+          "metrics": {
+            "tp": 1,
+            "fp": 1,
+            "fn": 0,
+            "tn": 0,
+            "precision": 0.5,
+            "recall": 1.0,
+            "support": 1
+          },
+          "threshold": 0.5
+        }
+      ]
+    }
+  }
+]

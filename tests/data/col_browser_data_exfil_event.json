@@ -1,0 +1,8 @@
+{
+  "event_id": "evt-col-browser-1",
+  "host": "host-101",
+  "timestamp": "2025-10-12T13:00:00Z",
+  "browser_profile_zip_created": true,
+  "cloud_api_calls_new": true,
+  "http_bytes_out": 2000000
+}

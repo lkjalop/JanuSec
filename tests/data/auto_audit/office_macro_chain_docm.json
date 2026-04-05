@@ -1,0 +1,14 @@
+{
+  "event_id": "evt-office-macro-001",
+  "file_name": "invoice.docm",
+  "event.source": "invoice.docm",
+  "contains_macro": true,
+  "macro_commands": ["powershell -nop -w hidden -encodedcommand SGVsbG8="],
+  "process": "winword.exe",
+  "children": [
+    {
+      "process": "powershell.exe",
+      "cmdline": "powershell -nop -w hidden -encodedcommand SGVsbG8="
+    }
+  ]
+}

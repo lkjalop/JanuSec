@@ -1,0 +1,4 @@
+{
+  "process": "C:\\Windows\\System32\\wevtutil.exe",
+  "cmdline": "wevtutil cl Application"
+}

@@ -1,0 +1,3 @@
+Executive Summary:
+No high-confidence chains found from start node.
+Key Rationale: evidence-based chain scoring from HopGraph.

@@ -1,0 +1,7 @@
+{
+  "sequence": 2,
+  "steps": [
+    { "target_process": "lsass.exe", "action": "open" },
+    { "file_path": "C:/Temp/cred_dump.dmp", "action": "write_dump" }
+  ]
+}

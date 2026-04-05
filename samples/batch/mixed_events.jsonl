@@ -1,0 +1,3 @@
+{"id":"m-01","type":"net","src_ip":"10.0.4.23","dst_ip":"185.220.101.1","domain":"malware-example.com","ja3":"769,49195-49200,ext","ts":"2025-10-06T10:03:01Z"}
+{"id":"m-02","type":"process","process_name":"msmpeng.exe","path":"C:/Program Files/Windows Defender/MpCmdRun.exe","ts":"2025-10-06T10:03:10Z"}
+{"id":"m-03","type":"dns","query":"bad-domain.ml","answer":"192.42.116.1","ts":"2025-10-06T10:03:12Z"}

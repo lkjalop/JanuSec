@@ -1,0 +1,7 @@
+{
+  "event_id": "evt-c2-cert-1",
+  "host": "host-110",
+  "timestamp": "2025-10-12T13:09:00Z",
+  "tls_cert_issuer_rare": true,
+  "beacon_like_periodicity": true
+}

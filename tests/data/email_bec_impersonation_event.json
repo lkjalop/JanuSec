@@ -1,0 +1,8 @@
+{
+  "message_id": "mid-001",
+  "from_address": "ceo@example.com",
+  "display_name": "CEO Example",
+  "reply_to": "ceo.accounting@evil.biz",
+  "subject": "Urgent: wire transfer",
+  "body": "Please process a wire to vendor immediately."
+}

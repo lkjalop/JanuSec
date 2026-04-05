@@ -1,0 +1,11 @@
+{
+  "id": "precision_metrics",
+  "title": "Precision & FP Reduction",
+  "description": "Shows daily TP/FP/FN and precision/recall trends.",
+  "api": "/api/v1/metrics/fp_reduction_trend?tenant_id=default&start={{start}}&end={{end}}",
+  "visual": {
+    "type": "timeseries",
+    "y": ["precision", "recall"],
+    "series": ["tp","fp"]
+  }
+}

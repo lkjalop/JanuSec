@@ -1,0 +1,65 @@
+name: API Stage Harness
+
+on:
+  schedule:
+    - cron: "0 5 * * *"
+  workflow_dispatch:
+
+jobs:
+  harness:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run API security benchmark and soak
+        env:
+          PLATFORM_LITE_INIT: "1"
+        run: |
+          python scripts/run_api_stage_benchmark.py --use-testclient --tenant-config config/api_stage_tenants.ci.json
+
+      - name: Capture HSM proof artefacts
+        env:
+          PLATFORM_LITE_INIT: "1"
+          PYTHONPATH: .
+        run: |
+          python tools/run_hsm_proof.py --tenant github-ci --simulate-tamper
+
+      - name: Generate courier SLA manifest
+        env:
+          PLATFORM_LITE_INIT: "1"
+          PYTHONPATH: .
+        run: |
+          python tools/run_courier_soak.py --tenants config/api_stage_tenants.ci.json
+
+      - name: Run memory health fixtures
+        env:
+          PLATFORM_LITE_INIT: "1"
+          PYTHONPATH: .
+        run: |
+          python tools/run_memory_health.py
+
+      - name: Publish timeline artefacts
+        env:
+          PLATFORM_LITE_INIT: "1"
+          PYTHONPATH: .
+        run: |
+          python tools/publish_memory_timelines.py
+
+      - name: Upload API stage performance logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-stage-perf
+          path: logs/perf/api_stage
+          if-no-files-found: ignore

@@ -1,0 +1,8 @@
+[
+  {"id": "S", "name": "Spoofing"},
+  {"id": "T", "name": "Tampering"},
+  {"id": "R", "name": "Repudiation"},
+  {"id": "I", "name": "Information Disclosure"},
+  {"id": "D", "name": "Denial of Service"},
+  {"id": "E", "name": "Elevation of Privilege"}
+]

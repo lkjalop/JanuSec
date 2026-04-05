@@ -1,0 +1,9 @@
+{
+  "mac.tasks": [
+    {"name": "launchservicesd", "pid": 88},
+    {"name": "securityd", "pid": 10}
+  ],
+  "mac.netscan": [
+    {"Process": "securityd", "dst": "api.apple.com:443"}
+  ]
+}

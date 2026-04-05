@@ -1,0 +1,5 @@
+suppression_templates:
+  a,b: -0.01
+  entity_diversity_high,batch_missing: -0.03
+  entity_diversity_high,multi_source_correlation: 0.0
+  mapping_semantics_rich,batch_missing: -0.04

@@ -1,0 +1,10 @@
+[
+  {
+    "message_id": "msg-shopsquire-001",
+    "timestamp": "2025-03-21T02:19:00Z",
+    "to": "finance@shopsquire.example",
+    "ip": "185.220.101.61",
+    "clicked_url": "https://bit.ly/ingram-update",
+    "user_agent": "Mozilla/5.0"
+  }
+]

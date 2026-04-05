@@ -1,0 +1,9 @@
+[
+  {
+    "Id": "sh-aws-bec-1",
+    "Title": "Credential misuse and privilege escalation following suspicious supplier email",
+    "Severity": { "Label": "CRITICAL" },
+    "Resources": [{ "Id": "arn:aws:iam::123456789012:role/FinanceRole" }],
+    "UpdatedAt": "2025-03-15T02:58:00Z"
+  }
+]

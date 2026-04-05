@@ -1,0 +1,13 @@
+{
+  "id": "msg-004",
+  "ts": 1700000300,
+  "from": "noreply@service.example",
+  "to": ["user@example.com"],
+  "subject": "Activation",
+  "body": "Your code: 123456",
+  "headers": {
+    "DKIM-Signature": "",
+    "Received": "from unknown"
+  },
+  "return_path": "noreply@service.example"
+}

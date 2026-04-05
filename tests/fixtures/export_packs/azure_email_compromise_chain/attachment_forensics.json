@@ -1,0 +1,10 @@
+[
+  {
+    "message_id": "msg-azure-bec-001",
+    "timestamp": "2025-03-15T02:11:00Z",
+    "to": "alex.mercer@contoso.dev",
+    "attachment_name": "Harbourside_Acquisition_Details_CONFIDENTIAL.xlsm",
+    "attachment_path": "tests/fixtures/email_replay/shopsquire_supplier_bec/artifacts/Harbourside_Acquisition_Details_CONFIDENTIAL.xlsm",
+    "vba_source_path": "tests/fixtures/email_replay/shopsquire_supplier_bec/artifacts/VBA_SOURCE_SecurityModule.bas"
+  }
+]

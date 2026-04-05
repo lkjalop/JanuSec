@@ -1,0 +1,5 @@
+{
+  "source_type": "vm",
+  "api_call": "iam:AttachRolePolicy",
+  "caller": "vm-instance"
+}

@@ -1,0 +1,81 @@
+name: Redis Migration + TF-IDF Gating
+
+on:
+  workflow_dispatch:
+
+jobs:
+  redis-and-tfidf:
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - name: Create venv
+        run: |
+          python -m venv .venv
+          . .venv/bin/activate
+      - name: Install deps
+        run: |
+          . .venv/bin/activate
+          pip install --upgrade pip
+          pip install -r requirements.txt || true
+          pip install scikit-learn joblib || true
+          pip install redis aioredis || true
+      - name: Run migration to Redis
+        env:
+          ENABLE_REDIS_SCHEDULER: '1'
+          REDIS_URL: 'redis://127.0.0.1:6379/0'
+          TFIDF_MIN_PRECISION: '0.60'
+          TFIDF_MIN_RECALL: '0.35'
+        run: |
+          . .venv/bin/activate
+          python scripts/migrate_enrichment_jobs_to_redis.py || true
+      - name: Redis scheduler smoke test
+        run: |
+          . .venv/bin/activate
+          python scripts/redis_scheduler_smoke_test.py || true
+      - name: Build TF-IDF from shadow
+        run: |
+          . .venv/bin/activate
+          python scripts/build_tfidf_from_shadow.py || true
+      - name: Check TF-IDF metrics (gating)
+        run: |
+          . .venv/bin/activate
+          python scripts/check_tfidf_metrics.py || exit 1
+      - name: Upload TF-IDF metrics artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfidf-metrics
+          path: data/tfidf_metrics.json
+      - name: Comment metrics on PR (optional)
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const path = 'data/tfidf_metrics.json';
+            let body = 'TF-IDF metrics not found';
+            if (fs.existsSync(path)) {
+              const m = fs.readFileSync(path, 'utf8');
+              body = 'TF-IDF metrics (artifact):\n```
+' + m + '\n```';
+            }
+            github.rest.issues.createComment({
+              issue_number: context.payload.pull_request.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body
+            });

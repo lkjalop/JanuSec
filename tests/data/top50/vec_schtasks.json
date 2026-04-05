@@ -1,0 +1,4 @@
+{
+  "process": "C:\\Windows\\System32\\schtasks.exe",
+  "cmdline": "schtasks /create /sc onlogon /tn MyTask /tr C:\\mal.exe"
+}

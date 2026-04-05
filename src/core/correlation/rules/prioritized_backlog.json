@@ -1,0 +1,3510 @@
+[
+  {
+    "id": "exec_office_macro_chain",
+    "name": "Office Macro to External C2 Chain",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Initial Access",
+      "technique_id": "T1566.001"
+    },
+    "factors": [
+      "corr_phish_macro_outbound_c2"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.7,
+    "coverage_gap_factor": 1.0,
+    "priority": 49.05,
+    "false_positive_target": 0.08,
+    "logic_ref": "core/correlation/rules/week1/office_macro_chain.py",
+    "test_vectors": [
+      "tests/data/office_macro_chain_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 4,
+        "reproducibility": 3,
+        "exploitability": 3,
+        "affected_users": 3,
+        "discoverability": 2
+      },
+      "risk_score": 0.21
+    }
+  },
+  {
+    "id": "c2_dns_tunnel_exfil",
+    "name": "DNS Tunnel Exfiltration Indicator",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Command and Control",
+      "technique_id": "T1071.004"
+    },
+    "factors": [
+      "dns_tunnel_detected",
+      "high_entropy_queries"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.03,
+    "coverage_gap_factor": 1.0,
+    "priority": 37.8,
+    "false_positive_target": 0.04,
+    "logic_ref": "core/correlation/rules/weekX/expanded_batch.py",
+    "test_vectors": [
+      "tests/data/c2_dns_tunnel_exfil_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 5,
+        "reproducibility": 4,
+        "exploitability": 4,
+        "affected_users": 3,
+        "discoverability": 3
+      },
+      "risk_score": 0.31
+    }
+  },
+  {
+    "id": "exfil_dns_txt_chunks",
+    "name": "Exfil DNS TXT Chunks",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Exfiltration",
+      "technique_id": "T1071.004"
+    },
+    "factors": [
+      "dns_txt_chunk_count",
+      "high_entropy_queries"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.02,
+    "coverage_gap_factor": 1.0,
+    "priority": 37.55,
+    "false_positive_target": 0.05,
+    "logic_ref": "core/correlation/rules/batch_more/additional_30.py",
+    "test_vectors": [
+      "tests/data/exfil_dns_txt_chunks_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 4,
+        "reproducibility": 3,
+        "exploitability": 3,
+        "affected_users": 3,
+        "discoverability": 2
+      },
+      "risk_score": 0.31
+    }
+  },
+  {
+    "id": "exfil_stealth_cloud_metadata",
+    "name": "Exfil Stealth Cloud Metadata",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Exfiltration",
+      "technique_id": "T1530"
+    },
+    "factors": [
+      "cloud_metadata_access",
+      "cloud_api_unusual",
+      "http_bytes_out"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.01,
+    "coverage_gap_factor": 1.0,
+    "priority": 37.03,
+    "false_positive_target": 0.02,
+    "logic_ref": "core/correlation/rules/batch_more/additional_30.py",
+    "test_vectors": [
+      "tests/data/exfil_stealth_cloud_metadata_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 5,
+        "reproducibility": 4,
+        "exploitability": 4,
+        "affected_users": 4,
+        "discoverability": 3
+      },
+      "risk_score": 0.305
+    }
+  },
+  {
+    "id": "graph_lateral_chain_burst",
+    "name": "Graph Lateral Chain Burst (>=3 hosts within 1h)",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Lateral Movement",
+      "technique_id": "T1021"
+    },
+    "factors": [
+      "graph_lateral_chain_burst"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.35,
+    "coverage_gap_factor": 1.0,
+    "priority": 36.45,
+    "false_positive_target": 0.1,
+    "logic_ref": "core/correlation/rules/graph/lateral_chain_burst.py",
+    "test_vectors": [],
+    "dread": {
+      "components": {
+        "damage": 4,
+        "reproducibility": 3,
+        "exploitability": 3,
+        "affected_users": 3,
+        "discoverability": 3
+      },
+      "risk_score": 0.14
+    }
+  },
+  {
+    "id": "lateral_rdp_brute_force_from_cloud",
+    "name": "Lateral RDP Brute Force from Cloud",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Credential Access",
+      "technique_id": "T1110.001"
+    },
+    "factors": [
+      "rdp_failed_count",
+      "src_asn_cloud",
+      "exposed_rdp_port"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.02,
+    "coverage_gap_factor": 1.0,
+    "priority": 35.9,
+    "false_positive_target": 0.05,
+    "logic_ref": "core/correlation/rules/batch_more/additional_30.py",
+    "test_vectors": [
+      "tests/data/lateral_rdp_brute_force_from_cloud_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 4,
+        "reproducibility": 3,
+        "exploitability": 3,
+        "affected_users": 3,
+        "discoverability": 2
+      },
+      "risk_score": 0.28
+    }
+  },
+  {
+    "id": "c2_http_small_periodic_payload",
+    "name": "C2 HTTP Small Periodic Payload",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Command and Control",
+      "technique_id": "T1071.001"
+    },
+    "factors": [
+      "http_post_small",
+      "beacon_periodicity",
+      "rare_ua"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.05,
+    "coverage_gap_factor": 1.0,
+    "priority": 35.55,
+    "false_positive_target": 0.05,
+    "logic_ref": "core/correlation/rules/batch_more/additional_30.py",
+    "test_vectors": [
+      "tests/data/c2_http_small_periodic_payload_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 4,
+        "reproducibility": 3,
+        "exploitability": 3,
+        "affected_users": 3,
+        "discoverability": 2
+      },
+      "risk_score": 0.26
+    }
+  },
+  {
+    "id": "exfil_large_https_rare_asn",
+    "name": "Large HTTPS Exfil to Rare ASN",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Exfiltration",
+      "technique_id": "T1041"
+    },
+    "factors": [
+      "http_bytes_out",
+      "asn"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.1,
+    "coverage_gap_factor": 1.0,
+    "priority": 35.43,
+    "false_positive_target": 0.05,
+    "logic_ref": "core/correlation/rules/weekX/graph_week1.py",
+    "test_vectors": [
+      "tests/data/exfil_large_https_rare_asn_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 4,
+        "reproducibility": 3,
+        "exploitability": 3,
+        "affected_users": 3,
+        "discoverability": 2
+      },
+      "risk_score": 0.235
+    }
+  },
+  {
+    "id": "c2_ssl_odd_sni_beacon",
+    "name": "C2 SSL Odd SNI Beacon",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Command and Control",
+      "technique_id": "T1071.001"
+    },
+    "factors": [
+      "tls_sni_rare",
+      "tls_issuer_rare",
+      "beacon_like_periodicity"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.04,
+    "coverage_gap_factor": 1.0,
+    "priority": 35.3,
+    "false_positive_target": 0.05,
+    "logic_ref": "core/correlation/rules/batch_more/additional_30.py",
+    "test_vectors": [
+      "tests/data/c2_ssl_odd_sni_beacon_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 4,
+        "reproducibility": 3,
+        "exploitability": 3,
+        "affected_users": 3,
+        "discoverability": 2
+      },
+      "risk_score": 0.26
+    }
+  },
+  {
+    "id": "persistence_registry_run_key",
+    "name": "Registry Run/RunOnce Persistence Candidate",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Persistence",
+      "technique_id": "T1547.001"
+    },
+    "factors": [
+      "endpoint:persistence_candidate"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.5,
+    "coverage_gap_factor": 1.0,
+    "priority": 34.98,
+    "false_positive_target": 0.1,
+    "logic_ref": "core/correlation/rules/week2/registry_run_keys.py",
+    "test_vectors": [],
+    "dread": {
+      "components": {
+        "damage": 3,
+        "reproducibility": 2,
+        "exploitability": 3,
+        "affected_users": 2,
+        "discoverability": 2
+      },
+      "risk_score": 0.045
+    }
+  },
+  {
+    "id": "c2_rare_ja3_beacon",
+    "name": "C2 Beacon with Rare JA3",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Command and Control",
+      "technique_id": "T1071"
+    },
+    "factors": [
+      "net:outbound_ja3_rare",
+      "beacon_like_periodicity"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.06,
+    "coverage_gap_factor": 1.0,
+    "priority": 34.42,
+    "false_positive_target": 0.06,
+    "logic_ref": "core/correlation/rules/weekX/expanded_batch.py",
+    "test_vectors": [
+      "tests/data/c2_rare_ja3_beacon_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 4,
+        "reproducibility": 3,
+        "exploitability": 3,
+        "affected_users": 3,
+        "discoverability": 2
+      },
+      "risk_score": 0.235
+    }
+  },
+  {
+    "id": "c2_beacon_rare_ja3",
+    "name": "C2 Beacon with Rare JA3",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Command and Control",
+      "technique_id": "T1071"
+    },
+    "factors": [
+      "net:beacon_periodic",
+      "ja3"
+    ],
+    "stride": [
+      "command_and_control",
+      "information_disclosure"
+    ],
+    "maestro": {
+      "phases": [
+        "command_and_control"
+      ],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.2,
+    "coverage_gap_factor": 0.8,
+    "priority": 33.93,
+    "false_positive_target": 0.07,
+    "logic_ref": "core/correlation/rules/weekX/graph_week1.py",
+    "test_vectors": [
+      "tests/data/c2_beacon_rare_ja3_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 4,
+        "reproducibility": 3,
+        "exploitability": 3,
+        "affected_users": 3,
+        "discoverability": 2
+      },
+      "risk_score": 0.235
+    }
+  },
+  {
+    "id": "c2_rare_cert_issuer_beacon",
+    "name": "Beacon with Rare TLS Cert Issuer",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Command and Control",
+      "technique_id": "T1071"
+    },
+    "factors": [
+      "tls_cert_issuer_rare",
+      "beacon_like_periodicity"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.03,
+    "coverage_gap_factor": 1.0,
+    "priority": 33.67,
+    "false_positive_target": 0.05,
+    "logic_ref": "core/correlation/rules/weekX/expanded_batch.py",
+    "test_vectors": [
+      "tests/data/c2_rare_cert_issuer_beacon_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 4,
+        "reproducibility": 3,
+        "exploitability": 3,
+        "affected_users": 3,
+        "discoverability": 2
+      },
+      "risk_score": 0.235
+    }
+  },
+  {
+    "id": "de_process_hollowing_hint",
+    "name": "Process Hollowing Heuristic",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Defense Evasion",
+      "technique_id": "T1055.012"
+    },
+    "factors": [
+      "parent_mismatch",
+      "memory_only_module",
+      "net:beacon_periodic"
+    ],
+    "stride": [
+      "command_and_control",
+      "information_disclosure"
+    ],
+    "maestro": {
+      "phases": [
+        "command_and_control"
+      ],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.05,
+    "coverage_gap_factor": 0.9,
+    "priority": 33.55,
+    "false_positive_target": 0.05,
+    "logic_ref": "core/correlation/rules/weekX/expanded_batch.py",
+    "test_vectors": [
+      "tests/data/de_process_hollowing_hint_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 4,
+        "reproducibility": 3,
+        "exploitability": 3,
+        "affected_users": 3,
+        "discoverability": 2
+      },
+      "risk_score": 0.26
+    }
+  },
+  {
+    "id": "exec_powershell_encoded_command",
+    "name": "PowerShell Encoded Command Execution",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Execution",
+      "technique_id": "T1059.001"
+    },
+    "factors": [
+      "lane_lolbin:powershell_encoded"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.65,
+    "coverage_gap_factor": 0.5,
+    "priority": 32.85,
+    "false_positive_target": 0.1,
+    "logic_ref": "core/correlation/rules/week1/powershell_encoded.py",
+    "test_vectors": [
+      "tests/data/powershell_encoded_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 3,
+        "reproducibility": 2,
+        "exploitability": 3,
+        "affected_users": 2,
+        "discoverability": 2
+      },
+      "risk_score": 0.12
+    }
+  },
+  {
+    "id": "lm_graph_chain_len3",
+    "name": "Graph Lateral Chain Length >=3",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Lateral Movement",
+      "technique_id": "T1021"
+    },
+    "factors": [
+      "graph_lateral_chain_len"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.2,
+    "coverage_gap_factor": 1.0,
+    "priority": 32.7,
+    "false_positive_target": 0.05,
+    "logic_ref": "core/correlation/rules/weekX/graph_week1.py",
+    "test_vectors": [
+      "tests/data/graph_chain_len3_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 3,
+        "reproducibility": 2,
+        "exploitability": 2,
+        "affected_users": 2,
+        "discoverability": 2
+      },
+      "risk_score": 0.14
+    }
+  },
+  {
+    "id": "persistence_new_service_nonstandard",
+    "name": "New Service Binary in Non-Standard Path",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Persistence",
+      "technique_id": "T1543"
+    },
+    "factors": [
+      "endpoint:persistence_candidate"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.4,
+    "coverage_gap_factor": 1.0,
+    "priority": 32.48,
+    "false_positive_target": 0.08,
+    "logic_ref": "core/correlation/rules/week2/new_service_nonstandard_path.py",
+    "test_vectors": [],
+    "dread": {
+      "components": {
+        "damage": 4,
+        "reproducibility": 3,
+        "exploitability": 3,
+        "affected_users": 3,
+        "discoverability": 2
+      },
+      "risk_score": 0.045
+    }
+  },
+  {
+    "id": "exfil_cloud_storage_new",
+    "name": "Cloud Storage Exfil New Endpoint",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Exfiltration",
+      "technique_id": "T1567"
+    },
+    "factors": [
+      "cloud_api_calls_new",
+      "http_bytes_out"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.1,
+    "coverage_gap_factor": 1.0,
+    "priority": 32.12,
+    "false_positive_target": 0.05,
+    "logic_ref": "core/correlation/rules/weekX/expanded_batch.py",
+    "test_vectors": [
+      "tests/data/exfil_cloud_storage_new_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 4,
+        "reproducibility": 3,
+        "exploitability": 3,
+        "affected_users": 3,
+        "discoverability": 2
+      },
+      "risk_score": 0.175
+    }
+  },
+  {
+    "id": "col_browser_data_exfil",
+    "name": "Browser Profile Zip -> Cloud Exfil",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Collection",
+      "technique_id": "T1020"
+    },
+    "factors": [
+      "browser_profile_zip_created",
+      "cloud_api_calls_new"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.08,
+    "coverage_gap_factor": 1.0,
+    "priority": 31.63,
+    "false_positive_target": 0.05,
+    "logic_ref": "core/correlation/rules/weekX/expanded_batch.py",
+    "test_vectors": [
+      "tests/data/col_browser_data_exfil_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 4,
+        "reproducibility": 3,
+        "exploitability": 3,
+        "affected_users": 3,
+        "discoverability": 2
+      },
+      "risk_score": 0.175
+    }
+  },
+  {
+    "id": "exec_amsi_bypass_pattern",
+    "name": "PowerShell AMSI Bypass String Pattern",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Execution",
+      "technique_id": "T1059.001"
+    },
+    "factors": [
+      "lane_lolbin:powershell_encoded"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.6,
+    "coverage_gap_factor": 0.5,
+    "priority": 31.6,
+    "false_positive_target": 0.05,
+    "logic_ref": "core/correlation/rules/week1/amsi_bypass.py",
+    "test_vectors": [
+      "tests/data/amsi_bypass_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 4,
+        "reproducibility": 4,
+        "exploitability": 4,
+        "affected_users": 3,
+        "discoverability": 3
+      },
+      "risk_score": 0.12
+    }
+  },
+  {
+    "id": "ia_zip_js_chain",
+    "name": "Archive -> Script LOLBin Chain",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Initial Access",
+      "technique_id": "T1204"
+    },
+    "factors": [
+      "archive_extract",
+      "js_exec_from_archive",
+      "lolbin_wscript_or_mshta"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.2,
+    "coverage_gap_factor": 0.8,
+    "priority": 30.35,
+    "false_positive_target": 0.1,
+    "logic_ref": "core/correlation/rules/weekX/expanded_batch.py",
+    "test_vectors": [
+      "tests/data/ia_zip_js_chain_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 3,
+        "reproducibility": 3,
+        "exploitability": 3,
+        "affected_users": 2,
+        "discoverability": 2
+      },
+      "risk_score": 0.17
+    }
+  },
+  {
+    "id": "lateral_smb_grooming_credential_harvest",
+    "name": "Lateral SMB Grooming Credential Harvest",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Credential Access",
+      "technique_id": "T1003"
+    },
+    "factors": [
+      "smb_file_read_patterns",
+      "credential_file_matches"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.02,
+    "coverage_gap_factor": 1.0,
+    "priority": 30.12,
+    "false_positive_target": 0.05,
+    "logic_ref": "core/correlation/rules/batch_more/additional_30.py",
+    "test_vectors": [
+      "tests/data/lateral_smb_grooming_credential_harvest_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 4,
+        "reproducibility": 3,
+        "exploitability": 3,
+        "affected_users": 3,
+        "discoverability": 2
+      },
+      "risk_score": 0.175
+    }
+  },
+  {
+    "id": "discovery_dns_reverse_enum",
+    "name": "Discovery DNS Reverse Enum",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Discovery",
+      "technique_id": "T1046"
+    },
+    "factors": [
+      "dns_ptr_burst",
+      "subnet_scan_detected"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.04,
+    "coverage_gap_factor": 0.8,
+    "priority": 29.93,
+    "false_positive_target": 0.06,
+    "logic_ref": "core/correlation/rules/batch_more/additional_30.py",
+    "test_vectors": [
+      "tests/data/discovery_dns_reverse_enum_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 3,
+        "reproducibility": 2,
+        "exploitability": 2,
+        "affected_users": 2,
+        "discoverability": 2
+      },
+      "risk_score": 0.235
+    }
+  },
+  {
+    "id": "recon_dns_enumeration_enriched",
+    "name": "DNS Enumeration Burst",
+    "status": "active",
+    "mitre": {
+      "tactic": "Discovery",
+      "technique_id": "T1046"
+    },
+    "factors": [
+      "dns_query_count",
+      "unique_domains"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 2
+    },
+    "prevalence_factor": 0.12,
+    "coverage_gap_factor": 0.7,
+    "priority": 29.93,
+    "false_positive_target": 0.1,
+    "logic_ref": "core/correlation/rules/recon_weaponization_enriched.py",
+    "test_vectors": [
+      "tests/data/recon_dns_enumeration_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 2,
+        "reproducibility": 3,
+        "exploitability": 2,
+        "affected_users": 2,
+        "discoverability": 3
+      },
+      "risk_score": 0.235
+    }
+  },
+  {
+    "id": "cloud_role_escalation_from_vm",
+    "name": "Cloud Role Escalation from VM",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Privilege Escalation",
+      "technique_id": "T1538"
+    },
+    "factors": [
+      "cloud_api_modify_iam",
+      "vm_agent_origin"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.01,
+    "coverage_gap_factor": 1.0,
+    "priority": 29.88,
+    "false_positive_target": 0.02,
+    "logic_ref": "core/correlation/rules/batch_more/additional_30.py",
+    "test_vectors": [
+      "tests/data/cloud_role_escalation_from_vm_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 5,
+        "reproducibility": 4,
+        "exploitability": 4,
+        "affected_users": 4,
+        "discoverability": 3
+      },
+      "risk_score": 0.175
+    }
+  },
+  {
+    "id": "ia_lnk_lolbin",
+    "name": "LNK Spawns LOLBin From Downloads",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Initial Access",
+      "technique_id": "T1204"
+    },
+    "factors": [
+      "lnk_open",
+      "lolbin_child_spawn",
+      "downloads_path_exec"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.25,
+    "coverage_gap_factor": 0.7,
+    "priority": 29.6,
+    "false_positive_target": 0.1,
+    "logic_ref": "core/correlation/rules/weekX/expanded_batch.py",
+    "test_vectors": [
+      "tests/data/ia_lnk_lolbin_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 3,
+        "reproducibility": 3,
+        "exploitability": 2,
+        "affected_users": 2,
+        "discoverability": 2
+      },
+      "risk_score": 0.17
+    }
+  },
+  {
+    "id": "de_sideload_dll",
+    "name": "DLL Sideload Next To Signed EXE",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Defense Evasion",
+      "technique_id": "T1574.002"
+    },
+    "factors": [
+      "dll_next_to_signed_exe",
+      "immediate_load"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.05,
+    "coverage_gap_factor": 1.0,
+    "priority": 29.23,
+    "false_positive_target": 0.05,
+    "logic_ref": "core/correlation/rules/weekX/expanded_batch.py",
+    "test_vectors": [
+      "tests/data/de_sideload_dll_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 4,
+        "reproducibility": 3,
+        "exploitability": 3,
+        "affected_users": 3,
+        "discoverability": 2
+      },
+      "risk_score": 0.145
+    }
+  },
+  {
+    "id": "disc_credential_enum_burst",
+    "name": "Credential Enumeration Burst",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Discovery",
+      "technique_id": "T1087"
+    },
+    "factors": [
+      "credential_enum_count",
+      "internal_only"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.06,
+    "coverage_gap_factor": 0.9,
+    "priority": 29.12,
+    "false_positive_target": 0.07,
+    "logic_ref": "core/correlation/rules/weekX/expanded_batch.py",
+    "test_vectors": [
+      "tests/data/disc_credential_enum_burst_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 3,
+        "reproducibility": 2,
+        "exploitability": 2,
+        "affected_users": 2,
+        "discoverability": 2
+      },
+      "risk_score": 0.175
+    }
+  },
+  {
+    "id": "exec_scheduled_task_lolbin_anomaly",
+    "name": "Scheduled Task or LOLBin Anomaly",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Execution",
+      "technique_id": "T1053"
+    },
+    "factors": [
+      "endpoint:lolbin_mshta_remote"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.5,
+    "coverage_gap_factor": 0.5,
+    "priority": 29.1,
+    "false_positive_target": 0.1,
+    "logic_ref": "core/correlation/rules/week1/scheduled_task_lolbin.py",
+    "test_vectors": [
+      "tests/data/scheduled_task_lolbin_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 3,
+        "reproducibility": 3,
+        "exploitability": 3,
+        "affected_users": 2,
+        "discoverability": 2
+      },
+      "risk_score": 0.12
+    }
+  },
+  {
+    "id": "ia_html_smuggling",
+    "name": "HTML Smuggling Attachment Execution",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Initial Access",
+      "technique_id": "T1204.002"
+    },
+    "factors": [
+      "http:content_disposition_attachment",
+      "download_exe_temp",
+      "rare_domain"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.15,
+    "coverage_gap_factor": 1.0,
+    "priority": 28.98,
+    "false_positive_target": 0.08,
+    "logic_ref": "core/correlation/rules/weekX/expanded_batch.py",
+    "test_vectors": [
+      "tests/data/ia_html_smuggling_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 4,
+        "reproducibility": 3,
+        "exploitability": 3,
+        "affected_users": 3,
+        "discoverability": 2
+      },
+      "risk_score": 0.095
+    }
+  },
+  {
+    "id": "persistence_scheduled_task_shadowing",
+    "name": "Persistence Scheduled Task Shadowing",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Persistence",
+      "technique_id": "T1053"
+    },
+    "factors": [
+      "scheduled_task_created",
+      "lolbin_in_args",
+      "task_creator_unusual"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.03,
+    "coverage_gap_factor": 0.9,
+    "priority": 28.1,
+    "false_positive_target": 0.06,
+    "logic_ref": "core/correlation/rules/batch_more/additional_30.py",
+    "test_vectors": [
+      "tests/data/persistence_scheduled_task_shadowing_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 3,
+        "reproducibility": 2,
+        "exploitability": 2,
+        "affected_users": 2,
+        "discoverability": 2
+      },
+      "risk_score": 0.17
+    }
+  },
+  {
+    "id": "exec_powershell_amsi_bypass_combo",
+    "name": "PowerShell AMSI Bypass + Beacon Combo",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Execution",
+      "technique_id": "T1059.001"
+    },
+    "factors": [
+      "command_line",
+      "net:beacon_periodic"
+    ],
+    "stride": [
+      "command_and_control",
+      "information_disclosure"
+    ],
+    "maestro": {
+      "phases": [
+        "command_and_control"
+      ],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.2,
+    "coverage_gap_factor": 0.5,
+    "priority": 27.93,
+    "false_positive_target": 0.08,
+    "logic_ref": "core/correlation/rules/weekX/graph_week1.py",
+    "test_vectors": [
+      "tests/data/exec_powershell_amsi_bypass_combo_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 3,
+        "reproducibility": 3,
+        "exploitability": 3,
+        "affected_users": 2,
+        "discoverability": 2
+      },
+      "risk_score": 0.235
+    }
+  },
+  {
+    "id": "pers_registry_run_key_nonstd",
+    "name": "Registry Run Key Non-Std Path",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Persistence",
+      "technique_id": "T1547.001"
+    },
+    "factors": [
+      "registry_run_key_set",
+      "temp_path_exe"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.15,
+    "coverage_gap_factor": 1.0,
+    "priority": 27.6,
+    "false_positive_target": 0.08,
+    "logic_ref": "core/correlation/rules/weekX/expanded_batch.py",
+    "test_vectors": [
+      "tests/data/pers_registry_run_key_nonstd_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 4,
+        "reproducibility": 3,
+        "exploitability": 3,
+        "affected_users": 3,
+        "discoverability": 2
+      },
+      "risk_score": 0.07
+    }
+  },
+  {
+    "id": "cred_lsass_openprocess",
+    "name": "LSASS OpenProcess by Non-System Caller",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Credential Access",
+      "technique_id": "T1003"
+    },
+    "factors": [
+      "endpoint:rare_lineage"
+    ],
+    "stride": [
+      "elevation",
+      "tampering"
+    ],
+    "maestro": {
+      "phases": [
+        "execution",
+        "persistence"
+      ],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.2,
+    "coverage_gap_factor": 1.0,
+    "priority": 27.48,
+    "false_positive_target": 0.02,
+    "logic_ref": "core/correlation/rules/week2/lsass_openprocess.py",
+    "test_vectors": [],
+    "dread": {
+      "components": {
+        "damage": 5,
+        "reproducibility": 4,
+        "exploitability": 4,
+        "affected_users": 5,
+        "discoverability": 3
+      },
+      "risk_score": 0.045
+    }
+  },
+  {
+    "id": "pers_scheduled_task_lolbin_args",
+    "name": "Scheduled Task with LOLBin Args",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Persistence",
+      "technique_id": "T1053.005"
+    },
+    "factors": [
+      "scheduled_task_created",
+      "lolbin_in_task_args"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.05,
+    "coverage_gap_factor": 0.9,
+    "priority": 27.22,
+    "false_positive_target": 0.06,
+    "logic_ref": "core/correlation/rules/weekX/expanded_batch.py",
+    "test_vectors": [
+      "tests/data/pers_scheduled_task_lolbin_args_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 4,
+        "reproducibility": 3,
+        "exploitability": 3,
+        "affected_users": 3,
+        "discoverability": 2
+      },
+      "risk_score": 0.145
+    }
+  },
+  {
+    "id": "exec_mshta_remote",
+    "name": "Mshta Remote Payload Rare Domain",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Execution",
+      "technique_id": "T1218.005"
+    },
+    "factors": [
+      "proc_name",
+      "command_line",
+      "rare_domain"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.15,
+    "coverage_gap_factor": 0.9,
+    "priority": 26.98,
+    "false_positive_target": 0.08,
+    "logic_ref": "core/correlation/rules/weekX/expanded_batch.py",
+    "test_vectors": [
+      "tests/data/exec_mshta_remote_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 4,
+        "reproducibility": 3,
+        "exploitability": 3,
+        "affected_users": 3,
+        "discoverability": 2
+      },
+      "risk_score": 0.095
+    }
+  },
+  {
+    "id": "ca_lsass_access_seq",
+    "name": "LSASS Access & Dump Sequence",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Credential Access",
+      "technique_id": "T1003.001"
+    },
+    "factors": [
+      "lsass_handle_open",
+      "dump_file_created",
+      "hash_tool_present"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.05,
+    "coverage_gap_factor": 1.0,
+    "priority": 26.48,
+    "false_positive_target": 0.05,
+    "logic_ref": "core/correlation/rules/weekX/expanded_batch.py",
+    "test_vectors": [
+      "tests/data/ca_lsass_access_seq_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 5,
+        "reproducibility": 4,
+        "exploitability": 4,
+        "affected_users": 5,
+        "discoverability": 3
+      },
+      "risk_score": 0.095
+    }
+  },
+  {
+    "id": "exec_office_to_powershell_parent_child",
+    "name": "Office Spawning PowerShell Suspicious Chain",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Execution",
+      "technique_id": "T1059"
+    },
+    "factors": [
+      "corr_office_ps_rare_ja3"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.55,
+    "coverage_gap_factor": 0.5,
+    "priority": 26.22,
+    "false_positive_target": 0.1,
+    "logic_ref": "core/correlation/rules/week1/office_spawn_ps.py",
+    "test_vectors": [
+      "tests/data/office_spawn_ps_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 3,
+        "reproducibility": 3,
+        "exploitability": 3,
+        "affected_users": 3,
+        "discoverability": 2
+      },
+      "risk_score": 0.045
+    }
+  },
+  {
+    "id": "lm_smb_admin_burst",
+    "name": "SMB Admin Burst (>=4)",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Lateral Movement",
+      "technique_id": "T1021.002"
+    },
+    "factors": [
+      "net:admin_smb_count"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.15,
+    "coverage_gap_factor": 1.0,
+    "priority": 26.22,
+    "false_positive_target": 0.05,
+    "logic_ref": "core/correlation/rules/weekX/graph_week1.py",
+    "test_vectors": [
+      "tests/data/lm_smb_admin_burst_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 3,
+        "reproducibility": 2,
+        "exploitability": 3,
+        "affected_users": 2,
+        "discoverability": 2
+      },
+      "risk_score": 0.045
+    }
+  },
+  {
+    "id": "staged_payload_chain",
+    "name": "Staged Payload Chain",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Execution",
+      "technique_id": "T1105"
+    },
+    "factors": [
+      "download_stage1",
+      "exec_stage2",
+      "rare_chain"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.03,
+    "coverage_gap_factor": 1.0,
+    "priority": 25.98,
+    "false_positive_target": 0.05,
+    "logic_ref": "core/correlation/rules/batch_more/additional_30.py",
+    "test_vectors": [
+      "tests/data/staged_payload_chain_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 4,
+        "reproducibility": 3,
+        "exploitability": 3,
+        "affected_users": 3,
+        "discoverability": 2
+      },
+      "risk_score": 0.095
+    }
+  },
+  {
+    "id": "script_lateral_execution_by_wmi",
+    "name": "Script Lateral Execution by WMI",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Lateral Movement",
+      "technique_id": "T1047"
+    },
+    "factors": [
+      "wmi_remote_exec",
+      "script_child_proc",
+      "remote_host_count"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.03,
+    "coverage_gap_factor": 1.0,
+    "priority": 25.98,
+    "false_positive_target": 0.06,
+    "logic_ref": "core/correlation/rules/batch_more/additional_30.py",
+    "test_vectors": [
+      "tests/data/script_lateral_execution_by_wmi_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 4,
+        "reproducibility": 3,
+        "exploitability": 3,
+        "affected_users": 3,
+        "discoverability": 2
+      },
+      "risk_score": 0.095
+    }
+  },
+  {
+    "id": "supply_chain_downloader",
+    "name": "Supply Chain Downloader",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Initial Access",
+      "technique_id": "T1195"
+    },
+    "factors": [
+      "git_clone_runtime",
+      "download_exec",
+      "nested_child_spawn"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.03,
+    "coverage_gap_factor": 1.0,
+    "priority": 25.98,
+    "false_positive_target": 0.05,
+    "logic_ref": "core/correlation/rules/batch_more/additional_30.py",
+    "test_vectors": [
+      "tests/data/supply_chain_downloader_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 4,
+        "reproducibility": 3,
+        "exploitability": 3,
+        "affected_users": 3,
+        "discoverability": 2
+      },
+      "risk_score": 0.095
+    }
+  },
+  {
+    "id": "code_signer_spoofed",
+    "name": "Code Signer Spoofed",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Defense Evasion",
+      "technique_id": "T1553"
+    },
+    "factors": [
+      "signed_binary",
+      "signer_unusual",
+      "hash_mismatch_source"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.02,
+    "coverage_gap_factor": 0.8,
+    "priority": 25.85,
+    "false_positive_target": 0.06,
+    "logic_ref": "core/correlation/rules/batch_more/additional_30.py",
+    "test_vectors": [
+      "tests/data/code_signer_spoofed_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 3,
+        "reproducibility": 3,
+        "exploitability": 3,
+        "affected_users": 2,
+        "discoverability": 2
+      },
+      "risk_score": 0.17
+    }
+  },
+  {
+    "id": "cred_dump_lsass_trace",
+    "name": "Credential Dump LSASS Trace",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Credential Access",
+      "technique_id": "T1003"
+    },
+    "factors": [
+      "lsass_open",
+      "dump_tool_present",
+      "http_bytes_out"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.02,
+    "coverage_gap_factor": 1.0,
+    "priority": 25.73,
+    "false_positive_target": 0.02,
+    "logic_ref": "core/correlation/rules/batch_more/additional_30.py",
+    "test_vectors": [
+      "tests/data/cred_dump_lsass_trace_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 5,
+        "reproducibility": 4,
+        "exploitability": 4,
+        "affected_users": 5,
+        "discoverability": 3
+      },
+      "risk_score": 0.095
+    }
+  },
+  {
+    "id": "stealth_proc_injection_combo",
+    "name": "Stealth Process Injection Combo",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Defense Evasion",
+      "technique_id": "T1055"
+    },
+    "factors": [
+      "parent_mismatch",
+      "memory_module",
+      "suspicious_syscall_seq"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.02,
+    "coverage_gap_factor": 1.0,
+    "priority": 25.73,
+    "false_positive_target": 0.04,
+    "logic_ref": "core/correlation/rules/batch_more/additional_30.py",
+    "test_vectors": [
+      "tests/data/stealth_proc_injection_combo_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 4,
+        "reproducibility": 3,
+        "exploitability": 3,
+        "affected_users": 3,
+        "discoverability": 2
+      },
+      "risk_score": 0.095
+    }
+  },
+  {
+    "id": "insider_data_collection_pattern",
+    "name": "Insider Data Collection Pattern",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Collection",
+      "technique_id": "T1039"
+    },
+    "factors": [
+      "sensitive_file_read_count",
+      "usb_write",
+      "user_activity_change"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.02,
+    "coverage_gap_factor": 1.0,
+    "priority": 25.73,
+    "false_positive_target": 0.05,
+    "logic_ref": "core/correlation/rules/batch_more/additional_30.py",
+    "test_vectors": [
+      "tests/data/insider_data_collection_pattern_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 4,
+        "reproducibility": 3,
+        "exploitability": 3,
+        "affected_users": 3,
+        "discoverability": 2
+      },
+      "risk_score": 0.095
+    }
+  },
+  {
+    "id": "exfil_multipart_http_chunking",
+    "name": "Exfil Multipart HTTP Chunking",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Exfiltration",
+      "technique_id": "T1041"
+    },
+    "factors": [
+      "http_chunk_sequence",
+      "http_bytes_out",
+      "rare_upload_path"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.02,
+    "coverage_gap_factor": 1.0,
+    "priority": 25.73,
+    "false_positive_target": 0.05,
+    "logic_ref": "core/correlation/rules/batch_more/additional_30.py",
+    "test_vectors": [
+      "tests/data/exfil_multipart_http_chunking_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 4,
+        "reproducibility": 3,
+        "exploitability": 3,
+        "affected_users": 3,
+        "discoverability": 2
+      },
+      "risk_score": 0.095
+    }
+  },
+  {
+    "id": "filesystem_encryption_trigger",
+    "name": "Filesystem Encryption Trigger",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Impact",
+      "technique_id": "T1486"
+    },
+    "factors": [
+      "mass_rename_ext",
+      "vss_delete",
+      "ransom_note_created"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.01,
+    "coverage_gap_factor": 1.0,
+    "priority": 25.48,
+    "false_positive_target": 0.02,
+    "logic_ref": "core/correlation/rules/batch_more/additional_30.py",
+    "test_vectors": [
+      "tests/data/filesystem_encryption_trigger_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 5,
+        "reproducibility": 4,
+        "exploitability": 4,
+        "affected_users": 4,
+        "discoverability": 3
+      },
+      "risk_score": 0.095
+    }
+  },
+  {
+    "id": "lateral_smb_admin_burst",
+    "name": "Lateral SMB Admin Burst",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Lateral Movement",
+      "technique_id": "T1021.002"
+    },
+    "factors": [
+      "smb_admin_conn_count",
+      "off_hours"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.06,
+    "coverage_gap_factor": 1.0,
+    "priority": 25.35,
+    "false_positive_target": 0.06,
+    "logic_ref": "core/correlation/rules/batch_more/additional_30.py",
+    "test_vectors": [
+      "tests/data/lateral_smb_admin_burst_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 4,
+        "reproducibility": 3,
+        "exploitability": 3,
+        "affected_users": 3,
+        "discoverability": 2
+      },
+      "risk_score": 0.07
+    }
+  },
+  {
+    "id": "imp_encrypt_pattern_canary",
+    "name": "Encryption/Ransom Pattern Canary",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Impact",
+      "technique_id": "T1486"
+    },
+    "factors": [
+      "file_rename_count",
+      "ransom_note_like"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.05,
+    "coverage_gap_factor": 1.0,
+    "priority": 25.1,
+    "false_positive_target": 0.02,
+    "logic_ref": "core/correlation/rules/weekX/graph_week1.py",
+    "test_vectors": [
+      "tests/data/imp_encrypt_pattern_canary_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 5,
+        "reproducibility": 4,
+        "exploitability": 3,
+        "affected_users": 4,
+        "discoverability": 3
+      },
+      "risk_score": 0.07
+    }
+  },
+  {
+    "id": "de_disable_av",
+    "name": "Disable AV & Clear Logs",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Defense Evasion",
+      "technique_id": "T1562.001"
+    },
+    "factors": [
+      "defender_exclusions_set",
+      "event_log_clear"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.05,
+    "coverage_gap_factor": 1.0,
+    "priority": 25.1,
+    "false_positive_target": 0.05,
+    "logic_ref": "core/correlation/rules/weekX/expanded_batch.py",
+    "test_vectors": [
+      "tests/data/de_disable_av_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 4,
+        "reproducibility": 3,
+        "exploitability": 3,
+        "affected_users": 3,
+        "discoverability": 2
+      },
+      "risk_score": 0.07
+    }
+  },
+  {
+    "id": "recon_port_scan_burst_enriched",
+    "name": "Recon Port Scan Burst",
+    "status": "active",
+    "mitre": {
+      "tactic": "Reconnaissance",
+      "technique_id": "T1595"
+    },
+    "factors": [
+      "scan_rate",
+      "unique_ports",
+      "unique_hosts"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 2
+    },
+    "prevalence_factor": 0.15,
+    "coverage_gap_factor": 0.8,
+    "priority": 24.98,
+    "false_positive_target": 0.08,
+    "logic_ref": "core/correlation/rules/recon_weaponization_enriched.py",
+    "test_vectors": [
+      "tests/data/recon_port_scan_burst_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 2,
+        "reproducibility": 3,
+        "exploitability": 2,
+        "affected_users": 2,
+        "discoverability": 3
+      },
+      "risk_score": 0.095
+    }
+  },
+  {
+    "id": "pers_wmi_persistence",
+    "name": "WMI Event Consumer Persistence",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Persistence",
+      "technique_id": "T1047"
+    },
+    "factors": [
+      "wmi_event_filter",
+      "wmi_consumer_created"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.04,
+    "coverage_gap_factor": 1.0,
+    "priority": 24.85,
+    "false_positive_target": 0.05,
+    "logic_ref": "core/correlation/rules/weekX/expanded_batch.py",
+    "test_vectors": [
+      "tests/data/pers_wmi_persistence_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 4,
+        "reproducibility": 3,
+        "exploitability": 3,
+        "affected_users": 3,
+        "discoverability": 2
+      },
+      "risk_score": 0.07
+    }
+  },
+  {
+    "id": "exfil_ftp_large_payload",
+    "name": "Exfil FTP Large Payload",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Exfiltration",
+      "technique_id": "T1041"
+    },
+    "factors": [
+      "ftp_upload_bytes",
+      "rare_external_host"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.03,
+    "coverage_gap_factor": 1.0,
+    "priority": 24.6,
+    "false_positive_target": 0.04,
+    "logic_ref": "core/correlation/rules/batch_more/additional_30.py",
+    "test_vectors": [
+      "tests/data/exfil_ftp_large_payload_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 4,
+        "reproducibility": 3,
+        "exploitability": 3,
+        "affected_users": 3,
+        "discoverability": 2
+      },
+      "risk_score": 0.07
+    }
+  },
+  {
+    "id": "defense_evasion_amsi_bypass_combo",
+    "name": "Defense Evasion AMSI Bypass Combo",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Defense Evasion",
+      "technique_id": "T1562"
+    },
+    "factors": [
+      "powershell_encoded",
+      "amsi_disable_call"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.03,
+    "coverage_gap_factor": 1.0,
+    "priority": 24.6,
+    "false_positive_target": 0.04,
+    "logic_ref": "core/correlation/rules/batch_more/additional_30.py",
+    "test_vectors": [
+      "tests/data/defense_evasion_amsi_bypass_combo_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 4,
+        "reproducibility": 4,
+        "exploitability": 4,
+        "affected_users": 3,
+        "discoverability": 3
+      },
+      "risk_score": 0.07
+    }
+  },
+  {
+    "id": "impostor_domain_beacon",
+    "name": "Impostor Domain Beacon",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Command and Control",
+      "technique_id": "T1071"
+    },
+    "factors": [
+      "typosquat_domain",
+      "net:outbound_ja3_rare"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.03,
+    "coverage_gap_factor": 1.0,
+    "priority": 24.6,
+    "false_positive_target": 0.05,
+    "logic_ref": "core/correlation/rules/batch_more/additional_30.py",
+    "test_vectors": [
+      "tests/data/impostor_domain_beacon_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 4,
+        "reproducibility": 3,
+        "exploitability": 3,
+        "affected_users": 3,
+        "discoverability": 2
+      },
+      "risk_score": 0.07
+    }
+  },
+  {
+    "id": "config_file_tamper",
+    "name": "Config File Tamper",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Impact",
+      "technique_id": "T1490"
+    },
+    "factors": [
+      "config_hash_changed",
+      "service_restart_after_change"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.03,
+    "coverage_gap_factor": 1.0,
+    "priority": 24.6,
+    "false_positive_target": 0.05,
+    "logic_ref": "core/correlation/rules/batch_more/additional_30.py",
+    "test_vectors": [
+      "tests/data/config_file_tamper_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 4,
+        "reproducibility": 3,
+        "exploitability": 3,
+        "affected_users": 3,
+        "discoverability": 2
+      },
+      "risk_score": 0.07
+    }
+  },
+  {
+    "id": "pe_token_theft_combo",
+    "name": "Token Theft + LSASS Access",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Privilege Escalation",
+      "technique_id": "T1134"
+    },
+    "factors": [
+      "se_debug_adjust",
+      "lsass_openprocess"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.03,
+    "coverage_gap_factor": 1.0,
+    "priority": 24.6,
+    "false_positive_target": 0.03,
+    "logic_ref": "core/correlation/rules/weekX/expanded_batch.py",
+    "test_vectors": [
+      "tests/data/pe_token_theft_combo_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 5,
+        "reproducibility": 4,
+        "exploitability": 4,
+        "affected_users": 5,
+        "discoverability": 3
+      },
+      "risk_score": 0.07
+    }
+  },
+  {
+    "id": "ca_kerberoast_burst",
+    "name": "Kerberoast Burst",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Credential Access",
+      "technique_id": "T1558.003"
+    },
+    "factors": [
+      "kerberoast_count"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.08,
+    "coverage_gap_factor": 1.0,
+    "priority": 24.48,
+    "false_positive_target": 0.03,
+    "logic_ref": "core/correlation/rules/weekX/graph_week1.py",
+    "test_vectors": [
+      "tests/data/ca_kerberoast_burst_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 4,
+        "reproducibility": 3,
+        "exploitability": 3,
+        "affected_users": 3,
+        "discoverability": 2
+      },
+      "risk_score": 0.045
+    }
+  },
+  {
+    "id": "persistence_service_binary_change",
+    "name": "Persistence Service Binary Change",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Persistence",
+      "technique_id": "T1547"
+    },
+    "factors": [
+      "service_bin_changed",
+      "service_path_temp"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.02,
+    "coverage_gap_factor": 1.0,
+    "priority": 24.35,
+    "false_positive_target": 0.05,
+    "logic_ref": "core/correlation/rules/batch_more/additional_30.py",
+    "test_vectors": [
+      "tests/data/persistence_service_binary_change_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 4,
+        "reproducibility": 3,
+        "exploitability": 3,
+        "affected_users": 3,
+        "discoverability": 2
+      },
+      "risk_score": 0.07
+    }
+  },
+  {
+    "id": "lateral_ssh_sweep_internal",
+    "name": "Lateral SSH Sweep Internal",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Lateral Movement",
+      "technique_id": "T1021.004"
+    },
+    "factors": [
+      "ssh_failed_count",
+      "ssh_success_unusual_ip"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.02,
+    "coverage_gap_factor": 1.0,
+    "priority": 24.35,
+    "false_positive_target": 0.05,
+    "logic_ref": "core/correlation/rules/batch_more/additional_30.py",
+    "test_vectors": [
+      "tests/data/lateral_ssh_sweep_internal_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 4,
+        "reproducibility": 3,
+        "exploitability": 3,
+        "affected_users": 3,
+        "discoverability": 2
+      },
+      "risk_score": 0.07
+    }
+  },
+  {
+    "id": "lateral_http_proxy_tunnel",
+    "name": "Lateral HTTP Proxy Tunnel",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Lateral Movement",
+      "technique_id": "T1090"
+    },
+    "factors": [
+      "host_proxying_detected",
+      "multiple_internal_forwarding"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.02,
+    "coverage_gap_factor": 1.0,
+    "priority": 24.35,
+    "false_positive_target": 0.05,
+    "logic_ref": "core/correlation/rules/batch_more/additional_30.py",
+    "test_vectors": [
+      "tests/data/lateral_http_proxy_tunnel_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 4,
+        "reproducibility": 3,
+        "exploitability": 3,
+        "affected_users": 3,
+        "discoverability": 2
+      },
+      "risk_score": 0.07
+    }
+  },
+  {
+    "id": "discovery_ad_credential_dump",
+    "name": "Discovery AD Credential Dump",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Discovery",
+      "technique_id": "T1087"
+    },
+    "factors": [
+      "ad_group_query_burst",
+      "kerberoast_service_ticket_request"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.02,
+    "coverage_gap_factor": 1.0,
+    "priority": 24.35,
+    "false_positive_target": 0.04,
+    "logic_ref": "core/correlation/rules/batch_more/additional_30.py",
+    "test_vectors": [
+      "tests/data/discovery_ad_credential_dump_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 4,
+        "reproducibility": 3,
+        "exploitability": 3,
+        "affected_users": 3,
+        "discoverability": 2
+      },
+      "risk_score": 0.07
+    }
+  },
+  {
+    "id": "process_hollowing_evidence_combo",
+    "name": "Process Hollowing Evidence Combo",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Defense Evasion",
+      "technique_id": "T1055"
+    },
+    "factors": [
+      "suspicious_map_calls",
+      "child_thread_unusual"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.02,
+    "coverage_gap_factor": 1.0,
+    "priority": 24.35,
+    "false_positive_target": 0.05,
+    "logic_ref": "core/correlation/rules/batch_more/additional_30.py",
+    "test_vectors": [
+      "tests/data/process_hollowing_evidence_combo_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 4,
+        "reproducibility": 3,
+        "exploitability": 3,
+        "affected_users": 3,
+        "discoverability": 2
+      },
+      "risk_score": 0.07
+    }
+  },
+  {
+    "id": "lm_rdp_fanout",
+    "name": "RDP Fanout Off-Hours",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Lateral Movement",
+      "technique_id": "T1021.001"
+    },
+    "factors": [
+      "net:rdp_connection_count",
+      "off_hours"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.1,
+    "coverage_gap_factor": 0.9,
+    "priority": 24.35,
+    "false_positive_target": 0.08,
+    "logic_ref": "core/correlation/rules/weekX/expanded_batch.py",
+    "test_vectors": [
+      "tests/data/lm_rdp_fanout_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 4,
+        "reproducibility": 3,
+        "exploitability": 3,
+        "affected_users": 3,
+        "discoverability": 2
+      },
+      "risk_score": 0.07
+    }
+  },
+  {
+    "id": "imp_shadowcopy_delete",
+    "name": "VSS Shadow Copy Delete & Backup Stop",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Impact",
+      "technique_id": "T1490"
+    },
+    "factors": [
+      "vssadmin_delete",
+      "backup_service_stop"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.02,
+    "coverage_gap_factor": 1.0,
+    "priority": 24.35,
+    "false_positive_target": 0.03,
+    "logic_ref": "core/correlation/rules/weekX/expanded_batch.py",
+    "test_vectors": [
+      "tests/data/imp_shadowcopy_delete_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 5,
+        "reproducibility": 4,
+        "exploitability": 3,
+        "affected_users": 4,
+        "discoverability": 3
+      },
+      "risk_score": 0.07
+    }
+  },
+  {
+    "id": "imp_stop_security_services",
+    "name": "Stop Security Services Across Hosts",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Impact",
+      "technique_id": "T1562.001"
+    },
+    "factors": [
+      "service_stop_edr",
+      "admin_context_change"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.02,
+    "coverage_gap_factor": 1.0,
+    "priority": 24.35,
+    "false_positive_target": 0.03,
+    "logic_ref": "core/correlation/rules/weekX/expanded_batch.py",
+    "test_vectors": [
+      "tests/data/imp_stop_security_services_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 5,
+        "reproducibility": 4,
+        "exploitability": 4,
+        "affected_users": 4,
+        "discoverability": 3
+      },
+      "risk_score": 0.07
+    }
+  },
+  {
+    "id": "col_keylogger_detected_exfil",
+    "name": "Keylogger Implant + Exfil HTTP",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Collection",
+      "technique_id": "T1056.001"
+    },
+    "factors": [
+      "keylogger_implant_detected",
+      "http_bytes_out"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.02,
+    "coverage_gap_factor": 1.0,
+    "priority": 24.35,
+    "false_positive_target": 0.03,
+    "logic_ref": "core/correlation/rules/weekX/expanded_batch.py",
+    "test_vectors": [
+      "tests/data/col_keylogger_detected_exfil_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 5,
+        "reproducibility": 4,
+        "exploitability": 4,
+        "affected_users": 4,
+        "discoverability": 3
+      },
+      "risk_score": 0.07
+    }
+  },
+  {
+    "id": "de_signed_binary_proxy",
+    "name": "Signed Binary Proxy Execution",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Defense Evasion",
+      "technique_id": "T1218"
+    },
+    "factors": [
+      "signed_parent",
+      "unsanctioned_child",
+      "rare_pairing"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.04,
+    "coverage_gap_factor": 0.9,
+    "priority": 24.23,
+    "false_positive_target": 0.05,
+    "logic_ref": "core/correlation/rules/weekX/expanded_batch.py",
+    "test_vectors": [
+      "tests/data/de_signed_binary_proxy_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 4,
+        "reproducibility": 3,
+        "exploitability": 3,
+        "affected_users": 3,
+        "discoverability": 2
+      },
+      "risk_score": 0.095
+    }
+  },
+  {
+    "id": "disc_net_enum_burst",
+    "name": "Network Enumeration Burst",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Discovery",
+      "technique_id": "T1046"
+    },
+    "factors": [
+      "net:portscan_hosts",
+      "internal_only"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.25,
+    "coverage_gap_factor": 0.7,
+    "priority": 24.1,
+    "false_positive_target": 0.1,
+    "logic_ref": "core/correlation/rules/weekX/expanded_batch.py",
+    "test_vectors": [
+      "tests/data/disc_net_enum_burst_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 3,
+        "reproducibility": 2,
+        "exploitability": 2,
+        "affected_users": 2,
+        "discoverability": 2
+      },
+      "risk_score": 0.07
+    }
+  },
+  {
+    "id": "weaponization_sandbox_malicious_enriched",
+    "name": "Sandbox Verdict Malicious",
+    "status": "active",
+    "mitre": {
+      "tactic": "Execution",
+      "technique_id": "T1204"
+    },
+    "factors": [
+      "sandbox_verdict",
+      "sandbox_score"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 2
+    },
+    "prevalence_factor": 0.08,
+    "coverage_gap_factor": 0.9,
+    "priority": 23.85,
+    "false_positive_target": 0.05,
+    "logic_ref": "core/correlation/rules/recon_weaponization_enriched.py",
+    "test_vectors": [
+      "tests/data/weaponization_sandbox_verdict_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 4,
+        "reproducibility": 3,
+        "exploitability": 3,
+        "affected_users": 3,
+        "discoverability": 2
+      },
+      "risk_score": 0.07
+    }
+  },
+  {
+    "id": "persistence_registry_run_once_args",
+    "name": "Persistence Registry RunOnce Args",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Persistence",
+      "technique_id": "T1547"
+    },
+    "factors": [
+      "registry_run_key_set",
+      "run_once_flag",
+      "temp_args_pattern"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.02,
+    "coverage_gap_factor": 0.9,
+    "priority": 23.73,
+    "false_positive_target": 0.06,
+    "logic_ref": "core/correlation/rules/batch_more/additional_30.py",
+    "test_vectors": [
+      "tests/data/persistence_registry_run_once_args_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 3,
+        "reproducibility": 2,
+        "exploitability": 2,
+        "affected_users": 2,
+        "discoverability": 2
+      },
+      "risk_score": 0.095
+    }
+  },
+  {
+    "id": "col_screencap_tool",
+    "name": "Screencap Tool + Upload",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Collection",
+      "technique_id": "T1113"
+    },
+    "factors": [
+      "screencap_tool_exec",
+      "screenshot_upload"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.05,
+    "coverage_gap_factor": 0.9,
+    "priority": 23.1,
+    "false_positive_target": 0.08,
+    "logic_ref": "core/correlation/rules/weekX/expanded_batch.py",
+    "test_vectors": [
+      "tests/data/col_screencap_tool_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 3,
+        "reproducibility": 2,
+        "exploitability": 3,
+        "affected_users": 2,
+        "discoverability": 2
+      },
+      "risk_score": 0.07
+    }
+  },
+  {
+    "id": "disc_exposed_rdp_hosts",
+    "name": "External RDP Exposed + Brute Attempts",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Discovery",
+      "technique_id": "T1046"
+    },
+    "factors": [
+      "external_rdp_exposed",
+      "rdp_bruteforce_attempts"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.05,
+    "coverage_gap_factor": 0.9,
+    "priority": 23.1,
+    "false_positive_target": 0.06,
+    "logic_ref": "core/correlation/rules/weekX/expanded_batch.py",
+    "test_vectors": [
+      "tests/data/disc_exposed_rdp_hosts_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 3,
+        "reproducibility": 2,
+        "exploitability": 2,
+        "affected_users": 2,
+        "discoverability": 2
+      },
+      "risk_score": 0.07
+    }
+  },
+  {
+    "id": "exec_rundll32_suspicious",
+    "name": "Rundll32 Suspicious Url/Javascript",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Execution",
+      "technique_id": "T1218.011"
+    },
+    "factors": [
+      "proc_name",
+      "command_line"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.2,
+    "coverage_gap_factor": 0.7,
+    "priority": 22.85,
+    "false_positive_target": 0.1,
+    "logic_ref": "core/correlation/rules/weekX/expanded_batch.py",
+    "test_vectors": [
+      "tests/data/exec_rundll32_suspicious_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 3,
+        "reproducibility": 3,
+        "exploitability": 3,
+        "affected_users": 2,
+        "discoverability": 2
+      },
+      "risk_score": 0.07
+    }
+  },
+  {
+    "id": "c2_ssh_bruteforce_multiple",
+    "name": "SSH Bruteforce -> Success from Unusual IP",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Credential Access",
+      "technique_id": "T1110.001"
+    },
+    "factors": [
+      "ssh_failed_login_count",
+      "ssh_success_from_unusual_ip"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.04,
+    "coverage_gap_factor": 0.9,
+    "priority": 22.85,
+    "false_positive_target": 0.05,
+    "logic_ref": "core/correlation/rules/weekX/expanded_batch.py",
+    "test_vectors": [
+      "tests/data/c2_ssh_bruteforce_multiple_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 4,
+        "reproducibility": 3,
+        "exploitability": 3,
+        "affected_users": 3,
+        "discoverability": 2
+      },
+      "risk_score": 0.07
+    }
+  },
+  {
+    "id": "pers_registry_wmi_combo",
+    "name": "Registry + WMI Persistence Combo",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Persistence",
+      "technique_id": "T1546"
+    },
+    "factors": [
+      "registry_persistence_set",
+      "wmi_consumer_created"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.04,
+    "coverage_gap_factor": 0.9,
+    "priority": 22.85,
+    "false_positive_target": 0.06,
+    "logic_ref": "core/correlation/rules/weekX/expanded_batch.py",
+    "test_vectors": [
+      "tests/data/pers_registry_wmi_combo_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 4,
+        "reproducibility": 3,
+        "exploitability": 3,
+        "affected_users": 3,
+        "discoverability": 2
+      },
+      "risk_score": 0.07
+    }
+  },
+  {
+    "id": "pe_uac_bypass_fodhelper",
+    "name": "UAC Bypass Fodhelper Registry Hijack",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Privilege Escalation",
+      "technique_id": "T1548.002"
+    },
+    "factors": [
+      "registry_hijack_fodhelper",
+      "fodhelper_exec"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.03,
+    "coverage_gap_factor": 0.9,
+    "priority": 22.6,
+    "false_positive_target": 0.05,
+    "logic_ref": "core/correlation/rules/weekX/expanded_batch.py",
+    "test_vectors": [
+      "tests/data/pe_uac_bypass_fodhelper_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 4,
+        "reproducibility": 3,
+        "exploitability": 3,
+        "affected_users": 3,
+        "discoverability": 2
+      },
+      "risk_score": 0.07
+    }
+  },
+  {
+    "id": "pe_namedpipe_impersonation",
+    "name": "Named Pipe Impersonation",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Privilege Escalation",
+      "technique_id": "T1134.001"
+    },
+    "factors": [
+      "named_pipe_suspicious",
+      "admin_context_change"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.03,
+    "coverage_gap_factor": 0.9,
+    "priority": 22.6,
+    "false_positive_target": 0.05,
+    "logic_ref": "core/correlation/rules/weekX/expanded_batch.py",
+    "test_vectors": [
+      "tests/data/pe_namedpipe_impersonation_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 4,
+        "reproducibility": 3,
+        "exploitability": 3,
+        "affected_users": 3,
+        "discoverability": 2
+      },
+      "risk_score": 0.07
+    }
+  },
+  {
+    "id": "pe_service_binpath_space",
+    "name": "Service Unquoted Path Exploit",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Privilege Escalation",
+      "technique_id": "T1574.009"
+    },
+    "factors": [
+      "service_unquoted_path",
+      "child_started_from_mid_path"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.03,
+    "coverage_gap_factor": 0.9,
+    "priority": 22.6,
+    "false_positive_target": 0.05,
+    "logic_ref": "core/correlation/rules/weekX/expanded_batch.py",
+    "test_vectors": [
+      "tests/data/pe_service_binpath_space_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 4,
+        "reproducibility": 3,
+        "exploitability": 3,
+        "affected_users": 3,
+        "discoverability": 2
+      },
+      "risk_score": 0.07
+    }
+  },
+  {
+    "id": "exec_powershell_encoded",
+    "name": "PowerShell Encoded Execution (graph canary)",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Execution",
+      "technique_id": "T1059.001"
+    },
+    "factors": [
+      "command_line"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.4,
+    "coverage_gap_factor": 0.5,
+    "priority": 22.48,
+    "false_positive_target": 0.08,
+    "logic_ref": "core/correlation/rules/weekX/graph_week1.py",
+    "test_vectors": [
+      "tests/data/exec_powershell_encoded_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 3,
+        "reproducibility": 3,
+        "exploitability": 3,
+        "affected_users": 2,
+        "discoverability": 2
+      },
+      "risk_score": 0.045
+    }
+  },
+  {
+    "id": "ia_phish_macro_spawn_ps",
+    "name": "Phishing Macro -> PowerShell Spawn",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Initial Access",
+      "technique_id": "T1566.001"
+    },
+    "factors": [
+      "parent_process",
+      "child_process"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.25,
+    "coverage_gap_factor": 0.6,
+    "priority": 22.1,
+    "false_positive_target": 0.1,
+    "logic_ref": "core/correlation/rules/weekX/graph_week1.py",
+    "test_vectors": [
+      "tests/data/ia_phish_macro_spawn_ps_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 3,
+        "reproducibility": 3,
+        "exploitability": 2,
+        "affected_users": 2,
+        "discoverability": 2
+      },
+      "risk_score": 0.07
+    }
+  },
+  {
+    "id": "pers_startup_folder_drop",
+    "name": "Startup Folder Drop & Exec",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Persistence",
+      "technique_id": "T1547.009"
+    },
+    "factors": [
+      "startup_folder_write",
+      "subsequent_exec"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.25,
+    "coverage_gap_factor": 0.6,
+    "priority": 22.1,
+    "false_positive_target": 0.1,
+    "logic_ref": "core/correlation/rules/weekX/expanded_batch.py",
+    "test_vectors": [
+      "tests/data/pers_startup_folder_drop_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 3,
+        "reproducibility": 2,
+        "exploitability": 2,
+        "affected_users": 2,
+        "discoverability": 2
+      },
+      "risk_score": 0.07
+    }
+  },
+  {
+    "id": "de_timestomp",
+    "name": "File Timestomp Detected",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Defense Evasion",
+      "technique_id": "T1070.006"
+    },
+    "factors": [
+      "file_timestomp_detected"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.05,
+    "coverage_gap_factor": 0.9,
+    "priority": 21.73,
+    "false_positive_target": 0.05,
+    "logic_ref": "core/correlation/rules/weekX/expanded_batch.py",
+    "test_vectors": [
+      "tests/data/de_timestomp_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 3,
+        "reproducibility": 3,
+        "exploitability": 3,
+        "affected_users": 2,
+        "discoverability": 2
+      },
+      "risk_score": 0.045
+    }
+  },
+  {
+    "id": "weaponization_yara_match_enriched",
+    "name": "YARA Match on Payload",
+    "status": "active",
+    "mitre": {
+      "tactic": "Defense Evasion",
+      "technique_id": "T1027"
+    },
+    "factors": [
+      "yara_hits"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 2
+    },
+    "prevalence_factor": 0.1,
+    "coverage_gap_factor": 0.8,
+    "priority": 20.98,
+    "false_positive_target": 0.07,
+    "logic_ref": "core/correlation/rules/recon_weaponization_enriched.py",
+    "test_vectors": [
+      "tests/data/weaponization_yara_match_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 3,
+        "reproducibility": 3,
+        "exploitability": 3,
+        "affected_users": 3,
+        "discoverability": 2
+      },
+      "risk_score": 0.045
+    }
+  },
+  {
+    "id": "pers_scheduled_task_anomaly_canary",
+    "name": "Scheduled Task Anomaly (canary)",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Persistence",
+      "technique_id": "T1053"
+    },
+    "factors": [
+      "scheduled_task_name",
+      "process"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.2,
+    "coverage_gap_factor": 0.6,
+    "priority": 20.85,
+    "false_positive_target": 0.1,
+    "logic_ref": "core/correlation/rules/weekX/graph_week1.py",
+    "test_vectors": [
+      "tests/data/pers_scheduled_task_anomaly_canary_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 3,
+        "reproducibility": 2,
+        "exploitability": 2,
+        "affected_users": 2,
+        "discoverability": 2
+      },
+      "risk_score": 0.07
+    }
+  },
+  {
+    "id": "ia_iso_mount_exec",
+    "name": "ISO Mount Immediate Execution",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Initial Access",
+      "technique_id": "T1204"
+    },
+    "factors": [
+      "iso_mount",
+      "proc_exec_from_iso"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.2,
+    "coverage_gap_factor": 0.6,
+    "priority": 20.85,
+    "false_positive_target": 0.1,
+    "logic_ref": "core/correlation/rules/weekX/expanded_batch.py",
+    "test_vectors": [
+      "tests/data/ia_iso_mount_exec_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 3,
+        "reproducibility": 2,
+        "exploitability": 2,
+        "affected_users": 2,
+        "discoverability": 2
+      },
+      "risk_score": 0.07
+    }
+  },
+  {
+    "id": "exec_oab_formshell",
+    "name": "Outlook -> PowerShell Chain",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Execution",
+      "technique_id": "T1059.003"
+    },
+    "factors": [
+      "parent_process",
+      "child_process"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.2,
+    "coverage_gap_factor": 0.6,
+    "priority": 20.85,
+    "false_positive_target": 0.1,
+    "logic_ref": "core/correlation/rules/weekX/expanded_batch.py",
+    "test_vectors": [
+      "tests/data/exec_oab_formshell_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 3,
+        "reproducibility": 3,
+        "exploitability": 3,
+        "affected_users": 2,
+        "discoverability": 2
+      },
+      "risk_score": 0.07
+    }
+  },
+  {
+    "id": "exfil_paste_bin",
+    "name": "Pastebin Data Post Burst",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Exfiltration",
+      "technique_id": "T1041"
+    },
+    "factors": [
+      "pastebin_post",
+      "data_growth_trend"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.12,
+    "coverage_gap_factor": 0.7,
+    "priority": 20.85,
+    "false_positive_target": 0.08,
+    "logic_ref": "core/correlation/rules/weekX/expanded_batch.py",
+    "test_vectors": [
+      "tests/data/exfil_paste_bin_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 3,
+        "reproducibility": 2,
+        "exploitability": 2,
+        "affected_users": 2,
+        "discoverability": 2
+      },
+      "risk_score": 0.07
+    }
+  },
+  {
+    "id": "pe_lolbin_msi_silent_elevated",
+    "name": "MSI Silent Elevated Install via LOLBin",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Privilege Escalation",
+      "technique_id": "T1218.007"
+    },
+    "factors": [
+      "msiexec_no_ui",
+      "parent_office_app"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.03,
+    "coverage_gap_factor": 0.8,
+    "priority": 20.6,
+    "false_positive_target": 0.06,
+    "logic_ref": "core/correlation/rules/weekX/expanded_batch.py",
+    "test_vectors": [
+      "tests/data/pe_lolbin_msi_silent_elevated_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 3,
+        "reproducibility": 3,
+        "exploitability": 3,
+        "affected_users": 2,
+        "discoverability": 2
+      },
+      "risk_score": 0.07
+    }
+  },
+  {
+    "id": "exfil_smtp_large_attachment",
+    "name": "Exfil SMTP Large Attachment",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Exfiltration",
+      "technique_id": "T1041"
+    },
+    "factors": [
+      "smtp_attach_size",
+      "rare_recipient_domain"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.02,
+    "coverage_gap_factor": 0.8,
+    "priority": 20.35,
+    "false_positive_target": 0.06,
+    "logic_ref": "core/correlation/rules/batch_more/additional_30.py",
+    "test_vectors": [
+      "tests/data/exfil_smtp_large_attachment_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 3,
+        "reproducibility": 2,
+        "exploitability": 2,
+        "affected_users": 2,
+        "discoverability": 2
+      },
+      "risk_score": 0.07
+    }
+  },
+  {
+    "id": "disc_ad_enum",
+    "name": "Active Directory Enumeration",
+    "status": "planned",
+    "mitre": {
+      "tactic": "Discovery",
+      "technique_id": "T1069.002"
+    },
+    "factors": [
+      "ldap_query"
+    ],
+    "stride": [
+      "unknown"
+    ],
+    "maestro": {
+      "phases": [],
+      "maturity_level": 1
+    },
+    "prevalence_factor": 0.12,
+    "coverage_gap_factor": 0.6,
+    "priority": 17.47,
+    "false_positive_target": 0.08,
+    "logic_ref": "core/correlation/rules/weekX/graph_week1.py",
+    "test_vectors": [
+      "tests/data/disc_ad_enum_event.json"
+    ],
+    "dread": {
+      "components": {
+        "damage": 3,
+        "reproducibility": 2,
+        "exploitability": 2,
+        "affected_users": 2,
+        "discoverability": 2
+      },
+      "risk_score": 0.045
+    }
+  }
+]

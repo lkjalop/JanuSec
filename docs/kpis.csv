@@ -1,0 +1,14 @@
+phase,kpi_name,definition,measurement_method,target
+1,precision,TP/(TP+FP),Label a sample set or use analyst agreement rate,>0.8
+1,false_positive_reduction,(baseline_alerts - janusec_alerts)/baseline_alerts,Compare before/after on same corpus,>30%
+1,report_usefulness,Analyst survey score (1-5),Quick pulse survey after review,>=4.0
+2,mapping_completeness,Mapped fields / total relevant fields,Schema mapping matrix,>90%
+2,time_to_first_feed,Time to first live host or Zeek feed,Stopwatch from kickoff,<1 day
+3,decision_latency,Mean ingest->decision latency,Measure via scripts/measure_decision_latency.ps1,<500 ms
+3,alert_reduction,Alerts reduced before SIEM,Compare routed vs raw,>25%
+3,time_to_first_triage,Time to first triage on new alerts,SOC measurement,<5 min
+4,writeback_adoption,% alerts with auto tags/notes,Audit in XDR/SIEM,>70%
+4,time_to_enrichment,Mean time to add notes/tags,Measure from decision to writeback,<2 min
+5,throughput,Events per second sustained,Load test (scripts/stress_ingest_test.py),>=2k eps (example)
+5,error_rate,Delivery error rate,Shipper logs + HTTP 5xx rate,<0.5%
+5,siem_cost_reduction,% index volume saved,Ingest before vs after,>20%

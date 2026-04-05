@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Heartbeat Tile</title>
+  <style>body{background:#0f1724;color:#d1d5db;font-family:Arial;padding:12px} .card{background:#111827;padding:12px;border-radius:6px;max-width:600px}</style>
+  <script>
+    async function loadTile(){
+      const tenant = 'default';
+      const src = prompt('Enter source name (example: aws_cloudtrail)') || 'aws_cloudtrail';
+      const b = await fetch(`/api/v1/heartbeat/baseline/${tenant}/${src}`).then(r=>r.json());
+      document.getElementById('baseline').innerText = JSON.stringify(b,null,2);
+      try{
+        const qs = new URLSearchParams(); qs.append('sources', src);
+        const a = await fetch(`/api/v1/heartbeat/anomalies/${tenant}?${qs.toString()}`).then(r=>r.json());
+        document.getElementById('anoms').innerText = JSON.stringify(a,null,2);
+      }catch(e){document.getElementById('anoms').innerText = 'error: '+e}
+    }
+    window.addEventListener('load', loadTile)
+  </script>
+</head>
+<body>
+  <div class="card">
+    <h3>Heartbeat Baseline & Anomalies</h3>
+    <h4>Baseline</h4>
+    <pre id="baseline">loading...</pre>
+    <h4>Anomalies</h4>
+    <pre id="anoms">loading...</pre>
+  </div>
+</body>
+</html>
