@@ -107,7 +107,12 @@ def log(msg: str, level: str = "INFO"):
     ts = datetime.now().strftime("%H:%M:%S")
     symbols = {"INFO": "•", "OK": "✓", "WARN": "⚠", "ERROR": "✗", "STEP": "▶"}
     sym = symbols.get(level, "•")
-    print(f"  [{ts}] {sym}  {msg}")
+    line = f"  [{ts}] {sym}  {msg}"
+    try:
+        print(line)
+    except UnicodeEncodeError:
+        ascii_sym = {"INFO": "*", "OK": "[OK]", "WARN": "[!!]", "ERROR": "[ERR]", "STEP": ">>"}
+        print(f"  [{ts}] {ascii_sym.get(level, '*')}  {msg}", errors="replace")
 
 
 # ---------------------------------------------------------------------------

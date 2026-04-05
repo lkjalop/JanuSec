@@ -314,7 +314,50 @@ async def analyze_row(payload: dict, tenant_id: str | None = Header(None, alias=
         dread = calculate_dread({'event_id': event_id, 'factors': list(raw_factors)}, list(raw_factors))
         stride_heuristics = map_stride(list(raw_factors))
     except Exception:
-        pass
+        # Fallback: use local MITRE and DREAD modules
+        try:
+            from src.core.mappings.factor_to_mitre import get_all_mappings as _get_mitre  # type: ignore
+            _md = _get_mitre(list(raw_factors))
+            mitre = _md.get('mitre', [])
+        except Exception:
+            pass
+        try:
+            from src.core.scoring.dread_engine import compute_dread as _cd  # type: ignore
+            _dread_artifact = {'event_id': event_id or 'adhoc', 'factors': list(raw_factors)}
+            _dread_factors = [{'name': str(f)} for f in raw_factors]
+            dread = _cd(_dread_artifact, _dread_factors) or {}
+        except Exception:
+            pass
+        try:
+            _STRIDE_LOOKUP: dict = {
+                'suspicious_process': ['Elevation of Privilege', 'Tampering'],
+                'c2_beacon': ['Tampering', 'Information Disclosure'],
+                'lateral_movement': ['Elevation of Privilege', 'Tampering'],
+                'privilege_escalation': ['Elevation of Privilege'],
+                'data_exfil': ['Information Disclosure'],
+                'ransomware': ['Tampering', 'Denial of Service'],
+                'macro_lure': ['Spoofing', 'Tampering'],
+                'credential_dump': ['Information Disclosure', 'Elevation of Privilege'],
+                'port_scan': ['Information Disclosure'],
+                'brute_force': ['Spoofing'],
+                'phishing': ['Spoofing', 'Tampering'],
+                'malicious_script': ['Tampering', 'Elevation of Privilege'],
+                'defense_evasion': ['Tampering', 'Repudiation'],
+                'persistence': ['Tampering', 'Elevation of Privilege'],
+                'nxdomain_spike': ['Information Disclosure'],
+                'high_entropy': ['Information Disclosure', 'Tampering'],
+                'large_file': ['Denial of Service', 'Tampering'],
+                'sig_mismatch': ['Tampering', 'Repudiation'],
+                'beaconing': ['Tampering', 'Information Disclosure'],
+            }
+            seen_cats: set = set()
+            for _f in raw_factors:
+                for _cat in _STRIDE_LOOKUP.get(str(_f).lower(), []):
+                    if _cat not in seen_cats:
+                        stride_heuristics.append(_cat)
+                        seen_cats.add(_cat)
+        except Exception:
+            pass
     try:
         from integrations.threat_intel_client import CLIENT as _TI  # type: ignore
         if getattr(_TI, 'factor_techniques', None):
@@ -375,8 +418,24 @@ async def analyze_row(payload: dict, tenant_id: str | None = Header(None, alias=
             response['triage_score'] = 0.0
     except Exception:
         try:
-            # Fallback: derive a simple density-based triage
-            response['triage_score'] = min(1.0, max(0.0, 0.06 * len(response.get('factors') or [])))
+            # Fallback: weighted triage — max severity factor + breadth bonus
+            _TW: dict = {
+                'ransomware': 0.90, 'c2_beacon': 0.85, 'credential_dump': 0.80,
+                'lateral_movement': 0.75, 'data_exfil': 0.75, 'privilege_escalation': 0.70,
+                'suspicious_process': 0.60, 'macro_lure': 0.55, 'phishing': 0.55,
+                'malicious_script': 0.50, 'persistence': 0.50, 'defense_evasion': 0.45,
+                'beaconing': 0.45, 'brute_force': 0.40, 'nxdomain_spike': 0.35,
+                'high_entropy': 0.30, 'sig_mismatch': 0.25, 'port_scan': 0.20,
+            }
+            _names = [f.get('name', '') if isinstance(f, dict) else str(f)
+                      for f in (response.get('factors') or [])]
+            _ws = [_TW.get(str(n).lower(), 0.15) for n in _names if n]
+            if _ws:
+                _base = max(_ws)
+                _breadth = 0.05 * (len(_ws) - 1)  # +5% per extra factor
+                response['triage_score'] = min(1.0, max(0.0, _base + _breadth))
+            else:
+                response['triage_score'] = 0.0
         except Exception:
             response['triage_score'] = 0.0
     if include_advanced:
@@ -534,13 +593,9 @@ async def upload_csv(
             if tenant_id:
                 entry['tenant_id'] = tenant_id
             try:
-                from .runtime_state import cache_set as _cache_set
-                _cache_set(evt_id, entry)
+                DECISION_CACHE[evt_id] = entry
             except Exception:
-                try:
-                    _cache_set(evt_id, entry)
-                except Exception:
-                    pass
+                pass
     except Exception:
         # Do not fail the upload on cache wiring errors
         pass

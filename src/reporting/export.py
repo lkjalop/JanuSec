@@ -133,11 +133,25 @@ def export_pdf_bytes_from_html(html: str) -> Optional[bytes]:
         pdf = _WP_HTML(string=html).write_pdf()
         return pdf
     except ImportError:
-        pass  # not installed — try Playwright
+        pass  # not installed — try xhtml2pdf
     except Exception:
-        pass  # generation error — try Playwright
+        pass  # generation error — try xhtml2pdf
 
-    # 2. Playwright fallback
+    # 2. xhtml2pdf fallback (installed: pip install xhtml2pdf)
+    try:
+        import io as _io2
+        from xhtml2pdf import pisa  # type: ignore
+        _buf = _io2.BytesIO()
+        _status = pisa.CreatePDF(html.encode('utf-8'), dest=_buf)
+        if not _status.err and _buf.tell() > 100:
+            _buf.seek(0)
+            return _buf.read()
+    except ImportError:
+        pass
+    except Exception:
+        pass
+
+    # 3. Playwright fallback
     return _export_pdf_playwright(html)
 
 
