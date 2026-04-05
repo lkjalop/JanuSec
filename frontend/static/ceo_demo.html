@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>JanuSec — CEO Live Demo Guide</title>
+<style>
+:root{--bg-primary:#0B0E14;--bg-secondary:#141A24;--bg-tertiary:#1D2531;--bg-elevated:#202A37;--border:#2C3746;--text-primary:#E8EBF0;--text-secondary:#C2CBD6;--text-muted:#93A0B1;--accent:#4A63E7;--accent-hover:#5C74F2;--critical:#E54848;--high:#FF8A3C;--medium:#E0C446;--low:#3FA860;--safe:#2DB67C;--info:#4DA6FF;}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{background:var(--bg-primary);color:var(--text-primary);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;min-height:100vh;}
+a{color:var(--accent);text-decoration:none;}
+a:hover{text-decoration:underline;}
+.layout{display:grid;grid-template-columns:220px 1fr;min-height:100vh;}
+.sidebar{background:var(--bg-secondary);border-right:1px solid var(--border);padding:16px;position:sticky;top:0;height:100vh;overflow-y:auto;}
+.logo{display:flex;align-items:center;gap:10px;font-weight:700;font-size:15px;margin-bottom:24px;color:var(--text-primary);}
+.nav-section{margin-bottom:20px;}
+.nav-title{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);margin-bottom:8px;font-weight:600;}
+.nav-item{padding:9px 12px;border-radius:6px;cursor:pointer;display:block;font-size:13px;color:var(--text-secondary);margin-bottom:3px;transition:background .15s;}
+.nav-item:hover{background:var(--bg-tertiary);color:var(--text-primary);}
+.nav-item.active{background:var(--accent);color:#fff;}
+.main{padding:32px;max-width:1100px;}
+h1{font-size:26px;font-weight:700;margin-bottom:6px;}
+.subtitle{color:var(--text-muted);margin-bottom:32px;font-size:15px;}
+/* Section cards */
+.card{background:var(--bg-secondary);border:1px solid var(--border);border-radius:8px;padding:20px 24px;margin-bottom:20px;}
+.card h2{font-size:17px;font-weight:600;margin-bottom:14px;display:flex;align-items:center;gap:8px;}
+.card h3{font-size:14px;font-weight:600;margin:16px 0 8px;color:var(--text-secondary);}
+/* ASCII wireframe */
+.wireframe{background:#070c14;border:1px solid var(--border);border-radius:6px;padding:16px 20px;font-family:'Consolas','Courier New',monospace;font-size:12px;line-height:1.6;color:#8aafcc;overflow-x:auto;white-space:pre;}
+.wireframe .hl{color:#4da6ff;}
+.wireframe .cta{color:#f4a;}
+.wireframe .good{color:#2ecc71;}
+.wireframe .warn{color:#ff8a3c;}
+/* Step list */
+.steps{counter-reset:step;list-style:none;padding:0;}
+.steps li{counter-increment:step;display:flex;gap:14px;padding:12px 0;border-bottom:1px solid var(--border);}
+.steps li:last-child{border-bottom:none;}
+.steps li::before{content:counter(step);min-width:28px;height:28px;border-radius:50%;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0;margin-top:1px;}
+.steps li .step-body{flex:1;}
+.steps li .step-title{font-weight:600;margin-bottom:4px;}
+.steps li .step-desc{color:var(--text-muted);font-size:13px;line-height:1.5;}
+/* Badge */
+.badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;vertical-align:middle;}
+.badge-p0{background:rgba(229,72,72,.18);color:#e54848;border:1px solid #e5484860;}
+.badge-p1{background:rgba(255,138,60,.15);color:#ff8a3c;border:1px solid #ff8a3c50;}
+.badge-p2{background:rgba(77,166,255,.12);color:#4da6ff;border:1px solid #4da6ff50;}
+.badge-ok{background:rgba(45,182,124,.15);color:#2db67c;border:1px solid #2db67c50;}
+/* Path cards */
+.path-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:14px;}
+.path-card{background:var(--bg-tertiary);border:1px solid var(--border);border-radius:8px;padding:16px;}
+.path-card h4{font-size:13px;font-weight:600;margin-bottom:8px;display:flex;align-items:center;gap:7px;}
+.path-card ul{list-style:none;padding:0;}
+.path-card ul li{font-size:12px;color:var(--text-muted);padding:4px 0;border-bottom:1px solid var(--border);}
+.path-card ul li:last-child{border-bottom:none;}
+.path-card ul li strong{color:var(--text-secondary);}
+/* Icon circles */
+.icon-circle{width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;}
+.ic-blue{background:rgba(74,99,231,.2);color:#4a63e7;}
+.ic-orange{background:rgba(255,138,60,.15);color:#ff8a3c;}
+.ic-green{background:rgba(45,182,124,.15);color:#2db67c;}
+/* Table */
+table{width:100%;border-collapse:collapse;font-size:13px;}
+th{text-align:left;padding:8px 12px;border-bottom:1px solid var(--border);color:var(--text-muted);font-weight:600;text-transform:uppercase;font-size:11px;letter-spacing:.4px;}
+td{padding:8px 12px;border-bottom:1px solid var(--border);}
+tr:last-child td{border-bottom:none;}
+tr:hover td{background:var(--bg-tertiary);}
+/* Report options grid */
+.opts-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px;}
+.opt-pill{background:var(--bg-tertiary);border:1px solid var(--border);border-radius:5px;padding:7px 10px;font-size:12px;color:var(--text-muted);}
+.opt-pill .key{color:var(--text-secondary);font-family:monospace;font-size:11px;}
+.opt-pill .val{color:#2db67c;margin-left:4px;font-size:11px;}
+/* Timeline */
+.timeline{border-left:2px solid var(--border);padding-left:20px;margin:14px 0;}
+.tl-item{position:relative;margin-bottom:16px;}
+.tl-item::before{content:'';position:absolute;left:-25px;top:4px;width:8px;height:8px;border-radius:50%;background:var(--accent);}
+.tl-item .tl-time{font-size:11px;color:var(--text-muted);margin-bottom:2px;}
+.tl-item .tl-action{font-weight:600;font-size:13px;}
+.tl-item .tl-detail{font-size:12px;color:var(--text-muted);margin-top:3px;}
+/* Code block */
+code{background:var(--bg-tertiary);border:1px solid var(--border);border-radius:4px;padding:2px 6px;font-family:monospace;font-size:12px;color:#8aafcc;}
+pre.code-block{background:#070c14;border:1px solid var(--border);border-radius:6px;padding:14px 16px;font-family:monospace;font-size:12px;color:#8aafcc;overflow-x:auto;white-space:pre;}
+.section-anchor{scroll-margin-top:16px;}
+/* Divider label */
+.divider-label{display:flex;align-items:center;gap:12px;margin:24px 0 14px;color:var(--text-muted);font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;}
+.divider-label::before,.divider-label::after{content:'';flex:1;height:1px;background:var(--border);}
+</style>
+</head>
+<body>
+<div class="layout">
+<!-- Sidebar -->
+<nav class="sidebar">
+  <div class="logo">
+    <svg width="24" height="24" viewBox="0 0 64 64" fill="none">
+      <circle cx="32" cy="32" r="30" stroke="#4A63E7" stroke-width="2"/>
+      <path d="M20 24 Q20 20 24 20 L28 20 L28 44 Q28 48 24 48 L20 48 Z" fill="#4A63E7" opacity=".8"/>
+      <path d="M44 24 Q44 20 40 20 L36 20 L36 44 Q36 48 40 48 L44 48 Z" fill="#4A63E7" opacity=".8"/>
+    </svg>
+    JanuSec
+  </div>
+  <div class="nav-section">
+    <div class="nav-title">Demo Guide</div>
+    <a class="nav-item active" href="#overview">Overview</a>
+    <a class="nav-item" href="#wireframe">UI Wireframe</a>
+    <a class="nav-item" href="#paths">Upload Paths</a>
+    <a class="nav-item" href="#script">Demo Script</a>
+    <a class="nav-item" href="#report-options">Report Gating</a>
+    <a class="nav-item" href="#architecture">Architecture</a>
+    <a class="nav-item" href="#qa">CEO Q&amp;A Prep</a>
+  </div>
+  <div class="nav-section">
+    <div class="nav-title">Platform</div>
+    <a class="nav-item" href="/">LIVE Console</a>
+    <a class="nav-item" href="/static/hunt_network.html">Network Hunt</a>
+    <a class="nav-item" href="/static/hunt_endpoint.html">Endpoint Hunt</a>
+    <a class="nav-item" href="/static/metrics.html">Metrics</a>
+    <a class="nav-item" href="/static/integrations.html">Integrations</a>
+    <a class="nav-item" href="/static/sbom.html">SBOM</a>
+    <a class="nav-item" href="/static/multi_log_investigator.html">Investigator</a>
+    <a class="nav-item" href="/static/csv_multi_analyzer.html">CSV Analyzer</a>
+  </div>
+</nav>
+
+<!-- Main content -->
+<main class="main">
+  <h1>CEO Live Demo Guide</h1>
+  <div class="subtitle">Step-by-step playbook for a 15-minute recorded demo — wire to run, what to click, what to say.</div>
+
+  <!-- ══════════════════════════════════════════════
+       SECTION 1 — OVERVIEW
+       ══════════════════════════════════════════════ -->
+  <div id="overview" class="card section-anchor">
+    <h2><span class="icon-circle ic-blue">▶</span> What we're showcasing</h2>
+    <p style="color:var(--text-muted);margin-bottom:16px;">Three live ingestion paths all feeding the same detection + reporting engine. CEO sees raw data go in, structured threat intelligence come out — five different expert views, GDPR clock started, escalation path visible.</p>
+    <div class="path-grid">
+      <div class="path-card">
+        <h4><span class="icon-circle ic-blue">📁</span> Path A — Manual XLSX</h4>
+        <ul>
+          <li><strong>File:</strong> Cyberstash_csv2.xlsx</li>
+          <li><strong>Sheets:</strong> Network/Endpoint/Email/EDR/C2</li>
+          <li><strong>Result:</strong> 8/15 malicious, 5 personas</li>
+          <li><strong>Time:</strong> ~90 sec end-to-end</li>
+        </ul>
+      </div>
+      <div class="path-card">
+        <h4><span class="icon-circle ic-orange">☁</span> Path B — AWS CloudTrail</h4>
+        <ul>
+          <li><strong>Input:</strong> JSON CloudTrail log</li>
+          <li><strong>Endpoint:</strong> POST /api/v1/connectors/aws/ingest</li>
+          <li><strong>Result:</strong> Executive HTML report</li>
+          <li><strong>Time:</strong> ~10 sec</li>
+        </ul>
+      </div>
+      <div class="path-card">
+        <h4><span class="icon-circle ic-green">🔷</span> Path C — Azure Entra</h4>
+        <ul>
+          <li><strong>Input:</strong> Azure sign-in JSON</li>
+          <li><strong>Endpoint:</strong> POST /api/v1/connectors/azure/ingest</li>
+          <li><strong>Result:</strong> Executive HTML report</li>
+          <li><strong>Time:</strong> ~10 sec</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════
+       SECTION 2 — ASCII WIREFRAME
+       ══════════════════════════════════════════════ -->
+  <div id="wireframe" class="card section-anchor">
+    <h2><span class="icon-circle ic-blue">🖥</span> UI Wire-frame — What the screen looks like</h2>
+    <div class="wireframe">
+╔══════════════════════════════════════════════════════════════════════════════════╗
+║  JanuSec Platform   ● Connected to XDR   Last Update: 2min ago                  ║
+║  Critical: <span class="cta">2</span>  High: <span class="warn">8</span>  Medium: <span class="hl">15</span>                                             ║
+╠══════════════╦═══════════════════════════════════════════╦══════════════════════╣
+║  SIDEBAR     ║  MAIN PANEL                               ║  RIGHT PANEL         ║
+║              ║                                           ║                      ║
+║  ● Dashboard ║  ┌──────────────────────────────────┐    ║  Investigation       ║
+║    Artifacts ║  │  UPLOAD LOGS  ◄─── DEMO START    │    ║  ─────────────────   ║
+║    Threats   ║  │  ┌──────────────────────────────┐│    ║  Create Incident     ║
+║  ─────────── ║  │  │  Drag & Drop XLSX / JSON     ││    ║  Export Report       ║
+║  Hunt        ║  │  │  ─ or ─ paste Assessment ID  ││    ║  Send to SIEM        ║
+║   Network    ║  │  └──────────────────────────────┘│    ║                      ║
+║   Endpoint   ║  └──────────────────────────────────┘    ║  Scoring Config      ║
+║  Compliance  ║                                           ║  ─────────────────   ║
+║  Metrics     ║  Recent Decisions  ┌──────────────────┐  ║  path weight: 0.35   ║
+║  Integrations║  ─────────────────│ E01 wmiexec  CRIT│  ║  mapping:     0.00   ║
+║  SBOM        ║                   │ E02 rdp_lat  HIGH│  ║                      ║
+║  Investigator║                   │ E03 c2_beac  CRIT│  ║  Multi-Domain Health ║
+║  <span class="cta">CEO Demo  ◄</span>   ║                   │ E04 dropper  HIGH│  ║  ─────────────────   ║
+╚══════════════╩═══════════════════════════════════════════╩══════════════════════╝
+
+  STEP 1: Open http://localhost:8080/  →  you're here (LIVE Console)
+  STEP 2: Click "Upload Logs" in the left sidebar nav or the drop-zone in main pane
+  STEP 3: Drag in Cyberstash_csv2.xlsx  (or click to select)
+  STEP 4: Watch decisions populate in the "Recent Decisions" feed
+  STEP 5: Click "Export Investigation Report" → opens /api/v1/report/ingestion?format=html&...
+  STEP 6: Switch persona tabs in the report (Executive / SOC / Threat Hunter / Forensics / Compliance)
+  STEP 7: Click "Create Incident" → fires POST /api/v1/incidents → shows ticket confirmation
+    </div>
+
+    <div class="divider-label">Report Opens Automatically</div>
+
+    <div class="wireframe">
+REPORT   http://localhost:8080/api/v1/report/ingestion?format=html&include_model=true
+         &include_scenarios=true   (or click the "Export" button in right rail)
+
+╔══════════════════════════════════════════════════════════════════════════════════╗
+║  JanuSec Threat Intelligence Report — 2026-04-05 13:27Z                         ║
+║  Dataset: Cyberstash_csv2.xlsx   |  Malicious: <span class="cta">8/15</span>   Confidence: <span class="warn">0.91</span>          ║
+╠══════════════════════════════════════════════════════════════════════════════════╣
+║                                                                                  ║
+║  [Executive] [SOC Analyst] [Threat Hunter] [Forensics] [Compliance]             ║
+║                                                                                  ║
+║  ── Executive ──────────────────────────────────────────────────────────────    ║
+║  VERDICT: MALICIOUS (confidence 0.91)                                            ║
+║  A malicious process (wmiexec.py) was executed on WKSTN-BOB. Likely             ║
+║  delivered via phishing: 'Invoice_Final.doc' to bob@company.com.                ║
+║  C2 callback interval: ~30s to 198.51.100.45:4444                               ║
+║  DREAD Score: 8.6 / 10                                                           ║
+║                                                                                  ║
+║  ── Compliance ─────────────────────────────────────────────────────────────    ║
+║  GDPR Art.33 NOTIFICATION REQUIRED — PII in scope + confirmed C2 channel.       ║
+║  72h clock started at: <span class="cta">2026-04-05 13:27 UTC (report generated — discovery time)</span>    ║
+║  STRIDE: <span class="good">S✓ T✓ R✓ I✓ D? E✓</span>  PASTA risks: 4   Diamond victims: 3              ║
+║                                                                                  ║
+║  ── Threat Hunter ──────────────────────────────────────────────────────────    ║
+║  Kill Chain: Initial Access → Execution → Defense Evasion → Lateral Movement    ║
+║  ▶ Blind Spots: No EDR on DCs / No PCAP / WMI-Activity log unknown             ║
+╚══════════════════════════════════════════════════════════════════════════════════╝
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════
+       SECTION 3 — UPLOAD PATHS
+       ══════════════════════════════════════════════ -->
+  <div id="paths" class="card section-anchor">
+    <h2><span class="icon-circle ic-orange">⬆</span> Three Upload Paths — Where to Click What</h2>
+
+    <h3>Path A — Manual XLSX (the main demo)</h3>
+    <ol class="steps">
+      <li>
+        <div class="step-body">
+          <div class="step-title">Open the LIVE Console</div>
+          <div class="step-desc">Navigate to <code>http://localhost:8080/</code>. You'll see the dashboard with Recent Decisions feed.</div>
+        </div>
+      </li>
+      <li>
+        <div class="step-body">
+          <div class="step-title">Click "Upload Logs" in the sidebar or the drop-zone</div>
+          <div class="step-desc">Drag in <code>Cyberstash_csv2.xlsx</code> from <code>C:\AI\janusec\</code>. The drop-zone accepts .xlsx, .csv, .json, .evtx, .pcap.</div>
+        </div>
+      </li>
+      <li>
+        <div class="step-body">
+          <div class="step-title">Watch the pipeline run</div>
+          <div class="step-desc">Decisions populate in real-time. The status bar updates: <strong>Critical: 2 → 8, High: 5</strong>. This is the detection engine. You can also run the full pipeline directly: <code>python scripts/run_cyberstash_full_pipeline.py --server http://localhost:8080</code></div>
+        </div>
+      </li>
+      <li>
+        <div class="step-body">
+          <div class="step-title">Click "Export Investigation Report"</div>
+          <div class="step-desc">In the right rail. Opens the full HTML report with all 5 persona tabs. Alternatively: <code>/api/v1/report/ingestion?format=html&include_model=true&include_scenarios=true</code></div>
+        </div>
+      </li>
+      <li>
+        <div class="step-body">
+          <div class="step-title">Switch persona tabs</div>
+          <div class="step-desc">Click <strong>[Executive] → [Compliance] → [Threat Hunter]</strong>. Show GDPR clock, blind spots, MITRE coverage. Each tab is a different audience.</div>
+        </div>
+      </li>
+      <li>
+        <div class="step-body">
+          <div class="step-title">Click "Create Incident"</div>
+          <div class="step-desc">Fires <code>POST /api/v1/incidents</code>. Shows confirmation toast. In production this writes to your SIEM/ticketing system.</div>
+        </div>
+      </li>
+    </ol>
+
+    <div class="divider-label">Path B — AWS CloudTrail</div>
+    <div class="wireframe">
+1. Open: http://localhost:8080/static/integrations.html
+2. Under "AWS" section → click "Paste CloudTrail JSON" or use API:
+
+   curl -X POST http://localhost:8080/api/v1/connectors/aws/ingest \
+     -H "x-api-key: devkey123" \
+     -H "content-type: application/json" \
+     -d @artifacts/reports/executive_review/aws/sample_cloudtrail.json
+
+3. Result: executive HTML report auto-generated
+   GET http://localhost:8080/api/v1/report/ingestion?format=html&persona=executive
+    </div>
+    <div class="divider-label">Path C — Azure Entra ID Sign-ins</div>
+    <div class="wireframe">
+1. Same flow, different endpoint:
+
+   curl -X POST http://localhost:8080/api/v1/connectors/azure/ingest \
+     -H "x-api-key: devkey123" \
+     -H "content-type: application/json" \
+     -d @artifacts/reports/executive_review/azure/sample_signinlogs.json
+
+2. Pre-built artifacts available in:
+   artifacts/reports/executive_review/aws/   (9 HTML+PDF pairs)
+   artifacts/reports/executive_review/azure/ (9 HTML+PDF pairs)
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════
+       SECTION 4 — DEMO SCRIPT (TIMING)
+       ══════════════════════════════════════════════ -->
+  <div id="script" class="card section-anchor">
+    <h2><span class="icon-circle ic-blue">⏱</span> 15-Minute Demo Script</h2>
+    <div class="timeline">
+      <div class="tl-item">
+        <div class="tl-time">0:00 – 1:00</div>
+        <div class="tl-action">Set the scene</div>
+        <div class="tl-detail">
+          "This is the JanuSec Platform — it turns raw log files into structured threat intelligence in under 90 seconds. 
+          Today I'll show you three data sources: a multi-sheet Excel workbook (our most complex case), 
+          live AWS CloudTrail, and Azure Entra sign-in logs. Same engine, different adapters."
+        </div>
+      </div>
+      <div class="tl-item">
+        <div class="tl-time">1:00 – 3:30</div>
+        <div class="tl-action">Upload + detect (Path A)</div>
+        <div class="tl-detail">
+          Drag in Cyberstash_csv2.xlsx. Narrate what each sheet represents while the spinner runs.
+          Point out decisions populating: wmiexec = CRITICAL, rdp_lateral = HIGH, c2_beacon = CRITICAL.
+          <strong>Talking point:</strong> "8 of 15 events confirmed malicious — all tagged STRIDE, MITRE, and DREAD scored."
+        </div>
+      </div>
+      <div class="tl-item">
+        <div class="tl-time">3:30 – 7:00</div>
+        <div class="tl-action">Walk the report personas</div>
+        <div class="tl-detail">
+          Click "Export Investigation Report". Show tabs:
+          <br>• <strong>Executive:</strong> "Malicious process executed on WKSTN-BOB — C2 callback every 30 seconds to known-bad IP."
+          <br>• <strong>Compliance:</strong> "GDPR Art.33 REQUIRED — 72-hour clock started NOW. PII in scope + confirmed C2 channel."
+          <br>• <strong>Threat Hunter:</strong> "Kill chain: Initial Access → Execution → Lateral Movement. Blind spots flagged: no EDR on DCs."
+          <br>• <strong>Forensics:</strong> "SHA-256 anomaly detected in EDR row — collect before remediation."
+          <br>• <strong>SOC Analyst:</strong> Full triage table, escalation handoff with all CRITICAL events (no 4-item cap).
+        </div>
+      </div>
+      <div class="tl-item">
+        <div class="tl-time">7:00 – 9:00</div>
+        <div class="tl-action">Create an incident</div>
+        <div class="tl-detail">
+          Click "Create Incident" in the right rail. Show the toast confirmation. 
+          <strong>Talking point:</strong> "In production this fires a webhook to PagerDuty, Jira, or ServiceNow. 
+          SIEM dispatch is one click from 'Send to SIEM'."
+        </div>
+      </div>
+      <div class="tl-item">
+        <div class="tl-time">9:00 – 11:00</div>
+        <div class="tl-action">Cloud ingestion (Path B or C)</div>
+        <div class="tl-detail">
+          Open <code>/static/integrations.html</code>. Show AWS + Azure toggles. Paste or hit the stub endpoint. 
+          Show the pre-built artifacts: 
+          <code>artifacts/reports/executive_review/aws/</code> — 9 reports already generated on AWS CloudTrail data.
+          <strong>Talking point:</strong> "Same intelligence engine — different adapter. No re-training, no re-tuning."
+        </div>
+      </div>
+      <div class="tl-item">
+        <div class="tl-time">11:00 – 13:00</div>
+        <div class="tl-action">Governance + scoring controls</div>
+        <div class="tl-detail">
+          Show the right-rail scoring sliders. Point to path weight, diversity weight.
+          Open <code>/static/multi_log_investigator.html</code> for the analyst deep-dive view.
+          <strong>Talking point:</strong> "Operators tune detection sensitivity without redeploying. Changes take effect immediately."
+        </div>
+      </div>
+      <div class="tl-item">
+        <div class="tl-time">13:00 – 15:00</div>
+        <div class="tl-action">Close + Q&amp;A transition</div>
+        <div class="tl-detail">
+          Navigate to <a href="#qa">CEO Q&A Prep</a> section below to show the pre-prepared answers.
+          Close with: "This is production-ready. The stack is Python/FastAPI — no vendor lock-in. 
+          Deployment is a single Docker container or start_server.bat on Windows."
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════
+       SECTION 5 — REPORT OPTIONS GATING
+       ══════════════════════════════════════════════ -->
+  <div id="report-options" class="card section-anchor">
+    <h2><span class="icon-circle ic-blue">🎛</span> Report Gating — 12 Toggles (for live demo tuning)</h2>
+    <p style="margin-bottom:12px;color:var(--text-muted);">Pass <code>report_options</code> in the API payload to turn sections on/off without modifying code. All <strong>ON</strong> by default — only set <code>false</code> to suppress.</p>
+
+    <div class="opts-grid">
+      <div class="opt-pill"><div class="key">include_mitre_table</div><div class="val">true ← MITRE ATT&CK coverage grid</div></div>
+      <div class="opt-pill"><div class="key">include_raw_data</div><div class="val">true ← raw events appendix (SOC/Forensics)</div></div>
+      <div class="opt-pill"><div class="key">include_pasta_register</div><div class="val">true ← PASTA risk register table</div></div>
+      <div class="opt-pill"><div class="key">include_hunt_queries</div><div class="val">true ← KQL/SPL hunt queries (Threat Hunter)</div></div>
+      <div class="opt-pill"><div class="key">include_sigma_rules</div><div class="val"><span style="color:var(--text-muted)">false</span> ← SIGMA output (off by default)</div></div>
+      <div class="opt-pill"><div class="key">include_dread_breakdown</div><div class="val">true ← DREAD score breakdown table</div></div>
+      <div class="opt-pill"><div class="key">include_beacon_analysis</div><div class="val">true ← C2 beacon interval analysis</div></div>
+      <div class="opt-pill"><div class="key">include_blind_spots</div><div class="val">true ← coverage gap listing (Threat Hunter)</div></div>
+      <div class="opt-pill"><div class="key">include_process_tree</div><div class="val">true ← process ancestry table (Forensics)</div></div>
+      <div class="opt-pill"><div class="key">include_full_escalation</div><div class="val">true ← all CRITICAL events (no cap)</div></div>
+      <div class="opt-pill"><div class="key">include_framework_citations</div><div class="val">true ← ISO/NIST citations (Compliance)</div></div>
+      <div class="opt-pill"><div class="key">compact_mode</div><div class="val"><span style="color:var(--text-muted)">false</span> ← compact layout for printing</div></div>
+    </div>
+
+    <h3>Example: executive-only compact report</h3>
+    <pre class="code-block">POST /api/v1/report/generate_pdf
+{
+  "persona": "executive",
+  "report_options": {
+    "include_raw_data": false,
+    "include_hunt_queries": false,
+    "include_sigma_rules": false,
+    "compact_mode": true
+  }
+}</pre>
+  </div>
+
+  <!-- ══════════════════════════════════════════════
+       SECTION 6 — ARCHITECTURE
+       ══════════════════════════════════════════════ -->
+  <div id="architecture" class="card section-anchor">
+    <h2><span class="icon-circle ic-green">🏗</span> Architecture — Unified vs Cloud-specific</h2>
+
+    <div class="wireframe">
+INGESTION PATHS                      SHARED ENGINE                 OUTPUT
+─────────────────                    ─────────────────────────     ────────────────────
+                                     
+  Cyberstash_csv2.xlsx               ┌──────────────────────┐     5 × Persona HTML+PDF
+     (Network/Endpoint/Email/   ───► │ enrich_rows_locally() │ ──► • Executive
+      EDR/C2 sheets)                 │ deep_analyze()        │     • SOC Analyst
+                                     │ build_threat_models() │     • Threat Hunter
+  AWS CloudTrail JSON          ───► │  STRIDE/Diamond/      │ ──► • Forensics
+    /api/v1/connectors/aws          │  MAESTRO/PASTA        │     • Compliance
+                                     │                       │
+  Azure Entra Sign-in JSON     ───► │ beacon_interval       │ ──► JSON (REST)
+    /api/v1/connectors/azure         │ gdpr_clock            │     CSV (export)
+                                     │ report_options gating │     Incident ticket
+  Zeek/Suricata/Sysmon logs    ───► │                       │     SIEM webhook
+    /api/v1/fetch/zeek|etc           └──────────────────────┘
+                                            │
+  KAPE forensic triage         ───► ────────┘
+  (upload drop-zone)
+                                                   
+KEY POINT: All paths above normalize to rows[]  →  same enrichment pipeline  →  same report.
+           The connectors are adapters; the detection logic is NOT duplicated.
+    </div>
+
+    <h3>Why unified matters (CEO talking point)</h3>
+    <table>
+      <thead>
+        <tr><th>Concern</th><th>Separate pipelines</th><th>JanuSec unified</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Detection rule changes</td><td>Update in 3 places</td><td><span class="badge badge-ok">Update once</span></td></tr>
+        <tr><td>New cloud provider</td><td>Build separate ML model</td><td><span class="badge badge-ok">Write one adapter</span></td></tr>
+        <tr><td>Compliance audit</td><td>3 separate GDPR clocks</td><td><span class="badge badge-ok">One clock from discovery time</span></td></tr>
+        <tr><td>MITRE coverage</td><td>Vendor-specific mapping</td><td><span class="badge badge-ok">Unified ATT&CK mapping</span></td></tr>
+        <tr><td>Licensing cost</td><td>Per-connector pricing</td><td><span class="badge badge-ok">Single deployment</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- ══════════════════════════════════════════════
+       SECTION 7 — CEO Q&A PREP
+       ══════════════════════════════════════════════ -->
+  <div id="qa" class="card section-anchor">
+    <h2><span class="icon-circle ic-orange">❓</span> CEO Q&amp;A Preparation</h2>
+
+    <h3>"How accurate is it?"</h3>
+    <p style="color:var(--text-muted);margin-bottom:12px;">
+      On the Cyberstash_csv2 dataset: <strong>8/15 events confirmed malicious</strong>, confidence 0.91. 
+      DREAD scores: 8.6/10 average for CRITICAL tier. 
+      The system uses corroborating evidence from multiple sheets — a single suspicious event doesn't trigger CRITICAL; 
+      it requires matching factors across Network + EDR + C2 channels.
+    </p>
+
+    <h3>"What happens when it's wrong?"</h3>
+    <p style="color:var(--text-muted);margin-bottom:12px;">
+      False positives are tracked via <code>/api/v1/admin/factors/telemetry</code>. 
+      Operators can adjust factor weights via the scoring sliders without code changes. 
+      The <strong>Blind Spots</strong> section in Threat Hunter reports explicitly flags where coverage is missing — 
+      we don't pretend coverage we don't have.
+    </p>
+
+    <h3>"Is this GDPR-compliant itself?"</h3>
+    <p style="color:var(--text-muted);margin-bottom:12px;">
+      The platform detects GDPR breach obligations; it does not itself process PII beyond what's in the uploaded logs. 
+      On-premise deployment means no data leaves the customer environment. 
+      The 72h clock starts at <em>report generation time</em> (discovery moment), not the historical incident timestamp.
+    </p>
+
+    <h3>"How does it scale?"</h3>
+    <p style="color:var(--text-muted);margin-bottom:12px;">
+      The API layer is FastAPI (async), stateless, horizontally scalable behind a load balancer. 
+      HopGraph correlation and Redis are optional — the core works without them for demo/PoC. 
+      Session persistence uses flat JSON files; swap to PostgreSQL or S3 for production.
+    </p>
+
+    <h3>"What's the deployment story?"</h3>
+    <p style="color:var(--text-muted);margin-bottom:12px;">
+      Windows: double-click <code>start_server.bat</code>. 
+      Linux/Docker: single container (included Dockerfile). 
+      Azure: Terraform deployment scripts in <code>azure/</code> 
+      — see <code>AZURE_TERRAFORM_DEPLOYMENT_SUMMARY.md</code>.
+    </p>
+
+    <h3>"When is it production ready?"</h3>
+    <p style="color:var(--text-muted);">
+      The detection engine, API, PDF/HTML reports, and GDPR compliance module are production-ready today. 
+      The roadmap items are: HopGraph Redis with persistent storage, email DKIM verification (install dkimpy), 
+      and the multi-tenant auth layer. None of these are blockers for a pilot deployment with a single tenant.
+    </p>
+  </div>
+
+  <!-- Quick reference links -->
+  <div class="card" style="background:var(--bg-tertiary);">
+    <h2>Quick Reference Links</h2>
+    <table>
+      <thead><tr><th>URL</th><th>What it shows</th></tr></thead>
+      <tbody>
+        <tr><td><a href="/">http://localhost:8080/</a></td><td>LIVE Console (start here)</td></tr>
+        <tr><td><a href="/api/v1/report/ingestion?format=html&include_model=true&include_scenarios=true">/api/v1/report/ingestion?format=html…</a></td><td>Latest full HTML report</td></tr>
+        <tr><td><a href="/static/metrics.html">/static/metrics.html</a></td><td>Platform metrics + factor telemetry</td></tr>
+        <tr><td><a href="/static/integrations.html">/static/integrations.html</a></td><td>AWS / Azure / Slack / Teams toggles</td></tr>
+        <tr><td><a href="/static/sbom.html">/static/sbom.html</a></td><td>SBOM upload + CVE mapping</td></tr>
+        <tr><td><a href="/static/multi_log_investigator.html">/static/multi_log_investigator.html</a></td><td>Analyst Tier-2 investigator</td></tr>
+        <tr><td><a href="/static/csv_multi_analyzer.html">/static/csv_multi_analyzer.html</a></td><td>HopGraph CSV multi-source correlator</td></tr>
+        <tr><td><code>dump/reports/cyberstash/</code></td><td>Pre-generated PDF + HTML sample reports</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+</main>
+</div>
+</body>
+</html>
