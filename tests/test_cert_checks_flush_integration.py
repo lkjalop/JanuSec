@@ -38,9 +38,11 @@ def _build_app(monkeypatch, calls_holder):
         calls_holder.append({'url': url, 'data': data, 'headers': headers})
         return DummyResp(200, {'ok': True})
     monkeypatch.setattr(cc, 'httpx', types.SimpleNamespace(get=fake_get, post=fake_post))
+    # Use the existing app rather than reloading the module to avoid breaking
+    # the shared app object used by other tests imported at module level.
     import src.api.app as appmod
-    importlib.reload(appmod)
-    return appmod.app, cc
+    app = appmod.app
+    return app, cc
 
 
 @pytest.mark.asyncio

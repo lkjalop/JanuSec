@@ -136,7 +136,7 @@ try:
     if 'security.auth' not in sys.modules and not _skip_stub:
         _sec = _early_types.ModuleType('security.auth')
         # Permissive stub: FastAPI-compatible Header annotation, no enforcement.
-        def require_scopes(scope):
+        def require_scopes(*scope):
             from fastapi import Header as _FHeader
             async def _dep(x_api_key: str | None = _FHeader(None, alias='x-api-key')):
                 return True
@@ -973,6 +973,39 @@ def test_app():
             return getattr(mod, 'app', None)
         except Exception:
             return None
+
+
+@pytest.fixture
+def test_client():
+    """Return a ``TestClient`` with a freshly-initialized app and default auth
+    headers pre-injected.  Creates its own env-isolated app instance so that
+    module-reloads in other tests (e.g. cert_checks) don't affect this client.
+    """
+    import os, importlib, logging
+    os.environ.setdefault('PLATFORM_LITE_INIT', '1')
+    os.environ.setdefault('TEST_HELPERS_ENABLED', '1')
+    os.environ.setdefault('DISABLE_DB', '1')
+    logging.disable(logging.CRITICAL)
+    try:
+        _mod = importlib.reload(importlib.import_module('src.api.app'))
+        _app = _mod.app
+    except Exception:
+        try:
+            import importlib as _il
+            _app = _il.import_module('src.api.app').app
+        except Exception:
+            pytest.skip('src.api.app not importable')
+    from fastapi.testclient import TestClient
+    from tests._helpers import default_test_headers
+    client = TestClient(_app, raise_server_exceptions=False)
+    hdrs = default_test_headers()
+    _orig_request = client.request
+    def _authed_request(method, url, **kwargs):
+        kw_headers = dict(hdrs)
+        kw_headers.update(kwargs.pop('headers', {}) or {})
+        return _orig_request(method, url, headers=kw_headers, **kwargs)
+    client.request = _authed_request
+    return client
 import sys
 import types
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 import os
 from types import SimpleNamespace
 
@@ -101,4 +102,33 @@ __all__ = [
     'StageResult',
     'StageContext',
     'STAGE_DEFINITIONS',
+    '_lazy_runner',
 ]
+
+
+def _lazy_runner(module_path: str, class_name: str, stage_name: str):
+    """Return an async stage runner that lazy-imports *module_path.class_name*.
+
+    If the import fails the runner returns a safe StageResult with the error
+    recorded in *metadata* instead of propagating the exception.
+    """
+    async def _runner(event: dict, ctx: StageContext) -> StageResult:  # type: ignore[name-defined]
+        try:
+            mod = importlib.import_module(module_path)
+            klass = getattr(mod, class_name)
+            analyzer = klass(ctx.config)
+            result = await analyzer.analyze_event(event)
+            return StageResult(
+                name=stage_name,
+                factors=result.get('factors', []),
+                confidence_delta=result.get('confidence_delta', 0.0),
+                metadata=result.get('metadata'),
+            )
+        except Exception as exc:  # noqa: BLE001
+            return StageResult(
+                name=stage_name,
+                factors=[],
+                confidence_delta=0.0,
+                metadata={'error': str(exc)},
+            )
+    return _runner
