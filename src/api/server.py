@@ -4572,6 +4572,18 @@ async def decisions_recent(limit: int = 50, tenant_id: str | None = None, reques
                 tenant_id = tenant_hdr
     except Exception:
         pass
+    # H2: If the authenticated API key is scoped to a specific tenant, enforce it regardless
+    # of what the caller passes. This prevents cross-tenant data access.
+    try:
+        key_tenant = getattr(auth, 'tenant_id', None) if auth is not None else None
+        if key_tenant:
+            if tenant_id and tenant_id != key_tenant:
+                raise HTTPException(status_code=403, detail='tenant_mismatch_for_api_key')
+            tenant_id = key_tenant
+    except HTTPException:
+        raise
+    except Exception:
+        pass
 
     if adapter and hasattr(adapter, 'pool'):
         # Postgres path
@@ -4631,16 +4643,19 @@ async def decisions_recent(limit: int = 50, tenant_id: str | None = None, reques
         except Exception:
             rows = []
     else:
-        # Fallback to in-memory cache slice
+        # Fallback to in-memory cache slice — honour tenant_id filter
         rows = []
-        for dec in list(DECISION_CACHE.values())[-limit:][::-1]:
+        for dec in list(DECISION_CACHE.values())[-limit * 4:][::-1]:
+            dec_tenant = getattr(dec, 'tenant_id', None) or (dec.get('tenant_id') if isinstance(dec, dict) else None)
+            if tenant_id and dec_tenant and dec_tenant != tenant_id:
+                continue
             row = {
                 'id': getattr(dec, 'event_id', None) or dec.get('event_id'),
                 'event_id': getattr(dec, 'event_id', None) or dec.get('event_id'),
                 'verdict': getattr(dec, 'verdict', None) or dec.get('verdict'),
                 'confidence': getattr(dec, 'confidence', None) or dec.get('confidence'),
                 'reasons': getattr(dec, 'factors', None) or dec.get('factors'),
-                'tenant_id': getattr(dec, 'tenant_id', None) or dec.get('tenant_id'),
+                'tenant_id': dec_tenant,
                 'ts': getattr(dec, 'timestamp', None) or dec.get('ts'),
                 'correlation_insights': _row_insights(dec),
             }
@@ -4649,6 +4664,8 @@ async def decisions_recent(limit: int = 50, tenant_id: str | None = None, reques
                 if val is not None:
                     row[field] = val
             rows.append(row)
+            if len(rows) >= limit:
+                break
     rows = _hydrate_decision_rows(rows)
     # Enforce tenant isolation at the application layer as a safety net.
     try:

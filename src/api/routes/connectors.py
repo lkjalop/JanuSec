@@ -120,6 +120,126 @@ def _dedupe_events(runtime, tenant: str, provider: str, connector: str, events: 
     return filtered, duplicate_count
 
 
+def _aws_decision_inputs(connector: str, event: Dict[str, Any]) -> tuple[str, str, float, list[str], dict[str, Any]] | None:
+    """Map normalised AWS connector events to (event_id, verdict, confidence, factors, meta).
+
+    Returns None for low-risk/informational events that should not emit decisions.
+    """
+    source = str(event.get('source') or connector)
+    event_id = str(
+        event.get('id')
+        or event.get('event_id')
+        or f"{source}:{event.get('event_ts') or event.get('ts') or time.time()}:{event.get('user') or event.get('resource') or event.get('account_id') or 'entity'}"
+    )
+    factors: list[str] = list(event.get('factors') or [])
+    risk_signals: list[str] = [str(s) for s in (event.get('risk_signals') or []) if s]
+    verdict = 'allow'
+    confidence = 0.35
+
+    if connector == 'guardduty':
+        sev = float(event.get('severity') or 0)
+        if sev >= 7.0:
+            verdict = 'bad'
+            confidence = min(0.5 + sev / 20.0, 0.97)
+            factors.extend(['aws:guardduty_high'])
+        elif sev >= 4.0:
+            verdict = 'suspicious'
+            confidence = 0.65
+            factors.extend(['aws:guardduty_medium'])
+        else:
+            return None  # low severity — skip
+    elif connector == 'securityhub':
+        sev = str(event.get('severity') or '').upper()
+        if sev in {'CRITICAL', 'HIGH'}:
+            verdict = 'bad' if sev == 'CRITICAL' else 'suspicious'
+            confidence = 0.9 if sev == 'CRITICAL' else 0.82
+            factors.extend([f'aws:securityhub_{sev.lower()}'])
+        elif sev == 'MEDIUM':
+            verdict = 'suspicious'
+            confidence = 0.65
+            factors.extend(['aws:securityhub_medium'])
+        else:
+            return None
+    elif connector == 'cloudtrail':
+        # IAM, privilege-change, or error events
+        event_name = str(event.get('event_name') or event.get('action') or '')
+        error_code = event.get('error_code') or ''
+        if 'CreateUser' in event_name or 'AttachRolePolicy' in event_name or 'PutUserPolicy' in event_name or 'CreateAccessKey' in event_name:
+            verdict = 'suspicious'
+            confidence = 0.75
+            factors.extend(['aws:iam_privilege_change'])
+        elif error_code in ('AccessDenied', 'UnauthorizedAccess'):
+            verdict = 'suspicious'
+            confidence = 0.6
+            factors.extend(['aws:access_denied'])
+        elif 'AssumeRole' in event_name and any(s in risk_signals for s in ('cross_account', 'external_principal')):
+            verdict = 'suspicious'
+            confidence = 0.72
+            factors.extend(['aws:cross_account_assume_role'])
+        else:
+            return None
+    elif connector == 'vpcflow':
+        action = str(event.get('action') or '').upper()
+        if action == 'REJECT' and any(s in risk_signals for s in ('scan', 'external_ip', 'port_sweep')):
+            verdict = 'suspicious'
+            confidence = 0.6
+            factors.extend(['aws:vpcflow_reject_scan'])
+        else:
+            return None
+    elif connector in ('s3_access', 'cloudwatch', 'config_snapshot'):
+        if 'public_access' in risk_signals or 'exposed_bucket' in risk_signals:
+            verdict = 'suspicious'
+            confidence = 0.7
+            factors.extend(['aws:public_exposure'])
+        else:
+            return None
+    else:
+        # Generic fallback: require pre-set factors
+        if not factors:
+            return None
+        verdict = 'suspicious'
+        confidence = 0.6
+
+    factors = sorted({str(f) for f in factors if f})
+    if not factors:
+        return None
+    meta = {
+        'details': {
+            'source': source,
+            'event_type': event.get('event_type') or event.get('event_name'),
+            'user': event.get('user') or event.get('principal_arn'),
+            'ip': event.get('ip') or event.get('source_ip'),
+            'resource': event.get('resource') or event.get('resource_arn'),
+            'action': event.get('action') or event.get('event_name'),
+            'account_id': event.get('account_id'),
+            'region': event.get('region'),
+        },
+        'hopgraph_context': {
+            'provider': 'aws',
+            'source': source,
+            'event_type': event.get('event_type') or event.get('event_name'),
+            'event_ts': event.get('event_ts') or event.get('ts'),
+            'user': event.get('user') or event.get('principal_arn'),
+            'ip': event.get('ip') or event.get('source_ip'),
+            'resource': event.get('resource') or event.get('resource_arn'),
+            'action': event.get('action') or event.get('event_name'),
+            'account_id': event.get('account_id'),
+            'risk_signals': risk_signals,
+        },
+        'recommendation_actions': [
+            {
+                'id': f'aws|review|{connector}',
+                'domain': 'aws',
+                'action': 'review_evidence',
+                'priority': 'high' if verdict == 'bad' else 'medium',
+                'status': 'pending',
+                'updated_ts': time.time(),
+            }
+        ],
+    }
+    return event_id, verdict, confidence, factors, meta
+
+
 def _azure_decision_inputs(connector: str, event: Dict[str, Any]) -> tuple[str, str, float, list[str], dict[str, Any]] | None:
     source = str(event.get('source') or connector)
     event_id = str(
@@ -152,6 +272,36 @@ def _azure_decision_inputs(connector: str, event: Dict[str, Any]) -> tuple[str, 
             verdict = 'suspicious'
             confidence = 0.7
             factors.extend(['cloud:defender_finding'])
+    elif connector == 'nsg_flow':
+        action = str(event.get('action') or event.get('flow_state') or '').upper()
+        if action in ('D', 'DENY', 'REJECTED') and any(
+            s in (event.get('risk_signals') or []) for s in ('scan', 'external_ip', 'port_sweep')
+        ):
+            verdict = 'suspicious'
+            confidence = 0.62
+            factors.extend(['azure:nsg_denied_scan'])
+        elif action in ('D', 'DENY', 'REJECTED'):
+            verdict = 'suspicious'
+            confidence = 0.5
+            factors.extend(['azure:nsg_flow_deny'])
+        else:
+            return None
+    elif connector == 'azure_activity':
+        operation = str(event.get('operation_name') or event.get('action') or '')
+        status = str(event.get('status') or event.get('result') or '').lower()
+        if 'delete' in operation.lower() or 'write' in operation.lower():
+            if status in ('failed', 'failure'):
+                verdict = 'suspicious'
+                confidence = 0.6
+                factors.extend(['azure:activity_write_failure'])
+            elif any(kw in operation.lower() for kw in ('roledefinitions', 'roleassignments', 'locks', 'policy')):
+                verdict = 'suspicious'
+                confidence = 0.7
+                factors.extend(['azure:activity_privileged_op'])
+            else:
+                return None
+        else:
+            return None
 
     factors = sorted({str(f) for f in factors if f})
     if not factors:
@@ -193,7 +343,7 @@ def _azure_decision_inputs(connector: str, event: Dict[str, Any]) -> tuple[str, 
 
 
 def _emit_connector_decisions(provider: str, connector: str, events: list[dict[str, Any]]) -> int:
-    if provider != 'azure':
+    if provider not in ('azure', 'aws'):
         return 0
     emitted = 0
     try:
@@ -202,7 +352,10 @@ def _emit_connector_decisions(provider: str, connector: str, events: list[dict[s
         return 0
     for event in events[:200]:
         try:
-            decision_inputs = _azure_decision_inputs(connector, event)
+            if provider == 'azure':
+                decision_inputs = _azure_decision_inputs(connector, event)
+            else:
+                decision_inputs = _aws_decision_inputs(connector, event)
             if not decision_inputs:
                 continue
             event_id, verdict, confidence, factors, meta = decision_inputs

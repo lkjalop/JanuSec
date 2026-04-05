@@ -27,11 +27,12 @@ except Exception:  # pragma: no cover
     jwt = None  # type: ignore
 
 class AuthContext:
-    def __init__(self, subject: str, scopes: list[str]):
+    def __init__(self, subject: str, scopes: list[str], tenant_id: str | None = None):
         self.subject = subject
         self.scopes = scopes
+        self.tenant_id = tenant_id  # None means unrestricted (all tenants)
 
-_API_KEYS: dict[str, list[str]] | None = None
+_API_KEYS: dict[str, dict] | None = None  # {key: {"scopes": [...], "tenant_id": str|None}}
 _API_KEYS_RAW: str | None = None
 _ROLE_MAP: dict[str, list[str]] = {
     'analyst': ['nlp.query','factors.search','feedback.write'],
@@ -49,22 +50,24 @@ def _test_helper_api_keys() -> set[str]:
         keys = {'testkey123', 'k3', 'janusec-test-key', 'devkey123'}
     return keys
 
-def _load_api_keys():
+def _load_api_keys() -> dict[str, dict]:
     global _API_KEYS, _API_KEYS_RAW
-    raw = os.getenv('API_KEYS_JSON','')
+    raw = os.getenv('API_KEYS_JSON', '')
     # Reload if first time or env changed. When running under pytest,
     # prefer to re-parse env on each call so tests that mutate
     # API_KEYS_JSON at runtime are observed (avoids order-dependent flakes).
     if _API_KEYS is None or _API_KEYS_RAW != raw or os.getenv('PYTEST_CURRENT_TEST'):
-        data: dict[str, list[str]] = {}
+        data: dict[str, dict] = {}
         if raw:
             try:
                 arr = json.loads(raw)
                 for entry in arr:
                     k = entry.get('key')
                     sc = entry.get('scopes', [])
+                    # Optional per-tenant restriction: {"key": "...", "scopes": ["*"], "tenant_id": "acme"}
+                    tenant_bind = entry.get('tenant_id') or entry.get('tenant') or None
                     if k:
-                        data[k] = sc
+                        data[k] = {'scopes': sc, 'tenant_id': tenant_bind}
             except Exception:
                 data = {}
         _API_KEYS = data
@@ -94,10 +97,12 @@ async def auth_dependency(x_api_key: str | None = Header(None), authorization: s
     # 1. API Key path
     api_keys = _load_api_keys()
     if x_api_key and x_api_key in api_keys:
-        scopes = api_keys[x_api_key]
+        key_entry = api_keys[x_api_key]
+        scopes = key_entry['scopes'] if isinstance(key_entry, dict) else key_entry
+        key_tenant = key_entry.get('tenant_id') if isinstance(key_entry, dict) else None
         if not _match_scopes(scopes, required_scopes):
             raise HTTPException(status_code=403, detail='insufficient_scope')
-        return AuthContext(subject=f'api_key:{x_api_key[:4]}', scopes=scopes)
+        return AuthContext(subject=f'api_key:{x_api_key[:4]}', scopes=scopes, tenant_id=key_tenant)
     # Pytest-friendly fallback: some tests mutate API_KEYS_JSON in different modules.
     # When running under pytest, accept the canonical test key with expected scopes
     # to avoid cross-test ordering flakiness in full-suite runs.
