@@ -2380,15 +2380,15 @@ async def run_deep_analyze_pipeline(payload: dict) -> JSONResponse:
 
     # Schedule background LLM row generation so the HTTP response is fast even when providers are slow
     # In test environments, allow disabling automatic background scheduling to avoid leaking tasks.
+    _skip_llm_sched = False
     try:
         if str(os.getenv('TEST_HELPERS_ENABLED', '0')).lower() in ('1', 'true', 'yes'):
-            # tests will explicitly invoke LLN generation helpers; skip scheduling here
             logger.debug('TEST_HELPERS_ENABLED set; skipping automatic _schedule_llm_generation for %s', assessment_id)
-            return
+            _skip_llm_sched = True
     except Exception:
         pass
-    _schedule_llm_generation(rows, ctx, assessment_obj, assessment_id, org, payload if isinstance(payload, dict) else {})
-    _schedule_llm_generation(rows, ctx, assessment_obj, assessment_id, org, payload if isinstance(payload, dict) else {})
+    if not _skip_llm_sched:
+        _schedule_llm_generation(rows, ctx, assessment_obj, assessment_id, org, payload if isinstance(payload, dict) else {})
 
     # Start worker session asynchronously (best-effort). Worker should update persisted file as it progresses.
     try:

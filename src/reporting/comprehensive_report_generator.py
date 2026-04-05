@@ -33,6 +33,19 @@ _FACTOR_LABELS = {
     'phishing_subject':           'Phishing Subject Line Detected',
     'email_received':             'Email Received',
     'unclassified_event':         'Unclassified Event',
+    # New enrichment factors
+    'lateral_movement':           'Active Lateral Movement (internal pivot)',
+    'lateral_movement_tool':      'Offensive Lateral Movement Tool (wmiexec/psexec)',
+    'interactive_wmi_session':    'Interactive WMI Session (-i flag)',
+    'credential_harvest':         'Credential Harvesting Link in Email Body',
+    'smb_external':               'SMB to External IP (T1021.002)',
+    'dropper_file_write':         'Dropper: Malicious Process Wrote Secondary Payload',
+    'masquerading_extension':     'Masquerading: File with Benign Extension (T1036.005)',
+    'c2_data_staging':            'C2 Payload Size Elevated — Data Staging Suspected',
+    'c2_communication':           'Active C2 Communication Confirmed',
+    'dns_beacon':                 'DNS Beacon Channel',
+    'suspicious_url_in_body':     'Suspicious URL in Email Body',
+    'edr_observation':            'EDR Observation (non-blocking)',
 }
 
 # ── MITRE technique display helpers ─────────────────────────────────────────
@@ -73,6 +86,11 @@ _MITRE_NAMES = {
     'T1133':     'External Remote Services',
     'T1048':     'Exfiltration Over Alternative Protocol',
     'T1102':     'Web Service (C2)',
+    'T1566.002': 'Phishing: Spearphishing Link',
+    'T1071.004': 'Application Layer Protocol: DNS',
+    'T1046':     'Network Service Discovery',
+    'T1021.003': 'DCOM Remote Services',
+    'T1021.004': 'SSH Remote Services',
     'T1095':     'Non-Application Layer Protocol',
 }
 
@@ -221,6 +239,13 @@ def _render_persona_section(payload: dict, persona: str) -> str:
                     or str(r.get('verdict') or '').lower() in ('malicious', 'suspicious', 'review', 'escalate')
                     or str(r.get('severity') or '').lower() in ('critical', 'high', 'medium'))
 
+    # Threat models (STRIDE, Diamond, MAESTRO, PASTA) from enrichment
+    threat_models = payload.get('threat_models') or {}
+    stride_summary = threat_models.get('stride_summary') or {}
+    diamond_model = threat_models.get('diamond_model') or {}
+    maestro_stages = threat_models.get('maestro_stages') or []
+    pasta_risks = threat_models.get('pasta_risk_matrix') or []
+
     BLOCK = 'margin-top:18px;padding:14px;background:#0c1520;border-left:4px solid {clr};border-radius:6px'
     HEAD  = 'color:{clr};font-size:15px;font-weight:600;margin-bottom:8px'
     SUB   = 'color:#9bb;font-size:11px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px'
@@ -232,10 +257,50 @@ def _render_persona_section(payload: dict, persona: str) -> str:
         secs.append(f'<div style="{HEAD.format(clr=clr)}">Executive Summary</div>')
         if n_flagged:
             secs.append(f'<p><strong>{n_flagged} of {n_rows} events</strong> require your attention. '
-                        f'{"High-confidence threats including C2 command-and-control beacons and malicious process execution were found." if any(f in all_factors for f in ("c2_beacon","suspicious_process")) else "Suspicious activity was detected across multiple data sources."}'
+                        f'{"High-confidence threats including C2 command-and-control beacons and malicious process execution were found." if any(f in all_factors for f in ("c2_beacon","suspicious_process","c2_communication")) else "Suspicious activity was detected across multiple data sources."}'
                         f' Immediate containment is recommended for impacted endpoints.</p>')
         else:
             secs.append(f'<p>No high-risk events detected in this batch of {n_rows} records. Routine security monitoring can continue.</p>')
+        # MAESTRO Mission Assessment (adversary intent)
+        if maestro_stages:
+            m_stage = next((s for s in maestro_stages if s.get('stage','').startswith('M')), None)
+            o_stage = next((s for s in maestro_stages if s.get('stage','').startswith('O')), None)
+            if m_stage and m_stage.get('detected'):
+                secs.append(f'<div style="padding:10px 14px;background:#0a1018;border:1px solid {clr};border-radius:4px;margin:8px 0">')
+                secs.append(f'<strong style="color:{clr}">Adversary Mission Assessment (MAESTRO):</strong> '
+                            f'{escape(m_stage.get("description",""))}')
+                if o_stage and o_stage.get('detected'):
+                    secs.append(f'<br><strong style="color:#e74c3c">Attack Status:</strong> '
+                                f'The attacker has NOT completed their objective. The observed window captures the beginning of an attack chain — containment window is narrowing.')
+                secs.append('</div>')
+        # Diamond Model — Blast Radius
+        if diamond_model.get('victims'):
+            secs.append(f'<div style="{SUB}">Blast Radius (Diamond Model)</div>')
+            secs.append('<table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:10px">')
+            secs.append('<thead><tr><th style="text-align:left;padding:3px 8px;border-bottom:1px solid #243144">Target</th>'
+                        '<th style="text-align:left;padding:3px 8px;border-bottom:1px solid #243144">Status</th>'
+                        '<th style="text-align:left;padding:3px 8px;border-bottom:1px solid #243144">Source</th></tr></thead><tbody>')
+            for v in diamond_model['victims'][:8]:
+                st_clr = '#e74c3c' if 'COMPROMISED' in v.get('status','') else '#f1c40f'
+                secs.append(f'<tr><td style="padding:3px 8px;border-bottom:1px solid #0e1722;font-family:monospace">{escape(str(v.get("identity","")))}</td>'
+                            f'<td style="padding:3px 8px;border-bottom:1px solid #0e1722;color:{st_clr}">{escape(v.get("status",""))}</td>'
+                            f'<td style="padding:3px 8px;border-bottom:1px solid #0e1722;color:#9bb">{escape(v.get("sheet",""))}</td></tr>')
+            secs.append('</tbody></table>')
+        # PASTA Business Risk Table
+        if pasta_risks:
+            secs.append(f'<div style="{SUB}">Business Risk (PASTA Stage 7)</div>')
+            secs.append('<table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:10px">')
+            secs.append('<thead><tr><th style="text-align:left;padding:3px 8px;border-bottom:1px solid #243144">Risk</th>'
+                        '<th style="text-align:center;padding:3px 8px;border-bottom:1px solid #243144">Likelihood</th>'
+                        '<th style="text-align:center;padding:3px 8px;border-bottom:1px solid #243144">Impact</th>'
+                        '<th style="text-align:right;padding:3px 8px;border-bottom:1px solid #243144">Score</th></tr></thead><tbody>')
+            for risk in pasta_risks[:6]:
+                score_clr = '#e74c3c' if risk.get('score',0) >= 8.0 else '#f1c40f'
+                secs.append(f'<tr><td style="padding:3px 8px;border-bottom:1px solid #0e1722">{escape(risk.get("risk",""))}</td>'
+                            f'<td style="padding:3px 8px;border-bottom:1px solid #0e1722;text-align:center">{escape(risk.get("likelihood",""))}</td>'
+                            f'<td style="padding:3px 8px;border-bottom:1px solid #0e1722;text-align:center">{escape(risk.get("impact",""))}</td>'
+                            f'<td style="padding:3px 8px;border-bottom:1px solid #0e1722;text-align:right;color:{score_clr};font-weight:600">{risk.get("score",0)}/10</td></tr>')
+            secs.append('</tbody></table>')
         # Business impact
         top_factors = list(all_factors.keys())[:3]
         if top_factors:
@@ -244,15 +309,21 @@ def _render_persona_section(payload: dict, persona: str) -> str:
             risk_map = {
                 'c2_beacon':          'Active command-and-control channel — attacker may have persistent access to your network.',
                 'c2_port':            'Traffic on known C2 port (443/8080) to external IP — potential data exfiltration or implant callback.',
+                'c2_communication':   'Active C2 communication confirmed — attacker has established persistent remote access.',
                 'external_connection':'External network connections detected to suspicious IPs — outbound traffic requires investigation.',
                 'suspicious_process': 'Malicious processes executed — potential malware infection on one or more endpoints.',
                 'malicious_process':  'Confirmed malicious process execution — immediate endpoint containment required.',
                 'process_execution':  'Process execution events detected — verify parent/child process ancestry for anomalies.',
                 'macro_lure':         'Phishing campaign via macro-enabled documents — credential theft or malware delivery likely attempted.',
                 'phishing_subject':   'Phishing email detected by subject line analysis — social engineering attack targeting staff.',
-                'smb_lateral_movement': 'Lateral movement across file shares — attacker may be traversing the internal network.',
-                'rdp_lateral_movement': 'Remote desktop lateral movement — attacker may be moving to higher-value systems.',
-                'wmi_lateral_movement': 'Remote execution via WMI — could indicate hands-on-keyboard attacker behaviour.',
+                'credential_harvest': 'Credential harvesting link detected — employee passwords may be compromised.',
+                'lateral_movement':   'Active lateral movement to internal hosts — attacker spreading through your network.',
+                'smb_lateral_movement': 'Lateral movement across file shares — attacker traversing the internal network.',
+                'rdp_lateral_movement': 'Remote desktop lateral movement — attacker moving to higher-value systems.',
+                'lateral_movement_tool': 'Offensive lateral movement tool detected (e.g. wmiexec) — hands-on-keyboard attacker activity.',
+                'smb_external':       'SMB connection to external IP — possible credential relay or file share exploitation.',
+                'dropper_file_write': 'Malicious file dropped secondary payload — multi-stage attack in progress.',
+                'c2_data_staging':    'C2 payload size increasing — possible data exfiltration in progress.',
                 'phishing_lure':      'Phishing email targeting staff — social engineering risk to credentials or data.',
                 'credential_access':  'Credential theft attempted — passwords or tokens may have been compromised.',
             }
@@ -275,6 +346,27 @@ def _render_persona_section(payload: dict, persona: str) -> str:
         clr = '#2ecc71'
         secs.append(f'<div style="{BLOCK.format(clr=clr)}">')
         secs.append(f'<div style="{HEAD.format(clr=clr)}">SOC Analyst — Triage & Response</div>')
+        # STRIDE Quick-Hits for SOC
+        if stride_summary:
+            _stride_soc_items = []
+            e_stride = stride_summary.get('E', {})
+            r_stride = stride_summary.get('R', {})
+            t_stride = stride_summary.get('T', {})
+            s_stride = stride_summary.get('S', {})
+            if e_stride.get('count', 0) > 0:
+                _stride_soc_items.append(('E — Privilege', 'Investigate all lateral movement tool sessions for admin credential usage'))
+            if r_stride.get('count', 0) > 0:
+                _stride_soc_items.append(('R — Repudiation', 'Enable auth logging NOW before any remediation — evidence will be lost'))
+            if t_stride.get('count', 0) > 0:
+                _stride_soc_items.append(('T — Tampering', 'Check if dropped files were subsequently executed — secondary payloads may be live'))
+            if s_stride.get('count', 0) > 0:
+                _stride_soc_items.append(('S — Spoofing', 'Verify sender identity via DKIM/SPF for all flagged emails'))
+            if _stride_soc_items:
+                secs.append(f'<div style="{SUB}">STRIDE Priority Actions</div>')
+                secs.append('<div style="padding:8px;background:#0a1a10;border:1px solid #2ecc71;border-radius:4px;margin-bottom:10px">')
+                for label, action in _stride_soc_items:
+                    secs.append(f'<div style="margin:4px 0"><strong style="color:#2ecc71">{escape(label)}:</strong> {escape(action)}</div>')
+                secs.append('</div>')
         # Factor frequency table
         if all_factors:
             secs.append(f'<div style="{SUB}">Detected Factors (frequency)</div>')
@@ -314,6 +406,40 @@ def _render_persona_section(payload: dict, persona: str) -> str:
         clr = '#e74c3c'
         secs.append(f'<div style="{BLOCK.format(clr=clr)}">')
         secs.append(f'<div style="{HEAD.format(clr=clr)}">Threat Hunter — Kill Chain & Hypotheses</div>')
+        # Diamond Model — Campaign Overview
+        if diamond_model.get('infrastructure') or diamond_model.get('capabilities'):
+            secs.append(f'<div style="{SUB}">Diamond Model — Campaign Overview</div>')
+            secs.append('<div style="padding:10px;background:#1a0a0a;border:1px solid #e74c3c;border-radius:4px;margin-bottom:10px">')
+            adv = diamond_model.get('adversary', {})
+            secs.append(f'<div style="margin-bottom:6px"><strong style="color:#e74c3c">Adversary:</strong> {escape(adv.get("profile","Unknown"))}</div>')
+            if diamond_model.get('infrastructure'):
+                secs.append('<div style="margin-bottom:4px"><strong style="color:#e74c3c">Infrastructure:</strong></div>')
+                secs.append('<div style="margin-left:14px;font-family:monospace;font-size:11px">')
+                for inf in diamond_model['infrastructure'][:6]:
+                    secs.append(f'{escape(str(inf.get("ip","")))}:{escape(str(inf.get("port","")))} — {escape(inf.get("role",""))} &nbsp; ')
+                secs.append('</div>')
+            if diamond_model.get('victims'):
+                secs.append(f'<div style="margin-top:4px"><strong style="color:#e74c3c">Victims:</strong> ')
+                secs.append(', '.join(f'{escape(str(v.get("identity","")))} ({escape(v.get("status",""))})' for v in diamond_model['victims'][:6]))
+                secs.append('</div>')
+            secs.append('</div>')
+        # MAESTRO Kill Chain Stage Coverage
+        if maestro_stages:
+            secs.append(f'<div style="{SUB}">MAESTRO Kill Chain Coverage</div>')
+            secs.append('<table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:10px">')
+            secs.append('<thead><tr><th style="text-align:left;padding:3px 8px;border-bottom:1px solid #243144">Stage</th>'
+                        '<th style="text-align:center;padding:3px 8px;border-bottom:1px solid #243144">Detected?</th>'
+                        '<th style="text-align:left;padding:3px 8px;border-bottom:1px solid #243144">Evidence</th>'
+                        '<th style="text-align:left;padding:3px 8px;border-bottom:1px solid #243144">Assessment</th></tr></thead><tbody>')
+            for ms in maestro_stages:
+                det_clr = '#2ecc71' if ms.get('detected') else '#555'
+                det_txt = 'YES' if ms.get('detected') else 'NOT SEEN'
+                ev_txt = ', '.join(ms.get('evidence_factors',[])[:3]) or '—'
+                secs.append(f'<tr><td style="padding:3px 8px;border-bottom:1px solid #0e1722;font-weight:600;color:{clr}">{escape(ms.get("stage",""))}</td>'
+                            f'<td style="padding:3px 8px;border-bottom:1px solid #0e1722;text-align:center;color:{det_clr}">{det_txt}</td>'
+                            f'<td style="padding:3px 8px;border-bottom:1px solid #0e1722;font-family:monospace;font-size:10px">{escape(ev_txt)}</td>'
+                            f'<td style="padding:3px 8px;border-bottom:1px solid #0e1722;color:#9bb">{escape(ms.get("description",""))}</td></tr>')
+            secs.append('</tbody></table>')
         # Kill chain stage inference
         stages = []
         if any(f in all_factors for f in ('macro_lure','phishing_link','phishing_lure','email_malicious_url','phishing_subject')):
@@ -355,6 +481,67 @@ def _render_persona_section(payload: dict, persona: str) -> str:
         clr = '#9b59b6'
         secs.append(f'<div style="{BLOCK.format(clr=clr)}">')
         secs.append(f'<div style="{HEAD.format(clr=clr)}">Compliance — Controls & Regulatory Obligations</div>')
+        # STRIDE → Control Domain Mapping
+        if stride_summary:
+            _stride_ctrl_map = [
+                ('S', 'Spoofing', 'Identity & Auth', 'ISO A.8.5 / NIST IA-2'),
+                ('T', 'Tampering', 'Integrity Controls', 'ISO A.8.15 / NIST SI-7'),
+                ('R', 'Repudiation', 'Audit & Logging', 'ISO A.8.15 / NIST AU-2'),
+                ('I', 'Info Disclosure', 'Data Protection', 'GDPR Art.5(1)(f) / NIST SC-28'),
+                ('D', 'Denial of Service', 'Availability', 'ISO A.8.6 / NIST CP-10'),
+                ('E', 'Elevation of Priv', 'Access Control', 'ISO A.8.3 / NIST AC-6'),
+            ]
+            secs.append(f'<div style="{SUB}">STRIDE → Control Domain Mapping</div>')
+            secs.append('<table style="width:100%;border-collapse:collapse;font-size:11px;margin-bottom:10px">')
+            secs.append('<thead><tr>'
+                        '<th style="text-align:left;padding:3px 6px;border-bottom:1px solid #243144">STRIDE</th>'
+                        '<th style="text-align:left;padding:3px 6px;border-bottom:1px solid #243144">Control Domain</th>'
+                        '<th style="text-align:center;padding:3px 6px;border-bottom:1px solid #243144">Status</th>'
+                        '<th style="text-align:left;padding:3px 6px;border-bottom:1px solid #243144">Framework</th>'
+                        '</tr></thead><tbody>')
+            for code, label, domain, fw in _stride_ctrl_map:
+                s = stride_summary.get(code, {})
+                status = s.get('status', 'NOT DETECTED')
+                st_clr = '#e74c3c' if status == 'CONFIRMED' else ('#f1c40f' if status == 'SUSPECTED' else '#555')
+                secs.append(f'<tr><td style="padding:3px 6px;border-bottom:1px solid #0e1722;font-weight:600;color:#c4b">{escape(code)} — {escape(label)}</td>'
+                            f'<td style="padding:3px 6px;border-bottom:1px solid #0e1722">{escape(domain)}</td>'
+                            f'<td style="padding:3px 6px;border-bottom:1px solid #0e1722;text-align:center;color:{st_clr}">{escape(status)}</td>'
+                            f'<td style="padding:3px 6px;border-bottom:1px solid #0e1722;font-family:monospace;font-size:10px">{escape(fw)}</td></tr>')
+            secs.append('</tbody></table>')
+        # GDPR warning — clock based on DISCOVERY time, not incident time
+        import datetime as _dt
+        _discovery_ts = _dt.datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')
+        _gdpr_triggered = any(f in all_factors for f in (
+            'credential_access', 'credential_harvest', 'phishing_lure', 'phishing_subject',
+            'macro_lure', 'c2_beacon', 'c2_communication', 'c2_data_staging',
+            'malicious_process', 'external_connection',
+        ))
+        if _gdpr_triggered:
+            secs.append('<div style="padding:10px 14px;background:#1a0a20;border:1px solid #9b59b6;border-radius:4px;margin-bottom:10px">')
+            secs.append(f'<strong style="color:#c4b">GDPR Art.33 — Breach Notification:</strong><br>')
+            secs.append(f'72-hour clock starts at <strong>discovery</strong> ({escape(_discovery_ts)}), NOT at the incident timestamp.<br>')
+            secs.append(f'PII in scope: employee email addresses confirmed in phishing/C2 data path.<br>')
+            secs.append(f'<strong>Notification: LIKELY REQUIRED</strong> — unless controller can demonstrate unlikely risk to individuals.')
+            secs.append('</div>')
+        # PASTA Risk Register (for board/audit committee)
+        if pasta_risks:
+            secs.append(f'<div style="{SUB}">PASTA Risk Register (Stage 7)</div>')
+            secs.append('<table style="width:100%;border-collapse:collapse;font-size:11px;margin-bottom:10px">')
+            secs.append('<thead><tr><th style="text-align:left;padding:3px 6px;border-bottom:1px solid #243144">Risk</th>'
+                        '<th style="text-align:left;padding:3px 6px;border-bottom:1px solid #243144">Control Gap</th>'
+                        '<th style="text-align:right;padding:3px 6px;border-bottom:1px solid #243144">Score</th></tr></thead><tbody>')
+            _pasta_gap_map = {
+                'Ransomware': 'EDR prevention mode OFF', 'domain compromise': 'Network segmentation absent',
+                'PII': 'No DLP / egress filtering', 'Credential': 'MFA not enforced',
+                'Regulatory': 'Notification pending', 'disruption': 'IR plan not tested',
+            }
+            for risk in pasta_risks[:6]:
+                gap = next((v for k, v in _pasta_gap_map.items() if k.lower() in risk.get('risk','').lower()), 'Review required')
+                score_clr = '#e74c3c' if risk.get('score',0) >= 8.0 else '#f1c40f'
+                secs.append(f'<tr><td style="padding:3px 6px;border-bottom:1px solid #0e1722">{escape(risk.get("risk",""))}</td>'
+                            f'<td style="padding:3px 6px;border-bottom:1px solid #0e1722;color:#9bb">{escape(gap)}</td>'
+                            f'<td style="padding:3px 6px;border-bottom:1px solid #0e1722;text-align:right;color:{score_clr};font-weight:600">{risk.get("score",0)}/10</td></tr>')
+            secs.append('</tbody></table>')
         # Framework mapping table
         if mitre_hits:
             fw_rows = []
@@ -380,12 +567,6 @@ def _render_persona_section(payload: dict, persona: str) -> str:
                                 f'<td style="padding:3px 6px;border-bottom:1px solid #0e1722;color:#c4b">{escape(fw.get("GDPR",""))}</td>'
                                 '</tr>')
                 secs.append('</tbody></table>')
-        # GDPR warning
-        if any(f in all_factors for f in ('credential_access','phishing_lure','macro_lure','c2_beacon')):
-            secs.append('<div style="padding:8px 12px;background:#1a0a20;border:1px solid #9b59b6;border-radius:4px;margin-bottom:10px">'
-                        '<strong style="color:#c4b">⚠ GDPR Notification Risk:</strong> Credential access or phishing targeting of users '
-                        'may constitute a personal data breach. Assess within 72 hours of confirming incident scope. '
-                        'Article 33 requires notification to the supervisory authority if risk to individuals cannot be ruled out.</div>')
         # Compliance next steps
         secs.append(f'<div style="{SUB}">Compliance Action Plan</div>')
         secs.append('<table style="width:100%;border-collapse:collapse;font-size:12px">')
@@ -401,6 +582,19 @@ def _render_persona_section(payload: dict, persona: str) -> str:
         clr = '#e67e22'
         secs.append(f'<div style="{BLOCK.format(clr=clr)}">')
         secs.append(f'<div style="{HEAD.format(clr=clr)}">Forensics — Artefact Collection & Investigation</div>')
+        # STRIDE Tamper/Repudiation flags for evidence integrity
+        _t_stride = stride_summary.get('T', {})
+        _r_stride = stride_summary.get('R', {})
+        if _t_stride.get('count', 0) > 0 or _r_stride.get('count', 0) > 0:
+            secs.append(f'<div style="padding:8px 12px;background:#1a120a;border:1px solid #e67e22;border-radius:4px;margin-bottom:10px">')
+            secs.append(f'<strong style="color:#e67e22">STRIDE Evidence Integrity Flags:</strong><br>')
+            if _t_stride.get('count', 0) > 0:
+                secs.append(f'<strong>T — Tampering ({_t_stride["count"]} events):</strong> File writes and payload modifications detected. '
+                            f'Preserve all dropped files BEFORE remediation — hash doc.doc and secondary payloads on disk.<br>')
+            if _r_stride.get('count', 0) > 0:
+                secs.append(f'<strong>R — Repudiation ({_r_stride["count"]} events):</strong> WMI interactive sessions suppress audit logging. '
+                            f'Check for Event 4688 gaps; enable command-line process auditing before system restart.')
+            secs.append('</div>')
         # IOC table
         hosts_seen, ips_seen, hashes_seen, processes_seen = set(), set(), set(), set()
         for r in rows:
@@ -559,7 +753,8 @@ def build_report_html(payload):
             sev_color = _SEV_COLORS.get(sev, '#555')
             identifier = (r.get('process') or r.get('process_name') or r.get('path') or
                           r.get('file_path') or r.get('src_ip') or r.get('host') or
-                          r.get('from') or r.get('event_id') or 'unknown')
+                          r.get('subject') or r.get('from') or r.get('to') or
+                          r.get('event_id') or 'unknown')
             factors_list = r.get('factors') or []
             factor_names = [f.get('name') if isinstance(f, dict) else str(f) for f in factors_list[:5]]
             factor_html = ' '.join(f'<span style="display:inline-block;padding:1px 6px;border-radius:10px;font-size:10px;background:#1a2030;color:#9bb;margin:1px">{escape(fn)}</span>'
