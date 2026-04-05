@@ -1009,6 +1009,8 @@ async def tenable_config(request: Request) -> dict[str, Any]:
         from integrations.tenable_client import CLIENT as TENABLE
         res = await TENABLE.config(body or {})
         return {'name': 'tenable', **res}
+    except ImportError:
+        raise HTTPException(status_code=503, detail='tenable_client_not_installed')
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -1018,6 +1020,8 @@ async def tenable_status() -> dict[str, Any]:
     try:
         from integrations.tenable_client import CLIENT as TENABLE
         return TENABLE.status()
+    except ImportError:
+        return {'name': 'tenable', 'connected': False, 'error': 'tenable_client_not_installed'}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -1029,6 +1033,8 @@ async def tenable_sync() -> dict[str, Any]:
         if not TENABLE.enabled:
             return {'synced': False, 'error': 'tenable_not_configured'}
         return await TENABLE.sync()
+    except ImportError:
+        return {'synced': False, 'error': 'tenable_client_not_installed'}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -1043,6 +1049,8 @@ async def qualys_config(request: Request) -> dict[str, Any]:
         from integrations.qualys_client import CLIENT as QUALYS
         res = await QUALYS.config(body or {})
         return {'name': 'qualys', **res}
+    except ImportError:
+        raise HTTPException(status_code=503, detail='qualys_client_not_installed')
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -1052,6 +1060,8 @@ async def qualys_status() -> dict[str, Any]:
     try:
         from integrations.qualys_client import CLIENT as QUALYS
         return QUALYS.status()
+    except ImportError:
+        return {'name': 'qualys', 'connected': False, 'error': 'qualys_client_not_installed'}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -1063,6 +1073,8 @@ async def qualys_sync() -> dict[str, Any]:
         if not QUALYS.enabled:
             return {'synced': False, 'error': 'qualys_not_configured'}
         return await QUALYS.sync()
+    except ImportError:
+        return {'synced': False, 'error': 'qualys_client_not_installed'}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -1739,6 +1751,8 @@ async def misp_sync() -> dict[str, Any]:
         if not MISP.enabled:
             return {'synced': False, 'error': 'misp_not_configured'}
         return await MISP.sync()
+    except ImportError:
+        return {'synced': False, 'error': 'misp_client_not_installed'}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -1750,6 +1764,8 @@ async def opencti_sync() -> dict[str, Any]:
         if not OCTI.enabled:
             return {'synced': False, 'error': 'opencti_not_configured'}
         return await OCTI.sync()
+    except ImportError:
+        return {'synced': False, 'error': 'opencti_client_not_installed'}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

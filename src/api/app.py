@@ -4868,6 +4868,20 @@ def register_core_routers(full: bool = True):
             _register_lite_incident_routes()
         except Exception:
             logger.debug('lite_incident_routes registration failed', exc_info=True)
+        # Include AWS/Azure/CloudTrail push-ingest routers in lite mode
+        for _ingest_mod, _ingest_attr in [
+            ('src.api.connectors_aws', 'router'),
+            ('src.api.connectors_azure', 'router'),
+            ('src.api.connectors_cloudtrail', 'router'),
+        ]:
+            try:
+                import importlib as _il
+                _m = _il.import_module(_ingest_mod)
+                _r = getattr(_m, _ingest_attr, None)
+                if _r is not None:
+                    app.include_router(_r)
+            except Exception as _e:
+                logger.debug('Lite-mode ingest router %s include failed: %s', _ingest_mod, _e)
         _prioritize_lite_events_route()
         return
     # Full set (best-effort, each guarded)
@@ -4913,6 +4927,8 @@ def register_core_routers(full: bool = True):
         ('connectivity_smoke', 'connectivity_smoke_router'),
         ('ingest_cloudtrail', 'connectors_cloudtrail_router'),
         ('ingest_siem', 'connectors_siem_router'),
+        ('ingest_aws', 'connectors_aws_router'),
+        ('ingest_azure', 'connectors_azure_router'),
         ('ingest_sysmon_wef', 'connectors_sysmon_router'),
         ('iam', 'iam_router'),
         ('iam_admin', 'iam_admin_router'),
@@ -5007,6 +5023,20 @@ def register_core_routers(full: bool = True):
                     from src.api.connectors_siem import router as connectors_siem_router
                     globals()['connectors_siem_router'] = connectors_siem_router
                     robj = connectors_siem_router
+                except Exception:
+                    robj = None
+            if robj is None and router_obj == 'connectors_aws_router':
+                try:
+                    from src.api.connectors_aws import router as connectors_aws_router
+                    globals()['connectors_aws_router'] = connectors_aws_router
+                    robj = connectors_aws_router
+                except Exception:
+                    robj = None
+            if robj is None and router_obj == 'connectors_azure_router':
+                try:
+                    from src.api.connectors_azure import router as connectors_azure_router
+                    globals()['connectors_azure_router'] = connectors_azure_router
+                    robj = connectors_azure_router
                 except Exception:
                     robj = None
             if robj is not None:
