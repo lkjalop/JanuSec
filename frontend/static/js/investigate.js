@@ -28,6 +28,7 @@
     activeFilter: 'all',
     sortCol: 'triage_score',
     sortDir: 'desc',
+    _gateApproved: false, // human-gate: set true after analyst approves escalation personas
   };
 
   // ── DOM refs ─────────────────────────────────────────────────────────────
@@ -328,15 +329,54 @@
 
   $('btnAddMore').addEventListener('click', function () { fileInput.click(); });
 
+  // Personas requiring human-gate approval before reports are generated
+  var GATED_PERSONAS = ['ciso', 'executive', 'audit'];
+
+  // Analyst approves the gate — POSTs to backend and unlocks gated persona chips
+  function approveHumanGate() {
+    var aid = state.assessmentId;
+    if (!aid) { toast('Run analysis first before approving gate', 'error'); return; }
+    fetch('/api/v1/assessments/' + encodeURIComponent(aid) + '/gate', {
+      method: 'POST',
+      headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders()),
+      body: JSON.stringify({
+        gate_verdict: 'approve',
+        reviewer_tag: 'analyst',
+        notes: 'Approved from investigation console',
+        gate_personas: GATED_PERSONAS,
+      }),
+    }).then(function (r) { return r.json(); }).then(function (d) {
+      if (d.ok) {
+        state._gateApproved = true;
+        toast('Gate approved — CISO, Executive, and Audit reports are now unlocked', 'success');
+        renderPersonaChips();
+      } else {
+        toast('Gate approval failed: ' + (d.detail || 'unknown error'), 'error');
+      }
+    }).catch(function () {
+      toast('Gate approval failed — server error', 'error');
+    });
+  }
+
   // ── Persona chip rendering ───────────────────────────────────────────────
   function renderPersonaChips() {
     var container = $('personaChips');
     container.innerHTML = '';
     PERSONAS.forEach(function (p) {
       var chip = document.createElement('button');
+      var isGated = GATED_PERSONAS.indexOf(p) >= 0;
+      var isApproved = state._gateApproved;
+      var lockIcon = (isGated && !isApproved) ? ' 🔒' : '';
       chip.className = 'persona-chip' + (p === state.currentPersona ? ' active' : '');
-      chip.textContent = PERSONA_LABELS[p];
+      chip.textContent = PERSONA_LABELS[p] + lockIcon;
+      chip.title = (isGated && !isApproved)
+        ? 'Human review gate required — click Approve Gate below to unlock this persona report'
+        : '';
       chip.addEventListener('click', function () {
+        if (isGated && !isApproved) {
+          toast('Gate required: complete analyst review and click "Approve Gate" before generating ' + PERSONA_LABELS[p] + ' reports.', 'error');
+          return;
+        }
         state.currentPersona = p;
         $('personaSelect').value = p;
         renderPersonaChips();
@@ -344,6 +384,20 @@
       });
       container.appendChild(chip);
     });
+    // Gate approval button — appears once an assessment exists
+    if (state.assessmentId) {
+      var gateBtn = document.createElement('button');
+      gateBtn.id = 'btnApproveGate';
+      gateBtn.className = 'btn-secondary' + (state._gateApproved ? ' btn-secondary--active' : '');
+      gateBtn.style.cssText = 'margin-left:8px;font-size:11px;padding:4px 10px;';
+      gateBtn.textContent = state._gateApproved ? '✓ Gate Approved' : '🔓 Approve Gate';
+      gateBtn.title = 'Certify that you have reviewed the triage findings — unlocks CISO, Executive, and Audit persona reports';
+      gateBtn.addEventListener('click', function () {
+        if (state._gateApproved) return;
+        approveHumanGate();
+      });
+      container.appendChild(gateBtn);
+    }
   }
 
   $('personaSelect').addEventListener('change', function () {
@@ -926,6 +980,173 @@
   }
 
   // ── Detail panel ─────────────────────────────────────────────────────────
+  // Dimension metadata: label, evidence description, confirm-logs, deny-logs, playbook per persona-group
+  var BREAKDOWN_META = {
+    dread: {
+      label: 'Threat Severity (DREAD)',
+      desc: 'Composite of Damage Potential, Reproducibility, Exploitability, Affected Scope, and Discoverability. High score means the technique is well-understood, easy to repeat, and impacts many users.',
+      confirm: 'EDR process tree · AV/NDR alert feed · VirusTotal hash submission · Endpoint sysmon EventID 1/3',
+      deny: 'Patch management records (verify vuln is patched) · Application allow-list entries · Admin scheduled-task logs',
+      playbook: {
+        soc: 'P1 SLA: isolate affected host(s) before any remediation. Open incident ticket with triage_score and DREAD value attached. Do not reboot — volatile memory contains live attacker artefacts.',
+        hunter: 'Pivot to ATT&CK Execution/Persistence sub-techniques. Scan all endpoints sharing the same parent process, user, or destination IP. Check LOLBAS for the process name.',
+        forensics: 'Capture memory dump (winpmem/volatility3) and full PCAP NOW — before containment. Each DREAD sub-dimension maps to a separate forensic artefact; log them individually.',
+        compliance: 'High DREAD satisfies the "serious harm" test under NDB Scheme s.26WB. Start notification clock. Review whether APRA CPS 234 §36 material incident threshold is met.',
+      },
+    },
+    correlation: {
+      label: 'Campaign Correlation',
+      desc: 'How many other events in this session share the same entity, actor, or infrastructure. High score means this is part of a coordinated, multi-event attack rather than an isolated alert.',
+      confirm: 'DNS/proxy logs for same source IP across the full time window · SIEM query: same user or host across all indexes · Zeek conn.log for repeated outbound pattern',
+      deny: 'Legitimate scheduled task / backup job logs · Helpdesk records for admin work on those systems · Deployment pipeline logs (CI/CD artifact pushes)',
+      playbook: {
+        soc: 'Search SIEM for all events sharing the correlated pivot (IP/user/domain). Scope the blast radius. Alert: do not dismiss other events in this session — they are the same incident.',
+        hunter: 'Build a kill-chain timeline across all correlated events. Use the shared pivot as the hunt root. Lateral movement to adjacent subnets is the most probable next phase.',
+        forensics: 'Chain-of-custody must span ALL correlated events. Document each artefact separately but link under one root-cause finding. ISO 19011 §6.5.4 requires chronological continuity.',
+        compliance: 'Multiple correlated events increase the count of affected data subjects — the key NDB Scheme determinant. Aggregate all correlated events in the notification scope assessment.',
+      },
+    },
+    density: {
+      label: 'Attack Complexity (Factor Density)',
+      desc: 'How many distinct threat behaviors (factors) appear in one event. High score means complex, multi-technique activity — often a sign of hands-on-keyboard or toolkit-driven intrusion.',
+      confirm: 'Full PCAP around the event timestamp · Parent process tree (sysmon EventID 1+13) · Registry snapshot (Autoruns or sysmon EventID 13) · Scheduled task export (schtasks /query)',
+      deny: 'Application crash/test logs · Developer workstation exception reports · Anti-malware scan showing clean result on the same hash',
+      playbook: {
+        soc: 'Escalate to Tier 2 immediately — multi-technique events are not handled safely by single-analyst triage. Do not attempt to remediate individual factors without the full kill-chain picture.',
+        hunter: 'High density suggests automated toolkit (Cobalt Strike, Sliver, Havoc, Brute Ratel). Run YARA rules for C2 framework beacon signatures. Check beacon intervals in Zeek conn.log or Suricata.',
+        forensics: 'Each factor = a separate forensic artefact requiring separate provenance documentation. Do not combine them into a single exhibit — it obscures the attack sequence in legal/regulatory review.',
+        compliance: 'Multiple distinct control failures in one event = multiple separate ISO 27001 Annex A Major Nonconformities. Document each individually — grouping understates audit scope.',
+      },
+    },
+    confidence: {
+      label: 'Detection Confidence',
+      desc: 'How certain the detection model is in its verdict. Low score means the evidence is partial or ambiguous — human validation is required before any containment action.',
+      confirm: 'Raw event re-parse with manual analyst review · Second-source corroboration (e.g., network + endpoint for the same event) · Threat intel feed query on the entity',
+      deny: 'Nothing — low confidence means validate first; do not dismiss without a documented reason. Check known-good baseline for the same entity.',
+      playbook: {
+        soc: 'Do NOT contain based on low-confidence alerts alone. Pull the raw event and manually confirm process lineage and network destination before any host isolation or IP block.',
+        hunter: 'Run hypothesis queries below before generating more alerts from this event. Low confidence means the technique is not yet confirmed — validate IOCs via VirusTotal and ANY.RUN sandbox.',
+        forensics: 'Capture evidence passively but do not apply remediation labels. Document the confidence limitation in the workpaper — ISO 19011 §6.4.5: evidence must be verifiable.',
+        compliance: 'Low confidence does not reset the notification clock. Document the confidence level in the preliminary assessment and submit with a "best endeavours" qualifier to the regulator.',
+      },
+    },
+    rarity: {
+      label: 'Behavioral Rarity',
+      desc: 'How unusual this behavior is versus the established baseline. High score means first-seen activity with no prior precedent — potential zero-day, supply-chain compromise, or novel technique.',
+      confirm: 'Threat intel feed query for the entity/hash/domain · MITRE ATT&CK search for technique sub-variants · EDR baseline comparison for the same host over last 30 days · ANY.RUN or Hybrid Analysis sandbox',
+      deny: 'Admin change log (new software deployment, patch rollout) · User change log (role change, new device) · Asset inventory (new system recently provisioned)',
+      playbook: {
+        soc: 'Flag for threat intelligence escalation — possible zero-day indicator. Do not dismiss as FP without written justification and second-analyst sign-off. Check VirusTotal for the process hash.',
+        hunter: 'Cross-reference MITRE ATT&CK for novel technique categories. Generate a specific IoC set (hash, domain, IP) for threat intel enrichment and proactive hunting across other tenants.',
+        forensics: 'Preserve the full binary sample for sandbox analysis. First-seen behavior may constitute unique evidence in prosecution or regulatory review — chain-of-custody is critical here.',
+        compliance: 'First-seen activity that cannot be explained by authorised admin action satisfies the NDB Scheme eligible breach threshold. Precautionary notification + provisional risk assessment recommended.',
+      },
+    },
+  };
+
+  var PERSONA_TO_PLAYBOOK_KEY = {
+    soc_analyst: 'soc', threat_hunter: 'hunter', forensics: 'forensics',
+    compliance: 'compliance', audit: 'compliance', ciso: 'compliance',
+    executive: 'soc', mssp: 'soc',
+  };
+
+  function buildBreakdownSection(row) {
+    var bd = (row.raw && row.raw._triage_breakdown) || null;
+    // Derive from local signals if server breakdown unavailable
+    if (!bd) {
+      var sevMap = { critical: 0.9, high: 0.7, medium: 0.45, low: 0.2 };
+      var dreadEst = sevMap[row.severity] || 0.3;
+      var corrEst = row.type === 'correlated' ? 0.75 : 0.15;
+      var factors = (row.raw && (row.raw.factors || (row.raw._factors))) || [];
+      var densEst = Math.min(1.0, (Array.isArray(factors) ? factors.length : 0) / 6);
+      bd = { dread: dreadEst, correlation: corrEst, density: densEst, confidence: 0.4, rarity: 0.2 };
+    }
+    var dims = ['dread', 'correlation', 'density', 'confidence', 'rarity'];
+    var BAR_COLORS = { dread: '#E54848', correlation: '#FF8A3C', density: '#E0C446', confidence: '#3FA860', rarity: '#5b9bd5' };
+    var topDim = dims.reduce(function (a, b) { return (bd[a] || 0) >= (bd[b] || 0) ? a : b; });
+    var pkKey = PERSONA_TO_PLAYBOOK_KEY[state.currentPersona] || 'soc';
+    var meta = BREAKDOWN_META[topDim] || BREAKDOWN_META.dread;
+
+    var barsHtml = dims.map(function (d) {
+      var val = Math.max(0, Math.min(1, bd[d] || 0));
+      var pct = Math.round(val * 100);
+      var col = BAR_COLORS[d];
+      var m = BREAKDOWN_META[d] || {};
+      return '<div style="margin:4px 0;">' +
+        '<div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:2px;">' +
+        '<span style="color:var(--text-secondary);">' + escHtml(m.label || d) + '</span>' +
+        '<span style="font-weight:600;color:' + col + ';">' + pct + '%</span>' +
+        '</div>' +
+        '<div style="height:6px;border-radius:3px;background:var(--bg-tertiary,#1e2a3a);overflow:hidden;">' +
+        '<div style="height:100%;width:' + pct + '%;background:' + col + ';border-radius:3px;transition:width .4s"></div>' +
+        '</div></div>';
+    }).join('');
+
+    // Per-dimension evidence analysis detail (collapsed)
+    var dimDetailHtml = dims.map(function (d) {
+      var val = Math.round((bd[d] || 0) * 100);
+      var m = BREAKDOWN_META[d] || {};
+      return '<div style="margin-top:8px;padding:8px;background:var(--bg-tertiary,#1e2a3a);border-radius:4px;font-size:11px;">' +
+        '<strong style="color:' + BAR_COLORS[d] + ';">' + escHtml(m.label || d) + ' — ' + val + '%</strong>' +
+        '<p style="margin:4px 0 2px;color:var(--text-secondary);">' + escHtml(m.desc || '') + '</p>' +
+        '<p style="margin:2px 0;"><span style="color:#3FA860;">✓ Confirm with:</span> ' + escHtml(m.confirm || '—') + '</p>' +
+        '<p style="margin:2px 0 0;"><span style="color:#E54848;">✗ Deny with:</span> ' + escHtml(m.deny || '—') + '</p>' +
+        '</div>';
+    }).join('');
+
+    var playbookSteps = meta.playbook || {};
+    var playbookHtml = Object.keys(playbookSteps).map(function (role) {
+      var roleLabel = { soc: 'SOC Analyst', hunter: 'Threat Hunter', forensics: 'Forensics', compliance: 'Compliance/Audit' }[role] || role;
+      var isActive = role === pkKey;
+      return '<div style="margin:4px 0;padding:6px 8px;border-left:3px solid ' + (isActive ? BAR_COLORS[topDim] : 'var(--border)') + ';' +
+        (isActive ? 'background:var(--bg-tertiary,#1e2a3a);' : 'opacity:.65;') + 'border-radius:0 4px 4px 0;font-size:11px;">' +
+        '<strong>' + escHtml(roleLabel) + ':</strong> ' + escHtml(playbookSteps[role]) +
+        '</div>';
+    }).join('');
+
+    return '<div class="report-section">' +
+      '<div class="report-section__title">Score Breakdown — Top driver: ' + escHtml(meta.label) + '</div>' +
+      '<div class="report-section__body">' +
+      barsHtml +
+      '<details style="margin-top:8px;font-size:11px;">' +
+      '<summary style="cursor:pointer;color:var(--text-muted);font-weight:500;">Evidence Analysis — per dimension (expand)</summary>' +
+      dimDetailHtml +
+      '</details>' +
+      '<div style="margin-top:10px;"><strong style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);">Next Steps by Role</strong>' +
+      playbookHtml + '</div>' +
+      '</div></div>';
+  }
+
+  function buildRagNeighboursSection(row) {
+    var rag = (row.raw && row.raw.rag_context) || null;
+    if (!rag || !rag.rag_available) return '';
+    var neighbours = rag.neighbours || [];
+    if (!neighbours.length && !rag.summary_hint) return '';
+    var html = '<div class="report-section"><div class="report-section__title">Similar Prior Events (TemporalRAG)</div><div class="report-section__body">';
+    if (rag.summary_hint) {
+      html += '<p style="font-size:12px;color:var(--text-secondary);margin:0 0 8px;">' + escHtml(rag.summary_hint) + '</p>';
+    }
+    if (neighbours.length) {
+      html += '<table style="width:100%;font-size:11px;border-collapse:collapse;">' +
+        '<thead><tr style="color:var(--text-muted);text-align:left;">' +
+        '<th style="padding:3px 6px;">Rank</th><th style="padding:3px 6px;">Score</th><th style="padding:3px 6px;">Time Delta</th><th style="padding:3px 6px;">Entity / Description</th>' +
+        '</tr></thead><tbody>';
+      neighbours.slice(0, 6).forEach(function (n, i) {
+        var ts = n.ts ? new Date(n.ts * 1000).toISOString().slice(0, 16).replace('T', ' ') : '—';
+        var desc = n.text ? n.text.slice(0, 80) : (n.entity || '—');
+        html += '<tr style="border-top:1px solid var(--border);">' +
+          '<td style="padding:3px 6px;color:var(--text-muted);">#' + (i + 1) + '</td>' +
+          '<td style="padding:3px 6px;font-weight:600;">' + (n.score ? n.score.toFixed(3) : '—') + '</td>' +
+          '<td style="padding:3px 6px;">' + escHtml(ts) + '</td>' +
+          '<td style="padding:3px 6px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escHtml(n.text || '') + '">' + escHtml(desc) + '</td>' +
+          '</tr>';
+      });
+      html += '</tbody></table>';
+    }
+    html += '</div></div>';
+    return html;
+  }
+
   function showDetail(row) {
     var panel = $('detailPanel');
     panel.classList.remove('detail-panel--hidden');
@@ -945,6 +1166,12 @@
     html += '<p><b>Triage Score:</b> <span style="color:' + scoreColor(row.triage_score) + ';font-weight:600;">' + row.triage_score.toFixed(2) + '</span></p>';
     html += '</div></div>';
 
+    // Score breakdown accordion with evidence analysis and role playbook
+    html += buildBreakdownSection(row);
+
+    // TemporalRAG neighbours from pipeline
+    html += buildRagNeighboursSection(row);
+
     // LLM summary if available
     if (row._llmSummary) {
       var llm = row._llmSummary;
@@ -961,17 +1188,17 @@
     html += '<pre style="margin-top:8px;white-space:pre-wrap;word-break:break-all;color:var(--text-secondary);font-size:11px;max-height:300px;overflow:auto;background:var(--bg-tertiary);padding:10px;border-radius:var(--radius-sm);">' + escHtml(JSON.stringify(row.raw, null, 2)) + '</pre>';
     html += '</details>';
 
-    // Quick actions
+    // Wired action buttons
     html += '<div class="mt-3" style="display:flex;gap:6px;flex-wrap:wrap;">';
-    html += '<button class="btn-secondary" onclick="toast(\'Marked as FP\',\'success\')"><i data-lucide="check-circle" style="width:12px;height:12px;"></i> Mark FP</button>';
-    html += '<button class="btn-secondary" onclick="toast(\'Escalated\',\'success\')"><i data-lucide="alert-triangle" style="width:12px;height:12px;"></i> Escalate</button>';
-    html += '<button class="btn-secondary" onclick="toast(\'Incident created\',\'success\')"><i data-lucide="siren" style="width:12px;height:12px;"></i> Create Incident</button>';
+    html += '<button class="btn-secondary" id="btnDetailFP" data-idx="' + row.row_index + '"><i data-lucide="check-circle" style="width:12px;height:12px;"></i> Mark FP</button>';
+    html += '<button class="btn-secondary" id="btnDetailEscalate" data-idx="' + row.row_index + '"><i data-lucide="alert-triangle" style="width:12px;height:12px;"></i> Escalate</button>';
+    html += '<button class="btn-secondary" id="btnDetailIncident" data-idx="' + row.row_index + '"><i data-lucide="siren" style="width:12px;height:12px;"></i> Create Incident</button>';
     html += '</div>';
 
     $('detailBody').innerHTML = html;
     if (window.lucide) lucide.createIcons();
 
-    // Wire the T1 button in detail panel
+    // Wire T1 summary button
     var llmBtn = document.getElementById('btnDetailLLM');
     if (llmBtn) {
       llmBtn.addEventListener('click', function () {
@@ -979,9 +1206,87 @@
       });
     }
 
-    // Highlight the selected row in the table
+    // Mark FP → PUT review status=dismissed
+    var fpBtn = document.getElementById('btnDetailFP');
+    if (fpBtn) {
+      fpBtn.addEventListener('click', function () {
+        var idx = parseInt(fpBtn.getAttribute('data-idx'), 10);
+        rowReviewAction(idx, 'dismissed', 'analyst').then(function () {
+          toast('Row #' + idx + ' marked as False Positive', 'success');
+          fpBtn.disabled = true;
+          fpBtn.textContent = 'Marked FP';
+        }).catch(function () { toast('Could not save FP — check assessment ID', 'error'); });
+      });
+    }
+
+    // Escalate → PUT review status=escalated
+    var escBtn = document.getElementById('btnDetailEscalate');
+    if (escBtn) {
+      escBtn.addEventListener('click', function () {
+        var idx = parseInt(escBtn.getAttribute('data-idx'), 10);
+        rowReviewAction(idx, 'escalated', 'analyst').then(function () {
+          toast('Row #' + idx + ' escalated to Tier 2', 'success');
+          escBtn.disabled = true;
+          escBtn.textContent = 'Escalated';
+        }).catch(function () { toast('Escalation failed — check assessment ID', 'error'); });
+      });
+    }
+
+    // Create Incident → POST /api/v1/incidents
+    var incBtn = document.getElementById('btnDetailIncident');
+    if (incBtn) {
+      incBtn.addEventListener('click', function () {
+        var idx = parseInt(incBtn.getAttribute('data-idx'), 10);
+        createIncidentFromRow(row, idx, incBtn);
+      });
+    }
+
+    // Highlight selected row in table
     document.querySelectorAll('#evidenceBody tr').forEach(function (tr) {
       tr.classList.toggle('selected', tr.getAttribute('data-idx') === String(row.row_index));
+    });
+  }
+
+  // Send row review status to the backend
+  function rowReviewAction(rowIndex, status, reviewerTag) {
+    var aid = state.assessmentId;
+    if (!aid) return Promise.reject(new Error('no_assessment_id'));
+    return fetch('/api/v1/assessments/' + encodeURIComponent(aid) + '/rows/' + rowIndex + '/review', {
+      method: 'POST',
+      headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders()),
+      body: JSON.stringify({ status: status, reviewer_tag: reviewerTag || 'analyst', notes: '' }),
+    }).then(function (r) {
+      if (!r.ok) throw new Error('http_' + r.status);
+      return r.json();
+    });
+  }
+
+  // Create incident from a detail-panel row
+  function createIncidentFromRow(row, rowIndex, btn) {
+    var raw = row.raw || {};
+    var payload = {
+      event_id: raw.event_id || ('row-' + rowIndex),
+      host: raw.host || raw.hostname || raw.computer || row.entity || 'unknown',
+      user: raw.user || raw.username || 'unknown',
+      severity: row.severity || 'high',
+      description: row.description || 'Escalated from investigation console — row #' + rowIndex,
+      generated_persona: state.currentPersona || 'soc_analyst',
+      assessment_id: state.assessmentId || null,
+      triage_score: row.triage_score,
+    };
+    if (btn) { btn.disabled = true; btn.textContent = 'Creating…'; }
+    fetch('/api/v1/incidents', {
+      method: 'POST',
+      headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders()),
+      body: JSON.stringify(payload),
+    }).then(function (r) { return r.json(); }).then(function (d) {
+      toast('Incident ' + (d.incident_id || d.id || 'created') + ' — row #' + rowIndex, 'success');
+      if (btn) { btn.textContent = 'Incident Created'; }
+      // Also mark row as escalated in the review store
+      rowReviewAction(rowIndex, 'escalated', 'analyst').catch(function () {});
+    }).catch(function () {
+      toast('Incident creation failed — server error', 'error');
+      if (btn) { btn.disabled = false; btn.textContent = 'Create Incident'; }
     });
   }
 

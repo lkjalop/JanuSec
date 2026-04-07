@@ -4838,3 +4838,107 @@ async def update_row_review(assessment_id: str, row_index: int, payload: dict | 
     except Exception:
         pass
     return JSONResponse({'ok': True, 'assessment_id': assessment_id, 'row_index': row_index, 'review': reviews[str(row_index)]})
+
+
+@router.post('/{assessment_id}/gate', summary='Human-gate: analyst sign-off before CISO/Exec/Audit reports')
+async def gate_assessment_for_escalation(assessment_id: str, request: Request):
+    """Analyst certifies that the triage findings are human-reviewed before escalation reports
+    (CISO, Executive, Audit) are generated.
+
+    This gate satisfies:
+    - ISO 27001 A.16.1.4 (human assessment of security events before formal reporting)
+    - GDPR Art.33 (reasoned human decision before mandatory notification)
+    - APRA CPS 234 §36 (material incident assessment by responsible officer)
+    - NDB Scheme s.26WB (eligible data breach declared by responsible individual)
+
+    Payload: { reviewer_tag: str, notes: str, gate_verdict: 'approve'|'reject'|'conditional',
+               gate_personas: ['ciso','executive','audit'] (optional, defaults to all 3) }
+    Returns: { ok, gate_id, gate_ts, gate_verdict, gate_personas, assessment_id }
+    """
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+
+    verdict = str(payload.get('gate_verdict') or 'approve').lower()
+    if verdict not in ('approve', 'reject', 'conditional'):
+        return JSONResponse({'detail': 'invalid_gate_verdict — must be approve|reject|conditional'}, status_code=400)
+
+    reviewer_tag = str(payload.get('reviewer_tag') or payload.get('reviewer_role') or 'analyst')[:64]
+    notes = str(payload.get('notes') or '')[:2000]
+    # Personas that this gate covers; default to the three highest-consequence consumers
+    gate_personas = payload.get('gate_personas') or ['ciso', 'executive', 'audit']
+    if not isinstance(gate_personas, list):
+        gate_personas = ['ciso', 'executive', 'audit']
+    gate_personas = [str(p)[:32] for p in gate_personas[:8]]
+
+    in_mem = REPORT_STORE.get(assessment_id) or {}
+    assessment = _load_assessment_from_disk(assessment_id, in_mem.get('persisted_path')) or in_mem
+    if not assessment:
+        return JSONResponse({'detail': 'not_found'}, status_code=404)
+
+    gate_id = hashlib.sha256(
+        f"{assessment_id}:{reviewer_tag}:{int(time.time())}".encode()
+    ).hexdigest()[:16]
+    gate_record = {
+        'gate_id': gate_id,
+        'gate_ts': int(time.time()),
+        'gate_verdict': verdict,
+        'gate_personas': gate_personas,
+        'reviewer_tag': reviewer_tag,
+        'notes': notes,
+        # Snapshot of triage state at gate time for audit trail
+        'gated_malicious_count': assessment.get('malicious_count') or 0,
+        'gated_row_count': len(assessment.get('rows') or []),
+    }
+    existing_gates = assessment.get('_human_gates') or []
+    if not isinstance(existing_gates, list):
+        existing_gates = []
+    existing_gates.append(gate_record)
+    assessment['_human_gates'] = existing_gates
+    assessment['_latest_gate'] = gate_record
+    REPORT_STORE[assessment_id] = {**in_mem, **assessment}
+
+    # Persist best-effort
+    try:
+        path = assessment.get('persisted_path')
+        if path:
+            with open(path + '.tmp', 'w', encoding='utf-8') as fh:
+                fh.write(json.dumps(assessment, default=str))
+            os.replace(path + '.tmp', path)
+    except Exception:
+        pass
+
+    return JSONResponse({
+        'ok': True,
+        'gate_id': gate_id,
+        'gate_ts': gate_record['gate_ts'],
+        'gate_verdict': verdict,
+        'gate_personas': gate_personas,
+        'assessment_id': assessment_id,
+        'message': (
+            f"Gate APPROVED — {len(gate_personas)} persona reports unlocked for {reviewer_tag}"
+            if verdict == 'approve' else
+            f"Gate REJECTED — escalation reports blocked pending further investigation"
+            if verdict == 'reject' else
+            f"Gate CONDITIONAL — reports generated with analyst caveat from {reviewer_tag}"
+        ),
+    })
+
+
+@router.get('/{assessment_id}/gate', summary='Check human-gate status for an assessment')
+async def get_gate_status(assessment_id: str):
+    """Return the current gate status so the UI can show a lock/unlock indicator on CISO/Exec/Audit persona tabs."""
+    in_mem = REPORT_STORE.get(assessment_id) or {}
+    assessment = _load_assessment_from_disk(assessment_id, in_mem.get('persisted_path')) or in_mem
+    if not assessment:
+        return JSONResponse({'detail': 'not_found'}, status_code=404)
+    latest = assessment.get('_latest_gate')
+    gates = assessment.get('_human_gates') or []
+    return JSONResponse({
+        'assessment_id': assessment_id,
+        'gate_required': True,
+        'gated': bool(latest and latest.get('gate_verdict') == 'approve'),
+        'latest_gate': latest,
+        'gate_count': len(gates),
+    })

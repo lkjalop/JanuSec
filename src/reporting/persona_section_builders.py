@@ -181,6 +181,154 @@ def _t1_banner(text: str, verdict_class: str = "review") -> str:
 
 
 # ---------------------------------------------------------------------------
+# Triage score reason block — 2-3 sentence personalised explanation per persona
+# ---------------------------------------------------------------------------
+
+_DRIVER_LABELS = {
+    'dread':       'Threat Severity (DREAD)',
+    'correlation': 'Campaign Correlation',
+    'density':     'Attack Complexity',
+    'confidence':  'Detection Confidence',
+    'rarity':      'Behavioral Rarity',
+}
+
+# Per-persona explanation templates keyed by top driver.
+# {score}, {pct}, {n_mal}, {host}, {sla_mins}, {tier}, {driver_label} are substituted.
+_PERSONA_DRIVER_REASON: dict[str, dict[str, str]] = {
+    'soc_analyst': {
+        'dread':       "Score {score} is driven by a high threat-severity rating ({pct}%) — the attack technique is known, reliably exploitable, and impacts a named asset. SLA is {sla_mins} min ({tier}): isolate immediately and open a P1 ticket before any further investigation.",
+        'correlation': "Score {score} mainly reflects campaign correlation ({pct}%): this event shares infrastructure or identity with {n_mal} other flagged events, indicating a coordinated attack rather than an isolated alert. Expand the search to all events sharing the same source IP or user.",
+        'density':     "Score {score} is elevated because {pct}% of the weight comes from attack complexity — multiple distinct threat behaviors (LOLBin abuse, credential use, network callback) appear in a single event, which is a strong indicator of a hands-on-keyboard intrusion phase. Escalate to Tier 2 now.",
+        'confidence':  "Score {score} reflects that detection confidence is low ({pct}%) — the model has limited evidence and the verdict may not hold. Manually corroborate before containment: pull the raw event, confirm process lineage, and validate against known-good baselines.",
+        'rarity':      "Score {score} is boosted by behavioral novelty ({pct}%) — this activity has not appeared in prior sessions, making false-positive dismissal risky. Treat as a potential zero-day indicator: check VirusTotal for the process hash and review network egress for the destination IP.",
+    },
+    'threat_hunter': {
+        'dread':       "Score {score} is driven by a high DREAD rating ({pct}%): the technique is well-understood, easily exploitable, and linked to {n_mal} confirmed malicious event(s). Pivot to ATT&CK Execution/Persistence sub-techniques and scan all endpoints with the same parent process or user context.",
+        'correlation': "Score {score} is dominated by correlation ({pct}%): multiple events share the same actor or infrastructure. Build a kill chain across all correlated events and use the shared pivot (IP/domain/user) as the hunt root — lateral movement to adjacent subnets is the most likely next phase.",
+        'density':     "Score {score} is fuelled by factor density ({pct}%): a single event carries {n_mal}+ threat indicators, suggesting automated toolkit use (Cobalt Strike, Sliver, Havoc). Run YARA rules for C2 framework signatures and check beacon intervals via Zeek conn.log or Suricata alerts.",
+        'confidence':  "Score {score} is limited by detection confidence ({pct}%) — evidence is partial and hypotheses are unconfirmed. Run the hypothesis queries below and confirm process hashes via VirusTotal before generating additional alerts; avoid tunnel vision on this event alone.",
+        'rarity':      "Score {score} peaks because behavioral novelty ({pct}%) signals a technique not seen in prior sessions — potential zero-day or living-off-the-land variant. Cross-reference MITRE ATT&CK for sub-technique candidates and generate a specific IoC set for threat intel enrichment.",
+    },
+    'forensics': {
+        'dread':       "Score {score} is driven by threat severity ({pct}%): evidence preservation is time-critical. Capture a memory dump and full PCAP from the affected host before any containment step — volatile artifacts will be lost on reboot, and the process execution chain is the primary forensic timeline anchor.",
+        'correlation': "Score {score} reflects cross-event correlation ({pct}%): chain-of-custody tracking must span {n_mal} related events. Document each artefact's collection timestamp and the sequence of containment actions across all correlated events to satisfy ISO 19011 §6.5.4 chronological evidence requirements.",
+        'density':     "Score {score} is elevated by attack complexity ({pct}%): multiple distinct techniques in one event mean multiple, independent forensic artefacts must be preserved — process image, registry snapshot, network capture, and file system artefacts are each separate items with separate provenance records.",
+        'confidence':  "Score {score} is dampened by detection confidence ({pct}%) — forensic action on low-confidence findings risks contaminating the chain of custody. Capture evidence but do not apply remediation labels until a second analyst validates the verdict; note the uncertainty explicitly in the workpaper.",
+        'rarity':      "Score {score} is elevated by behavioral novelty ({pct}%): first-seen activity requires broader evidence capture. Preserve a disk image for offline malware analysis and submit the suspicious binary to a sandbox — the sample may constitute unique evidence if a prosecution or regulatory review follows.",
+    },
+    'compliance': {
+        'dread':       "Score {score} is driven by threat severity ({pct}%): the DREAD rating (Damage/Reproducibility/Exploitability/Affected/Discoverability) places this event in the mandatory notification band. The 'serious harm' and 'reasonable grounds' tests under Privacy Act 1988 / NDB Scheme are likely satisfied; start the notification clock now.",
+        'correlation': "Score {score} reflects campaign breadth ({pct}%): {n_mal} correlated events increase the likelihood that multiple data subjects are affected, which is the key determinant of NDB Scheme scope. APRA CPS 234 material incident guidance applies if aggregated impact meets the threshold; seek legal review immediately.",
+        'density':     "Score {score} is pushed up by attack complexity ({pct}%): multiple distinct control failures in one event constitute multiple Major Nonconformities under ISO 27001 Annex A. Each failure must be documented separately in the risk register with its own remediation owner and 24-hour deadline.",
+        'confidence':  "Score {score} is limited by detection confidence ({pct}%): mandatory notification should be preceded by a reasonable investigation unless the notification window has elapsed. Document the confidence level in the notification to regulators — it satisfies the 'best endeavours' standard while full investigation continues.",
+        'rarity':      "Score {score} is elevated by behavioral novelty ({pct}%): first-seen activity that cannot be explained by authorized administrative action satisfies the 'eligible data breach' threshold under NDB Scheme (Privacy Act s.26WB). A precautionary notification and provisional risk assessment is recommended.",
+    },
+    'ciso': {
+        'dread':       "Score {score} is dominated by threat severity ({pct}%): this is a confirmed, high-impact event with known exploit. Board escalation is required within the hour; brief with scope, affected assets ({host}), and the three immediate containment actions recommended by the SOC.",
+        'correlation': "Score {score} is driven by campaign breadth ({pct}%): this event is one node in a multi-event attack pattern involving {n_mal} confirmed malicious events. The blast radius is wider than a single host — the SOC must scope all affected systems before you can report a definitive impact to the Board.",
+        'density':     "Score {score} reflects a complex, multi-stage intrusion ({pct}% from attack complexity). This is not a commodity infection — the attacker is using multiple techniques in sequence, indicating advanced capability. Activate the IR retainer and brief Legal and Communications now, not after containment.",
+        'confidence':  "Score {score} is below the high-confidence threshold ({pct}%): do not brief the Board on confirmed breach until confidence improves. Brief on 'material security event under investigation' and set a 4-hour update cadence with the CISO-direct SOC lead.",
+        'rarity':      "Score {score} peaks on behavioral novelty ({pct}%): a technique cluster with no prior precedent in this environment suggests either a supply-chain compromise or targeted attack. Engage threat intelligence retainer for attribution and activate third-party IR if internal capacity is insufficient.",
+    },
+    'audit': {
+        'dread':       "Score {score} is anchored by threat severity ({pct}%): the DREAD score constitutes a Material Finding under ISO 19011 §6.5.4, requiring a Major Nonconformity entry in the audit workpaper with bitemporal timestamps (valid_time: event occurrence, transaction_time: this assessment). Assign a remediation owner within 24 hours.",
+        'correlation': "Score {score} reflects audit evidence breadth ({pct}% from correlation): {n_mal} correlated events share the same control failure root cause. The audit workpaper must capture each event as a separate evidence exhibit with its own chain-of-custody entry but group them under a single root-cause finding for efficiency.",
+        'density':     "Score {score} is elevated by attack complexity ({pct}%): each distinct factor in this event maps to a separate Annex A control. Enumerate all control failures individually in the nonconformity matrix — grouping them under one finding will understate the audit scope and risk remediation gaps.",
+        'confidence':  "Score {score} is limited by detection confidence ({pct}%): record this as an Observation rather than a Nonconformity until evidence strengthens. ISO 19011 §6.4.5 requires that audit evidence be verifiable — document the confidence limitation in the workpaper footnote.",
+        'rarity':      "Score {score} is boosted by behavioral novelty ({pct}%): a first-seen technique cluster may indicate a control environment gap not covered by existing audit criteria. Flag as an Emerging Risk requiring a new audit criterion for future cycles; notify the audit committee chair.",
+    },
+    'mssp': {
+        'dread':       "Score {score} is driven by confirmed threat severity ({pct}%): our automated pipeline rates this as a high-confidence malicious event on {host}. We recommend immediate isolation and will schedule a follow-up call within {sla_mins} minutes — no action is needed from your team until we brief you.",
+        'correlation': "Score {score} reflects that this alert is linked to {n_mal} other events sharing the same attacker infrastructure — this is a coordinated incident, not a one-off alert. We are correlating across all your tenants and will provide a multi-event briefing within the hour.",
+        'density':     "Score {score} is elevated because the attacker is using multiple techniques simultaneously, a sign of an advanced threat. We have escalated this to our Tier 2 team; next steps are a full forensic triage and containment recommendation delivered by written report within 2 hours.",
+        'confidence':  "Score {score} is currently moderate ({pct}% confidence) — our pipeline requires further validation before we recommend containment. We have queued this for analyst review; you will receive an update within 30 minutes confirming or dismissing the alert.",
+        'rarity':      "Score {score} is elevated because this behavior pattern is new and has not been seen in prior sessions across your environment. We are checking this against our multi-tenant threat intelligence and will confirm whether this is isolated to your tenant or part of a wider campaign.",
+    },
+    'executive': {
+        'dread':       "Score {score} translates to a Critical business-impact classification: the attack technique is confirmed, reliably executed, and affects named systems in your environment. Approved containment must begin within {sla_mins} minutes — the security team is ready and awaiting your sign-off on the response plan.",
+        'correlation': "Score {score} reflects a coordinated attack across {n_mal} events rather than a single isolated incident — the risk is systemic, not localised. Three decisions are required now: (1) approve host isolation, (2) notify Legal, (3) confirm whether external advisors are engaged.",
+        'density':     "Score {score} reflects a sophisticated, multi-technique intrusion that indicates a capable threat actor. Financial and reputational impact modelling is underway; this briefing is to ensure Executive awareness and decision authority is clear before the security team escalates to full IR mode.",
+        'confidence':  "Score {score} is below the Board-notification threshold at current confidence ({pct}%): the security team is investigating and will confirm within 4 hours. No external disclosure is needed yet; the response plan is active and telemetry is being gathered to narrow the verdict.",
+        'rarity':      "Score {score} is elevated because this attack pattern has no prior precedent in your environment, suggesting a targeted or supply-chain threat. External expert engagement is recommended; the security team will brief on attribution and regulatory notification requirements within 2 hours.",
+    },
+}
+
+_DEFAULT_DRIVER_REASON = "Score {score} is the composite of threat severity, cross-event correlation, attack complexity, detection confidence, and behavioral rarity. The top-weighted dimension for this event is {driver_label} ({pct}%), which is the primary justification for the recommended action."
+
+
+def _triage_reason_block(model: dict, persona: str) -> str:
+    """Return a styled 2-3 sentence triage-score reason block personalised per persona.
+
+    Reads the highest-confidence evidence row's _triage_breakdown from model.evidence,
+    falls back to aggregate model fields when breakdown is absent.
+    """
+    ev = model.get('evidence') or []
+    n_mal = model.get('malicious_count') or 0
+    atk = model.get('attack_story') or {}
+    iocs = model.get('iocs') or {}
+
+    # Find the top-scored row's breakdown (prefer malicious evidence)
+    top_breakdown: dict = {}
+    top_score: float = 0.0
+    for e in ev:
+        row = e.get('row') or {}
+        bd = row.get('_triage_breakdown') or {}
+        ts = float(row.get('triage_score') or 0.0)
+        if ts > top_score and bd:
+            top_score = ts
+            top_breakdown = bd
+
+    # Graceful fallback: derive breakdown from model-level signals
+    if not top_breakdown:
+        sev_top = max((e.get('severity', 'low') for e in ev), key=lambda s: {'critical': 4, 'high': 3, 'medium': 2, 'low': 1}.get(s, 0), default='low')
+        dread_approx = {'critical': 0.9, 'high': 0.7, 'medium': 0.45, 'low': 0.2}.get(sev_top, 0.3)
+        top_breakdown = {
+            'dread': dread_approx,
+            'correlation': min(1.0, n_mal / 5.0) if n_mal else 0.1,
+            'density': min(1.0, len({f for e in ev for f in e.get('factors', [])}) / 6.0),
+            'confidence': 0.5,
+            'rarity': 0.2,
+        }
+
+    # Identify top driver
+    driver = max(top_breakdown, key=lambda k: top_breakdown.get(k, 0.0))
+    pct = int(round(top_breakdown.get(driver, 0.0) * 100))
+    score_str = f"{top_score:.2f}" if top_score > 0 else "N/A"
+
+    host = ""
+    if ev:
+        r0 = (next((e for e in ev if e.get('verdict') == 'malicious'), ev[0]) or {}).get('row') or {}
+        host = str(r0.get('hostname') or r0.get('computer') or r0.get('host') or 'affected host')[:28]
+
+    n_crit = sum(1 for e in ev if e.get('severity') == 'critical')
+    n_high = sum(1 for e in ev if e.get('severity') == 'high')
+    tier = 'P1' if n_crit or n_mal else ('P2' if n_high else 'P3')
+    sla_mins = 60 if tier == 'P1' else 240 if tier == 'P2' else 1440
+
+    template = (_PERSONA_DRIVER_REASON.get(persona, {}).get(driver) or _DEFAULT_DRIVER_REASON)
+    reason = template.format(
+        score=score_str,
+        pct=pct,
+        n_mal=n_mal,
+        host=host,
+        sla_mins=sla_mins,
+        tier=tier,
+        driver_label=_DRIVER_LABELS.get(driver, driver),
+    )
+
+    _bg  = '#fef9ee'
+    _bdr = '#d4980a'
+    return (
+        f"<div style='background:{_bg};border-left:4px solid {_bdr};"
+        f"padding:10px 14px;margin-bottom:14px;border-radius:4px;"
+        f"font-size:13px;line-height:1.55;color:#333;'>"
+        f"<strong style='font-size:11px;letter-spacing:.05em;color:{_bdr};text-transform:uppercase;'>Why this Score?</strong>"
+        f"<br/>{escape(reason)}"
+        f"</div>"
+    )
+
+
+# ---------------------------------------------------------------------------
 # MITRE ID → plain-English translation for non-technical persona views
 # ---------------------------------------------------------------------------
 
@@ -336,7 +484,7 @@ def _executive_extra(artifact: dict, model: dict | None) -> str:
 
     e8_exec_html = _essential_eight_block(model)
 
-    return _t1_banner(_exec_t1, _exec_t1_cls) + f"""
+    return _t1_banner(_exec_t1, _exec_t1_cls) + _triage_reason_block(model, 'executive') + f"""
 <section class='panel page-break' style='margin-top:18px'>
   <h2>PASTA Risk Analysis</h2>
   <p class='section-note'>Process and Attack Simulation &amp; Threat Analysis — risk scored against current evidence.</p>
@@ -568,7 +716,7 @@ def _soc_analyst(artifact: dict, model: dict | None) -> str:
         f"<li>&#9658; {instr}</li>" for instr in handoff_instructions
     )
 
-    return _t1_banner(_soc_t1, _soc_t1_cls) + f"""
+    return _t1_banner(_soc_t1, _soc_t1_cls) + _triage_reason_block(model, 'soc_analyst') + f"""
 <section class='panel page-break' style='margin-top:18px'>
   <h2>SOC Analyst — Triage Queue</h2>
   <div class='meta-strip' style='margin-bottom:14px'>
@@ -820,7 +968,7 @@ def _threat_hunter(artifact: dict, model: dict | None) -> str:
         _th_t1 = "Threat hunt: negative result — no confirmed threats in this dataset — recommend baseline calibration."
         _th_t1_cls = "complete"
 
-    return _t1_banner(_th_t1, _th_t1_cls) + f"""
+    return _t1_banner(_th_t1, _th_t1_cls) + _triage_reason_block(model, 'threat_hunter') + f"""
 <section class='panel page-break' style='margin-top:18px'>
   <h2>Threat Hunter — Hunt Hypothesis Status</h2>
   {_tbl(["Hypothesis", "Status", "Evidence / Basis"], hyp_rows)}
@@ -984,7 +1132,7 @@ def _forensics(artifact: dict, model: dict | None) -> str:
         _for_t1 = "No malicious activity confirmed — evidence inventory complete, no forensic action required."
         _for_t1_cls = "complete"
 
-    return _t1_banner(_for_t1, _for_t1_cls) + f"""
+    return _t1_banner(_for_t1, _for_t1_cls) + _triage_reason_block(model, 'forensics') + f"""
 <section class='panel page-break' style='margin-top:18px'>
   <h2>Forensic Analyst — Evidence Inventory</h2>
   <p class='section-note'>Quality rating: COMPLETE (all key fields), PARTIAL (1 key field missing), MISSING (≥2 fields missing).</p>
@@ -1219,7 +1367,7 @@ def _compliance(artifact: dict, model: dict | None) -> str:
         _comp_t1 = "No regulatory notification obligations identified — no confirmed control failures in current evidence."
         _comp_t1_cls = "complete"
 
-    return _t1_banner(_comp_t1, _comp_t1_cls) + f"""
+    return _t1_banner(_comp_t1, _comp_t1_cls) + _triage_reason_block(model, 'compliance') + f"""
 <section class='panel page-break' style='margin-top:18px'>
   <h2>Compliance / GRC — Regulatory Notification Assessment</h2>
   {_tbl(["Obligation", "Assessment"], breach_rows)}
@@ -1437,7 +1585,7 @@ def _ciso(artifact: dict, model: dict | None) -> str:
         _ciso_t1 = "No confirmed incident — routine review complete, no disclosure obligations triggered."
         _ciso_t1_cls = "complete"
 
-    return _t1_banner(_ciso_t1, _ciso_t1_cls) + f"""
+    return _t1_banner(_ciso_t1, _ciso_t1_cls) + _triage_reason_block(model, 'ciso') + f"""
 <section class='panel page-break' style='margin-top:18px'>
   <h2>CISO — Current Risk Posture</h2>
   <p class='section-note'>Board-level snapshot. All findings require human validation before external disclosure or regulatory notification.</p>
@@ -1657,7 +1805,7 @@ def _audit(artifact: dict, model: dict | None) -> str:
         _aud_t1 = "AUDIT FINDING: No nonconformities identified — all controls operating within acceptable parameters."
         _aud_t1_cls = "complete"
 
-    return _t1_banner(_aud_t1, _aud_t1_cls) + f"""
+    return _t1_banner(_aud_t1, _aud_t1_cls) + _triage_reason_block(model, 'audit') + f"""
 <section class='panel page-break' style='margin-top:18px'>
   <h2>Audit — Control Failure Findings (ISO 19011 §6.4.7)</h2>
   {scope_limitation_html}
@@ -1808,7 +1956,7 @@ def _mssp(artifact: dict, model: dict | None) -> str:
         ioc_plain.append(f"Suspicious websites contacted: {', '.join(iocs['domains'][:3])}")
     ioc_plain_html = "".join(f"<li>{_e(s)}</li>" for s in ioc_plain) or "<li>No specific indicators extracted.</li>"
 
-    return _t1_banner(_mssp_t1, _mssp_t1_cls) + f"""
+    return _t1_banner(_mssp_t1, _mssp_t1_cls) + _triage_reason_block(model, 'mssp') + f"""
 <section class='panel page-break' style='margin-top:18px'>
   <h2>MSSP — SLA and Escalation Status</h2>
   <div style='display:flex;gap:24px;align-items:flex-start;flex-wrap:wrap;margin-bottom:12px'>
