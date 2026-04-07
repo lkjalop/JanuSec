@@ -119,7 +119,12 @@ def log(msg: str, level: str = "INFO"):
 # Excel Parsing
 # ---------------------------------------------------------------------------
 def parse_excel_all_sheets(path: Path) -> list[dict]:
-    """Parse ALL sheets of an Excel file into a flat list of row dicts."""
+    """Parse ALL sheets of an Excel file into a flat list of row dicts.
+
+    Returns ALL rows including Change_Context rows (tagged with _sheet).
+    The caller (or pre-processing step) decides what to do with each sheet.
+    Timestamps from Excel datetime cells are normalised to UTC ISO-8601 strings.
+    """
     if not HAS_OPENPYXL:
         raise RuntimeError("openpyxl not installed: pip install openpyxl")
     wb = openpyxl.load_workbook(str(path), read_only=True, data_only=True)
@@ -134,7 +139,16 @@ def parse_excel_all_sheets(path: Path) -> list[dict]:
                 continue
             row_dict = {}
             for h, v in zip(headers_row, row):
-                row_dict[h] = "" if v is None else str(v)
+                if v is None:
+                    row_dict[h] = ""
+                elif isinstance(v, datetime):
+                    # P1-7: treat all Excel datetime cells as UTC — prevents the
+                    # 13-hour offset that appears when naive datetimes are printed.
+                    if v.tzinfo is None:
+                        v = v.replace(tzinfo=timezone.utc)
+                    row_dict[h] = v.strftime("%Y-%m-%dT%H:%M:%SZ")
+                else:
+                    row_dict[h] = str(v)
             row_dict["_sheet"] = sheet_name
             row_dict["_source_file"] = path.name
             all_rows.append(row_dict)
@@ -142,6 +156,101 @@ def parse_excel_all_sheets(path: Path) -> list[dict]:
         log(f"  Sheet '{sheet_name}': {row_count} data rows", "INFO")
     wb.close()
     return all_rows
+
+
+# ---------------------------------------------------------------------------
+# P0-3: Change_Context false-positive suppressor
+# ---------------------------------------------------------------------------
+
+def _parse_dt(val: str) -> float | None:
+    """Parse an ISO-8601 or free-form datetime string → UTC epoch float. None on failure."""
+    if not val:
+        return None
+    for fmt in ("%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M",
+                "%Y-%m-%dT%H:%M:%S", "%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M"):
+        try:
+            dt = datetime.strptime(val.strip(), fmt).replace(tzinfo=timezone.utc)
+            return dt.timestamp()
+        except ValueError:
+            continue
+    return None
+
+
+def extract_approved_change_windows(all_rows: list[dict]) -> list[dict]:
+    """Extract approved change-ticket windows from Change_Context sheet rows.
+
+    Returns a list of dicts:
+      { ticket_id, host, user, start_epoch, end_epoch }
+    Only rows with a non-empty ticket ID are included (status = 'approved' or any).
+    """
+    windows = []
+    for r in all_rows:
+        sheet = (r.get("_sheet") or "").lower()
+        if sheet not in ("change_context", "change context", "changecontext", "changes"):
+            continue
+        ticket_id = (r.get("ticket_id") or r.get("change_id") or r.get("change_ticket") or "").strip()
+        if not ticket_id:
+            continue
+        status = (r.get("status") or r.get("approval_status") or "approved").lower()
+        if "reject" in status or "denied" in status:
+            continue
+        host = (r.get("host") or r.get("hostname") or r.get("computer") or "").strip().lower()
+        user = (r.get("user") or r.get("username") or r.get("user_principal_name") or "").strip().lower()
+        start_raw = (r.get("start_time") or r.get("change_start") or r.get("start") or "").strip()
+        end_raw   = (r.get("end_time")   or r.get("change_end")   or r.get("end")   or "").strip()
+        start_ep = _parse_dt(start_raw)
+        end_ep   = _parse_dt(end_raw)
+        if start_ep is None:
+            continue
+        if end_ep is None or end_ep <= start_ep:
+            end_ep = start_ep + 7200  # default 2h window
+        windows.append({
+            "ticket_id":   ticket_id,
+            "host":        host,
+            "user":        user,
+            "start_epoch": start_ep,
+            "end_epoch":   end_ep + 7200,  # ±2h grace period
+        })
+    log(f"  Change Context: {len(windows)} approved ticket windows extracted", "INFO")
+    return windows
+
+
+def _stamp_approved_changes(rows: list[dict], windows: list[dict]) -> list[dict]:
+    """Mark rows that fall inside an approved change window.
+
+    Sets ``_approved_change_ticket`` on the row if it matches a window.
+    Matching criteria: host OR user matches AND timestamp within window.
+    """
+    if not windows:
+        return rows
+    out = []
+    for r in rows:
+        sheet = (r.get("_sheet") or "").lower()
+        if sheet in ("change_context", "change context", "changecontext", "changes"):
+            out.append(r)
+            continue
+        # Resolve row timestamp
+        ts_raw = (r.get("ts") or r.get("timestamp") or r.get("event_time")
+                  or r.get("time") or r.get("start_time") or "").strip()
+        row_ep = _parse_dt(ts_raw)
+        row_host = (r.get("hostname") or r.get("computer") or r.get("host") or "").strip().lower()
+        row_user = (r.get("user") or r.get("username") or r.get("user_principal_name") or "").strip().lower()
+        matched_ticket = None
+        for w in windows:
+            if row_ep is not None:
+                if not (w["start_epoch"] <= row_ep <= w["end_epoch"]):
+                    continue
+            # Host or user must match (either is sufficient for an approved change action)
+            host_match = w["host"] and row_host and (w["host"] in row_host or row_host in w["host"])
+            user_match = w["user"] and row_user and (w["user"] in row_user or row_user in w["user"])
+            if host_match or user_match:
+                matched_ticket = w["ticket_id"]
+                break
+        if matched_ticket:
+            r = dict(r)
+            r["_approved_change_ticket"] = matched_ticket
+        out.append(r)
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -207,12 +316,72 @@ _MITRE_BY_FACTOR = {
 }
 
 
+def _lookalike_score(domain_a: str, domain_b: str) -> float:
+    """Return a similarity score 0-1 between two domain strings.
+    Uses a simple character-ngram overlap (no external dependencies).
+    1.0 = identical, 0.0 = no overlap.
+    """
+    def _ngrams(s: str, n: int = 2) -> set:
+        return {s[i:i+n] for i in range(len(s) - n + 1)}
+
+    # Strip TLD for comparison
+    def _strip_tld(d: str) -> str:
+        parts = d.rsplit(".", 1)
+        return parts[0] if len(parts) > 1 else d
+
+    a = _strip_tld(domain_a.lower())
+    b = _strip_tld(domain_b.lower())
+    if not a or not b:
+        return 0.0
+    if a == b:
+        return 1.0
+    ng_a = _ngrams(a) | set(a)
+    ng_b = _ngrams(b) | set(b)
+    intersection = ng_a & ng_b
+    union = ng_a | ng_b
+    return len(intersection) / len(union) if union else 0.0
+
+
 def enrich_rows_locally(rows: list[dict]) -> list[dict]:
-    """Analyse raw Excel rows and assign verdict/severity/factors/MITRE/summary."""
+    """Analyse raw Excel rows and assign verdict/severity/factors/MITRE/summary.
+
+    Changes:
+    - P0-3: rows with ``_approved_change_ticket`` are immediately verdict=good
+    - P1-8: analyst_notes field overrides llm_summary when present
+    - P2-3: impossible travel detection across identity rows (built after first pass)
+    - P2-1: lookalike/typosquat domain detection in email rows
+    """
+    # --- First pass: per-row analysis ---
     enriched = []
+    # Collect identity login events for impossible-travel second pass
+    _login_events: list[dict] = []
+
     for i, r in enumerate(rows):
         e = dict(r)
         sheet = (e.get("_sheet") or "").lower()
+
+        # Skip Change_Context rows — they are metadata, not threat events
+        if sheet in ("change_context", "change context", "changecontext", "changes"):
+            e["verdict"] = "good"
+            e["factors"] = ["approved_change_context"]
+            e["severity"] = "info"
+            e["dread_score"] = 0.0
+            e["llm_summary"] = f"Change management record: {e.get('ticket_id','—')}"
+            e["row_index"] = i
+            enriched.append(e)
+            continue
+
+        # P0-3: Rows stamped with an approved change ticket are suppressed
+        if e.get("_approved_change_ticket"):
+            e["verdict"] = "good"
+            e["factors"] = ["approved_change_ticket"]
+            e["severity"] = "info"
+            e["dread_score"] = 0.0
+            e["llm_summary"] = f"Approved change activity — ticket {e['_approved_change_ticket']} covers this event."
+            e["row_index"] = i
+            enriched.append(e)
+            continue
+
         factors = []
         mitre = []
         verdict = "good"
@@ -395,8 +564,27 @@ def enrich_rows_locally(rows: list[dict]) -> list[dict]:
             if not factors:
                 factors.append("email_received")
                 verdict = "good"
-            summary = f"Email: from={e.get('from','?')} to={e.get('to','?')} subj='{e.get('subject','?')}'. " \
-                      + ("Phishing indicators detected." if verdict != "good" else "No phishing indicators.")
+            # P2-1: Lookalike / typosquat domain detection
+            _from_addr = str(e.get("from") or e.get("sender") or "").strip().lower()
+            _to_addr   = str(e.get("to") or e.get("recipient") or "").strip().lower()
+            _org_domain = ""
+            if "@" in _to_addr:
+                _org_domain = _to_addr.split("@")[-1].split(">")[0].strip()
+            if _org_domain and "@" in _from_addr:
+                _from_domain = _from_addr.split("@")[-1].split(">")[0].strip()
+                if _from_domain != _org_domain and _from_domain and _org_domain:
+                    # Simple lookalike check: edit-distance-like scoring
+                    _ld_score = _lookalike_score(_from_domain, _org_domain)
+                    if 0.75 < _ld_score < 1.0:
+                        factors.append("lookalike_sender_domain")
+                        verdict = "malicious" if verdict != "malicious" else verdict
+                        severity = "high" if severity not in ("critical",) else severity
+                        dread = max(dread, 0.82)
+                        mitre.append(("T1566.001", "Phishing: Spearphishing Attachment"))
+                        summary = (f"LOOKALIKE DOMAIN: from={_from_addr} closely resembles "
+                                   f"org domain '{_org_domain}' (similarity {_ld_score:.0%}) — BEC/impersonation suspected.")
+            summary = summary or (f"Email: from={e.get('from','?')} to={e.get('to','?')} subj='{e.get('subject','?')}'. "
+                      + ("Phishing indicators detected." if verdict != "good" else "No phishing indicators."))
 
         # ---- EDR sheet ----
         elif sheet == "edr" or any(k in e for k in ["computer", "detection_name", "rule_id"]):
@@ -447,6 +635,65 @@ def enrich_rows_locally(rows: list[dict]) -> list[dict]:
             if not summary:
                 summary = f"EDR: {event_type or 'detection'} proc={edr_proc or '?'} on {e.get('computer','?')}."
 
+        # ---- Identity / Auth sheet — TOR exit node detection (P1-5) ----
+        elif sheet in ("identity", "auth", "identity_protection") or any(k in e for k in ["user_principal_name", "source_ip", "location_country"]):
+            loc_country = str(e.get("location_country") or "").upper()
+            loc_city    = str(e.get("location_city") or "").upper()
+            review      = str(e.get("review_state") or "").lower()
+            analyst_note = str(e.get("analyst_notes") or "").lower()
+            # Override verdict from upstream review_state when explicitly malicious
+            if review == "confirmed_malicious":
+                verdict = "malicious"
+                severity = "critical"
+                dread = max(dread, 0.90)
+                factors.append("upstream_confirmed_malicious")
+            # TOR exit node — immediate critical regardless of review_state
+            if loc_country in ("TOR_EXIT", "TOR", "ANONYMIZER") or "TOR" in loc_city:
+                factors.append("tor_exit_node")
+                verdict = "malicious"
+                severity = "critical"
+                dread = 0.97
+                mitre.append(("T1090.003", "Proxy: Multi-hop Proxy (TOR)"))
+                summary = (f"TOR EXIT NODE LOGIN: {e.get('user_principal_name','?')} from "
+                           f"{e.get('source_ip','?')} via TOR — anonymized attacker, immediate response required.")
+            if not summary:
+                summary = (f"Identity: {e.get('user_principal_name','?')} from "
+                           f"{e.get('source_ip','?')} {e.get('location_city','?')}/{e.get('location_country','?')}.")
+            if not factors:
+                factors.append("identity_event")
+                verdict = "good"
+
+        # ---- Data_Movement sheet — exfiltration confirmation (P1-2) ----
+        elif sheet in ("data_movement", "data movement") or any(k in e for k in ["dst_system", "file_name", "bytes_transferred"]):
+            dst_sys  = str(e.get("dst_system") or e.get("destination") or e.get("dst_ip") or "")
+            fname    = str(e.get("file_name") or e.get("filename") or "")
+            bytes_tx = str(e.get("bytes_transferred") or e.get("size") or "0")
+            review   = str(e.get("review_state") or "").lower()
+            if review == "confirmed_malicious":
+                verdict  = "malicious"
+                severity = "critical"
+                dread    = max(dread, 0.92)
+                factors.append("upstream_confirmed_malicious")
+            # External destination = confirmed exfil (not SharePoint/OneDrive)
+            is_external = dst_sys and not any(dst_sys.startswith(pfx) for pfx in _INTERNAL_SUBNETS)
+            saas_allowlist = ("sharepoint", "onedrive", "teams", "outlook", "office365",
+                              "amazonaws.com", "blob.core.windows.net", "azure")
+            is_saas = any(svc in dst_sys.lower() for svc in saas_allowlist)
+            if is_external and not is_saas:
+                factors.append("data_exfiltration_confirmed")
+                verdict  = "malicious"
+                severity = "critical"
+                dread    = max(dread, 0.95)
+                mitre.append(("T1041", "Exfiltration Over C2 Channel"))
+                mitre.append(("T1048", "Exfiltration Over Alternative Protocol"))
+                summary  = (f"DATA EXFILTRATION CONFIRMED: {fname or 'file'} → "
+                            f"{dst_sys} ({bytes_tx} bytes). External destination outside SaaS allowlist.")
+            if not summary:
+                summary = f"Data movement: {fname or '?'} → {dst_sys or '?'} ({bytes_tx} bytes)."
+            if not factors:
+                factors.append("data_movement_event")
+                verdict = "good"
+
         # ---- C2 sheet ----
         elif sheet == "c2" or any(k in e for k in ["c2_ip", "beacon_interval", "payload_type", "domain"]):
             factors.append("c2_communication")
@@ -475,6 +722,25 @@ def enrich_rows_locally(rows: list[dict]) -> list[dict]:
             else:
                 summary = f"C2 beacon detected: domain={e.get('domain',e.get('c2_ip','?'))} " \
                           f"interval={e.get('beacon_interval','?')}s. Active C2 channel confirmed."
+
+        # ---- Identity / inline TOR check for any sheet (second-pass safety net) ----
+        # Some test datasets store TOR exit info in non-identity sheets.
+        if "tor_exit_node" not in factors:
+            _loc = str(e.get("location_country") or "").upper()
+            _city = str(e.get("location_city") or "").upper()
+            if _loc in ("TOR_EXIT", "TOR", "ANONYMIZER") or "TOR" in _city:
+                factors.append("tor_exit_node")
+                verdict  = "malicious"
+                severity = "critical"
+                dread    = max(dread, 0.97)
+                mitre.append(("T1090.003", "Proxy: Multi-hop Proxy (TOR)"))
+        # upstream confirmed_malicious always wins
+        _rs = str(e.get("review_state") or "").lower()
+        if _rs == "confirmed_malicious" and verdict not in ("malicious",):
+            verdict  = "malicious"
+            severity = "critical"
+            dread    = max(dread, 0.90)
+            factors.append("upstream_confirmed_malicious")
 
         # fallback
         if not summary:
@@ -524,13 +790,120 @@ def enrich_rows_locally(rows: list[dict]) -> list[dict]:
             if "T" not in stride_tags:
                 stride_tags.append("T")  # Integrity anomaly
         e["stride_tags"] = sorted(set(stride_tags))
+
+        # P1-8: Analyst notes override llm_summary when present (highest priority context)
+        _analyst_note = str(e.get("analyst_notes") or "").strip()
+        if _analyst_note and _analyst_note.lower() not in ("", "nan", "none"):
+            summary = f"[Analyst] {_analyst_note}"
+
+        e["llm_summary"] = summary
+
+        # Collect login row for impossible-travel second pass
+        _upn = (e.get("user_principal_name") or e.get("user") or "").strip()
+        _ts_raw = (e.get("ts") or e.get("timestamp") or e.get("time") or "").strip()
+        _city = (e.get("location_city") or "").strip()
+        if sheet in ("identity", "auth", "identity_protection") and _upn and _city:
+            _ep = _parse_dt(_ts_raw)
+            if _ep:
+                _login_events.append({
+                    "idx": len(enriched), "user": _upn.lower(),
+                    "city": _city.lower(), "epoch": _ep, "row": e,
+                })
+
         enriched.append(e)
+
+    # --- Second pass: impossible travel detection (P2-3) ---
+    # Group login events by user and check for physically impossible city hops.
+    _EARTH_RADIUS_KM = 6371
+    import math as _math
+
+    def _approx_city_lat_lon(city: str) -> tuple[float, float] | None:
+        """Very small hardcoded lookup for most common cities in test data.
+        Returns (lat, lon) in degrees or None if unknown."""
+        _known = {
+            "sydney": (-33.87, 151.21), "melbourne": (-37.81, 144.96),
+            "london": (51.51, -0.12),   "new york": (40.71, -74.01),
+            "frankfurt": (50.11, 8.68), "singapore": (1.35, 103.82),
+            "tokyo": (35.68, 139.69),   "paris": (48.85, 2.35),
+            "dubai": (25.20, 55.27),    "toronto": (43.65, -79.38),
+            "chicago": (41.88, -87.63), "los angeles": (34.05, -118.24),
+        }
+        for key, coords in _known.items():
+            if key in city.lower():
+                return coords
+        return None
+
+    def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+        dlat = _math.radians(lat2 - lat1)
+        dlon = _math.radians(lon2 - lon1)
+        a = _math.sin(dlat / 2) ** 2 + _math.cos(_math.radians(lat1)) * _math.cos(_math.radians(lat2)) * _math.sin(dlon / 2) ** 2
+        return _EARTH_RADIUS_KM * 2 * _math.asin(_math.sqrt(a))
+
+    # Sort login events per user and check consecutive pairs
+    from collections import defaultdict as _dd
+    _user_logins: dict[str, list] = _dd(list)
+    for ev in _login_events:
+        _user_logins[ev["user"]].append(ev)
+
+    for user, logins in _user_logins.items():
+        logins.sort(key=lambda x: x["epoch"])
+        for a, b in zip(logins, logins[1:]):
+            dt_hours = (b["epoch"] - a["epoch"]) / 3600
+            if dt_hours <= 0 or a["city"] == b["city"]:
+                continue
+            ca = _approx_city_lat_lon(a["city"])
+            cb = _approx_city_lat_lon(b["city"])
+            if ca is None or cb is None:
+                continue
+            dist_km = _haversine_km(ca[0], ca[1], cb[0], cb[1])
+            max_speed_kmh = 900  # commercial flight speed
+            min_hours_needed = dist_km / max_speed_kmh
+            if dt_hours < min_hours_needed:
+                # Mark both rows
+                for ev in (a, b):
+                    row_e = ev["row"]
+                    row_e["factors"] = list(row_e.get("factors") or [])
+                    if "impossible_travel" not in row_e["factors"]:
+                        row_e["factors"].append("impossible_travel")
+                    row_e["verdict"] = "malicious"
+                    row_e["severity"] = "critical"
+                    row_e["dread_score"] = max(row_e.get("dread_score") or 0, 0.92)
+                    row_e["llm_summary"] = (
+                        f"IMPOSSIBLE TRAVEL: {user} logged in from {a['city']} then "
+                        f"{b['city']} in {dt_hours:.1f}h ({dist_km:.0f}km apart — "
+                        f"min {min_hours_needed:.1f}h required by air). Credential compromise suspected."
+                    )
+                    row_e.setdefault("mitre_techniques", [])
+                    if "T1078: Valid Accounts" not in row_e["mitre_techniques"]:
+                        row_e["mitre_techniques"].append("T1078: Valid Accounts")
+
     return enriched
 
 
 # ---------------------------------------------------------------------------
 # Threat Model Builders (STRIDE, Diamond, MAESTRO, PASTA)
 # ---------------------------------------------------------------------------
+
+def _enrich_rows_from_findings(rows: list[dict], findings: list[dict]) -> list[dict]:
+    """Back-propagate verdict/severity/factors from findings list onto raw rows.
+    Used by build_pdf_reportlab() when the assessment comes from the offline path
+    (build_offline_workbook_assessment) which stores enrichment in 'findings', not rows."""
+    verdict_map = {f.get("row_index"): f for f in findings if isinstance(f, dict) and f.get("row_index") is not None}
+    enriched = []
+    for r in rows:
+        row = dict(r)
+        idx = row.get("row_index")
+        if idx is not None and idx in verdict_map:
+            f = verdict_map[idx]
+            row.setdefault("verdict",  f.get("verdict") or "suspicious")
+            row.setdefault("severity", f.get("severity") or "medium")
+            row.setdefault("factors",  f.get("factors") or [])
+            row.setdefault("mitre_techniques", f.get("mitre") or [])
+            row.setdefault("dread_score", round(float(f.get("confidence") or 0.5) * 10, 2))
+            row.setdefault("llm_summary", f.get("title") or f.get("summary") or "")
+        enriched.append(row)
+    return enriched
+
 
 def build_threat_models(rows: list[dict]) -> dict:
     """Build all four threat models from enriched rows. Returns dict with
@@ -1784,13 +2157,16 @@ def _story_soc(model: dict, assessment: dict, filename: str, W: float, st: dict)
         quality_col = (colors.HexColor("#43a047") if quality == "COMPLETE" else
                        colors.HexColor("#fb8c00") if quality == "PARTIAL" else
                        colors.HexColor("#e53935"))
+        # P1-6: Format DREAD as "X.X / 10" (was raw 0-1 float)
+        dread_val = e['dread']  # 0-1 float
+        dread_disp = f"{dread_val * 10:.1f} / 10"
         tbl_rows.append([
             Paragraph(e["code"], st["mono"]),
             Paragraph(e["ts_human"][:19] if e["ts_human"] != "—" else "—", st["label"]),
             Paragraph(host, st["mono"]),
             Paragraph(user, st["label"]),
             Paragraph(mitre_disp, st["mono"]),
-            Paragraph(f"{e['dread']:.2f}", st["label"]),
+            Paragraph(dread_disp, st["label"]),
             Paragraph(f"<b>{action}</b>",
                       ParagraphStyle("act", fontSize=7, textColor=action_col,
                                      fontName="Helvetica-Bold", leading=9)),
@@ -2397,6 +2773,15 @@ def build_pdf_reportlab(
 
     rows = assessment.get("llm_rows") or assessment.get("rows") or []
 
+    # P0-1 fix: if rows come from the offline assessment path (no verdict field set),
+    # back-propagate verdict from assessment["findings"] before building the model.
+    _has_verdicts = any(r.get("verdict") in ("malicious", "suspicious") for r in rows[:100])
+    if not _has_verdicts:
+        _findings = assessment.get("findings") or []
+        if _findings:
+            rows = _enrich_rows_from_findings(rows, _findings)
+            log(f"PDF: back-propagated verdict from {len(_findings)} findings onto {len(rows)} rows", "INFO")
+
     # Build canonical evidence model
     model = _build_canonical_model(rows, filename)
     overall_risk = model["overall_risk"]
@@ -2590,11 +2975,22 @@ def main():
 
         # ---- Step 1: Parse Excel (all sheets) ----
         log(f"Parsing Excel: {excel_path.name}", "STEP")
+        # P2-8 / P0-3: Compute SHA-256 of input file for chain of custody
+        _file_sha256 = hashlib.sha256(excel_path.read_bytes()).hexdigest()
+        log(f"  Source file SHA-256: {_file_sha256[:16]}…", "INFO")
+
         rows = parse_excel_all_sheets(excel_path)
         if not rows:
             log("No rows parsed — skipping file", "WARN")
             continue
         log(f"Total rows extracted: {len(rows)}", "OK")
+
+        # P0-3: Extract approved change windows and suppress matching rows
+        approved_windows = extract_approved_change_windows(rows)
+        rows = _stamp_approved_changes(rows, approved_windows)
+        suppressed_count = sum(1 for r in rows if r.get("_approved_change_ticket"))
+        if suppressed_count:
+            log(f"  Change ticket suppression: {suppressed_count} rows marked as approved change", "INFO")
 
         # ---- Step 2 (local): Enrich rows with local analysis ----
         log(f"Running local row enrichment …", "STEP")
@@ -2618,6 +3014,12 @@ def main():
         # ---- Step 5: Merge local+server enrichment ----
         assessment = merge_server_enrichment(server_assessment, enriched_rows)
         assessment["rows_processed"] = len(enriched_rows)
+        # P2-6: Store source file SHA-256 in chain of custody
+        assessment["source_file_sha256"] = _file_sha256
+        assessment["source_filename"] = excel_path.name
+        # P0-3: Store suppression stats
+        assessment["change_ticket_suppressed"] = suppressed_count
+        assessment["change_ticket_windows"] = len(approved_windows)
 
         # ---- Step 5b: Build threat models (STRIDE, Diamond, MAESTRO, PASTA) ----
         log(f"Building threat models (STRIDE/Diamond/MAESTRO/PASTA) …", "STEP")

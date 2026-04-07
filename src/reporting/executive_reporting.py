@@ -101,6 +101,72 @@ def _pretty_source(source: Any) -> str:
     return text.replace("_", " ") or "telemetry"
 
 
+def _claim_validate(field_name: str, value: str) -> str:
+    """Phase-1 claim validator: replace empty/generic fields with structured INSUFFICIENT_EVIDENCE."""
+    _CLAIM_MESSAGES = {
+        "what_happened": (
+            "INSUFFICIENT_EVIDENCE: LLM Tier-2 narrative not yet generated. "
+            "Upload again with LLM_MOCK=0 to generate. ETA: +2 min. "
+            "Deterministic summary: correlated activity detected across available telemetry sources."
+        ),
+        "why_it_matters": (
+            "INSUFFICIENT_EVIDENCE: Business impact assessment not yet generated. "
+            "Run with LLM_MOCK=0 for full analysis. ETA: +3 min. "
+            "Interim: review DREAD composite score for risk estimate."
+        ),
+        "what_to_do_next": (
+            "INSUFFICIENT_EVIDENCE: Action recommendation not yet generated. "
+            "ETA: +2 min with LLM enabled. Interim: review triage table above for immediate actions."
+        ),
+    }
+    _generic_prefixes = ("No ", "—", "N/A")
+    if not value or not value.strip() or any(value.startswith(p) for p in _generic_prefixes):
+        return _CLAIM_MESSAGES.get(field_name, f"INSUFFICIENT_EVIDENCE: {field_name} not available.")
+    return value
+
+
+def _synthesise_narrative(report: Dict[str, Any]) -> str:
+    """P0-2: Deterministic fallback narrative — never show 'No narrative available'."""
+    rq = report.get("risk_quantification") or {}
+    severity = str(rq.get("severity") or report.get("severity") or "").upper()
+    n_mal = int((report.get("canonical") or {}).get("suspicious_row_count") or 0)
+    n_total = int(report.get("accepted_rows") or report.get("rows_processed") or 0)
+    org = str(report.get("org") or report.get("tenant_name") or report.get("tenant_id") or "the dataset")
+    # Try to derive from top factors
+    top_factors = [(e.get("factor_name") or e.get("name") or str(e)) for e in
+                   ((report.get("verdict") or {}).get("semantic_top_factors") or
+                    (report.get("verdict") or {}).get("top_contributing_factors") or [])[:3]]
+    factor_str = "; ".join(str(f) for f in top_factors if f) or "no high-confidence indicators"
+    if not severity or severity in ("LOW", "NONE"):
+        return (f"Assessment of {org} found no high-confidence threats in {n_total:,} records. "
+                f"All signals reviewed: {factor_str}.")
+    return (
+        f"Assessment of {org} identified {severity}-severity activity across {n_total:,} records. "
+        f"Leading signals: {factor_str}. "
+        f"{'Immediate analyst review required.' if severity in ('CRITICAL', 'HIGH') else 'Monitoring recommended.'}"
+    )
+
+
+def _synthesise_why_it_matters(report: Dict[str, Any]) -> str:
+    """P0-2: Deterministic business-context fallback — never show 'No business summary available'."""
+    rq = report.get("risk_quantification") or {}
+    severity = str(rq.get("severity") or report.get("severity") or "").upper()
+    exp_loss = int(rq.get("expected_loss_usd") or 0)
+    has_pii = any(
+        str(row.get("source_kind") or "").lower() in ("email", "identity")
+        for row in ((report.get("evidence_appendix") or {}).get("source_evidence_rows") or [])
+        if isinstance(row, dict)
+    )
+    exposure = f"Estimated financial exposure: ${exp_loss:,}. " if exp_loss else ""
+    pii_note = "Personal data may be in scope — GDPR/privacy assessment recommended. " if has_pii else ""
+    if not severity or severity == "LOW":
+        return f"No material risk identified. {pii_note}Continue monitoring."
+    return (
+        f"{exposure}{pii_note}"
+        f"{'Uncontained incident — containment decisions required now.' if severity == 'CRITICAL' else 'Incident under investigation — escalation may be required.'}"
+    )
+
+
 def _provider_label(report: Dict[str, Any]) -> str:
     sources = " ".join(
         str(row.get("source_kind") or "")
@@ -487,6 +553,98 @@ def _executive_title(report: Dict[str, Any]) -> str:
         pretty = " and ".join(_pretty_domain(item) for item in sorted(set(domains))[:2])
         return f"Correlated {pretty} activity requiring review"
     return "Correlated cloud security activity requiring review"
+
+
+def _persona_headline(report: Dict[str, Any], persona: str) -> str:
+    """P2-8: Persona-specific headline — substantively different per audience.
+
+    Each persona's first sentence should be the one thing their role cares about most.
+    """
+    rq = report.get("risk_quantification") or {}
+    csv_model = (report.get("canonical_report") or report).get("_csv_model") or {}
+    n_mal = int(csv_model.get("malicious_count") or
+                (report.get("verdict") or {}).get("confirmed_malicious") or
+                (report.get("canonical") or {}).get("malicious_row_count") or 0)
+    n_sus = int(csv_model.get("suspicious_count") or
+                (report.get("canonical") or {}).get("suspicious_row_count") or 0)
+    overall = str(rq.get("severity") or csv_model.get("overall_risk") or
+                  (report.get("verdict") or {}).get("final_verdict") or "LOW").upper()
+    exp_loss = int(rq.get("expected_loss_usd") or 0)
+    has_pii = bool(csv_model.get("has_email") or csv_model.get("has_pii"))
+    has_c2 = bool(csv_model.get("has_c2"))
+    has_exfil = any("data_exfiltration_confirmed" in (ev.get("factors") or [])
+                    for ev in (csv_model.get("evidence") or []))
+    # Grab primary adversary IP for context
+    attacker_ips = ((csv_model.get("attack_story") or {}).get("attacker_ips") or [])
+    primary_ip = (attacker_ips[0] if attacker_ips else
+                  (report.get("canonical") or {}).get("top_c2_ip") or "")
+    # Hosts at risk
+    all_hosts = (csv_model.get("attack_story") or {}).get("internal_hosts") or []
+    _canonical_host = (report.get("canonical") or {}).get("host_most_affected") or ""
+    host_summary = (f"{all_hosts[0]}" if len(all_hosts) == 1
+                    else f"{len(all_hosts)} hosts" if len(all_hosts) > 1
+                    else _canonical_host if _canonical_host else "affected systems")
+
+    p = (persona or "executive").lower()
+
+    if p in ("soc", "soc_analyst"):
+        if n_mal > 0:
+            actions = f"{n_mal} event{'s' if n_mal > 1 else ''} require immediate isolation"
+            return (f"P1 — {actions} | {host_summary}"
+                    + (f" | C2: {primary_ip}" if primary_ip else ""))
+        if n_sus > 0:
+            return f"P2 — {n_sus} suspicious event{'s need' if n_sus > 1 else ' needs'} investigation | No confirmed threat"
+        return "P3 — No confirmed threats | Review complete — all events benign"
+
+    if p in ("forensic", "forensics"):
+        if n_mal > 0:
+            return (f"Evidence chain: {n_mal} confirmed malicious event{'s' if n_mal > 1 else ''} on {host_summary}"
+                    + (" | Exfiltration confirmed" if has_exfil else ""))
+        if n_sus > 0:
+            return f"Evidence under review: {n_sus} suspicious events — timeline confidence MEDIUM"
+        return "Evidence chain: INTACT | No malicious activity confirmed in dataset"
+
+    if p == "threat_hunter":
+        if has_c2 and primary_ip:
+            return f"Hunt pivot: C2 infrastructure {primary_ip} — expand hunt to related subnet and user scope"
+        if n_mal > 0:
+            return f"Technique cluster confirmed | {n_mal} malicious events — generate hunt hypotheses"
+        return "Threat hunt: negative result — recommend baseline calibration"
+
+    if p in ("ciso",):
+        lines = []
+        if overall in ("CRITICAL", "HIGH"):
+            lines.append(f"{overall} incident")
+        if has_exfil:
+            lines.append("data exfiltration confirmed")
+        elif has_pii:
+            lines.append("PII in scope")
+        if exp_loss:
+            lines.append(f"exposure est. ${exp_loss:,}")
+        if lines:
+            return " | ".join(lines).capitalize() + " — executive decision required"
+        if n_sus > 0:
+            return "Under investigation — no confirmed breach yet | Monitoring active"
+        return "No material risk confirmed | Current controls effective"
+
+    if p in ("executive", "board"):
+        if overall in ("CRITICAL",):
+            return "Active security incident — customer data may be at risk — decision required now"
+        if overall == "HIGH":
+            return "Serious security incident — under active containment — board update recommended"
+        if n_sus > 0:
+            return "Suspected security activity — investigation in progress — no confirmed breach"
+        return "Security review complete — no confirmed threats identified"
+
+    if p in ("compliance", "audit", "grc"):
+        if has_pii and n_mal > 0:
+            return "GDPR Art.33 notification clock running — PII confirmed in scope — legal review required"
+        if n_mal > 0:
+            return f"Control failures confirmed: {n_mal} events — framework mapping and remediation required"
+        return "Compliance review: no control failures confirmed | Documentation complete"
+
+    # Fallback to generic title
+    return _executive_title(report)
 
 
 def _focus_cluster_summary(report: Dict[str, Any]) -> Dict[str, Any]:
@@ -991,6 +1149,119 @@ def _framework_sections(report: Dict[str, Any]) -> List[Dict[str, Any]]:
                 "items": [str(item) for item in collected["pasta"][:8]],
             }
         )
+
+    # Wire PASTA/Diamond/MAESTRO/DREAD for Cloud-v2 pipeline (generated inline when not in canonical)
+    if not sections or not any(s["title"] in ("PASTA", "Diamond Model", "MAESTRO") for s in sections):
+        _inline = _inline_threat_models(report)
+        for sec in _inline:
+            if not any(s["title"] == sec["title"] for s in sections):
+                sections.append(sec)
+
+    return sections
+
+
+def _inline_threat_models(report: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Generate PASTA / Diamond / MAESTRO / DREAD threat model sections inline
+    from scored assessment data. Used when the pipeline didn't run build_threat_models()."""
+    sections: List[Dict[str, Any]] = []
+    rq = report.get("risk_quantification") or {}
+    verdict = report.get("verdict") or {}
+    top_factors = [str(e.get("factor_name") or "") for e in (report.get("semantic_top_factors") or [])[:5] if e.get("factor_name")]
+    impact = report.get("impact_metadata") or {}
+    identities = sorted(impact.get("affected_identities") or [])[:4]
+    hosts = sorted(impact.get("affected_hosts") or [])[:4]
+    findings = (report.get("findings") or [])[:4]
+    severity = str(rq.get("severity") or "LOW")
+    confidence = float(verdict.get("final_confidence") or 0.0)
+    attack_timeline = report.get("attack_timeline") or []
+    provider = str(report.get("org") or report.get("tenant_name") or "the organization")
+    clusters = report.get("investigation_clusters") or []
+    cluster_entities = [str(c.get("pivot_entity") or "") for c in clusters if c.get("pivot_entity")][:4]
+
+    # ── DREAD (if risk_quantification fields present) ──────────────────────
+    damage = int(rq.get("damage_potential") or 0)
+    repro = int(rq.get("reproducibility") or 0)
+    exploitability = int(rq.get("exploitability") or 0)
+    aff_users = int(rq.get("affected_users") or 0)
+    discoverability = int(rq.get("discoverability") or 0)
+    if any([damage, repro, exploitability, aff_users, discoverability]):
+        total = damage + repro + exploitability + aff_users + discoverability
+        sections.append({
+            "title": "DREAD",
+            "summary": f"DREAD risk score derived from scored findings. Total: {total}/50.",
+            "items": [
+                f"Damage: {damage}/10",
+                f"Reproducibility: {repro}/10",
+                f"Exploitability: {exploitability}/10",
+                f"Affected Users: {aff_users}/10",
+                f"Discoverability: {discoverability}/10",
+                f"Total Score: {total}/50 — severity {severity}",
+            ],
+        })
+
+    # ── Diamond Model ─────────────────────────────────────────────────────
+    ext_ips = []
+    for row in (report.get("rows") or []):
+        dst = str(row.get("dst_ip") or row.get("dst_system") or "")
+        if dst and not any(dst.startswith(p) for p in ("10.", "192.168.", "172.")):
+            ext_ips.append(dst.split("(")[0].strip())
+    ext_ips = sorted(set(ext_ips))[:3]
+    infra = ", ".join(ext_ips) if ext_ips else "unknown"
+    capab = ", ".join(set(top_factors[:4])) if top_factors else "unknown"
+    victim_str = ", ".join(identities[:2] or hosts[:2]) if (identities or hosts) else "unknown"
+    sections.append({
+        "title": "Diamond Model",
+        "summary": "Adversary–Capability–Infrastructure–Victim model derived from scored evidence.",
+        "items": [
+            f"Adversary: Unknown threat actor (infrastructure: {infra})",
+            f"Capability: {capab}",
+            f"Infrastructure: {infra}",
+            f"Victim: {victim_str or provider}",
+        ],
+    })
+
+    # ── MAESTRO stages ────────────────────────────────────────────────────
+    _factor_str = " ".join(top_factors).lower()
+    maestro_stages = []
+    _stage_map = [
+        ("Initial Access",       ["email:lookalike_domain", "email:phishing", "email:vendor_impersonation", "identity:cloud_signin_external"]),
+        ("Execution",            ["endpoint:suspicious_process_path", "attachment:malicious", "endpoint:encoded_command"]),
+        ("Persistence",          ["email:inbox_rule_creation", "cloud:privilege_change", "cloud:iam_change"]),
+        ("Defense Evasion",      ["network:c2_jitter_evasion", "network:adaptive_ewma_regular_cadence"]),
+        ("Credential Access",    ["endpoint:credential_dump", "endpoint:lsass"]),
+        ("Lateral Movement",     ["network:lateral_movement_port", "network:lateral_movement"]),
+        ("Exfiltration",         ["network:suspicious_external_ip", "network:tor_exit_node", "data_movement"]),
+    ]
+    for stage_name, stage_factors in _stage_map:
+        matched = [f for f in top_factors if any(sf in f.lower() for sf in stage_factors)]
+        if matched or any(sf.replace("_", " ") in _factor_str for sf in stage_factors):
+            maestro_stages.append(f"{stage_name}: CONFIRMED — {', '.join(matched[:2]) or 'see factors'}")
+        elif severity in ("CRITICAL", "HIGH") and stage_name in ("Lateral Movement", "Exfiltration"):
+            maestro_stages.append(f"{stage_name}: POSSIBLE — high severity investigation")
+    if maestro_stages:
+        sections.append({
+            "title": "MAESTRO Stages",
+            "summary": "Kill-chain lifecycle stages detected based on factor evidence.",
+            "items": maestro_stages,
+        })
+
+    # ── PASTA (7 stages) ─────────────────────────────────────────────────
+    org_name = str(report.get("org") or "Organization")
+    pasta_items = [
+        f"Stage 1 — Define Objectives: {org_name} assets and data at risk",
+        f"Stage 2 — Define Scope: {', '.join(sorted(set(impact.get('corroborating_domains') or [])))[:3] or 'multi-domain activity'}",
+        f"Stage 3 — Decompose: {' → '.join(cluster_entities[:4]) if len(cluster_entities) > 1 else (cluster_entities[0] if cluster_entities else 'single pivot')}",
+        f"Stage 4 — Threat Analysis: {severity} severity threat — {confidence:.0%} confidence",
+        f"Stage 5 — Vulnerability Analysis: {', '.join(top_factors[:3]) or 'see findings'}",
+        f"Stage 6 — Attack Modelling: detected {len(attack_timeline)} timeline events",
+        f"Stage 7 — Risk Quantification: expected loss ${rq.get('expected_loss_usd') or 0:,}",
+    ]
+    sections.append({
+        "title": "PASTA",
+        "summary": "Process for Attack Simulation and Threat Analysis — derived from investigation findings.",
+        "items": pasta_items,
+    })
+
     return sections
 
 
@@ -1018,6 +1289,45 @@ def _adjudication_workflow(report: Dict[str, Any], rows: List[Dict[str, Any]], l
     }
 
 
+def _persona_filtered_claims(claims: List[Dict[str, Any]], persona: str) -> List[Dict[str, Any]]:
+    """P1-A: Return persona-relevant claims so each persona sees different confirmed_claims."""
+    if not claims:
+        return claims
+    # Keyword sets per persona — claims matching these keywords are promoted to top
+    _persona_keywords: Dict[str, tuple] = {
+        "executive":     ("business", "financial", "revenue", "brand", "pii", "exfil", "gdpr", "breach", "data"),
+        "ciso":          ("pii", "gdpr", "nis2", "regulation", "compliance", "risk", "exposure", "exfil", "lateral"),
+        "soc_analyst":   ("event", "alert", "ioc", "indicator", "ip", "hash", "process", "rule", "sigma", "timeline"),
+        "threat_hunter": ("ioc", "ttp", "mitre", "technique", "c2", "beacon", "lateral", "persistence", "hash"),
+        "forensics":     ("artifact", "hash", "sha256", "disk", "memory", "dump", "chain", "custody", "acquisition"),
+        "compliance":    ("gdpr", "nis2", "regulation", "art.33", "pii", "control", "audit", "policy", "soc2"),
+        "audit":         ("control", "failure", "iam", "policy", "change", "ticket", "audit", "population"),
+    }
+    keywords = _persona_keywords.get(persona, ())
+    if not keywords:
+        return claims
+    def _score(c: Dict[str, Any]) -> int:
+        text = (str(c.get("claim") or "") + " " + str(c.get("status") or "")).lower()
+        return sum(1 for kw in keywords if kw in text)
+    sorted_claims = sorted(claims, key=_score, reverse=True)
+    return sorted_claims
+
+
+def _build_stakeholder_gate(report: Dict[str, Any]) -> Dict[str, Any]:
+    """Build stakeholder_now/stakeholder_wait lists from report severity."""
+    severity = str((report.get("risk_quantification") or {}).get("severity") or "").upper()
+    if severity == "CRITICAL":
+        now = ["CISO", "SOC analyst", "IR lead", "Legal"]
+        wait = ["Board", "PR"]
+    elif severity in ("HIGH", "MEDIUM"):
+        now = ["SOC analyst", "IR lead"]
+        wait = ["CISO", "Legal"]
+    else:
+        now = []
+        wait = ["SOC analyst"]
+    return {"stakeholder_now": now, "stakeholder_wait": wait}
+
+
 def build_executive_report_artifact(payload: Dict[str, Any], options: Dict[str, Any] | None = None) -> Dict[str, Any]:
     opts = dict(options or {})
     report = enrich_canonical_report(_extract_report(payload))
@@ -1042,13 +1352,17 @@ def build_executive_report_artifact(payload: Dict[str, Any], options: Dict[str, 
         time.time(),
     )
     window_counts = _trend_counts_from_labels(label_history, end_ts) if label_history else _window_counts(rows, end_ts)
-    executive = generate_persona_view(report, persona="executive", disclosure_level=2, top_n=6)
+    _active_persona = str(opts.get("persona") or "executive").lower()
+    executive = generate_persona_view(report, persona=_active_persona, disclosure_level=2, top_n=6)
     appendix = report.get("evidence_appendix") or {}
-    claim_register = appendix.get("claim_register") or []
+    _all_claims = appendix.get("claim_register") or []
+    # P1-A: Filter claims by persona so each persona sees different confirmed_claims
+    claim_register = _persona_filtered_claims(_all_claims, _active_persona)
     business_outcomes = _business_outcomes_with_refs(report)
     frameworks = _framework_sections(report)
     adjudication = _adjudication_workflow(report, rows, latest_labels, label_history)
-    title = _executive_title(report)
+    # P2-8: Per-persona headline — substantively different per audience
+    title = _persona_headline(report, _active_persona) or _executive_title(report)
     focus_cluster_summary = _focus_cluster_summary(report)
     focus_cluster_explainability = _focus_cluster_explainability(report)
     key_evidence = _plain_english_alerts(report, evidence_lookup)
@@ -1083,8 +1397,23 @@ def build_executive_report_artifact(payload: Dict[str, Any], options: Dict[str, 
         },
         "overview": {
             "headline": title,
-            "what_happened": executive.get("what_happened"),
-            "why_it_matters": executive.get("why_it_matters"),
+            "what_happened": (
+                # P0-C: Wire T1/T2 LLM narrative — prefer grounded tier-2 narrative,
+                # fall back to canonical plain-language llm_summary, then persona view
+                (report.get("tier2_analysis") or {}).get("grounded_narrative")
+                or (report.get("canonical") or {}).get("llm_summary")
+                or executive.get("what_happened")
+                # P0-2 fix: deterministic fallback from attack_narrative (set by csv_adapter)
+                or report.get("attack_narrative")
+                # Final fallback: synthesise from verdict + counts
+                or _synthesise_narrative(report)
+            ),
+            "why_it_matters": (
+                executive.get("why_it_matters")
+                # P0-2 fix: synthesise a business summary when LLM not available
+                or (report.get("canonical") or {}).get("layered_summary", {}).get("top_layer", {}).get("why_it_matters")
+                or _synthesise_why_it_matters(report)
+            ),
             "what_to_do_next": executive.get("what_to_do_next") or executive.get("operational_next_step"),
             "action_basis_refs": _action_basis_refs(report),
             "business_impact": executive.get("business_impact") or {},
@@ -1095,6 +1424,7 @@ def build_executive_report_artifact(payload: Dict[str, Any], options: Dict[str, 
             "areas_to_investigate": areas_to_investigate,
             "working_hypothesis": hypothesis,
             "provider": provider,
+            "stakeholder_gate": _build_stakeholder_gate(report),
         },
         "facts": {
             "review_state_counts": review_counts,
@@ -1113,7 +1443,12 @@ def build_executive_report_artifact(payload: Dict[str, Any], options: Dict[str, 
             },
         },
         "appendix": {
-            "evidence_appendix": {**appendix, "key_evidence_reviewed": key_evidence, "focus_cluster_explainability": focus_cluster_explainability},
+            "evidence_appendix": {
+                **appendix,
+                "key_evidence_reviewed": key_evidence,
+                "focus_cluster_explainability": focus_cluster_explainability,
+                "source_rows": len(appendix.get("source_evidence_rows") or []),
+            },
             "top_findings": (report.get("findings") or [])[:8],
             "tier2": report.get("_replay_tier2") or {},
             "playbook": report.get("_replay_playbook") or {},
@@ -1326,6 +1661,65 @@ def _render_key_value_rows(rows: List[List[Any]]) -> str:
     return "".join(body)
 
 
+# ── Factor badge colour mapping ───────────────────────────────────────────────
+_FACTOR_BADGE_COLOURS: Dict[str, str] = {
+    "email": "#d97706", "attachment": "#b45309", "cloud": "#7c3aed",
+    "identity": "#1d4ed8", "network": "#059669", "endpoint": "#dc2626",
+    "corr": "#0891b2", "sequence": "#db2777", "graph": "#65a30d",
+}
+
+def _factor_badge(factor_name: str) -> str:
+    category = factor_name.split(":")[0] if ":" in factor_name else "other"
+    colour = _FACTOR_BADGE_COLOURS.get(category, "#6b7280")
+    label = factor_name.replace("_", " ").replace(":", "›")
+    return f"<span style='display:inline-block;padding:2px 7px;border-radius:10px;font-size:11px;font-weight:600;background:{colour};color:#fff;margin:2px'>{escape(label)}</span>"
+
+
+def _render_cluster_panels(clusters: List[Dict[str, Any]]) -> str:
+    """Render one <article> per investigation cluster for a war-room multi-panel view."""
+    if not clusters:
+        return ""
+    parts = ["<section style='margin-top:22px'><h2 style='font-size:1.1rem;margin-bottom:12px'>Investigation Clusters</h2>"]
+    parts.append("<div style='display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:14px'>")
+    _sev_colours = {"CRITICAL": "#dc2626", "HIGH": "#d97706", "MEDIUM": "#ca8a04", "LOW": "#16a34a"}
+    for cl in clusters:
+        entity = str(cl.get("pivot_entity") or "Unknown")
+        severity = str(cl.get("severity") or "LOW").upper()
+        sev_colour = _sev_colours.get(severity, "#6b7280")
+        factors = cl.get("top_factors") or []
+        badge_strip = "".join(_factor_badge(f) for f in factors[:5])
+        _no_factors_html = "<span style='color:#9ca3af;font-size:11px'>no scored factors</span>"
+        badge_html = badge_strip if badge_strip else _no_factors_html
+        timeline = cl.get("timeline_events") or []
+        timeline_html = ""
+        if timeline:
+            timeline_html = "<ul style='font-size:11px;margin:6px 0 0 0;padding-left:16px'>"
+            for ev in timeline[:5]:
+                ts = str(ev.get("ts") or ev.get("timestamp") or "")[:16]
+                desc = str(ev.get("description") or ev.get("summary") or ev.get("event_type") or "")[:80]
+                timeline_html += f"<li><span style='color:#9ca3af'>{escape(ts)}</span> {escape(desc)}</li>"
+            timeline_html += "</ul>"
+        action = str(cl.get("recommended_action") or cl.get("action") or "Analyst review required.")
+        confidence = cl.get("confidence")
+        conf_txt = f" &nbsp;· {int(float(confidence)*100)}%" if confidence is not None else ""
+        ioc_count = len(cl.get("iocs") or [])
+        ioc_txt = f" &nbsp;· {ioc_count} IOC{'s' if ioc_count != 1 else ''}" if ioc_count else ""
+        parts.append(
+            f"<article style='border:1px solid #374151;border-radius:8px;padding:12px;background:#111827'>"
+            f"<div style='display:flex;align-items:center;justify-content:space-between;margin-bottom:6px'>"
+            f"<strong style='font-size:13px'>{escape(entity)}</strong>"
+            f"<span style='font-size:11px;font-weight:700;color:{sev_colour}'>{escape(severity)}{conf_txt}{ioc_txt}</span>"
+            f"</div>"
+            f"<div style='margin:4px 0'>{badge_html}</div>"
+            f"{timeline_html}"
+            f"<p style='font-size:11px;margin:8px 0 0 0;border-top:1px solid #374151;padding-top:6px;color:#d1d5db'>"
+            f"<strong>Action:</strong> {escape(action)}</p>"
+            f"</article>"
+        )
+    parts.append("</div></section>")
+    return "".join(parts)
+
+
 def render_executive_report_html(artifact: Dict[str, Any]) -> str:
     overview = artifact.get("overview") or {}
     facts = artifact.get("facts") or {}
@@ -1340,7 +1734,7 @@ def render_executive_report_html(artifact: Dict[str, Any]) -> str:
     provider = str(overview.get("provider") or "Cloud")
     provider_style = PROVIDER_STYLE.get(provider, PROVIDER_STYLE["Cloud"])
     hypothesis = overview.get("working_hypothesis") or []
-    decision_value = overview.get("what_to_do_next") or "No action recommendation available."
+    decision_value = _claim_validate("what_to_do_next", str(overview.get("what_to_do_next") or ""))
     if isinstance(decision_value, list):
         immediate_decision = ""
         immediate_decision_list = [str(item).strip() for item in decision_value if str(item).strip()]
@@ -1471,7 +1865,7 @@ h2,h3,h4{{margin:0 0 12px}} table td,table th{{padding:8px 10px;border-bottom:1p
   <section class="hero">
     <div class="eyebrow">Executive Report</div>
     <h1 class="headline">{escape(str(overview.get("headline") or "Executive assessment"))}</h1>
-    <div class="sub">{escape(str(overview.get("what_happened") or "No narrative available."))}</div>
+    <div class="sub">{escape(_claim_validate("what_happened", str(overview.get("what_happened") or "")))}</div>
     <div class="meta-strip">
       <div class="provider-chip"><span class="provider-dot" style="background:{provider_style['accent']}"></span>{escape(provider_style['chip'])}</div>
       <div><strong>Tenant:</strong> {escape(str(meta.get("tenant") or "unknown"))}</div>
@@ -1483,7 +1877,7 @@ h2,h3,h4{{margin:0 0 12px}} table td,table th{{padding:8px 10px;border-bottom:1p
   {"<section class='wide-grid'>" if checklist.get("include_overview", True) else ""}
       <article class="panel">
         <h2>What We Found</h2>
-        <p>{escape(str(overview.get("why_it_matters") or "No business summary available."))}</p>
+        <p>{escape(_claim_validate("why_it_matters", str(overview.get("why_it_matters") or "")))}</p>
         <div class='small'><strong>Focus of investigation:</strong> {escape(str(focus_cluster_summary.get("narrative") or ""))}</div>
         <div class='small'><strong>Why this was prioritized:</strong> {escape(str(focus_cluster_summary.get("why_it_matters") or ""))}</div>
         <div class='small'><strong>Evidence:</strong> {escape(_render_evidence_citations(focus_cluster_summary.get("evidence_refs") or []))}</div>
@@ -1536,6 +1930,7 @@ h2,h3,h4{{margin:0 0 12px}} table td,table th{{padding:8px 10px;border-bottom:1p
   {("<article class='panel'><h2>Claims</h2><table style='width:100%;border-collapse:collapse'><thead><tr><th align='left'>Claim</th><th align='left'>Status</th><th align='left'>Possible business effect</th><th align='left'>Action / owner</th><th align='left'>Evidence</th></tr></thead><tbody>" + (''.join(claim_rows) or "<tr><td colspan='5'>No claims available.</td></tr>") + "</tbody></table></article>") if checklist.get("include_claims", True) else ""}
   {"</section>" if checklist.get("include_claims", True) else ""}
   {("<section class='panel' style='margin-top:18px'><h2>Trend Windows</h2><div class='trend-grid'>" + trends_html + "</div></section>") if checklist.get("include_trends", True) else ""}
+  {_render_cluster_panels(artifact.get("canonical_report", {}).get("investigation_clusters") or [])}
   {("<section class='grid' style='margin-top:18px'><article class='panel'><h2>Adjudication Workflow</h2><p class='small'>Labels are sourced from the existing analyst labeling workflow, not from model guesses.</p><table style='width:100%;border-collapse:collapse'><tbody><tr><td>Tenant</td><td>" + escape(str(adjudication.get("tenant") or "unknown")) + "</td></tr><tr><td>Labels in history</td><td>" + escape(str(adjudication.get("label_history_count") or 0)) + "</td></tr><tr><td>Report events labeled</td><td>" + escape(str(adjudication.get("report_event_labeled_count") or 0)) + "</td></tr><tr><td>Report events unlabeled</td><td>" + escape(str(adjudication.get("report_event_unlabeled_count") or 0)) + "</td></tr><tr><td>Single-label endpoint</td><td>" + escape(str(((adjudication.get("workflow") or {}).get("single_label_endpoint") or ""))) + "</td></tr><tr><td>CSV import</td><td>" + escape(str(((adjudication.get("workflow") or {}).get("csv_import_endpoint") or ""))) + "</td></tr><tr><td>CSV export</td><td>" + escape(str(((adjudication.get("workflow") or {}).get("csv_export_endpoint") or ""))) + "</td></tr></tbody></table></article>" + ("<article class='panel'><h2>Framework Sections</h2>" + "".join(framework_html) + "</article>" if framework_html else "<article class='panel'><h2>Framework Sections</h2><p class='small'>No canonical framework mappings were present, so this section is intentionally omitted from the executive body.</p></article>") + "</section>")}
   {("<section class='page-break' style='margin-top:18px'><h2>Evidence Appendix</h2>" + _render_appendix_tables(appendix.get("evidence_appendix") or {}) + "</section>") if checklist.get("include_appendix", True) else ""}
 </div>

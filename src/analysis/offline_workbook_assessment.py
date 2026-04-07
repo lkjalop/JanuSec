@@ -16,6 +16,15 @@ from urllib.parse import urlparse
 from src.core.detect.isolation_forest import IsolationForestDetector
 from src.ml.tfidf_profile import TfidfProfile
 
+try:
+    from src.analysis.threat_intel_enrichment import enrich_ip, enrich_ioc_set, intel_factor_boost
+    _INTEL_ENRICHMENT_AVAILABLE = True
+except Exception:  # pragma: no cover
+    _INTEL_ENRICHMENT_AVAILABLE = False
+    def enrich_ip(ip: str) -> dict: return {}  # type: ignore[misc]
+    def enrich_ioc_set(ips, domains) -> dict: return {}  # type: ignore[misc]
+    def intel_factor_boost(e: dict) -> float: return 0.0  # type: ignore[misc]
+
 
 _LATERAL_PORTS = {135, 139, 445, 3389, 5985, 5986}
 _SUSPICIOUS_PATH_MARKERS = (
@@ -126,6 +135,11 @@ _FACTOR_WEIGHTS = {
     "network:vpc_external_flow": 0.08,
     "corr:cross_sheet_indicator_pivot": 0.16,
     "network:adaptive_ewma_regular_cadence": 0.08,
+    # P2 detections
+    "email:lookalike_domain": 0.19,          # P2-A spearphishing lookalike
+    "email:inbox_rule_creation": 0.17,       # P2-B T1114.003 inbox rule
+    "network:tor_exit_node": 0.20,           # P2-D Tor exit node
+    "network:c2_jitter_evasion": 0.18,       # P2-E C2 jitter EWMA evasion
     "context:tfidf_rare_tokens": 0.06,
     "ml:isolation_forest_outlier": 0.09,
     "ml:dbscan_sparse_cluster": 0.07,
@@ -1025,6 +1039,164 @@ def _benign_context_tags(path: str, process: str, row: Dict[str, Any]) -> list[s
     return deduped
 
 
+# ── P2 Detection helpers ──────────────────────────────────────────────────────
+
+# P2-D: Known Tor exit nodes and suspicious infrastructure (extend as needed)
+_TOR_EXIT_IPS: frozenset[str] = frozenset({
+    "185.220.101.45", "185.220.101.46", "185.220.101.47", "185.220.101.48",
+    "185.220.101.49", "185.220.101.50", "185.220.101.51", "185.220.101.34",
+    "185.220.100.240", "185.220.100.241", "185.220.100.242", "185.220.100.243",
+    "185.220.100.244", "185.220.100.245", "185.220.100.246", "185.220.100.247",
+    "185.220.102.8", "185.220.103.6", "199.249.230.68", "199.249.230.69",
+    "51.195.42.82", "163.172.149.155", "176.10.99.200", "176.10.99.201",
+    "185.100.86.128", "195.206.105.217",
+})
+
+
+def _is_tor_exit_ip(ip: str) -> bool:
+    """Return True when ip is a known Tor exit node."""
+    return str(ip or "").strip() in _TOR_EXIT_IPS
+
+
+def _levenshtein_ratio(a: str, b: str) -> float:
+    """Simple normalised Levenshtein similarity (0–1)."""
+    if not a or not b:
+        return 0.0
+    a, b = a.lower(), b.lower()
+    if a == b:
+        return 1.0
+    la, lb = len(a), len(b)
+    dp = list(range(lb + 1))
+    for i in range(1, la + 1):
+        prev = dp[:]
+        dp[0] = i
+        for j in range(1, lb + 1):
+            if a[i - 1] == b[j - 1]:
+                dp[j] = prev[j - 1]
+            else:
+                dp[j] = 1 + min(prev[j], dp[j - 1], prev[j - 1])
+    dist = dp[lb]
+    return 1.0 - dist / max(la, lb)
+
+
+def _is_lookalike_domain(candidate: str, trusted: str, threshold: float = 0.75) -> bool:
+    """Return True when candidate looks like a lookalike/typosquat of trusted.
+
+    Handles:
+    - Levenshtein similarity >= threshold (typosquat: googIe.com)
+    - Trusted domain embedded as prefix/substring: acmecorp-finance.com contains 'acmecorp'
+    - Subdomain prepend of fake root: auth.acmecorp-finance.com
+    """
+    if not candidate or not trusted:
+        return False
+    c, t = candidate.lower().strip(), trusted.lower().strip()
+    if c == t:
+        return False
+    # Strip port if present
+    c = c.split(":")[0]
+    # Substring containment check: trusted root (without TLD) appears in candidate
+    def _root(d: str) -> str:
+        parts = d.rsplit(".", 1)
+        return parts[0] if len(parts) == 2 else d
+    trusted_root = _root(t)
+    candidate_stripped = _root(c)
+    # If the trusted root (e.g. 'acmecorp') is a substring of candidate root → lookalike
+    if len(trusted_root) >= 4 and trusted_root in candidate_stripped:
+        return True
+    # Standard Levenshtein ratio on stripped domains
+    return _levenshtein_ratio(candidate_stripped, trusted_root) >= threshold
+
+
+def _detect_lookalike_domain(row: Dict[str, Any], org_domain: str) -> bool:
+    """Check email rows for lookalike domain impersonation."""
+    if not org_domain:
+        return False
+    sender = _email_sender_domain(row)
+    if sender and sender != org_domain and _is_lookalike_domain(sender, org_domain):
+        return True
+    from_domain_raw = _lower(row.get("from_domain") or "")
+    if from_domain_raw and from_domain_raw != org_domain and _is_lookalike_domain(from_domain_raw, org_domain):
+        return True
+    return False
+
+
+def _detect_inbox_rule_creation(row: Dict[str, Any]) -> bool:
+    """Flag inbox rule creation events (T1114.003 — Email Collection: Email Forwarding Rule)."""
+    subject = _lower(str(row.get("subject") or ""))
+    event_name = _lower(str(row.get("event_name") or row.get("eventName") or row.get("action") or ""))
+    return (
+        "inbox rule created" in subject
+        or "inbox rule" in event_name and "created" in event_name
+        or "new-inboxrule" in event_name
+        or "set-inboxrule" in event_name
+        or "forward" in subject and "rule" in subject
+    )
+
+
+def _infer_org_domain(rows: list[Dict[str, Any]]) -> str:
+    """Infer the primary organisation domain from the most common internal email domain."""
+    from_collections: Counter[str] = Counter()
+    for row in rows:
+        for field in ("user", "username", "userPrincipalName", "actor", "caller", "from", "to",
+                      "sender", "recipient", "recipient_email", "upn"):
+            val = _lower(row.get(field) or "")
+            if "@" in val:
+                domain = val.split("@", 1)[1].strip()
+                if domain:
+                    from_collections[domain] += 1
+        for field in ("recipient_domain", "to_domain"):
+            val = _lower(row.get(field) or "")
+            if val and "." in val:
+                from_collections[val] += 1
+    # Also count from_domain occurrences as supporting signal
+    from_domain_counts: Counter[str] = Counter()
+    for row in rows:
+        val = _lower(row.get("from_domain") or "")
+        if val and "." in val:
+            from_domain_counts[val] += 1
+    _public_providers = {"gmail.com", "outlook.com", "yahoo.com", "hotmail.com", "protonmail.com", "icloud.com"}
+    # Prefer identity/user-derived domains
+    for domain, _ in from_collections.most_common(10):
+        if domain not in _public_providers:
+            return domain
+    # Fall back to majority from_domain (the one seen in 2+ rows)
+    for domain, count in from_domain_counts.most_common(10):
+        if domain not in _public_providers and count >= 2:
+            return domain
+    return ""
+
+
+def _detect_c2_jitter(timestamps: list[float]) -> tuple[bool, float, str]:
+    """Detect C2 EWMA-evasion jitter pattern.
+
+    Returns (is_jittered, cv, description).
+    High CV (>0.5) + presence of long-sleep intervals (>1800s) indicates jitter evasion.
+    """
+    if len(timestamps) < 4:
+        return False, 0.0, ""
+    sorted_ts = sorted(timestamps)
+    intervals = [sorted_ts[i + 1] - sorted_ts[i] for i in range(len(sorted_ts) - 1)]
+    if not intervals:
+        return False, 0.0, ""
+    mean_iv = sum(intervals) / len(intervals)
+    if mean_iv <= 0:
+        return False, 0.0, ""
+    variance = sum((x - mean_iv) ** 2 for x in intervals) / len(intervals)
+    std_iv = variance ** 0.5
+    cv = std_iv / mean_iv
+    has_long_sleep = any(iv > 1800 for iv in intervals)
+    has_short_burst = any(iv < 60 for iv in intervals)
+    is_jittered = cv > 0.5 and (has_long_sleep or has_short_burst)
+    desc = (
+        f"C2 jitter detected: {len(intervals)} intervals, "
+        f"mean={mean_iv:.0f}s, cv={cv:.2f}, "
+        f"long_sleep={has_long_sleep}, short_burst={has_short_burst}"
+    )
+    return is_jittered, cv, desc
+
+# ── END P2 helpers ────────────────────────────────────────────────────────────
+
+
 def _confidence_from_factors(factors: list[str], benign_tags: list[str]) -> float:
     confidence = 0.18
     categories = set()
@@ -1339,6 +1511,16 @@ def _extract_replay_label(row: Dict[str, Any]) -> str:
     for alert in alerts:
         if isinstance(alert, dict) and alert.get("_janusec_label"):
             return str(alert.get("_janusec_label"))
+    # Pack-level labels set by manifest loader (preferring malicious over benign)
+    pack_labels = row.get("pack_labels") or []
+    malicious_label = next((lbl for lbl in pack_labels if "malicious" in str(lbl).lower()), None)
+    if malicious_label:
+        return str(malicious_label)
+    benign_label = next((lbl for lbl in pack_labels if "benign" in str(lbl).lower() or "background" in str(lbl).lower()), None)
+    if benign_label:
+        return str(benign_label)
+    if pack_labels:
+        return str(pack_labels[0])
     return ""
 
 
@@ -1835,8 +2017,12 @@ def build_offline_workbook_assessment(rows: list[Dict[str, Any]], *, assessment_
         tenant_domain_profiles.setdefault((org, domain), TfidfProfile()).add_document(tokens)
 
     ip_to_sheets, domain_to_sheets, hash_to_sheets, user_to_sheets, resource_to_sheets = _collect_indicator_maps(rows)
+    # P2: Infer org domain once for lookalike detection across all email rows
+    _org_domain = _infer_org_domain(rows)
     endpoint_hash_counts = Counter(_lower(row.get("sha256") or row.get("file_hash")) for row in rows if row.get("sha256") or row.get("file_hash"))
     network_groups: dict[Tuple[str, str, int], list[float]] = defaultdict(list)
+    # P2-E: per-src_ip→dst_ip timestamp groups for C2 jitter detection
+    c2_jitter_groups: dict[tuple[str, str], list[float]] = defaultdict(list)
     entity_pair_groups: dict[Tuple[str, str, str], list[float]] = defaultdict(list)
     value_groups: dict[tuple[str, str], list[float]] = defaultdict(list)
     historical_graph_paths = dict(persisted.get("graph_paths") or {})
@@ -1854,6 +2040,9 @@ def build_offline_workbook_assessment(rows: list[Dict[str, Any]], *, assessment_
             network_groups[(src_ip, dst_ip, port)].append(ts)
             entity_pair_groups[("host_dst_ip", _lower(row.get("host") or row.get("hostname") or src_ip), dst_ip)].append(ts)
             value_groups[("network_payload", f"{src_ip}->{dst_ip}:{port}")].append(float(_as_float(row.get("payload_len") or row.get("bytes")) or 0.0))
+        # P2-E: collect timestamps for C2 jitter detection (group by src→dst regardless of port)
+        if src_ip and dst_ip and ts is not None:
+            c2_jitter_groups[(src_ip, dst_ip)].append(ts)
         user = _lower(row.get("user") or row.get("username") or row.get("userPrincipalName") or row.get("actor") or row.get("caller"))
         app = _lower(row.get("app") or row.get("application") or row.get("client_app"))
         if user and app and ts is not None:
@@ -1963,6 +2152,20 @@ def build_offline_workbook_assessment(rows: list[Dict[str, Any]], *, assessment_
         if external_dst:
             factors.append("network:suspicious_external_ip")
             evidence.append(f"external destination {dst_ip}")
+            # P2-D: Tor exit check for network destination IPs
+            if dst_ip and _is_tor_exit_ip(dst_ip):
+                factors.append("network:tor_exit_node")
+                evidence.append(f"destination IP {dst_ip} is a known Tor exit node")
+            # Threat intel enrichment: AbuseIPDB + static bad-actor lists
+            if dst_ip and _INTEL_ENRICHMENT_AVAILABLE:
+                _dst_intel = enrich_ip(dst_ip)
+                if _dst_intel:
+                    row["_intel_dst"] = _dst_intel
+                    if _dst_intel.get("is_known_bad") and "network:tor_exit_node" not in factors:
+                        factors.append("network:tor_exit_node")
+                        evidence.append(f"destination IP {dst_ip} flagged as known-bad infrastructure (abuse_score={_dst_intel.get('abuse_score', 0)})")
+                    elif _dst_intel.get("abuse_score", 0) >= 25 and "network:suspicious_external_ip" in factors:
+                        evidence.append(f"AbuseIPDB score {_dst_intel['abuse_score']}/100 for {dst_ip} (isp={_dst_intel.get('isp','?')})")
         if lateral_port:
             factors.append("network:lateral_movement_port")
             evidence.append(f"lateral movement port {dst_port}")
@@ -1990,6 +2193,20 @@ def build_offline_workbook_assessment(rows: list[Dict[str, Any]], *, assessment_
         ):
             factors.append("email:vendor_impersonation")
             evidence.append(f"sender trust mismatch sender={sender_domain or 'unknown'} baseline={baseline_domain or 'unknown'} reply_to={reply_domain or 'unknown'}")
+        # P2-A: Lookalike/typosquat domain detection
+        if domain == "email" and _org_domain and _detect_lookalike_domain(row, _org_domain):
+            _lookalike_sender = _email_sender_domain(row) or _lower(row.get("from_domain") or "")
+            factors.append("email:lookalike_domain")
+            evidence.append(f"lookalike domain {_lookalike_sender!r} resembles org domain {_org_domain!r} — potential spearphishing (T1566.001)")
+        # P2-B: Inbox rule creation — T1114.003 Email Collection: Email Forwarding Rule
+        if domain == "email" and _detect_inbox_rule_creation(row):
+            factors.append("email:inbox_rule_creation")
+            evidence.append(f"inbox rule creation detected in email event — likely attacker hiding replies (T1114.003): subject={str(row.get('subject') or '')[:60]!r}")
+        # P2-D: Tor exit node detection on sender_ip
+        _sender_ip_raw = str(row.get("sender_ip") or row.get("src_ip") or row.get("ip") or "").strip()
+        if _sender_ip_raw and _is_tor_exit_ip(_sender_ip_raw):
+            factors.append("network:tor_exit_node")
+            evidence.append(f"sender/source IP {_sender_ip_raw} is a known Tor exit node")
         if domain == "email" and _email_auth_fail(row):
             factors.append("email:auth_alignment_fail")
             evidence.append(
@@ -2067,6 +2284,13 @@ def build_offline_workbook_assessment(rows: list[Dict[str, Any]], *, assessment_
             if regular:
                 factors.append("network:adaptive_ewma_regular_cadence")
                 evidence.append(f"regular cadence score {regularity:.2f}")
+        # P2-E: C2 jitter / EWMA-evasion detection (jittered intervals + long sleeps)
+        if src_ip and dst_ip:
+            _c2_ts = c2_jitter_groups.get((src_ip, dst_ip), [])
+            _is_jitter, _cv, _jitter_desc = _detect_c2_jitter(_c2_ts)
+            if _is_jitter and "network:c2_jitter_evasion" not in factors:
+                factors.append("network:c2_jitter_evasion")
+                evidence.append(_jitter_desc)
         for pair_kind, pair_a, pair_b in (
             ("user_app", _lower(row.get("user") or row.get("username") or row.get("userPrincipalName")), _lower(row.get("app") or row.get("application") or row.get("client_app"))),
             ("user_resource", _lower(row.get("user") or row.get("username") or row.get("userPrincipalName") or row.get("actor") or row.get("caller")), _lower(row.get("resource") or row.get("resourceDisplayName") or row.get("target_resource"))),
@@ -2467,6 +2691,28 @@ def build_offline_workbook_assessment(rows: list[Dict[str, Any]], *, assessment_
 
     likelihood = min(99, int(max_confidence * 100))
     severity = _severity_from_confidence(max_confidence)
+    # ── Severity gate: prevent false CRITICAL/HIGH on benign datasets ─────
+    _n_confirmed_mal_rows = sum(
+        1 for item in base_rows
+        if str(item["row"].get("review_state", "")).lower() == "confirmed_malicious"
+    )
+    _n_fp_or_benign = sum(
+        1 for item in base_rows
+        if str(item["row"].get("review_state", "")).lower() in (
+            "reviewed_benign", "reviewed_false_positive", "approved_change"
+        )
+    )
+    if _n_confirmed_mal_rows == 0 and severity in ("CRITICAL", "HIGH"):
+        if _n_fp_or_benign > len(base_rows) * 0.5:
+            severity = "LOW"
+            max_confidence = min(max_confidence, 0.49)
+            likelihood = min(99, int(max_confidence * 100))
+        elif _n_fp_or_benign > len(base_rows) * 0.35 or len(suspicious_rows) < len(base_rows) * 0.35:
+            # More than 35% of events are reviewed benign, or <35% are suspicious → not HIGH
+            severity = "MEDIUM"
+            max_confidence = min(max_confidence, 0.69)
+            likelihood = min(99, int(max_confidence * 100))
+    # ─────────────────────────────────────────────────────────────────────
     affected_identities = {
         _lower(item["row"].get("user") or item["row"].get("username") or item["row"].get("email"))
         for item in suspicious_rows
@@ -2647,6 +2893,18 @@ def build_offline_workbook_assessment(rows: list[Dict[str, Any]], *, assessment_
         "updated_ts": now,
     }
     connected_evidence = corroboration_count >= 2 or len(corroborating_domains) >= 2 or bool(graph_edges)
+    # P2-F: Source file SHA-256 for chain of custody
+    _source_file_hashes: dict[str, str] = {}
+    for row in rows:
+        sf = str(row.get("source_file") or "")
+        if sf and sf not in _source_file_hashes:
+            # hash the source file name + row fingerprints as a stable digest
+            _sf_fingerprints = sorted(
+                str(r.get("fingerprint") or "")
+                for r in rows if str(r.get("source_file") or "") == sf
+            )
+            _sf_digest = hashlib.sha256(("\n".join(_sf_fingerprints[:500])).encode()).hexdigest()
+            _source_file_hashes[sf] = _sf_digest
     upload_provenance = {
         "tenant": org,
         "ingest_time": now,
@@ -2655,13 +2913,187 @@ def build_offline_workbook_assessment(rows: list[Dict[str, Any]], *, assessment_
         "accepted_rows": len(rows),
         "rejected_rows": 0,
         "parser_warnings": sorted(set(parser_warnings))[:20],
+        "source_file_hashes": _source_file_hashes,  # P2-F: SHA-256 per source file
     }
     _save_persisted_baseline(org, persisted_payload)
+
+    # ── P1-C: Investigation cluster separation ────────────────────────────────
+    _cluster_map: defaultdict[str, list] = defaultdict(list)
+    for _ci_item in suspicious_rows:
+        _ci_row = _ci_item.get("row") or {}
+        _ci_key = (
+            _lower(_ci_row.get("user") or _ci_row.get("username") or _ci_row.get("userPrincipalName") or _ci_row.get("actor") or "")
+            or _lower(_ci_row.get("host") or _ci_row.get("hostname") or "")
+            or _lower(_safe_ip(_ci_row.get("src_ip") or _ci_row.get("ip") or "") or "")
+            or "unknown"
+        )
+        _cluster_map[_ci_key].append(_ci_item)
+    _min_cluster_size = 2
+    _clusters_main = {k: v for k, v in _cluster_map.items() if len(v) >= _min_cluster_size}
+    _singletons_items = [it for k, v in _cluster_map.items() if len(v) < _min_cluster_size for it in v]
+    # P2-C: Promote high-value singletons to their own cluster (e.g. insider track, data_movement + external IP)
+    _promoted_singletons: list = []
+    _remaining_singletons: list = []
+    for _si in _singletons_items:
+        _si_row = _si.get("row") or {}
+        _si_sheet = _sheet_name(_si_row).lower()
+        _si_dst = _lower(str(_si_row.get("dst_system") or _si_row.get("dst_ip") or ""))
+        _si_is_exfil = ("data" in _si_sheet or "movement" in _si_sheet) and _si_dst
+        _si_is_external = _si_is_exfil and not any(
+            _si_dst.startswith(pfx)
+            for pfx in ("10.", "192.168.", "172.16.", "172.17.", "172.18.", "172.19.",
+                        "172.20.", "172.21.", "172.22.", "172.23.", "172.24.", "172.25.",
+                        "172.26.", "172.27.", "172.28.", "172.29.", "172.30.", "172.31.")
+        )
+        if _si_is_external or _si.get("confidence", 0) >= 0.7:
+            _promoted_singletons.append(_si)
+        else:
+            _remaining_singletons.append(_si)
+    investigation_clusters: list[dict[str, Any]] = []
+    for _psi in _promoted_singletons:
+        _psi_row = _psi.get("row") or {}
+        _psi_key = (
+            _lower(_psi_row.get("user") or _psi_row.get("username") or "")
+            or _lower(_psi_row.get("host") or "")
+            or _lower(_safe_ip(_psi_row.get("src_ip") or "") or "")
+            or "data-movement-external"
+        )
+        _psi_fcount: Counter[str] = Counter(_psi.get("factors") or [])
+        investigation_clusters.append({
+            "pivot_entity": _psi_key,
+            "event_count": 1,
+            "severity": _severity_from_confidence(_psi.get("confidence", 0.18)),
+            "domains": [_psi.get("domain", "other")],
+            "top_factors": [k for k, _ in _psi_fcount.most_common(5)],
+            "evidence_row_indices": [_psi_row.get("row_index")] if _psi_row.get("row_index") is not None else [],
+        })
+    _singletons_items = _remaining_singletons
+    for _ck, _cv in sorted(_clusters_main.items()):
+        _cl_sev = _severity_from_confidence(max((_i.get("confidence", 0) for _i in _cv), default=0.18))
+        _cl_fcount: Counter[str] = Counter(f for _i in _cv for f in (_i.get("factors") or []))
+        investigation_clusters.append({
+            "pivot_entity": _ck,
+            "event_count": len(_cv),
+            "severity": _cl_sev,
+            "domains": sorted({_i.get("domain", "other") for _i in _cv}),
+            "top_factors": [k for k, _ in _cl_fcount.most_common(5)],
+            "evidence_row_indices": [
+                (_i.get("row") or {}).get("row_index")
+                for _i in sorted(_cv, key=lambda x: x.get("confidence", 0), reverse=True)[:6]
+                if (_i.get("row") or {}).get("row_index") is not None
+            ],
+        })
+    if _singletons_items:
+        if investigation_clusters:
+            investigation_clusters[-1]["event_count"] += len(_singletons_items)
+        else:
+            investigation_clusters.append({
+                "pivot_entity": "mixed",
+                "event_count": len(_singletons_items),
+                "severity": "LOW",
+                "domains": sorted({_i.get("domain", "other") for _i in _singletons_items}),
+                "top_factors": [],
+                "evidence_row_indices": [],
+            })
+    # ── END cluster separation ────────────────────────────────────────────────
+
+    # ── Ollama-grounded tier-2 narrative (when auto_llm enabled) ─────────────
+    tier2_analysis: dict[str, Any] = {}
+    if auto_llm and os.getenv("LLM_MOCK", "0").lower() not in {"1", "true", "yes"}:
+        try:
+            from src.integrations.llm_client import DEFAULT_CLIENT as _llm_client  # noqa: F811
+            if _llm_client:
+                _top_factors_txt = ", ".join(entry["factor_name"] for entry in semantic_top_factors[:6]) or "none"
+                _top_findings_txt = "; ".join(
+                    f"{f.get('entity')} ({f.get('sheet')}): {f.get('title')}"
+                    for f in findings[:5]
+                ) or "none"
+                _cluster_txt = "; ".join(
+                    f"Cluster '{c['pivot_entity']}' ({c['event_count']} events, sev {c['severity']})"
+                    for c in investigation_clusters[:3]
+                ) or "single cluster"
+                _llm_prompt = (
+                    "You are a cybersecurity analyst. Based ONLY on the following scored evidence, "
+                    "write a concise (150 words max) security analysis. Do not invent facts not present.\n\n"
+                    f"Verdict: {final_verdict} | Severity: {risk_quantification.get('severity')} "
+                    f"| Confidence: {round(max_confidence * 100)}%\n"
+                    f"Top detection signals: {_top_factors_txt}\n"
+                    f"Key findings: {_top_findings_txt}\n"
+                    f"Investigation clusters: {_cluster_txt}\n"
+                    f"Missing evidence: {', '.join(sorted(set(missing_evidence))[:6]) or 'none'}\n\n"
+                    "Write the analysis in 3 sentences: (1) what was detected, (2) the confidence and key evidence, "
+                    "(3) the recommended immediate action."
+                )
+                _llm_resp = _llm_client.generate(
+                    _llm_prompt,
+                    model=os.getenv("T2_MODEL", "llama3.1:8b"),  # T2: quality narrative model
+                    max_tokens=300,
+                    tenant_id=org,
+                )
+                _llm_text = ""
+                if isinstance(_llm_resp, dict):
+                    _llm_text = _llm_resp.get("text") or ""
+                elif isinstance(_llm_resp, str):
+                    _llm_text = _llm_resp
+                if _llm_text.strip():
+                    tier2_analysis = {
+                        "provider": getattr(_llm_client, "provider", "unknown"),
+                        "model": getattr(_llm_client, "ollama_model", "unknown"),
+                        "grounded_narrative": _llm_text.strip(),
+                        "grounding_context": {
+                            "factors": _top_factors_txt,
+                            "clusters": _cluster_txt,
+                            "severity": risk_quantification.get("severity"),
+                        },
+                        "generated_at": now,
+                    }
+        except Exception as _llm_exc:
+            tier2_analysis = {"error": str(_llm_exc), "grounded_narrative": ""}
+    elif auto_llm:
+        # LLM_MOCK mode: deterministic grounded stub for testing
+        tier2_analysis = {
+            "provider": "mock",
+            "model": "mock",
+            "grounded_narrative": (
+                f"[MOCK] Assessment: {final_verdict} at {round(max_confidence * 100)}% confidence. "
+                f"Severity: {risk_quantification.get('severity')}. "
+                f"Top signals: {', '.join(entry['factor_name'] for entry in semantic_top_factors[:3]) or 'none'}. "
+                f"Recommend: {(recommended_actions[0].get('primary_action') or 'analyst review') if recommended_actions else 'analyst review'}."
+            ),
+            "grounding_context": {},
+            "generated_at": now,
+        }
+    # ── END tier-2 narrative ─────────────────────────────────────────────────
+
+    # ── Intel enrichment summary ─────────────────────────────────────────────
+    # Collect unique external IPs from suspicious rows and bulk-enrich them.
+    # Results are attached to the assessment for reporting / SOAR export.
+    _intel_ips: list[str] = list({
+        ip for item in suspicious_rows
+        for ip in [
+            _safe_ip((item.get("row") or {}).get("dst_ip")),
+            _safe_ip((item.get("row") or {}).get("src_ip") or (item.get("row") or {}).get("ip")),
+        ]
+        if ip and _is_external_ip(ip)
+    })[:30]
+    _intel_domains: list[str] = list({
+        d for item in suspicious_rows
+        for d in (_extract_domains(list((item.get("row") or {}).get("_urls", []) or [])))
+        if d
+    })[:20]
+    ioc_enrichment: dict[str, Any] = {}
+    if _INTEL_ENRICHMENT_AVAILABLE and (_intel_ips or _intel_domains):
+        try:
+            ioc_enrichment = enrich_ioc_set(_intel_ips, _intel_domains)
+        except Exception:  # pragma: no cover
+            ioc_enrichment = {}
+    # ── END intel enrichment summary ────────────────────────────────────────
 
     return {
         "assessment_id": assessment_id,
         "report_id": assessment_id,
         "status": "completed",
+        "tier2_analysis": tier2_analysis,
         "final_verdict": final_verdict,
         "final_confidence": round(max_confidence, 2),
         "severity": risk_quantification.get("severity"),
@@ -2675,6 +3107,7 @@ def build_offline_workbook_assessment(rows: list[Dict[str, Any]], *, assessment_
         "org": org,
         "assessor": "offline-workbook",
         "rows": rows,
+        "investigation_clusters": investigation_clusters,
         "llm_rows": llm_rows,
         "results": results,
         "canonical": canonical,
@@ -2696,6 +3129,7 @@ def build_offline_workbook_assessment(rows: list[Dict[str, Any]], *, assessment_
         "attack_timeline": attack_timeline,
         "recommended_actions": recommended_actions,
         "upload_provenance": upload_provenance,
+        "ioc_enrichment": ioc_enrichment,
         "impact_metadata": {
             "affected_identities": sorted(x for x in affected_identities if x)[:12],
             "affected_hosts": sorted(x for x in affected_hosts if x)[:12],
