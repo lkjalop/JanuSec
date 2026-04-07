@@ -123,35 +123,41 @@ def export_docx_bytes_from_report(payload: Dict[str, Any]) -> Optional[bytes]:
 def export_pdf_bytes_from_html(html: str) -> Optional[bytes]:
     """Return PDF bytes generated from HTML.
 
-    Tries WeasyPrint first (best CSS fidelity), then falls back to Playwright
-    (Chromium headless — requires `playwright install chromium`).
-    Returns None when neither is available or generation fails.
+    Priority order:
+      1. xhtml2pdf  — uses ReportLab internally; best Windows compatibility.
+      2. WeasyPrint  — better CSS fidelity but requires GTK/Pango native libs.
+      3. Playwright  — Chromium headless fallback.
+    Returns None when no engine is available or all fail.
     """
-    # 1. WeasyPrint path
+    # 1. xhtml2pdf / ReportLab (preferred — no native lib deps on Windows)
     try:
-        from weasyprint import HTML as _WP_HTML
-        pdf = _WP_HTML(string=html).write_pdf()
-        return pdf
-    except ImportError:
-        pass  # not installed — try xhtml2pdf
-    except Exception:
-        pass  # generation error — try xhtml2pdf
-
-    # 2. xhtml2pdf fallback (installed: pip install xhtml2pdf)
-    try:
-        import io as _io2
+        import io as _io1
         from xhtml2pdf import pisa  # type: ignore
-        _buf = _io2.BytesIO()
+        _buf = _io1.BytesIO()
         _status = pisa.CreatePDF(html.encode('utf-8'), dest=_buf)
-        if not _status.err and _buf.tell() > 100:
+        if not _status.err and _buf.tell() > 1024:
             _buf.seek(0)
             return _buf.read()
     except ImportError:
+        pass  # not installed — try WeasyPrint
+    except Exception:
+        pass  # generation error — try WeasyPrint
+
+    # 2. WeasyPrint fallback (requires GTK/Pango native libraries)
+    try:
+        import warnings as _w
+        with _w.catch_warnings():
+            _w.simplefilter("ignore")
+            from weasyprint import HTML as _WP_HTML
+            pdf = _WP_HTML(string=html).write_pdf()
+            if pdf and len(pdf) > 1024:
+                return pdf
+    except ImportError:
         pass
     except Exception:
         pass
 
-    # 3. Playwright fallback
+    # 3. Playwright fallback (requires playwright install chromium)
     return _export_pdf_playwright(html)
 
 
