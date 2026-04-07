@@ -408,6 +408,14 @@ def _soc_analyst(artifact: dict, model: dict | None) -> str:
     priority = "P1" if n_crit else "P2" if n_high else "P3"
     sla_mins = 60 if n_crit else 240 if n_high else 1440
     risk_col = "#e53935" if priority == "P1" else "#fb8c00" if priority == "P2" else "#43a047"
+    # Fallback: workbook review_state_counts may confirm malicious even when CSV model severity
+    # classifies all events as 'high' (not 'critical') → upgrade to P1 to avoid false P2 signal.
+    _ws_confirmed = (((artifact.get("facts") or {}).get("review_state_counts") or {}).get("confirmed_malicious") or 0)
+    if _ws_confirmed > 0 and priority != "P1":
+        priority = "P1"
+        n_crit   = _ws_confirmed
+        sla_mins = 60
+        risk_col = "#e53935"
 
     # T1 — spec: P-priority + specific host/IP, immediately actionable
     _mal_ev_t1 = [e for e in ev if e.get("verdict") == "malicious"]
@@ -794,7 +802,25 @@ def _threat_hunter(artifact: dict, model: dict | None) -> str:
     if not query_html:
         query_html = "<p class='section-note'>No specific IOCs available for query generation — use MITRE technique IDs above.</p>"
 
-    return f"""
+    # T1 — threat hunter: hunt outcome one-liner
+    _ws_confirmed_th = (((artifact.get("facts") or {}).get("review_state_counts") or {}).get("confirmed_malicious") or 0)
+    _th_n_mal = (model.get("malicious_count") or 0) or _ws_confirmed_th
+    _th_has_c2 = model.get("has_c2")
+    _th_primary_ip = (iocs.get("public_ips") or atk.get("attacker_ips") or [None])[0]
+    if _th_n_mal > 0 and _th_has_c2 and _th_primary_ip:
+        _th_t1 = f"Hunt pivot confirmed: C2 infrastructure {_th_primary_ip} — {_th_n_mal} malicious event{'s' if _th_n_mal != 1 else ''} linked — expand hunt to related subnet and user scope."
+        _th_t1_cls = "investigate"
+    elif _th_n_mal > 0:
+        _th_t1 = f"Technique cluster confirmed — {_th_n_mal} malicious event{'s' if _th_n_mal != 1 else ''} — generate hunt hypotheses from MITRE techniques and IOCs below."
+        _th_t1_cls = "investigate"
+    elif c2_codes or ep_codes:
+        _th_t1 = "Suspicious activity detected — no confirmed malicious events yet — run hypothesis queries and validate IOCs before escalating."
+        _th_t1_cls = "review"
+    else:
+        _th_t1 = "Threat hunt: negative result — no confirmed threats in this dataset — recommend baseline calibration."
+        _th_t1_cls = "complete"
+
+    return _t1_banner(_th_t1, _th_t1_cls) + f"""
 <section class='panel page-break' style='margin-top:18px'>
   <h2>Threat Hunter — Hunt Hypothesis Status</h2>
   {_tbl(["Hypothesis", "Status", "Evidence / Basis"], hyp_rows)}
@@ -1160,6 +1186,10 @@ def _compliance(artifact: dict, model: dict | None) -> str:
         ["Preservation status",            _pill("COUNSEL REVIEW ADVISED", "investigate")
                                            if n_mal > 0 else _pill("NOT REQUIRED", "review")],
     ]
+
+    # Fallback: use workbook review_state_counts if CSV model malicious_count is disconnected.
+    _ws_confirmed_comp = (((artifact.get("facts") or {}).get("review_state_counts") or {}).get("confirmed_malicious") or 0)
+    n_mal = max(n_mal, _ws_confirmed_comp)
 
     # T1 — spec: which frameworks implicated + notification obligation status
     _notif_frameworks = []
@@ -1605,6 +1635,10 @@ def _audit(artifact: dict, model: dict | None) -> str:
     recs_html = "".join(f"<li>{_e(r)}</li>" for r in recs)
 
     # T1 — audit spec: objective scope statement (§6.4.7 language)
+    # Fallback: use workbook review_state_counts if CSV model malicious_count is disconnected.
+    _ws_confirmed_aud = (((artifact.get("facts") or {}).get("review_state_counts") or {}).get("confirmed_malicious") or 0)
+    n_mal = max(n_mal, _ws_confirmed_aud)
+
     major_ncf_count = sum(
         1 for row in finding_rows
         if "MAJOR" in str(row[4] if len(row) > 4 else "")
