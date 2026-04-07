@@ -28,8 +28,22 @@ if not defined API_KEYS_JSON (
     set API_KEYS_JSON=[{"key":"%API_KEY%","scopes":["*"]}]
     echo INFO: Generated API key for this session: %API_KEY%
 )
+REM CB-2: Auto-generate secrets if not set — never use hard-coded dev defaults in production
+if not defined AUDIT_CHAIN_SECRET (
+    for /f "usebackq delims=" %%A in (`python -c "import secrets; print(secrets.token_urlsafe(32))"`) do set AUDIT_CHAIN_SECRET=%%A
+    echo INFO: Generated AUDIT_CHAIN_SECRET for this session.
+)
+if not defined JWT_SECRET (
+    for /f "usebackq delims=" %%A in (`python -c "import secrets; print(secrets.token_urlsafe(48))"`) do set JWT_SECRET=%%A
+    echo INFO: Generated JWT_SECRET for this session.
+)
+if not defined ECLIPSE_XDR_SHARED_SECRET (
+    for /f "usebackq delims=" %%A in (`python -c "import secrets; print(secrets.token_urlsafe(32))"`) do set ECLIPSE_XDR_SHARED_SECRET=%%A
+    echo INFO: Generated ECLIPSE_XDR_SHARED_SECRET for this session.
+)
+REM CB-2: Warn if known dev placeholder detected in any critical variable
+python -c "import os,sys; bad=[k for k,v in os.environ.items() if k in ('AUDIT_CHAIN_SECRET','JWT_SECRET') and v in ('dev_secret','secret','changeme','password','1234')]; [print('SECURITY WARNING: '+k+' is set to a known-weak value!') for k in bad]" 2>nul
 set ENABLE_CSV_UPLOAD=true
-set ECLIPSE_XDR_SHARED_SECRET=dev_secret
 set ENV=dev
 set APP_ENV=dev
 set DEFAULT_FRONTEND=console

@@ -264,6 +264,36 @@ class SentinelWorkspaceConnector:
         raw = self._http('PUT', url, self._tokens.headers(_ARM_SCOPE), body=body)
         return _normalize_incident(raw)
 
+    def push_janusec_verdict(
+        self,
+        incident_id: str,
+        verdict: str,
+        confidence: float = 0.0,
+        mitre_tags: Optional[List[str]] = None,
+        persona_summary: str = '',
+    ) -> Dict[str, Any]:
+        """Write-back a Janusec pipeline verdict to a Sentinel incident.
+
+        Delegates to :mod:`src.connectors.azure.sentinel_writeback` so all
+        classification/comment logic lives in one place.
+        """
+        try:
+            from src.connectors.azure.sentinel_writeback import SentinelWriteback
+            wb = SentinelWriteback(workspace_id=self.cfg.workspace_id)
+            return wb.push_pipeline_result(
+                incident_id=incident_id,
+                verdict=verdict,
+                confidence=confidence,
+                mitre_tags=mitre_tags,
+                persona_summary=persona_summary,
+            )
+        except Exception as exc:
+            import logging as _log
+            _log.getLogger(__name__).error(
+                'sentinel_workspace: push_janusec_verdict failed: %s', exc
+            )
+            return {'error': str(exc)}
+
     def list_incident_alerts(self, incident_id: str) -> List[Dict[str, Any]]:
         """List alerts attached to an incident."""
         url = (
