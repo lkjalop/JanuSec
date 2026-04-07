@@ -13,25 +13,16 @@ def _mock_summary(text: str, level: int = 1) -> str:
     return f"[Tier-2 Detailed Summary] {text[:300]}..."
 
 
-def _call_ollama(prompt: str, model: str = 'ggml-alloy', timeout: int = 10) -> str:
-    host = os.getenv('OLLAMA_HOST') or os.getenv('OLLAMA_URL')
-    if not host:
-        raise RuntimeError('OLLAMA_HOST or OLLAMA_URL not set')
-    # Prefer the v1 model-specific generate endpoint if available
-    gen_path = f"/v1/models/{model}/generate"
-    payload = {'prompt': prompt}
-    r = requests.post(host.rstrip('/') + gen_path, json=payload, timeout=timeout)
+def _call_ollama(prompt: str, model: str = 'llama3.2:3b', timeout: int = 60) -> str:
+    host = os.getenv('OLLAMA_HOST') or os.getenv('OLLAMA_URL') or 'http://127.0.0.1:11434'
+    # Use the standard Ollama generate API
+    payload = {'model': model, 'prompt': prompt, 'stream': False}
+    r = requests.post(host.rstrip('/') + '/api/generate', json=payload, timeout=timeout)
     r.raise_for_status()
     try:
         data = r.json()
-        # Ollama v1-style response may include 'object':'response' and 'data':[{'content':...}]
         if isinstance(data, dict):
-            if 'content' in data:
-                return data.get('content')
-            if 'data' in data and isinstance(data['data'], list) and len(data['data'])>0:
-                first = data['data'][0]
-                if isinstance(first, dict) and 'content' in first:
-                    return first['content']
+            return data.get('response') or data.get('content') or json.dumps(data)
         return json.dumps(data)
     except Exception:
         return r.text
@@ -39,19 +30,21 @@ def _call_ollama(prompt: str, model: str = 'ggml-alloy', timeout: int = 10) -> s
 
 def summarize_tier1(text: str) -> str:
     """Short, high-level summary for triage."""
+    if os.getenv('LLM_MOCK', '0').lower() in {'1', 'true', 'yes'}:
+        return _mock_summary(text, level=1)
     try:
-        if os.getenv('USE_OLLAMA', '0') in {'1', 'true', 'yes'}:
-            return _call_ollama(text, model=os.getenv('OLLAMA_MODEL', 'ggml-alloy'))
+        model = os.getenv('T1_MODEL') or os.getenv('OLLAMA_MODEL', 'llama3.2:3b')
+        return _call_ollama(text, model=model)
     except Exception:
-        pass
-    return _mock_summary(text, level=1)
+        return _mock_summary(text, level=1)
 
 
 def summarize_tier2(text: str) -> str:
     """Longer, contextual summary with suggested next steps."""
+    if os.getenv('LLM_MOCK', '0').lower() in {'1', 'true', 'yes'}:
+        return _mock_summary(text, level=2)
     try:
-        if os.getenv('USE_OLLAMA', '0') in {'1', 'true', 'yes'}:
-            return _call_ollama(text, model=os.getenv('OLLAMA_MODEL', 'ggml-alloy'))
+        model = os.getenv('T2_MODEL') or os.getenv('OLLAMA_MODEL', 'llama3.2:3b')
+        return _call_ollama(text, model=model, timeout=int(os.getenv('OLLAMA_TIMEOUT_SECONDS', '120')))
     except Exception:
-        pass
-    return _mock_summary(text, level=2)
+        return _mock_summary(text, level=2)

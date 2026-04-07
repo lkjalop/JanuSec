@@ -18,7 +18,16 @@ import time
 from pathlib import Path
 
 # ── Environment setup (must be first) ─────────────────────────────────────
-os.environ.setdefault("LLM_MOCK", "1")         # no Ollama needed
+# LLM_MOCK: default 0 so Ollama is used when available.
+# Override to 1 for fast offline/CI runs: LLM_MOCK=1 python scripts/regenerate_test_reports.py
+os.environ.setdefault("LLM_MOCK", "0")
+# Prefer llama3.1:8b for T2 narratives; falls back to whatever Ollama has if not pulled.
+os.environ.setdefault("T2_MODEL", "llama3.1:8b")
+os.environ.setdefault("T1_MODEL", "llama3.2:3b")
+# Allow auto-selection when configured model is absent (silently selects first available model)
+os.environ.setdefault("OLLAMA_PROBE_ON_START", "1")
+# Increase timeout for 8b models on CPU
+os.environ.setdefault("OLLAMA_TIMEOUT_SECONDS", "120")
 os.environ.setdefault("DISABLE_DB", "1")
 os.environ.setdefault("PLATFORM_LITE_INIT", "1")
 os.environ.setdefault("TEST_HELPERS_ENABLED", "1")
