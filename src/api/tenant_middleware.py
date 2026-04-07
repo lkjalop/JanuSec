@@ -15,7 +15,7 @@ class TenantMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next) -> Response:
         tenant = request.headers.get('X-Tenant-ID') or request.headers.get('x-tenant-id')
         path = request.url.path or ''
-        exempt_paths = {'/health', '/ready', '/api/v1/llm/health', '/', '/console', '/live'}
+        exempt_paths = {'/health', '/ready', '/api/v1/llm/health', '/', '/console', '/live', '/docs', '/openapi.json', '/redoc'}
         if path in exempt_paths or path.startswith('/metrics') or path.startswith('/static/'):
             request.state.tenant_id = os.getenv('DEFAULT_TENANT', 'default')
             response = await call_next(request)
@@ -33,6 +33,8 @@ class TenantMiddleware(BaseHTTPMiddleware):
                 os.getenv('PLATFORM_LITE_INIT','0').lower() in {'1','true','yes'}
                 or os.getenv('TEST_HELPERS_ENABLED','0').lower() in {'1','true','yes'}
                 or os.getenv('LLM_MOCK','0').lower() in {'1','true','yes'}
+                or os.getenv('APP_ENV','').lower() in {'dev','development','local'}
+                or os.getenv('ENV','').lower() in {'dev','development','local'}
                 or 'PYTEST_CURRENT_TEST' in os.environ
                 or path.startswith('/api/v1/metrics/')
                 or path == '/metrics'

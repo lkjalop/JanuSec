@@ -39,6 +39,8 @@ os.environ.setdefault("API_KEYS_JSON", '[{"key":"devkey123","scopes":["*"]}]')
 os.environ.setdefault("ENABLE_CSV_UPLOAD", "true")
 os.environ.setdefault("ECLIPSE_XDR_SHARED_SECRET", "dev_secret")
 os.environ.setdefault("DEFAULT_FRONTEND", "console")
+os.environ.setdefault("APP_ENV", "dev")
+os.environ.setdefault("ENV", "dev")
 
 def main():
     """Start the server with minimal dependencies"""
