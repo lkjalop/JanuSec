@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -17,6 +17,7 @@
     h2 { margin: var(--space-2) 0 var(--space-3); font-size: var(--font-size-lg); }
     .muted { color: var(--color-text-muted); font-size: var(--font-size-xs); }
   </style>
+  <script src="https://unpkg.com/lucide@0.344.0/dist/umd/lucide.min.js"></script>
 </head>
 <body class="with-topbar">
   <a href="#contentWrapper" class="skip-link">Skip to content</a>
@@ -64,7 +65,7 @@
       </div>
       <div id="activeFilters" class="muted"></div>
       <table><thead><tr><th>TS</th><th>Src</th><th>Dst</th><th>Port</th><th>JA3</th><th>JA4</th><th>DNS</th><th>DoH</th><th>Factors</th></tr></thead>
-        <tbody id="netBody"><tr><td colspan="9" class="muted">Loading…</td></tr></tbody>
+        <tbody id="netBody"><tr><td colspan="9" class="muted">Loadingâ€¦</td></tr></tbody>
       </table>
     </div>
   </div>
@@ -137,7 +138,7 @@
     loadNetworkTable();
     async function explain(id){
       const r=await (window.safeFetch || fetch)(`/api/v1/decisions/${id}/explain`,{headers: authHeaders()}); if(!r.ok) return safeNotify('Explain failed','error');
-      const j=await r.json(); safeNotify(`Decision ${id} — Verdict: ${j.verdict} — Factors: ${(j.factors||[]).length}`,'info');
+      const j=await r.json(); safeNotify(`Decision ${id} â€” Verdict: ${j.verdict} â€” Factors: ${(j.factors||[]).length}`,'info');
     }
     document.getElementById('btnRefresh').onclick=loadRecent;
     document.getElementById('btnSuggestLogs').onclick=async ()=>{
@@ -161,7 +162,7 @@
         if(!resp.ok){ throw new Error('session build failed'); }
         const data = await resp.json();
         const sugg = data.suggested_missing_logs || [];
-        document.getElementById('suggestLogs').innerHTML = (sugg.length? ('<ul>'+sugg.map(s=>`<li><strong>${esc(s.log_type||'')}</strong> — ${esc(s.reason||'')} <span class="muted">(${esc(s.priority||'')})</span></li>`).join('')+'</ul>') : 'No suggestions. Add more diverse telemetry to improve correlation.');
+        document.getElementById('suggestLogs').innerHTML = (sugg.length? ('<ul>'+sugg.map(s=>`<li><strong>${esc(s.log_type||'')}</strong> â€” ${esc(s.reason||'')} <span class="muted">(${esc(s.priority||'')})</span></li>`).join('')+'</ul>') : 'No suggestions. Add more diverse telemetry to improve correlation.');
       }catch(err){ document.getElementById('suggestLogs').textContent = 'Suggestion error: '+err.message; }
     };
     document.getElementById('btnFinops').onclick=async ()=>{
@@ -186,5 +187,6 @@
   </script>
   <script src="/static/js/hunt_overview.js"></script>
   <script src="/static/js/notifications.js"></script>
+<script>if(window.lucide)lucide.createIcons();</script>
 </body>
 </html>

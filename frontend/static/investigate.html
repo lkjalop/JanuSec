@@ -1,19 +1,20 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>JanuSec — Investigation Console</title>
+  <title>JanuSec â€” Investigation Console</title>
   <link rel="stylesheet" href="/static/css/theme.css">
   <link rel="stylesheet" href="/static/css/theme-pro.css">
   <script src="https://unpkg.com/lucide@0.344.0/dist/umd/lucide.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
   <style>
-    /* ── Page-level layout ─────────────────────────────────────── */
+    /* â”€â”€ Page-level layout â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     html, body { height: 100%; margin: 0; overflow: hidden; }
     .page { display: flex; height: 100vh; }
 
-    /* ── Left sidebar ──────────────────────────────────────────── */
+    /* â”€â”€ Left sidebar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     .sidebar {
       width: 56px; flex-shrink: 0; background: var(--bg-secondary);
       border-right: 1px solid var(--border); display: flex; flex-direction: column;
@@ -39,7 +40,7 @@
     }
     .sidebar__spacer { flex: 1; }
 
-    /* ── Top bar ───────────────────────────────────────────────── */
+    /* â”€â”€ Top bar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     .topbar {
       height: 48px; background: var(--bg-secondary); border-bottom: 1px solid var(--border);
       display: flex; align-items: center; padding: 0 16px; gap: 12px; flex-shrink: 0;
@@ -47,11 +48,11 @@
     .topbar__title { font-size: 14px; font-weight: 600; color: var(--text-primary); flex: 1; }
     .topbar__title span { color: var(--text-muted); font-weight: 400; }
 
-    /* ── Main content area ─────────────────────────────────────── */
+    /* â”€â”€ Main content area â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     .main-col { flex: 1; display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
     .content-area { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
 
-    /* ── Upload bar ── always visible above tabs ───────────────── */
+    /* â”€â”€ Upload bar â”€â”€ always visible above tabs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     .upload-bar {
       background: var(--bg-secondary); border-bottom: 1px solid var(--border);
       padding: 10px 16px; display: flex; flex-direction: column; gap: 8px;
@@ -59,19 +60,19 @@
     .upload-bar__row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
     .upload-bar__sources { max-height: 120px; overflow-y: auto; }
 
-    /* ── Severity summary — always pinned below upload ─────────── */
+    /* â”€â”€ Severity summary â€” always pinned below upload â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     .sev-summary {
       background: var(--bg-secondary); border-bottom: 1px solid var(--border);
       padding: 8px 16px; display: none;
     }
     .sev-summary.has-data { display: block; }
 
-    /* ── Tab content panels ────────────────────────────────────── */
+    /* â”€â”€ Tab content panels â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     .tab-content { flex: 1; overflow: hidden; display: none; }
     .tab-content.active { display: flex; flex-direction: column; }
     .tab-scroll { flex: 1; overflow-y: auto; padding: 16px; }
 
-    /* ── Report panel ──────────────────────────────────────────── */
+    /* â”€â”€ Report panel â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     .report-panel { max-width: 900px; }
     .report-headline {
       font-size: 18px; font-weight: 700; color: var(--text-primary);
@@ -89,7 +90,7 @@
     .report-section__body ul { margin: 6px 0; padding-left: 20px; }
     .report-section__body li { margin-bottom: 4px; }
 
-    /* ── Evidence table container ──────────────────────────────── */
+    /* â”€â”€ Evidence table container â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     .evidence-container { flex: 1; overflow: auto; }
     .evidence-toolbar {
       display: flex; align-items: center; gap: 8px; padding: 8px 16px;
@@ -102,7 +103,7 @@
     }
     .filter-chip:hover, .filter-chip.active { background: var(--accent-subtle); color: var(--accent); border-color: var(--accent); }
 
-    /* ── Empty / placeholder state ─────────────────────────────── */
+    /* â”€â”€ Empty / placeholder state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     .empty-state {
       display: flex; flex-direction: column; align-items: center; justify-content: center;
       gap: 12px; padding: 60px 20px; color: var(--text-muted); text-align: center;
@@ -111,19 +112,19 @@
     .empty-state__title { font-size: 16px; font-weight: 600; color: var(--text-secondary); }
     .empty-state__hint { font-size: 13px; max-width: 400px; }
 
-    /* ── Pipeline progress bar ─────────────────────────────────── */
+    /* â”€â”€ Pipeline progress bar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     .pipeline-bar { height: 3px; background: var(--bg-tertiary); border-radius: 2px; overflow: hidden; display: none; }
     .pipeline-bar.running { display: block; }
     .pipeline-bar__fill { height: 100%; background: var(--accent-gradient); border-radius: 2px; width: 0; transition: width 300ms ease; }
 
-    /* ── Investigate layout (main + detail panel) ──────────────── */
+    /* â”€â”€ Investigate layout (main + detail panel) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     .investigate-layout { display: flex; flex: 1; overflow: hidden; }
     .investigate-main { flex: 1; display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
   </style>
 </head>
 <body>
 <div class="page">
-  <!-- ═══ LEFT SIDEBAR ═══ -->
+  <!-- â•â•â• LEFT SIDEBAR â•â•â• -->
   <nav class="sidebar" role="navigation" aria-label="Main navigation">
     <div class="sidebar__logo" aria-label="JanuSec"><i data-lucide="shield-check"></i></div>
     <button class="nav-btn active" data-tooltip="Investigation" aria-label="Investigation"><i data-lucide="search"></i></button>
@@ -136,10 +137,10 @@
     <button class="nav-btn" data-tooltip="Settings" aria-label="Settings"><i data-lucide="settings"></i></button>
   </nav>
 
-  <!-- ═══ MAIN COLUMN ═══ -->
+  <!-- â•â•â• MAIN COLUMN â•â•â• -->
   <div class="main-col">
     <header class="topbar">
-      <div class="topbar__title">Investigation Console <span>— Unified Analysis</span></div>
+      <div class="topbar__title">Investigation Console <span>â€” Unified Analysis</span></div>
       <select id="personaSelect" class="btn-secondary" style="padding:4px 10px;font-size:12px;" aria-label="Persona">
         <option value="soc_analyst">SOC Analyst</option>
         <option value="ciso">CISO</option>
@@ -163,7 +164,7 @@
         <div class="upload-zone" id="uploadZone" role="button" tabindex="0" aria-label="Upload files">
           <i data-lucide="upload-cloud"></i>
           <div style="font-size:13px;color:var(--text-secondary);font-weight:500;">Drop files here or click to browse</div>
-          <div class="text-xs text-muted mt-2">CSV, XLSX, JSON, JSONL — single or multiple files, AWS/Azure packs</div>
+          <div class="text-xs text-muted mt-2">CSV, XLSX, JSON, JSONL â€” single or multiple files, AWS/Azure packs</div>
         </div>
         <input type="file" id="fileInput" multiple accept=".csv,.xlsx,.xls,.json,.jsonl" style="display:none">
       </div>
@@ -210,7 +211,7 @@
       </div>
     </section>
 
-    <!-- ═══ INVESTIGATE LAYOUT ═══ -->
+    <!-- â•â•â• INVESTIGATE LAYOUT â•â•â• -->
     <div class="investigate-layout">
       <div class="investigate-main">
         <div class="tab-bar" role="tablist">
@@ -327,7 +328,7 @@
         </div>
       </div>
 
-      <!-- ═══ DETAIL PANEL ═══ -->
+      <!-- â•â•â• DETAIL PANEL â•â•â• -->
       <div class="detail-panel detail-panel--hidden" id="detailPanel">
         <div class="detail-panel__header">
           <span id="detailTitle">Event Detail</span>
@@ -348,175 +349,5 @@
 <div class="toast-container" id="toastContainer"></div>
 <script src="/static/js/investigate.js"></script>
 <script>lucide.createIcons();</script>
-</body>
-</html>
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8" />
-<title>Composite Investigation Builder</title>
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<style>
-:root { --bg-primary:#0B0E14; --bg-secondary:#141A24; --bg-tertiary:#1D2531; --text-primary:#E8EBF0; --text-muted:#93A0B1; --border:#2C3746; --accent:#4A63E7; --accent-hover:#5C74F2; --critical:#E54848; --safe:#2DB67C; }
-body { margin:0; font-family: Inter, Segoe UI, system-ui, sans-serif; background: var(--bg-primary); color: var(--text-primary); }
-header { padding:16px 22px; background: var(--bg-secondary); border-bottom:1px solid var(--border); }
-main { max-width:1200px; margin:0 auto; padding:20px; }
-.input, select, textarea { background: var(--bg-tertiary); border:1px solid var(--border); color: var(--text-primary); border-radius:6px; padding:8px; font-size:14px; width:100%; }
-.btn { background: var(--bg-tertiary); color: var(--text-primary); border:1px solid var(--border); border-radius:6px; padding:8px 14px; font-size:13px; cursor:pointer; display:inline-flex; align-items:center; gap:6px; }
-.btn:hover { background: var(--bg-secondary); }
-.btn-primary { background: var(--accent); border-color: var(--accent); color:#fff; }
-.btn-primary:hover { background: var(--accent-hover); }
-.grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:18px; }
-.section { background: var(--bg-secondary); border:1px solid var(--border); border-radius:8px; padding:16px; margin-bottom:22px; }
-.section h2 { margin:0 0 12px 0; font-size:16px; }
-.small { font-size:12px; color: var(--text-muted); }
-.code-block { background: var(--bg-tertiary); padding:10px; border-radius:6px; font-family: monospace; font-size:12px; white-space:pre-wrap; }
-.table { width:100%; border-collapse: collapse; font-size:12px; }
-.table th, .table td { padding:6px 8px; border:1px solid var(--border); text-align:left; }
-.badge { display:inline-block; padding:3px 8px; font-size:11px; background: var(--bg-tertiary); border:1px solid var(--border); border-radius:14px; margin:2px 4px 2px 0; }
-.flex { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
-.status-pill { padding:4px 10px; border-radius:16px; font-size:11px; background:var(--bg-tertiary); border:1px solid var(--border); }
-.status-pill.ready { background: var(--safe); color:#fff; border-color: var(--safe); }
-.status-pill.failed { background: var(--critical); color:#fff; border-color: var(--critical); }
-</style>
-<script>window.authHeaders = window.authHeaders || function(){ try{ const k=localStorage.getItem('apiKey')||'devkey123'; const h={'x-api-key':k}; const t=localStorage.getItem('tenantId'); if(t) h['X-Tenant-ID']=t; return h; }catch(e){ return {'x-api-key':'devkey123'}; } };</script>
-</head>
-<body>
-<header>
-  <h1 style="margin:0;font-size:20px;">Investigate &mdash; Composite Context Builder</h1>
-  <div class="small">Build a multi-row correlated narrative, evidence table, inferred telemetry gaps, persona expansions.</div>
-</header>
-<main>
-  <div class="section" id="builderSection">
-    <h2>Build Composite</h2>
-    <div class="grid-2">
-      <div>
-        <label class="small" for="assessmentInput">Assessment ID</label>
-        <input id="assessmentInput" class="input" placeholder="assessment-..." />
-      </div>
-      <div>
-        <label class="small" for="limitInput">Row Limit (top K)</label>
-        <input id="limitInput" class="input" type="number" value="30" />
-      </div>
-    </div>
-    <div style="margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
-      <button id="btnBuild" class="btn btn-primary">Build Investigation</button>
-      <button id="btnVerify" class="btn" title="Generate verification markdown">Verification Report</button>
-      <label style="display:inline-flex;align-items:center;gap:8px;">
-        <span class="small">LLM Summaries:</span>
-        <select id="llmLimit" class="input" style="width:120px; margin-left:6px;">
-          <option value="25" selected>Top 25</option>
-          <option value="50">Top 50</option>
-          <option value="75">Top 75</option>
-          <option value="0">All suspicious</option>
-        </select>
-      </label>
-      <span id="llmCostEstimate" class="small">Est. cost: $0.075</span>
-      <button id="btnGenerateMore" class="btn" style="display:none;">Generate Next 25</button>
-      <button id="btnTimeline" class="btn" title="Show timeline for top-K">Timeline</button>
-      <span id="buildStatus" class="status-pill">idle</span>
-    </div>
-    <div class="small" style="margin-top:10px;">Rows ranked by verdict, DREAD score, factor count and optional ml_score.</div>
-  </div>
-  <div id="resultsContainer" style="display:none;">
-    <div class="section" id="narrativeSection">
-      <h2>Narrative</h2>
-      <div id="narrativeBlock" class="code-block">Waiting...</div>
-    </div>
-    <div class="section" id="evidenceSection">
-      <h2>Evidence Table</h2>
-      <table class="table" id="evidenceTable"><thead><tr><th>Row</th><th>Host</th><th>User</th><th>Process</th><th>Verdict</th><th>ML Score</th><th>DREAD</th></tr></thead><tbody></tbody></table>
-    </div>
-    <div class="section" id="missingLogsSection">
-      <h2>Missing Telemetry</h2>
-      <div id="missingLogsList" class="flex"></div>
-    </div>
-    <div class="section" id="correlationSection">
-      <h2>Correlation Summary</h2>
-      <div id="factorFreq" class="flex"></div>
-    </div>
-    <div class="section" id="personaSection">
-      <h2>Persona Expansions</h2>
-      <div id="personaContent"></div>
-    </div>
-  </div>
-  <div class="section" id="verificationSection" style="display:none;">
-    <h2>Verification Report (Markdown)</h2>
-    <div id="verificationMeta" class="small"></div>
-    <pre id="verificationMarkdown" class="code-block" style="max-height:380px;overflow:auto;"></pre>
-  </div>
-</main>
-<script>
-(function(){
-  const assessEl = document.getElementById('assessmentInput');
-  const limitEl = document.getElementById('limitInput');
-  const btn = document.getElementById('btnBuild');
-  const statusEl = document.getElementById('buildStatus');
-  const verifyBtn = document.getElementById('btnVerify');
-  let currentAssess = null; let currentInvId = null; let pollTimer = null;
-  function setStatus(s, cls){ statusEl.textContent = s; statusEl.className = 'status-pill ' + (cls||''); }
-  function renderInvestigation(data){
-     try{ document.getElementById('resultsContainer').style.display='block'; }catch(_){ }
-     const narrative = data.narrative || 'No narrative yet.';
-     document.getElementById('narrativeBlock').textContent = narrative;
-     // Evidence table
-     const tbody = document.querySelector('#evidenceTable tbody');
-     if(tbody){ tbody.innerHTML = (data.evidence_table||[]).map(e=>`<tr><td>${e.row_index??''}</td><td>${e.host??''}</td><td>${e.user??''}</td><td>${e.process??''}</td><td>${e.verdict??''}</td><td>${e.ml_score??''}</td><td>${e.dread??''}</td></tr>`).join(''); }
-     // Missing logs
-     const mlNode = document.getElementById('missingLogsList');
-     if(mlNode){ const list = data.missing_logs || data.missing_logs_initial || []; mlNode.innerHTML = list.length? list.map(m=>`<span class='badge'>${m}</span>`).join('') : '<span class="small">None inferred</span>'; }
-     // Factor freq
-     const ffNode = document.getElementById('factorFreq');
-     if(ffNode){ const ff = data.factor_frequency || data.factor_frequency_initial || {}; const entries = Object.entries(ff).sort((a,b)=>b[1]-a[1]).slice(0,40); ffNode.innerHTML = entries.map(([k,v])=>`<span class='badge' title='count:${v}'>${k} (${v})</span>`).join(''); }
-     // Personas
-     const pNode = document.getElementById('personaContent');
-     if(pNode){ const personas = data.persona_expanded || {}; pNode.innerHTML = Object.keys(personas).map(p=>`<div style='margin-bottom:12px;'><div style='font-weight:600;'>${p}</div><div class='code-block'>${personas[p].text||''}</div></div>`).join(''); }
-  }
-  async function poll(){
-    if(!currentAssess || !currentInvId) return;
-    try{ const r = await fetch(`/api/v1/assessments/${encodeURIComponent(currentAssess)}/investigate/${encodeURIComponent(currentInvId)}`, { headers: authHeaders() }); const j = await r.json().catch(()=>({})); if(r.ok){ renderInvestigation(j); if(j.status==='ready'){ setStatus('ready','ready'); clearInterval(pollTimer); pollTimer=null; } else if(j.status==='failed'){ setStatus('failed','failed'); clearInterval(pollTimer); } else { setStatus(j.status); } } else { setStatus('error'); }
-    }catch(e){ setStatus('error'); }
-  }
-  async function build(){
-    const aid = assessEl.value.trim(); if(!aid){ setStatus('missing id','failed'); return; }
-    currentAssess = aid; currentInvId = null; setStatus('building...');
-    try{ const limit = Number(limitEl.value)||30; const r = await fetch(`/api/v1/assessments/${encodeURIComponent(aid)}/investigate/build`, { method:'POST', headers:{ 'Content-Type':'application/json', ...authHeaders() }, body: JSON.stringify({ limit }) }); const j = await r.json().catch(()=>({})); if(!r.ok){ setStatus('error','failed'); return; } currentInvId = j.investigate_id; setStatus('queued'); if(pollTimer) clearInterval(pollTimer); pollTimer = setInterval(poll, 3000); poll(); }catch(e){ setStatus('exception','failed'); }
-  }
-  // Generate more LLM summaries for assessment (calls existing endpoint)
-  async function generateMore(){
-    const aid = (currentAssess || assessEl.value || '').trim(); if(!aid) return alert('Set assessment id');
-    const limit = Number(document.getElementById('llmLimit').value) || 25;
-    try{
-      const resp = await fetch('/api/v1/assessments/generate_llm_summaries', { method:'POST', headers: {'Content-Type':'application/json', ...authHeaders()}, body: JSON.stringify({ assessment_id: aid, limit }) });
-      const j = await resp.json(); if(!resp.ok) return alert('Generate failed');
-      // show generate more button until no pending rows
-      document.getElementById('btnGenerateMore').style.display = 'inline-flex';
-      alert(`Enqueued ${j.count||0} rows for LLM generation`);
-    }catch(e){ alert('Exception generating summaries'); }
-  }
-  document.getElementById('btnGenerateMore').addEventListener('click', generateMore);
-
-  // Timeline view: call topk_sequence endpoint and open a simple popup
-  async function showTimeline(){
-    const aid = (currentAssess || assessEl.value || '').trim(); if(!aid) return alert('Set assessment id');
-    const k = 50;
-    try{
-      const r = await fetch(`/api/v1/assessments/${encodeURIComponent(aid)}/rows/topk_sequence?k=${k}`, { headers: authHeaders() });
-      if(!r.ok) return alert('Timeline fetch failed');
-      const j = await r.json();
-      // simple visualization: open new window with JSON summary
-      const w = window.open('', '_blank');
-      w.document.write('<pre>' + JSON.stringify(j, null, 2) + '</pre>');
-    }catch(e){ alert('Timeline exception'); }
-  }
-  document.getElementById('btnTimeline').addEventListener('click', showTimeline);
-  btn.addEventListener('click', build);
-  verifyBtn.addEventListener('click', async ()=>{
-     const aid = (currentAssess || assessEl.value || '').trim(); if(!aid){ alert('Set assessment id first'); return; }
-     try{ const r = await fetch(`/api/v1/assessments/${encodeURIComponent(aid)}/llm/verification`, { headers: authHeaders() }); const j = await r.json().catch(()=>({})); if(!r.ok){ alert('Verification failed'); return; } document.getElementById('verificationSection').style.display='block'; document.getElementById('verificationMarkdown').textContent = j.markdown||''; document.getElementById('verificationMeta').textContent = `Baseline: ${j.baseline_rows} Enriched: ${j.enriched_rows} Factor uplift: ${j.coverage_uplift}`; window.scrollTo({ top: document.getElementById('verificationSection').offsetTop - 20, behavior:'smooth' }); }catch(e){ alert('Verification exception'); }
-  });
-})();
-</script>
 </body>
 </html>

@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
 	<meta charset="UTF-8"/>
@@ -17,12 +17,13 @@
 		h2 { margin: var(--space-2) 0 var(--space-3); font-size: var(--font-size-lg); }
 		.muted { color: var(--color-text-muted); font-size: var(--font-size-xs); }
 	</style>
+  <script src="https://unpkg.com/lucide@0.344.0/dist/umd/lucide.min.js"></script>
 </head>
 <body class="with-topbar">
 	<a href="#contentWrapper" class="skip-link">Skip to content</a>
 	<div class="page-root">
 		<div class="actions-row">
-			<a class="btn" href="/static/janusec-platform-complete-LIVE.html">← Console</a>
+			<a class="btn" href="/static/janusec-platform-complete-LIVE.html">â† Console</a>
 			<a class="btn" href="/static/hunt_network.html">Network</a>
 			<a class="btn" href="/static/metrics.html">Metrics</a>
 			<a class="btn" href="/static/integrations.html">Integrations</a>
@@ -75,7 +76,7 @@
 				const r = await (window.safeFetch || fetch)(`/api/v1/decisions/${id}/explain`, { headers: H() });
 				if(!r.ok) return safeNotify('Explain failed','error');
 				const j = await r.json();
-				safeNotify(`Decision ${id} — Verdict: ${j.verdict} — Factors: ${(j.factors||[]).length}`,'info');
+				safeNotify(`Decision ${id} â€” Verdict: ${j.verdict} â€” Factors: ${(j.factors||[]).length}`,'info');
 			}
 
 			document.getElementById('btnRefresh').onclick = recent;
@@ -90,5 +91,6 @@
 		</script>
 
   <script src="/static/js/notifications.js"></script>
+<script>if(window.lucide)lucide.createIcons();</script>
 </body>
 </html>

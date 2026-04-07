@@ -14,6 +14,8 @@
   var MAX_FILE_SIZE = 50 * 1024 * 1024; // 50 MB
   var PERSONAS = ['soc_analyst', 'ciso', 'executive', 'threat_hunter', 'forensics', 'compliance', 'audit', 'mssp'];
   var PERSONA_LABELS = { soc_analyst: 'SOC Analyst', ciso: 'CISO', executive: 'Executive', threat_hunter: 'Threat Hunter', forensics: 'Forensics', compliance: 'Compliance', audit: 'Audit', mssp: 'MSSP' };
+  var SEV_COLORS = { critical: '#E54848', high: '#FF8A3C', medium: '#E0C446', low: '#3FA860' };
+  var PERSONA_ALIASES = { soc_analyst: 'soc_analyst', ciso: 'ciso', executive: 'executive', threat_hunter: 'threat_hunter', forensics: 'forensics', compliance: 'compliance', audit: 'audit', mssp: 'mssp' };
 
   // ── State ────────────────────────────────────────────────────────────────
   var state = {
@@ -394,6 +396,14 @@
       // Step 3: Build enriched evidence rows from assessment
       buildEvidenceFromAssessment(assessment);
 
+      // Step 3b: Render graph + timeline visualizations
+      $('graphEmpty').style.display = 'none';
+      $('graphContent').style.display = '';
+      $('timelineEmpty').style.display = 'none';
+      $('timelineContent').style.display = '';
+      renderGraph(state.evidenceRows);
+      renderTimeline(state.evidenceRows);
+
       // Step 4: Generate persona report
       $('pipelineBarFill').style.width = '85%';
       await generatePersonaReport(assessment);
@@ -714,19 +724,43 @@
 
   // ── Generate persona report ──────────────────────────────────────────────
   async function generatePersonaReport(assessment) {
-    // Use the offline workbook assessment approach via the report endpoint
+    var persona = PERSONA_ALIASES[state.currentPersona] || state.currentPersona;
     try {
-      var resp = await fetch('/api/v1/report/ingestion?format=json&include_model=true&include_scenarios=true', {
-        headers: authHeaders(),
-      });
+      var url = '/api/v1/report/ingestion?format=json&persona=' + encodeURIComponent(persona) + '&include_model=true&include_scenarios=true';
+      var resp = await fetch(url, { headers: authHeaders() });
       if (resp.ok) {
         var reportData = await resp.json();
-        state.reportData = reportData;
+        if (buildBackendReport(reportData, assessment)) return;
       }
-    } catch (_) { /* best effort */ }
-
-    // For now, build a local report from the assessment data
+    } catch (_) { /* fall through */ }
     buildLocalReport(assessment);
+  }
+
+  function buildBackendReport(reportData, assessment) {
+    if (!reportData) return false;
+    var narrative = (reportData.narrative || (reportData.summary && reportData.summary.narrative) || '').trim();
+    var title = (reportData.title || (reportData.summary && reportData.summary.title) || '').trim();
+    var personaData = reportData.persona_sections || reportData.sections || {};
+    var sections = [];
+    if (Array.isArray(personaData)) {
+      sections = personaData.map(function (s) {
+        return { title: s.heading || s.title || 'Section', html: '<p>' + escHtml(s.text || s.content || '') + '</p>' };
+      });
+    } else if (personaData && typeof personaData === 'object') {
+      Object.keys(personaData).forEach(function (key) {
+        var val = personaData[key];
+        sections.push({ title: key.replace(/_/g, ' '), html: '<p>' + escHtml(typeof val === 'string' ? val : JSON.stringify(val)) + '</p>' });
+      });
+    }
+    if (narrative && sections.length === 0) sections.push({ title: 'Analysis', html: '<p>' + escHtml(narrative) + '</p>' });
+    if (sections.length === 0) return false;
+    var evRows = state.evidenceRows || [];
+    var critCount = evRows.filter(function (r) { return r.severity === 'critical'; }).length;
+    var highCount = evRows.filter(function (r) { return r.severity === 'high'; }).length;
+    var headline = title || (critCount > 0 ? 'P1 — ' + critCount + ' critical finding(s)' : highCount > 0 ? 'P2 — High severity events' : 'P3 — Review complete');
+    state.reportArtifacts[state.currentPersona] = { headline: headline, sections: sections };
+    renderReport();
+    return true;
   }
 
   function buildLocalReport(assessment) {
@@ -937,15 +971,23 @@
   function detachTab(name) {
     var content = document.getElementById('tab' + name.charAt(0).toUpperCase() + name.slice(1));
     if (!content) return;
-    var win = window.open('', '_blank', 'width=900,height=700');
+    var win = window.open('/static/investigate-shell.html?tab=' + encodeURIComponent(name), '_blank', 'width=1000,height=750');
     if (!win) { toast('Pop-up blocked — allow pop-ups for detach', 'error'); return; }
-    win.document.write('<!DOCTYPE html><html><head><title>JanuSec — ' + name + '</title>');
-    win.document.write('<link rel="stylesheet" href="/static/css/theme.css"><link rel="stylesheet" href="/static/css/theme-pro.css">');
-    win.document.write('<style>body{margin:0;padding:16px;background:var(--bg-primary);color:var(--text-primary);font-family:Inter,system-ui,sans-serif;}</style></head><body>');
-    win.document.write(content.innerHTML);
-    win.document.write('</body></html>');
-    win.document.close();
-    toast(name + ' panel detached to new window', 'success');
+    var html = content.innerHTML;
+    var timer = setTimeout(function () { sendContent(); }, 1800);
+    function onMsg(e) {
+      if (e.source !== win) return;
+      if (e.data && e.data.type === 'ready') {
+        clearTimeout(timer);
+        window.removeEventListener('message', onMsg);
+        sendContent();
+      }
+    }
+    window.addEventListener('message', onMsg);
+    function sendContent() {
+      try { win.postMessage({ type: 'content', tab: name, html: html }, '*'); } catch (_) {}
+      toast(name + ' detached to new window', 'success');
+    }
   }
 
   // Wire detach buttons
@@ -973,6 +1015,203 @@
     // Trigger server-side PDF generation
     window.open('/api/v1/report/ingestion?format=html&include_model=true&include_scenarios=true', '_blank');
   });
+
+  // ── Graph Viz B: D3 Force Graph ──────────────────────────────────────────
+  function renderGraph(evRows) {
+    var canvas = $('graphCanvas');
+    if (!canvas || !evRows || !evRows.length) return;
+    canvas.innerHTML = '';
+    if (typeof d3 === 'undefined') {
+      canvas.innerHTML = '<p class="text-sm text-muted" style="padding:16px">D3 library unavailable.</p>';
+      return;
+    }
+    var W = canvas.clientWidth || 800;
+    var H = Math.max(420, canvas.clientHeight || 500);
+
+    var entityMap = {};
+    evRows.forEach(function (row) {
+      var e = row.entity;
+      if (!e || e === '-') return;
+      if (!entityMap[e]) {
+        entityMap[e] = { id: e, label: e.length > 22 ? e.slice(0, 20) + '…' : e, nodeType: guessEntityType(e, row), severity: row.severity, count: 0, srcList: [] };
+      }
+      entityMap[e].count++;
+      if (entityMap[e].srcList.indexOf(row.source) < 0) entityMap[e].srcList.push(row.source);
+      var sevOrd = ['low', 'medium', 'high', 'critical'];
+      if (sevOrd.indexOf(row.severity) > sevOrd.indexOf(entityMap[e].severity)) entityMap[e].severity = row.severity;
+    });
+
+    var entityNodes = Object.values(entityMap).slice(0, 50);
+    var srcNodeMap = {};
+    var srcNodes = [];
+    state.sources.forEach(function (src) {
+      var nid = '__src__' + src.name;
+      srcNodeMap[src.name] = nid;
+      srcNodes.push({ id: nid, label: shortSource(src.name), nodeType: 'source', severity: 'low', count: src.rows.length, srcList: [], isSource: true });
+    });
+    var nodes = entityNodes.concat(srcNodes);
+    var nodeIds = {};
+    nodes.forEach(function (n) { nodeIds[n.id] = true; });
+
+    var links = [];
+    var seenL = {};
+    entityNodes.forEach(function (en) {
+      en.srcList.forEach(function (srcName) {
+        var sid = srcNodeMap[srcName];
+        if (!sid || !nodeIds[sid]) return;
+        var key = en.id + '|||' + sid;
+        if (seenL[key]) return;
+        seenL[key] = true;
+        links.push({ source: en.id, target: sid, correlated: en.srcList.length > 1 });
+      });
+    });
+
+    var NODE_COLORS = { user: '#4A63E7', ip: '#E54848', resource: '#2DB67C', detection: '#FF8A3C', source: '#708090', other: '#E0C446' };
+    var SEV_R = { critical: 10, high: 8, medium: 6, low: 5 };
+
+    var svg = d3.select(canvas).append('svg').attr('width', W).attr('height', H).style('display', 'block').style('border-radius', 'var(--radius-lg)');
+    var g = svg.append('g');
+    svg.call(d3.zoom().scaleExtent([0.25, 3]).on('zoom', function (event) { g.attr('transform', event.transform); }));
+
+    var lgData = [{ l: 'User', c: NODE_COLORS.user }, { l: 'IP', c: NODE_COLORS.ip }, { l: 'Resource', c: NODE_COLORS.resource }, { l: 'Detection', c: NODE_COLORS.detection }, { l: 'Source', c: NODE_COLORS.source }];
+    var lg = svg.append('g').attr('transform', 'translate(8,8)');
+    lgData.forEach(function (ld, i) {
+      lg.append('circle').attr('cx', 6).attr('cy', i * 18 + 6).attr('r', 5).attr('fill', ld.c).attr('opacity', 0.85);
+      lg.append('text').attr('x', 15).attr('y', i * 18 + 10).attr('fill', 'var(--text-muted)').attr('font-size', '10px').text(ld.l);
+    });
+
+    var sim = d3.forceSimulation(nodes)
+      .force('link', d3.forceLink(links).id(function (d) { return d.id; }).distance(90))
+      .force('charge', d3.forceManyBody().strength(-220))
+      .force('center', d3.forceCenter(W / 2, H / 2))
+      .force('collide', d3.forceCollide().radius(22));
+
+    var link = g.append('g').selectAll('line').data(links).join('line')
+      .attr('stroke', function (d) { return d.correlated ? 'rgba(74,99,231,0.6)' : 'rgba(255,255,255,0.12)'; })
+      .attr('stroke-width', function (d) { return d.correlated ? 2 : 1; })
+      .attr('stroke-dasharray', function (d) { return d.correlated ? '5,3' : ''; });
+
+    var node = g.append('g').selectAll('g').data(nodes).join('g').attr('cursor', 'pointer')
+      .call(d3.drag()
+        .on('start', function (event, d) { if (!event.active) sim.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
+        .on('drag', function (event, d) { d.fx = event.x; d.fy = event.y; })
+        .on('end', function (event, d) { if (!event.active) sim.alphaTarget(0); d.fx = null; d.fy = null; }));
+
+    node.append('circle')
+      .attr('r', function (d) { return d.isSource ? 12 : (SEV_R[d.severity] || 6); })
+      .attr('fill', function (d) { return NODE_COLORS[d.nodeType] || NODE_COLORS.other; })
+      .attr('opacity', 0.85)
+      .attr('stroke', function (d) { return d.srcList && d.srcList.length > 1 ? 'rgba(229,72,72,0.9)' : 'rgba(255,255,255,0.15)'; })
+      .attr('stroke-width', function (d) { return d.srcList && d.srcList.length > 1 ? 2.5 : 1; });
+
+    node.append('text').attr('x', 0).attr('y', function (d) { return (d.isSource ? 12 : (SEV_R[d.severity] || 6)) + 13; })
+      .attr('text-anchor', 'middle').attr('fill', 'var(--text-muted)').attr('font-size', '10px').text(function (d) { return d.label; });
+
+    node.append('title').text(function (d) {
+      return d.id + (d.srcList && d.srcList.length > 1 ? '\nCorrelated: ' + d.srcList.join(', ') : '') + '\nCount: ' + d.count;
+    });
+
+    sim.on('tick', function () {
+      link.attr('x1', function (d) { return d.source.x; }).attr('y1', function (d) { return d.source.y; })
+        .attr('x2', function (d) { return d.target.x; }).attr('y2', function (d) { return d.target.y; });
+      node.attr('transform', function (d) { return 'translate(' + d.x + ',' + d.y + ')'; });
+    });
+  }
+
+  function guessEntityType(entity, row) {
+    if (!entity) return 'other';
+    if (/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(entity)) return 'ip';
+    if (entity.indexOf('@') >= 0) return 'user';
+    if (/^[a-z]{2,6}:\/\//.test(entity)) return 'resource';
+    var raw = (row && row.raw) || row || {};
+    var rt = ((raw.type || raw.userType || raw.resourceType || raw.eventSource || '') + '').toLowerCase();
+    if (rt.indexOf('user') >= 0 || rt.indexOf('member') >= 0) return 'user';
+    if (rt.indexOf('vm') >= 0 || rt.indexOf('storage') >= 0 || rt.indexOf('resource') >= 0) return 'resource';
+    if (rt.indexOf('alert') >= 0 || rt.indexOf('finding') >= 0) return 'detection';
+    return 'other';
+  }
+
+  // ── Swimlane Timeline (Graph Viz B) ──────────────────────────────────────
+  function renderTimeline(evRows) {
+    var canvas = $('timelineCanvas');
+    if (!canvas || !evRows || !evRows.length) return;
+    canvas.innerHTML = '';
+    var rowsWithTime = evRows.map(function (row) {
+      return { ts: extractTimestamp(row), row: row };
+    }).filter(function (r) { return r.ts; });
+    if (!rowsWithTime.length) {
+      canvas.innerHTML = '<p class="text-sm text-muted" style="padding:8px">No timestamp fields detected. Supported: eventTime, timestamp, createdDateTime, activityDateTime, TimeGenerated.</p>';
+      return;
+    }
+    var allTs = rowsWithTime.map(function (r) { return r.ts; });
+    var minTs = Math.min.apply(null, allTs);
+    var maxTs = Math.max.apply(null, allTs);
+    var srcGroups = {};
+    rowsWithTime.forEach(function (r) {
+      var src = r.row.source || 'unknown';
+      if (!srcGroups[src]) srcGroups[src] = [];
+      srcGroups[src].push(r);
+    });
+    var sources = Object.keys(srcGroups);
+    var PAD_L = 160; var PAD_R = 40; var PAD_TOP = 48; var LANE_H = 64;
+    var svgW = Math.max(800, (canvas.clientWidth || 900) - 4);
+    var svgH = PAD_TOP + sources.length * LANE_H + 20;
+    var timeW = svgW - PAD_L - PAD_R;
+    var span = maxTs - minTs || 1;
+    function xScale(ts) { return PAD_L + ((ts - minTs) / span) * timeW; }
+    function fmtTs(ts) { return new Date(ts).toISOString().slice(0, 16).replace('T', ' '); }
+    var parts = ['<svg xmlns="http://www.w3.org/2000/svg" width="' + svgW + '" height="' + svgH + '" style="display:block;font-family:Inter,system-ui,sans-serif;">' ];
+    parts.push('<text x="' + PAD_L + '" y="18" fill="var(--text-muted)" font-size="10">' + fmtTs(minTs) + '</text>');
+    parts.push('<text x="' + (PAD_L + timeW) + '" y="18" fill="var(--text-muted)" font-size="10" text-anchor="end">' + fmtTs(maxTs) + '</text>');
+    parts.push('<text x="' + (PAD_L + timeW / 2) + '" y="18" fill="var(--text-muted)" font-size="10" text-anchor="middle">— time →</text>');
+    for (var ti = 0; ti <= 4; ti++) {
+      var tx = PAD_L + (ti / 4) * timeW;
+      parts.push('<line x1="' + tx + '" y1="22" x2="' + tx + '" y2="' + svgH + '" stroke="rgba(255,255,255,0.04)"/>');
+    }
+    var entityFirst = {};
+    sources.forEach(function (src, idx) {
+      var y = PAD_TOP + idx * LANE_H;
+      var cy = y + LANE_H / 2;
+      if (idx % 2 === 0) parts.push('<rect x="0" y="' + y + '" width="' + svgW + '" height="' + LANE_H + '" fill="rgba(255,255,255,0.015)"/>');
+      var lbl = src.length > 22 ? src.slice(0, 20) + '…' : src;
+      parts.push('<text x="8" y="' + (cy + 4) + '" fill="var(--text-muted)" font-size="11">' + escHtml(lbl) + '</text>');
+      parts.push('<line x1="' + PAD_L + '" y1="' + cy + '" x2="' + (PAD_L + timeW) + '" y2="' + cy + '" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>');
+      (srcGroups[src] || []).forEach(function (r) {
+        var cx = xScale(r.ts);
+        var color = SEV_COLORS[r.row.severity] || '#666';
+        var rad = r.row.type === 'correlated' ? 7 : 5;
+        var entity = r.row.entity || '';
+        if (entity && entity !== '-') {
+          if (!entityFirst[entity]) entityFirst[entity] = {};
+          if (!entityFirst[entity][src]) entityFirst[entity][src] = { cx: cx, cy: cy };
+        }
+        var ttip = escHtml((entity || '?') + ' — ' + (r.row.description || r.row.severity) + ' (' + fmtTs(r.ts) + ')');
+        if (r.row.type === 'correlated') parts.push('<circle cx="' + cx + '" cy="' + cy + '" r="' + (rad + 4) + '" fill="none" stroke="' + color + '" stroke-width="1.5" opacity="0.4"/>');
+        parts.push('<circle cx="' + cx + '" cy="' + cy + '" r="' + rad + '" fill="' + color + '" opacity="0.8"><title>' + ttip + '</title></circle>');
+      });
+    });
+    Object.keys(entityFirst).forEach(function (entity) {
+      var srcs = Object.keys(entityFirst[entity]);
+      if (srcs.length < 2) return;
+      var pts = srcs.map(function (s) { return entityFirst[entity][s]; });
+      for (var pi = 0; pi < pts.length - 1; pi++) {
+        parts.push('<line x1="' + pts[pi].cx + '" y1="' + pts[pi].cy + '" x2="' + pts[pi + 1].cx + '" y2="' + pts[pi + 1].cy + '" stroke="rgba(74,99,231,0.45)" stroke-width="1.5" stroke-dasharray="5,3"/>');
+      }
+    });
+    parts.push('</svg>');
+    canvas.innerHTML = parts.join('');
+  }
+
+  function extractTimestamp(row) {
+    var fields = ['eventTime', 'ts', 'timestamp', 'time', 'createdDateTime', 'activityDateTime',
+      'UpdatedDateTime', 'TimeGenerated', 'start', 'date', 'datetime', '@timestamp', 'event_time'];
+    var raw = (row && row.raw) || row || {};
+    for (var i = 0; i < fields.length; i++) {
+      var v = raw[fields[i]] || row[fields[i]];
+      if (v) { var d = new Date(v); if (!isNaN(d.getTime())) return d.getTime(); }
+    }
+    return null;
+  }
 
   // ── Init ─────────────────────────────────────────────────────────────────
   // Expose toast globally for inline onclick handlers
