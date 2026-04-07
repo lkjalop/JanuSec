@@ -7,7 +7,7 @@ import json
 import os
 import logging
 import sys
-from fastapi import APIRouter, Request, HTTPException
+from fastapi import APIRouter, Request, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, Response
 
 try:
@@ -156,6 +156,87 @@ def publish_llm_event(assessment_id: str, event: dict):
         pass
 
 
+# ── WebSocket pipeline progress ─────────────────────────────────────────────
+_WS_CONNECTIONS: dict[str, list] = {}
+
+
+@router.websocket('/ws/progress/{assessment_id}')
+async def ws_pipeline_progress(websocket: WebSocket, assessment_id: str):
+    """WebSocket endpoint for real-time pipeline progress events.
+
+    Client connects after POST /api/v1/csv/deep_analyze returns assessment_id.
+    Server sends JSON events: {event, stage, pct, detail, ts}.
+    Closes automatically when status reaches 'complete' or 'error'.
+    """
+    await websocket.accept()
+    queue: list = []
+    # Register this connection in both SSE and WS broadcaster maps
+    _SSE_BROADCASTERS.setdefault(assessment_id, []).append(queue)
+    _WS_CONNECTIONS.setdefault(assessment_id, []).append(websocket)
+    try:
+        deadline = time.time() + 120  # max 2 minutes
+        while time.time() < deadline:
+            if queue:
+                event = queue.pop(0)
+                try:
+                    await websocket.send_json(event)
+                except Exception:
+                    break
+                # Close gracefully when pipeline finishes
+                evt = event.get('event') or ''
+                if evt in ('complete', 'error', 'done'):
+                    break
+            else:
+                # No events yet — send a heartbeat and check assessment status
+                try:
+                    assessment = REPORT_STORE.get(assessment_id) or {}
+                    status = assessment.get('status') or 'pending'
+                    pct = None
+                    try:
+                        session_id = assessment.get('session_id')
+                        if session_id:
+                            ws = DEFAULT_WORKER.status(session_id) or {}
+                            pct = ws.get('pct')
+                            status = ws.get('status') or status
+                    except Exception:
+                        pass
+                    msg = {'event': 'heartbeat', 'status': status, 'ts': time.time()}
+                    if pct is not None:
+                        msg['pct'] = pct
+                    await websocket.send_json(msg)
+                except Exception:
+                    break
+                if status in ('complete', 'completed', 'error'):
+                    await asyncio.sleep(0.2)
+                    break
+                await asyncio.sleep(0.8)
+    except (WebSocketDisconnect, Exception):
+        pass
+    finally:
+        try:
+            listeners = _SSE_BROADCASTERS.get(assessment_id) or []
+            if queue in listeners:
+                listeners.remove(queue)
+            _SSE_BROADCASTERS[assessment_id] = listeners
+        except Exception:
+            pass
+        try:
+            ws_list = _WS_CONNECTIONS.get(assessment_id) or []
+            if websocket in ws_list:
+                ws_list.remove(websocket)
+        except Exception:
+            pass
+
+
+# --- TemporalRAG engine (lazy import so offline mode costs nothing) ---------
+def _get_trag_engine():
+    try:
+        from src.ai.temporal_rag import get_engine
+        return get_engine()
+    except Exception:
+        return None
+
+
 class StageBase:
     name = 'base'
     async def run(self, context: dict) -> dict:
@@ -184,6 +265,38 @@ class ThreatIntelStage(StageBase):
         await asyncio.sleep(0)
         elapsed = (time.time() - t0) * 1000.0
         return {'stage': self.name, 'status': 'done', 'elapsed_ms': elapsed, 'result': {'threat_hits': len(hits)}}
+
+
+class TemporalRAGStage(StageBase):
+    """Index evidence rows into TemporalRAG corpus so the LLM stage can retrieve
+    temporally-adjacent context.  Silently skips when embeddings unavailable."""
+    name = 'TemporalRAG'
+
+    async def run(self, context: dict) -> dict:
+        t0 = time.time()
+        rows = context.get('rows') or []
+        tenant = context.get('org') or context.get('tenant') or 'default'
+        engine = _get_trag_engine()
+        indexed = 0
+        if engine and rows:
+            try:
+                indexed = await asyncio.to_thread(engine.index_rows, rows, tenant)
+                # Build a context block from the first non-empty row as the query seed
+                seed_text = ''
+                for r in rows[:5]:
+                    if isinstance(r, dict):
+                        s = ' '.join(str(v) for v in r.values() if v)[:200]
+                        if s:
+                            seed_text = s
+                            break
+                if seed_text:
+                    ctx_block = await asyncio.to_thread(engine.build_context_block, seed_text, tenant)
+                    context['rag_context'] = ctx_block
+            except Exception as exc:
+                logger.debug('TemporalRAGStage skipped: %s', exc)
+        elapsed = (time.time() - t0) * 1000.0
+        return {'stage': self.name, 'status': 'done', 'elapsed_ms': elapsed,
+                'result': {'indexed_rows': indexed, 'embed_mode': os.getenv('TEMPORAL_RAG_EMBED', 'ollama')}}
 
 
 class GraphStage(StageBase):
@@ -271,6 +384,15 @@ class LLMSummaryStage(StageBase):
         except Exception:
             pass
         prompt = llm_prompts.compose_prompt(context)
+        # Inject TemporalRAG context block into prompt when available
+        rag_ctx = context.get('rag_context') or {}
+        if rag_ctx.get('rag_available') and rag_ctx.get('summary_hint'):
+            rag_prefix = (
+                f"\n[TemporalRAG context — {rag_ctx['neighbour_count']} similar events "
+                f"in prior {rag_ctx['window_seconds'] // 3600}h window]\n"
+                f"{rag_ctx['summary_hint']}\n"
+            )
+            prompt = rag_prefix + prompt
         summary = {'text': 'LLM summary unavailable'}
         try:
             # Use the central LLM client abstraction which honors LLM_MOCK and provider configs
@@ -296,7 +418,39 @@ class LLMSummaryStage(StageBase):
         return {'stage': self.name, 'status': 'done', 'elapsed_ms': elapsed, 'result': {'llm_summary': summary}}
 
 
-STAGE_REGISTRY = [GeoIPStage(), ThreatIntelStage(), GraphStage(), LLMSummaryStage()]
+class TriageScoreStage(StageBase):
+    """Apply src.analysis.triage.compute_triage_score to all rows so claim bands
+    have real triage data instead of showing '?'."""
+    name = 'TriageScore'
+
+    async def run(self, context: dict) -> dict:
+        t0 = time.time()
+        rows = context.get('rows') or []
+        enriched = 0
+        try:
+            from src.analysis.triage import compute_triage_score as _cts
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                if row.get('triage_score') is None:
+                    inputs = {
+                        'dread': _extract_dread_score(row) if callable(globals().get('_extract_dread_score')) else (row.get('dread_score') or 0.0),
+                        'correlation': float(row.get('correlation_score') or (row.get('_correlation') or {}).get('score') or 0.0),
+                        'density': float(row.get('factor_density') or 0.0),
+                        'confidence': float(row.get('risk_confidence') or row.get('confidence') or 0.0),
+                        'rarity': float(row.get('rarity_score') or 0.0),
+                    }
+                    result = _cts(inputs)
+                    row['triage_score'] = result.get('triage_score', 0.0)
+                    row['_triage_breakdown'] = result.get('breakdown', {})
+                    enriched += 1
+        except Exception:
+            pass
+        elapsed = (time.time() - t0) * 1000.0
+        return {'stage': self.name, 'status': 'done', 'elapsed_ms': elapsed, 'result': {'enriched_rows': enriched}}
+
+
+STAGE_REGISTRY = [GeoIPStage(), ThreatIntelStage(), TemporalRAGStage(), GraphStage(), TriageScoreStage(), LLMSummaryStage()]
 
 
 class EBPFStage(StageBase):
@@ -1740,6 +1894,41 @@ def prioritize_rows_for_llm(
     if limit > 0:
         candidates = candidates[:limit]
     return [(idx, rec) for idx, rec, _d, _f, _t in candidates]
+
+
+@router.get('/assessments/{assessment_id}', summary="Load a saved assessment by ID")
+async def get_assessment_by_id(assessment_id: str, request: Request):
+    """Return a previously completed assessment so the history sidebar can reload it.
+
+    Searches REPORT_STORE (in-memory), then disk (data/assessments/).
+    Returns { assessment_id, evidenceRows, rows, headline, sources, ts }.
+    """
+    assessment = _get_assessment_cached(assessment_id)
+    if not assessment:
+        from fastapi import HTTPException as _HTTPException
+        raise _HTTPException(status_code=404, detail=f"Assessment {assessment_id!r} not found")
+    # Build a normalised response the history sidebar JS can consume
+    evidence_rows = (
+        assessment.get('evidenceRows')
+        or assessment.get('evidence_rows')
+        or assessment.get('llm_rows')
+        or assessment.get('rows')
+        or []
+    )
+    return {
+        'assessment_id': assessment_id,
+        'evidenceRows': evidence_rows,
+        'rows': evidence_rows,
+        'headline': (
+            assessment.get('headline')
+            or assessment.get('report_title')
+            or assessment.get('summary', '')[:80]
+            or f'{len(evidence_rows)} events'
+        ),
+        'sources': assessment.get('sources') or [],
+        'ts': assessment.get('ts') or assessment.get('created_at'),
+        'stage_results': assessment.get('stage_results') or [],
+    }
 
 
 @router.post('/generate_llm_summaries')

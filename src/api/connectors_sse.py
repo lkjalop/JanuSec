@@ -17,6 +17,10 @@ Every route:
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
+import asyncio
+import logging
+import os
+import time
 
 from fastapi import APIRouter, Body, Header, HTTPException, Request
 
@@ -26,6 +30,8 @@ from src.api.runtime_state import (
     update_connector_health,
 )
 from src.api.tenant_helpers import resolve_tenant_id
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/ingest", tags=["ingest-sse"])
 
@@ -305,4 +311,194 @@ async def ingest_sse_generic(
     return {"ok": True, "ingested": len(raw_events), "accepted": len(normalized), "source": "sse_generic"}
 
 
-__all__ = ["router"]
+# ---------------------------------------------------------------------------
+# Splunk HEC normalizer
+# ---------------------------------------------------------------------------
+def _normalize_splunk(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalise a Splunk HEC event (wrapped in ``event`` key or raw)."""
+    evt = raw.get("event") if isinstance(raw.get("event"), dict) else raw
+    fields = raw.get("fields") or {}
+    host = raw.get("host") or evt.get("host") or fields.get("host")
+    src_ip = evt.get("src_ip") or evt.get("src") or fields.get("src_ip")
+    dst_ip = evt.get("dest_ip") or evt.get("dest") or fields.get("dest_ip")
+    user = evt.get("user") or evt.get("src_user") or fields.get("user")
+    sev_raw = str(evt.get("severity") or fields.get("severity") or raw.get("severity") or "info").lower()
+    severity = sev_raw if sev_raw in ("critical", "high", "medium", "low") else "info"
+    source_type = raw.get("sourcetype") or raw.get("source") or "splunk"
+    return {k: v for k, v in {
+        "source_kind": "splunk",
+        "source": source_type,
+        "provider": "Splunk",
+        "domain": "endpoint",
+        "ts": raw.get("time") or evt.get("_time") or evt.get("timestamp"),
+        "event_type": evt.get("EventCode") or evt.get("event_type") or source_type,
+        "user": user,
+        "host": host,
+        "ip": src_ip,
+        "src_ip": src_ip,
+        "dst_ip": dst_ip,
+        "action": evt.get("action") or evt.get("EventType"),
+        "process": evt.get("process") or evt.get("ParentCommandLine"),
+        "file_hash": evt.get("file_hash") or evt.get("md5") or evt.get("sha256"),
+        "severity": severity,
+        "confidence": 0.7 if severity in ("critical", "high") else 0.45,
+        "factors": ["endpoint:splunk_hec"],
+        "raw": raw,
+    }.items() if v is not None}
+
+
+@router.post("/splunk", summary="Ingest Splunk HEC events")
+async def ingest_splunk(
+    request: Request,
+    payload: Any = Body(...),
+    tenant_id: Optional[str] = Header(None, alias="x-tenant-id"),
+    api_key: Optional[str] = Header(None, alias="x-api-key"),
+) -> Dict[str, Any]:
+    """Accept Splunk HTTP Event Collector (HEC) formatted events."""
+    if not api_key:
+        raise HTTPException(status_code=401, detail="missing_api_key")
+    tenant = resolve_tenant_id(request, tenant_id) or tenant_id or "default"
+    raw_events = _extract_events(payload)
+    if not raw_events:
+        return {"ok": True, "ingested": 0, "accepted": 0, "source": "splunk"}
+    normalized = [_normalize_splunk(e) for e in raw_events]
+    _store_events(request, tenant, normalized, "sse:splunk", provider="Splunk")
+    return {"ok": True, "ingested": len(raw_events), "accepted": len(normalized), "source": "splunk"}
+
+
+# ---------------------------------------------------------------------------
+# Microsoft Sentinel normalizer
+# ---------------------------------------------------------------------------
+def _normalize_sentinel(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalise a Sentinel Log Analytics / Defender XDR event."""
+    # Sentinel workspace events arrive with TimeGenerated, TenantId, Category, etc.
+    user = (raw.get("AccountName") or raw.get("InitiatingProcessAccountName")
+            or raw.get("SourceUserName") or raw.get("UserPrincipalName"))
+    src_ip = raw.get("LocalIPAddress") or raw.get("SourceIP") or raw.get("RemoteIP")
+    dst_ip = raw.get("RemoteIPAddress") or raw.get("DestinationIP")
+    sev_raw = str(raw.get("Severity") or raw.get("AlertSeverity") or "informational").lower()
+    _sev_map = {"high": "high", "medium": "medium", "low": "low",
+                "critical": "critical", "informational": "info"}
+    severity = _sev_map.get(sev_raw, "info")
+    process = raw.get("InitiatingProcessFileName") or raw.get("ProcessName")
+    file_hash = raw.get("SHA256") or raw.get("MD5") or raw.get("InitiatingProcessSHA256")
+    entity = raw.get("DeviceName") or raw.get("ComputerName") or raw.get("HostName")
+    return {k: v for k, v in {
+        "source_kind": "sentinel",
+        "source": raw.get("Category") or raw.get("AlertName") or "sentinel",
+        "provider": "MicrosoftSentinel",
+        "domain": "cloud",
+        "ts": raw.get("TimeGenerated") or raw.get("CreatedTime") or raw.get("TimeStamp"),
+        "event_type": raw.get("Category") or raw.get("Type") or "SentinelAlert",
+        "entity": entity,
+        "user": user,
+        "ip": src_ip,
+        "src_ip": src_ip,
+        "dst_ip": dst_ip,
+        "action": raw.get("Activity") or raw.get("AlertName"),
+        "process": process,
+        "file_hash": file_hash,
+        "description": (raw.get("Description") or raw.get("AlertDescription") or "")[:200],
+        "severity": severity,
+        "confidence": 0.75 if severity in ("critical", "high") else 0.5,
+        "factors": ["cloud:sentinel_alert"],
+        "raw": raw,
+    }.items() if v is not None}
+
+
+@router.post("/sentinel", summary="Ingest Microsoft Sentinel / Defender XDR alerts")
+async def ingest_sentinel(
+    request: Request,
+    payload: Any = Body(...),
+    tenant_id: Optional[str] = Header(None, alias="x-tenant-id"),
+    api_key: Optional[str] = Header(None, alias="x-api-key"),
+) -> Dict[str, Any]:
+    """Accept Microsoft Sentinel Log Analytics or Defender XDR alert records."""
+    if not api_key:
+        raise HTTPException(status_code=401, detail="missing_api_key")
+    tenant = resolve_tenant_id(request, tenant_id) or tenant_id or "default"
+    raw_events = _extract_events(payload)
+    if not raw_events:
+        return {"ok": True, "ingested": 0, "accepted": 0, "source": "sentinel"}
+    normalized = [_normalize_sentinel(e) for e in raw_events]
+    _store_events(request, tenant, normalized, "sse:sentinel", provider="MicrosoftSentinel")
+    return {"ok": True, "ingested": len(raw_events), "accepted": len(normalized), "source": "sentinel"}
+
+
+# ---------------------------------------------------------------------------
+# Micro-batch pipeline flush
+#
+# Every CONNECTOR_FLUSH_INTERVAL_SECONDS the worker drains the per-tenant
+# recent_sse_events store and submits a synthetic assessment through the same
+# 6-stage pipeline used by manual uploads.  This turns live connector events
+# into real persona-ready assessments without any UI change.
+# ---------------------------------------------------------------------------
+_FLUSH_INTERVAL: int = int(os.getenv("CONNECTOR_FLUSH_INTERVAL_SECONDS", "30"))
+_FLUSH_MIN_EVENTS: int = int(os.getenv("CONNECTOR_FLUSH_MIN_EVENTS", "1"))
+_FLUSH_TASK: asyncio.Task | None = None
+
+
+async def _micro_batch_flush_worker(app_ref: Any) -> None:  # pragma: no cover
+    """Background task: periodically flush connector events through the pipeline."""
+    logger.info("Connector micro-batch flush worker started (interval=%ds)", _FLUSH_INTERVAL)
+    while True:
+        try:
+            await asyncio.sleep(_FLUSH_INTERVAL)
+            runtime = get_server_runtime_state(app_ref)
+            for tenant, tstate in list(runtime.tenants.items()):
+                events: list = tstate.get(_CONNECTOR_STORE_KEY) or []
+                if len(events) < _FLUSH_MIN_EVENTS:
+                    continue
+                # Drain the queue
+                batch = list(events)
+                tstate[_CONNECTOR_STORE_KEY] = []
+
+                # Submit through the deep-analyze pipeline
+                try:
+                    from src.api.deep_analyze_endpoints import (  # type: ignore
+                        STAGE_REGISTRY, _get_trag_engine,
+                    )
+                    import uuid as _uuid
+                    assessment_id = f"stream-{tenant}-{_uuid.uuid4().hex[:8]}"
+                    context: dict = {
+                        "rows": batch,
+                        "assessment_id": assessment_id,
+                        "org": tenant,
+                        "tenant": tenant,
+                        "source": "connector_stream",
+                        "options": {"auto_llm": False},
+                    }
+                    stage_results = []
+                    for stage in STAGE_REGISTRY:
+                        try:
+                            result = await stage.run(context)
+                            stage_results.append(result)
+                        except Exception as exc:
+                            stage_results.append({"stage": stage.name, "status": "error", "error": str(exc)})
+                    # Also index into TemporalRAG corpus
+                    engine = _get_trag_engine()
+                    if engine:
+                        await asyncio.to_thread(engine.index_rows, batch, tenant)
+                    logger.info(
+                        "Connector flush: tenant=%s events=%d assessment_id=%s",
+                        tenant, len(batch), assessment_id,
+                    )
+                except Exception as exc:
+                    logger.warning("Connector micro-batch pipeline error: %s", exc)
+        except asyncio.CancelledError:
+            logger.info("Connector micro-batch flush worker stopped")
+            return
+        except Exception as exc:
+            logger.warning("Connector flush worker error: %s", exc)
+
+
+def start_flush_worker(app: Any) -> None:  # pragma: no cover
+    """Start the background flush task (call from app lifespan / startup)."""
+    global _FLUSH_TASK
+    if _FLUSH_INTERVAL <= 0:
+        return
+    if _FLUSH_TASK is None or _FLUSH_TASK.done():
+        _FLUSH_TASK = asyncio.create_task(_micro_batch_flush_worker(app))
+
+
+__all__ = ["router", "start_flush_worker"]
