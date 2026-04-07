@@ -23,15 +23,20 @@ SIGNAL_HINTS = {
 
 
 def _resolve_model_for_tier(tier: str, context: Dict[str, Any] | None = None) -> str:
-    """Return preferred model name for a tier, honoring context and env vars."""
+    """Return preferred model name for a tier, honoring context and env vars.
+
+    Defaults: T1=llama3.2:3b (fast per-row), T2=llama3.1:8b (quality narrative).
+    Override with T1_MODEL / T2_MODEL env vars.
+    """
     env_key = 'T1_MODEL' if tier == 'tier1' else 'T2_MODEL'
-    fallback = 'gpt-4o-mini' if tier == 'tier1' else 'gpt-4o'
+    # Ollama-first defaults (better quality, local, no cost)
+    ollama_fallback = 'llama3.2:3b' if tier == 'tier1' else 'llama3.1:8b'
     try:
         if context and context.get('model'):
             return context.get('model')
     except Exception:
         pass
-    return os.getenv(env_key) or fallback
+    return os.getenv(env_key) or ollama_fallback
 
 
 def _resolve_token_limit(tier: str) -> int:

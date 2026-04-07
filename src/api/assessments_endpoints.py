@@ -118,3 +118,112 @@ async def capture_feedback_simple(request: Request):
     if not ok:
         raise HTTPException(status_code=500, detail='persist_failed')
     return {'ok': True, 'stored': ok}
+
+
+@router.get('/{assessment_id}/iocs')
+async def export_iocs(assessment_id: str, request: Request):
+    """Phase-1 IOC export: return deduplicated, cutoff-filtered IOCs for an assessment.
+
+    Query params:
+        format: 'json' (default) or 'stix' for a minimal STIX 2.1 bundle
+    """
+    import uuid as _uuid
+    fmt = (request.query_params.get('format') or 'json').lower()
+    # Locate assessment on disk
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+    assessment_obj: dict = {}
+    raw_rows: list[dict] = []
+    # Try data/assessments/*/*/reports/{id}.json first, then fallback paths
+    import glob as _glob
+    candidates = _glob.glob(
+        os.path.join(repo_root, 'data', 'assessments', '*', '*', 'reports', f'{assessment_id}.json')
+    )
+    if not candidates:
+        candidates = _glob.glob(
+            os.path.join(repo_root, 'data', 'assessments', '*', '*', f'{assessment_id}.json')
+        )
+    if not candidates:
+        raise HTTPException(status_code=404, detail='assessment_not_found')
+    try:
+        with open(candidates[0], 'r', encoding='utf-8') as fh:
+            assessment_obj = json.load(fh)
+        raw_rows = (
+            assessment_obj.get('raw_rows')
+            or assessment_obj.get('per_row')
+            or assessment_obj.get('rows')
+            or []
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f'read_failed:{exc}')
+
+    try:
+        from src.reporting.adapters.csv_adapter import _collect_iocs_from_rows
+        iocs = _collect_iocs_from_rows(raw_rows)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f'ioc_extraction_failed:{exc}')
+
+    generated_at = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+
+    if fmt == 'stix':
+        # Minimal STIX 2.1 bundle — indicators only
+        objects: list[dict] = []
+        for ip in (iocs.get('public_ips') or iocs.get('ips') or []):
+            objects.append({
+                'type': 'indicator',
+                'spec_version': '2.1',
+                'id': f"indicator--{_uuid.uuid5(_uuid.NAMESPACE_URL, ip)}",
+                'created': generated_at,
+                'modified': generated_at,
+                'name': ip,
+                'pattern': f"[ipv4-addr:value = '{ip}']",
+                'pattern_type': 'stix',
+                'indicator_types': ['malicious-activity'],
+                'valid_from': generated_at,
+            })
+        for dom in (iocs.get('domains') or []):
+            objects.append({
+                'type': 'indicator',
+                'spec_version': '2.1',
+                'id': f"indicator--{_uuid.uuid5(_uuid.NAMESPACE_URL, dom)}",
+                'created': generated_at,
+                'modified': generated_at,
+                'name': dom,
+                'pattern': f"[domain-name:value = '{dom}']",
+                'pattern_type': 'stix',
+                'indicator_types': ['malicious-activity'],
+                'valid_from': generated_at,
+            })
+        for sha in (iocs.get('hashes') or []):
+            objects.append({
+                'type': 'indicator',
+                'spec_version': '2.1',
+                'id': f"indicator--{_uuid.uuid5(_uuid.NAMESPACE_URL, sha)}",
+                'created': generated_at,
+                'modified': generated_at,
+                'name': sha,
+                'pattern': f"[file:hashes.'SHA-256' = '{sha}']",
+                'pattern_type': 'stix',
+                'indicator_types': ['malicious-activity'],
+                'valid_from': generated_at,
+            })
+        return {
+            'type': 'bundle',
+            'id': f"bundle--{_uuid.uuid4()}",
+            'spec_version': '2.1',
+            'created': generated_at,
+            'objects': objects,
+        }
+
+    # Default: JSON format
+    return {
+        'assessment_id': assessment_id,
+        'generated_at': generated_at,
+        'ioc_cutoffs_days': {'ips': 60, 'domains': 30, 'hashes': 'never', 'processes': 90},
+        'iocs': {
+            'ips':       iocs.get('ips') or [],
+            'public_ips': iocs.get('public_ips') or [],
+            'domains':   iocs.get('domains') or [],
+            'hashes':    iocs.get('hashes') or [],
+            'processes': iocs.get('processes') or [],
+        },
+    }

@@ -6572,6 +6572,20 @@ try:
 except Exception:
     logger.debug('Failed to include YARA router')
 
+# ── Peer benchmarking router ─────────────────────────────────────────────────
+try:
+    from .benchmarks import router as benchmarks_router
+    app.include_router(benchmarks_router)
+except Exception:
+    logger.debug('Failed to include benchmarks router')
+
+# ── Operational exports (SOAR playbook / ATT&CK layer / Sigma rules) ─────────
+try:
+    from .operational_exports_endpoints import router as op_exports_router
+    app.include_router(op_exports_router)
+except Exception:
+    logger.debug('Failed to include operational_exports router')
+
 # Threat intel sync background job (optional)
 try:
     _TI_SYNC_ENABLED = os.getenv('THREAT_INTEL_SYNC_ENABLED','0').lower() in {'1','true','yes'}
