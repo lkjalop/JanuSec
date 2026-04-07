@@ -985,6 +985,17 @@ async def lifespan(app: FastAPI):
             await asyncio.to_thread(_deferred_sync)
         except Exception:
             pass
+        # Start SSE micro-batch flush worker so Splunk/Sentinel ingest routes
+        # drain queued events through the full STAGE_REGISTRY pipeline.
+        try:
+            from src.api.connectors_sse import start_flush_worker as _start_flush
+            _start_flush(app)
+        except Exception:
+            pass
+        try:
+            await asyncio.sleep(0)  # yield so the task is scheduled
+        except Exception:
+            pass
     try:
         app.state._deferred_post_startup = asyncio.create_task(_deferred_post_startup())
     except Exception:
