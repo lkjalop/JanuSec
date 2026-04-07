@@ -652,12 +652,19 @@ def test_persona_headline_executive_vs_ciso():
 # ---------------------------------------------------------------------------
 
 def test_claim_validate_empty_returns_insufficient_evidence():
-    """_claim_validate should return INSUFFICIENT_EVIDENCE for empty/generic values."""
+    """_claim_validate should return clean fallback (no INSUFFICIENT_EVIDENCE) for empty/generic values."""
     from src.reporting.executive_reporting import _claim_validate
 
-    assert _claim_validate("what_happened", "").startswith("INSUFFICIENT_EVIDENCE")
-    assert _claim_validate("what_happened", "No narrative available.").startswith("INSUFFICIENT_EVIDENCE")
-    assert _claim_validate("why_it_matters", None).startswith("INSUFFICIENT_EVIDENCE")
+    for val in ["", "No narrative available.", None]:
+        result = _claim_validate("what_happened", val)
+        assert "INSUFFICIENT_EVIDENCE" not in result, f"Leaked placeholder for {val!r}"
+        assert "ETA" not in result, f"Leaked ETA placeholder for {val!r}"
+        assert len(result) > 10, f"Fallback too short for {val!r}"
+
+    # why_it_matters fallback
+    result = _claim_validate("why_it_matters", None)
+    assert "INSUFFICIENT_EVIDENCE" not in result
+    assert len(result) > 10
 
 
 def test_claim_validate_real_value_passthrough():

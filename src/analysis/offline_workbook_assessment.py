@@ -786,6 +786,9 @@ def _plain_language_summary(
     confidence: float,
     semantic_top_factors: list[dict[str, Any]],
     corroboration_summary: dict[str, Any],
+    *,
+    severity: str = "",
+    confirmed_malicious: int = 0,
 ) -> str:
     factor_names = [entry.get("factor_name") for entry in semantic_top_factors if entry.get("factor_name")]
     email_compromise = any(str(name).startswith("email:") for name in factor_names)
@@ -810,14 +813,25 @@ def _plain_language_summary(
     if not actions:
         actions.append("multiple suspicious cloud events")
     corroboration = int(corroboration_summary.get("count") or 0)
+    _sev = (severity or "").upper()
     if email_compromise:
-        review_text = (
-            "Do not pay, reply, or change supplier details until callback verification and attachment review are complete."
-            if final_verdict in {"THREAT", "SUSPICIOUS"}
-            else "Continue monitoring and preserve the message, headers, and attachment evidence."
-        )
+        # Only show urgent BEC language when there are confirmed malicious events
+        # or severity is CRITICAL/HIGH. Avoids alarming narrative on benign datasets.
+        if confirmed_malicious > 0 or _sev in ("CRITICAL", "HIGH"):
+            review_text = (
+                "Do not pay, reply, or change supplier details until callback verification and attachment review are complete."
+            )
+        elif _sev == "MEDIUM":
+            review_text = (
+                "Potential email compromise detected. Preserve the message, headers, and attachment evidence for review."
+            )
+        else:
+            review_text = (
+                "Email-related activity was flagged for review. No confirmed threat — continue monitoring and preserve evidence."
+            )
         return (
-            f"A likely email-led compromise or supplier payment-diversion attempt was identified with {', '.join(actions[:3])}. "
+            f"{'A likely email-led compromise or supplier payment-diversion attempt was identified' if confirmed_malicious > 0 or _sev in ('CRITICAL', 'HIGH') else 'Email-related security activity was reviewed'}"
+            f" with {', '.join(actions[:3])}. "
             f"{corroboration} independent evidence sources support this finding. "
             f"Confidence is {confidence:.0%}. {review_text}"
         )
@@ -2736,16 +2750,19 @@ def build_offline_workbook_assessment(rows: list[Dict[str, Any]], *, assessment_
         reverse=True,
     )
     expected_loss = _estimate_expected_loss(severity, max(1, len(affected_identities) or len(affected_hosts) or high_entity_count), len(suspicious_rows), critical_asset_count)
+    # DREAD dimensions — gate on confirmed malicious to avoid inflated scores on benign datasets
+    _dread_base = 0 if _n_confirmed_mal_rows == 0 and severity == "LOW" else 2
+    _dread_mal_boost = min(5, _n_confirmed_mal_rows) if _n_confirmed_mal_rows > 0 else 0
     risk_quantification = {
         "severity": severity,
         "likelihood_percent": likelihood,
         "expected_loss_usd": expected_loss,
-        "damage_potential": min(10, 2 + len(affected_hosts) + len([f for f in factor_counter if f.startswith("endpoint:") or f.startswith("corr:")])),
-        "reproducibility": min(10, 2 + len([f for f in factor_counter if f.startswith("network:")])),
-        "exploitability": min(10, 2 + len([f for f in factor_counter if f.startswith("email:") or f.startswith("endpoint:") or f.startswith("corr:")])),
-        "affected_users": max(1, len(affected_identities) or len(affected_hosts) or high_entity_count),
-        "discoverability": min(10, 3 + len([f for f in factor_counter if f.startswith("corr:")])),
-        "impact_range_usd": [expected_loss, expected_loss * 3],
+        "damage_potential": min(10, _dread_base + _dread_mal_boost + len([f for f in factor_counter if f.startswith("endpoint:") or f.startswith("corr:")])),
+        "reproducibility": min(10, _dread_base + len([f for f in factor_counter if f.startswith("network:")])),
+        "exploitability": min(10, _dread_base + len([f for f in factor_counter if f.startswith("email:") or f.startswith("endpoint:") or f.startswith("corr:")])),
+        "affected_users": min(10, max(1, len(affected_identities) or len(affected_hosts) or high_entity_count)),
+        "discoverability": min(10, _dread_base + 1 + len([f for f in factor_counter if f.startswith("corr:")])),
+        "impact_range_usd": [expected_loss, expected_loss * 3] if _n_confirmed_mal_rows > 0 else [0, expected_loss],
     }
 
     llm_rows = []
@@ -2795,7 +2812,10 @@ def build_offline_workbook_assessment(rows: list[Dict[str, Any]], *, assessment_
             parser_warnings.append(str(warning))
 
     highlighted_findings = findings[:5]
-    plain_summary = _plain_language_summary(final_verdict, max_confidence, semantic_top_factors, corroboration_summary)
+    plain_summary = _plain_language_summary(
+        final_verdict, max_confidence, semantic_top_factors, corroboration_summary,
+        severity=severity, confirmed_malicious=_n_confirmed_mal_rows,
+    )
     evidence_layers = _evidence_layers(
         semantic_top_factors,
         corroboration_summary,
