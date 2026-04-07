@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
 	<meta charset="UTF-8"/>
@@ -16,12 +16,13 @@
 		h2 { margin: var(--space-2) 0 var(--space-3); font-size: var(--font-size-lg); }
 		.kv div:nth-child(odd){ color: var(--color-text-muted); }
 	</style>
+  <script src="https://unpkg.com/lucide@0.344.0/dist/umd/lucide.min.js"></script>
 </head>
 <body class="with-topbar">
 	<a href="#contentWrapper" class="skip-link">Skip to content</a>
 	<div class="page-root">
 		<div class="actions-row">
-			<a class="btn" href="/static/janusec-platform-complete-LIVE.html">← Console</a>
+			<a class="btn" href="/static/janusec-platform-complete-LIVE.html">â† Console</a>
 			<a class="btn" href="/static/hunt_network.html">Network</a>
 			<a class="btn" href="/static/hunt_endpoint.html">Endpoint</a>
 			<a class="btn" href="/static/integrations.html">Integrations</a>
@@ -272,7 +273,7 @@
 			const ciHi = (j.stats||[]).map(s=> s.ci && s.ci.hi);
 			const ctxAB = document.getElementById('abChart').getContext('2d');
 			if(abChartInstance){ abChartInstance.destroy(); }
-			abChartInstance = new Chart(ctxAB, { type:'bar', data:{ labels:labelsAB, datasets:[{ label:'Precision', data: (j.stats||[]).map(s=> s.precision), backgroundColor:'#4A63E7' }] }, options:{ responsive:true, scales:{ y:{ min:0, max:1 } }, plugins:{ tooltip:{ callbacks:{ label: c=>{ const i=c.dataIndex; const p=c.parsed.y; const lo=ciLo[i], hi=ciHi[i]; return `p=${(p!=null? (Math.round(p*10000)/100)+'%':'n/a')} • CI [${lo!=null? lo.toFixed(3):'–'}, ${hi!=null? hi.toFixed(3):'–'}]`; } } } } });
+			abChartInstance = new Chart(ctxAB, { type:'bar', data:{ labels:labelsAB, datasets:[{ label:'Precision', data: (j.stats||[]).map(s=> s.precision), backgroundColor:'#4A63E7' }] }, options:{ responsive:true, scales:{ y:{ min:0, max:1 } }, plugins:{ tooltip:{ callbacks:{ label: c=>{ const i=c.dataIndex; const p=c.parsed.y; const lo=ciLo[i], hi=ciHi[i]; return `p=${(p!=null? (Math.round(p*10000)/100)+'%':'n/a')} â€¢ CI [${lo!=null? lo.toFixed(3):'â€“'}, ${hi!=null? hi.toFixed(3):'â€“'}]`; } } } } });
 		}
 
 		document.getElementById('btnComputeBA').addEventListener('click', computeBeforeAfter);
@@ -289,5 +290,6 @@
 		});
 		loadMetrics();
 	</script>
+<script>if(window.lucide)lucide.createIcons();</script>
 </body>
 </html>

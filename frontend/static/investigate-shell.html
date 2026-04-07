@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JanuSec Panel</title>
+  <link rel="stylesheet" href="/static/css/theme.css">
+  <link rel="stylesheet" href="/static/css/theme-pro.css">
+  <script src="https://unpkg.com/lucide@0.344.0/dist/umd/lucide.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+  <style>
+    html, body { height: 100%; margin: 0; overflow: auto; }
+    body {
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      font-family: Inter, Segoe UI, system-ui, sans-serif;
+      padding: 16px;
+    }
+    .shell-header {
+      display: flex; align-items: center; gap: 10px;
+      margin-bottom: 12px; padding-bottom: 10px;
+      border-bottom: 1px solid var(--border);
+    }
+    .shell-header__title { font-size: 14px; font-weight: 600; color: var(--text-primary); flex: 1; }
+    .shell-header__badge {
+      font-size: 11px; padding: 2px 8px; border-radius: 12px;
+      background: var(--accent-subtle); color: var(--accent); font-weight: 500;
+    }
+    .shell-loading { color: var(--text-muted); font-size: 13px; padding: 20px 0; }
+    #root { width: 100%; }
+    /* Carry over ev-table styles for detached evidence */
+    .ev-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .ev-table th { background: var(--bg-secondary); position: sticky; top: 0; padding: 8px; text-align: left; border-bottom: 1px solid var(--border); }
+    .ev-table td { padding: 7px 8px; border-bottom: 1px solid var(--border-soft); }
+    .ev-table tr:hover td { background: var(--bg-hover); }
+  </style>
+</head>
+<body>
+  <div class="shell-header">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+    <span class="shell-header__title" id="shellTitle">JanuSec — Loading panel…</span>
+    <span class="shell-header__badge" id="shellBadge">Detached</span>
+  </div>
+  <div id="root"><p class="shell-loading">Waiting for content from main window&#8230;</p></div>
+
+  <script>
+    var tab = new URLSearchParams(location.search).get('tab') || 'panel';
+
+    // Notify opener as soon as DOM is ready
+    function notifyOpener() {
+      if (window.opener) {
+        try { window.opener.postMessage({ type: 'ready' }, '*'); } catch (e) {}
+      }
+    }
+
+    window.addEventListener('message', function (e) {
+      if (!e.data || e.data.type !== 'content') return;
+      var data = e.data;
+      var tabName = data.tab || tab;
+      document.title = 'JanuSec \u2014 ' + tabName.charAt(0).toUpperCase() + tabName.slice(1);
+      document.getElementById('shellTitle').textContent = 'JanuSec \u2014 ' + tabName.charAt(0).toUpperCase() + tabName.slice(1);
+      var root = document.getElementById('root');
+      root.innerHTML = data.html || '<p style="color:var(--text-muted);padding:16px">No content received.</p>';
+      if (window.lucide) lucide.createIcons();
+      // Remove detach/close buttons that don't work in detached context
+      root.querySelectorAll('.btn-detach, #btnCloseDetail, #btnExportPDF').forEach(function (el) { el.style.display = 'none'; });
+    });
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', notifyOpener);
+    } else {
+      notifyOpener();
+    }
+  </script>
+</body>
+</html>

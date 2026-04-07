@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8"/>
@@ -14,12 +14,13 @@
     label { font-size: var(--font-size-xs); color: var(--color-text-muted); margin:4px 0; display:block; }
     pre { font-size: var(--font-size-xs); line-height:1.4; }
   </style>
+  <script src="https://unpkg.com/lucide@0.344.0/dist/umd/lucide.min.js"></script>
 </head>
 <body class="with-topbar">
   <a href="#contentWrapper" class="skip-link">Skip to content</a>
   <div class="page-root">
     <div class="actions-row">
-      <a class="btn" href="/static/janusec-platform-complete-LIVE.html">← Console</a>
+      <a class="btn" href="/static/janusec-platform-complete-LIVE.html">â† Console</a>
       <a class="btn" href="/static/hunt_network.html">Network</a>
       <a class="btn" href="/static/hunt_endpoint.html">Endpoint</a>
       <a class="btn" href="/static/metrics.html">Metrics</a>
@@ -265,6 +266,7 @@
     function g(id){ return document.getElementById(id); }
   </script>
   <script src="/static/js/notifications.js"></script>
+<script>if(window.lucide)lucide.createIcons();</script>
 </body>
 </html>
 

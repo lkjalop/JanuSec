@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
@@ -30,6 +30,7 @@
 <script>
   window.authHeaders = window.authHeaders || function(){ try{ const k=localStorage.getItem('apiKey'); const h={}; const t=localStorage.getItem('tenantId'); if(k) h['x-api-key']=k; if(t) h['X-Tenant-ID']=t; return h; }catch(e){ return {}; } };
 </script>
+  <script src="https://unpkg.com/lucide@0.344.0/dist/umd/lucide.min.js"></script>
 </head>
 <body>
 <header>
@@ -149,13 +150,13 @@
       </div>
     </div>
     <div class="row" style="margin-top:12px;">
-      <button id="btnTier2" class="btn">Tier‑2 LLM Summary (fallback ticket)</button>
+      <button id="btnTier2" class="btn">Tierâ€‘2 LLM Summary (fallback ticket)</button>
       <span class="small muted">Sends a Slack webhook when LLM unavailable</span>
     </div>
   </div>
 
   <div class="section" id="tier2Section" style="display:none;">
-    <h2>Tier‑2 Summary</h2>
+    <h2>Tierâ€‘2 Summary</h2>
     <div id="tier2Output" class="code"></div>
   </div>
 
@@ -265,7 +266,7 @@
       const cost = x.cost || '-';
       const priv = x.privacy || '-';
       pill.className = 'pill';
-      pill.title = `duration_seconds: ${dur} — cost: ${cost} — privacy: ${priv}`;
+      pill.title = `duration_seconds: ${dur} â€” cost: ${cost} â€” privacy: ${priv}`;
       pill.textContent = `${type} (${dur}s)`;
       host.appendChild(pill);
     });
@@ -299,7 +300,7 @@
   document.getElementById('btnSubmit').addEventListener('click', submit);
   document.getElementById('btnTier2').addEventListener('click', async function(){
     try{
-      setStatus('Dispatching Tier‑2...');
+      setStatus('Dispatching Tierâ€‘2...');
       // Prefer autogen trigger if available; fallback to webhook test
       let ok = false;
       try{
@@ -318,10 +319,10 @@
         $('tier2Section').style.display = 'block';
         $('tier2Output').textContent = JSON.stringify({ fallback: 'webhook', result: j }, null, 2);
       }
-      if(!ok){ setStatus('Tier‑2 failed'); alert('Tier‑2 dispatch failed'); return; }
-      setStatus('Tier‑2 dispatched');
-      alert('Tier‑2 summary request sent (Slack webhook)');
-    }catch(e){ setStatus('Tier‑2 exception'); }
+      if(!ok){ setStatus('Tierâ€‘2 failed'); alert('Tierâ€‘2 dispatch failed'); return; }
+      setStatus('Tierâ€‘2 dispatched');
+      alert('Tierâ€‘2 summary request sent (Slack webhook)');
+    }catch(e){ setStatus('Tierâ€‘2 exception'); }
   });
 
   document.getElementById('btnSaveWeights').addEventListener('click', async function(){
@@ -337,5 +338,6 @@
   });
 })();
 </script>
+<script>if(window.lucide)lucide.createIcons();</script>
 </body>
 </html>
