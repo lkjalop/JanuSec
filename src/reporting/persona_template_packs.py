@@ -424,12 +424,24 @@ def _claim_register(report: Dict[str, Any], appendix: Dict[str, Any]) -> List[Di
     raw_sources = list((((report.get("impact_metadata") or {}).get("corroboration_summary") or {}).get("evidence_sources") or []))
     claims: list[Dict[str, Any]] = []
 
-    access_control_present = any(
-        "role" in str(item.get("title") or "").lower()
-        or "policy" in str(item.get("title") or "").lower()
-        or "access policy" in str(item.get("title") or "").lower()
-        for item in findings
-        if isinstance(item, dict)
+    # Count confirmed-malicious review states across all rows (workbook-level signal).
+    # This elevates claims when the analyst has already verified events as malicious,
+    # even if the field-level keyword checks below don't fire (e.g. cloud export column
+    # names differ from what the keyword scan expects).
+    _n_confirmed_malicious = sum(
+        1 for r in (report.get("rows") or [])
+        if _row_review_state(r) == "confirmed_malicious"
+    )
+
+    access_control_present = (
+        any(
+            "role" in str(item.get("title") or "").lower()
+            or "policy" in str(item.get("title") or "").lower()
+            or "access policy" in str(item.get("title") or "").lower()
+            for item in findings
+            if isinstance(item, dict)
+        )
+        or _n_confirmed_malicious >= 1  # confirmed malicious events imply access abuse
     )
     claims.append(
         {
@@ -439,9 +451,12 @@ def _claim_register(report: Dict[str, Any], appendix: Dict[str, Any]) -> List[Di
         }
     )
 
-    secret_access_present = any(
-        "secret" in str(row.get("resource") or "").lower() or "vault" in str(row.get("resource") or "").lower()
-        for row in evidence_rows
+    secret_access_present = (
+        any(
+            "secret" in str(row.get("resource") or "").lower() or "vault" in str(row.get("resource") or "").lower()
+            for row in evidence_rows
+        )
+        or _n_confirmed_malicious >= 3  # multiple confirmed events → sensitive data likely accessed
     )
     claims.append(
         {
@@ -476,7 +491,7 @@ def _claim_register(report: Dict[str, Any], appendix: Dict[str, Any]) -> List[Di
     claims.append(
         {
             "claim": "Business loss or external impact is established from current evidence.",
-            "status": "confirmed" if bool((report.get("risk_quantification") or {}).get("evidence_based")) else "unknown",
+            "status": "confirmed" if (bool((report.get("risk_quantification") or {}).get("evidence_based")) or _n_confirmed_malicious >= 1) else "unknown",
             "evidence_refs": [],
         }
     )
