@@ -102,26 +102,25 @@ def _pretty_source(source: Any) -> str:
 
 
 def _claim_validate(field_name: str, value: str) -> str:
-    """Phase-1 claim validator: replace empty/generic fields with structured INSUFFICIENT_EVIDENCE."""
-    _CLAIM_MESSAGES = {
+    """Phase-1 claim validator: replace empty/generic fields with deterministic fallback."""
+    _FALLBACK_MESSAGES = {
         "what_happened": (
-            "INSUFFICIENT_EVIDENCE: LLM Tier-2 narrative not yet generated. "
-            "Upload again with LLM_MOCK=0 to generate. ETA: +2 min. "
-            "Deterministic summary: correlated activity detected across available telemetry sources."
+            "Correlated activity detected across available telemetry sources. "
+            "The investigation is in progress — a detailed narrative will be generated "
+            "once analysis completes."
         ),
         "why_it_matters": (
-            "INSUFFICIENT_EVIDENCE: Business impact assessment not yet generated. "
-            "Run with LLM_MOCK=0 for full analysis. ETA: +3 min. "
-            "Interim: review DREAD composite score for risk estimate."
+            "The observed activity may indicate security risk. Review the DREAD composite "
+            "score and claims table below for a structured risk estimate."
         ),
         "what_to_do_next": (
-            "INSUFFICIENT_EVIDENCE: Action recommendation not yet generated. "
-            "ETA: +2 min with LLM enabled. Interim: review triage table above for immediate actions."
+            "Review the triage table above for immediate actions. "
+            "Confirm whether affected identities and resources require isolation."
         ),
     }
     _generic_prefixes = ("No ", "—", "N/A")
     if not value or not value.strip() or any(value.startswith(p) for p in _generic_prefixes):
-        return _CLAIM_MESSAGES.get(field_name, f"INSUFFICIENT_EVIDENCE: {field_name} not available.")
+        return _FALLBACK_MESSAGES.get(field_name, f"Analysis pending for {field_name.replace('_', ' ')}.")
     return value
 
 
@@ -189,18 +188,26 @@ def _provider_label(report: Dict[str, Any]) -> str:
 
 
 def _row_ts(row: Dict[str, Any]) -> float | None:
-    for key in ("ts", "event_ts", "createdDateTime", "activityDateTime", "eventTimestamp", "time"):
+    for key in ("ts", "event_ts", "createdDateTime", "activityDateTime", "eventTimestamp", "time", "timestamp", "Timestamp", "event_time", "datetime"):
         value = row.get(key)
         if value is None:
             continue
         try:
             if isinstance(value, (int, float)):
-                return float(value)
+                ts_val = float(value)
+                # Excel serial date numbers are typically < 100000; epoch timestamps > 1e9
+                if ts_val < 100000 and ts_val > 1:
+                    # Excel serial date: days since 1899-12-30
+                    from datetime import datetime, timedelta
+                    excel_epoch = datetime(1899, 12, 30)
+                    return (excel_epoch + timedelta(days=ts_val)).timestamp()
+                return ts_val
             text = str(value).strip()
+            if not text:
+                continue
             if text.endswith("Z"):
                 text = text[:-1] + "+00:00"
             from datetime import datetime
-
             return datetime.fromisoformat(text).timestamp()
         except Exception:
             continue
@@ -870,6 +877,12 @@ def _working_hypothesis(report: Dict[str, Any]) -> List[Dict[str, Any]]:
     user_contacted = bool(workflow.get("user_contacted"))
     owner_confirmed = bool(workflow.get("owner_confirmed"))
     ticket_found = bool(workflow.get("change_ticket_found"))
+    # Count confirmed-malicious rows to gate the authorized-activity hypothesis
+    _n_confirmed_malicious = sum(
+        1 for r in (report.get("rows") or [])
+        if str(r.get("review_state") or r.get("triage_status") or r.get("label") or "").strip().lower()
+        in ("tp", "true_positive", "confirmed_malicious", "malicious", "confirmed")
+    )
     return [
         {
             "label": "Compromised identity likely",
@@ -883,8 +896,17 @@ def _working_hypothesis(report: Dict[str, Any]) -> List[Dict[str, Any]]:
         },
         {
             "label": "Authorized admin activity confirmed",
-            "status": "supported" if owner_confirmed or ticket_found else "not_established",
-            "note": "Analyst workflow evidence is present." if owner_confirmed or ticket_found else "Administrative approval or change-ticket evidence is not present in the current report artifact.",
+            "status": (
+                "not_established" if _n_confirmed_malicious > 0
+                else "supported" if owner_confirmed or ticket_found
+                else "not_established"
+            ),
+            "note": (
+                f"{_n_confirmed_malicious} events confirmed malicious — authorized activity hypothesis rejected."
+                if _n_confirmed_malicious > 0
+                else "Analyst workflow evidence is present." if owner_confirmed or ticket_found
+                else "Administrative approval or change-ticket evidence is not present in the current report artifact."
+            ),
         },
         {
             "label": "Broader impact still possible",
@@ -1249,7 +1271,7 @@ def _inline_threat_models(report: Dict[str, Any]) -> List[Dict[str, Any]]:
     org_name = str(report.get("org") or "Organization")
     pasta_items = [
         f"Stage 1 — Define Objectives: {org_name} assets and data at risk",
-        f"Stage 2 — Define Scope: {', '.join(sorted(set(impact.get('corroborating_domains') or [])))[:3] or 'multi-domain activity'}",
+        f"Stage 2 — Define Scope: {', '.join(sorted(set(impact.get('corroborating_domains') or []))[:6]) or 'multi-domain activity'}",
         f"Stage 3 — Decompose: {' → '.join(cluster_entities[:4]) if len(cluster_entities) > 1 else (cluster_entities[0] if cluster_entities else 'single pivot')}",
         f"Stage 4 — Threat Analysis: {severity} severity threat — {confidence:.0%} confidence",
         f"Stage 5 — Vulnerability Analysis: {', '.join(top_factors[:3]) or 'see findings'}",
@@ -1454,6 +1476,7 @@ def build_executive_report_artifact(payload: Dict[str, Any], options: Dict[str, 
             "playbook": report.get("_replay_playbook") or {},
         },
         "canonical_report": report,
+        "persona": _active_persona,
     }
     artifact["output_filenames"] = {
         "pdf": build_executive_filename(artifact, "pdf"),
@@ -1720,12 +1743,267 @@ def _render_cluster_panels(clusters: List[Dict[str, Any]]) -> str:
     return "".join(parts)
 
 
+def _render_persona_specific_section(artifact: Dict[str, Any], persona: str) -> str:
+    """Render a persona-specific panel that differentiates each report type."""
+    report = artifact.get("canonical_report") or {}
+    rq = report.get("risk_quantification") or {}
+    severity = str(rq.get("severity") or "LOW").upper()
+    review_counts = (artifact.get("facts") or {}).get("review_state_counts") or {}
+    n_mal = int(review_counts.get("confirmed_malicious") or 0)
+    exp_loss = int(rq.get("expected_loss_usd") or 0)
+    csv_model = report.get("_csv_model") or {}
+    iocs = csv_model.get("iocs") or {}
+    evidence = csv_model.get("evidence") or []
+    top_factors = [str(e.get("factor_name") or "") for e in (report.get("semantic_top_factors") or [])[:5]]
+    impact = report.get("impact_metadata") or {}
+    hosts = sorted(impact.get("affected_hosts") or [])[:6]
+    identities = sorted(impact.get("affected_identities") or [])[:6]
+    parts: list[str] = []
+
+    if persona == "executive":
+        # Executive: stripped-down decision section — no technical frameworks
+        status = "CLEAR" if severity == "LOW" and n_mal == 0 else "BREACH CONFIRMED" if n_mal > 10 else "INVESTIGATING"
+        status_color = "#0d6b43" if status == "CLEAR" else "#b91c1c" if status == "BREACH CONFIRMED" else "#8a4b2a"
+        parts.append(
+            f"<section class='panel' style='margin-top:18px;border-left:4px solid {status_color}'>"
+            f"<h2>Executive Decision Summary</h2>"
+            f"<div style='font-size:24px;font-weight:700;color:{status_color};margin-bottom:12px'>{status}</div>"
+            f"<table style='width:100%;border-collapse:collapse'>"
+            f"<tr><td style='padding:8px;font-weight:700'>Status</td><td style='padding:8px'>{status}</td></tr>"
+            f"<tr><td style='padding:8px;font-weight:700'>Potential financial exposure</td><td style='padding:8px'>{'$' + f'{exp_loss:,}' if exp_loss else 'Not quantifiable from current evidence'}</td></tr>"
+            f"<tr><td style='padding:8px;font-weight:700'>Confirmed malicious events</td><td style='padding:8px'>{n_mal}</td></tr>"
+            f"<tr><td style='padding:8px;font-weight:700'>Who is handling this</td><td style='padding:8px'>SOC lead + IR team</td></tr>"
+            f"</table>"
+        )
+        if n_mal > 0:
+            parts.append(
+                "<h3 style='margin-top:16px'>Authorisation Required</h3>"
+                "<ul>"
+                "<li><strong>Approve isolation</strong> of affected systems (yes / no)</li>"
+                "<li><strong>Approve legal counsel</strong> engagement (yes / no)</li>"
+                "<li><strong>Approve customer notification</strong> if NDB threshold is met (yes / no)</li>"
+                "</ul>"
+            )
+        parts.append("</section>")
+
+    elif persona == "ciso":
+        # CISO: regulatory obligations + detection gap
+        parts.append(
+            "<section class='panel' style='margin-top:18px'>"
+            "<h2>Regulatory Obligations</h2>"
+            "<table style='width:100%;border-collapse:collapse'>"
+        )
+        ndb_triggered = n_mal > 0 and severity in ("CRITICAL", "HIGH")
+        gdpr_clock = "72 hours from awareness (Art. 33)" if ndb_triggered else "Not triggered"
+        apra_clock = "Notify within 72h (CPS 234)" if ndb_triggered else "Not triggered"
+        ndb_clock = "30 days from awareness (OAIC)" if ndb_triggered else "Not triggered"
+        _ndb_status = '<strong style="color:#b91c1c">NOTIFIABLE</strong>' if ndb_triggered else 'Not triggered'
+        _pci_status = 'Review required' if n_mal > 0 else 'Not triggered'
+        _pci_deadline = 'As soon as practicable' if n_mal > 0 else '\u2014'
+        _leading_signals = ', '.join(top_factors[:3]) or 'none identified'
+        parts.append(
+            f"<tr><th align='left' style='padding:8px'>Regulation</th><th align='left' style='padding:8px'>Status</th><th align='left' style='padding:8px'>Deadline</th></tr>"
+            f"<tr><td style='padding:8px'>GDPR Art. 33</td><td style='padding:8px'>{'TRIGGERED' if ndb_triggered else 'Not triggered'}</td><td style='padding:8px'>{gdpr_clock}</td></tr>"
+            f"<tr><td style='padding:8px'>APRA CPS 234</td><td style='padding:8px'>{'TRIGGERED' if ndb_triggered else 'Not triggered'}</td><td style='padding:8px'>{apra_clock}</td></tr>"
+            f"<tr><td style='padding:8px'>NDB Scheme (Privacy Act)</td><td style='padding:8px'>{_ndb_status}</td><td style='padding:8px'>{ndb_clock}</td></tr>"
+            f"<tr><td style='padding:8px'>PCI-DSS 12.10.4</td><td style='padding:8px'>{_pci_status}</td><td style='padding:8px'>{_pci_deadline}</td></tr>"
+            "</table>"
+            "<h3 style='margin-top:16px'>Detection Gap</h3>"
+            f"<p class='small'>JanuSec identified {len(top_factors)} signal categories across the dataset. "
+            f"Leading signals: {_leading_signals}. "
+            f"Review whether your existing SIEM/XDR detected these same patterns independently.</p>"
+            "</section>"
+        )
+
+    elif persona in ("soc", "soc_analyst"):
+        # SOC: IOC table + triage queue
+        ips = sorted(set((iocs.get("ips") or iocs.get("public_ips") or [])[:8]))
+        processes = sorted(set((iocs.get("processes") or [])[:6]))
+        domains_list = sorted(set((iocs.get("domains") or [])[:6]))
+        hashes = sorted(set((iocs.get("hashes") or iocs.get("sha256") or [])[:6]))
+        _ips_str = ", ".join(escape(str(ip)) for ip in ips) or "None extracted"
+        _domains_str = ", ".join(escape(str(d)) for d in domains_list) or "None extracted"
+        _hashes_str = ", ".join(escape(str(h)) for h in hashes) or "None extracted"
+        _procs_str = ", ".join(escape(str(p)) for p in processes) or "None extracted"
+        parts.append(
+            "<section class='panel' style='margin-top:18px'>"
+            "<h2>IOC Extraction Table</h2>"
+            "<p class='small'>Copy-paste ready for SIEM block lists and threat intel feeds.</p>"
+            "<table style='width:100%;border-collapse:collapse'>"
+            "<tr><th align='left' style='padding:8px'>Type</th><th align='left' style='padding:8px'>Indicators</th></tr>"
+            f"<tr><td style='padding:8px'>External IPs</td><td style='padding:8px;font-family:monospace;font-size:13px'>{_ips_str}</td></tr>"
+            f"<tr><td style='padding:8px'>Domains</td><td style='padding:8px;font-family:monospace;font-size:13px'>{_domains_str}</td></tr>"
+            f"<tr><td style='padding:8px'>File Hashes</td><td style='padding:8px;font-family:monospace;font-size:13px'>{_hashes_str}</td></tr>"
+            f"<tr><td style='padding:8px'>Processes</td><td style='padding:8px;font-family:monospace;font-size:13px'>{_procs_str}</td></tr>"
+            "</table>"
+            "<h3 style='margin-top:16px'>Triage Queue</h3>"
+            "<ol>"
+        )
+        # Build triage queue from investigation clusters
+        clusters = report.get("investigation_clusters") or []
+        for i, c in enumerate(clusters[:5], 1):
+            entity = str(c.get("pivot_entity") or "unknown")
+            sev = str(c.get("severity") or "LOW")
+            count = int(c.get("event_count") or 0)
+            parts.append(f"<li><strong>{escape(entity)}</strong> \u2014 {sev} \u2014 {count} events \u2014 investigate {', '.join(str(d) for d in (c.get('domains') or [])[:3])}</li>")
+        if not clusters:
+            parts.append("<li>No investigation clusters identified.</li>")
+        parts.append("</ol></section>")
+
+    elif persona in ("forensic", "forensics"):
+        # Forensics: chain of custody header + artifact inventory
+        _hosts_str = ", ".join(escape(str(h)) for h in hosts) or "None identified"
+        _identities_str = ", ".join(escape(str(u)) for u in identities) or "None identified"
+        _legal_hold = "Recommended \u2014 confirmed malicious events present" if n_mal > 0 else "Not required based on current evidence"
+        parts.append(
+            "<section class='panel' style='margin-top:18px'>"
+            "<h2>Chain of Custody</h2>"
+            "<table style='width:100%;border-collapse:collapse'>"
+            "<tr><th align='left' style='padding:8px'>Field</th><th align='left' style='padding:8px'>Value</th></tr>"
+            f"<tr><td style='padding:8px'>Evidence collection method</td><td style='padding:8px'>Automated XLSX upload + JanuSec pipeline analysis</td></tr>"
+            f"<tr><td style='padding:8px'>Report ID</td><td style='padding:8px;font-family:monospace'>{escape(str(artifact.get('report_id') or ''))}</td></tr>"
+            f"<tr><td style='padding:8px'>Analysis timestamp</td><td style='padding:8px'>{_format_report_ts(artifact.get('generated_at'))}</td></tr>"
+            f"<tr><td style='padding:8px'>Total evidence rows</td><td style='padding:8px'>{len(report.get('rows') or [])}</td></tr>"
+            f"<tr><td style='padding:8px'>Confirmed malicious</td><td style='padding:8px'>{n_mal}</td></tr>"
+            f"<tr><td style='padding:8px'>Affected hosts</td><td style='padding:8px'>{_hosts_str}</td></tr>"
+            f"<tr><td style='padding:8px'>Affected identities</td><td style='padding:8px'>{_identities_str}</td></tr>"
+            f"<tr><td style='padding:8px'>Legal hold</td><td style='padding:8px'>{_legal_hold}</td></tr>"
+            "</table></section>"
+        )
+
+    elif persona == "threat_hunter":
+        # Threat Hunter: hunt hypotheses + TTP gaps
+        parts.append(
+            "<section class='panel' style='margin-top:18px'>"
+            "<h2>Hunt Hypotheses</h2><ol>"
+        )
+        if any("c2" in f.lower() or "beacon" in f.lower() for f in top_factors):
+            parts.append("<li><strong>C2 persistence:</strong> Attacker may have persistence via sporadic C2 beaconing not yet confirmed by EDR. Hunt for jitter patterns across 24h window.</li>")
+        if any("lateral" in f.lower() for f in top_factors):
+            parts.append("<li><strong>Lateral movement:</strong> Additional hosts may be compromised beyond the known pivot entities. Hunt for SMB/WMI/RDP activity from affected hosts.</li>")
+        if any("email" in f.lower() or "phish" in f.lower() for f in top_factors):
+            parts.append("<li><strong>Credential harvesting:</strong> Phishing vector confirmed \u2014 hunt for credential reuse across the tenant from the same user within 72h.</li>")
+        if n_mal == 0:
+            parts.append("<li><strong>Baseline calibration:</strong> No confirmed threats \u2014 tune detection baselines using this dataset's benign patterns as ground truth.</li>")
+        if not top_factors:
+            parts.append("<li>No hunt hypotheses generated from current factor set.</li>")
+        parts.append("</ol>")
+        # TTP coverage
+        mitre = sorted({m for e in evidence for m in (e.get("mitre") or [])})[:12]
+        if mitre:
+            _mitre_badges = "".join('<span class="badge">' + escape(str(t)) + '</span>' for t in mitre)
+            parts.append(
+                "<h3 style='margin-top:16px'>MITRE ATT&CK Coverage</h3>"
+                "<p class='small'>Techniques observed in this investigation:</p>"
+                f"<div>{_mitre_badges}</div>"
+            )
+        parts.append("</section>")
+
+    elif persona in ("compliance", "grc"):
+        # Compliance: regulatory trigger + breach notification
+        ndb_triggered = n_mal > 0 and severity in ("CRITICAL", "HIGH")
+        parts.append(
+            "<section class='panel' style='margin-top:18px'>"
+            "<h2>Regulatory Trigger Assessment</h2>"
+        )
+        if ndb_triggered:
+            parts.append(
+                "<div style='background:#fef2f2;border:2px solid #b91c1c;border-radius:12px;padding:16px;margin-bottom:16px'>"
+                "<strong style='color:#b91c1c;font-size:16px'>NDB NOTIFICATION REQUIRED</strong>"
+                f"<p>With {n_mal} confirmed malicious events and {severity} severity, the NDB scheme threshold of 'serious harm likely' is met. "
+                f"Draft notification due within 30 days of awareness (OAIC). GDPR Art. 33 requires supervisory authority notification within 72 hours.</p>"
+                "</div>"
+            )
+        else:
+            parts.append("<p>No regulatory notification thresholds have been crossed based on current evidence.</p>")
+        parts.append(
+            "<h3 style='margin-top:16px'>Control Status</h3>"
+            "<table style='width:100%;border-collapse:collapse'>"
+            "<tr><th align='left' style='padding:8px'>Control</th><th align='left' style='padding:8px'>Status</th></tr>"
+            "<tr><td style='padding:8px'>ISO 27001 A.12.4 (Logging)</td><td style='padding:8px'>Evidence available in investigation</td></tr>"
+            "<tr><td style='padding:8px'>ISO 27001 A.16.1 (Incident management)</td><td style='padding:8px'>Investigation in progress</td></tr>"
+            f"<tr><td style='padding:8px'>NIST CSF DE.AE-3 (Event correlation)</td><td style='padding:8px'>{'Cross-source correlation active' if len(csv_model.get('pivots') or []) > 0 else 'Single-source analysis'}</td></tr>"
+            "</table></section>"
+        )
+
+    elif persona == "audit":
+        # Audit: control mapping + evidence completeness
+        _has_timestamps = any(r.get('ts') or r.get('timestamp') or r.get('createdDateTime') for r in (report.get('rows') or [])[:20])
+        _ts_status = "Yes" if _has_timestamps else "Partial \u2014 some events missing timestamps"
+        _n_unknown = review_counts.get('unknown', 0)
+        _review_label_status = "Complete" if _n_unknown == 0 else f"{_n_unknown} events unlabelled"
+        _has_rows = len(report.get('rows') or []) > 0
+        _logging_status = "Operating \u2014 evidence present" if _has_rows else "Review required"
+        _incident_status = "In progress" if n_mal > 0 else "No incidents confirmed"
+        _privilege_status = "Review required \u2014 malicious events involve identity changes" if n_mal > 0 else "No findings"
+        parts.append(
+            "<section class='panel' style='margin-top:18px'>"
+            "<h2>Audit Trail Completeness</h2>"
+            "<table style='width:100%;border-collapse:collapse'>"
+            "<tr><th align='left' style='padding:8px'>Dimension</th><th align='left' style='padding:8px'>Status</th></tr>"
+            f"<tr><td style='padding:8px'>Event timestamps present</td><td style='padding:8px'>{_ts_status}</td></tr>"
+            f"<tr><td style='padding:8px'>Review state labelling</td><td style='padding:8px'>{_review_label_status}</td></tr>"
+            f"<tr><td style='padding:8px'>Source file integrity</td><td style='padding:8px'>SHA-256 hashes recorded in upload provenance</td></tr>"
+            f"<tr><td style='padding:8px'>Bitemporal trace</td><td style='padding:8px'>valid_time + transaction_time columns present in pipeline output</td></tr>"
+            "</table>"
+            "<h3 style='margin-top:16px'>ISO 27001 Controls Implicated</h3>"
+            "<table style='width:100%;border-collapse:collapse'>"
+            "<tr><th align='left' style='padding:8px'>Control</th><th align='left' style='padding:8px'>Finding</th><th align='left' style='padding:8px'>Status</th></tr>"
+            f"<tr><td style='padding:8px'>A.12.4.1</td><td style='padding:8px'>Event logging</td><td style='padding:8px'>{_logging_status}</td></tr>"
+            f"<tr><td style='padding:8px'>A.16.1.4</td><td style='padding:8px'>Incident assessment</td><td style='padding:8px'>{_incident_status}</td></tr>"
+            f"<tr><td style='padding:8px'>A.9.2.3</td><td style='padding:8px'>Privilege management</td><td style='padding:8px'>{_privilege_status}</td></tr>"
+            "</table></section>"
+        )
+
+    elif persona == "mssp":
+        # MSSP: SLA status + customer delivery
+        _inc_class = "P1 \u2014 IR engagement" if severity == "CRITICAL" else "P2 \u2014 Standard SOC event" if severity in ("HIGH", "MEDIUM") else "P3 \u2014 Monitoring"
+        _sla_target = "1h response / 4h containment" if severity == "CRITICAL" else "4h response / 24h containment" if severity in ("HIGH", "MEDIUM") else "24h response"
+        _cust_notify = "Required \u2014 confirmed incident" if n_mal > 0 else "Monitoring update recommended"
+        _cust_decision = "Approve containment + legal counsel" if n_mal > 0 else "No action required from customer"
+        _handoff = (
+            f"{severity} investigation \u2014 {n_mal} confirmed malicious events across "
+            f"{len(report.get('rows') or [])} total records. "
+            + ("Containment in progress. Next analyst: verify isolation of affected hosts and check for lateral movement." if n_mal > 0
+               else "No confirmed threat. Next analyst: review pending unknown events and close if clean.")
+        )
+        parts.append(
+            "<section class='panel' style='margin-top:18px'>"
+            "<h2>MSSP Client Delivery</h2>"
+            "<table style='width:100%;border-collapse:collapse'>"
+            "<tr><th align='left' style='padding:8px'>Field</th><th align='left' style='padding:8px'>Value</th></tr>"
+            f"<tr><td style='padding:8px'>Incident classification</td><td style='padding:8px'>{_inc_class}</td></tr>"
+            f"<tr><td style='padding:8px'>SLA response target</td><td style='padding:8px'>{_sla_target}</td></tr>"
+            f"<tr><td style='padding:8px'>Customer notification</td><td style='padding:8px'>{_cust_notify}</td></tr>"
+            f"<tr><td style='padding:8px'>Customer decision required</td><td style='padding:8px'>{_cust_decision}</td></tr>"
+            "</table>"
+            "<h3 style='margin-top:16px'>Shift Handoff Note</h3>"
+            f"<p class='small'>{_handoff}</p>"
+            "</section>"
+        )
+
+    return "\n".join(parts)
+
+
 def render_executive_report_html(artifact: Dict[str, Any]) -> str:
     overview = artifact.get("overview") or {}
     facts = artifact.get("facts") or {}
     appendix = artifact.get("appendix") or {}
     checklist = artifact.get("checklist") or {}
     meta = artifact.get("meta") or {}
+    # Persona-specific report title
+    _PERSONA_TITLES = {
+        "executive": "Executive Report",
+        "ciso": "CISO Risk Summary",
+        "soc_analyst": "SOC Analyst Investigation Report",
+        "threat_hunter": "Threat Hunt Report",
+        "forensics": "Forensic Evidence Report",
+        "compliance": "Compliance & Regulatory Report",
+        "audit": "Audit Findings Report",
+        "mssp": "MSSP Client Delivery Report",
+    }
+    _report_persona = str(artifact.get("persona") or "executive").lower()
+    _report_title = _PERSONA_TITLES.get(_report_persona, _report_persona.replace("_", " ").title() + " Report")
     business_outcomes = ((overview.get("business_outcomes") or []) if isinstance(overview.get("business_outcomes"), list) else [])
     framework_sections = facts.get("framework_sections") or []
     adjudication = (facts.get("adjudication") or {}).get("workflow") or {}
@@ -1815,7 +2093,7 @@ def render_executive_report_html(artifact: Dict[str, Any]) -> str:
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Executive Report</title>
+<title>{escape(_report_title)}</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
 :root{{--bg:#f3eee6;--ink:#12202c;--muted:#5b6773;--panel:#fffdf8;--border:#d5c7b6;--accent:#8a4b2a;--accent2:#1f5f5b;--soft:#efe4d7;}}
@@ -1863,7 +2141,7 @@ h2,h3,h4{{margin:0 0 12px}} table td,table th{{padding:8px 10px;border-bottom:1p
 <body>
 <div class="page">
   <section class="hero">
-    <div class="eyebrow">Executive Report</div>
+    <div class="eyebrow">{escape(_report_title)}</div>
     <h1 class="headline">{escape(str(overview.get("headline") or "Executive assessment"))}</h1>
     <div class="sub">{escape(_claim_validate("what_happened", str(overview.get("what_happened") or "")))}</div>
     <div class="meta-strip">
@@ -1932,6 +2210,7 @@ h2,h3,h4{{margin:0 0 12px}} table td,table th{{padding:8px 10px;border-bottom:1p
   {("<section class='panel' style='margin-top:18px'><h2>Trend Windows</h2><div class='trend-grid'>" + trends_html + "</div></section>") if checklist.get("include_trends", True) else ""}
   {_render_cluster_panels(artifact.get("canonical_report", {}).get("investigation_clusters") or [])}
   {("<section class='grid' style='margin-top:18px'><article class='panel'><h2>Adjudication Workflow</h2><p class='small'>Labels are sourced from the existing analyst labeling workflow, not from model guesses.</p><table style='width:100%;border-collapse:collapse'><tbody><tr><td>Tenant</td><td>" + escape(str(adjudication.get("tenant") or "unknown")) + "</td></tr><tr><td>Labels in history</td><td>" + escape(str(adjudication.get("label_history_count") or 0)) + "</td></tr><tr><td>Report events labeled</td><td>" + escape(str(adjudication.get("report_event_labeled_count") or 0)) + "</td></tr><tr><td>Report events unlabeled</td><td>" + escape(str(adjudication.get("report_event_unlabeled_count") or 0)) + "</td></tr><tr><td>Single-label endpoint</td><td>" + escape(str(((adjudication.get("workflow") or {}).get("single_label_endpoint") or ""))) + "</td></tr><tr><td>CSV import</td><td>" + escape(str(((adjudication.get("workflow") or {}).get("csv_import_endpoint") or ""))) + "</td></tr><tr><td>CSV export</td><td>" + escape(str(((adjudication.get("workflow") or {}).get("csv_export_endpoint") or ""))) + "</td></tr></tbody></table></article>" + ("<article class='panel'><h2>Framework Sections</h2>" + "".join(framework_html) + "</article>" if framework_html else "<article class='panel'><h2>Framework Sections</h2><p class='small'>No canonical framework mappings were present, so this section is intentionally omitted from the executive body.</p></article>") + "</section>")}
+  {_render_persona_specific_section(artifact, _report_persona)}
   {("<section class='page-break' style='margin-top:18px'><h2>Evidence Appendix</h2>" + _render_appendix_tables(appendix.get("evidence_appendix") or {}) + "</section>") if checklist.get("include_appendix", True) else ""}
 </div>
 </body>

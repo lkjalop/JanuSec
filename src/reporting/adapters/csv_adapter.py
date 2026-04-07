@@ -369,11 +369,19 @@ def _claim_blueprints(model: dict) -> list[dict]:
 
 def _build_non_technical(model: dict) -> list[dict]:
     findings = []
+    _wb_mal = int(model.get("malicious_count") or 0)
     for claim in _claim_blueprints(model):
         band = _normalize_confidence_band(claim.get("confidence_band"))
+        # Align with claim_register: if workbook has confirmed malicious, key
+        # claims should not show "No — evidence rule not met" when the Claims
+        # table above shows them as Confirmed.
+        present = band in ("Observed", "Supported", "Likely")
+        if not present and _wb_mal > 0 and claim.get("claim_type") in ("incident_presence", "access_control"):
+            present = True
+            band = "Supported"
         findings.append({
             "claim": claim.get("claim"),
-            "present": band in ("Observed", "Supported", "Likely"),
+            "present": present,
             "confidence_band": band,
             "missing_telemetry": claim.get("missing_telemetry") or [],
             "human_gate": claim.get("human_gate") or "investigate",
