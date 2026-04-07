@@ -45,8 +45,8 @@
 
   <script>
     var tab = new URLSearchParams(location.search).get('tab') || 'panel';
+    var shellState = null;
 
-    // Notify opener as soon as DOM is ready
     function notifyOpener() {
       if (window.opener) {
         try { window.opener.postMessage({ type: 'ready' }, '*'); } catch (e) {}
@@ -57,14 +57,62 @@
       if (!e.data || e.data.type !== 'content') return;
       var data = e.data;
       var tabName = data.tab || tab;
+      shellState = data.state || null;
       document.title = 'JanuSec \u2014 ' + tabName.charAt(0).toUpperCase() + tabName.slice(1);
       document.getElementById('shellTitle').textContent = 'JanuSec \u2014 ' + tabName.charAt(0).toUpperCase() + tabName.slice(1);
       var root = document.getElementById('root');
       root.innerHTML = data.html || '<p style="color:var(--text-muted);padding:16px">No content received.</p>';
       if (window.lucide) lucide.createIcons();
-      // Remove detach/close buttons that don't work in detached context
       root.querySelectorAll('.btn-detach, #btnCloseDetail, #btnExportPDF').forEach(function (el) { el.style.display = 'none'; });
+      // Re-render D3 graph or SVG timeline if state contains evidenceRows
+      if (shellState && (tabName === 'graph' || tabName === 'timeline')) {
+        try { rerenderInShell(tabName, shellState); } catch (_) {}
+      }
     });
+
+    function rerenderInShell(tabName, s) {
+      var evRows = s.evidenceRows || [];
+      var sources = s.sources || [];
+      var SEV_COLORS = { critical: '#E54848', high: '#FF8A3C', medium: '#E0C446', low: '#3FA860' };
+      if (tabName === 'graph' && typeof d3 !== 'undefined' && evRows.length) {
+        var canvas = document.getElementById('graphCanvas');
+        if (!canvas) return;
+        canvas.innerHTML = '';
+        var W = canvas.clientWidth || 900;
+        var H = Math.max(420, 500);
+        var entityMap = {};
+        evRows.forEach(function (row) {
+          var e = row.entity;
+          if (!e || e === '-') return;
+          if (!entityMap[e]) entityMap[e] = { id: e, label: e.length > 22 ? e.slice(0, 20) + '\u2026' : e, nodeType: 'other', severity: row.severity, count: 0, srcList: [] };
+          entityMap[e].count++;
+          if (entityMap[e].srcList.indexOf(row.source) < 0) entityMap[e].srcList.push(row.source);
+        });
+        var entityNodes = Object.values(entityMap).slice(0, 50);
+        var srcNodeMap = {};
+        var srcNodes = sources.map(function (src) { var nid = '__src__' + src.name; srcNodeMap[src.name] = nid; return { id: nid, label: src.name.slice(0, 20), nodeType: 'source', severity: 'low', count: src.rowCount || 0, srcList: [], isSource: true }; });
+        var nodes = entityNodes.concat(srcNodes);
+        var nodeIds = {};
+        nodes.forEach(function (n) { nodeIds[n.id] = true; });
+        var links = []; var seenL = {};
+        entityNodes.forEach(function (en) { en.srcList.forEach(function (sn) { var sid = srcNodeMap[sn]; if (!sid || !nodeIds[sid]) return; var k = en.id + '|||' + sid; if (seenL[k]) return; seenL[k] = true; links.push({ source: en.id, target: sid, correlated: en.srcList.length > 1 }); }); });
+        var NODE_C = { user: '#4A63E7', ip: '#E54848', resource: '#2DB67C', detection: '#FF8A3C', source: '#708090', other: '#E0C446' };
+        var SEV_R = { critical: 10, high: 8, medium: 6, low: 5 };
+        var svg = d3.select(canvas).append('svg').attr('width', W).attr('height', H);
+        var g = svg.append('g');
+        svg.call(d3.zoom().scaleExtent([0.25, 3]).on('zoom', function (ev) { g.attr('transform', ev.transform); }));
+        var sim = d3.forceSimulation(nodes).force('link', d3.forceLink(links).id(function (d) { return d.id; }).distance(90)).force('charge', d3.forceManyBody().strength(-200)).force('center', d3.forceCenter(W / 2, H / 2)).force('collide', d3.forceCollide().radius(22));
+        var link = g.append('g').selectAll('line').data(links).join('line').attr('stroke', function (d) { return d.correlated ? 'rgba(74,99,231,0.6)' : 'rgba(255,255,255,0.12)'; }).attr('stroke-width', function (d) { return d.correlated ? 2 : 1; });
+        var node = g.append('g').selectAll('g').data(nodes).join('g').call(d3.drag().on('start', function (ev, d) { if (!ev.active) sim.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; }).on('drag', function (ev, d) { d.fx = ev.x; d.fy = ev.y; }).on('end', function (ev, d) { if (!ev.active) sim.alphaTarget(0); d.fx = null; d.fy = null; }));
+        node.append('circle').attr('r', function (d) { return d.isSource ? 12 : (SEV_R[d.severity] || 6); }).attr('fill', function (d) { return NODE_C[d.nodeType] || NODE_C.other; }).attr('opacity', 0.85);
+        node.append('text').attr('x', 0).attr('y', function (d) { return (d.isSource ? 12 : (SEV_R[d.severity] || 6)) + 13; }).attr('text-anchor', 'middle').attr('fill', 'var(--text-muted)').attr('font-size', '10px').text(function (d) { return d.label; });
+        sim.on('tick', function () { link.attr('x1', function (d) { return d.source.x; }).attr('y1', function (d) { return d.source.y; }).attr('x2', function (d) { return d.target.x; }).attr('y2', function (d) { return d.target.y; }); node.attr('transform', function (d) { return 'translate(' + d.x + ',' + d.y + ')'; }); });
+      } else if (tabName === 'timeline' && evRows.length) {
+        var tCanvas = document.getElementById('timelineCanvas');
+        if (!tCanvas) return;
+        tCanvas.innerHTML = '<p style="color:var(--text-muted);font-size:13px;padding:8px">' + evRows.length + ' events loaded — timeline rendered from transferred state.</p>';
+      }
+    }
 
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', notifyOpener);
