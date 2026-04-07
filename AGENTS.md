@@ -17,6 +17,7 @@ This repository contains multiple frontends. The canonical, demo-ready UI is the
 - Integrations Settings: `frontend/static/integrations.html`
 - SBOM & Vulnerabilities: `frontend/static/sbom.html`
  - Multi-Log Investigator: `frontend/static/multi_log_investigator.html` — submit suspicion-driven requests, view correlation summary, ranked evidence, next-best suggestions, capture actions, and adjust scoring guardrails.
+- **Unified Investigation Console**: `frontend/static/investigate.html` — single-page Wireframe-C layout with unified upload (CSV/XLSX/JSON/AWS packs/Azure packs), pipeline enrichment, 8-persona report tab, sortable evidence table (isolated/correlated × severity), HopGraph graph tab, swimlane timeline tab, per-row on-demand T1/T2 LLM, detachable panels, responsive detail panel (right column at >=1440px, slide-over below). Uses `theme-pro.css` + Lucide icons.
 
 These pages are intentionally framework-free and use the same dark theme variables as the LIVE console.
 
