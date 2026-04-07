@@ -5,6 +5,11 @@ import os
 import time
 from typing import Dict, Any, List
 try:
+    from src.security.llm_prompt_guard import sanitize_row_for_llm as _sanitize_row
+except Exception:
+    def _sanitize_row(r):  # type: ignore[misc]
+        return r
+try:
     from src.explain.dread import aggregate  # type: ignore
 except Exception:
     aggregate = None
@@ -217,7 +222,7 @@ def build_llm_prompt(row: Dict[str, Any], context: Dict[str, Any]) -> str:
         if include_missing:
             prompt += "MISSING LOGS (3-5 lines) - only include when pipeline evidence suggests gaps\n"
 
-        prompt += "\nARTIFACT JSON:\n" + json.dumps(row, indent=2, default=str) + "\n\n"
+        prompt += "\nARTIFACT JSON:\n" + json.dumps(_sanitize_row(row), indent=2, default=str) + "\n\n"
         # include compact pipeline context when present
         try:
             ctx_snip = {

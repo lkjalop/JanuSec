@@ -197,7 +197,12 @@ class AutoIncidentScanner:
                     res = self.hop.explain_chain(c, max_depth=4, beam_width=6, top_k=3)
                     for ch in res.get('chains', []):
                         score = float(ch.get('score', 0.0) or 0.0)
-                        if score < self.threshold:
+                        try:
+                            from src.security.threshold_jitter import get_jittered_threshold as _jitter
+                            _effective_threshold = _jitter(self.threshold)
+                        except Exception:
+                            _effective_threshold = self.threshold
+                        if score < _effective_threshold:
                             continue
                         tenant = (self.hop.nodes.get(c) or {}).get('tenant') or os.getenv('DEFAULT_TENANT','default')
                         # Create a deterministic chain hash for dedup

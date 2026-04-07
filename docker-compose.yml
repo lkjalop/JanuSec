@@ -130,8 +130,46 @@ services:
     depends_on:
       - prometheus
 
-volumes:
+  # CB-1: Local LLM inference - Ollama
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    environment:
+      OLLAMA_KEEP_ALIVE: "24h"
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Pull the default model after Ollama is healthy
+  ollama-init:
+    image: curlimages/curl:latest
+    depends_on:
+      ollama:
+        condition: service_healthy
+    entrypoint: >
+      sh -c "curl -s -X POST http://ollama:11434/api/pull
+      -H 'Content-Type: application/json'
+      -d '{\"name\":\"llama3.2:3b\"}'
+      && echo 'Model pull requested.'"
+    restart: "no"
+
+
   pgdata:
   redisdata:
   grafana_data:
   sessiondata:
+  ollama_data:

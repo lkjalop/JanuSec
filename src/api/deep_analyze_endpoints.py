@@ -2441,7 +2441,33 @@ async def capture_feedback(request: Request):
     ok = persist_feedback(payload)
     if not ok:
         raise HTTPException(status_code=500, detail='persist_failed')
-    return JSONResponse({'ok': True, 'stored': ok})
+
+    # CB-5: feedback poisoning anomaly detection
+    anomaly_detected = False
+    try:
+        from src.security.feedback_anomaly import get_detector as _get_feedback_detector
+        _det = _get_feedback_detector()
+        _tenant = str(payload.get('tenant_id') or 'default')
+        _analyst = str(payload.get('analyst_tag') or payload.get('analyst') or 'unknown')
+        _from_v = str(payload.get('original_verdict') or payload.get('from_verdict') or '')
+        _to_v = str(payload.get('verdict') or payload.get('to_verdict') or '')
+        if _from_v and _to_v and _from_v.upper() != _to_v.upper():
+            _det.record_flip(_tenant, _analyst, _from_v, _to_v)
+            anomaly_detected, _flip_rate = _det.check_for_poisoning(_tenant, _analyst)
+            if anomaly_detected:
+                import logging as _logging
+                _logging.getLogger(__name__).warning(
+                    'feedback_anomaly alert: tenant=%s analyst=%s flip_rate=%.2f',
+                    _tenant, _analyst, _flip_rate,
+                )
+    except Exception:
+        pass  # guard never breaks the feedback path
+
+    resp: dict = {'ok': True, 'stored': ok}
+    if anomaly_detected:
+        resp['anomaly_detected'] = True
+        resp['anomaly_reason'] = 'high_malicious_to_benign_flip_rate'
+    return JSONResponse(resp)
 
 
 async def run_deep_analyze_pipeline(payload: dict) -> JSONResponse:
