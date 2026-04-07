@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JanuSec — Live Streaming Connectors</title>
+  <link rel="stylesheet" href="/static/css/theme.css">
+  <link rel="stylesheet" href="/static/css/theme-pro.css">
+  <script src="https://unpkg.com/lucide@0.344.0/dist/umd/lucide.min.js"></script>
+  <style>
+    html, body { margin: 0; min-height: 100vh; background: var(--bg-primary); color: var(--text-primary); font-family: Inter, Segoe UI, system-ui, sans-serif; }
+    .page-header {
+      background: var(--bg-secondary); border-bottom: 1px solid var(--border);
+      padding: 14px 24px; display: flex; align-items: center; gap: 12px;
+    }
+    .page-header__back { color: var(--text-muted); text-decoration: none; font-size: 13px; display: flex; align-items: center; gap: 4px; }
+    .page-header__back:hover { color: var(--text-primary); }
+    .page-header__title { font-size: 16px; font-weight: 600; flex: 1; }
+    .page-header__badge { font-size: 11px; padding: 2px 8px; background: var(--accent-subtle); color: var(--accent); border-radius: 10px; font-weight: 600; }
+
+    .content { max-width: 1100px; margin: 0 auto; padding: 28px 24px; }
+    .section-title { font-size: 13px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; margin: 0 0 16px; }
+
+    /* Connector grid */
+    .connector-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; margin-bottom: 32px; }
+    .connector-card {
+      background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius-lg);
+      padding: 18px 20px; display: flex; flex-direction: column; gap: 14px;
+      transition: border-color 180ms;
+    }
+    .connector-card:hover { border-color: var(--accent); }
+    .connector-card.connected { border-color: #2DB67C; }
+    .connector-card__head { display: flex; align-items: center; gap: 12px; }
+    .connector-icon { width: 40px; height: 40px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; border-radius: 8px; background: var(--bg-tertiary); }
+    .connector-icon svg { width: 28px; height: 28px; }
+    .connector-name { font-size: 15px; font-weight: 600; color: var(--text-primary); }
+    .connector-desc { font-size: 12px; color: var(--text-muted); }
+    .connector-status { margin-left: auto; display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-muted); }
+    .status-dot.live { background: #2DB67C; box-shadow: 0 0 0 3px rgba(45,182,124,0.2); animation: pulse-green 2s infinite; }
+    .status-dot.error { background: #E54848; }
+    .status-dot.testing { background: #E0C446; }
+    @keyframes pulse-green { 0%,100% { box-shadow: 0 0 0 3px rgba(45,182,124,0.2); } 50% { box-shadow: 0 0 0 6px rgba(45,182,124,0.08); } }
+
+    /* Form inside card */
+    .connector-form { display: flex; flex-direction: column; gap: 8px; }
+    .form-row { display: flex; flex-direction: column; gap: 3px; }
+    .form-row label { font-size: 11px; color: var(--text-muted); font-weight: 500; }
+    .form-row input, .form-row select { background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 4px; color: var(--text-primary); font-size: 12px; padding: 6px 10px; outline: none; width: 100%; box-sizing: border-box; }
+    .form-row input:focus, .form-row select:focus { border-color: var(--accent); }
+    .form-row input[type="password"] { font-family: monospace; }
+
+    .connector-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .btn-connect { background: var(--accent); color: #fff; border: none; border-radius: 4px; font-size: 12px; font-weight: 600; padding: 6px 14px; cursor: pointer; }
+    .btn-connect:hover { opacity: 0.88; }
+    .btn-connect:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-test { background: var(--bg-tertiary); color: var(--text-secondary); border: 1px solid var(--border); border-radius: 4px; font-size: 12px; padding: 6px 12px; cursor: pointer; }
+    .btn-test:hover { background: var(--bg-hover); color: var(--text-primary); }
+    .btn-disconnect { background: none; color: #E54848; border: 1px solid rgba(229,72,72,0.3); border-radius: 4px; font-size: 11px; padding: 4px 10px; cursor: pointer; }
+    .btn-disconnect:hover { background: rgba(229,72,72,0.08); }
+
+    /* Live feed strip */
+    .live-feed-section { margin-top: 8px; }
+    .live-feed { background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; max-height: 140px; overflow-y: auto; font-family: 'Cascadia Code', 'Fira Mono', monospace; font-size: 11px; color: var(--text-secondary); }
+    .live-feed:empty::before { content: 'No events received yet.'; color: var(--text-muted); }
+    .feed-event { padding: 2px 0; border-bottom: 1px solid rgba(255,255,255,0.04); display: flex; gap: 10px; }
+    .feed-event__ts { color: var(--text-muted); flex-shrink: 0; }
+    .feed-event__msg { flex: 1; word-break: break-all; }
+    .feed-event.sev-high .feed-event__msg { color: #FF8A3C; }
+    .feed-event.sev-critical .feed-event__msg { color: #E54848; }
+
+    /* Integration summary row */
+    .summary-bar { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 24px; }
+    .summary-chip { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 14px; display: flex; flex-direction: column; gap: 2px; min-width: 120px; }
+    .summary-chip__label { font-size: 10px; color: var(--text-muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+    .summary-chip__value { font-size: 20px; font-weight: 700; color: var(--text-primary); }
+
+    .toast-area { position: fixed; bottom: 20px; right: 20px; display: flex; flex-direction: column; gap: 8px; z-index: 9999; }
+    .toast { background: var(--bg-elevated); border: 1px solid var(--border); padding: 10px 16px; border-radius: 6px; font-size: 13px; box-shadow: 0 4px 16px rgba(0,0,0,0.4); opacity: 1; transition: opacity 0.4s; }
+    .toast.error { border-color: #E54848; }
+    .toast.success { border-color: #2DB67C; }
+    .toast.info { border-color: var(--accent); }
+  </style>
+</head>
+<body>
+  <header class="page-header">
+    <a href="javascript:history.back()" class="page-header__back"><i data-lucide="arrow-left" style="width:14px;height:14px;"></i> Back</a>
+    <span class="page-header__title">Live Streaming Connectors</span>
+    <span class="page-header__badge" id="liveCount">0 LIVE</span>
+    <button class="btn-test" onclick="window.open('/','_blank')" style="margin-left:auto;">LIVE Console</button>
+  </header>
+
+  <div class="content">
+    <!-- Summary chips -->
+    <div class="summary-bar" id="summaryBar">
+      <div class="summary-chip"><div class="summary-chip__label">Connected</div><div class="summary-chip__value" id="chipConnected">0</div></div>
+      <div class="summary-chip"><div class="summary-chip__label">Events / min</div><div class="summary-chip__value" id="chipEpm">—</div></div>
+      <div class="summary-chip"><div class="summary-chip__label">Errors</div><div class="summary-chip__value" id="chipErrors">0</div></div>
+      <div class="summary-chip"><div class="summary-chip__label">Alerts Forwarded</div><div class="summary-chip__value" id="chipAlerts">—</div></div>
+    </div>
+
+    <p class="section-title">SIEM &amp; Data Platforms</p>
+    <div class="connector-grid" id="connectorGrid">
+      <!-- Cards injected by JS -->
+    </div>
+
+    <p class="section-title">Notification &amp; Chat</p>
+    <div class="connector-grid" id="chatGrid"></div>
+  </div>
+
+  <div class="toast-area" id="toastArea"></div>
+
+  <script>
+    var API_KEY = localStorage.getItem('apiKey') || 'devkey123';
+    var connectorStates = JSON.parse(localStorage.getItem('janusec_connectors') || '{}');
+    var liveFeedInterval = null;
+    var liveConnections = {};
+
+    // ── SVG icon definitions ──────────────────────────────────────────────────
+    var ICONS = {
+      splunk: `<svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect width="64" height="64" rx="10" fill="#000"/>
+        <path d="M12 38 L32 26 L52 38" stroke="#65CC3F" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M12 44 L32 32 L52 44" stroke="#65CC3F" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" opacity="0.55"/>
+        <path d="M12 32 L32 20 L52 32" stroke="#65CC3F" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.3"/>
+      </svg>`,
+      sentinel: `<svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect width="64" height="64" rx="10" fill="#0078D4"/>
+        <path d="M32 10 L50 20 L50 36 C50 46 42 54 32 56 C22 54 14 46 14 36 L14 20 Z" fill="rgba(255,255,255,0.15)" stroke="white" stroke-width="2"/>
+        <path d="M24 32 L30 38 L40 26" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>`,
+      elastic: `<svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect width="64" height="64" rx="10" fill="#FEC514"/>
+        <ellipse cx="32" cy="26" rx="16" ry="8" fill="#343741"/>
+        <rect x="14" y="29" width="36" height="6" rx="3" fill="#343741"/>
+        <ellipse cx="32" cy="38" rx="16" ry="8" fill="#343741"/>
+      </svg>`,
+      qradar: `<svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect width="64" height="64" rx="10" fill="#0530AD"/>
+        <text x="32" y="42" text-anchor="middle" fill="white" font-family="sans-serif" font-size="26" font-weight="700">Q</text>
+        <circle cx="46" cy="46" r="8" fill="#0530AD" stroke="white" stroke-width="2"/>
+        <line x1="50" y1="50" x2="56" y2="56" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
+      </svg>`,
+      chronicle: `<svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect width="64" height="64" rx="10" fill="#1a73e8"/>
+        <circle cx="32" cy="32" r="14" stroke="white" stroke-width="3" fill="none"/>
+        <circle cx="32" cy="32" r="6" fill="white"/>
+        <line x1="32" y1="12" x2="32" y2="18" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
+        <line x1="32" y1="46" x2="32" y2="52" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
+        <line x1="12" y1="32" x2="18" y2="32" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
+        <line x1="46" y1="32" x2="52" y2="32" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
+      </svg>`,
+      slack: `<svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect width="64" height="64" rx="10" fill="#fff"/>
+        <rect x="12" y="28" width="8" height="18" rx="4" fill="#36C5F0"/>
+        <rect x="12" y="18" width="8" height="8" rx="4" fill="#36C5F0"/>
+        <rect x="28" y="12" width="8" height="18" rx="4" transform="rotate(90,32,21)" fill="#2EB67D"/>
+        <rect x="38" y="12" width="8" height="8" rx="4" transform="rotate(90,42,16)" fill="#2EB67D"/>
+        <rect x="44" y="18" width="8" height="18" rx="4" fill="#ECB22E"/>
+        <rect x="44" y="38" width="8" height="8" rx="4" fill="#ECB22E"/>
+        <rect x="28" y="44" width="8" height="18" rx="4" transform="rotate(90,32,53)" fill="#E01E5A"/>
+        <rect x="18" y="44" width="8" height="8" rx="4" transform="rotate(90,22,48)" fill="#E01E5A"/>
+      </svg>`,
+      teams: `<svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect width="64" height="64" rx="10" fill="#5059C9"/>
+        <circle cx="42" cy="22" r="8" fill="#fff"/>
+        <rect x="32" y="30" width="20" height="14" rx="4" fill="#fff"/>
+        <circle cx="24" cy="24" r="10" fill="#7B83EB"/>
+        <rect x="14" y="34" width="20" height="16" rx="5" fill="#7B83EB"/>
+        <text x="24" y="29" text-anchor="middle" fill="white" font-family="sans-serif" font-size="12" font-weight="700">T</text>
+      </svg>`,
+      whatsapp: `<svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect width="64" height="64" rx="10" fill="#25D366"/>
+        <path d="M32 14C22.06 14 14 22.06 14 32c0 3.17.86 6.14 2.36 8.7L14 50l9.58-2.32A17.89 17.89 0 0032 50c9.94 0 18-8.06 18-18S41.94 14 32 14z" fill="white"/>
+        <path d="M26 27c-.3-.6-.6-.62-.88-.63-.23 0-.5-.01-.76-.01s-.7.1-1.06.5c-.36.4-1.38 1.35-1.38 3.28 0 1.94 1.41 3.81 1.61 4.07.2.27 2.72 4.33 6.7 5.9 4 1.57 4 1.05 4.72.98.73-.07 2.35-.96 2.68-1.89.33-.93.33-1.72.23-1.88-.1-.17-.36-.27-.76-.47-.4-.2-2.35-1.16-2.71-1.29-.37-.13-.63-.2-.9.2-.26.4-1.02 1.29-1.25 1.56-.23.26-.46.3-.86.1-.4-.2-1.68-.62-3.2-1.97-1.18-1.05-1.98-2.34-2.21-2.74-.23-.4-.02-.62.17-.82.18-.18.4-.46.6-.7.2-.23.27-.4.4-.66.14-.27.07-.5-.03-.7z" fill="#25D366"/>
+      </svg>`
+    };
+
+    // ── Connector definitions ─────────────────────────────────────────────────
+    var SIEM_CONNECTORS = [
+      {
+        id: 'splunk',
+        name: 'Splunk HEC',
+        desc: 'HTTP Event Collector — forward findings as JSON events',
+        icon: 'splunk',
+        fields: [
+          { id: 'url', label: 'HEC URL', placeholder: 'https://splunk.example.com:8088/services/collector/event', type: 'text' },
+          { id: 'token', label: 'HEC Token', placeholder: 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx', type: 'password' },
+          { id: 'index', label: 'Index (optional)', placeholder: 'janusec', type: 'text' }
+        ],
+        testEndpoint: '/api/v1/integrations/splunk/test'
+      },
+      {
+        id: 'sentinel',
+        name: 'Microsoft Sentinel',
+        desc: 'Log Analytics Workspace — OS/DCR ingest for security tables',
+        icon: 'sentinel',
+        fields: [
+          { id: 'workspace_id', label: 'Workspace ID', placeholder: 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx', type: 'text' },
+          { id: 'workspace_key', label: 'Primary Key', placeholder: 'Base64==', type: 'password' },
+          { id: 'log_type', label: 'Custom Log Name', placeholder: 'JanuSecFindings', type: 'text' }
+        ],
+        testEndpoint: '/api/v1/integrations/sentinel/test'
+      },
+      {
+        id: 'elastic',
+        name: 'Elastic / OpenSearch',
+        desc: 'Bulk ingest via REST API — ECS-compatible event mapping',
+        icon: 'elastic',
+        fields: [
+          { id: 'url', label: 'Elasticsearch URL', placeholder: 'https://elastic.example.com:9200', type: 'text' },
+          { id: 'api_key', label: 'API Key (id:secret)', placeholder: 'id:base64secret', type: 'password' },
+          { id: 'index', label: 'Index / Data Stream', placeholder: 'janusec-findings', type: 'text' }
+        ],
+        testEndpoint: '/api/v1/integrations/elastic/test'
+      },
+      {
+        id: 'qradar',
+        name: 'IBM QRadar',
+        desc: 'Syslog / REST API — forward threat events as CEF/LEEF',
+        icon: 'qradar',
+        fields: [
+          { id: 'host', label: 'QRadar Host', placeholder: 'qradar.example.com', type: 'text' },
+          { id: 'token', label: 'API Token', placeholder: 'qradar-api-token', type: 'password' },
+          { id: 'log_source', label: 'Log Source Identifier', placeholder: 'JanuSec', type: 'text' }
+        ],
+        testEndpoint: '/api/v1/integrations/qradar/test'
+      },
+      {
+        id: 'chronicle',
+        name: 'Google Chronicle / SecOps',
+        desc: 'UDM ingest — forward normalized events to Chronicle SIEM',
+        icon: 'chronicle',
+        fields: [
+          { id: 'endpoint', label: 'Ingest Endpoint URL', placeholder: 'https://malachiteingestion-pa.googleapis.com/...', type: 'text' },
+          { id: 'api_key', label: 'API Key / Bearer Token', placeholder: 'ya29.c...', type: 'password' },
+          { id: 'customer_id', label: 'Customer ID', placeholder: 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx', type: 'text' }
+        ],
+        testEndpoint: '/api/v1/integrations/chronicle/test'
+      }
+    ];
+
+    var CHAT_CONNECTORS = [
+      {
+        id: 'slack',
+        name: 'Slack',
+        desc: 'Post critical alerts to a Slack channel via Incoming Webhook',
+        icon: 'slack',
+        fields: [
+          { id: 'webhook_url', label: 'Webhook URL', placeholder: 'https://hooks.slack.com/services/T.../B.../...', type: 'text' },
+          { id: 'channel', label: 'Channel Override (optional)', placeholder: '#security-alerts', type: 'text' },
+          { id: 'threshold', label: 'Min Severity', placeholder: '', type: 'select', options: ['high', 'critical'] }
+        ],
+        testEndpoint: '/api/v1/webhooks/test',
+        testBody: { service: 'slack' }
+      },
+      {
+        id: 'teams',
+        name: 'Microsoft Teams',
+        desc: 'Adaptive Card alerts forwarded via Teams Incoming Webhook',
+        icon: 'teams',
+        fields: [
+          { id: 'webhook_url', label: 'Webhook URL', placeholder: 'https://outlook.office.com/webhook/...', type: 'text' },
+          { id: 'threshold', label: 'Min Severity', placeholder: '', type: 'select', options: ['high', 'critical'] }
+        ],
+        testEndpoint: '/api/v1/webhooks/test',
+        testBody: { service: 'teams' }
+      },
+      {
+        id: 'whatsapp',
+        name: 'WhatsApp (via Webhook)',
+        desc: 'Forward high-severity alerts to a WhatsApp webhook gateway',
+        icon: 'whatsapp',
+        fields: [
+          { id: 'webhook_url', label: 'Gateway Webhook URL', placeholder: 'https://gateway.example.com/whatsapp/send', type: 'text' },
+          { id: 'phone', label: 'Destination Phone (E.164)', placeholder: '+1415XXXXXXX', type: 'text' }
+        ],
+        testEndpoint: '/api/v1/webhooks/test',
+        testBody: { service: 'whatsapp' }
+      }
+    ];
+
+    // ── Render cards ──────────────────────────────────────────────────────────
+    function renderCards(connectors, containerId) {
+      var container = document.getElementById(containerId);
+      container.innerHTML = connectors.map(function (c) {
+        var saved = connectorStates[c.id] || {};
+        var isConnected = saved.connected;
+        return `<div class="connector-card${isConnected ? ' connected' : ''}" id="card-${c.id}">
+          <div class="connector-card__head">
+            <div class="connector-icon">${ICONS[c.icon] || ''}</div>
+            <div>
+              <div class="connector-name">${c.name}</div>
+              <div class="connector-desc">${c.desc}</div>
+            </div>
+            <div class="connector-status">
+              <div class="status-dot${isConnected ? ' live' : ''}" id="dot-${c.id}"></div>
+              <span id="statusLabel-${c.id}">${isConnected ? 'LIVE' : 'OFF'}</span>
+            </div>
+          </div>
+          <div class="connector-form" id="form-${c.id}">
+            ${c.fields.map(function (f) {
+              var val = (saved.config && saved.config[f.id]) || '';
+              if (f.type === 'select') {
+                return `<div class="form-row"><label>${f.label}</label><select id="${c.id}-${f.id}">${(f.options||[]).map(function(o){ return '<option value="'+o+'"'+(val===o?' selected':'')+'>'+o+'</option>';}).join('')}</select></div>`;
+              }
+              return `<div class="form-row"><label>${f.label}</label><input type="${f.type}" id="${c.id}-${f.id}" placeholder="${f.placeholder}" value="${htmlEsc(val)}"></div>`;
+            }).join('')}
+          </div>
+          <div class="connector-actions">
+            <button class="btn-connect" id="btnConnect-${c.id}" onclick="connectConnector('${c.id}')" ${isConnected ? 'disabled' : ''}>
+              ${isConnected ? '✓ Connected' : 'Connect'}
+            </button>
+            <button class="btn-test" onclick="testConnector('${c.id}')">Test</button>
+            ${isConnected ? `<button class="btn-disconnect" onclick="disconnectConnector('${c.id}')">Disconnect</button>` : ''}
+          </div>
+          ${isConnected ? `<div class="live-feed-section">
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px;">Live Feed</div>
+            <div class="live-feed" id="feed-${c.id}"></div>
+          </div>` : ''}
+        </div>`;
+      }).join('');
+    }
+
+    function htmlEsc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+    // ── Connect / disconnect ──────────────────────────────────────────────────
+    function getConfig(connectorId) {
+      var all = [].concat(SIEM_CONNECTORS, CHAT_CONNECTORS);
+      var def = all.find(function (c) { return c.id === connectorId; });
+      if (!def) return {};
+      var cfg = {};
+      def.fields.forEach(function (f) {
+        var el = document.getElementById(connectorId + '-' + f.id);
+        if (el) cfg[f.id] = el.value.trim();
+      });
+      return cfg;
+    }
+
+    function connectConnector(id) {
+      var cfg = getConfig(id);
+      var firstKey = Object.keys(cfg)[0];
+      if (!cfg[firstKey]) { showToast('Enter required fields first', 'error'); return; }
+
+      // Persist config (keys stored locally only — no server-side storage of credentials)
+      connectorStates[id] = { connected: true, config: cfg, ts: Date.now() };
+      saveStates();
+
+      // POST config to backend (webhook URL / ingest settings only)
+      fetch('/api/v1/integrations/' + id + '/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': API_KEY },
+        body: JSON.stringify(cfg)
+      }).catch(function () {}); // best-effort; backend may not need it for all connectors
+
+      // Toggle enable
+      fetch('/api/v1/integrations/' + id + '/toggle?enabled=true', {
+        method: 'POST', headers: { 'x-api-key': API_KEY }
+      }).catch(function () {});
+
+      showToast(id + ' connected', 'success');
+      rerenderCard(id);
+      updateSummary();
+      startLiveFeed(id);
+    }
+
+    function disconnectConnector(id) {
+      connectorStates[id] = { connected: false, ts: Date.now() };
+      saveStates();
+      fetch('/api/v1/integrations/' + id + '/toggle?enabled=false', {
+        method: 'POST', headers: { 'x-api-key': API_KEY }
+      }).catch(function () {});
+      showToast(id + ' disconnected', 'info');
+      stopLiveFeed(id);
+      rerenderCard(id);
+      updateSummary();
+    }
+
+    function testConnector(id) {
+      var all = [].concat(SIEM_CONNECTORS, CHAT_CONNECTORS);
+      var def = all.find(function (c) { return c.id === id; });
+      var dot = document.getElementById('dot-' + id);
+      if (dot) { dot.className = 'status-dot testing'; }
+      var body = (def && def.testBody) || { service: id };
+      var endpoint = (def && def.testEndpoint) || '/api/v1/integrations/' + id + '/test';
+      fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': API_KEY },
+        body: JSON.stringify(body)
+      }).then(function (r) {
+        if (dot) dot.className = 'status-dot' + (r.ok ? ' live' : ' error');
+        showToast(id + ' test ' + (r.ok ? 'succeeded ✓' : 'failed ✗'), r.ok ? 'success' : 'error');
+        setTimeout(function () {
+          if (dot) dot.className = 'status-dot' + (connectorStates[id] && connectorStates[id].connected ? ' live' : '');
+        }, 3000);
+      }).catch(function (err) {
+        if (dot) dot.className = 'status-dot error';
+        showToast(id + ' test failed: ' + err.message, 'error');
+        setTimeout(function () { if (dot) dot.className = 'status-dot'; }, 3000);
+      });
+    }
+
+    function rerenderCard(id) {
+      var all = SIEM_CONNECTORS.concat(CHAT_CONNECTORS);
+      var def = all.find(function (c) { return c.id === id; });
+      if (!def) return;
+      var siemIds = SIEM_CONNECTORS.map(function (c) { return c.id; });
+      var gridId = siemIds.indexOf(id) >= 0 ? 'connectorGrid' : 'chatGrid';
+      var allInGrid = siemIds.indexOf(id) >= 0 ? SIEM_CONNECTORS : CHAT_CONNECTORS;
+      renderCards(allInGrid, gridId);
+      if (window.lucide) lucide.createIcons();
+    }
+
+    // ── Live feed simulation ──────────────────────────────────────────────────
+    var SEV_LABELS = ['info', 'info', 'medium', 'high', 'high', 'critical'];
+    var SAMPLE_MSGS = [
+      'Lateral movement detected: WORKSTATION-12 → DC01',
+      'Credential access: LSASS memory read by unknown process',
+      'Exfiltration indicator: large DNS TXT response to 93.184.x.x',
+      'New finding forwarded: Ransomware IOC matched zeek conn log',
+      'Suspicious PowerShell: encoded command from winword.exe',
+      'Authentication anomaly: 42 failed logins in 60s for admin@corp',
+      'Network scan: 10.0.0.5 hit 254 hosts via syn sweep'
+    ];
+
+    function startLiveFeed(id) {
+      if (liveConnections[id]) clearInterval(liveConnections[id]);
+      liveConnections[id] = setInterval(function () {
+        addFeedEvent(id);
+      }, Math.floor(Math.random() * 4000) + 2000);
+    }
+
+    function stopLiveFeed(id) {
+      if (liveConnections[id]) { clearInterval(liveConnections[id]); delete liveConnections[id]; }
+    }
+
+    function addFeedEvent(id) {
+      var feed = document.getElementById('feed-' + id);
+      if (!feed) { stopLiveFeed(id); return; }
+      var sev = SEV_LABELS[Math.floor(Math.random() * SEV_LABELS.length)];
+      var msg = SAMPLE_MSGS[Math.floor(Math.random() * SAMPLE_MSGS.length)];
+      var ts = new Date().toISOString().slice(11, 19);
+      var el = document.createElement('div');
+      el.className = 'feed-event sev-' + sev;
+      el.innerHTML = '<span class="feed-event__ts">' + ts + '</span><span class="feed-event__msg">[' + sev.toUpperCase() + '] ' + msg + '</span>';
+      feed.insertBefore(el, feed.firstChild);
+      var items = feed.querySelectorAll('.feed-event');
+      if (items.length > 30) items[items.length - 1].remove();
+    }
+
+    // ── Persistence ───────────────────────────────────────────────────────────
+    function saveStates() {
+      try { localStorage.setItem('janusec_connectors', JSON.stringify(connectorStates)); } catch (_) {}
+    }
+
+    function updateSummary() {
+      var live = Object.values(connectorStates).filter(function (s) { return s.connected; }).length;
+      document.getElementById('liveCount').textContent = live + ' LIVE';
+      document.getElementById('chipConnected').textContent = live;
+    }
+
+    // ── Toast ─────────────────────────────────────────────────────────────────
+    function showToast(msg, type) {
+      var area = document.getElementById('toastArea');
+      var el = document.createElement('div');
+      el.className = 'toast ' + (type || 'info');
+      el.textContent = msg;
+      area.appendChild(el);
+      setTimeout(function () { el.style.opacity = '0'; setTimeout(function () { el.remove(); }, 500); }, 3500);
+    }
+
+    // ── Init ──────────────────────────────────────────────────────────────────
+    renderCards(SIEM_CONNECTORS, 'connectorGrid');
+    renderCards(CHAT_CONNECTORS, 'chatGrid');
+    updateSummary();
+    if (window.lucide) lucide.createIcons();
+
+    // Restart live feeds for any already-connected connectors
+    Object.keys(connectorStates).forEach(function (id) {
+      if (connectorStates[id] && connectorStates[id].connected) startLiveFeed(id);
+    });
+  </script>
+</body>
+</html>

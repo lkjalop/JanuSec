@@ -1,4 +1,4 @@
-/**
+﻿/**
  * investigate.js — Core logic for the JanuSec Unified Investigation Console.
  * Handles: file upload + auto-detection, pipeline dispatch, persona report rendering,
  * evidence table, severity breakdown, tab switching, detail panel, keyboard shortcuts.
@@ -355,6 +355,29 @@
   // ── Analyze button — runs pipeline + generates report ────────────────────
   $('btnAnalyze').addEventListener('click', function () { runAnalysis(); });
 
+  var _activeWs = null;
+
+  function connectProgressWs(assessmentId, onPct) {
+    if (_activeWs) { try { _activeWs.close(); } catch(_) {} _activeWs = null; }
+    var proto = location.protocol === 'https:' ? 'wss' : 'ws';
+    var wsUrl = proto + '://' + location.host + '/api/v1/csv/deep_analyze/ws/progress/' + encodeURIComponent(assessmentId);
+    try {
+      var ws = new WebSocket(wsUrl);
+      _activeWs = ws;
+      ws.addEventListener('message', function (e) {
+        try {
+          var msg = JSON.parse(e.data);
+          if (msg.pct != null) onPct(msg.pct);
+          if (msg.status === 'complete' || msg.status === 'completed' || msg.event === 'complete') {
+            ws.close();
+          }
+        } catch (_) {}
+      });
+      ws.addEventListener('error', function () { _activeWs = null; });
+      ws.addEventListener('close', function () { _activeWs = null; });
+    } catch (_) { /* WebSocket not available — progress bar uses manual steps */ }
+  }
+
   async function runAnalysis() {
     if (!state.allRows.length) { toast('No rows to analyze', 'error'); return; }
 
@@ -388,6 +411,14 @@
       state.assessmentId = analyzeData.assessment_id || analyzeData.report_id;
       $('pipelineBarFill').style.width = '50%';
 
+      // Connect WebSocket for real-time progress updates (falls back to manual steps if unavailable)
+      if (state.assessmentId) {
+        connectProgressWs(state.assessmentId, function (pct) {
+          var clampedPct = Math.max(50, Math.min(90, Math.round(pct * 100)));
+          $('pipelineBarFill').style.width = clampedPct + '%';
+        });
+      }
+
       // Step 2: Poll for assessment completion (quick — pipeline stages are fast)
       var assessment = await pollAssessment(state.assessmentId);
       state.assessment = assessment;
@@ -410,6 +441,10 @@
 
       $('pipelineBarFill').style.width = '100%';
       toast('Analysis complete — ' + state.allRows.length + ' events processed', 'success');
+
+      // Save to assessment history
+      var headline = (state.assessment && (state.assessment.headline || state.assessment.summary || state.assessment.report_title)) || (state.allRows.length + ' events from ' + state.sources.length + ' source(s)');
+      saveToHistory(state.assessmentId, String(headline).slice(0, 80), state.sources);
     } catch (err) {
       toast('Analysis error: ' + err.message, 'error');
       console.error('Analysis error:', err);
@@ -974,6 +1009,17 @@
     var win = window.open('/static/investigate-shell.html?tab=' + encodeURIComponent(name), '_blank', 'width=1000,height=750');
     if (!win) { toast('Pop-up blocked — allow pop-ups for detach', 'error'); return; }
     var html = content.innerHTML;
+    // Serialize full state for re-rendering live graphs in the shell
+    var statePayload = null;
+    try {
+      statePayload = {
+        evidenceRows: (state.evidenceRows || []).slice(0, 200).map(function (r) {
+          return { row_index: r.row_index, source: r.source, severity: r.severity, type: r.type, entity: r.entity, description: r.description, triage_score: r.triage_score };
+        }),
+        sources: (state.sources || []).map(function (s) { return { name: s.name, type: s.type, rowCount: s.rowCount }; }),
+        currentPersona: state.currentPersona,
+      };
+    } catch (_) {}
     var timer = setTimeout(function () { sendContent(); }, 1800);
     function onMsg(e) {
       if (e.source !== win) return;
@@ -985,7 +1031,7 @@
     }
     window.addEventListener('message', onMsg);
     function sendContent() {
-      try { win.postMessage({ type: 'content', tab: name, html: html }, '*'); } catch (_) {}
+      try { win.postMessage({ type: 'content', tab: name, html: html, state: statePayload }, '*'); } catch (_) {}
       toast(name + ' detached to new window', 'success');
     }
   }
@@ -1218,5 +1264,110 @@
   window.toast = toast;
 
   renderPersonaChips();
+
+  // Assessment History ─────────────────────────────────────────────────────────
+  var HISTORY_KEY = 'janusec_history';
+  var HISTORY_MAX = 40;
+
+  function saveToHistory(assessmentId, headline, sourcesArr) {
+    var list = loadHistory();
+    var existing = list.findIndex(function (h) { return h.id === assessmentId; });
+    var entry = {
+      id: assessmentId,
+      ts: Date.now(),
+      headline: headline || 'Untitled Assessment',
+      sources: (sourcesArr || []).map(function (s) { return s.name || s; }).slice(0, 6),
+      rows: (state.evidenceRows || []).length
+    };
+    if (existing >= 0) list.splice(existing, 1);
+    list.unshift(entry);
+    if (list.length > HISTORY_MAX) list = list.slice(0, HISTORY_MAX);
+    try { localStorage.setItem(HISTORY_KEY, JSON.stringify(list)); } catch (_) {}
+    renderHistory();
+  }
+
+  function loadHistory() {
+    try { return JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]'); } catch (_) { return []; }
+  }
+
+  function clearHistory() {
+    if (!confirm('Clear all saved assessment history?')) return;
+    try { localStorage.removeItem(HISTORY_KEY); } catch (_) {}
+    renderHistory();
+    toast('History cleared', 'info');
+  }
+
+  function toggleHistorySidebar() {
+    var el = document.getElementById('historySidebar');
+    var btn = document.getElementById('btnToggleHistory');
+    if (!el) return;
+    var hidden = el.hasAttribute('hidden');
+    if (hidden) { el.removeAttribute('hidden'); if (btn) btn.classList.add('active'); renderHistory(); }
+    else { el.setAttribute('hidden', ''); if (btn) btn.classList.remove('active'); }
+    if (window.lucide) lucide.createIcons();
+  }
+
+  function renderHistory() {
+    var container = document.getElementById('historyList');
+    if (!container) return;
+    var q = (document.getElementById('historySearchInput') || {}).value || '';
+    var list = loadHistory();
+    if (q) {
+      var lq = q.toLowerCase();
+      list = list.filter(function (h) {
+        return (h.headline || '').toLowerCase().indexOf(lq) >= 0 ||
+          (h.sources || []).some(function (s) { return s.toLowerCase().indexOf(lq) >= 0; });
+      });
+    }
+    if (!list.length) {
+      container.innerHTML = '<p class="history-empty">' + (q ? 'No matches.' : 'No previous assessments.') + '</p>';
+      return;
+    }
+    container.innerHTML = list.map(function (h) {
+      var ago = _timeAgo(h.ts);
+      var isActive = h.id === state.assessmentId;
+      return '<div class="history-item' + (isActive ? ' active' : '') + '" onclick="loadHistoryEntry(\'' + h.id + '\')" title="' + (h.headline || '').replace(/"/g, '&quot;') + '">' +
+        '<div class="history-item__headline">' + _htmlEsc(h.headline || 'Assessment') + '</div>' +
+        '<div class="history-item__meta">' +
+        '<span>' + ago + '</span>' +
+        '<span class="history-item__badge">' + (h.rows || 0) + ' rows</span>' +
+        (h.sources && h.sources.length ? '<span>' + _htmlEsc(h.sources.join(', ').slice(0, 30)) + '</span>' : '') +
+        '</div></div>';
+    }).join('');
+  }
+
+  function loadHistoryEntry(assessmentId) {
+    if (!assessmentId) return;
+    var apiKey = localStorage.getItem('apiKey') || 'devkey123';
+    fetch('/api/v1/csv/deep_analyze/assessments/' + encodeURIComponent(assessmentId), { headers: { 'x-api-key': apiKey } })
+      .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
+      .then(function (data) {
+        var rows = data.rows || data.evidence_rows || data.evidenceRows || [];
+        if (!rows.length) { toast('Assessment has no rows', 'warn'); return; }
+        state.assessmentId = assessmentId;
+        state.evidenceRows = rows;
+        rebuildFilteredRows();
+        switchTab('evidence');
+        toast('Loaded ' + rows.length + ' rows from history', 'info');
+        renderHistory();
+      })
+      .catch(function (err) { toast('Could not load assessment: ' + err, 'error'); });
+  }
+
+  function _timeAgo(ts) {
+    var d = Math.round((Date.now() - ts) / 1000);
+    if (d < 60) return d + 's ago';
+    if (d < 3600) return Math.floor(d / 60) + 'm ago';
+    if (d < 86400) return Math.floor(d / 3600) + 'h ago';
+    return Math.floor(d / 86400) + 'd ago';
+  }
+
+  function _htmlEsc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+
+  window.toggleHistorySidebar = toggleHistorySidebar;
+  window.clearHistory = clearHistory;
+  window.loadHistoryEntry = loadHistoryEntry;
+  window.renderHistory = renderHistory;
+  window.toast = toast;
 
 })();
