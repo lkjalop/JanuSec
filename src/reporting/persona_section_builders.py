@@ -160,6 +160,83 @@ def _fmt_confidence(val: float | None) -> str:
 
 
 # ---------------------------------------------------------------------------
+# T1 banner — single-sentence actionable headline (persona_nontechnical_summaries spec)
+# ---------------------------------------------------------------------------
+
+def _t1_banner(text: str, verdict_class: str = "review") -> str:
+    """Render the T1 one-liner headline banner per the non-technical summary spec.
+
+    verdict_class: 'investigate' (red), 'review' (amber), 'complete' (green).
+    """
+    _bg  = {"investigate": "#fde8e8", "review": "#fff8e1", "complete": "#e8f5e9"}.get(
+        verdict_class, "#f5f5f5")
+    _bdr = {"investigate": "#c62828", "review": "#f57c00", "complete": "#2e7d32"}.get(
+        verdict_class, "#9e9e9e")
+    return (
+        f"<div style='background:{_bg};border-left:6px solid {_bdr};"
+        f"padding:14px 18px;margin-bottom:20px;border-radius:6px;"
+        f"font-size:16px;font-weight:600;line-height:1.45;color:#212121'>"
+        f"{escape(str(text or ''))}</div>"
+    )
+
+
+# ---------------------------------------------------------------------------
+# MITRE ID → plain-English translation for non-technical persona views
+# ---------------------------------------------------------------------------
+
+_MITRE_PLAIN: dict[str, str] = {
+    "T1003": "Password theft from the operating system",
+    "T1059": "Malicious script or command execution",
+    "T1071": "Attacker remote-control channel (C2 beacon)",
+    "T1078": "Use of valid or stolen credentials",
+    "T1082": "System information reconnaissance",
+    "T1083": "File and directory browsing by attacker",
+    "T1098": "Persistent access via account modification",
+    "T1105": "Attacker tool download from external server",
+    "T1110": "Brute force password attack",
+    "T1539": "Session cookie theft",
+    "T1566": "Phishing attack delivery",
+    "T1486": "Ransomware data encryption",
+    "T1021": "Remote service lateral movement",
+    "T1218": "Execution via trusted Windows binary (LOLBin)",
+    "T1027": "Obfuscated or encoded malware payload",
+    "T1547": "Persistence via auto-start mechanism",
+    "T1055": "Process injection (code injected into another process)",
+    "T1074": "Data staged before exfiltration",
+    "T1041": "Data exfiltration over a network channel",
+    "T1190": "Exploitation of internet-facing application",
+}
+
+# Plain-English factor descriptions for client-facing (MSSP / compliance) views
+_FACTOR_NONTECHNICAL: dict[str, str] = {
+    "c2_communication":            "Your computer was communicating with an external server controlled by an attacker.",
+    "malicious_process":           "A harmful program was detected running on one of your machines.",
+    "credential_harvest":          "An attempt was made to steal login credentials.",
+    "mfa_bypass":                  "A login bypassed your two-factor authentication check.",
+    "privilege_escalation":        "An account gained unauthorised administrator access.",
+    "lateral_movement":            "The attacker moved from one system to another inside your network.",
+    "data_exfiltration_confirmed": "Data was sent outside your network to an external server.",
+    "phishing_subject":            "A phishing email was detected that may have delivered malicious content.",
+    "log_clearing":                "Security logs were deleted — the attacker tried to hide their activity.",
+    "impossible_travel":           "A user account showed logins from two locations too far apart to be the same person.",
+    "legacy_auth":                 "An outdated login method was used that is easier for attackers to exploit.",
+    "process_injection":           "Malicious code was injected into a legitimate running process.",
+}
+
+_FACTOR_FORENSIC_PLAIN: dict[str, str] = {
+    "c2_communication":            "C2 communication",
+    "malicious_process":           "malicious process execution",
+    "credential_harvest":          "credential theft",
+    "mfa_bypass":                  "authentication bypass",
+    "privilege_escalation":        "privilege escalation",
+    "lateral_movement":            "lateral movement",
+    "data_exfiltration_confirmed": "data exfiltration",
+    "phishing_subject":            "phishing delivery",
+    "log_clearing":                "log tampering",
+}
+
+
+# ---------------------------------------------------------------------------
 # Executive extra section (PASTA / MAESTRO model when available in CSV model)
 # ---------------------------------------------------------------------------
 
@@ -245,9 +322,21 @@ def _executive_extra(artifact: dict, model: dict | None) -> str:
         "Regulatory notification language before legal review.",
     ]
 
+    # T1 — one-sentence actionable headline (spec: persona_nontechnical_summaries §1)
+    n_susp = model.get("suspicious_count") or 0
+    if n_mal > 0:
+        _exec_t1 = "A confirmed attack was detected — immediate escalation is in progress."
+        _exec_t1_cls = "investigate"
+    elif n_susp > 0:
+        _exec_t1 = "Unusual activity was flagged and is under investigation — no confirmed breach yet."
+        _exec_t1_cls = "review"
+    else:
+        _exec_t1 = "No threat detected — activity was reviewed and found to be normal."
+        _exec_t1_cls = "complete"
+
     e8_exec_html = _essential_eight_block(model)
 
-    return f"""
+    return _t1_banner(_exec_t1, _exec_t1_cls) + f"""
 <section class='panel page-break' style='margin-top:18px'>
   <h2>PASTA Risk Analysis</h2>
   <p class='section-note'>Process and Attack Simulation &amp; Threat Analysis — risk scored against current evidence.</p>
@@ -319,6 +408,32 @@ def _soc_analyst(artifact: dict, model: dict | None) -> str:
     priority = "P1" if n_crit else "P2" if n_high else "P3"
     sla_mins = 60 if n_crit else 240 if n_high else 1440
     risk_col = "#e53935" if priority == "P1" else "#fb8c00" if priority == "P2" else "#43a047"
+
+    # T1 — spec: P-priority + specific host/IP, immediately actionable
+    _mal_ev_t1 = [e for e in ev if e.get("verdict") == "malicious"]
+    _soc_t1_host = "—"
+    if _mal_ev_t1:
+        _r0 = _mal_ev_t1[0]["row"]
+        _soc_t1_host = str(_r0.get("hostname") or _r0.get("computer") or _r0.get("host") or "—")[:28]
+    _soc_attacker_ips = iocs.get("public_ips") or atk.get("attacker_ips") or []
+    _soc_t1_ip = str(_soc_attacker_ips[0]) if _soc_attacker_ips else "—"
+    if priority == "P1":
+        if _soc_t1_host != "—" and _soc_t1_ip != "—":
+            _soc_t1 = f"P1 — CONTAIN IMMEDIATELY: Isolate host {_soc_t1_host} and block IP {_soc_t1_ip}."
+        elif _soc_t1_host != "—":
+            _soc_t1 = f"P1 — CONTAIN IMMEDIATELY: Isolate host {_soc_t1_host} — {n_crit} critical event{'s' if n_crit != 1 else ''} confirmed."
+        else:
+            _soc_t1 = f"P1 — CONTAIN IMMEDIATELY: {n_crit} critical event{'s' if n_crit != 1 else ''} confirmed — identify and isolate affected hosts."
+        _soc_t1_cls = "investigate"
+    elif priority == "P2":
+        _soc_t1 = f"P2 — INVESTIGATE: Review {n_high} suspicious event{'s' if n_high != 1 else ''} within the next 2 hours — no confirmed breach yet."
+        _soc_t1_cls = "review"
+    elif flagged > 0:
+        _soc_t1 = "P3 — MONITOR: No immediate action required — watch for recurrence in next analysis window."
+        _soc_t1_cls = "complete"
+    else:
+        _soc_t1 = "P4 — CLOSE: Activity confirmed benign — no further action required."
+        _soc_t1_cls = "complete"
 
     # Triage table rows
     triage_rows: list[list[Any]] = []
@@ -445,7 +560,7 @@ def _soc_analyst(artifact: dict, model: dict | None) -> str:
         f"<li>&#9658; {instr}</li>" for instr in handoff_instructions
     )
 
-    return f"""
+    return _t1_banner(_soc_t1, _soc_t1_cls) + f"""
 <section class='panel page-break' style='margin-top:18px'>
   <h2>SOC Analyst — Triage Queue</h2>
   <div class='meta-strip' style='margin-bottom:14px'>
@@ -815,7 +930,35 @@ def _forensics(artifact: dict, model: dict | None) -> str:
         gaps.append(f"Re-collect missing fields for: <code>{_e(', '.join(partial[:5]))}</code>")
     gaps_html = "".join(f"<li>{gap}</li>" for gap in gaps)
 
-    return f"""
+    # T1 — spec: precise incident scope statement with asset + time window
+    _mal_ev = [e for e in ev if e.get("verdict") == "malicious"]
+    _sus_ev = [e for e in ev if e.get("verdict") == "suspicious"]
+    _host_f1 = ""
+    _ts_start_f = atk.get("start_ts") or (ev[0]["ts_human"] if ev else "")
+    _ts_end_f   = atk.get("end_ts")   or (ev[-1]["ts_human"] if ev else "")
+    if ev:
+        _r0f = (_mal_ev[0] if _mal_ev else ev[0])["row"]
+        _host_f1 = str(_r0f.get("hostname") or _r0f.get("computer") or _r0f.get("host") or "")[:28]
+
+    if _mal_ev:
+        # Determine primary factor in plain English
+        _f0 = (_mal_ev[0].get("factors") or ["malicious activity"])[0]
+        _plain_f0 = _FACTOR_FORENSIC_PLAIN.get(_f0, _f0.replace("_", " "))
+        if _host_f1:
+            _for_t1 = (f"{_plain_f0.capitalize()} on host {_host_f1}"
+                       + (f" — evidence window {_fmt_ts(_ts_start_f)} to {_fmt_ts(_ts_end_f)}." if _ts_start_f else "."))
+        else:
+            _for_t1 = (f"{_plain_f0.capitalize()} detected"
+                       + (f" — evidence window {_fmt_ts(_ts_start_f)} to {_fmt_ts(_ts_end_f)}." if _ts_start_f else "."))
+        _for_t1_cls = "investigate"
+    elif _sus_ev:
+        _for_t1 = "Suspicious activity under investigation — no confirmed malicious events in this evidence set."
+        _for_t1_cls = "review"
+    else:
+        _for_t1 = "No malicious activity confirmed — evidence inventory complete, no forensic action required."
+        _for_t1_cls = "complete"
+
+    return _t1_banner(_for_t1, _for_t1_cls) + f"""
 <section class='panel page-break' style='margin-top:18px'>
   <h2>Forensic Analyst — Evidence Inventory</h2>
   <p class='section-note'>Quality rating: COMPLETE (all key fields), PARTIAL (1 key field missing), MISSING (≥2 fields missing).</p>
@@ -1018,7 +1161,35 @@ def _compliance(artifact: dict, model: dict | None) -> str:
                                            if n_mal > 0 else _pill("NOT REQUIRED", "review")],
     ]
 
-    return f"""
+    # T1 — spec: which frameworks implicated + notification obligation status
+    _notif_frameworks = []
+    if (has_pii and n_mal > 0) or has_pii:
+        _notif_frameworks.append("NDB Scheme (AU)")
+    if has_c2 and n_mal > 0:
+        _notif_frameworks.append("SOCI Act s.30BC")
+    if n_mal >= 5:
+        _notif_frameworks.append("APRA CPS 234")
+    _gdpr_text = "GDPR Art.33 assessment required" if has_pii else ""
+
+    major_ncf_count = sum(
+        1 for factor, _, _, _, _ in
+        [("c2_communication", None, None, None, None)] * (1 if has_c2 and n_mal > 0 else 0)
+    )
+    # Simpler: count whether there are critical control failures
+    has_major = n_mal >= 2 or (has_c2 and n_mal > 0)
+
+    if _notif_frameworks:
+        _fw_str = " / ".join(_notif_frameworks[:3])
+        _comp_t1 = f"Potential {_fw_str} notification obligation identified — {'72-hour clock is RUNNING' if has_pii and n_mal > 0 else 'assessment required before clock starts'}."
+        _comp_t1_cls = "investigate"
+    elif has_major:
+        _comp_t1 = "Control failures identified — no immediate regulatory notification obligation confirmed, but corrective action is required."
+        _comp_t1_cls = "review"
+    else:
+        _comp_t1 = "No regulatory notification obligations identified — no confirmed control failures in current evidence."
+        _comp_t1_cls = "complete"
+
+    return _t1_banner(_comp_t1, _comp_t1_cls) + f"""
 <section class='panel page-break' style='margin-top:18px'>
   <h2>Compliance / GRC — Regulatory Notification Assessment</h2>
   {_tbl(["Obligation", "Assessment"], breach_rows)}
@@ -1211,7 +1382,32 @@ def _ciso(artifact: dict, model: dict | None) -> str:
 
     e8_html = _essential_eight_block(model)
 
-    return f"""
+    # T1 — spec: verdict + severity + most important regulatory implication
+    _reg_disclosure = None
+    if model.get("has_pii") and n_mal > 0:
+        _reg_disclosure = "GDPR/NDB Art.33 disclosure assessment required"
+    elif n_mal >= 3 and model.get("has_c2"):
+        _reg_disclosure = "SOCI Act s.30BC reporting assessment required"
+    elif n_mal >= 5:
+        _reg_disclosure = "APRA CPS 234 notification assessment required"
+
+    if n_mal > 0:
+        _ciso_t1 = (
+            f"CONFIRMED CRITICAL INCIDENT: {n_mal} malicious event{'s' if n_mal != 1 else ''} detected"
+            + (f" — {_reg_disclosure}." if _reg_disclosure else " — escalation and containment required.")
+        )
+        _ciso_t1_cls = "investigate"
+    elif n_susp > 0:
+        _ciso_t1 = (
+            f"ELEVATED SUSPICION: {n_susp} event{'s' if n_susp != 1 else ''} require investigation"
+            + " — disclosure clock not yet running."
+        )
+        _ciso_t1_cls = "review"
+    else:
+        _ciso_t1 = "No confirmed incident — routine review complete, no disclosure obligations triggered."
+        _ciso_t1_cls = "complete"
+
+    return _t1_banner(_ciso_t1, _ciso_t1_cls) + f"""
 <section class='panel page-break' style='margin-top:18px'>
   <h2>CISO — Current Risk Posture</h2>
   <p class='section-note'>Board-level snapshot. All findings require human validation before external disclosure or regulatory notification.</p>
@@ -1408,7 +1604,26 @@ def _audit(artifact: dict, model: dict | None) -> str:
         recs.insert(0, "Preserve PII-related evidence and route data-subject assessment through privacy or legal review (NDB Scheme)")
     recs_html = "".join(f"<li>{_e(r)}</li>" for r in recs)
 
-    return f"""
+    # T1 — audit spec: objective scope statement (§6.4.7 language)
+    major_ncf_count = sum(
+        1 for row in finding_rows
+        if "MAJOR" in str(row[4] if len(row) > 4 else "")
+    )
+    all_finding_verdicts = [e.get("verdict") for e in ev if e.get("verdict") in ("malicious", "suspicious")]
+    if n_mal > 0:
+        _aud_t1 = (
+            f"AUDIT FINDING: {n_mal} confirmed control failure{'s' if n_mal != 1 else ''} "
+            f"classified as Major Nonconformity — immediate corrective action required per ISO 19011 §6.6."
+        )
+        _aud_t1_cls = "investigate"
+    elif any(v == "suspicious" for v in all_finding_verdicts):
+        _aud_t1 = "AUDIT FINDING: Suspected control weaknesses identified — Minor Nonconformities raised, corrective actions required within 30 days."
+        _aud_t1_cls = "review"
+    else:
+        _aud_t1 = "AUDIT FINDING: No nonconformities identified — all controls operating within acceptable parameters."
+        _aud_t1_cls = "complete"
+
+    return _t1_banner(_aud_t1, _aud_t1_cls) + f"""
 <section class='panel page-break' style='margin-top:18px'>
   <h2>Audit — Control Failure Findings (ISO 19011 §6.4.7)</h2>
   {scope_limitation_html}
@@ -1441,6 +1656,165 @@ def _audit(artifact: dict, model: dict | None) -> str:
 
 
 # ---------------------------------------------------------------------------
+# MSSP section — client-forwarding SLA view (persona_nontechnical_summaries §7)
+# ---------------------------------------------------------------------------
+
+def _mssp(artifact: dict, model: dict | None) -> str:
+    """MSSP persona: client-ready alert summary, SLA status, escalation path.
+
+    Written to be forwarded directly to a client IT manager without editing.
+    No security jargon — all technical terms are translated.
+    """
+    if not model:
+        return ""
+
+    ev     = model.get("evidence") or []
+    iocs   = model.get("iocs") or {}
+    atk    = model.get("attack_story") or {}
+    n_mal  = model.get("malicious_count") or 0
+    n_susp = model.get("suspicious_count") or 0
+    n_crit = sum(1 for e in ev if e.get("severity") == "critical")
+
+    # ── T1 — client alert one-liner (spec: copy-paste into client email) ────
+    if n_mal > 0:
+        _mssp_t1 = f"ALERT: {n_mal} confirmed malicious event{'s' if n_mal != 1 else ''} detected in your environment — immediate response required."
+        _mssp_t1_cls = "investigate"
+    elif n_susp > 0:
+        _mssp_t1 = f"ADVISORY: Suspicious activity detected ({n_susp} event{'s' if n_susp != 1 else ''}) — investigation underway, no confirmed breach yet."
+        _mssp_t1_cls = "review"
+    else:
+        _mssp_t1 = "INFO: Security review complete — no threats detected in this analysis window."
+        _mssp_t1_cls = "complete"
+
+    # ── SLA status ───────────────────────────────────────────────────────────
+    if n_crit > 0:
+        sla_status   = "BREACHED" if n_crit >= 2 else "AT RISK"
+        sla_variant  = "investigate" if sla_status == "BREACHED" else "review"
+        sla_note     = ("We are past the agreed response time — client must be notified immediately."
+                        if sla_status == "BREACHED"
+                        else "We are approaching the P1 response deadline — accelerate triage now.")
+        p_tier = "P1"
+        sla_window = "15 minutes"
+    elif n_mal > 0:
+        sla_status   = "AT RISK"
+        sla_variant  = "review"
+        sla_note     = "We are approaching the response deadline — accelerate triage."
+        p_tier = "P2"
+        sla_window = "4 hours"
+    else:
+        sla_status  = "WITHIN TARGET"
+        sla_variant = "complete"
+        sla_note    = "Response is on track — continue normal workflow."
+        p_tier = "P3"
+        sla_window = "Next business day"
+
+    escalation_steps: list[str] = []
+    if n_mal > 0 or n_crit > 0:
+        escalation_steps.append(f"Notify client within {sla_window} per MSA escalation clause.")
+        escalation_steps.append("Engage IR retainer if containment not achieved within 1 hour.")
+        escalation_steps.append("Log escalation time and client acknowledgement in ticketing system.")
+    else:
+        escalation_steps.append("Continue monitoring — escalate only if new events are confirmed malicious.")
+        escalation_steps.append("Close ticket after 48-hour watchlist period with no recurrence.")
+    esc_html = "".join(f"<li>{_e(s)}</li>" for s in escalation_steps)
+
+    # ── Client-ready findings (no jargon) ───────────────────────────────────
+    client_rows: list[list[Any]] = []
+    attacker_ips = iocs.get("public_ips") or atk.get("attacker_ips") or []
+    hosts = (atk.get("internal_hosts") or list(iocs.get("hosts") or set()))[:3]
+
+    for e in ev[:8]:
+        factors = e.get("factors") or []
+        verdict = e.get("verdict") or "unknown"
+        if verdict not in ("malicious", "suspicious"):
+            continue
+        r = e["row"]
+        host = str(r.get("hostname") or r.get("computer") or r.get("host") or "your network device")[:32]
+        # Plain-English description for non-technical client
+        plain_desc = next(
+            (_FACTOR_NONTECHNICAL.get(f) for f in factors if f in _FACTOR_NONTECHNICAL),
+            f"Unusual activity was detected on {host}."
+        )
+        client_action_map = {
+            "malicious": "Notify your IT team immediately and do not restart affected machines.",
+            "suspicious": "Ask your IT team to review this activity — no immediate action yet.",
+        }
+        client_action = client_action_map.get(verdict, "No action required at this time.")
+        client_rows.append([
+            _e(host),
+            _e(plain_desc),
+            _e(client_action),
+            _pill("CONFIRMED THREAT" if verdict == "malicious" else "UNDER INVESTIGATION",
+                  "investigate" if verdict == "malicious" else "review"),
+        ])
+
+    if not client_rows:
+        client_rows.append(["—", "No threats detected", "No action required", _pill("CLEAR", "complete")])
+
+    # ── What the MSSP is doing on the client's behalf ───────────────────────
+    mssp_actions: list[str] = []
+    if n_mal > 0 and attacker_ips:
+        mssp_actions.append(f"Reviewing {len(attacker_ips)} external IP address{'es' if len(attacker_ips) != 1 else ''} for policy-based blocking.")
+    if n_mal > 0 and hosts:
+        mssp_actions.append(f"Requesting evidence preservation from affected machine{'s' if len(hosts) != 1 else ''}: {', '.join(str(h) for h in hosts[:3])}.")
+    mssp_actions.append("Correlating with threat intelligence sources to determine attacker origin and pattern.")
+    if n_mal > 0:
+        mssp_actions.append("Preparing incident report for client delivery within the agreed SLA window.")
+    else:
+        mssp_actions.append("Monitoring for recurrence across the next 48-hour analysis window.")
+    mssp_html = "".join(f"<li>{_e(a)}</li>" for a in mssp_actions)
+
+    # ── IOC summary in plain language ───────────────────────────────────────
+    ioc_plain: list[str] = []
+    if attacker_ips:
+        ioc_plain.append(f"External server addresses involved: {', '.join(str(ip) for ip in attacker_ips[:4])}")
+    if iocs.get("processes"):
+        ioc_plain.append(f"Suspicious programs detected: {', '.join(iocs['processes'][:3])}")
+    if iocs.get("domains"):
+        ioc_plain.append(f"Suspicious websites contacted: {', '.join(iocs['domains'][:3])}")
+    ioc_plain_html = "".join(f"<li>{_e(s)}</li>" for s in ioc_plain) or "<li>No specific indicators extracted.</li>"
+
+    return _t1_banner(_mssp_t1, _mssp_t1_cls) + f"""
+<section class='panel page-break' style='margin-top:18px'>
+  <h2>MSSP — SLA and Escalation Status</h2>
+  <div style='display:flex;gap:24px;align-items:flex-start;flex-wrap:wrap;margin-bottom:12px'>
+    <div>
+      <div style='font-size:12px;color:var(--muted);text-transform:uppercase'>SLA Status</div>
+      {_pill(sla_status, sla_variant)}
+    </div>
+    <div>
+      <div style='font-size:12px;color:var(--muted);text-transform:uppercase'>Priority Tier</div>
+      <strong>{_e(p_tier)}</strong>
+    </div>
+    <div>
+      <div style='font-size:12px;color:var(--muted);text-transform:uppercase'>Response Window</div>
+      <strong>{_e(sla_window)}</strong>
+    </div>
+  </div>
+  <p class='section-note'>{_e(sla_note)}</p>
+  <h3>Escalation Steps</h3>
+  <ul class='checklist'>{esc_html}</ul>
+</section>
+
+<section class='panel' style='margin-top:18px'>
+  <h2>Client-Ready Findings</h2>
+  <p class='section-note'>This section is written for your client's IT manager. All technical terms have been translated into plain language.</p>
+  {_tbl(["Affected System", "What Happened", "What Your Team Should Do", "Status"], client_rows)}
+</section>
+
+<section class='panel' style='margin-top:18px'>
+  <h2>What the MSSP Is Doing on Your Behalf</h2>
+  <ul class='checklist'>{mssp_html}</ul>
+</section>
+
+<section class='panel' style='margin-top:18px'>
+  <h2>Technical Summary (for client IT manager)</h2>
+  <ul class='checklist'>{ioc_plain_html}</ul>
+</section>
+"""
+
+
+# ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
 
@@ -1452,6 +1826,7 @@ _DISPATCH = {
     "compliance":    _compliance,
     "ciso":          _ciso,
     "audit":         _audit,
+    "mssp":          _mssp,
 }
 
 
