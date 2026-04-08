@@ -908,121 +908,58 @@
     <div class="app-container" id="appContainer">
         <!-- Header -->
     <header class="header">
-            <div class="header-left">
-                <div class="logo">
-                    <svg width="28" height="28" viewBox="0 0 64 64" fill="none">
-                        <circle cx="32" cy="32" r="30" stroke="var(--accent)" stroke-width="2"/>
-                        <path d="M32 8 L32 56" stroke="var(--accent)" stroke-width="1" opacity="0.3"/>
-                        <path d="M20 24 Q20 20 24 20 L28 20 L28 44 Q28 48 24 48 L20 48 Z" fill="var(--accent)" opacity="0.8"/>
-                        <path d="M44 24 Q44 20 40 20 L36 20 L36 44 Q36 48 40 48 L44 48 Z" fill="var(--accent)" opacity="0.8"/>
-                    </svg>
-                    JanuSec Platform
-                </div>
-                <div class="status-bar">
-                    <div class="status-item">
-                        <div class="status-dot active"></div>
-                        <span>Connected to XDR</span>
-                    </div>
-                    <div class="status-item">
-                        <span style="color: var(--text-muted);">Last Update:</span>
-                        <span id="lastUpdate">2 min ago</span>
-                    </div>
-                </div>
-                                            <script>
-                                                // Ensure #fileInput remains attached: if other scripts replace uploadZone, re-attach our hidden input to body
-                                                (function(){ try{ const ensure = ()=>{ try{ if(!document.getElementById('fileInput')){ const inp=document.createElement('input'); inp.type='file'; inp.id='fileInput'; inp.style.display='none'; inp.multiple=true; inp.accept='.pcap,.evtx,.json,.csv,.log,.xls,.xlsx,.xlsm,.ods,.zip,.gz'; document.body.appendChild(inp); } else { const el=document.getElementById('fileInput'); if(el && !el.closest('body') && document.body) document.body.appendChild(el); } }catch(e){} }; ensure(); const mo = new MutationObserver(()=> ensure()); mo.observe(document.documentElement || document.body, { childList:true, subtree:true }); setTimeout(()=> mo.disconnect(), 20000); }catch(e){ console.warn('fileInput observer failed', e); } })();
-                                            </script>
-                <div class="mini-metrics" id="miniMetricsHeader" style="margin-left:18px;">
-                    <div class="mini-card">CS dedupe: <span id="cs_dedupe_val">-</span></div>
-                    <div class="mini-card">CS db upserts: <span id="cs_upsert_val">-</span></div>
-                </div>
+        <div class="header-left">
+            <!-- Logo: shield with J -->
+            <div class="logo">
+                <svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                    <path d="M16 2 L28 7 L28 17 C28 23.5 22.5 29 16 30 C9.5 29 4 23.5 4 17 L4 7 Z" fill="var(--accent)" opacity="0.15" stroke="var(--accent)" stroke-width="1.5"/>
+                    <path d="M16 2 L28 7 L28 17 C28 23.5 22.5 29 16 30" stroke="var(--accent)" stroke-width="2" fill="none" stroke-linecap="round"/>
+                    <text x="16" y="21" text-anchor="middle" font-family="system-ui,sans-serif" font-size="13" font-weight="700" fill="var(--accent)">J</text>
+                </svg>
+                <span style="font-size:16px; font-weight:700; letter-spacing:-0.3px;">JanuSec</span>
+                <span style="font-size:11px; color:var(--text-muted); font-weight:400; padding:2px 6px; border:1px solid var(--border); border-radius:4px; margin-left:4px;">beta</span>
             </div>
-            <div class="status-bar">
-                <div class="status-item">
-                    <span style="color: var(--critical);">&bull;</span>
-                    Critical: <strong id="criticalCount">2</strong>
-                </div>
-                <div class="status-item">
-                    <span style="color: var(--high);">&bull;</span>
-                    High: <strong id="highCount">8</strong>
-                </div>
-                <div class="status-item">
-                    <span style="color: var(--medium);">&bull;</span>
-                    Medium: <strong id="mediumCount">15</strong>
-                </div>
-                <div class="status-item" title="AI provider status">
-                    <span id="aiStatus" class="pill-badge pill-warn">AI: n/a</span>
-                </div>
-                <div class="status-item" title="FinOps anomaly status">
-                    <span id="finopsStatus" class="pill-badge pill-warn">FinOps: n/a</span>
-                </div>
+        </div>
+        <!-- Right: severity pulse only -->
+        <div class="status-bar">
+            <div class="status-item">
+                <span style="color:var(--critical); font-size:18px; line-height:1;">●</span>
+                <span>Critical: <strong id="criticalCount">0</strong></span>
             </div>
-        </header>
+            <div class="status-item">
+                <span style="color:var(--high); font-size:18px; line-height:1;">●</span>
+                <span>High: <strong id="highCount">0</strong></span>
+            </div>
+            <div class="status-item">
+                <span style="color:var(--medium); font-size:18px; line-height:1;">●</span>
+                <span>Medium: <strong id="mediumCount">0</strong></span>
+            </div>
+            <div class="status-item" style="margin-left:12px;">
+                <span id="aiStatus" class="pill-badge pill-warn" title="AI provider">AI: checking…</span>
+            </div>
+        </div>
+    </header>
 
-        <!-- Sidebar (Beta — clean) -->
+        <!-- Sidebar: 3 links only for beta -->
     <nav class="sidebar" role="navigation" aria-label="Primary">
 
-        <!-- ── LIVE OPERATIONS ────────────────────────────────── -->
+        <!-- Home / Live Dashboard -->
         <div class="nav-section">
-            <div class="nav-title">Live Operations</div>
             <div class="nav-item active" role="link" tabindex="0" data-view="dashboard" aria-current="page">
-                <span class="nav-ico nav-ico--dashboard"></span>Dashboard
+                <span class="nav-ico nav-ico--dashboard"></span>Home
             </div>
-            <div class="nav-item" role="link" tabindex="0" data-view="threats">
-                <span class="nav-ico nav-ico--threats"></span>Active Threats<span class="nav-badge" id="threatCount">0</span>
-            </div>
-            <div class="nav-item" role="link" tabindex="0" data-view="artifacts">
-                <span class="nav-ico nav-ico--artifacts"></span>Detections<span class="nav-badge" id="artifactsCount">0</span>
-            </div>
-            <!-- Live cloud connectors — alpha, shown for demo -->
-            <a class="nav-item" href="/static/connectors.html">
-                <span class="nav-ico nav-ico--cloud"></span>Cloud Connectors
-                <span style="font-size:10px;margin-left:auto;padding:1px 5px;border-radius:3px;background:rgba(255,165,0,.2);color:orange;">alpha</span>
-            </a>
         </div>
 
-        <!-- ── INVESTIGATE (Manual Upload — primary beta path) ── -->
+        <!-- Investigate: manual upload + reports (the primary beta path) -->
         <div class="nav-section">
-            <div class="nav-title">Investigate</div>
-            <!-- Primary CTA: single-click to open the investigation console -->
             <a class="nav-item" href="/static/investigate.html"
-               style="border:1px solid var(--accent);border-radius:6px;background:rgba(74,99,231,.12);color:var(--accent);font-weight:600;margin-bottom:4px;">
-                <span class="nav-ico nav-ico--csv" style="background:var(--accent)"></span>Upload &amp; Investigate
-            </a>
-            <!-- Multi-file / multi-source correlation -->
-            <a class="nav-item" href="/static/csv_multi_analyzer.html">
-                <span class="nav-ico nav-ico--csv"></span>Multi-Source Correlator
-            </a>
-            <!-- Suspicion-driven text investigation -->
-            <a class="nav-item" href="/static/multi_log_investigator.html">
-                <span class="nav-ico nav-ico--graph"></span>Log Investigator
-            </a>
-            <!-- SBOM & supply chain CVE cross-ref -->
-            <a class="nav-item" href="/static/sbom.html">
-                <span class="nav-ico nav-ico--sbom"></span>SBOM &amp; Vulnerabilities
-            </a>
-            <!-- Metrics / factor telemetry -->
-            <a class="nav-item" href="/static/metrics.html">
-                <span class="nav-ico nav-ico--metrics"></span>Metrics
+               style="border:1px solid var(--accent);border-radius:6px;background:rgba(74,99,231,.12);color:var(--accent);font-weight:600;">
+                <span class="nav-ico nav-ico--csv" style="background:var(--accent)"></span>Investigate
             </a>
         </div>
 
-        <!-- ── ADMIN & SETTINGS ───────────────────────────────── -->
-        <div class="nav-section">
-            <div class="nav-title">Admin &amp; Settings</div>
-            <!-- Cloud API keys, connector config, LLM provider (OpenAI / Azure OpenAI / Bedrock / Ollama) -->
-            <a class="nav-item" href="/static/integrations.html">
-                <span class="nav-ico nav-ico--integrations"></span>Integrations &amp; API Keys
-            </a>
-            <!-- AI / LLM model config: Ollama, Azure OpenAI, AWS Bedrock/SageMaker -->
-            <a class="nav-item" href="/static/ai_settings.html">
-                <span class="nav-ico nav-ico--ai"></span>AI / LLM Providers
-            </a>
-            <!-- Admin controls: tenant, scoring weights, rate limits, human gate -->
-            <a class="nav-item" href="/static/admin.html">
-                <span class="nav-ico nav-ico--admin"></span>Admin Controls
-            </a>
-            <!-- User preferences -->
+        <!-- Settings: admin controls, cloud/LLM keys, tenant config -->
+        <div class="nav-section" style="margin-top:auto;">
             <div class="nav-item" role="link" tabindex="0" data-view="settings">
                 <span class="nav-ico nav-ico--settings"></span>Settings
             </div>
@@ -4485,6 +4422,11 @@
         <!-- View switching -->
         function switchView(view, sourceEl) {
             if(!view) return;
+            // Settings → open integrations page which consolidates admin/LLM/keys
+            if(view === 'settings'){
+                window.location.href = '/static/integrations.html';
+                return;
+            }
             document.querySelectorAll('.sidebar .nav-item[data-view]').forEach(i=>i.classList.remove('active','aria-current'));
             if(sourceEl){ sourceEl.classList.add('active'); sourceEl.setAttribute('aria-current','page'); }
             const contentTitle = document.querySelector('.content-title');
