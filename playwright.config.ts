@@ -31,8 +31,18 @@ export default defineConfig({
         TEST_HELPERS_ENABLED: '0',
         FAST_TEST_MODE: '0',
         PLATFORM_LITE_INIT: '0',
-        ENV: 'staging',
-        API_KEYS_JSON: '[{"key":"janusec-playwright-local","scopes":["*"]}]'
+        // Use 'dev' so TenantMiddleware falls back to DEFAULT_TENANT instead of 400ing
+        ENV: 'dev',
+        APP_ENV: 'dev',
+        DEFAULT_TENANT: 'default',
+        ALLOW_DEFAULT_TENANT: '1',
+        TENANT_RATE_LIMIT_ENABLED: '0',
+        RATE_LIMIT_ENABLED: '0',
+        API_KEYS_JSON: '[{"key":"janusec-playwright-local","scopes":["*"]}]',
+        PLAYWRIGHT_API_KEY: 'janusec-playwright-local',
+        LLM_MOCK: '1',
+        DISABLE_DB: '0',
+        HOPGRAPH_PERSISTENCE_ENABLED: '0',
       }
     }
   })

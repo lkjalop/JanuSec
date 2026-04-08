@@ -33,6 +33,7 @@ class TenantMiddleware(BaseHTTPMiddleware):
                 os.getenv('PLATFORM_LITE_INIT','0').lower() in {'1','true','yes'}
                 or os.getenv('TEST_HELPERS_ENABLED','0').lower() in {'1','true','yes'}
                 or os.getenv('LLM_MOCK','0').lower() in {'1','true','yes'}
+                or os.getenv('ALLOW_DEFAULT_TENANT','0').lower() in {'1','true','yes'}
                 or os.getenv('APP_ENV','').lower() in {'dev','development','local'}
                 or os.getenv('ENV','').lower() in {'dev','development','local'}
                 or 'PYTEST_CURRENT_TEST' in os.environ
