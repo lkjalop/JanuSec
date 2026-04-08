@@ -959,98 +959,84 @@
             </div>
         </header>
 
-        <!-- Sidebar (normalized) -->
+        <!-- Sidebar (Beta — clean) -->
     <nav class="sidebar" role="navigation" aria-label="Primary">
-            <div class="nav-section">
-                <div class="nav-title">Detection & Response</div>
-                <div class="nav-item active" role="link" tabindex="0" data-view="dashboard" aria-current="page"><span class="nav-ico nav-ico--dashboard"></span>Dashboard</div>
-                <div class="nav-item" role="link" tabindex="0" data-view="artifacts"><span class="nav-ico nav-ico--artifacts"></span>Artifacts<span class="nav-badge" id="artifactsCount">342</span></div>
-                <a class="nav-item" href="https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml" target="_blank" rel="noopener">
-                    <span class="nav-ico nav-ico--metrics"></span>CI Workflow (api-stage-perf)
-                </a>
-                <div class="nav-item" style="flex-direction:column; align-items:flex-start; gap:6px;">
-                    <div style="font-size:11px; text-transform:uppercase; letter-spacing:0.4px; color:var(--text-muted);">Latest API Stage Artifacts</div>
-                    <div id="apiStageArtifactList" class="small" style="width:100%; min-height:38px; color:var(--text-muted);">Loading artifacts…</div>
-                </div>
-                <div class="nav-item" role="link" tabindex="0" data-view="threats"><span class="nav-ico nav-ico--threats"></span>Active Threats<span class="nav-badge" id="threatCount">2</span></div>
+
+        <!-- ── LIVE OPERATIONS ────────────────────────────────── -->
+        <div class="nav-section">
+            <div class="nav-title">Live Operations</div>
+            <div class="nav-item active" role="link" tabindex="0" data-view="dashboard" aria-current="page">
+                <span class="nav-ico nav-ico--dashboard"></span>Dashboard
             </div>
-            <div class="nav-section">
-                <div class="nav-title">Hunt & Analysis</div>
-                        <a class="nav-item" href="/static/hunt_network.html"><span class="nav-ico nav-ico--network"></span>Network Hunt</a>
-                        <div id="rightPanelActions">
-                            <div id="crqExplainCard" style="margin-top:12px;padding:10px;background:var(--panel-bg);border-radius:6px;">
-                                <h4 style="margin:0 0 8px 0;color:var(--muted)">Recent CRQ Explanations</h4>
-                                <div id="crqExplainList">Loading...</div>
-                            </div>
-                        </div>
-                <a class="nav-item" href="/static/hunt_endpoint.html"><span class="nav-ico nav-ico--endpoint"></span>Endpoint Hunt</a>
-                <a class="nav-item" href="/static/compliance.html"><span class="nav-ico nav-ico--compliance"></span>Compliance</a>
-                <a class="nav-item" href="/static/metrics.html"><span class="nav-ico nav-ico--metrics"></span>Metrics</a>
-                <a class="nav-item" href="/static/baseline.html"><span class="nav-ico nav-ico--network"></span>Baseline</a>
-                <a class="nav-item" href="/static/batch_events.html"><span class="nav-ico nav-ico--batch"></span>Batch Events</a>
-                <a class="nav-item" href="/static/reports.html"><span class="nav-ico nav-ico--reports"></span>Reports</a>
-                <a class="nav-item" href="/static/sandbox.html"><span class="nav-ico nav-ico--sandbox"></span>Sandbox</a>
-                <a class="nav-item" href="/static/kape_upload_live.html"><span class="nav-ico nav-ico--sandbox"></span>KAPE Upload</a>
-                <a class="nav-item" href="/static/kape_jobs.html"><span class="nav-ico nav-ico--sandbox"></span>KAPE Jobs</a>
-                <a class="nav-item" href="/api/v1/report/ingestion?format=html&include_model=true&include_scenarios=true" target="_blank"><span class="nav-ico nav-ico--mitre"></span>MITRE ATT&CK</a>
-                <a class="nav-item" href="/static/graph_explain.html"><span class="nav-ico nav-ico--graph"></span>Graph Explain</a>
-                <a class="nav-item" href="/static/hopgraph_ux.html"><span class="nav-ico nav-ico--graph"></span>HopGraph UX</a>
-                <a class="nav-item" href="/static/timeline_composer.html"><span class="nav-ico nav-ico--timeline"></span>Timeline Composer</a>
-                <a class="nav-item" href="/static/training_aids.html"><span class="nav-ico nav-ico--ai"></span>Training Aids</a>
-                <a class="nav-item" href="/static/mitre.html"><span class="nav-ico nav-ico--mitre"></span>MITRE Matrix</a>
-                <a class="nav-item" href="/static/process_tree.html"><span class="nav-ico nav-ico--endpoint"></span>Process Tree</a>
-                <a class="nav-item" href="/static/yara.html"><span class="nav-ico nav-ico--yara"></span>YARA Rules</a>
-                <a class="nav-item" href="/static/bgp.html"><span class="nav-ico nav-ico--bgp"></span>BGP Incidents</a>
-                <a class="nav-item" href="/static/sbom.html"><span class="nav-ico nav-ico--sbom"></span>SBOM & Vulns</a>
-                <a class="nav-item" href="/static/supply_chain.html"><span class="nav-ico nav-ico--sbom"></span>Supply Chain</a>
-                <a class="nav-item" href="/static/cspm.html"><span class="nav-ico nav-ico--intel"></span>Compliance & CSPM</a>
-                <a class="nav-item" href="/static/iam.html"><span class="nav-ico nav-ico--users"></span>IAM Risk</a>
-                <a class="nav-item" href="/static/iam_connectors.html"><span class="nav-ico nav-ico--cloud"></span>IAM Connectors</a>
-                <a class="nav-item" href="/static/csv_analyzer.html"><span class="nav-ico nav-ico--csv"></span>CSV Analyzer</a>
-                <a class="nav-item" href="/static/csv_multi_analyzer.html"><span class="nav-ico nav-ico--csv"></span>Multi-Source Correlator</a>
-                <a class="nav-item" href="/static/multi_log_investigator.html"><span class="nav-ico nav-ico--graph"></span>Multi-Log Investigator</a>
-                <a class="nav-item" href="/static/factors_top20.html" data-feature="factors-top20" title="Factors taxonomy & playbooks"><span class="nav-ico nav-ico--factors"></span>Factors Top-20</a>
-                <a class="nav-item" href="/static/replay.html"><span class="nav-ico nav-ico--timeline"></span>Scenario Replay</a>
-                <a class="nav-item" href="/static/coverage.html"><span class="nav-ico nav-ico--compliance"></span>Coverage Map</a>
-                <a class="nav-item" href="/static/attack_graph.html"><span class="nav-ico nav-ico--graph"></span>Attack Graph</a>
-                <a class="nav-item" href="/static/hopgraph_visual.html"><span class="nav-ico nav-ico--graph"></span>HopGraph Visual</a>
-                <a class="nav-item" href="/static/investigate.html"><span class="nav-ico nav-ico--graph"></span>Investigate</a>
-                <a class="nav-item" href="/static/connectors.html"><span class="nav-ico nav-ico--cloud"></span>Live Connectors</a>
-                <a class="nav-item" href="/static/ceo_demo.html" style="border:1px solid var(--accent);border-radius:6px;background:rgba(74,99,231,.12);color:var(--accent);font-weight:600;"><span class="nav-ico nav-ico--sbom" style="background:var(--accent)"></span>CEO Demo Guide</a>
+            <div class="nav-item" role="link" tabindex="0" data-view="threats">
+                <span class="nav-ico nav-ico--threats"></span>Active Threats<span class="nav-badge" id="threatCount">0</span>
             </div>
-            <div class="nav-section">
-                <div class="nav-title">Integrations</div>
-                                <div style="display:flex;gap:8px;align-items:center">
-                                    <div class="nav-item" role="link" tabindex="0" data-view="integrations"><span class="nav-ico nav-ico--integrations"></span>API & Webhooks</div>
-                                    <a class="btn" href="/static/isms.html" title="ISMS Evidence">ISMS</a>
-                                </div>
-                <div style="margin-top:8px; padding:8px 12px;">
-                    <div class="small" style="margin-bottom:6px;">Quick CSV Presets</div>
-                    <div style="display:flex; gap:6px; flex-wrap:wrap;">
-                        <button class="btn" onclick="openCsvWithPreset('sysmon')">Sysmon</button>
-                        <button class="btn" onclick="openCsvWithPreset('suricata')">Suricata</button>
-                        <button class="btn" onclick="openCsvWithPreset('zeek')">Zeek</button>
-                        <button class="btn" onclick="openCsvWithPreset('crowdstrike')">CrowdStrike</button>
-                        <button class="btn" onclick="openCsvWithPreset('siem')">SIEM</button>
-                        <button class="btn" onclick="openCsvWithPreset('cloudtrail')">CloudTrail</button>
-                    </div>
-                </div>
-                <div class="nav-item" role="link" tabindex="0" data-view="notifications"><span class="nav-ico nav-ico--notifications"></span>Notifications</div>
+            <div class="nav-item" role="link" tabindex="0" data-view="artifacts">
+                <span class="nav-ico nav-ico--artifacts"></span>Detections<span class="nav-badge" id="artifactsCount">0</span>
             </div>
-            <div class="nav-section">
-                <div class="nav-title">System</div>
-                <a class="nav-item" href="/static/executive.html"><span class="nav-ico nav-ico--executive"></span>Executive Overview</a>
-                <div class="nav-item" role="link" tabindex="0" data-view="settings"><span class="nav-ico nav-ico--settings"></span>Settings</div>
-                <a class="nav-item" href="/static/ai_settings.html"><span class="nav-ico nav-ico--ai"></span>AI Providers</a>
-                <a class="nav-item" href="/static/finops.html"><span class="nav-ico nav-ico--finops"></span>FinOps / Budget</a>
-                <a class="nav-item" href="/static/approvals.html"><span class="nav-ico nav-ico--approvals"></span>Approvals</a>
-                <a class="nav-item" href="/static/intel.html"><span class="nav-ico nav-ico--intel"></span>Threat Intel</a>
-                <a class="nav-item" href="/static/admin.html"><span class="nav-ico nav-ico--admin"></span>Admin Controls</a>
-                <a class="nav-item" href="/static/autogen_admin.html"><span class="nav-ico nav-ico--ai"></span>Auto-Incident Admin</a>
-                <a class="nav-item" href="/admin/dlq"><span class="nav-ico nav-ico--admin"></span>DLQ (Dead Letter)</a>
-                <a class="nav-item" href="/static/intel_status.html"><span class="nav-ico nav-ico--intel-status"></span>Intel Status</a>
+            <!-- Live cloud connectors — alpha, shown for demo -->
+            <a class="nav-item" href="/static/connectors.html">
+                <span class="nav-ico nav-ico--cloud"></span>Cloud Connectors
+                <span style="font-size:10px;margin-left:auto;padding:1px 5px;border-radius:3px;background:rgba(255,165,0,.2);color:orange;">alpha</span>
+            </a>
+        </div>
+
+        <!-- ── INVESTIGATE (Manual Upload — primary beta path) ── -->
+        <div class="nav-section">
+            <div class="nav-title">Investigate</div>
+            <!-- Primary CTA: single-click to open the investigation console -->
+            <a class="nav-item" href="/static/investigate.html"
+               style="border:1px solid var(--accent);border-radius:6px;background:rgba(74,99,231,.12);color:var(--accent);font-weight:600;margin-bottom:4px;">
+                <span class="nav-ico nav-ico--csv" style="background:var(--accent)"></span>Upload &amp; Investigate
+            </a>
+            <!-- Multi-file / multi-source correlation -->
+            <a class="nav-item" href="/static/csv_multi_analyzer.html">
+                <span class="nav-ico nav-ico--csv"></span>Multi-Source Correlator
+            </a>
+            <!-- Suspicion-driven text investigation -->
+            <a class="nav-item" href="/static/multi_log_investigator.html">
+                <span class="nav-ico nav-ico--graph"></span>Log Investigator
+            </a>
+            <!-- SBOM & supply chain CVE cross-ref -->
+            <a class="nav-item" href="/static/sbom.html">
+                <span class="nav-ico nav-ico--sbom"></span>SBOM &amp; Vulnerabilities
+            </a>
+            <!-- Metrics / factor telemetry -->
+            <a class="nav-item" href="/static/metrics.html">
+                <span class="nav-ico nav-ico--metrics"></span>Metrics
+            </a>
+        </div>
+
+        <!-- ── ADMIN & SETTINGS ───────────────────────────────── -->
+        <div class="nav-section">
+            <div class="nav-title">Admin &amp; Settings</div>
+            <!-- Cloud API keys, connector config, LLM provider (OpenAI / Azure OpenAI / Bedrock / Ollama) -->
+            <a class="nav-item" href="/static/integrations.html">
+                <span class="nav-ico nav-ico--integrations"></span>Integrations &amp; API Keys
+            </a>
+            <!-- AI / LLM model config: Ollama, Azure OpenAI, AWS Bedrock/SageMaker -->
+            <a class="nav-item" href="/static/ai_settings.html">
+                <span class="nav-ico nav-ico--ai"></span>AI / LLM Providers
+            </a>
+            <!-- Admin controls: tenant, scoring weights, rate limits, human gate -->
+            <a class="nav-item" href="/static/admin.html">
+                <span class="nav-ico nav-ico--admin"></span>Admin Controls
+            </a>
+            <!-- User preferences -->
+            <div class="nav-item" role="link" tabindex="0" data-view="settings">
+                <span class="nav-ico nav-ico--settings"></span>Settings
             </div>
-        </nav>
+        </div>
+
+    </nav>
+
+    <!-- rightPanelActions lives in the right panel, NOT in the sidebar -->
+    <div id="rightPanelActions" style="display:none;">
+        <div id="crqExplainCard" style="margin-top:12px;padding:10px;background:var(--panel-bg);border-radius:6px;">
+            <h4 style="margin:0 0 8px 0;color:var(--muted)">Recent CRQ Explanations</h4>
+            <div id="crqExplainList">Loading...</div>
+        </div>
+    </div>
         <script>
             // Attempt to replace/hydrate sidebar with the reusable nav include when available
             (function(){ try{ fetch('/static/components/nav.html').then(r=>{ if(!r.ok) return; return r.text(); }).then(html=>{ if(!html) return; const parser = new DOMParser(); const doc = parser.parseFromString(html,'text/html'); const newNav = doc.body.firstElementChild; if(!newNav) return; const old = document.querySelector('.sidebar'); if(old && old.parentNode){ old.parentNode.replaceChild(newNav, old); } }).catch(e=>{ /* ignore */ }); }catch(e){} })();
