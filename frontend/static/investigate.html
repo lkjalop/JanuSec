@@ -3,6 +3,788 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JanuSec — Investigate</title>
+  <link rel="stylesheet" href="/static/css/theme.css">
+  <link rel="stylesheet" href="/static/css/theme-pro.css">
+  <script src="https://unpkg.com/lucide@0.344.0/dist/umd/lucide.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+  <style>
+    /* ── Reset / page ─────────────────────────────────────────────── */
+    html, body { height: 100%; margin: 0; overflow: hidden; font-family: var(--font-sans, 'Inter', 'Segoe UI', sans-serif); }
+    * { box-sizing: border-box; }
+    .page { display: flex; height: 100vh; background: var(--bg-primary, #0B0E14); color: var(--text-primary, #E8EBF0); }
+
+    /* ── Sidebar ───────────────────────────────────────────────────── */
+    .sidebar {
+      width: 200px; flex-shrink: 0;
+      background: var(--bg-secondary, #131720);
+      border-right: 1px solid var(--border, #1E2535);
+      display: flex; flex-direction: column; z-index: 10; overflow: hidden;
+    }
+    .sidebar__logo {
+      display: flex; align-items: center; gap: 10px;
+      padding: 14px 16px; border-bottom: 1px solid var(--border, #1E2535);
+      font-size: 15px; font-weight: 700; color: var(--text-primary, #E8EBF0);
+    }
+    .sidebar__logo i { color: var(--accent, #4A63E7); width: 22px; height: 22px; flex-shrink: 0; }
+    .sidebar__beta {
+      font-size: 10px; color: var(--text-muted, #6B7280);
+      padding: 1px 5px; border: 1px solid var(--border, #1E2535);
+      border-radius: 3px; margin-left: 2px;
+    }
+    .nav-section { padding: 6px 0; }
+    .nav-section + .nav-section { border-top: 1px solid var(--border, #1E2535); }
+    .nav-item {
+      display: flex; align-items: center; gap: 10px;
+      padding: 9px 16px; font-size: 13px; font-weight: 500;
+      color: var(--text-muted, #6B7280); cursor: pointer; transition: all 120ms;
+      text-decoration: none; border: none; background: none; width: 100%;
+      text-align: left; font-family: inherit;
+    }
+    .nav-item:hover { color: var(--text-primary, #E8EBF0); background: var(--bg-hover, rgba(255,255,255,0.04)); }
+    .nav-item.active {
+      color: var(--accent, #4A63E7); background: var(--accent-subtle, rgba(74,99,231,.1));
+      border-left: 3px solid var(--accent, #4A63E7); padding-left: 13px;
+    }
+    .nav-item i { width: 18px; height: 18px; flex-shrink: 0; }
+    .nav-badge-alpha {
+      font-size: 9px; padding: 1px 4px; border-radius: 3px;
+      background: rgba(255,165,0,.15); color: orange;
+      border: 1px solid rgba(255,165,0,.3); margin-left: auto;
+    }
+    .sidebar__spacer { flex: 1; }
+
+    /* ── History sidebar ───────────────────────────────────────────── */
+    .history-sidebar {
+      width: 220px; flex-shrink: 0;
+      background: var(--bg-secondary, #131720);
+      border-right: 1px solid var(--border, #1E2535);
+      display: flex; flex-direction: column; overflow: hidden; z-index: 9;
+    }
+    .history-sidebar[hidden] { display: none; }
+    .history-header {
+      display: flex; align-items: center; padding: 10px 12px 8px;
+      border-bottom: 1px solid var(--border, #1E2535); flex-shrink: 0;
+    }
+    .history-title { flex: 1; font-size: 12px; font-weight: 600; color: var(--text-secondary, #9CA3AF); text-transform: uppercase; letter-spacing: 0.04em; }
+    .history-close { background: none; border: none; cursor: pointer; color: var(--text-muted, #6B7280); padding: 2px; border-radius: 3px; display: flex; align-items: center; }
+    .history-close:hover { color: var(--text-primary, #E8EBF0); }
+    .history-search { padding: 8px 10px; border-bottom: 1px solid var(--border, #1E2535); flex-shrink: 0; }
+    .history-search input { width: 100%; background: var(--bg-tertiary, #1C2232); border: 1px solid var(--border, #1E2535); border-radius: 4px; color: var(--text-primary, #E8EBF0); font-size: 12px; padding: 4px 8px; outline: none; }
+    .history-search input:focus { border-color: var(--accent, #4A63E7); }
+    .history-list { flex: 1; overflow-y: auto; padding: 4px 0; }
+    .history-item { padding: 8px 12px; cursor: pointer; border-bottom: 1px solid rgba(255,255,255,0.04); display: flex; flex-direction: column; gap: 2px; }
+    .history-item:hover { background: var(--bg-hover, rgba(255,255,255,0.04)); }
+    .history-item.active { background: var(--accent-subtle, rgba(74,99,231,.1)); border-left: 2px solid var(--accent, #4A63E7); }
+    .history-item__headline { font-size: 12px; font-weight: 500; color: var(--text-primary, #E8EBF0); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .history-item__meta { font-size: 10px; color: var(--text-muted, #6B7280); }
+    .history-empty { font-size: 12px; color: var(--text-muted, #6B7280); text-align: center; padding: 20px 12px; }
+    .history-footer { padding: 8px 10px; border-top: 1px solid var(--border, #1E2535); flex-shrink: 0; text-align: right; }
+
+    /* ── Main column ───────────────────────────────────────────────── */
+    .main-col { flex: 1; display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
+
+    /* ── Top bar ───────────────────────────────────────────────────── */
+    .topbar {
+      height: 48px; background: var(--bg-secondary, #131720);
+      border-bottom: 1px solid var(--border, #1E2535);
+      display: flex; align-items: center; padding: 0 16px; gap: 10px; flex-shrink: 0;
+    }
+    .topbar__title { font-size: 14px; font-weight: 600; color: var(--text-primary, #E8EBF0); flex: 1; }
+    .topbar__title span { color: var(--text-muted, #6B7280); font-weight: 400; font-size: 13px; }
+
+    /* ── Pipeline progress bar ─────────────────────────────────────── */
+    .pipeline-bar { height: 3px; background: var(--bg-tertiary, #1C2232); overflow: hidden; display: none; }
+    .pipeline-bar.running { display: block; }
+    .pipeline-bar__fill { height: 100%; background: linear-gradient(90deg, var(--accent, #4A63E7), #7B8FFF); border-radius: 2px; width: 0; transition: width 400ms ease; }
+
+    /* ── Upload bar ────────────────────────────────────────────────── */
+    .upload-bar {
+      background: var(--bg-secondary, #131720); border-bottom: 1px solid var(--border, #1E2535);
+      padding: 10px 16px; display: flex; flex-direction: column; gap: 8px; flex-shrink: 0;
+    }
+    .upload-bar__row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .upload-zone {
+      flex: 1; border: 1.5px dashed var(--border, #1E2535); border-radius: 8px;
+      display: flex; align-items: center; justify-content: center; gap: 12px;
+      padding: 14px 20px; cursor: pointer; transition: all 160ms;
+      background: var(--bg-tertiary, #1C2232); min-height: 60px;
+    }
+    .upload-zone:hover, .upload-zone.drag-over { border-color: var(--accent, #4A63E7); background: var(--accent-subtle, rgba(74,99,231,.08)); }
+    .upload-zone i { color: var(--accent, #4A63E7); width: 24px; height: 24px; opacity: 0.7; }
+    .upload-zone__text { display: flex; flex-direction: column; gap: 2px; }
+    .upload-zone__primary { font-size: 13px; font-weight: 500; color: var(--text-primary, #E8EBF0); }
+    .upload-zone__hint { font-size: 11px; color: var(--text-muted, #6B7280); }
+    .upload-bar__sources { max-height: 120px; overflow-y: auto; }
+    .source-list { display: flex; flex-direction: column; gap: 4px; }
+    .source-item {
+      display: flex; align-items: center; gap: 8px; font-size: 12px;
+      padding: 4px 8px; border-radius: 4px; background: var(--bg-tertiary, #1C2232);
+    }
+    .source-item i { width: 14px; height: 14px; color: var(--accent, #4A63E7); flex-shrink: 0; }
+    .source-item__name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-primary, #E8EBF0); }
+    .source-item__rows { font-size: 10px; color: var(--text-muted, #6B7280); }
+    .source-item__remove { background: none; border: none; cursor: pointer; color: var(--text-muted, #6B7280); padding: 0; display: flex; }
+    .source-item__remove:hover { color: var(--critical, #E54848); }
+
+    /* ── Severity summary ──────────────────────────────────────────── */
+    .sev-summary {
+      background: var(--bg-secondary, #131720); border-bottom: 1px solid var(--border, #1E2535);
+      padding: 10px 16px; display: none; flex-shrink: 0;
+    }
+    .sev-summary.has-data { display: block; }
+    .sev-grid { display: flex; flex-direction: column; gap: 6px; }
+    .sev-row { display: flex; align-items: center; gap: 10px; }
+    .sev-row__label {
+      font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;
+      color: var(--text-muted, #6B7280); width: 76px; flex-shrink: 0;
+    }
+    .sev-row__boxes { display: flex; gap: 6px; }
+    .sev-box {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 5px 12px; border-radius: 6px; font-size: 11px; font-weight: 700;
+      cursor: pointer; transition: all 120ms; border: 1px solid transparent;
+      letter-spacing: 0.04em; user-select: none;
+    }
+    .sev-box:hover { filter: brightness(1.2); transform: translateY(-1px); }
+    .sev-box.filtered { box-shadow: 0 0 0 2px white; }
+    .sev-box__count { font-size: 15px; font-weight: 800; }
+    .sev-box--critical { background: rgba(229,72,72,.18); color: #E54848; border-color: rgba(229,72,72,.35); }
+    .sev-box--high     { background: rgba(255,138,60,.15); color: #FF8A3C; border-color: rgba(255,138,60,.3); }
+    .sev-box--medium   { background: rgba(224,196,70,.12); color: #E0C446; border-color: rgba(224,196,70,.25); }
+    .sev-box--low      { background: rgba(63,168,96,.12);  color: #3FA860; border-color: rgba(63,168,96,.25); }
+    .sev-total { font-size: 11px; color: var(--text-muted, #6B7280); margin-left: 4px; }
+
+    /* ── Tab bar ───────────────────────────────────────────────────── */
+    .tab-bar {
+      display: flex; align-items: center; background: var(--bg-secondary, #131720);
+      border-bottom: 1px solid var(--border, #1E2535); padding: 0 12px; flex-shrink: 0;
+    }
+    .tab-btn {
+      display: flex; align-items: center; gap: 6px; padding: 10px 14px;
+      font-size: 13px; font-weight: 500; color: var(--text-muted, #6B7280);
+      background: none; border: none; cursor: pointer; transition: all 140ms;
+      border-bottom: 2px solid transparent; margin-bottom: -1px; font-family: inherit;
+    }
+    .tab-btn:hover { color: var(--text-primary, #E8EBF0); }
+    .tab-btn.active { color: var(--accent, #4A63E7); border-bottom-color: var(--accent, #4A63E7); }
+    .tab-btn i { width: 16px; height: 16px; }
+    .tab-btn .badge {
+      font-size: 10px; padding: 1px 5px; border-radius: 10px;
+      background: var(--accent-subtle, rgba(74,99,231,.2)); color: var(--accent, #4A63E7);
+    }
+
+    /* ── Investigate layout ─────────────────────────────────────────── */
+    .investigate-layout { display: flex; flex: 1; overflow: hidden; }
+    .investigate-main { flex: 1; display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
+
+    /* ── Tab content ───────────────────────────────────────────────── */
+    .tab-content { flex: 1; overflow: hidden; display: none; }
+    .tab-content.active { display: flex; flex-direction: column; }
+    .tab-scroll { flex: 1; overflow-y: auto; padding: 16px; }
+
+    /* ── Persona chips ─────────────────────────────────────────────── */
+    .persona-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+    .persona-chip {
+      padding: 4px 12px; border-radius: 16px; font-size: 12px; font-weight: 600;
+      background: var(--bg-tertiary, #1C2232); border: 1px solid var(--border, #1E2535);
+      color: var(--text-muted, #6B7280); cursor: pointer; transition: all 120ms;
+    }
+    .persona-chip:hover { border-color: var(--accent, #4A63E7); color: var(--accent, #4A63E7); }
+    .persona-chip.active { background: var(--accent-subtle, rgba(74,99,231,.15)); border-color: var(--accent, #4A63E7); color: var(--accent, #4A63E7); }
+
+    /* ── Report panel ─────────────────────────────────────────────── */
+    .report-headline {
+      font-size: 17px; font-weight: 700; color: var(--text-primary, #E8EBF0);
+      padding: 14px 16px; border-radius: 8px; margin-bottom: 16px;
+      border-left: 4px solid var(--critical, #E54848);
+      background: linear-gradient(135deg, rgba(229,72,72,.08), transparent);
+    }
+    .report-section { margin-bottom: 20px; }
+    .report-section__title {
+      font-size: 12px; font-weight: 600; color: var(--text-muted, #6B7280);
+      text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px;
+      padding-bottom: 4px; border-bottom: 1px solid var(--border, #1E2535);
+    }
+    .report-section__body { font-size: 13px; line-height: 1.65; color: var(--text-secondary, #9CA3AF); }
+    .report-section__body ul { margin: 6px 0; padding-left: 20px; }
+    .report-section__body li { margin-bottom: 4px; }
+    .report-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+
+    /* ── Evidence table ────────────────────────────────────────────── */
+    .evidence-toolbar {
+      display: flex; align-items: center; gap: 8px; padding: 8px 16px;
+      flex-wrap: wrap; font-size: 12px; flex-shrink: 0;
+      border-bottom: 1px solid var(--border, #1E2535);
+    }
+    .filter-chip {
+      padding: 3px 10px; border-radius: 12px; font-size: 11px;
+      background: var(--bg-tertiary, #1C2232); border: 1px solid var(--border, #1E2535);
+      color: var(--text-muted, #6B7280); cursor: pointer; transition: all 120ms; font-family: inherit;
+    }
+    .filter-chip:hover, .filter-chip.active { background: var(--accent-subtle, rgba(74,99,231,.15)); color: var(--accent, #4A63E7); border-color: var(--accent, #4A63E7); }
+    .evidence-container { flex: 1; overflow: auto; }
+    .ev-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .ev-table th {
+      text-align: left; padding: 8px 12px; font-size: 11px; font-weight: 600;
+      color: var(--text-muted, #6B7280); text-transform: uppercase; letter-spacing: 0.04em;
+      background: var(--bg-tertiary, #1C2232); border-bottom: 1px solid var(--border, #1E2535);
+      white-space: nowrap; cursor: pointer; user-select: none; position: sticky; top: 0; z-index: 2;
+    }
+    .ev-table th:hover { color: var(--text-primary, #E8EBF0); }
+    .ev-table td { padding: 7px 12px; border-bottom: 1px solid rgba(255,255,255,0.04); vertical-align: middle; }
+    .ev-table tr:hover td { background: var(--bg-hover, rgba(255,255,255,0.03)); cursor: pointer; }
+    .ev-table tr.selected td { background: var(--accent-subtle, rgba(74,99,231,.08)); }
+    .sev-pill {
+      display: inline-block; padding: 2px 7px; border-radius: 4px;
+      font-size: 10px; font-weight: 700; letter-spacing: 0.04em;
+    }
+    .sev-pill--critical { background: rgba(229,72,72,.2); color: #E54848; }
+    .sev-pill--high     { background: rgba(255,138,60,.2); color: #FF8A3C; }
+    .sev-pill--medium   { background: rgba(224,196,70,.2); color: #E0C446; }
+    .sev-pill--low      { background: rgba(63,168,96,.2);  color: #3FA860; }
+    .type-pill {
+      display: inline-block; padding: 2px 7px; border-radius: 4px;
+      font-size: 10px; font-weight: 600; background: var(--bg-tertiary, #1C2232);
+      color: var(--text-muted, #6B7280); border: 1px solid var(--border, #1E2535);
+    }
+    .corr-icon { color: var(--accent, #4A63E7); font-size: 10px; }
+
+    /* ── Detail panel ─────────────────────────────────────────────── */
+    .detail-panel {
+      width: 360px; flex-shrink: 0; background: var(--bg-secondary, #131720);
+      border-left: 1px solid var(--border, #1E2535);
+      display: flex; flex-direction: column; overflow: hidden; transition: width 250ms ease;
+    }
+    .detail-panel--hidden { width: 0; border-left: none; overflow: hidden; }
+    .detail-panel__header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 14px; border-bottom: 1px solid var(--border, #1E2535);
+      font-size: 13px; font-weight: 600; flex-shrink: 0;
+    }
+    .detail-panel__body { flex: 1; overflow-y: auto; padding: 12px 14px; font-size: 13px; }
+    .detail-section { margin-bottom: 14px; }
+    .detail-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted, #6B7280); margin-bottom: 4px; }
+    .detail-value { color: var(--text-primary, #E8EBF0); line-height: 1.5; }
+    .detail-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+
+    /* ── Empty state ───────────────────────────────────────────────── */
+    .empty-state {
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 12px; padding: 60px 20px; color: var(--text-muted, #6B7280); text-align: center; flex: 1;
+    }
+    .empty-state i { width: 48px; height: 48px; opacity: 0.35; }
+    .empty-state__title { font-size: 16px; font-weight: 600; color: var(--text-secondary, #9CA3AF); margin: 0; }
+    .empty-state__hint { font-size: 13px; max-width: 400px; line-height: 1.6; margin: 0; }
+
+    /* ── Skeletons ─────────────────────────────────────────────────── */
+    @keyframes skel-pulse { 0%,100%{opacity:.5} 50%{opacity:1} }
+    .skeleton { border-radius: 4px; background: var(--bg-tertiary, #1C2232); animation: skel-pulse 1.5s ease-in-out infinite; margin-bottom: 10px; }
+    .skel-heading { height: 22px; width: 60%; }
+    .skel-text { height: 14px; }
+    .skel-block { height: 80px; }
+
+    /* ── Shared button helpers ─────────────────────────────────────── */
+    .btn-primary {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 8px 16px; border-radius: 6px; font-size: 13px; font-weight: 600;
+      background: var(--accent, #4A63E7); color: #fff; border: none; cursor: pointer;
+      transition: all 140ms; font-family: inherit;
+    }
+    .btn-primary:hover { background: #3a52d0; }
+    .btn-primary:disabled { opacity: 0.45; cursor: not-allowed; }
+    .btn-secondary {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 6px 12px; border-radius: 6px; font-size: 12px; font-weight: 500;
+      background: var(--bg-tertiary, #1C2232); color: var(--text-secondary, #9CA3AF);
+      border: 1px solid var(--border, #1E2535); cursor: pointer; transition: all 140ms; font-family: inherit;
+    }
+    .btn-secondary:hover { border-color: var(--accent, #4A63E7); color: var(--text-primary, #E8EBF0); }
+    .btn-detach {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 4px 8px; border-radius: 4px; font-size: 11px;
+      background: none; color: var(--text-muted, #6B7280);
+      border: 1px solid var(--border, #1E2535); cursor: pointer; font-family: inherit;
+    }
+    .btn-detach:hover { color: var(--accent, #4A63E7); border-color: var(--accent, #4A63E7); }
+    .btn-danger {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 5px 10px; border-radius: 5px; font-size: 12px;
+      background: rgba(229,72,72,.1); color: #E54848;
+      border: 1px solid rgba(229,72,72,.3); cursor: pointer; font-family: inherit;
+    }
+    .btn-danger:hover { background: rgba(229,72,72,.2); }
+
+    /* ── Toast ─────────────────────────────────────────────────────── */
+    .toast-container { position: fixed; bottom: 20px; right: 20px; display: flex; flex-direction: column; gap: 8px; z-index: 9999; }
+    .toast {
+      display: flex; align-items: center; gap: 10px; padding: 10px 16px;
+      background: var(--bg-elevated, #1E2535); border: 1px solid var(--border, #1E2535);
+      border-radius: 8px; font-size: 13px; color: var(--text-primary, #E8EBF0);
+      box-shadow: 0 4px 16px rgba(0,0,0,0.4); animation: toastIn 200ms ease; max-width: 360px;
+    }
+    @keyframes toastIn { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
+    .toast--error { border-color: rgba(229,72,72,.4); }
+    .toast--success { border-color: rgba(63,168,96,.4); }
+
+    /* ── Misc ──────────────────────────────────────────────────────── */
+    .text-xs { font-size: 11px; }
+    .text-sm { font-size: 13px; }
+    .text-muted { color: var(--text-muted, #6B7280); }
+    .text-secondary { color: var(--text-secondary, #9CA3AF); }
+    select { background: var(--bg-tertiary, #1C2232); color: var(--text-primary, #E8EBF0); border: 1px solid var(--border, #1E2535); border-radius: 6px; padding: 5px 10px; font-size: 12px; outline: none; cursor: pointer; font-family: inherit; }
+    select:focus { border-color: var(--accent, #4A63E7); }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border, #1E2535); border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--text-muted, #6B7280); }
+  </style>
+</head>
+<body>
+<div class="page">
+
+  <!-- ═══ SIDEBAR: Home / Investigate / Settings ═══ -->
+  <nav class="sidebar" role="navigation" aria-label="Main navigation">
+    <div class="sidebar__logo">
+      <i data-lucide="shield-check"></i>
+      JanuSec
+      <span class="sidebar__beta">beta</span>
+    </div>
+    <div class="nav-section">
+      <!-- Home = LIVE console (real-time streaming) -->
+      <a class="nav-item" href="/" aria-label="Home — LIVE Dashboard">
+        <i data-lucide="monitor"></i>
+        Home
+        <span class="nav-badge-alpha">Live</span>
+      </a>
+      <!-- Investigate = current page — manual upload -->
+      <button class="nav-item active" aria-label="Investigate" onclick="return false;" style="cursor:default;">
+        <i data-lucide="search"></i>
+        Investigate
+      </button>
+      <!-- History panel toggle -->
+      <button class="nav-item" id="btnToggleHistory" aria-label="Assessment History" onclick="toggleHistorySidebar()">
+        <i data-lucide="history"></i>
+        History
+      </button>
+    </div>
+    <div class="sidebar__spacer"></div>
+    <div class="nav-section">
+      <!-- Settings = integrations + admin + AI config -->
+      <a class="nav-item" href="/static/integrations.html" aria-label="Settings">
+        <i data-lucide="settings"></i>
+        Settings
+      </a>
+    </div>
+  </nav>
+
+  <!-- ═══ HISTORY SIDEBAR ═══ -->
+  <aside class="history-sidebar" id="historySidebar" aria-label="Assessment History" hidden>
+    <div class="history-header">
+      <span class="history-title">History</span>
+      <button class="history-close" onclick="toggleHistorySidebar()" aria-label="Close history">
+        <i data-lucide="x" style="width:14px;height:14px;"></i>
+      </button>
+    </div>
+    <div class="history-search">
+      <input type="search" id="historySearchInput" placeholder="Filter assessments…" oninput="renderHistory()">
+    </div>
+    <div class="history-list" id="historyList">
+      <p class="history-empty">No previous assessments.</p>
+    </div>
+    <div class="history-footer">
+      <button class="btn-secondary" style="font-size:11px;padding:3px 8px;" onclick="clearHistory()">Clear All</button>
+    </div>
+  </aside>
+
+  <!-- ═══ MAIN COLUMN ═══ -->
+  <div class="main-col">
+
+    <!-- Top bar -->
+    <header class="topbar">
+      <div class="topbar__title">
+        Investigation Console
+        <span>— Unified Analysis</span>
+      </div>
+      <select id="personaSelect" aria-label="Active persona">
+        <option value="soc_analyst">SOC Analyst</option>
+        <option value="ciso">CISO</option>
+        <option value="executive">Executive</option>
+        <option value="threat_hunter">Threat Hunter</option>
+        <option value="forensics">Forensics</option>
+        <option value="compliance">Compliance</option>
+        <option value="audit">Audit</option>
+        <option value="mssp">MSSP</option>
+      </select>
+      <button class="btn-secondary" id="btnKeyboardHelp" aria-label="Keyboard shortcuts" title="Ctrl+1–4 switch tabs, Ctrl+Shift+D detach">
+        <i data-lucide="keyboard" style="width:14px;height:14px;"></i>
+      </button>
+    </header>
+
+    <!-- Pipeline loading bar -->
+    <div class="pipeline-bar" id="pipelineBar">
+      <div class="pipeline-bar__fill" id="pipelineBarFill"></div>
+    </div>
+
+    <!-- ── UPLOAD BAR ── always visible ── -->
+    <section class="upload-bar" id="uploadBar">
+      <!-- Drop zone row (shown when no files loaded) -->
+      <div class="upload-bar__row" id="dropZoneRow">
+        <div class="upload-zone" id="uploadZone" role="button" tabindex="0" aria-label="Upload log files">
+          <i data-lucide="upload-cloud"></i>
+          <div class="upload-zone__text">
+            <div class="upload-zone__primary">Drop files here or click to browse</div>
+            <div class="upload-zone__hint">CSV, XLSX, JSON, JSONL — single or multiple files, AWS/Azure log packs</div>
+          </div>
+        </div>
+        <input type="file" id="fileInput" multiple accept=".csv,.xlsx,.xls,.json,.jsonl,.zip,.gz" style="display:none">
+      </div>
+      <!-- Source list row (shown after files loaded) -->
+      <div class="upload-bar__row" id="sourceListRow" style="display:none;">
+        <div style="flex:1;">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+            <span class="text-xs text-muted" style="font-weight:600;text-transform:uppercase;letter-spacing:0.04em;">Sources</span>
+            <span id="sourceSummary" class="text-xs text-muted"></span>
+            <span id="pipelineStatusChip" style="display:none;font-size:11px;padding:2px 10px;border-radius:10px;background:rgba(63,168,96,.18);color:#3FA860;border:1px solid rgba(63,168,96,.3);">
+              Pipeline ✓
+            </span>
+            <div style="flex:1;"></div>
+            <button class="btn-secondary" id="btnAddMore" style="padding:3px 8px;font-size:11px;">
+              <i data-lucide="plus" style="width:12px;height:12px;"></i> Add files
+            </button>
+            <button class="btn-secondary" id="btnClearSources" style="padding:3px 8px;font-size:11px;">
+              <i data-lucide="x" style="width:12px;height:12px;"></i> Clear
+            </button>
+            <a href="/static/connectors.html" class="btn-secondary" style="padding:3px 10px;font-size:11px;" title="Connect live AWS/Azure/Splunk streams">
+              <i data-lucide="radio" style="width:12px;height:12px;"></i> Connect Live Stream
+            </a>
+          </div>
+          <div class="source-list upload-bar__sources" id="sourceList"></div>
+        </div>
+        <button class="btn-primary" id="btnAnalyze" disabled>
+          <i data-lucide="play" style="width:16px;height:16px;"></i> Analyze
+        </button>
+      </div>
+    </section>
+
+    <!-- ── SEVERITY SUMMARY — shown after analysis ── -->
+    <section class="sev-summary" id="sevSummary" aria-label="Severity breakdown">
+      <div class="sev-grid">
+        <!-- Correlated row -->
+        <div class="sev-row">
+          <span class="sev-row__label">Correlated</span>
+          <div class="sev-row__boxes">
+            <div class="sev-box sev-box--critical" data-filter="correlated-critical" title="Correlated critical events">
+              <span class="sev-box__count" id="sc_crit">0</span> CRIT
+            </div>
+            <div class="sev-box sev-box--high" data-filter="correlated-high" title="Correlated high events">
+              <span class="sev-box__count" id="sc_high">0</span> HIGH
+            </div>
+            <div class="sev-box sev-box--medium" data-filter="correlated-medium" title="Correlated medium events">
+              <span class="sev-box__count" id="sc_med">0</span> MED
+            </div>
+            <div class="sev-box sev-box--low" data-filter="correlated-low" title="Correlated low events">
+              <span class="sev-box__count" id="sc_low">0</span> LOW
+            </div>
+          </div>
+          <span class="sev-total" id="sc_total">0 total</span>
+        </div>
+        <!-- Isolated row -->
+        <div class="sev-row">
+          <span class="sev-row__label">Isolated</span>
+          <div class="sev-row__boxes">
+            <div class="sev-box sev-box--critical" data-filter="isolated-critical" title="Single-source critical events">
+              <span class="sev-box__count" id="si_crit">0</span> CRIT
+            </div>
+            <div class="sev-box sev-box--high" data-filter="isolated-high" title="Single-source high events">
+              <span class="sev-box__count" id="si_high">0</span> HIGH
+            </div>
+            <div class="sev-box sev-box--medium" data-filter="isolated-medium" title="Single-source medium events">
+              <span class="sev-box__count" id="si_med">0</span> MED
+            </div>
+            <div class="sev-box sev-box--low" data-filter="isolated-low" title="Single-source low events">
+              <span class="sev-box__count" id="si_low">0</span> LOW
+            </div>
+          </div>
+          <span class="sev-total" id="si_total">0 total</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══ INVESTIGATION LAYOUT: tabs + detail panel ═══ -->
+    <div class="investigate-layout">
+      <div class="investigate-main">
+
+        <!-- Tab bar -->
+        <div class="tab-bar" role="tablist">
+          <button class="tab-btn active" role="tab" data-tab="report" aria-selected="true">
+            <i data-lucide="file-text"></i> Report
+          </button>
+          <button class="tab-btn" role="tab" data-tab="evidence" aria-selected="false">
+            <i data-lucide="table-2"></i> Evidence
+            <span class="badge" id="evidenceBadge" style="display:none;">0</span>
+          </button>
+          <button class="tab-btn" role="tab" data-tab="graph" aria-selected="false">
+            <i data-lucide="git-branch"></i> Graph
+          </button>
+          <button class="tab-btn" role="tab" data-tab="timeline" aria-selected="false">
+            <i data-lucide="clock"></i> Timeline
+          </button>
+          <div style="flex:1;"></div>
+          <button class="btn-detach" id="btnDetachActive" title="Detach current tab to new window">
+            <i data-lucide="external-link" style="width:13px;height:13px;"></i> Detach
+          </button>
+        </div>
+
+        <!-- ── TAB: Report ── -->
+        <div class="tab-content active" id="tabReport" role="tabpanel" aria-label="Report">
+          <div class="tab-scroll">
+            <!-- Empty state -->
+            <div id="reportEmpty" class="empty-state">
+              <i data-lucide="file-text"></i>
+              <p class="empty-state__title">No investigation loaded</p>
+              <p class="empty-state__hint">Upload security logs above and click <strong>Analyze</strong> to generate a persona-tailored report with actionable findings.</p>
+            </div>
+
+            <!-- Loading skeleton -->
+            <div id="reportLoading" style="display:none;">
+              <div class="skeleton skel-heading" style="width:55%;margin-bottom:14px;"></div>
+              <div class="skeleton skel-text" style="width:85%;"></div>
+              <div class="skeleton skel-text" style="width:70%;"></div>
+              <div class="skeleton skel-block" style="margin:12px 0;"></div>
+              <div class="skeleton skel-text" style="width:90%;"></div>
+              <div class="skeleton skel-text" style="width:60%;"></div>
+            </div>
+
+            <!-- Report content -->
+            <div id="reportContent" style="display:none;">
+              <!-- Persona chips + export actions -->
+              <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap;">
+                <div class="persona-chips" id="personaChips">
+                  <button class="persona-chip active" data-persona="soc_analyst">SOC</button>
+                  <button class="persona-chip" data-persona="ciso">CISO</button>
+                  <button class="persona-chip" data-persona="executive">Executive</button>
+                  <button class="persona-chip" data-persona="forensics">Forensics</button>
+                  <button class="persona-chip" data-persona="threat_hunter">TH</button>
+                  <button class="persona-chip" data-persona="compliance">Compliance</button>
+                  <button class="persona-chip" data-persona="audit">Audit</button>
+                  <button class="persona-chip" data-persona="mssp">MSSP</button>
+                </div>
+                <div style="flex:1;"></div>
+                <button class="btn-secondary" id="btnExportPDF" style="font-size:11px;padding:4px 10px;">
+                  <i data-lucide="download" style="width:12px;height:12px;"></i> PDF
+                </button>
+                <button class="btn-secondary" id="btnSendSIEM" style="font-size:11px;padding:4px 10px;">
+                  <i data-lucide="send" style="width:12px;height:12px;"></i> Send to SIEM
+                </button>
+              </div>
+
+              <!-- P-tier headline -->
+              <div class="report-headline" id="reportHeadline">
+                P1 — Investigation complete
+              </div>
+
+              <!-- Report sections -->
+              <div id="reportBody" class="report-panel"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── TAB: Evidence ── -->
+        <div class="tab-content" id="tabEvidence" role="tabpanel" aria-label="Evidence table">
+          <div class="evidence-toolbar" id="evidenceToolbar">
+            <span class="text-xs text-muted" style="font-weight:600;">FILTER:</span>
+            <button class="filter-chip active" data-ev-filter="all">All</button>
+            <button class="filter-chip" data-ev-filter="correlated">Correlated</button>
+            <button class="filter-chip" data-ev-filter="isolated">Isolated</button>
+            <span style="width:1px;height:16px;background:var(--border);margin:0 2px;"></span>
+            <button class="filter-chip" data-ev-filter="critical">Critical</button>
+            <button class="filter-chip" data-ev-filter="high">High</button>
+            <button class="filter-chip" data-ev-filter="medium">Medium</button>
+            <button class="filter-chip" data-ev-filter="low">Low</button>
+            <div style="flex:1;"></div>
+            <span class="text-xs text-muted" id="evidenceCount"></span>
+            <button class="btn-secondary" id="btnExportEvidence" style="padding:3px 8px;font-size:11px;">
+              <i data-lucide="download" style="width:12px;height:12px;"></i> Export CSV
+            </button>
+          </div>
+          <div class="evidence-container">
+            <table class="ev-table" id="evidenceTable" style="display:none;">
+              <thead>
+                <tr>
+                  <th data-sort="row_index" style="width:40px">#</th>
+                  <th data-sort="correlated" style="width:30px" title="Correlated"></th>
+                  <th data-sort="source">Source</th>
+                  <th data-sort="severity" style="width:65px">Sev</th>
+                  <th data-sort="type" style="width:80px">Type</th>
+                  <th data-sort="entity">Entity</th>
+                  <th data-sort="description">Description</th>
+                  <th data-sort="triage_score" style="width:55px">Score</th>
+                  <th style="width:44px" title="On-demand LLM summary">LLM</th>
+                </tr>
+              </thead>
+              <tbody id="evidenceBody"></tbody>
+            </table>
+            <div id="evidenceEmpty" class="empty-state">
+              <i data-lucide="table-2"></i>
+              <p class="empty-state__title">No evidence loaded</p>
+              <p class="empty-state__hint">Upload and analyze files to populate the evidence table. Use correlated/isolated filter buttons and severity chips to drill down.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── TAB: Graph (HopGraph) ── -->
+        <div class="tab-content" id="tabGraph" role="tabpanel" aria-label="HopGraph correlation">
+          <div style="display:flex;flex:1;overflow:hidden;gap:0;">
+            <!-- Graph canvas -->
+            <div style="flex:1;display:flex;flex-direction:column;min-width:0;padding:12px;">
+              <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-shrink:0;">
+                <span class="text-xs text-muted" style="font-weight:600;text-transform:uppercase;letter-spacing:0.04em;">HopGraph Correlation</span>
+                <div style="flex:1;"></div>
+                <button class="btn-secondary" id="btnGraphZoomFit" style="padding:3px 8px;font-size:11px;">
+                  <i data-lucide="maximize-2" style="width:12px;height:12px;"></i> Fit
+                </button>
+                <button class="btn-secondary" id="btnGraphLayout" style="padding:3px 8px;font-size:11px;">Layout</button>
+              </div>
+              <div id="graphEmpty" class="empty-state" style="flex:1;">
+                <i data-lucide="git-branch"></i>
+                <p class="empty-state__title">HopGraph Visualization</p>
+                <p class="empty-state__hint">Entity correlation graph appears after analysis. Shows cross-source relationships between identities, IPs, resources, and detections.</p>
+              </div>
+              <div id="graphCanvas" style="display:none;flex:1;background:var(--bg-tertiary);border-radius:8px;border:1px solid var(--border);overflow:hidden;"></div>
+              <!-- Timeline strip (collapsed) -->
+              <div id="graphTimeline" style="display:none;margin-top:8px;background:var(--bg-tertiary);border-radius:6px;border:1px solid var(--border);padding:10px 14px;flex-shrink:0;">
+                <div class="text-xs text-muted" style="font-weight:600;margin-bottom:6px;">TIMELINE</div>
+                <div id="graphTimelineCanvas" style="min-height:60px;overflow-x:auto;"></div>
+              </div>
+            </div>
+            <!-- Graph detail panel -->
+            <div id="graphDetailPanel" style="width:280px;flex-shrink:0;background:var(--bg-secondary);border-left:1px solid var(--border);padding:12px 14px;overflow-y:auto;display:none;">
+              <div style="font-size:12px;font-weight:600;margin-bottom:12px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.04em;">Entity Detail</div>
+              <div id="graphDetailBody">
+                <p class="text-sm text-muted">Click a node to inspect.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── TAB: Timeline ── -->
+        <div class="tab-content" id="tabTimeline" role="tabpanel" aria-label="Attack timeline">
+          <div class="tab-scroll" style="padding:12px;">
+            <div id="timelineEmpty" class="empty-state">
+              <i data-lucide="clock"></i>
+              <p class="empty-state__title">Attack Timeline</p>
+              <p class="empty-state__hint">Horizontal swimlane timeline showing events by source over time. Correlated chains are highlighted. Available after multi-source analysis.</p>
+            </div>
+            <div id="timelineContent" style="display:none;">
+              <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+                <span class="text-xs text-muted" style="font-weight:600;text-transform:uppercase;letter-spacing:0.04em;">Temporal Correlation — Swimlane View</span>
+                <div style="flex:1;"></div>
+              </div>
+              <div id="timelineCanvas" style="min-height:300px;background:var(--bg-tertiary);border-radius:8px;border:1px solid var(--border);padding:16px;overflow-x:auto;"></div>
+            </div>
+          </div>
+        </div>
+
+      </div><!-- /investigate-main -->
+
+      <!-- ── DETAIL PANEL (row drill-down, slides in from right) ── -->
+      <div class="detail-panel detail-panel--hidden" id="detailPanel" aria-label="Event detail">
+        <div class="detail-panel__header">
+          <span id="detailTitle">Event Detail</span>
+          <div style="display:flex;gap:5px;">
+            <button class="btn-detach" id="btnDetachDetail" title="Open in new window">
+              <i data-lucide="external-link" style="width:13px;height:13px;"></i>
+            </button>
+            <button class="btn-secondary" id="btnCloseDetail" style="padding:3px 8px;" aria-label="Close detail panel">
+              <i data-lucide="x" style="width:14px;height:14px;"></i>
+            </button>
+          </div>
+        </div>
+        <div class="detail-panel__body" id="detailBody">
+          <p class="text-sm text-muted">Select a row in the evidence table to view details, DREAD breakdown, RAG neighbours, and per-row LLM summary.</p>
+        </div>
+      </div>
+
+    </div><!-- /investigate-layout -->
+  </div><!-- /main-col -->
+</div><!-- /page -->
+
+<div class="toast-container" id="toastContainer"></div>
+
+<script src="/static/js/investigate.js"></script>
+<script>
+  // Severity box click → filter evidence table
+  document.querySelectorAll('.sev-box').forEach(box => {
+    box.addEventListener('click', () => {
+      const filter = box.getAttribute('data-filter') || 'all';
+      document.querySelectorAll('.sev-box').forEach(b => b.classList.remove('filtered'));
+      box.classList.add('filtered');
+      if (window._invFilterBySev) window._invFilterBySev(filter);
+    });
+  });
+  // History sidebar toggle
+  function toggleHistorySidebar() {
+    const el = document.getElementById('historySidebar');
+    if (el) { el.hidden = !el.hidden; }
+  }
+  function clearHistory() {
+    try { localStorage.removeItem('inv_history'); } catch(_) {}
+    renderHistory();
+  }
+  function renderHistory() {
+    const list = document.getElementById('historyList');
+    if (!list) return;
+    let items = [];
+    try { items = JSON.parse(localStorage.getItem('inv_history') || '[]'); } catch(_) { items = []; }
+    const q = (document.getElementById('historySearchInput') || {}).value || '';
+    if (q) items = items.filter(i => (i.headline || '').toLowerCase().includes(q.toLowerCase()));
+    if (!items.length) { list.innerHTML = '<p class="history-empty">No previous assessments.</p>'; return; }
+    list.innerHTML = items.map((it, idx) => `
+      <div class="history-item" onclick="loadHistoryItem(${idx})">
+        <div class="history-item__headline">${it.headline || 'Assessment'}</div>
+        <div class="history-item__meta">${it.date || ''} &bull; ${it.rows || 0} rows</div>
+      </div>`).join('');
+  }
+  function loadHistoryItem(idx) {
+    try {
+      const items = JSON.parse(localStorage.getItem('inv_history') || '[]');
+      if (items[idx] && window._invLoadFromHistory) window._invLoadFromHistory(items[idx]);
+    } catch(_) {}
+  }
+  // Keyboard shortcuts: Ctrl+1-4 switch tabs
+  document.addEventListener('keydown', e => {
+    if (e.ctrlKey && !e.shiftKey) {
+      const tabMap = { '1': 'report', '2': 'evidence', '3': 'graph', '4': 'timeline' };
+      if (tabMap[e.key]) {
+        e.preventDefault();
+        const btn = document.querySelector(`.tab-btn[data-tab="${tabMap[e.key]}"]`);
+        if (btn) btn.click();
+      }
+    }
+  });
+  // Detach current active tab to new window
+  document.getElementById('btnDetachActive').addEventListener('click', () => {
+    const active = document.querySelector('.tab-btn.active');
+    const tabName = active ? active.getAttribute('data-tab') : 'report';
+    const w = window.open('', '_blank', 'width=1100,height=800');
+    if (!w) { alert('Enable popups for detach.'); return; }
+    const tabEl = document.getElementById('tab' + tabName.charAt(0).toUpperCase() + tabName.slice(1));
+    if (tabEl) {
+      w.document.write(`<html><head><title>JanuSec — ${tabName}</title><base href="${location.origin}"/><link rel="stylesheet" href="/static/css/theme.css"><link rel="stylesheet" href="/static/css/theme-pro.css"></head><body style="margin:0;height:100vh;overflow:auto;background:#0B0E14;color:#E8EBF0;">${tabEl.innerHTML}</body></html>`);
+    }
+  });
+  // Lucide icons
+  lucide.createIcons();
+</script>
+</body>
+</html>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>JanuSec â€” Investigation Console</title>
   <link rel="stylesheet" href="/static/css/theme.css">
   <link rel="stylesheet" href="/static/css/theme-pro.css">
@@ -221,8 +1003,14 @@
             <span class="text-xs text-muted" style="font-weight:600;text-transform:uppercase;letter-spacing:0.04em;">Sources</span>
             <span id="sourceSummary" class="text-xs text-muted"></span>
             <div style="flex:1"></div>
-            <button class="btn-secondary" id="btnAddMore" style="padding:3px 8px;font-size:11px;"><i data-lucide="plus" style="width:12px;height:12px;"></i> Add more</button>
+            <!-- Pipeline status chip -->
+            <span id="pipelineStatus" style="display:none;font-size:11px;padding:2px 8px;border-radius:10px;background:rgba(74,99,231,.2);color:var(--accent);">Pipeline ✓</span>
+            <button class="btn-secondary" id="btnAddMore" style="padding:3px 8px;font-size:11px;"><i data-lucide="plus" style="width:12px;height:12px;"></i> Add files</button>
             <button class="btn-secondary" id="btnClearSources" style="padding:3px 8px;font-size:11px;"><i data-lucide="x" style="width:12px;height:12px;"></i> Clear</button>
+            <!-- Live stream CTA -->
+            <a href="/static/connectors.html" class="btn-secondary" style="padding:3px 10px;font-size:11px;display:flex;align-items:center;gap:4px;" title="Connect AWS/Azure/Splunk live streams">
+              <i data-lucide="radio" style="width:12px;height:12px;"></i> Connect Live Stream
+            </a>
           </div>
           <div class="source-list upload-bar__sources" id="sourceList"></div>
         </div>
