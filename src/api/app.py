@@ -6253,6 +6253,24 @@ try:
         logger.debug('Failed to include ingest router')
 except Exception:
     logger.debug('ingest_api module not present or failed to import')
+# EventBridge HTTPS webhook target endpoint (P1)
+try:
+    from .ingest_eventbridge import router as eventbridge_ingest_router
+    try:
+        app.include_router(eventbridge_ingest_router)
+    except Exception:
+        logger.debug('Failed to include EventBridge ingest router')
+except Exception:
+    logger.debug('ingest_eventbridge module not present or failed to import')
+# Tenant onboarding / provisioning endpoint
+try:
+    from .tenant_provisioning import router as tenant_provision_router
+    try:
+        app.include_router(tenant_provision_router)
+    except Exception:
+        logger.debug('Failed to include tenant_provisioning router')
+except Exception:
+    logger.debug('tenant_provisioning module not present or failed to import')
 try:
     from .kape_jobs_endpoints import router as kape_jobs_router
     try:
