@@ -14,6 +14,8 @@ Env vars:
     KAFKA_CONSUMER_GROUP        — consumer group id (default janusec.pipeline-workers)
     KAFKA_INPUT_TOPIC           — topic to consume from (default janusec.normalized)
     KAFKA_OUTPUT_TOPIC          — topic to produce to (default janusec.decisions)
+    KAFKA_ASSESSMENT_TOPIC      — topic for assessment requests (default janusec.assessment.requests)
+    KAFKA_ASSESSMENT_RESULTS_TOPIC — topic for assessment results (default janusec.assessment.results)
     KAFKA_INGEST_TOPICS         — comma-separated input topics for fan-in (overrrides INPUT_TOPIC)
     KAFKA_POLL_TIMEOUT_MS       — consumer poll timeout ms (default 1000)
     KAFKA_BATCH_SIZE            — max records per poll (default 100)
@@ -62,6 +64,12 @@ class KafkaSettings:
     )
     output_topic: str = field(
         default_factory=lambda: os.getenv('KAFKA_OUTPUT_TOPIC', 'janusec.decisions')
+    )
+    assessment_topic: str = field(
+        default_factory=lambda: os.getenv('KAFKA_ASSESSMENT_TOPIC', 'janusec.assessment.requests')
+    )
+    assessment_results_topic: str = field(
+        default_factory=lambda: os.getenv('KAFKA_ASSESSMENT_RESULTS_TOPIC', 'janusec.assessment.results')
     )
     poll_timeout_ms: int = field(
         default_factory=lambda: int(os.getenv('KAFKA_POLL_TIMEOUT_MS', '1000'))
