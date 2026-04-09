@@ -142,3 +142,33 @@ async def publish_audit(record: dict) -> bool:
     """Append an immutable audit record to the audit topic."""
     record.setdefault('audit_ts', time.time())
     return await _publish('audit', record, key=str(record.get('audit_ts', '')))
+
+
+async def publish_assessment_request(
+    payload: dict,
+    tenant_id: str = 'default',
+    assessment_id: str | None = None,
+) -> bool:
+    """Publish an assessment/deep-analyze request to the assessment queue."""
+    aid = assessment_id or payload.get('assessment_id') or payload.get('session_id') or ''
+    key = f'{tenant_id}:{aid}'
+    topic = 'assessment.requests'
+    settings = _get_settings()
+    if settings and getattr(settings, 'assessment_topic', ''):
+        topic = settings.assessment_topic
+    return await _publish(topic, payload, key=key)
+
+
+async def publish_assessment_result(
+    payload: dict,
+    tenant_id: str = 'default',
+    assessment_id: str | None = None,
+) -> bool:
+    """Publish an assessment/deep-analyze result to the assessment results topic."""
+    aid = assessment_id or payload.get('assessment_id') or payload.get('report_id') or ''
+    key = f'{tenant_id}:{aid}'
+    topic = 'assessment.results'
+    settings = _get_settings()
+    if settings and getattr(settings, 'assessment_results_topic', ''):
+        topic = settings.assessment_results_topic
+    return await _publish(topic, payload, key=key)
