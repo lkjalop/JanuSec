@@ -7,6 +7,9 @@ import json
 import os
 import logging
 import sys
+import re
+import ipaddress
+from collections import defaultdict
 from fastapi import APIRouter, Request, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, Response
 
@@ -54,6 +57,10 @@ from src.analysis.deep_analyze_utils import (
     map_to_maestro,
     map_to_diamond,
 )
+try:
+    from src.analysis.explain_mapping import map_factors_to_tags
+except Exception:
+    map_factors_to_tags = None  # type: ignore
 from src.analysis.domain_tools import build_collection_playbook, get_logs_for_mitre, get_tools_for_domain
 from src.analysis.correlation_context import (
     build_attack_chain_visualization,
@@ -88,6 +95,10 @@ from src.reporting.persona_parser import parse_persona_text, validate_parsed_per
 from src.reporting.feedback_capture import persist_feedback
 from src.analysis.cost_tracker import EXTERNAL_TRACKER, LOCAL_TRACKER
 from src.api.persist_utils import atomic_write_json
+try:
+    from src.graph.ingest import ingest_event as ingest_hopgraph_event
+except Exception:
+    ingest_hopgraph_event = None  # type: ignore
 # Attempt to load ML model for ml_score from data/models/ml_score.pkl
 MODEL_BUNDLE = None
 try:
@@ -158,6 +169,76 @@ def publish_llm_event(assessment_id: str, event: dict):
 
 # ── WebSocket pipeline progress ─────────────────────────────────────────────
 _WS_CONNECTIONS: dict[str, list] = {}
+
+
+def _extract_row_timestamp_value(row: dict | None) -> float | None:
+    if not isinstance(row, dict):
+        return None
+    for key in (
+        "timestamp",
+        "Timestamp",
+        "ts",
+        "event_ts",
+        "createdDateTime",
+        "activityDateTime",
+        "eventTimestamp",
+        "eventTime",
+        "TimeGenerated",
+        "time",
+        "date",
+        "Date",
+    ):
+        raw = row.get(key)
+        if raw in (None, "", [], {}):
+            continue
+        try:
+            if isinstance(raw, (int, float)):
+                return float(raw)
+            text = str(raw).strip()
+            if not text:
+                continue
+            if text.endswith("Z"):
+                text = text[:-1] + "+00:00"
+            return datetime.datetime.fromisoformat(text).timestamp()
+        except Exception:
+            continue
+    return None
+
+
+def _ingest_rows_to_hopgraph(rows: list[dict], assessment_id: str) -> dict[str, Any]:
+    if ingest_hopgraph_event is None:
+        return {"ingested": 0, "timeline_rows": 0, "timespan_seconds": 0.0}
+    ingested = 0
+    ts_values: list[float] = []
+    for idx, wrapper in enumerate(rows[:1000]):
+        base = wrapper.get("raw") if isinstance(wrapper, dict) and isinstance(wrapper.get("raw"), dict) else wrapper
+        if not isinstance(base, dict):
+            continue
+        event = dict(base)
+        event.setdefault("src_host", base.get("src_host") or base.get("source_host") or base.get("host") or base.get("hostname") or base.get("Computer"))
+        event.setdefault("host", base.get("host") or base.get("hostname") or base.get("Computer"))
+        event.setdefault("dst_ip", base.get("dst_ip") or base.get("destination_ip") or base.get("server_ip") or base.get("ipAddress") or base.get("ip"))
+        event.setdefault("domain", base.get("domain") or base.get("hostname") or base.get("host") or base.get("sni"))
+        event.setdefault("process", base.get("process") or base.get("process_name") or base.get("Image"))
+        ts_value = _extract_row_timestamp_value(base)
+        if ts_value is not None:
+            event["ts"] = ts_value
+            ts_values.append(ts_value)
+        else:
+            event["ts"] = time.time()
+        try:
+            ingest_hopgraph_event(event, source=f"assessment:{assessment_id}")
+            ingested += 1
+        except Exception:
+            continue
+    timespan = 0.0
+    if len(ts_values) >= 2:
+        timespan = max(ts_values) - min(ts_values)
+    return {
+        "ingested": ingested,
+        "timeline_rows": len(ts_values),
+        "timespan_seconds": round(timespan, 3),
+    }
 
 
 @router.websocket('/ws/progress/{assessment_id}')
@@ -235,6 +316,108 @@ def _get_trag_engine():
         return get_engine()
     except Exception:
         return None
+
+
+def _coerce_tag_list(value: Any) -> List[str]:
+    tags: List[str] = []
+
+    def _append(entry: Any) -> None:
+        if entry is None:
+            return
+        if isinstance(entry, dict):
+            for key in ("id", "technique", "technique_id", "name", "value"):
+                if entry.get(key):
+                    _append(entry.get(key))
+                    return
+            for nested in entry.values():
+                _append(nested)
+            return
+        if isinstance(entry, (list, tuple, set)):
+            for nested in entry:
+                _append(nested)
+            return
+        text = str(entry).strip()
+        if text and text not in tags:
+            tags.append(text)
+
+    _append(value)
+    return tags
+
+
+def _collect_factor_inputs(rows: List[dict] | None = None, *sources: Any) -> List[str]:
+    factors: List[str] = []
+
+    def _append_factor(value: Any) -> None:
+        if value is None:
+            return
+        if isinstance(value, str):
+            text = value.strip()
+            if text and text not in factors:
+                factors.append(text)
+            return
+        if isinstance(value, (list, tuple, set)):
+            for item in value:
+                _append_factor(item)
+            return
+        if isinstance(value, dict):
+            if value.get("factor"):
+                _append_factor(value.get("factor"))
+            if value.get("name"):
+                _append_factor(value.get("name"))
+            return
+
+    for source in list(sources) + list(rows or []):
+        if not isinstance(source, dict):
+            continue
+        _append_factor(source.get("factors"))
+        _append_factor(source.get("factor_names"))
+        mapping_tags = source.get("mapping_tags") or {}
+        if isinstance(mapping_tags, dict):
+            _append_factor(mapping_tags.get("factors"))
+
+    return factors
+
+
+def _build_mapping_bundle(canonical: Dict[str, Any] | None, rows: List[dict] | None = None, factors: List[str] | None = None) -> Dict[str, Any]:
+    canonical = canonical or {}
+    rows = rows or []
+    factor_inputs = _collect_factor_inputs(rows, canonical, {"factors": factors or []})
+
+    mitre = _coerce_tag_list(map_to_mitre(canonical))
+    stride = _coerce_tag_list(map_to_stride(canonical))
+    controls = _coerce_tag_list(map_to_controls(canonical))
+    dread = map_to_dread(canonical) or {}
+    pasta = map_to_pasa(canonical) or {}
+    maestro = map_to_maestro(canonical) or {}
+    diamond = map_to_diamond(canonical) or {}
+    atlas: List[str] = []
+    owasp_llm: List[str] = []
+
+    if map_factors_to_tags is not None and factor_inputs:
+        try:
+            tag_bundle = map_factors_to_tags(factor_inputs) or {}
+            mitre = _coerce_tag_list(mitre + _coerce_tag_list(tag_bundle.get("mitre")))
+            stride = _coerce_tag_list(stride + _coerce_tag_list(tag_bundle.get("stride")))
+            atlas = _coerce_tag_list(tag_bundle.get("atlas"))
+            owasp_llm = _coerce_tag_list(tag_bundle.get("owasp_llm"))
+            extra_pasta = _coerce_tag_list(tag_bundle.get("pasta"))
+            if extra_pasta and isinstance(pasta, dict) and not pasta.get("taxonomy_tags"):
+                pasta = {**pasta, "taxonomy_tags": extra_pasta}
+        except Exception:
+            pass
+
+    return {
+        "mitre": mitre,
+        "atlas": atlas,
+        "owasp_llm": owasp_llm,
+        "stride": stride,
+        "controls": controls,
+        "dread": dread,
+        "pasta": pasta,
+        "pasa": pasta,
+        "maestro": maestro,
+        "diamond": diamond,
+    }
 
 
 class StageBase:
@@ -330,13 +513,14 @@ class LLMSummaryStage(StageBase):
             }
         # Enrich context with mitre tags and playbook guidance when helpful
         try:
-            # map_to_mitre is available from imports above; derive tags from rows/factors
-            mitre_tags = []
-            try:
-                mitre_tags = map_to_mitre(context.get('rows') or [], context.get('factors') or []) or []
-            except Exception:
-                # fallback: look for mitre_tags in context
-                mitre_tags = context.get('mitre_tags') or []
+            context_rows = context.get('rows') or []
+            context_factors = _collect_factor_inputs(context_rows, context)
+            context_canonical = build_canonical_signals([], {'rows': context_rows})
+            if context_factors:
+                context_canonical['factors'] = context_factors
+            context_mapping = _build_mapping_bundle(context_canonical, context_rows, context_factors)
+            context['mapping_tags'] = context_mapping
+            mitre_tags = context_mapping.get('mitre') or context.get('mitre_tags') or []
             context['mitre_tags'] = mitre_tags
             # include artifact context for command templating
             artifact_context = context.get('artifact_context') or {}
@@ -359,11 +543,9 @@ class LLMSummaryStage(StageBase):
             # derive MITRE tags from signals if not already present
             if not context.get('mitre_tags'):
                 try:
-                    rows = context.get('rows') or []
-                    # map_to_mitre expects rows/factors; use existing helper
-                    mapped = map_to_mitre({'rows': rows}) if callable(map_to_mitre) else None
-                    if isinstance(mapped, dict):
-                        context['mitre_tags'] = mapped.get('techniques') or []
+                    existing_mapping = context.get('mapping_tags') or {}
+                    if isinstance(existing_mapping, dict):
+                        context['mitre_tags'] = existing_mapping.get('mitre') or []
                 except Exception:
                     context['mitre_tags'] = context.get('mitre_tags') or []
             # include artifact_context for templating commands
@@ -1299,6 +1481,1184 @@ def _flatten_row_payload(row: dict | None, fallback_index: int) -> dict:
     return merged
 
 
+_TS_FIELDS = (
+    'timestamp', 'Timestamp', 'ts', 'time', 'created', 'created_at', 'event_time',
+    'event_ts', 'last_seen', 'first_seen', 'TimeGenerated', 'ActivityDateTime'
+)
+_DESC_FIELDS = (
+    'analyst_notes', 'notes', 'description', 'Description', 'result_description',
+    'defender_alert', 'alert_name', 'event_name', 'eventName', 'operation_name',
+    'operationName', 'activityDisplayName', 'riskEventType', 'subject',
+    'threat_category', 'category'
+)
+_ACCOUNT_FIELDS = (
+    'user_principal_name', 'userPrincipalName', 'username', 'user', 'account',
+    'caller_upn', 'caller', 'requestor', 'actor', 'actor_email', 'mailbox_owner',
+    'identity', 'principal', 'principal_name', 'upn'
+)
+_HOST_FIELDS = (
+    'hostname', 'host', 'device_id', 'device_name', 'asset_name', 'computer',
+    'computer_name', 'endpoint', 'instance_id', 'vm_name'
+)
+_IP_FIELDS = (
+    'src_ip', 'source_ip', 'sourceIPAddress', 'ipAddress', 'ip', 'internal_ip',
+    'dst_ip', 'destination_ip', 'public_ip', 'remote_ip', 'client_ip'
+)
+_RESOURCE_FIELDS = (
+    'target_resource', 'resource_arn', 'file_name', 'attachment_name', 'path',
+    'object_key', 'bucket', 'vault', 'app', 'application', 'service', 'database'
+)
+_EMAIL_RE = re.compile(r'\b[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}\b', re.I)
+_IP_RE = re.compile(r'\b(?:\d{1,3}\.){3}\d{1,3}\b')
+_MITRE_RE = re.compile(r'\bT\d{4}(?:\.\d{3})?\b', re.I)
+_SEV_RANK = {'critical': 4, 'high': 3, 'medium': 2, 'low': 1}
+
+
+def _safe_text(value: Any) -> str:
+    if value is None:
+        return ''
+    return str(value).strip()
+
+
+def _extract_first_value(row: dict, keys: Tuple[str, ...]) -> str:
+    for key in keys:
+        value = row.get(key)
+        if value not in (None, ''):
+            return _safe_text(value)
+    return ''
+
+
+def _parse_backend_timestamp(value: Any) -> float | None:
+    if value in (None, ''):
+        return None
+    try:
+        if isinstance(value, (int, float)):
+            raw = float(value)
+            return raw / 1000.0 if raw > 10_000_000_000 else raw
+        text = _safe_text(value)
+        if not text:
+            return None
+        if text.endswith('Z'):
+            text = text[:-1] + '+00:00'
+        text = text.replace('/', '-')
+        try:
+            return datetime.datetime.fromisoformat(text).timestamp()
+        except Exception:
+            pass
+        for fmt in (
+            '%Y-%m-%d %H:%M:%S',
+            '%Y-%m-%d %H:%M',
+            '%Y-%m-%dT%H:%M:%S',
+            '%Y-%m-%dT%H:%M:%S.%f',
+        ):
+            try:
+                return datetime.datetime.strptime(text, fmt).timestamp()
+            except Exception:
+                continue
+    except Exception:
+        return None
+    return None
+
+
+def _is_private_ip_text(value: str) -> bool:
+    try:
+        return ipaddress.ip_address(value).is_private
+    except Exception:
+        return False
+
+
+def _collect_strings_from_row(row: dict) -> str:
+    try:
+        return json.dumps(row, default=str)
+    except Exception:
+        return str(row)
+
+
+def _extract_accounts_backend(row: dict) -> List[str]:
+    values: List[str] = []
+    for field in _ACCOUNT_FIELDS:
+        value = _safe_text(row.get(field))
+        if value and value not in values:
+            values.append(value)
+    for match in _EMAIL_RE.findall(_collect_strings_from_row(row)):
+        if match not in values:
+            values.append(match)
+    return values[:8]
+
+
+def _extract_hosts_backend(row: dict) -> List[str]:
+    values: List[str] = []
+    for field in _HOST_FIELDS:
+        value = _safe_text(row.get(field))
+        if value and value not in values:
+            values.append(value)
+    return values[:8]
+
+
+def _extract_ips_backend(row: dict) -> List[str]:
+    values: List[str] = []
+    for field in _IP_FIELDS:
+        value = _safe_text(row.get(field))
+        if value and value not in values:
+            values.append(value)
+    for match in _IP_RE.findall(_collect_strings_from_row(row)):
+        if match not in values:
+            values.append(match)
+    return values[:10]
+
+
+def _extract_resources_backend(row: dict) -> List[str]:
+    values: List[str] = []
+    for field in _RESOURCE_FIELDS:
+        value = _safe_text(row.get(field))
+        if value and value not in values:
+            values.append(value)
+    return values[:8]
+
+
+def _extract_tags_backend(row: dict, assessment: dict | None) -> Dict[str, List[str]]:
+    tags: Dict[str, List[str]] = {'mitre': [], 'atlas': [], 'owasp_llm': []}
+
+    def _add(bucket: str, value: Any) -> None:
+        if value is None:
+            return
+        if isinstance(value, list):
+            for item in value:
+                _add(bucket, item)
+            return
+        if isinstance(value, dict):
+            for key in ('id', 'technique_id', 'technique', 'name'):
+                if value.get(key):
+                    _add(bucket, value.get(key))
+            return
+        text = _safe_text(value)
+        if text and text not in tags[bucket]:
+            tags[bucket].append(text)
+
+    for source in (assessment or {}, row):
+        _add('mitre', source.get('mitre'))
+        _add('mitre', source.get('mitre_tags'))
+        _add('mitre', source.get('techniques'))
+        _add('atlas', source.get('atlas'))
+        _add('owasp_llm', source.get('owasp_llm'))
+        mappings = source.get('mapping_tags') or source.get('mappings') or {}
+        if isinstance(mappings, dict):
+            _add('mitre', mappings.get('mitre'))
+            _add('atlas', mappings.get('atlas'))
+            _add('owasp_llm', mappings.get('owasp_llm'))
+        for entry in source.get('framework_mappings') or []:
+            if not isinstance(entry, dict):
+                continue
+            framework = _safe_text(entry.get('framework')).lower()
+            if framework == 'mitre_attack':
+                _add('mitre', entry.get('id') or entry.get('name'))
+
+    blob = _collect_strings_from_row(row)
+    for item in _MITRE_RE.findall(blob):
+        _add('mitre', item)
+    if map_factors_to_tags is not None:
+        try:
+            factor_tags = map_factors_to_tags(row.get('factors') or [])
+            if isinstance(factor_tags, dict):
+                _add('mitre', factor_tags.get('mitre'))
+                _add('atlas', factor_tags.get('atlas'))
+                _add('owasp_llm', factor_tags.get('owasp_llm'))
+        except Exception:
+            pass
+    for bucket in tags:
+        tags[bucket] = tags[bucket][:8]
+    return tags
+
+
+def _classify_backend_severity(row: dict) -> str:
+    for key in ('severity', 'alert_severity', 'risk_rating', 'review_state'):
+        value = _safe_text(row.get(key)).lower()
+        if value in _SEV_RANK:
+            return value
+    text = _collect_strings_from_row(row).lower()
+    if any(token in text for token in ('global administrator', 'confirmed_malicious', 'cloudtrail logging disabled', 'lsass', 'exfil', 'ransomware')):
+        return 'critical'
+    if any(token in text for token in ('tor exit', 'mailbox rule', 'legacy auth', 'impossible travel', 'powershell', 'stager', 'c2', 'beacon')):
+        return 'high'
+    if any(token in text for token in ('suspicious', 'anomal', 'review', 'investigate')):
+        return 'medium'
+    return 'low'
+
+
+def _severity_label_for_rows(rows: List[dict]) -> str:
+    if not rows:
+        return 'low'
+    return sorted((_classify_backend_severity(row) for row in rows), key=lambda item: _SEV_RANK.get(item, 0), reverse=True)[0]
+
+
+def _infer_cloud_provider(row: dict, assessment: dict | None = None) -> str:
+    explicit = _safe_text(
+        row.get('cloud_provider')
+        or row.get('_provider_profile')
+        or row.get('provider')
+        or row.get('provider_profile')
+    ).lower()
+    if explicit in {'aws', 'azure', 'gcp', 'oci', 'multi_cloud', 'vmware', 'nutanix', 'openstack', 'okta', 'active_directory', 'email'}:
+        return explicit
+    source_sheet = _safe_text(row.get('_sheet') or row.get('sheet') or row.get('source') or '').lower()
+    text = _collect_strings_from_row(row).lower()
+    if 'cloud_aws' in source_sheet or any(token in text for token in ('aws', 'cloudtrail', 'guardduty', 'iam user', 'arn:aws')):
+        return 'aws'
+    if 'cloud_azure' in source_sheet or any(token in text for token in ('azure', 'entra', 'microsoft graph', 'subscription id')):
+        return 'azure'
+    if any(token in text for token in ('okta', 'okta verify', 'okta system log', 'okta fastpass')):
+        return 'okta'
+    if any(token in text for token in ('active directory', 'kerberos', 'ldap bind', 'domain controller', 'adfs', 'windows security')):
+        return 'active_directory'
+    if any(token in text for token in ('gcp', 'google cloud', 'gcloud', 'project id')):
+        return 'gcp'
+    if any(token in text for token in ('oracle cloud', 'oci', 'compartment ocid', 'tenancy ocid')):
+        return 'oci'
+    if any(token in text for token in ('vmware', 'vcenter', 'esxi')):
+        return 'vmware'
+    if any(token in text for token in ('nutanix', 'prism central')):
+        return 'nutanix'
+    if any(token in text for token in ('openstack', 'keystone', 'nova', 'neutron')):
+        return 'openstack'
+    if any(token in text for token in ('mailbox rule', 'message trace', 'exchange online', 'mail flow', 'proofpoint', 'mimecast', 'business email compromise', 'bec')):
+        return 'email'
+    return 'generic'
+
+
+def _infer_plane(row: dict) -> str:
+    text = _collect_strings_from_row(row).lower()
+    if any(token in text for token in ('signin', 'login', 'role', 'sts', 'entra', 'iam', 'policy', 'control plane', 'admin')):
+        return 'control_plane'
+    if any(token in text for token in ('s3', 'blob', 'object', 'query', 'dataset', 'db', 'download', 'egress', 'data plane')):
+        return 'data_plane'
+    return 'unknown'
+
+
+def _extract_cloud_context(row: dict, assessment: dict | None = None) -> dict:
+    provider = _infer_cloud_provider(row, assessment)
+    account_id = _extract_first_value(row, ['account_id', 'aws_account_id', 'account', 'recipientAccountId'])
+    subscription_id = _extract_first_value(row, ['subscription_id', 'azure_subscription_id'])
+    project_id = _extract_first_value(row, ['project_id', 'gcp_project_id', 'project'])
+    compartment_id = _extract_first_value(row, ['compartment_id', 'compartment_ocid'])
+    org_id = _extract_first_value(row, ['organization_id', 'org_id', 'tenant_id', 'azure_tenant_id'])
+    region = _extract_first_value(row, ['region', 'awsRegion', 'location', 'azure_region'])
+    resource_id = _extract_first_value(row, ['resource_id', 'resource_arn', 'target_resource', 'resource'])
+    resource_type = _extract_first_value(row, ['resource_type', 'target_resource_type', 'serviceName', 'service'])
+    return {
+        'provider': provider,
+        'org_id': org_id,
+        'account_id': account_id,
+        'subscription_id': subscription_id,
+        'project_id': project_id,
+        'compartment_id': compartment_id,
+        'region': region,
+        'resource_id': resource_id,
+        'resource_type': resource_type,
+        'control_plane': _infer_plane(row) == 'control_plane',
+        'data_plane': _infer_plane(row) == 'data_plane',
+        'plane': _infer_plane(row),
+    }
+
+
+def _extract_identity_context(row: dict) -> dict:
+    text = _collect_strings_from_row(row).lower()
+    role = _extract_first_value(row, ['identity_role', 'role', 'role_name', 'assigned_role', 'user_role'])
+    session_id = _extract_first_value(row, ['session_id', 'sessionId', 'correlation_id', 'correlationId'])
+    auth_strength = _extract_first_value(row, ['auth_strength', 'authentication_requirement', 'mfa_detail', 'authenticationMethodsUsed'])
+    privilege_type = 'standing'
+    privilege_state = 'normal'
+    privilege_source = ''
+    if any(token in text for token in ('just in time', 'jit', 'pim activated', 'temporary elevated', 'temporary privilege')):
+        privilege_type = 'temporary'
+        privilege_state = 'elevated'
+        privilege_source = 'jit_or_pim'
+    elif any(token in text for token in ('global administrator', 'privileged role administrator', 'role assigned', 'elevation', 'assume role', 'sts:assumerole')):
+        privilege_type = 'escalated'
+        privilege_state = 'elevated'
+        privilege_source = 'role_change'
+    elif any(token in text for token in ('token reuse', 'refresh token', 'session replay', 'legacy auth')):
+        privilege_type = 'session_reuse'
+        privilege_state = 'suspicious'
+        privilege_source = 'session_anomaly'
+    impossible_travel = any(token in text for token in ('impossible travel', 'atypical travel', 'geo-velocity', 'geovelocity'))
+    if impossible_travel and privilege_state == 'normal':
+        privilege_state = 'suspicious'
+    return {
+        'principal': _extract_first_value(row, ['user_principal_name', 'userPrincipalName', 'user', 'username', 'caller_upn', 'caller', 'requestor']),
+        'user_id': _extract_first_value(row, ['user_id', 'actor_id', 'principal_id', 'userIdentity.arn']),
+        'role': role,
+        'privilege_state': privilege_state,
+        'privilege_type': privilege_type,
+        'privilege_source': privilege_source,
+        'session_id': session_id,
+        'auth_strength': auth_strength,
+        'impossible_travel': impossible_travel,
+    }
+
+
+def _extract_network_context(row: dict) -> dict:
+    src_ip = _extract_first_value(row, ['src_ip', 'source_ip', 'sourceIPAddress', 'ipAddress', 'internal_ip'])
+    dst_ip = _extract_first_value(row, ['dst_ip', 'destination_ip', 'server_ip', 'target_ip'])
+    subnet = _extract_first_value(row, ['subnet', 'subnet_id', 'vpc_subnet', 'network_subnet'])
+    return {'src_ip': src_ip, 'dst_ip': dst_ip, 'subnet': subnet}
+
+
+def _extract_policy_change_context(row: dict) -> dict:
+    text = _collect_strings_from_row(row).lower()
+    signals = []
+    if any(token in text for token in ('policy drift', 'iam policy', 'attachrolepolicy', 'putrolepolicy', 'inline policy')):
+        signals.append('iam_policy')
+    if any(token in text for token in ('security group', 'sg-', 'nsg', 'firewall rule', 'subnet route', 'route table')):
+        signals.append('network_policy')
+    if any(token in text for token in ('config drift', 'terraform', 'opa', 'rego', 'policy as code', 'guardrail')):
+        signals.append('config_guardrail')
+    negated = any(token in text for token in ('without cab', 'without approval', 'no cab', 'not approved', 'unapproved'))
+    approved = (not negated) and any(token in text for token in ('approved', 'cab', 'change ticket', 'service request', 'terraform apply by pipeline', 'maintenance window'))
+    suspicious = bool(signals) and not approved
+    if not signals:
+        return {}
+    return {
+        'kind': 'policy_change',
+        'signals': signals,
+        'approved_change': approved,
+        'suspicious_drift': suspicious,
+        'summary': 'Approved policy change detected.' if approved else 'Policy drift or permission expansion requires corroboration.',
+    }
+
+
+def _extract_guest_onboarding_context(row: dict) -> dict:
+    text = _collect_strings_from_row(row).lower()
+    onboarding_markers = (
+        'inviteexternaluser',
+        'invited user',
+        'external user',
+        'b2b invite',
+        'guest onboarding',
+        'access package',
+        'sponsor',
+        'temporary guest',
+        'guest access',
+        'onboarding',
+    )
+    if not any(token in text for token in onboarding_markers):
+        return {}
+    approved = any(token in text for token in ('approved', 'ticket', 'manager approved', 'sponsor', 'mfa registered', 'access package'))
+    suspicious = any(token in text for token in ('unexpected geo', 'asn rare', 'legacy auth', 'impossible travel', 'beacon', 'data exfil', 'privilege escalation'))
+    category = 'benign_onboarding' if approved and not suspicious else 'needs_review'
+    return {
+        'kind': 'guest_onboarding',
+        'category': category,
+        'approved': approved,
+        'suspicious': suspicious,
+        'summary': 'Temporary guest onboarding appears approved and should remain benign unless corroborated.'
+        if category == 'benign_onboarding'
+        else 'Guest onboarding exists, but surrounding telemetry needs confirm/deny review before escalation.',
+    }
+
+
+def _extract_security_posture_context(row: dict) -> dict:
+    text = _collect_strings_from_row(row).lower()
+    vendors: List[str] = []
+    if any(token in text for token in ('check point', 'checkpoint', 'gaia gateway', 'cp-gateway')):
+        vendors.append('checkpoint')
+    if any(token in text for token in ('palo alto', 'pan-os', 'panw', 'panorama', 'cortex data lake')):
+        vendors.append('palo_alto')
+    cdn_present = any(token in text for token in ('cloudfront', 'cdn', 'edge cache', 'fastly', 'akamai'))
+    no_firewall = any(token in text for token in ('zero firewall', 'no firewall', 'without firewall', 'perimeter absent', 'no perimeter firewall'))
+    benign_mfa = any(token in text for token in ('mfa registered', 'fido2 success', 'phishing-resistant mfa', 'approved mfa challenge', 'webauthn success'))
+    compromised_mfa = any(token in text for token in ('mfa fatigue', 'push accepted from suspicious', 'compromised mfa', 'mfa bypass', 'sim swap', 'prompt bombing'))
+    if not vendors and not cdn_present and not no_firewall and not benign_mfa and not compromised_mfa:
+        return {}
+    if no_firewall:
+        perimeter_mode = 'none'
+    elif len(vendors) >= 2:
+        perimeter_mode = 'dual_firewall'
+    elif len(vendors) == 1:
+        perimeter_mode = 'single_firewall'
+    else:
+        perimeter_mode = 'edge_only' if cdn_present else 'unspecified'
+    return {
+        'kind': 'security_posture',
+        'vendors': vendors,
+        'cdn_present': cdn_present,
+        'perimeter_mode': perimeter_mode,
+        'benign_mfa': benign_mfa,
+        'compromised_mfa': compromised_mfa,
+        'summary': (
+            'No perimeter firewall telemetry is present; rely on cloud-native logs and east-west flow evidence.'
+            if perimeter_mode == 'none'
+            else 'Layered perimeter telemetry is available to confirm or deny ingress and egress hypotheses.'
+            if perimeter_mode == 'dual_firewall'
+            else 'Partial perimeter telemetry is available and should be cross-checked with cloud-native logs.'
+        ),
+    }
+
+
+def _derive_human_validation_required(row: dict, policy_ctx: dict, guest_ctx: dict) -> bool:
+    review_state = _safe_text(row.get('review_state')).lower()
+    severity = _safe_text(row.get('severity') or row.get('alert_severity')).lower()
+    if guest_ctx:
+        return True
+    if policy_ctx and policy_ctx.get('approved_change'):
+        return True
+    if review_state in {'review', 'benign', 'needs_review'}:
+        return True
+    if severity in {'low', 'medium', 'review'}:
+        return True
+    return False
+
+
+def _build_remediation_simulation(component_rows: List[dict], severity: str) -> dict:
+    joined = ' '.join(_collect_strings_from_row(row).lower() for row in component_rows)
+    prod_targets = sorted({
+        item for row in component_rows
+        for item in ((row.get('hosts') or []) + (row.get('resources') or []))
+        if 'prod' in _safe_text(item).lower() or 'app' in _safe_text(item).lower()
+    })[:4]
+    if not prod_targets:
+        return {}
+    containment_ready = severity in {'critical', 'high'} and any(
+        token in joined for token in ('guardduty', 'securityhub', 'c2', 'beacon', 'exfil', 'credentialaccess', 'powershell', 'curl http')
+    )
+    return {
+        'status': 'simulated' if containment_ready else 'manual_review',
+        'targets': prod_targets,
+        'isolated_nodes': prod_targets[:1] if containment_ready else [],
+        'alb_drain_status': 'simulated_drained' if containment_ready else 'pending_review',
+        'replacement_capacity_status': 'simulated_replaced' if containment_ready else 'not_started',
+        'summary': 'Simulated node isolation, ALB drain, and replacement capacity exercised for the affected production workload.'
+        if containment_ready
+        else 'Containment remains gated pending stronger corroboration.',
+    }
+
+
+def _extract_event_context(row: dict) -> dict:
+    return {
+        'action': _extract_first_value(row, ['eventName', 'event_name', 'operationName', 'operation_name', 'activityDisplayName', 'action']),
+        'service': _extract_first_value(row, ['serviceName', 'service', 'service_name']),
+        'method': _extract_first_value(row, ['http_method', 'method', 'request_method']),
+    }
+
+
+def _build_bitemporal_trace(timestamp_text: str | None, assessment: dict | None = None) -> dict:
+    event_ts = _parse_backend_timestamp(timestamp_text)
+    decision_raw = None
+    if isinstance(assessment, dict):
+        decision_raw = assessment.get('updated_at') or assessment.get('generated_at') or assessment.get('created_at')
+    if isinstance(decision_raw, (int, float)):
+        decision_ts = float(decision_raw)
+    else:
+        decision_ts = time.time()
+    lag = int(max(0.0, decision_ts - event_ts)) if event_ts is not None else None
+    return {
+        'event_time': timestamp_text,
+        'event_epoch': event_ts,
+        'decision_time': datetime.datetime.utcfromtimestamp(decision_ts).isoformat() + 'Z',
+        'decision_epoch': decision_ts,
+        'observed_lag_seconds': lag,
+    }
+
+
+def _extract_evidence_mode(row: dict, assessment: dict | None = None) -> str:
+    mode = _safe_text(row.get('_intake_mode') or row.get('intake_mode') or row.get('source_kind')).lower()
+    if not mode and isinstance(assessment, dict):
+        options = assessment.get('options') or {}
+        mode = _safe_text(options.get('intake_mode') or assessment.get('intake_mode')).lower()
+    if mode in {'live', 'stream'}:
+        return 'live'
+    if mode in {'merged', 'hybrid'}:
+        return 'merged'
+    return 'snapshot'
+
+
+def _extract_freshness(ts_epoch: float | None) -> dict:
+    if ts_epoch is None:
+        return {'freshness_ts': None, 'freshness_age_seconds': None, 'freshness_state': 'unknown'}
+    age = max(0.0, time.time() - float(ts_epoch))
+    if age <= 3600:
+        state = 'fresh'
+    elif age <= 86400:
+        state = 'recent'
+    else:
+        state = 'historical'
+    return {'freshness_ts': ts_epoch, 'freshness_age_seconds': int(age), 'freshness_state': state}
+
+
+def _cluster_controls_and_frameworks(cluster: dict, rows: List[dict]) -> dict:
+    row_map = {int(row.get('row_index') or 0): row for row in rows}
+    mitre_ids = []
+    for ref in cluster.get('row_refs') or []:
+        mitre_ids.extend(row_map.get(int(ref), {}).get('mitre') or [])
+    mitre_ids = list(dict.fromkeys([m for m in mitre_ids if isinstance(m, str) and m.strip()]))
+    factors = []
+    try:
+        from src.core.threat_modeling.factor_taxonomy import _FACTOR_MAP, controls_for_factors
+        reverse: Dict[str, List[str]] = {}
+        for name, meta in _FACTOR_MAP.items():
+            for mid in meta.get('mitre', []):
+                reverse.setdefault(mid, []).append(name)
+        for mid in mitre_ids:
+            factors.extend(reverse.get(mid, []))
+        factors = list(dict.fromkeys(factors))
+        controls = controls_for_factors(factors) if factors else []
+        frameworks = sorted({(entry.get('control') or '').split(':', 1)[0] for entry in controls if entry.get('control')})
+        return {
+            'factors': factors[:12],
+            'frameworks': frameworks[:12],
+            'controls': controls[:20],
+        }
+    except Exception:
+        return {'factors': [], 'frameworks': [], 'controls': []}
+
+
+def _normalize_assessment_rows(assessment: dict) -> List[dict]:
+    source_rows = assessment.get('rows') or []
+    llm_by_index: Dict[int, dict] = {}
+    for entry in assessment.get('llm_rows') or []:
+        try:
+            llm_by_index[int(entry.get('row_index'))] = entry
+        except Exception:
+            continue
+
+    normalized: List[dict] = []
+    for idx, source in enumerate(source_rows):
+        flat = _flatten_row_payload(source, idx)
+        try:
+            row_index = int(flat.get('row_index') or idx)
+        except Exception:
+            row_index = idx
+        llm_row = llm_by_index.get(row_index) or {}
+        merged = {**flat, **llm_row}
+        ts_text = _extract_first_value(merged, _TS_FIELDS)
+        accounts = _extract_accounts_backend(merged)
+        hosts = _extract_hosts_backend(merged)
+        ips = _extract_ips_backend(merged)
+        resources = _extract_resources_backend(merged)
+        tags = _extract_tags_backend(merged, assessment)
+        triage = float(merged.get('triage_score') or _compute_triage_score(merged) or 0.0)
+        cloud = _extract_cloud_context(merged, assessment)
+        identity = _extract_identity_context(merged)
+        network = _extract_network_context(merged)
+        policy_ctx = _extract_policy_change_context(merged)
+        guest_ctx = _extract_guest_onboarding_context(merged)
+        security_posture = _extract_security_posture_context(merged)
+        event_ctx = _extract_event_context(merged)
+        bitemporal = _build_bitemporal_trace(ts_text, assessment)
+        evidence_mode = _extract_evidence_mode(merged, assessment)
+        freshness = _extract_freshness(_parse_backend_timestamp(ts_text))
+        human_validation_required = _derive_human_validation_required(merged, policy_ctx, guest_ctx)
+        normalized.append({
+            **merged,
+            'row_index': row_index,
+            'timestamp': ts_text,
+            'timestamp_epoch': _parse_backend_timestamp(ts_text),
+            'source_sheet': _safe_text(merged.get('_sheet') or merged.get('sheet') or merged.get('source') or 'unknown'),
+            'entity': _extract_first_value(merged, _ACCOUNT_FIELDS + _HOST_FIELDS + _IP_FIELDS + _RESOURCE_FIELDS) or '-',
+            'description': _extract_first_value(merged, _DESC_FIELDS),
+            'severity': _classify_backend_severity(merged),
+            'triage_score': triage,
+            'accounts': accounts,
+            'hosts': hosts,
+            'ips': ips,
+            'external_ips': [ip for ip in ips if not _is_private_ip_text(ip)],
+            'resources': resources,
+            'mitre': tags['mitre'],
+            'atlas': tags['atlas'],
+            'owasp_llm': tags['owasp_llm'],
+            'cloud': cloud,
+            'identity': identity,
+            'network': network,
+            'event': event_ctx,
+            'policy_change_context': policy_ctx,
+            'guest_onboarding_context': guest_ctx,
+            'security_posture_context': security_posture,
+            'evidence_mode': evidence_mode,
+            'bitemporal_trace': bitemporal,
+            **freshness,
+            'provider_profile': cloud.get('provider'),
+            'cloud_boundary': (
+                cloud.get('account_id')
+                or cloud.get('subscription_id')
+                or cloud.get('project_id')
+                or cloud.get('compartment_id')
+                or cloud.get('org_id')
+            ),
+            'privilege_state': identity.get('privilege_state'),
+            'privilege_type': identity.get('privilege_type'),
+            'session_id': identity.get('session_id'),
+            'impossible_travel': bool(identity.get('impossible_travel')),
+            'human_validation_required': human_validation_required,
+        })
+    return normalized
+
+
+def _build_pair_reason(left: dict, right: dict) -> dict | None:
+    left_guest = left.get('guest_onboarding_context') or {}
+    right_guest = right.get('guest_onboarding_context') or {}
+    left_policy = left.get('policy_change_context') or {}
+    right_policy = right.get('policy_change_context') or {}
+    shared = {
+        'accounts': sorted(set(left.get('accounts') or []).intersection(right.get('accounts') or [])),
+        'hosts': sorted(set(left.get('hosts') or []).intersection(right.get('hosts') or [])),
+        'ips': sorted(set(left.get('ips') or []).intersection(right.get('ips') or [])),
+        'resources': sorted(set(left.get('resources') or []).intersection(right.get('resources') or [])),
+        'mitre': sorted(set(left.get('mitre') or []).intersection(right.get('mitre') or [])),
+        'cloud_boundaries': sorted(set(filter(None, [left.get('cloud_boundary')])).intersection(filter(None, [right.get('cloud_boundary')]))),
+        'privilege_states': sorted(set(filter(None, [left.get('privilege_state'), right.get('privilege_state')]))),
+        'sessions': sorted(set(filter(None, [left.get('session_id')])).intersection(filter(None, [right.get('session_id')]))),
+    }
+    strong_corroboration = bool(shared['sessions'] or shared['hosts'] or shared['ips'] or shared['resources'])
+    suspicious_identity_signal = bool(
+        left.get('impossible_travel') or right.get('impossible_travel')
+        or 'elevated' in shared['privilege_states']
+        or 'suspicious' in shared['privilege_states']
+        or left_guest.get('suspicious')
+        or right_guest.get('suspicious')
+        or left_policy.get('suspicious_drift')
+        or right_policy.get('suspicious_drift')
+    )
+    if (
+        left_guest.get('category') == 'benign_onboarding'
+        or right_guest.get('category') == 'benign_onboarding'
+    ) and not (strong_corroboration and suspicious_identity_signal):
+        return None
+    if (
+        left_policy.get('approved_change')
+        or right_policy.get('approved_change')
+    ) and not (strong_corroboration or suspicious_identity_signal):
+        return None
+    score = 0.0
+    if shared['accounts']:
+        score += 0.4
+    if shared['hosts']:
+        score += 0.35
+    if shared['resources']:
+        score += 0.25
+    if shared['ips']:
+        score += 0.2
+    if shared['mitre']:
+        score += 0.1
+    if shared['cloud_boundaries']:
+        score += 0.2
+    if shared['sessions']:
+        score += 0.2
+    if 'elevated' in shared['privilege_states'] or 'suspicious' in shared['privilege_states']:
+        score += 0.15
+    time_delta = None
+    if left.get('timestamp_epoch') is not None and right.get('timestamp_epoch') is not None:
+        time_delta = abs(float(left['timestamp_epoch']) - float(right['timestamp_epoch']))
+        if time_delta <= 900:
+            score += 0.2
+        elif time_delta <= 3600:
+            score += 0.1
+    cross_source = left.get('source_sheet') != right.get('source_sheet')
+    if cross_source:
+        score += 0.1
+    if left.get('cloud', {}).get('provider') and left.get('cloud', {}).get('provider') == right.get('cloud', {}).get('provider'):
+        score += 0.05
+    if left.get('impossible_travel') and right.get('impossible_travel'):
+        score += 0.1
+    if score < 0.45:
+        return None
+    evidence = []
+    for key in ('accounts', 'hosts', 'ips', 'resources', 'mitre', 'cloud_boundaries', 'sessions'):
+        vals = shared[key]
+        if vals:
+            evidence.append({'kind': key, 'values': vals[:4]})
+    significance_parts = []
+    if shared['accounts']:
+        significance_parts.append('shared identity activity')
+    if shared['hosts']:
+        significance_parts.append('same host sequence')
+    if shared['ips']:
+        significance_parts.append('same network infrastructure')
+    if shared['resources']:
+        significance_parts.append('same resource or artifact path')
+    if shared['mitre']:
+        significance_parts.append('same ATT&CK technique family')
+    if shared['cloud_boundaries']:
+        significance_parts.append('same cloud account or boundary')
+    if shared['sessions']:
+        significance_parts.append('same session or correlation context')
+    if 'elevated' in shared['privilege_states']:
+        significance_parts.append('privileged or escalated identity context')
+    if time_delta is not None and time_delta <= 3600:
+        significance_parts.append(f'within {int(time_delta // 60) or 1} minute(s)')
+    return {
+        'target_row_index': int(right.get('row_index') or 0),
+        'shared': evidence,
+        'cross_source': cross_source,
+        'time_delta_seconds': int(time_delta) if time_delta is not None else None,
+        'confidence': round(min(0.98, score), 2),
+        'summary': '; '.join(significance_parts) or 'shared telemetry context',
+    }
+
+
+def _build_correlation_clusters(rows: List[dict]) -> Tuple[List[dict], Dict[int, List[dict]]]:
+    adjacency: Dict[int, List[dict]] = defaultdict(list)
+    row_map = {int(row.get('row_index') or 0): row for row in rows}
+    indices = sorted(row_map.keys())
+    for pos, left_idx in enumerate(indices):
+        left = row_map[left_idx]
+        for right_idx in indices[pos + 1:]:
+            right = row_map[right_idx]
+            reason = _build_pair_reason(left, right)
+            if not reason:
+                continue
+            adjacency[left_idx].append(reason)
+            reverse = dict(reason)
+            reverse['target_row_index'] = left_idx
+            adjacency[right_idx].append(reverse)
+
+    visited: Set[int] = set()
+    clusters: List[dict] = []
+    cluster_num = 1
+    for row_index in indices:
+        if row_index in visited:
+            continue
+        component = []
+        stack = [row_index]
+        while stack:
+            current = stack.pop()
+            if current in visited:
+                continue
+            visited.add(current)
+            component.append(current)
+            for link in adjacency.get(current, []):
+                target = int(link.get('target_row_index') or 0)
+                if target and target not in visited:
+                    stack.append(target)
+        if len(component) < 2:
+            continue
+        component_rows = [row_map[idx] for idx in sorted(component)]
+        shared_accounts = sorted({item for row in component_rows for item in row.get('accounts') or []})
+        shared_hosts = sorted({item for row in component_rows for item in row.get('hosts') or []})
+        shared_ips = sorted({item for row in component_rows for item in row.get('external_ips') or []})
+        shared_resources = sorted({item for row in component_rows for item in row.get('resources') or []})
+        all_links = [link for idx in component for link in adjacency.get(idx, []) if int(link.get('target_row_index') or 0) in component]
+        time_values = [row.get('timestamp_epoch') for row in component_rows if row.get('timestamp_epoch') is not None]
+        cluster_id = f'cluster-{cluster_num}'
+        cluster_num += 1
+        cluster = {
+            'cluster_id': cluster_id,
+            'row_refs': [int(row.get('row_index') or 0) for row in component_rows],
+            'evidence_refs': [f"R{int(row.get('row_index') or 0)}" for row in component_rows],
+            'severity': _severity_label_for_rows(component_rows),
+            'confidence': round(sum(float(link.get('confidence') or 0.0) for link in all_links) / max(len(all_links), 1), 2),
+        'source_sheets': sorted({_safe_text(row.get('source_sheet') or 'unknown') for row in component_rows}),
+        'providers': sorted({_safe_text((row.get('cloud') or {}).get('provider') or row.get('provider_profile') or 'generic') for row in component_rows}),
+        'shared_accounts': shared_accounts[:6],
+        'shared_hosts': shared_hosts[:6],
+        'shared_external_ips': shared_ips[:6],
+        'shared_resources': shared_resources[:6],
+        'affected_accounts': sorted({item for row in component_rows for item in ((row.get('accounts') or []) + ([((row.get('cloud') or {}).get('account_id'))] if (row.get('cloud') or {}).get('account_id') else []))})[:8],
+        'affected_assets': sorted({item for row in component_rows for item in ((row.get('hosts') or []) + (row.get('resources') or []))})[:10],
+        'affected_subnets': sorted({item for row in component_rows if (row.get('network') or {}).get('subnet') for item in [(row.get('network') or {}).get('subnet')]})[:6],
+        'top_mitre': sorted({item for row in component_rows for item in row.get('mitre') or []})[:6],
+        'time_window': {
+            'start': min(time_values) if time_values else None,
+            'end': max(time_values) if time_values else None,
+            'span_seconds': int(max(time_values) - min(time_values)) if len(time_values) >= 2 else 0,
+            },
+            'lead_description': next((_safe_text(row.get('description')) for row in component_rows if _safe_text(row.get('description'))), 'Correlated activity cluster'),
+            'reason_summary': '; '.join(list(dict.fromkeys(
+                link.get('summary') for link in all_links if link.get('summary')
+            ))[:3]),
+            'business_significance': '',
+            'recommended_logs': [],
+        }
+        significance = []
+        if shared_accounts:
+            significance.append('identity compromise or shared actor sequence')
+        if shared_hosts:
+            significance.append('same endpoint or workload appears across multiple stages')
+        if shared_ips:
+            significance.append('external infrastructure appears across correlated rows')
+        if 'Cloud_AWS' in cluster['source_sheets'] or 'Cloud_Azure' in cluster['source_sheets']:
+            significance.append('cloud control changes may widen blast radius')
+        if any('Email' in sheet for sheet in cluster['source_sheets']):
+            significance.append('mailbox or phishing telemetry suggests user-facing compromise')
+        provider_set = {item for item in cluster.get('providers') or [] if item and item != 'generic'}
+        if {'aws', 'azure'} <= provider_set or ('okta' in provider_set and {'aws', 'azure'} & provider_set):
+            significance.append('cross-cloud identity movement links identity control changes to cloud actions across provider boundaries')
+        if 'active_directory' in provider_set and ('vmware' in provider_set or 'nutanix' in provider_set):
+            significance.append('on-prem identity and virtualization activity suggest hybrid infrastructure lateral-movement risk')
+        if 'email' in provider_set:
+            significance.append('email compromise or BEC telemetry may affect payment, approval, or executive-trust workflows')
+        logs = []
+        if shared_accounts:
+            logs.extend(['identity sign-in logs', 'MFA / Conditional Access decisions'])
+        if shared_hosts:
+            logs.extend(['EDR process lineage', 'Sysmon Event ID 1/3/11/13'])
+        if shared_ips:
+            logs.extend(['proxy / firewall egress logs', 'DNS resolution logs'])
+        if any('Cloud_AWS' in sheet for sheet in cluster['source_sheets']):
+            logs.extend(['CloudTrail', 'S3 data events'])
+        if any('Cloud_Azure' in sheet for sheet in cluster['source_sheets']):
+            logs.extend(['Azure Activity Log', 'Entra audit logs'])
+        if any('Email' in sheet for sheet in cluster['source_sheets']):
+            logs.extend(['mailbox audit logs', 'message trace'])
+        if 'okta' in provider_set:
+            logs.extend(['Okta System Log', 'Okta MFA / sign-on policy audit'])
+        if 'active_directory' in provider_set:
+            logs.extend(['Windows Security 4624/4625/4768/4769', 'Domain controller authentication logs'])
+        if 'vmware' in provider_set:
+            logs.extend(['vCenter tasks and events', 'ESXi hostd / vpxa logs'])
+        if 'nutanix' in provider_set:
+            logs.extend(['Prism Central audit log', 'AHV hypervisor task logs'])
+        if 'email' in provider_set:
+            logs.extend(['mail transport / secure email gateway logs', 'mailbox rule and delegate audit'])
+        cluster['recommended_logs'] = list(dict.fromkeys(logs))[:10]
+        compliance = _cluster_controls_and_frameworks(cluster, component_rows)
+        provider_count = len([p for p in cluster.get('providers') or [] if p and p != 'generic'])
+        cluster['blast_radius_summary'] = (
+            f"{len(cluster['affected_accounts'])} account/subscription boundary markers, "
+            f"{len(cluster['affected_assets'])} named assets or resources, "
+            f"{provider_count or 1} provider context(s)."
+        )
+        cluster['crown_jewel_likelihood'] = 'medium' if any('admin' in (_safe_text(item).lower()) for item in cluster.get('affected_accounts') or []) else 'low'
+        cluster['regulated_data_likelihood'] = 'medium' if any('s3' in (_safe_text(item).lower()) or 'blob' in (_safe_text(item).lower()) or 'mail' in (_safe_text(item).lower()) for item in cluster.get('affected_assets') or []) else 'low'
+        cluster['operational_impact_summary'] = 'Correlated activity may affect identity trust, workloads, communications, and control changes in the same case window.'
+        cluster['remediation_owner'] = 'Security Operations'
+        cluster['communications_owner'] = 'Security leadership'
+        cluster['legal_review_recommended'] = cluster['regulated_data_likelihood'] in {'medium', 'high'} or cluster['severity'] == 'critical'
+        cluster['pr_statement_recommended'] = cluster['severity'] == 'critical' and len(cluster.get('affected_assets') or []) >= 3
+        cluster['notification_obligation_likelihood'] = 'medium' if cluster['legal_review_recommended'] else 'low'
+        cluster['affected_frameworks'] = compliance.get('frameworks') or []
+        cluster['affected_controls'] = [entry.get('control') for entry in (compliance.get('controls') or []) if entry.get('control')][:12]
+        cluster['compliance_control_impact'] = {
+            'frameworks': cluster['affected_frameworks'],
+            'controls': cluster['affected_controls'],
+            'summary': 'Mapped controls should be validated against the exact affected account, subnet, and asset scope before reporting.',
+        }
+        cluster['financial_impact_min'] = None
+        cluster['financial_impact_max'] = None
+        cluster['financial_impact_status'] = 'pending_human_input'
+        cluster['policy_change_context'] = {
+            'suspicious_rows': [int(row.get('row_index') or 0) for row in component_rows if (row.get('policy_change_context') or {}).get('suspicious_drift')],
+            'approved_rows': [int(row.get('row_index') or 0) for row in component_rows if (row.get('policy_change_context') or {}).get('approved_change')],
+        }
+        cluster['guest_onboarding_context'] = {
+            'guest_rows': [int(row.get('row_index') or 0) for row in component_rows if row.get('guest_onboarding_context')],
+            'benign_rows': [int(row.get('row_index') or 0) for row in component_rows if (row.get('guest_onboarding_context') or {}).get('category') == 'benign_onboarding'],
+        }
+        posture_contexts = [row.get('security_posture_context') or {} for row in component_rows if row.get('security_posture_context')]
+        posture_vendors = sorted({vendor for ctx in posture_contexts for vendor in (ctx.get('vendors') or [])})
+        posture_modes = [ctx.get('perimeter_mode') for ctx in posture_contexts if ctx.get('perimeter_mode')]
+        posture_mode = (
+            'none' if 'none' in posture_modes else
+            'dual_firewall' if len(posture_vendors) >= 2 else
+            'single_firewall' if len(posture_vendors) == 1 else
+            'edge_only' if any(ctx.get('cdn_present') for ctx in posture_contexts) else
+            'unspecified'
+        )
+        cluster['security_posture'] = {
+            'vendors': posture_vendors,
+            'cdn_present': any(ctx.get('cdn_present') for ctx in posture_contexts),
+            'perimeter_mode': posture_mode,
+            'benign_mfa_rows': [int(row.get('row_index') or 0) for row in component_rows if (row.get('security_posture_context') or {}).get('benign_mfa')],
+            'compromised_mfa_rows': [int(row.get('row_index') or 0) for row in component_rows if (row.get('security_posture_context') or {}).get('compromised_mfa')],
+            'summary': '',
+        }
+        posture_summary = (
+            'No perimeter firewall telemetry is available in this cluster; validate ingress and egress with ALB, VPC Flow, CDN, and cloud control logs.'
+            if posture_mode == 'none'
+            else 'Dual next-gen firewall telemetry and cloud-native logs provide layered confirm/deny evidence for this cluster.'
+            if posture_mode == 'dual_firewall'
+            else 'Partial perimeter telemetry exists; confirm or deny with firewall, CDN, and cloud-native sources together.'
+        )
+        if cluster['security_posture'].get('compromised_mfa_rows'):
+            posture_summary += ' Compromised or fatigued MFA signals are present and should be treated as identity-control degradation.'
+        elif cluster['security_posture'].get('benign_mfa_rows'):
+            posture_summary += ' Approved MFA activity is present and should remain benign unless later corroborated by malicious evidence.'
+        cluster['security_posture']['summary'] = posture_summary
+        if posture_mode == 'none':
+            significance.append('limited perimeter controls increase blind-spot risk and raise the priority of cloud-native telemetry validation')
+        elif posture_mode == 'dual_firewall':
+            significance.append('layered perimeter telemetry strengthens ingress and egress confirm/deny analysis')
+        if cluster['security_posture'].get('cdn_present'):
+            significance.append('CDN edge activity sits between internet-facing delivery and origin workloads')
+        if cluster['security_posture'].get('compromised_mfa_rows'):
+            significance.append('MFA compromise indicators suggest identity controls may have been bypassed or fatigued')
+        if 'okta' in provider_set and 'azure' in provider_set:
+            significance.append('federated identity signals span IdP and Azure administrative context in the same incident window')
+        if 'active_directory' in provider_set and 'email' in provider_set:
+            significance.append('directory and email evidence together raise the likelihood of account takeover or BEC-driven abuse')
+        cluster['business_significance'] = '; '.join(significance) or 'multiple evidentiary rows point to one investigation track'
+        if 'checkpoint' in posture_vendors:
+            logs.append('Check Point traffic / threat logs')
+        if 'palo_alto' in posture_vendors:
+            logs.append('Palo Alto traffic / threat logs')
+        if cluster['security_posture'].get('cdn_present'):
+            logs.append('CDN edge access logs')
+        if posture_mode == 'none':
+            logs.append('ALB access logs / VPC Flow (no perimeter firewall present)')
+        cluster['recommended_logs'] = list(dict.fromkeys(logs))[:12]
+        cluster['human_validation_required'] = True
+        cluster['playbook_status'] = 'human_gated'
+        cluster['remediation_simulation'] = _build_remediation_simulation(component_rows, cluster['severity'])
+        cluster['alb_drain_status'] = cluster.get('remediation_simulation', {}).get('alb_drain_status')
+        cluster['replacement_capacity_status'] = cluster.get('remediation_simulation', {}).get('replacement_capacity_status')
+        cluster['crisis_management'] = {
+            'summary': 'Prepare containment, executive briefing, and customer-impact validation in parallel if this cluster remains confirmed.',
+            'actions': [
+                'Validate the blast radius with named accounts, subnets, and resources before declaring crisis status.',
+                'Route critical clusters to legal and executive owners when regulated data or customer services may be affected.',
+            ],
+        }
+        cluster['legal_considerations'] = {
+            'summary': 'Keep legal guidance brief: determine whether regulated data, contractual obligations, or preservation requirements apply.',
+            'actions': [
+                'Check whether the affected controls map to mandatory notification or evidence-preservation obligations.',
+            ],
+        }
+        cluster['pr_media_guidance'] = {
+            'summary': 'Do not issue external statements until row-linked scope, affected services, and communication ownership are confirmed.',
+            'recommended': bool(cluster['pr_statement_recommended']),
+        }
+        cluster['mandatory_communications'] = {
+            'summary': 'Use the compliance control impact and regulated-data likelihood to decide whether customer, regulator, or board communications are required.',
+            'frameworks': cluster['affected_frameworks'],
+        }
+        for row in component_rows:
+            row['correlation_cluster_id'] = cluster_id
+            row['correlation_type'] = 'correlated'
+            row['correlation_reasons'] = adjacency.get(int(row.get('row_index') or 0), [])
+            row['blast_radius_summary'] = cluster['blast_radius_summary']
+            row['affected_frameworks'] = cluster['affected_frameworks']
+            row['affected_controls'] = cluster['affected_controls']
+            row['human_validation_required'] = cluster['human_validation_required']
+            row['playbook_status'] = cluster['playbook_status']
+            row['remediation_simulation'] = cluster['remediation_simulation']
+            row['alb_drain_status'] = cluster.get('alb_drain_status')
+            row['replacement_capacity_status'] = cluster.get('replacement_capacity_status')
+            row['security_posture'] = cluster.get('security_posture')
+        clusters.append(cluster)
+
+    for row in rows:
+        row.setdefault('correlation_type', 'isolated')
+        row.setdefault('correlation_reasons', [])
+        row.setdefault('human_validation_required', True)
+        row.setdefault('playbook_status', 'human_gated')
+        row.setdefault('policy_change_context', {})
+        row.setdefault('guest_onboarding_context', {})
+        row.setdefault('security_posture_context', {})
+        row.setdefault('security_posture', {})
+        row.setdefault('remediation_simulation', {})
+    clusters.sort(key=lambda item: (_SEV_RANK.get(item.get('severity') or 'low', 0), len(item.get('row_refs') or []), item.get('confidence') or 0.0), reverse=True)
+    return clusters, adjacency
+
+
+def _build_task_entry(task: str, row_refs: List[int], logs: List[str], purpose: str) -> Dict[str, Any]:
+    refs = [int(r) for r in row_refs if r is not None]
+    return {
+        'task': task,
+        'row_refs': refs,
+        'evidence_refs': [f'R{r}' for r in refs],
+        'logs': list(dict.fromkeys(logs))[:8],
+        'purpose': purpose,
+    }
+
+
+def _build_persona_reports_backend(assessment: dict, rows: List[dict], clusters: List[dict]) -> Dict[str, dict]:
+    top_clusters = clusters[:3]
+    top_rows = sorted(rows, key=lambda row: (_SEV_RANK.get(row.get('severity') or 'low', 0), float(row.get('triage_score') or 0.0)), reverse=True)[:6]
+    top_entities = list(dict.fromkeys([row.get('entity') for row in top_rows if row.get('entity') and row.get('entity') != '-']))[:5]
+    top_mitre = list(dict.fromkeys([item for row in top_rows for item in row.get('mitre') or []]))[:6]
+    total_rows = len(rows)
+    correlated = len([row for row in rows if row.get('correlation_type') == 'correlated'])
+
+    def _cluster_line(cluster: dict) -> str:
+        pivots = cluster.get('shared_accounts') or cluster.get('shared_hosts') or cluster.get('shared_external_ips') or cluster.get('shared_resources') or []
+        pivot_text = ', '.join(pivots[:3]) if pivots else 'shared telemetry'
+        provider_text = ', '.join(cluster.get('providers') or [])
+        provider_suffix = f" across {provider_text}" if provider_text else ''
+        return f"Rows {', '.join('#' + str(r) for r in cluster.get('row_refs', [])[:5])} tie together around {pivot_text}{provider_suffix}; {cluster.get('business_significance')}"
+
+    reports: Dict[str, dict] = {}
+
+    soc_tasks = []
+    hunter_tasks = []
+    forensic_tasks = []
+    executive_tasks = []
+    ciso_tasks = []
+    for cluster in top_clusters:
+        row_refs = cluster.get('row_refs') or []
+        log_list = cluster.get('recommended_logs') or []
+        pivots = cluster.get('shared_accounts') or cluster.get('shared_hosts') or cluster.get('shared_external_ips') or []
+        pivot_text = ', '.join(pivots[:3]) if pivots else 'the shared evidence pivots'
+        soc_tasks.append(_build_task_entry(
+            f"Confirm whether rows {', '.join('#' + str(r) for r in row_refs[:5])} are one incident tied by {pivot_text}; if confirmed, contain the active account or host before closing.",
+            row_refs, log_list, 'confirm_or_deny'
+        ))
+        hunter_tasks.append(_build_task_entry(
+            f"Pivot on {pivot_text} across the full time window and adjacent sources to confirm whether the cluster extends beyond rows {', '.join('#' + str(r) for r in row_refs[:5])}.",
+            row_refs, log_list, 'hunt_hypothesis'
+        ))
+        forensic_tasks.append(_build_task_entry(
+            f"Preserve artefacts for rows {', '.join('#' + str(r) for r in row_refs[:5])}, then reconstruct the timeline and chain of custody before remediation changes the evidence.",
+            row_refs, log_list, 'preserve_and_reconstruct'
+        ))
+        executive_tasks.append(_build_task_entry(
+            f"Decide whether the activity around rows {', '.join('#' + str(r) for r in row_refs[:5])} changes customer, regulatory, or leadership notification posture; require security to confirm impact with named accounts, systems, and data paths.",
+            row_refs, log_list, 'business_decision'
+        ))
+        ciso_tasks.append(_build_task_entry(
+            f"Approve containment scope for rows {', '.join('#' + str(r) for r in row_refs[:5])} only after security confirms blast radius, affected identities, and whether the correlated sequence reached privileged or data-bearing assets.",
+            row_refs, log_list, 'risk_and_containment'
+        ))
+
+    def _section(title: str, bullets: List[str]) -> Dict[str, Any]:
+        return {'title': title, 'bullets': bullets, 'text': '\n'.join(bullets)}
+
+    reports['soc_analyst'] = {
+        'headline': f'P1 triage for {total_rows} rows | {correlated} correlated',
+        'overview': {
+            'what_happened': f'{correlated} row(s) share evidence-backed pivots across the uploaded workbook.',
+            'why_it_matters': 'Correlated rows indicate one or more incidents that should be triaged as sequences, not isolated alerts.',
+            'what_to_do_next': 'Validate the highest-confidence clusters, contain active identities or hosts, and deny benign explanations with change evidence.',
+        },
+        'focus_cluster_summary': {'summary': _cluster_line(top_clusters[0]) if top_clusters else 'No multi-row cluster established.'},
+        'key_points': [f'Lead entities: {", ".join(top_entities)}' if top_entities else 'Lead entities not yet resolved.'] + [_cluster_line(cluster) for cluster in top_clusters[:2]],
+        'sections': [
+            _section('Priority Evidence', [f'{total_rows} events analyzed.', f'Lead ATT&CK tags: {", ".join(top_mitre) or "none"}']),
+            _section('Containment Queue', [task['task'] for task in soc_tasks] or ['No correlated clusters met the action threshold.']),
+            _section('Control Posture', [cluster.get('security_posture', {}).get('summary') for cluster in top_clusters if cluster.get('security_posture')] or ['Security-control posture not yet inferred from the evidence.']),
+            _section('Benign / Change Denials', [
+                'Deny benign guest onboarding by matching invite, sponsor, MFA-registration, and ticket records before escalation.',
+                'Deny approved policy drift by matching CAB or pipeline change evidence before treating it as malicious.',
+            ]),
+        ],
+        'tasks': soc_tasks,
+    }
+    reports['threat_hunter'] = {
+        'headline': f'Hunt hypotheses for {len(top_clusters)} active cluster(s)',
+        'overview': {
+            'what_happened': 'The workbook contains correlated identity, endpoint, cloud, and email pivots that can be hunted beyond the uploaded rows.',
+            'why_it_matters': 'Shared accounts, hosts, external IPs, and technique overlap suggest adjacent activity may still be undiscovered.',
+            'what_to_do_next': 'Use the shared pivots to expand scope, test alternate branches, and measure telemetry gaps.',
+        },
+        'focus_cluster_summary': {'summary': _cluster_line(top_clusters[0]) if top_clusters else 'No hunt cluster established.'},
+        'key_points': [_cluster_line(cluster) for cluster in top_clusters] or ['No cluster-level pivots available.'],
+        'sections': [
+            _section('Hunt Leads', [f'Lead entities: {", ".join(top_entities)}' if top_entities else 'No lead entities resolved yet.']),
+            _section('Hunt Hypotheses', [task['task'] for task in hunter_tasks] or ['No hunt hypotheses met the threshold.']),
+            _section('Perimeter / Edge Expansions', [cluster.get('security_posture', {}).get('summary') for cluster in top_clusters if cluster.get('security_posture')] or ['Perimeter or CDN telemetry posture not yet established.']),
+            _section('Supply Chain / Drift Checks', [
+                'Expand package-poisoning pivots through CI/CD, registry, host, role, and subnet scope before assuming the blast radius is closed.',
+                'Separate approved policy-as-code rollout from suspicious drift by checking who changed the guardrail, from where, and what followed.',
+            ]),
+        ],
+        'tasks': hunter_tasks,
+    }
+    reports['forensics'] = {
+        'headline': f'Forensic preservation plan for {len(top_clusters)} cluster(s)',
+        'overview': {
+            'what_happened': 'Multiple timestamped artefacts align into clusters that should be preserved as one chain of evidence.',
+            'why_it_matters': 'The sequence matters as much as the individual rows; preserving chronology is necessary before remediation removes volatile evidence.',
+            'what_to_do_next': 'Acquire volatile artefacts first, then collect cloud, identity, and message traces in the same time order.',
+        },
+        'focus_cluster_summary': {'summary': _cluster_line(top_clusters[0]) if top_clusters else 'No preservation cluster established.'},
+        'key_points': [_cluster_line(cluster) for cluster in top_clusters] or ['No cluster-level chronology available.'],
+        'sections': [
+            _section('Collection Priorities', [f'Correlated clusters: {len(top_clusters)}', f'Lead entities: {", ".join(top_entities) or "none"}']),
+            _section('Preservation Plan', [task['task'] for task in forensic_tasks] or ['No preservation tasks exceeded the threshold.']),
+            _section('Perimeter Artefacts', [cluster.get('security_posture', {}).get('summary') for cluster in top_clusters if cluster.get('security_posture')] or ['No perimeter or edge artefact note is available yet.']),
+            _section('Timeline Caveats', [
+                'Preserve guest-onboarding and policy-change audit trails separately so benign or approved changes are not misclassified after remediation.',
+            ]),
+        ],
+        'tasks': forensic_tasks,
+    }
+    reports['executive'] = {
+        'headline': 'Executive decision brief',
+        'overview': {
+            'what_happened': f'The uploaded workbook shows {correlated} correlated rows across {len(set(row.get("source_sheet") for row in rows))} evidence domains.',
+            'why_it_matters': 'This may indicate a single business-impacting intrusion path rather than unrelated alerts.',
+            'what_to_do_next': 'Require security to confirm impacted accounts, systems, and data before deciding on notifications or public statements.',
+        },
+        'focus_cluster_summary': {'summary': _cluster_line(top_clusters[0]) if top_clusters else 'No executive-impact cluster established.'},
+        'key_points': [
+            f'Named entities in scope: {", ".join(top_entities)}' if top_entities else 'Named entities still being confirmed.',
+            f'Potential external infrastructure: {", ".join(top_clusters[0].get("shared_external_ips", [])[:3])}' if top_clusters and top_clusters[0].get('shared_external_ips') else 'External infrastructure not yet confirmed.',
+            'Leadership should expect a confirm / deny update tied to specific rows and evidence references, not a generic status report.',
+        ],
+        'sections': [
+            _section('Decision Checks', [task['task'] for task in executive_tasks] or ['No executive decision task exceeded the threshold.']),
+            _section('Business Impact View', [cluster.get('business_significance') for cluster in top_clusters] or ['Business impact not yet established.']),
+            _section('Crisis Management', [cluster.get('crisis_management', {}).get('summary') for cluster in top_clusters if cluster.get('crisis_management')] or ['Crisis-management posture not yet elevated.']),
+            _section('Legal / PR / Communications', [
+                (
+                    f"Legal review {'recommended' if cluster.get('legal_review_recommended') else 'not yet required'}; "
+                    f"communications likelihood {cluster.get('notification_obligation_likelihood')}; "
+                    f"framework impact: {', '.join(cluster.get('affected_frameworks') or ['none'])}"
+                ) for cluster in top_clusters
+            ] or ['Legal and communications triggers not yet established.']),
+        ],
+        'tasks': executive_tasks,
+        'business_significance': top_clusters[0] if top_clusters else {},
+        'crisis_management': (top_clusters[0] or {}).get('crisis_management') if top_clusters else {},
+        'legal_considerations': (top_clusters[0] or {}).get('legal_considerations') if top_clusters else {},
+        'pr_media_guidance': (top_clusters[0] or {}).get('pr_media_guidance') if top_clusters else {},
+        'mandatory_communications': (top_clusters[0] or {}).get('mandatory_communications') if top_clusters else {},
+        'compliance_control_impact': (top_clusters[0] or {}).get('compliance_control_impact') if top_clusters else {},
+    }
+    reports['ciso'] = {
+        'headline': 'CISO risk and containment brief',
+        'overview': {
+            'what_happened': f'{correlated} correlated rows suggest at least one evidence-backed incident sequence.',
+            'why_it_matters': 'The current evidence touches identities, workloads, and potentially data-bearing resources; containment scope should match that blast radius.',
+            'what_to_do_next': 'Approve containment only after security confirms privilege level, persistence, and data movement evidence by cluster.',
+        },
+        'focus_cluster_summary': {'summary': _cluster_line(top_clusters[0]) if top_clusters else 'No CISO focus cluster established.'},
+        'key_points': [_cluster_line(cluster) for cluster in top_clusters] or ['No cluster-level risk posture available.'],
+        'sections': [
+            _section('Risk Posture', [f'Lead ATT&CK tags: {", ".join(top_mitre) or "none"}', f'Correlated clusters: {len(top_clusters)}']),
+            _section('Decision Checks', [task['task'] for task in ciso_tasks] or ['No CISO decision task exceeded the threshold.']),
+            _section('Business Significance', [
+                (
+                    f"{cluster.get('blast_radius_summary')} {cluster.get('security_posture', {}).get('summary', '')} Crown-jewel likelihood: {cluster.get('crown_jewel_likelihood')}; "
+                    f"regulated-data likelihood: {cluster.get('regulated_data_likelihood')}; "
+                    f"financial impact status: {cluster.get('financial_impact_status')}"
+                ) for cluster in top_clusters
+            ] or ['Business significance still requires human validation.']),
+            _section('Crisis / Communications', [
+                (
+                    f"{cluster.get('crisis_management', {}).get('summary')} "
+                    f"Legal review {'recommended' if cluster.get('legal_review_recommended') else 'not yet required'}; "
+                    f"PR recommendation {'yes' if cluster.get('pr_statement_recommended') else 'no'}."
+                ) for cluster in top_clusters
+            ] or ['Crisis-management posture not yet established.']),
+        ],
+        'tasks': ciso_tasks,
+        'business_significance': top_clusters[0] if top_clusters else {},
+        'crisis_management': (top_clusters[0] or {}).get('crisis_management') if top_clusters else {},
+        'legal_considerations': (top_clusters[0] or {}).get('legal_considerations') if top_clusters else {},
+        'pr_media_guidance': (top_clusters[0] or {}).get('pr_media_guidance') if top_clusters else {},
+        'mandatory_communications': (top_clusters[0] or {}).get('mandatory_communications') if top_clusters else {},
+        'compliance_control_impact': (top_clusters[0] or {}).get('compliance_control_impact') if top_clusters else {},
+    }
+
+    for key, report in reports.items():
+        report['text'] = '\n'.join(
+            [report.get('overview', {}).get('what_happened', ''), report.get('overview', {}).get('why_it_matters', '')] +
+            [section.get('title', '') + ': ' + ' '.join(section.get('bullets') or []) for section in report.get('sections', [])]
+        ).strip()
+    return reports
+
+
+def _hydrate_assessment_semantics(assessment: dict) -> dict:
+    if not isinstance(assessment, dict):
+        return assessment
+    normalized_rows = _normalize_assessment_rows(assessment)
+    clusters, _adjacency = _build_correlation_clusters(normalized_rows)
+    persona_reports = _build_persona_reports_backend(assessment, normalized_rows, clusters)
+    assessment['evidence_rows'] = normalized_rows
+    assessment['correlation_clusters'] = clusters
+    assessment['persona_reports'] = persona_reports
+    return assessment
+
+
 def _error_llm_row(normalized_row: dict, idx: int, exc: Exception) -> dict:
     """Build a minimal llm_row payload when generation fails."""
     summary = f"LLM summary unavailable: {exc}"
@@ -1423,6 +2783,10 @@ def _schedule_llm_generation(rows: List[dict], ctx: dict, assessment_obj: dict, 
         except Exception:
             pass
         assessment_obj.setdefault('telemetry', {})['llm_completed_at'] = time.time()
+        try:
+            _hydrate_assessment_semantics(assessment_obj)
+        except Exception:
+            pass
         try:
             REPORT_STORE[assessment_id] = assessment_obj
             _persist_assessment_state(assessment_id, assessment_obj)
@@ -2541,15 +3905,7 @@ async def run_deep_analyze_pipeline(payload: dict) -> JSONResponse:
         stage_status = []
 
     canonical = build_canonical_signals(stage_status, ctx)
-    mappings = {
-        'mitre': map_to_mitre(canonical),
-        'stride': map_to_stride(canonical),
-        'controls': map_to_controls(canonical),
-        'dread': map_to_dread(canonical),
-        'pasa': map_to_pasa(canonical),
-        'maestro': map_to_maestro(canonical),
-        'diamond': map_to_diamond(canonical),
-    }
+    mappings = _build_mapping_bundle(canonical, rows, ctx.get('factors') or [])
     queued_ts = time.time()
     telemetry = {'queued_at': queued_ts, 'queued_at_ms': int(queued_ts * 1000), 'stage_count': len(pipeline_plan)}
 
@@ -2574,6 +3930,22 @@ async def run_deep_analyze_pipeline(payload: dict) -> JSONResponse:
         'reviews': {},  # row_index -> {status, notes, reviewer_tag, updated_ts}
         'batch_meta': batch_meta or {},
     }
+    assessment_obj = _hydrate_assessment_semantics(assessment_obj)
+    try:
+        hopgraph_meta = _ingest_rows_to_hopgraph(rows, assessment_id)
+    except Exception:
+        hopgraph_meta = {'ingested': 0, 'timeline_rows': 0, 'timespan_seconds': 0.0}
+    telemetry.update({
+        'hopgraph_ingested_rows': hopgraph_meta.get('ingested') or 0,
+        'timeline_rows': hopgraph_meta.get('timeline_rows') or 0,
+        'timeline_span_seconds': hopgraph_meta.get('timespan_seconds') or 0.0,
+    })
+    assessment_obj['telemetry'] = telemetry
+    assessment_obj['temporal_context'] = {
+        'ingested_rows': hopgraph_meta.get('ingested') or 0,
+        'timeline_rows': hopgraph_meta.get('timeline_rows') or 0,
+        'timespan_seconds': hopgraph_meta.get('timespan_seconds') or 0.0,
+    }
     persisted_path = _store_assessment(org, assessment_id, assessment_obj) or ''
 
     # Store light-weight view in memory for quick GET responses
@@ -2590,7 +3962,11 @@ async def run_deep_analyze_pipeline(payload: dict) -> JSONResponse:
         'mappings': mappings,
         'results': stage_status,
         'telemetry': telemetry,
+        'temporal_context': assessment_obj.get('temporal_context') or {},
         'rows_processed': len(rows),
+        'evidence_rows': assessment_obj.get('evidence_rows') or [],
+        'correlation_clusters': assessment_obj.get('correlation_clusters') or [],
+        'persona_reports': assessment_obj.get('persona_reports') or {},
     }
 
     # Schedule background LLM row generation so the HTTP response is fast even when providers are slow
@@ -2640,15 +4016,8 @@ async def run_deep_analyze_pipeline(payload: dict) -> JSONResponse:
                         except Exception:
                             pass
                     assessment_obj['canonical'] = build_canonical_signals(statuses, proc_ctx)
-                    assessment_obj['mappings'] = {
-                        'mitre': map_to_mitre(assessment_obj['canonical']),
-                        'stride': map_to_stride(assessment_obj['canonical']),
-                        'controls': map_to_controls(assessment_obj['canonical']),
-                        'dread': map_to_dread(assessment_obj['canonical']),
-                        'pasa': map_to_pasa(assessment_obj['canonical']),
-                        'maestro': map_to_maestro(assessment_obj['canonical']),
-                        'diamond': map_to_diamond(assessment_obj['canonical']),
-                    }
+                    assessment_obj['mappings'] = _build_mapping_bundle(assessment_obj['canonical'], rows, proc_ctx.get('factors') or [])
+                    assessment_obj = _hydrate_assessment_semantics(assessment_obj)
                     assessment_obj['status'] = 'completed'
                     assessment_obj['rows_processed'] = len(rows)
                     try:
@@ -2693,6 +4062,10 @@ async def run_deep_analyze_pipeline(payload: dict) -> JSONResponse:
         'canonical': canonical,
         'mappings': mappings,
         'telemetry': telemetry,
+        'temporal_context': assessment_obj.get('temporal_context') or {},
+        'evidence_rows': assessment_obj.get('evidence_rows') or [],
+        'correlation_clusters': assessment_obj.get('correlation_clusters') or [],
+        'persona_reports': assessment_obj.get('persona_reports') or {},
         'risk_appetite': risk_appetite,
         'batch_meta': batch_meta or {},
     }
@@ -2811,34 +4184,15 @@ def _build_lite_assessment(payload: dict, persist: bool = True) -> dict:
         fallback['processed'] = len(fallback.get('results') or [])
     except Exception:
         fallback['processed'] = int(fallback.get('rows_processed') or fallback.get('accepted_rows') or 0)
-    mappings = {}
-    try:
-        mappings['mitre'] = map_to_mitre(fallback['canonical']) or ['lite_mode']
-    except Exception:
+    mappings = _build_mapping_bundle(fallback['canonical'], rows, fallback.get('factors') or [])
+    if not mappings.get('mitre'):
         mappings['mitre'] = ['lite_mode']
-    try:
-        mappings['stride'] = map_to_stride(fallback['canonical']) or []
-    except Exception:
-        mappings['stride'] = []
-    try:
-        mappings['controls'] = map_to_controls(fallback['canonical']) or []
-    except Exception:
-        mappings['controls'] = []
-    try:
-        mappings['dread'] = map_to_dread(fallback['canonical'])
-    except Exception:
-        mappings['dread'] = {'score': 0}
-    try:
-        mappings['pasa'] = map_to_pasa(fallback['canonical'])
-    except Exception:
-        mappings['pasa'] = {'pasa_level': 'low'}
-    try:
-        mappings['maestro'] = map_to_maestro(fallback['canonical'])
-    except Exception:
+    if not mappings.get('pasta'):
+        mappings['pasta'] = {'pasa_level': 'low'}
+        mappings['pasa'] = mappings['pasta']
+    if not mappings.get('maestro'):
         mappings['maestro'] = {'maestro_tags': []}
-    try:
-        mappings['diamond'] = map_to_diamond(fallback['canonical'])
-    except Exception:
+    if not mappings.get('diamond'):
         mappings['diamond'] = {'adversary': None, 'capability': []}
     fallback['mappings'] = mappings
     if persist:
@@ -3112,6 +4466,12 @@ async def get_assessment(assessment_id: str):
             resp['telemetry'] = tele
             if worker_state.get('error'):
                 resp['error'] = worker_state.get('error')
+
+    if not resp.get('persona_reports') or not resp.get('correlation_clusters') or not resp.get('evidence_rows'):
+        try:
+            resp = _hydrate_assessment_semantics(resp)
+        except Exception:
+            pass
 
     REPORT_STORE[assessment_id] = {**in_mem, **resp}
     return JSONResponse(resp)
