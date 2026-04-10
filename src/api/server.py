@@ -4541,12 +4541,40 @@ async def decisions_recent(limit: int = 50, tenant_id: str | None = None, reques
             return getattr(obj, key, None)
         except Exception:
             return None
+    def _decision_to_recent_row(dec) -> dict[str, Any]:
+        dec_tenant = _row_attr(dec, 'tenant_id')
+        row = {
+            'id': _row_attr(dec, 'event_id') or _row_attr(dec, 'id'),
+            'event_id': _row_attr(dec, 'event_id') or _row_attr(dec, 'id'),
+            'verdict': _row_attr(dec, 'verdict'),
+            'confidence': _row_attr(dec, 'confidence'),
+            'reasons': _row_attr(dec, 'factors'),
+            'tenant_id': dec_tenant,
+            'ts': _row_attr(dec, 'timestamp') or _row_attr(dec, 'ts'),
+            'correlation_insights': _row_insights(dec),
+        }
+        for field in _EXTRA_DECISION_FIELDS:
+            val = _row_attr(dec, field)
+            if val is not None:
+                row[field] = val
+        return row
     def _hydrate_decision_rows(data: list[dict[str, Any]]) -> list[dict[str, Any]]:
         cache = DECISION_CACHE if isinstance(DECISION_CACHE, dict) else {}
-        if not cache:
+        persisted_by_event: dict[str, Any] = {}
+        try:
+            for item in globals().get('_PERSISTED_DECISIONS') or []:
+                event_key = str((item or {}).get('event_id') or (item or {}).get('id') or '')
+                if event_key:
+                    persisted_by_event[event_key] = item
+        except Exception:
+            persisted_by_event = {}
+        if not cache and not persisted_by_event:
             return data
         for row in data:
-            cached = cache.get(row.get('event_id'))
+            event_key = str(row.get('event_id') or row.get('id') or '')
+            cached = cache.get(event_key) if cache else None
+            if not cached:
+                cached = persisted_by_event.get(event_key)
             if not cached:
                 continue
             for field in _EXTRA_DECISION_FIELDS:
@@ -4556,6 +4584,40 @@ async def decisions_recent(limit: int = 50, tenant_id: str | None = None, reques
                 if val is not None:
                     row[field] = val
         return data
+    def _merge_recent_cache_rows(data: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        cache = DECISION_CACHE if isinstance(DECISION_CACHE, dict) else {}
+        if not cache:
+            return data
+        seen = {str(row.get('event_id') or row.get('id') or '') for row in data}
+        row_by_event = {str(row.get('event_id') or row.get('id') or ''): row for row in data}
+        additions: list[dict[str, Any]] = []
+        try:
+            cache_window = list(cache.values())[-limit * 4:][::-1]
+        except Exception:
+            cache_window = []
+        for dec in cache_window:
+            event_key = str(_row_attr(dec, 'event_id') or _row_attr(dec, 'id') or '')
+            if not event_key:
+                continue
+            if event_key in row_by_event:
+                fresh = _decision_to_recent_row(dec)
+                existing = row_by_event[event_key]
+                for field in _EXTRA_DECISION_FIELDS:
+                    if existing.get(field) is None and fresh.get(field) is not None:
+                        existing[field] = fresh[field]
+                continue
+            if event_key in seen:
+                continue
+            dec_tenant = _row_attr(dec, 'tenant_id')
+            if tenant_id and dec_tenant and dec_tenant != tenant_id:
+                continue
+            additions.append(_decision_to_recent_row(dec))
+            seen.add(event_key)
+            if len(additions) >= limit:
+                break
+        if not additions:
+            return data[: int(limit)]
+        return (additions + data)[: int(limit)]
     # Resolve tenant context: prefer explicit query param, then request.state, then header
     try:
         if not tenant_id:
@@ -4646,27 +4708,14 @@ async def decisions_recent(limit: int = 50, tenant_id: str | None = None, reques
         # Fallback to in-memory cache slice — honour tenant_id filter
         rows = []
         for dec in list(DECISION_CACHE.values())[-limit * 4:][::-1]:
-            dec_tenant = getattr(dec, 'tenant_id', None) or (dec.get('tenant_id') if isinstance(dec, dict) else None)
+            dec_tenant = _row_attr(dec, 'tenant_id')
             if tenant_id and dec_tenant and dec_tenant != tenant_id:
                 continue
-            row = {
-                'id': getattr(dec, 'event_id', None) or dec.get('event_id'),
-                'event_id': getattr(dec, 'event_id', None) or dec.get('event_id'),
-                'verdict': getattr(dec, 'verdict', None) or dec.get('verdict'),
-                'confidence': getattr(dec, 'confidence', None) or dec.get('confidence'),
-                'reasons': getattr(dec, 'factors', None) or dec.get('factors'),
-                'tenant_id': dec_tenant,
-                'ts': getattr(dec, 'timestamp', None) or dec.get('ts'),
-                'correlation_insights': _row_insights(dec),
-            }
-            for field in _EXTRA_DECISION_FIELDS:
-                val = _row_attr(dec, field)
-                if val is not None:
-                    row[field] = val
-            rows.append(row)
+            rows.append(_decision_to_recent_row(dec))
             if len(rows) >= limit:
                 break
     rows = _hydrate_decision_rows(rows)
+    rows = _merge_recent_cache_rows(rows)
     # Enforce tenant isolation at the application layer as a safety net.
     try:
         if tenant_id:
@@ -5488,10 +5537,6 @@ async def network_summary(limit_events: int = 1000) -> dict[str, Any]:
 async def _record_decision_async(event_id: str, verdict: str, confidence: float, factors: list[str], meta: dict[str, Any] | None = None) -> None:
     """Async path for recording decisions: compose risk, publish SSE, persist to DB."""
     try:
-        try:
-            print(f"RECORD_DECISION_ASYNC called event_id={event_id} verdict={verdict} conf={confidence} factors={factors}")
-        except Exception:
-            pass
         dec = {
             'event_id': event_id,
             'id': event_id,
@@ -5691,12 +5736,6 @@ async def _record_decision_async(event_id: str, verdict: str, confidence: float,
                     cache[event_id] = dec
             except Exception:
                 pass
-            # Debug visibility for tests (best-effort; avoid nested try to reduce indentation issues)
-            if True:
-                try:
-                    print(f"RECORD_DECISION_ASYNC cached event_id={event_id} present={event_id in cache}")
-                except Exception:
-                    pass
             # trim if exceeds configured max: evict oldest by timestamp (more stable than dict order)
             try:
                 if len(cache) > max_cache:
@@ -6187,6 +6226,10 @@ _EXTRA_DECISION_FIELDS = (
     'replay_history',
     'replayed_batch_count',
     'chain_record',
+    'evidence_summary',
+    'approval_state',
+    'assessment_id',
+    'report_id',
 )
 
 
