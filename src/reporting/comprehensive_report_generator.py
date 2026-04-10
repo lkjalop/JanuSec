@@ -226,7 +226,10 @@ def _collect_all_factors(rows: list) -> dict:
     for row in rows:
         factors = row.get('factors') or []
         for f in factors:
-            name = f.get('name') if isinstance(f, dict) else str(f)
+            name = (
+                f.get('name') or f.get('factor') or f.get('id') or f.get('label')
+                if isinstance(f, dict) else str(f)
+            )
             if name:
                 counts[name] = counts.get(name, 0) + 1
     return dict(sorted(counts.items(), key=lambda x: x[1], reverse=True))
@@ -383,7 +386,7 @@ def _render_persona_section(payload: dict, persona: str, report_options: dict | 
                 secs.append('</div>')
         # Factor frequency table
         if all_factors:
-            secs.append(f'<div style="{SUB}">Detected Factors (frequency)</div>')
+            secs.append(f'<div style="{SUB}">Key factors</div>')
             secs.append('<table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:10px">')
             secs.append('<thead><tr>'
                         '<th style="text-align:left;padding:3px 8px;border-bottom:1px solid #243144">Factor</th>'
@@ -810,7 +813,11 @@ def build_report_html(payload):
                           r.get('subject') or r.get('from') or r.get('to') or
                           r.get('event_id') or 'unknown')
             factors_list = r.get('factors') or []
-            factor_names = [f.get('name') if isinstance(f, dict) else str(f) for f in factors_list[:5]]
+            factor_names = [
+                str(f.get('name') or f.get('factor') or f.get('id') or f.get('label') or '')
+                if isinstance(f, dict) else str(f)
+                for f in factors_list[:5]
+            ]
             factor_html = ' '.join(f'<span style="display:inline-block;padding:1px 6px;border-radius:10px;font-size:10px;background:#1a2030;color:#9bb;margin:1px">{escape(fn)}</span>'
                                    for fn in factor_names)
             sections.append(f'<tr>'
@@ -856,7 +863,7 @@ def build_report_html(payload):
     # ── HopGraph (if present) ────────────────────────────────────────────────
     corr = payload.get('correlation')
     if corr and isinstance(corr, dict) and any(corr.values()):
-        sections.append('<h3 style="margin-top:16px">Correlation / HopGraph</h3>')
+        sections.append('<h3 style="margin-top:16px">Correlation details</h3>')
         try:
             sections.append('<div><pre style="background:#0a1018;padding:10px;border-radius:6px;font-size:11px;overflow:auto;max-height:200px">'
                             + escape(json.dumps(corr, indent=2)) + '</pre></div>')
