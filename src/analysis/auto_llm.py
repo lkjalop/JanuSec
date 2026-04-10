@@ -15,6 +15,7 @@ except Exception:
     aggregate = None
 
 SIGNAL_HINTS = {
+    # Core endpoint signals
     'novel_global': 'Hash not seen across enterprise baseline.',
     'novel_local': 'New artifact on this host.',
     'temp_execution': 'Executed from temporary directory.',
@@ -24,6 +25,73 @@ SIGNAL_HINTS = {
     'lolbin': 'Executed via living-off-the-land binary.',
     'network_beacon': 'Periodic outbound connections detected.',
     'credential_access': 'Touched credential stores.',
+    # URL risk
+    'email:url_entropy_high': 'URL path entropy exceeds obfuscation threshold — possible C2 redirect.',
+    'email:url_homoglyph': 'Domain impersonates protected brand via Unicode confusable characters.',
+    'email:url_redirect_chain': 'URL passes through multiple shortener hops — redirect chain evasion.',
+    'email:url_fresh_domain': 'Domain uses high-risk TLD consistent with freshly registered phishing infrastructure.',
+    'email:url_dga_candidate': 'Domain label exhibits DGA-consistent features.',
+    # Attachment
+    'email:attachment_double_ext': 'Double extension hides executable as benign file (e.g. invoice.pdf.exe).',
+    'email:attachment_zip_bomb': 'Attachment decompresses to extreme ratio — zip bomb.',
+    'email:attachment_ole_macro': 'OLE/OOXML file contains embedded VBA macro stream.',
+    'email:attachment_rtf_exploit': 'RTF attachment contains OLE exploit embedding pattern.',
+    'email:attachment_html_smuggling': 'HTML attachment contains runtime-decoded base64 blob — HTML smuggling.',
+    'email:attachment_polyglot': 'File passes as two formats simultaneously — format-filter evasion.',
+    'email:attachment_lnk_target': 'LNK shortcut targets a suspicious executable.',
+    # BEC
+    'email:bec_sender_anomaly': 'Sender frequency deviates from EWMA baseline — unusual volume burst.',
+    'email:bec_replyto_mismatch': 'Reply-To domain differs from From domain — BEC reply-hijack tell.',
+    'email:bec_first_contact': 'First email from this sender to this recipient — no prior history.',
+    'email:bec_display_name_spoof': 'Display name claims executive role but From is external domain.',
+    'email:bec_urgency_pressure': 'Multiple urgency/pressure phrases — wire fraud social engineering.',
+    'email:bec_lookalike_advanced': 'Sender domain Unicode-normalizes to protected brand.',
+    # Process tree
+    'endpoint:process_tree_anomaly': 'Parent→child process relationship outside normal baseline.',
+    'endpoint:cmdline_rarity_high': 'Command-line tokens have high rarity vs. host baseline.',
+    'endpoint:orphan_process': 'Process has no parent in telemetry — injection or log gap.',
+    'endpoint:process_depth_spike': 'Process tree depth exceeds normal threshold.',
+    'endpoint:lolbin_child_unusual': 'LOLBin spawned by unusual parent process.',
+    'endpoint:process_masquerade': 'System process running from unexpected path.',
+    # Persistence
+    'endpoint:persistence_reg_run': 'Registry Run key write detected — autostart persistence.',
+    'endpoint:persistence_service_new': 'New service installed — possible persistent implant.',
+    'endpoint:persistence_task_new': 'Scheduled task / cron job created — possible persistent execution.',
+    'endpoint:persistence_startup_lnk': 'File written to Startup folder.',
+    'endpoint:persistence_wmi_sub': 'WMI event subscription created — fileless persistence.',
+    'endpoint:persistence_ifeo': 'Image File Execution Options Debugger key set — debugger hijack.',
+    'endpoint:persistence_dll_search': 'DLL dropped in writable path — search order hijacking.',
+    'endpoint:persistence_bootkit': 'Bootloader/MBR modification — bootkit installation.',
+    'endpoint:persistence_burst': 'Multiple persistence mechanisms in short window — APT staging.',
+    'endpoint:persistence_ld_preload': 'LD_PRELOAD modified — Linux shared library injection.',
+    'endpoint:persistence_profile_mod': 'Shell profile modified by non-shell process.',
+    # Fileless
+    'endpoint:fileless_reflective_load': 'Reflective DLL injection — fileless, no disk artifact.',
+    'endpoint:fileless_process_hollow': 'Process hollowing — legitimate process replaced in-memory.',
+    'endpoint:fileless_shellcode_alloc': 'RWX memory allocation — shellcode staging.',
+    # eBPF/kernel
+    'endpoint:ebpf_prog_load_unusual': 'eBPF program loaded by non-standard process — possible rootkit.',
+    'endpoint:kernel_module_novel': 'Unknown kernel module loaded — possible rootkit.',
+    'endpoint:kernel_symbol_hook': 'Kernel symbol table access by userspace — rootkit hooking.',
+    'endpoint:proc_hide_indicator': 'getdents hook / sys_call_table modification — process hiding.',
+    # Steganography
+    'endpoint:steg_tool_execution': 'Known steganography tool executed — covert channel indicator.',
+    'endpoint:steg_image_entropy_flat': 'Image entropy suspiciously low — possible LSB steganography.',
+    'endpoint:steg_polyglot_image': 'Image contains ZIP footer — polyglot payload container.',
+    # Supply chain
+    'endpoint:npm_postinstall_exec': 'npm postinstall executing network/shell command — supply chain vector.',
+    'endpoint:pip_setup_exec': 'pip setup.py executing shell commands — supply chain vector.',
+    'endpoint:build_tool_network': 'Build tool spawning network utility — supply chain C2 or exfil.',
+    'endpoint:ci_runner_escalation': 'CI runner acquiring root or modifying system paths.',
+    'endpoint:dev_tool_modified': 'Developer tool binary hash differs from baseline — compromised toolchain.',
+    # Macros
+    'endpoint:xlm_macro_execution': 'Excel 4.0 (XLM) macro execution — legacy macro evasion.',
+    'endpoint:dde_command_injection': 'DDE field executing shell command — Office DDE injection.',
+    'endpoint:vba_environ_recon': 'VBA Environ() host recon in Office process.',
+    # Ransomware indicators
+    'endpoint:ransom_network_share_enum': 'Mass SMB share enumeration — pre-ransomware recon.',
+    'endpoint:ransom_backup_catalog_del': 'Backup catalog deletion — ransomware pre-encryption.',
+    'endpoint:ransom_inhibit_recovery': 'Recovery inhibition command — ransomware anti-recovery.',
 }
 
 
