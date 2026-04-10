@@ -5,6 +5,20 @@ SECTIONS = [
     'graph_context', 'business_impact', 'recommendations', 'controls', 'mitre', 'next_steps'
 ]
 
+# Chain-of-thought reasoning prefix injected into Tier 2 system prompts.
+# Forces the model to decompose multi-hop analysis into sequential steps
+# before producing structured output — dramatically improves quality on
+# correlated clusters without any infra change.
+COT_REASONING_PREFIX = (
+    "Think step by step before producing your final answer.\n"
+    "1. Identify all distinct entities (hosts, users, IPs, domains, processes, cloud resources).\n"
+    "2. Trace relationships between entities — what connected to what, in what order.\n"
+    "3. Assess the kill-chain phase for each relationship (initial access, execution, "
+    "persistence, privilege escalation, lateral movement, collection, exfiltration, C2).\n"
+    "4. Evaluate severity by considering the combination of factors, not each factor in isolation.\n"
+    "5. Only then produce the structured JSON output below.\n\n"
+)
+
 def _sample_evidence_item(row: Dict[str, Any]) -> Dict[str, Any]:
     return {
         'row_index': row.get('row_index'),
@@ -32,6 +46,8 @@ def build_tier2_prompt_context(payload: Dict[str, Any]) -> Dict[str, Any]:
         'pipeline_summary': payload.get('pipeline_summary') or {},
         'graph_summary': payload.get('graph_summary') or {},
         'threat_intel': payload.get('threat_intel') or {},
+        'cluster_reasoning_state': payload.get('cluster_reasoning_state') or {},
+        'corroboration': payload.get('corroboration') or {},
         'time_generated': payload.get('time_generated'),
     }
 
@@ -140,12 +156,18 @@ def build_tier2_prompt_context(payload: Dict[str, Any]) -> Dict[str, Any]:
     if not missing:
         missing = ['Authentication logs', 'Proxy/Web gateway logs', 'Endpoint EDR telemetry']
 
+    # Inject hop-chain narrative when available in the payload
+    hop_chain_narrative = payload.get('hop_chain_narrative')
+    if hop_chain_narrative:
+        context['hop_chain_narrative'] = hop_chain_narrative
+
     return {
         'sections': SECTIONS,
         'context': context,
         'templates': section_templates,
         'few_shot_examples': few_shot_examples,
         'missing_logs_suggestions': list(dict.fromkeys(missing)),
+        'cot_prefix': COT_REASONING_PREFIX,
     }
 
 
