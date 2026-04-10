@@ -3,6 +3,8 @@ from __future__ import annotations
 from typing import Any, Dict, Iterable, Optional
 import hashlib
 import json
+import asyncio
+import os
 import time
 
 from fastapi import APIRouter, Body, Header, HTTPException, Request
@@ -46,6 +48,12 @@ from src.connectors.resilience import RetryPolicy, execute_with_resilience, load
 from src.integrations.polling_state import PollingStateStore
 from src.core.platform_scope import scope_allows_provider
 from src.core.correlation.tier1_summarizer import summarize_tier1
+from src.collectors.iam_okta_adapter import OktaIAMCollector
+from src.collectors.iam_sailpoint_worker import SailPointCollector
+from src.connectors.mimecast import MimecastConnector
+from src.connectors.proofpoint import ProofpointConnector
+from src.api.connectors_email import _normalize_mimecast, _normalize_proofpoint
+from src.api.iam_ingest_endpoints import _normalize_okta_identity_event
 
 router = APIRouter(prefix="/api/v1/connectors", tags=["connectors-control"])
 
@@ -85,8 +93,13 @@ def _append_events(runtime, tenant: str, connector_id: str, events: list[dict[st
             del bucket[:-5000]
         for event in events:
             record_network_event(runtime, event, tenant)
-    elif connector_id in {'eventhub', 'entra_signin', 'entra_audit'}:
+    elif connector_id in {'eventhub', 'entra_signin', 'entra_audit', 'okta', 'sailpoint'}:
         bucket = tstate.setdefault('recent_iam_events', [])
+        bucket.extend(events)
+        if len(bucket) > 5000:
+            del bucket[:-5000]
+    elif connector_id in {'mimecast', 'proofpoint'}:
+        bucket = tstate.setdefault('recent_email_events', [])
         bucket.extend(events)
         if len(bucket) > 5000:
             del bucket[:-5000]
@@ -118,6 +131,15 @@ def _dedupe_events(runtime, tenant: str, provider: str, connector: str, events: 
     if len(recent) > 2000:
         del recent[:-2000]
     return filtered, duplicate_count
+
+
+def _coerce_since_ts(value: Any, default_seconds: int = 300) -> float:
+    try:
+        if value is None:
+            raise ValueError
+        return float(value)
+    except Exception:
+        return time.time() - default_seconds
 
 
 def _aws_decision_inputs(connector: str, event: Dict[str, Any]) -> tuple[str, str, float, list[str], dict[str, Any]] | None:
@@ -343,8 +365,6 @@ def _azure_decision_inputs(connector: str, event: Dict[str, Any]) -> tuple[str, 
 
 
 def _emit_connector_decisions(provider: str, connector: str, events: list[dict[str, Any]]) -> int:
-    if provider not in ('azure', 'aws'):
-        return 0
     emitted = 0
     try:
         from src.api.server import _record_decision  # type: ignore
@@ -354,8 +374,10 @@ def _emit_connector_decisions(provider: str, connector: str, events: list[dict[s
         try:
             if provider == 'azure':
                 decision_inputs = _azure_decision_inputs(connector, event)
-            else:
+            elif provider == 'aws':
                 decision_inputs = _aws_decision_inputs(connector, event)
+            else:
+                decision_inputs = _generic_decision_inputs(provider, connector, event)
             if not decision_inputs:
                 continue
             event_id, verdict, confidence, factors, meta = decision_inputs
@@ -394,6 +416,72 @@ def _emit_connector_decisions(provider: str, connector: str, events: list[dict[s
         except Exception:
             continue
     return emitted
+
+
+def _generic_decision_inputs(provider: str, connector: str, event: Dict[str, Any]) -> tuple[str, str, float, list[str], dict[str, Any]] | None:
+    source = str(event.get('source') or connector or provider)
+    event_id = str(event.get('id') or event.get('event_id') or f"{provider}:{connector}:{event.get('ts') or time.time()}")
+    factors = sorted({str(f) for f in (event.get('factors') or []) if f})
+    severity = str(event.get('severity') or '').lower()
+    verdict = 'allow'
+    confidence = 0.35
+    if provider in {'okta', 'sailpoint'}:
+        action = str(event.get('action') or event.get('event_type') or '').lower()
+        result = str(event.get('result') or '').lower()
+        if 'factor' in action or 'privilege' in action or 'policy' in action:
+            verdict = 'suspicious'
+            confidence = 0.76
+            factors.extend(['iam:privilege_change'])
+        elif any(token in action for token in ('login', 'signin', 'auth')) and result not in {'success', 'allow', ''}:
+            verdict = 'suspicious'
+            confidence = 0.68
+            factors.extend(['iam:signin_risk'])
+    elif provider == 'email':
+        if severity in {'critical', 'high'}:
+            verdict = 'bad'
+            confidence = 0.86 if severity == 'critical' else 0.78
+        elif factors:
+            verdict = 'suspicious'
+            confidence = 0.66
+    factors = sorted({str(f) for f in factors if f})
+    if verdict == 'allow' or not factors:
+        return None
+    return (
+        event_id,
+        verdict,
+        confidence,
+        factors,
+        {
+            'details': {
+                'source': source,
+                'event_type': event.get('event_type') or event.get('action'),
+                'user': event.get('user') or event.get('actor'),
+                'ip': event.get('ip'),
+                'resource': event.get('resource') or event.get('target'),
+                'action': event.get('action') or event.get('event_type'),
+            },
+            'hopgraph_context': {
+                'provider': provider,
+                'source': source,
+                'event_type': event.get('event_type') or event.get('action'),
+                'event_ts': event.get('event_ts') or event.get('ts'),
+                'user': event.get('user') or event.get('actor'),
+                'ip': event.get('ip'),
+                'resource': event.get('resource') or event.get('target'),
+                'action': event.get('action') or event.get('event_type'),
+            },
+            'recommendation_actions': [
+                {
+                    'id': f'{provider}|review|{connector}',
+                    'domain': provider,
+                    'action': 'review_evidence',
+                    'priority': 'high' if verdict == 'bad' else 'medium',
+                    'status': 'pending',
+                    'updated_ts': time.time(),
+                }
+            ],
+        },
+    )
 
 
 def _aws_connector(name: str, body: ConnectorPollRequest):
@@ -458,12 +546,99 @@ def _azure_connector(name: str, body: ConnectorPollRequest, tenant: str):
     return conn, fetcher
 
 
+def _okta_connector(name: str, body: ConnectorPollRequest, tenant: str):
+    if name != 'okta':
+        raise HTTPException(status_code=404, detail='unknown_connector')
+    store = ConnectorConfigStore()
+    cfg = store.load(tenant, 'okta', name)
+    if cfg.get('org_url'):
+        os.environ['OKTA_ORG_URL'] = str(cfg.get('org_url'))
+    if cfg.get('api_token'):
+        os.environ['OKTA_API_TOKEN'] = str(cfg.get('api_token'))
+    conn = OktaIAMCollector(tenant_id=tenant)
+    fetcher = lambda: [
+        _normalize_okta_identity_event(evt, tenant)
+        for evt in (conn.fetch_events(_coerce_since_ts(body.since_ts)) or [])
+        if isinstance(evt, dict)
+    ]
+    return conn, fetcher
+
+
+def _sailpoint_connector(name: str, body: ConnectorPollRequest, tenant: str):
+    if name not in {'sailpoint', 'identitynow'}:
+        raise HTTPException(status_code=404, detail='unknown_connector')
+    store = ConnectorConfigStore()
+    cfg = store.load(tenant, 'sailpoint', 'sailpoint')
+    conn = SailPointCollector(
+        tenant_id=tenant,
+        base_url=cfg.get('base_url'),
+        client_id=cfg.get('client_id'),
+        client_secret=cfg.get('client_secret'),
+    )
+    fetcher = lambda: [_ingest_generic_identity_normalized(evt, tenant, 'sailpoint') for evt in (asyncio.run(conn.poll_events()) or []) if isinstance(evt, dict)]
+    return conn, fetcher
+
+
+def _ingest_generic_identity_normalized(raw: Dict[str, Any], tenant: str, provider: str) -> Dict[str, Any]:
+    payload = {'events': [raw], 'tenant_id': tenant}
+    # reuse existing generic mapping semantics from iam ingest path
+    tenant_value, _ = tenant, 1
+    return {
+        'id': raw.get('id') or raw.get('event_id') or raw.get('raw', {}).get('id'),
+        'tenant_id': tenant_value,
+        'provider': provider,
+        'domain': 'identity',
+        'ts': raw.get('timestamp') or raw.get('ts'),
+        'actor': raw.get('actor'),
+        'action': raw.get('eventType') or raw.get('operation'),
+        'ip': raw.get('ip'),
+        'result': raw.get('result'),
+        'target': raw.get('target'),
+        'severity': 'high' if 'privilege' in str(raw.get('operation') or '').lower() else 'medium',
+        'factors': ['iam:connector_ingest'] + (['iam:privilege_change'] if 'privilege' in str(raw.get('operation') or '').lower() else []),
+        'raw': raw,
+    }
+
+
+def _email_connector(name: str, body: ConnectorPollRequest, tenant: str):
+    store = ConnectorConfigStore()
+    cfg = store.load(tenant, 'email', name)
+    if name == 'mimecast':
+        conn = MimecastConnector()
+        if cfg.get('client_id'):
+            os.environ['MIMECAST_CLIENT_ID'] = str(cfg.get('client_id'))
+        if cfg.get('client_secret'):
+            os.environ['MIMECAST_CLIENT_SECRET'] = str(cfg.get('client_secret'))
+        if cfg.get('token_url'):
+            os.environ['MIMECAST_TOKEN_URL'] = str(cfg.get('token_url'))
+        fetcher = lambda: [_normalize_mimecast(evt) for evt in ((asyncio.run(conn.execute('email', tenant, None)) or {}).get('events') or []) if isinstance(evt, dict)]
+    elif name == 'proofpoint':
+        conn = ProofpointConnector()
+        if cfg.get('client_id'):
+            os.environ['PROOFPOINT_CLIENT_ID'] = str(cfg.get('client_id'))
+        if cfg.get('client_secret'):
+            os.environ['PROOFPOINT_CLIENT_SECRET'] = str(cfg.get('client_secret'))
+        if cfg.get('token_url'):
+            os.environ['PROOFPOINT_TOKEN_URL'] = str(cfg.get('token_url'))
+        fetcher = lambda: [_normalize_proofpoint(evt) for evt in ((asyncio.run(conn.execute('email', tenant, None)) or {}).get('events') or []) if isinstance(evt, dict)]
+    else:
+        raise HTTPException(status_code=404, detail='unknown_connector')
+    return conn, fetcher
+
+
 def _connector_config_payload(provider: str, connector: str, tenant: str) -> Dict[str, Any]:
     store = ConnectorConfigStore()
     if provider == 'azure':
         cfg = AzureConnectorConfig.from_mapping({'tenant_id': tenant, **store.load(tenant, provider, connector)})
         return cfg.redacted()
-    return store.load(tenant, provider, connector)
+    payload = store.load(tenant, provider, connector)
+    if provider in {'okta', 'sailpoint', 'email'}:
+        redacted = dict(payload or {})
+        for key in ('api_token', 'client_secret', 'api_secret', 'access_token'):
+            if redacted.get(key):
+                redacted[key] = '***'
+        return redacted
+    return payload
 
 
 @router.get('/{tenant_id}/{provider}/{connector}/config')
@@ -503,8 +678,25 @@ def connector_config_put(
             raise HTTPException(status_code=400, detail={'missing': missing})
         store.save(tenant, provider, connector, payload)
         return {'ok': True, 'tenant': tenant, 'provider': provider, 'connector': connector, 'config': cfg.redacted()}
+    if provider == 'okta':
+        missing = [key for key in ('org_url', 'api_token') if not payload.get(key)]
+        if missing:
+            raise HTTPException(status_code=400, detail={'missing': missing})
+    elif provider == 'sailpoint':
+        missing = [key for key in ('base_url', 'client_id', 'client_secret') if not payload.get(key)]
+        if missing:
+            raise HTTPException(status_code=400, detail={'missing': missing})
+    elif provider == 'email':
+        if connector == 'mimecast':
+            missing = [key for key in ('client_id', 'client_secret', 'token_url') if not payload.get(key)]
+        elif connector == 'proofpoint':
+            missing = [key for key in ('client_id', 'client_secret', 'token_url') if not payload.get(key)]
+        else:
+            raise HTTPException(status_code=404, detail='unknown_connector')
+        if missing:
+            raise HTTPException(status_code=400, detail={'missing': missing})
     store.save(tenant, provider, connector, payload)
-    return {'ok': True, 'tenant': tenant, 'provider': provider, 'connector': connector, 'config': payload}
+    return {'ok': True, 'tenant': tenant, 'provider': provider, 'connector': connector, 'config': _connector_config_payload(provider, connector, tenant)}
 
 
 @router.get('/{tenant_id}/status')
@@ -576,18 +768,72 @@ def connector_poll(
             conn, fetcher = _aws_connector(connector, body)
         elif provider == 'azure':
             conn, fetcher = _azure_connector(connector, body, tenant)
+        elif provider == 'okta':
+            conn, fetcher = _okta_connector(connector, body, tenant)
+        elif provider == 'sailpoint':
+            conn, fetcher = _sailpoint_connector(connector, body, tenant)
+        elif provider == 'email':
+            conn, fetcher = _email_connector(connector, body, tenant)
         else:
             raise HTTPException(status_code=404, detail='unknown_provider')
         if provider == 'azure':
             cfg = conn.cfg
             missing = cfg.validate_for(connector)
             if missing and not body.dry_run:
-                update_connector_health(runtime, tenant, connector_id, provider=provider, status='misconfigured', ok=False, error=','.join(missing))
+                update_connector_health(
+                    runtime,
+                    tenant,
+                    connector_id,
+                    provider=provider,
+                    status='misconfigured',
+                    ok=False,
+                    error=','.join(missing),
+                    authenticated=False,
+                    receiving_events=False,
+                    checkpoint_healthy=False,
+                )
+                persist_tenant_runtime(runtime, tenant)
+                raise HTTPException(status_code=400, detail={'missing': missing})
+        if provider in {'okta', 'sailpoint', 'email'} and not body.dry_run:
+            missing = []
+            stored_payload = ConnectorConfigStore().load(tenant, provider, connector)
+            if provider == 'okta':
+                missing = [key for key in ('org_url', 'api_token') if not stored_payload.get(key)]
+            elif provider == 'sailpoint':
+                missing = [key for key in ('base_url', 'client_id', 'client_secret') if not stored_payload.get(key)]
+            elif provider == 'email':
+                missing = [key for key in ('client_id', 'client_secret', 'token_url') if not stored_payload.get(key)]
+            if missing:
+                update_connector_health(
+                    runtime,
+                    tenant,
+                    connector_id,
+                    provider=provider,
+                    status='misconfigured',
+                    ok=False,
+                    error=','.join(missing),
+                    authenticated=False,
+                    receiving_events=False,
+                    checkpoint_healthy=False,
+                )
                 persist_tenant_runtime(runtime, tenant)
                 raise HTTPException(status_code=400, detail={'missing': missing})
         if body.dry_run:
             runtime_state = load_runtime_state(state_store, tenant, provider, connector)
-            update_connector_health(runtime, tenant, connector_id, provider=provider, status='dry_run', ok=True, checkpoint=getattr(conn, 'ck', {}), error=runtime_state.get('last_error'))
+            checkpoint = getattr(conn, 'ck', {})
+            update_connector_health(
+                runtime,
+                tenant,
+                connector_id,
+                provider=provider,
+                status='dry_run',
+                ok=True,
+                checkpoint=checkpoint,
+                error=runtime_state.get('last_error'),
+                authenticated=True,
+                receiving_events=False,
+                checkpoint_healthy=bool(checkpoint),
+            )
             persist_tenant_runtime(runtime, tenant)
             return {
                 'ok': True,
@@ -620,6 +866,9 @@ def connector_poll(
             last_count=len(events),
             checkpoint=getattr(conn, 'ck', {}),
             error=runtime_state.get('last_error'),
+            authenticated=True,
+            receiving_events=bool(events),
+            checkpoint_healthy=bool(getattr(conn, 'ck', {})),
         )
         runtime.tenants.setdefault(tenant, {}).setdefault('connector_health', {}).setdefault(connector_id, {})['last_duplicate_count'] = duplicate_count
         runtime.tenants.setdefault(tenant, {}).setdefault('connector_health', {}).setdefault(connector_id, {})['last_latency_ms'] = runtime_state.get('last_latency_ms')
@@ -639,7 +888,19 @@ def connector_poll(
         raise
     except Exception as exc:
         runtime_state = load_runtime_state(state_store, tenant, provider, connector)
-        update_connector_health(runtime, tenant, connector_id, provider=provider, status='error', ok=False, error=str(exc), checkpoint=getattr(locals().get('conn', None), 'ck', {}))
+        update_connector_health(
+            runtime,
+            tenant,
+            connector_id,
+            provider=provider,
+            status='error',
+            ok=False,
+            error=str(exc),
+            checkpoint=getattr(locals().get('conn', None), 'ck', {}),
+            authenticated=False,
+            receiving_events=False,
+            checkpoint_healthy=False,
+        )
         runtime.tenants.setdefault(tenant, {}).setdefault('connector_health', {}).setdefault(connector_id, {})['runtime_state'] = runtime_state
         persist_tenant_runtime(runtime, tenant)
         raise HTTPException(status_code=502, detail=f'connector_poll_failed:{connector}')
