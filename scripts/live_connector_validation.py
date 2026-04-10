@@ -18,6 +18,8 @@ from scripts.offline_replay_harness import _load_rows
 
 AWS_CONNECTORS = ("cloudtrail", "guardduty", "securityhub", "vpcflow")
 AZURE_CONNECTORS = ("eventhub", "entra_signin", "entra_audit", "defender_cloud")
+IDENTITY_CONNECTORS = (("okta", "okta"), ("sailpoint", "sailpoint"))
+EMAIL_CONNECTORS = (("email", "mimecast"), ("email", "proofpoint"))
 
 
 def _headers(api_key: str, tenant_id: str) -> Dict[str, str]:
@@ -143,6 +145,77 @@ def _iter_targets(scope: str) -> Iterable[Tuple[str, str]]:
     if lowered in {"azure", "all"}:
         for connector in AZURE_CONNECTORS:
             yield "azure", connector
+    if lowered in {"identity", "all"}:
+        for provider, connector in IDENTITY_CONNECTORS:
+            yield provider, connector
+    if lowered in {"email", "all"}:
+        for provider, connector in EMAIL_CONNECTORS:
+            yield provider, connector
+
+
+def _check_live_lane_chronology(assessment: Dict[str, Any]) -> List[str]:
+    failures: List[str] = []
+    rows = list(assessment.get("rows") or assessment.get("llm_rows") or [])
+    saw_bitemporal = False
+    for row in rows:
+        valid_time = row.get("valid_time")
+        transaction_time = row.get("transaction_time")
+        if valid_time is None or transaction_time is None:
+            continue
+        saw_bitemporal = True
+        try:
+            if float(transaction_time) < float(valid_time):
+                failures.append(f"transaction_before_valid:{row.get('row_index')}")
+        except Exception:
+            failures.append(f"invalid_bitemporal:{row.get('row_index')}")
+    if rows and not saw_bitemporal:
+        failures.append("missing_bitemporal_fields")
+    return failures
+
+
+def _build_live_lane_assessment(
+    *,
+    base: str,
+    tenant_id: str,
+    headers: Dict[str, str],
+    timeout: int,
+    include_email: bool,
+) -> Dict[str, Any]:
+    payload = _post_json(
+        f"{base}/api/v1/connectors/{tenant_id}/assessment/live_lane",
+        headers,
+        {
+            "providers": ["aws", "azure", "okta", "sailpoint", "email"] if include_email else ["aws", "azure", "okta", "sailpoint"],
+            "connectors": ["cloudtrail", "entra_signin", "okta", "sailpoint", "mimecast", "proofpoint"] if include_email else ["cloudtrail", "entra_signin", "okta", "sailpoint"],
+            "limit_per_lane": 50,
+            "auto_llm": False,
+            "include_email": include_email,
+        },
+        timeout=max(timeout, 120),
+    )
+    assessment_id = payload.get("assessment_id")
+    cluster_state = payload.get("cluster_reasoning_state") or {}
+    cluster_id = cluster_state.get("primary_cluster_id")
+    failures = _check_live_lane_chronology(payload)
+    cluster_detail = None
+    if assessment_id and cluster_id:
+        cluster_detail = _get_json(
+            f"{base}/api/v1/assessments/{assessment_id}/clusters/{cluster_id}",
+            headers,
+            timeout=max(timeout, 60),
+        )
+        provider_context = (cluster_detail.get("cluster_detail") or {}).get("provider_context") or {}
+        if not provider_context.get("connector_status"):
+            failures.append("cluster_detail_missing_connector_status")
+    else:
+        failures.append("missing_primary_cluster")
+    return {
+        "assessment_id": assessment_id,
+        "cluster_id": cluster_id,
+        "cluster_detail": cluster_detail,
+        "row_count": len(payload.get("rows") or payload.get("llm_rows") or []),
+        "failures": failures,
+    }
 
 
 def _run_export_replay(
@@ -214,12 +287,14 @@ def main(argv: List[str]) -> int:
     ap.add_argument("--base", default="http://127.0.0.1:8080")
     ap.add_argument("--api-key", default="devkey123")
     ap.add_argument("--tenant-id", required=True)
-    ap.add_argument("--scope", choices=["aws", "azure", "all"], default="all")
+    ap.add_argument("--scope", choices=["aws", "azure", "identity", "email", "all"], default="all")
     ap.add_argument("--since-seconds", type=int, default=900)
     ap.add_argument("--limit", type=int, default=100)
     ap.add_argument("--timeout", type=int, default=60,
                     help="HTTP request timeout in seconds (default: 60)")
     ap.add_argument("--out", default=None)
+    ap.add_argument("--build-live-lane", action="store_true", help="Build a live-lane assessment after polling configured connectors.")
+    ap.add_argument("--include-email", action="store_true", help="Include Mimecast/Proofpoint in the live-lane assessment.")
     ap.add_argument("--azure-export-pack", action="append", default=[], help="Path to exported Azure replay pack directory or file.")
     ap.add_argument("--aws-export-pack", action="append", default=[], help="Path to exported AWS replay pack directory or file.")
     args = ap.parse_args(argv)
@@ -259,6 +334,21 @@ def main(argv: List[str]) -> int:
         if result.get("failures"):
             exit_code = 1
         report["results"].append(result)
+
+    if args.build_live_lane:
+        try:
+            report["live_lane_assessment"] = _build_live_lane_assessment(
+                base=base,
+                tenant_id=args.tenant_id,
+                headers=headers,
+                timeout=args.timeout,
+                include_email=bool(args.include_email),
+            )
+            if report["live_lane_assessment"].get("failures"):
+                exit_code = 1
+        except Exception as exc:
+            exit_code = 1
+            report["live_lane_assessment"] = {"failures": [f"live_lane_exception:{exc}"]}
 
     export_packs = {
         "azure": list(args.azure_export_pack or []),
@@ -318,6 +408,12 @@ def main(argv: List[str]) -> int:
                 continue
             verdict = (entry.get("verdict") or {}).get("final_verdict")
             confidence = (entry.get("verdict") or {}).get("final_confidence")
+    if report.get("live_lane_assessment"):
+        live = report["live_lane_assessment"]
+        if live.get("failures"):
+            print(f"  FAIL  live-lane  failures={live.get('failures')}", file=sys.stderr)
+        else:
+            print(f"  PASS  live-lane  assessment={live.get('assessment_id')} cluster={live.get('cluster_id')} rows={live.get('row_count')}", file=sys.stderr)
             pack = entry.get("pack") or "pack"
             print(f"  REPLAY {provider}/{pack} verdict={verdict} confidence={confidence}", file=sys.stderr)
     print(f"\n[{overall}] {passed}/{total} connectors passed", file=sys.stderr)

@@ -13,6 +13,11 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Tuple
 from urllib.parse import urlparse
 
+from src.core.correlation.cluster_reasoning import (
+    build_cluster_reasoning_root,
+    build_cluster_reasoning_state,
+    compact_cluster_reasoning_state,
+)
 from src.core.detect.isolation_forest import IsolationForestDetector
 from src.ml.tfidf_profile import TfidfProfile
 
@@ -779,6 +784,382 @@ def _build_corroboration_summary(
         "evidence_sources": sorted(list(evidence_units or source_categories)),
         "shared_pivots": shared_pivots[:10],
     }
+
+
+def _compact_cluster_reasoning_state(state: dict[str, Any] | None) -> dict[str, Any]:
+    return compact_cluster_reasoning_state(state)
+
+
+def _offline_alt_hypotheses(cluster_sources: list[str], review_state_counts: dict[str, int]) -> list[dict[str, Any]]:
+    items = [{
+        "hypothesis": "Legitimate operational activity or maintenance created the correlated pattern.",
+        "confidence": 0.24,
+        "weakness": "No owner-approved change evidence is attached to the workbook yet.",
+        "evidence_refs": [],
+    }]
+    if int(review_state_counts.get("unknown") or 0) > 0:
+        items.append({
+            "hypothesis": "Unreviewed rows could materially change the current attack-chain interpretation.",
+            "confidence": 0.29,
+            "weakness": "Review coverage is incomplete.",
+            "evidence_refs": [],
+        })
+    if len(cluster_sources) <= 1:
+        items.append({
+            "hypothesis": "Single-source concentration may indicate a narrow detection context rather than a broad incident.",
+            "confidence": 0.18,
+            "weakness": "Cross-source corroboration is limited.",
+            "evidence_refs": [],
+        })
+    return items[:3]
+
+
+def _build_offline_cluster_reasoning_state(
+    *,
+    assessment_id: str,
+    investigation_clusters: list[dict[str, Any]],
+    suspicious_rows: list[dict[str, Any]],
+    severity: str,
+    final_verdict: str,
+    final_confidence: float,
+    corroboration_summary: dict[str, Any],
+    recommended_actions: list[dict[str, Any]],
+    graph_anomaly_score: float,
+    graph_path_score: float,
+    sequence_score: float,
+    review_state_counts: dict[str, int],
+    analyst_workflow: dict[str, Any],
+    canonical_summary: str,
+    semantic_top_factors: list[dict[str, Any]],
+    impact_metadata: dict[str, Any],
+    evidence_layers: dict[str, Any],
+) -> tuple[dict[str, Any], dict[int, dict[str, Any]]]:
+    if not investigation_clusters:
+        return {}, {}
+
+    severity_score_map = {"LOW": 0.35, "MEDIUM": 0.58, "HIGH": 0.78, "CRITICAL": 0.92}
+    row_items_by_index: dict[int, list[dict[str, Any]]] = defaultdict(list)
+    for item in suspicious_rows:
+        row = item.get("row") or {}
+        row_index = row.get("row_index")
+        if isinstance(row_index, int):
+            row_items_by_index[row_index].append(item)
+
+    evidence_sources = [str(src) for src in (corroboration_summary.get("evidence_sources") or []) if str(src).strip()]
+    shared_pivots = [
+        str(item.get("pivot") or "").strip()
+        for item in (corroboration_summary.get("shared_pivots") or [])
+        if isinstance(item, dict) and str(item.get("pivot") or "").strip()
+    ]
+    top_hypothesis = _factor_plain_label(str((semantic_top_factors[:1] or [{}])[0].get("factor_name") or "correlated attack chain"))
+    recommended_text = [str(item.get("primary_action") or "").strip() for item in recommended_actions if str(item.get("primary_action") or "").strip()]
+    review_status = "confirmed_malicious" if int(review_state_counts.get("confirmed_malicious") or 0) > 0 else "needs_investigation"
+    gate_required = final_verdict in {"THREAT", "SUSPICIOUS"} and int(corroboration_summary.get("count") or 0) >= 2
+    analyst_state = {
+        "review_status": review_status,
+        "gate_status": "pending" if gate_required else "not_required",
+        "hypothesis": top_hypothesis,
+        "factors_added": [],
+        "factors_removed": [],
+        "confidence_override": None,
+        "disposition_delta": 0.0,
+        "user_contacted": bool(analyst_workflow.get("user_contacted")),
+        "change_ticket_found": bool(analyst_workflow.get("change_ticket_found")),
+        "owner_confirmed": bool(analyst_workflow.get("owner_confirmed")),
+        "change_tickets": list(analyst_workflow.get("change_tickets") or [])[:5],
+    }
+
+    cluster_states: list[dict[str, Any]] = []
+    row_cluster_lookup: dict[int, dict[str, Any]] = {}
+    for idx, cluster in enumerate(investigation_clusters):
+        cluster_id = f"cluster-{idx + 1}"
+        evidence_row_indices = [int(v) for v in (cluster.get("evidence_row_indices") or []) if isinstance(v, int)]
+        cluster_items = [item for row_index in evidence_row_indices for item in row_items_by_index.get(row_index, [])]
+        cluster_sources = sorted(
+            {
+                str((item.get("row") or {}).get("export_source") or (item.get("row") or {}).get("provider") or (item.get("row") or {}).get("cloud_export_kind") or (item.get("row") or {}).get("sheet") or "").strip()
+                for item in cluster_items
+                if str((item.get("row") or {}).get("export_source") or (item.get("row") or {}).get("provider") or (item.get("row") or {}).get("cloud_export_kind") or (item.get("row") or {}).get("sheet") or "").strip()
+            }
+        ) or evidence_sources[:]
+        cluster_size = max(int(cluster.get("event_count") or 0), len(evidence_row_indices), len(cluster_items))
+        graph_score = round(max(graph_anomaly_score, graph_path_score), 3)
+        ewma_score = round(min(1.0, max(sequence_score, 0.0)), 3)
+        pattern_support_score = round(
+            min(
+                1.0,
+                (len(cluster_sources) * 0.18)
+                + (len(shared_pivots) * 0.08)
+                + (min(int(corroboration_summary.get("count") or 0), 5) * 0.1),
+            ),
+            3,
+        )
+        severity_score = float(severity_score_map.get(str(severity or "").upper(), 0.42))
+        routing_score = round(min(0.99, (severity_score * 0.38) + (graph_score * 0.27) + (ewma_score * 0.15) + (pattern_support_score * 0.20)), 3)
+        reasoning_mode = "deep" if cluster_size >= 2 or str(severity).upper() in {"HIGH", "CRITICAL"} or final_verdict == "THREAT" else "cheap"
+        corroboration_confidence = round(min(0.99, max(final_confidence, routing_score)), 3)
+        if corroboration_confidence >= 0.78:
+            corroboration_verdict = "corroborated_high_signal"
+        elif corroboration_confidence >= 0.62:
+            corroboration_verdict = "corroborated_medium_signal"
+        else:
+            corroboration_verdict = "mixed_signal"
+        contradictions = []
+        missing_evidence = list((((evidence_layers.get("plain_language") or {}).get("missing_evidence")) or []))[:6]
+        if missing_evidence:
+            contradictions.append("Important supporting telemetry is still missing from the current evidence set.")
+        if int(review_state_counts.get("unknown") or 0) > 0:
+            contradictions.append("Some rows remain unreviewed and may still change the final scope.")
+        attachment_names = [
+            str(
+                (item.get("row") or {}).get("attachment_name")
+                or (item.get("row") or {}).get("file_name")
+                or (item.get("row") or {}).get("filename")
+                or ""
+            ).strip()
+            for item in cluster_items
+            if str(
+                (item.get("row") or {}).get("attachment_name")
+                or (item.get("row") or {}).get("file_name")
+                or (item.get("row") or {}).get("filename")
+                or ""
+            ).strip()
+        ]
+        attachment_signal = any(
+            name.lower().endswith((".pdf", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".xlsm", ".docm"))
+            for name in attachment_names
+        ) or any(
+            str((item.get("row") or {}).get("source_kind") or "").lower() in {"attachment_forensics", "attachment_detonation", "mimecast", "proofpoint"}
+            for item in cluster_items
+        )
+        qr_or_visual_signal = any(
+            token in " ".join([
+                str((item.get("row") or {}).get("description") or ""),
+                str((item.get("row") or {}).get("attachment_name") or ""),
+                " ".join(str(f) for f in ((item.get("row") or {}).get("factors") or [])),
+            ]).lower()
+            for item in cluster_items
+            for token in ("qr", "barcode", "image", "steg", "screenshot")
+        )
+        attachment_confirmation_details: list[dict[str, Any]] = []
+        attachment_denial_details: list[dict[str, Any]] = []
+        attachment_missing: list[str] = []
+        if attachment_signal:
+            attachment_confirmation_details.append({
+                "lead": "Run OCR and visual inspection on the suspicious attachment set to extract invoice text, QR destinations, sender-brand drift, and hidden execution cues.",
+                "expected_information_gain": 0.86,
+                "artifact_availability": "available_now",
+                "why_it_matters": "Attachment OCR and computer-vision review can confirm payment fraud, QR lures, or malicious visual prompts before the case is escalated or closed.",
+            })
+            attachment_confirmation_details.append({
+                "lead": "Collect attachment hashes, detonation output, and endpoint opening telemetry for the same document or image family across all affected mailboxes and hosts.",
+                "expected_information_gain": 0.83,
+                "artifact_availability": "requires_live_pull",
+                "why_it_matters": "This validates whether the attachment only reached one user or reproduced across the broader environment.",
+            })
+            attachment_denial_details.append({
+                "lead": "Verify whether the attachment content, QR destination, and embedded branding match a trusted supplier baseline or approved finance workflow.",
+                "expected_information_gain": 0.71,
+                "artifact_availability": "requires_owner_validation",
+                "why_it_matters": "A legitimate supplier or approved internal workflow is the strongest denial path for a suspicious attachment cluster.",
+            })
+            attachment_missing.extend(["ocr_attachment_review", "visual_brand_baseline", "attachment_open_telemetry"])
+        if qr_or_visual_signal:
+            attachment_confirmation_details.append({
+                "lead": "Decode any QR code or embedded redirect path, then compare the resolved destination against web proxy, DNS, and endpoint browser telemetry.",
+                "expected_information_gain": 0.88,
+                "artifact_availability": "requires_live_pull",
+                "why_it_matters": "QR and visual lures often shift execution to browsers or mobile devices, so decoding the destination is required to confirm damage and scope.",
+            })
+            attachment_denial_details.append({
+                "lead": "Confirm whether the image or screenshot is synthetic training content, harmless marketing collateral, or a known-good internal asset before retaining the malicious hypothesis.",
+                "expected_information_gain": 0.64,
+                "artifact_availability": "requires_owner_validation",
+                "why_it_matters": "Visual-only artifacts can generate false positives if they are demonstration material rather than delivered attack payloads.",
+            })
+            attachment_missing.append("qr_destination_resolution")
+        claims = [
+            {
+                "claim": canonical_summary,
+                "claim_type": "fact",
+                "confidence": round(max(0.35, routing_score), 3),
+                "evidence_refs": evidence_row_indices[:5],
+                "counter_evidence": [],
+                "assumptions": [],
+            },
+            {
+                "claim": top_hypothesis,
+                "claim_type": "inference",
+                "confidence": round(min(0.95, max(0.3, corroboration_confidence)), 3),
+                "evidence_refs": evidence_row_indices[:4],
+                "counter_evidence": contradictions[:3],
+                "assumptions": ["Workbook clusters represent one incident candidate until disproved by owner validation."],
+            },
+        ]
+        if missing_evidence:
+            claims.append({
+                "claim": "Confidence is constrained by telemetry gaps that still need confirmation or denial.",
+                "claim_type": "assumption",
+                "confidence": round(min(0.8, 0.42 + (len(missing_evidence) * 0.04)), 3),
+                "evidence_refs": evidence_row_indices[:3],
+                "counter_evidence": [],
+                "assumptions": missing_evidence[:4],
+            })
+        state = build_cluster_reasoning_state(
+            assessment_id=assessment_id,
+            cluster_id=cluster_id,
+            version="offline-v1",
+            generated_ts=int(time.time()),
+            trigger_reason="offline_workbook_assessment",
+            routing_mode="cluster-first" if cluster_size >= 2 else "row-first",
+            reasoning_mode=reasoning_mode,
+            cluster_size=cluster_size,
+            severity_score=round(severity_score, 3),
+            graph_score=graph_score,
+            ewma_score=ewma_score,
+            pattern_support_score=pattern_support_score,
+            routing_score=routing_score,
+            analyst_state=dict(analyst_state),
+            canonical_narrative=canonical_summary,
+            top_hypothesis=top_hypothesis,
+            supporting_evidence=cluster_sources[:6] or evidence_sources[:6],
+            contradictions=contradictions,
+            missing_telemetry=missing_evidence,
+            recommended_actions=recommended_text[:4],
+            corroboration_status="completed" if int(corroboration_summary.get("count") or 0) >= 2 or final_verdict == "THREAT" else "deferred",
+            corroboration_verdict=corroboration_verdict,
+            corroboration_confidence=corroboration_confidence,
+            corroboration_run_ts=int(time.time()),
+            evidence_used=cluster_sources[:6] or evidence_sources[:6],
+            alt_hypotheses=_offline_alt_hypotheses(cluster_sources, review_state_counts),
+            claims=claims[:4],
+            leads={
+                "next_best": recommended_text[:2],
+                "confirmation": (cluster_sources[:2] or evidence_sources[:2] or ["Owner validation and source-log cross-check required."]),
+                "denial": [
+                    "Check approved change tickets or operational owner attestations for the same time window.",
+                    "Confirm whether baseline or backup behavior explains the same pivots before retaining the attack hypothesis.",
+                ],
+                "high_value_missing_telemetry": (missing_evidence[:3] + attachment_missing)[:5],
+                "next_best_details": [
+                    {
+                        "lead": lead,
+                        "expected_information_gain": round(0.74 - (idx * 0.08), 3),
+                        "artifact_availability": "available_now",
+                        "why_it_matters": "This is the fastest workbook-native step to validate the cluster before opening duplicate investigations.",
+                    }
+                    for idx, lead in enumerate(recommended_text[:2])
+                ] + attachment_confirmation_details[:1],
+                "confirmation_details": [
+                    {
+                        "lead": lead,
+                        "expected_information_gain": round(0.8 - (idx * 0.06), 3),
+                        "artifact_availability": "requires_live_pull" if lead in missing_evidence else "available_now",
+                        "why_it_matters": "This evidence can confirm the current workbook hypothesis or strengthen corroboration.",
+                    }
+                    for idx, lead in enumerate((cluster_sources[:2] or evidence_sources[:2] or ["Owner validation and source-log cross-check required."]))
+                ] + attachment_confirmation_details,
+                "denial_details": [
+                    {
+                        "lead": lead,
+                        "expected_information_gain": round(0.63 - (idx * 0.05), 3),
+                        "artifact_availability": "requires_owner_validation",
+                        "why_it_matters": "This check is the safest route to deny a false-positive workbook cluster.",
+                    }
+                    for idx, lead in enumerate([
+                        "Check approved change tickets or operational owner attestations for the same time window.",
+                        "Confirm whether baseline or backup behavior explains the same pivots before retaining the attack hypothesis.",
+                    ])
+                ] + attachment_denial_details,
+                "scope_expansion_details": [
+                    {
+                        "lead": "Expand to adjacent workbook rows only if the shared pivots strengthen after corroboration.",
+                        "expected_information_gain": 0.57,
+                        "artifact_availability": "available_now",
+                        "why_it_matters": "This keeps workbook scoping tight and avoids unnecessary incident duplication.",
+                    }
+                ],
+                "closure_blockers": missing_evidence[:2] or ["Document whether missing evidence still blocks final closure."],
+                "lead_outcomes": [],
+            },
+            source_reliability=[
+                {
+                    "source": src,
+                    "type": "direct_artifact" if src not in {"Overview", "Summary"} else "derived",
+                    "weight": 0.95 if src not in {"Overview", "Summary"} else 0.62,
+                    "why_it_matters": f"{src} contributes corroborating evidence to the workbook assessment.",
+                }
+                for src in (cluster_sources[:6] or evidence_sources[:6])
+            ],
+            what_would_flip=[
+                "Owner-approved maintenance evidence or a valid change ticket could reduce malicious confidence.",
+                "If missing telemetry disproves the shared pivot chain, de-escalate this cluster for isolated review.",
+            ],
+            disconfirming_evidence=contradictions,
+            persona_seed_claims=[entry.get("finding") for entry in ((evidence_layers.get("plain_language") or {}).get("confirmed_evidence") or [])[:4] if entry.get("finding")],
+            persona_seed_actions=recommended_text[:5],
+            persona_seed_missing_telemetry=missing_evidence[:4],
+            temporal_rag_sources=evidence_sources[:8],
+            shared_pivots=shared_pivots[:8],
+            provider_context={
+                "affected_hosts": list((impact_metadata.get("affected_hosts") or [])[:6]),
+                "affected_identities": list((impact_metadata.get("affected_identities") or [])[:6]),
+                "valid_time": min((((item.get("row") or {}).get("timestamp_epoch")) for item in suspicious_rows if (item.get("row") or {}).get("timestamp_epoch")), default=None),
+                "transaction_time": int(time.time()),
+                "backfill_observed": bool(missing_evidence),
+                "connector_freshness": {
+                    "available": not bool(missing_evidence),
+                    "missing_sources": missing_evidence[:4],
+                    "gaps": [
+                        {"name": entry, "severity": "warning", "message": f"Workbook is missing {entry} required for higher-confidence corroboration."}
+                        for entry in missing_evidence[:4]
+                    ],
+                    "seconds_since_ok": None,
+                },
+                "connector_status": [
+                    {
+                        "connector": src,
+                        "configured": True,
+                        "authenticated": True,
+                        "receiving_events": True,
+                        "checkpoint_healthy": True,
+                        "heartbeat_stale": False,
+                        "beta_ready": True,
+                    }
+                    for src in (cluster_sources[:6] or evidence_sources[:6])
+                ],
+            },
+            evidence_row_indices=evidence_row_indices[:12],
+            close_conditions={
+                "soc_close_conditions": [
+                    "Containment is confirmed for the workbook-scoped hosts, users, or cloud resources.",
+                    (cluster_sources[:1] or evidence_sources[:1] or ["Owner validation and source-log cross-check required."])[0],
+                    (missing_evidence[:1] or ["Document whether missing evidence still blocks final closure."])[0],
+                ],
+                "hunter_close_conditions": [
+                    "Rule out the strongest benign explanation before closing the hunt.",
+                    "Expand adjacent workbook pivots only while they materially improve evidence quality.",
+                    (missing_evidence[:1] or ["Document why no further hunt pivots are required."])[0],
+                ],
+                "forensics_close_conditions": [
+                    "Preserve the highest-value workbook artifacts before evidence ages out.",
+                    (missing_evidence[:1] or ["Capture the highest-value missing telemetry before finalizing the timeline."])[0],
+                    "Record whether delayed or backfilled evidence changed the verdict.",
+                ],
+            },
+        )
+        cluster_states.append(state)
+        compact = _compact_cluster_reasoning_state(state)
+        for row_index in evidence_row_indices:
+            row_cluster_lookup[row_index] = compact
+
+    root = build_cluster_reasoning_root(
+        assessment_id=assessment_id,
+        version="offline-v1",
+        generated_ts=int(time.time()),
+        cluster_states=cluster_states,
+    )
+    return root, row_cluster_lookup
 
 
 def _plain_language_summary(
@@ -3018,6 +3399,70 @@ def build_offline_workbook_assessment(rows: list[Dict[str, Any]], *, assessment_
     # ── END cluster separation ────────────────────────────────────────────────
 
     # ── Ollama-grounded tier-2 narrative (when auto_llm enabled) ─────────────
+    review_state_counts = {
+        key: sum(1 for row in rows if str(row.get("review_state") or "").lower() == key)
+        for key in (
+            "reviewed_benign",
+            "reviewed_false_positive",
+            "needs_investigation",
+            "confirmed_malicious",
+            "out_of_scope",
+            "duplicate",
+            "unknown",
+        )
+    }
+    impact_metadata = {
+        "affected_identities": sorted(x for x in affected_identities if x)[:12],
+        "affected_hosts": sorted(x for x in affected_hosts if x)[:12],
+        "control_objectives": [
+            "identity_access_review",
+            "endpoint_lineage_validation",
+            "network_containment_readiness",
+        ],
+        "corroborating_domains": corroborating_domains,
+        "missing_evidence": sorted(set(missing_evidence)),
+        "corroboration_summary": corroboration_summary,
+        "analyst_workflow": {
+            **analyst_workflow,
+            "change_tickets": analyst_workflow["change_tickets"][:5],
+        },
+        "business_criticality": {
+            "highest": highest_business_criticality[0] if highest_business_criticality else None,
+            "sensitive_resource_count": len(
+                [
+                    row for row in criticality_rows
+                    if float((((row.get("business_criticality") or {}).get("score")) or 0.0)) >= 0.74
+                ]
+            ),
+        },
+    }
+    cluster_reasoning_state, row_cluster_lookup = _build_offline_cluster_reasoning_state(
+        assessment_id=assessment_id,
+        investigation_clusters=investigation_clusters,
+        suspicious_rows=suspicious_rows,
+        severity=severity,
+        final_verdict=final_verdict,
+        final_confidence=max_confidence,
+        corroboration_summary=corroboration_summary,
+        recommended_actions=recommended_actions,
+        graph_anomaly_score=graph_anomaly_score,
+        graph_path_score=graph_path_score,
+        sequence_score=sequence_score,
+        review_state_counts=review_state_counts,
+        analyst_workflow=impact_metadata["analyst_workflow"],
+        canonical_summary=plain_summary,
+        semantic_top_factors=semantic_top_factors,
+        impact_metadata=impact_metadata,
+        evidence_layers=evidence_layers,
+    )
+    if cluster_reasoning_state:
+        for row in rows:
+            row_index = row.get("row_index")
+            if isinstance(row_index, int) and row_index in row_cluster_lookup:
+                row["cluster_reasoning_state"] = dict(row_cluster_lookup[row_index])
+                row["corroboration"] = dict((row_cluster_lookup[row_index].get("corroboration") or {}))
+                row["correlation_cluster_id"] = row_cluster_lookup[row_index].get("cluster_id")
+
     tier2_analysis: dict[str, Any] = {}
     if auto_llm and os.getenv("LLM_MOCK", "0").lower() not in {"1", "true", "yes"}:
         try:
@@ -3150,31 +3595,10 @@ def build_offline_workbook_assessment(rows: list[Dict[str, Any]], *, assessment_
         "recommended_actions": recommended_actions,
         "upload_provenance": upload_provenance,
         "ioc_enrichment": ioc_enrichment,
-        "impact_metadata": {
-            "affected_identities": sorted(x for x in affected_identities if x)[:12],
-            "affected_hosts": sorted(x for x in affected_hosts if x)[:12],
-            "control_objectives": [
-                "identity_access_review",
-                "endpoint_lineage_validation",
-                "network_containment_readiness",
-            ],
-            "corroborating_domains": corroborating_domains,
-            "missing_evidence": sorted(set(missing_evidence)),
-            "corroboration_summary": corroboration_summary,
-            "analyst_workflow": {
-                **analyst_workflow,
-                "change_tickets": analyst_workflow["change_tickets"][:5],
-            },
-            "business_criticality": {
-                "highest": highest_business_criticality[0] if highest_business_criticality else None,
-                "sensitive_resource_count": len(
-                    [
-                        row for row in criticality_rows
-                        if float((((row.get("business_criticality") or {}).get("score")) or 0.0)) >= 0.74
-                    ]
-                ),
-            },
-        },
+        "impact_metadata": impact_metadata,
+        "cluster_reasoning_state": cluster_reasoning_state,
+        "corroboration": (cluster_reasoning_state.get("corroboration") or {}) if cluster_reasoning_state else {},
+        "review_state_counts": review_state_counts,
         "risk_quantification": risk_quantification,
         "verdict": {
             "final_verdict": final_verdict,

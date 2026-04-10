@@ -53,6 +53,11 @@ def connectors_status(
                 'last_poll_ts': entry.get('last_poll_ts'),
                 'last_count': entry.get('last_count', 0),
                 'checkpoint': entry.get('checkpoint') or {},
+                'authenticated': bool(entry.get('authenticated')),
+                'receiving_events': bool(entry.get('receiving_events')),
+                'checkpoint_healthy': bool(entry.get('checkpoint_healthy')),
+                'beta_ready': bool(entry.get('beta_ready')),
+                'freshness': entry.get('freshness') or {},
                 'seconds_since_ok': (now - float(entry.get('last_ok_ts'))) if entry.get('last_ok_ts') else None,
                 **_runtime_projection(entry, now),
             }
