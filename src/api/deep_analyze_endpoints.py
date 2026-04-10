@@ -2878,6 +2878,138 @@ def _hydrate_assessment_semantics(assessment: dict) -> dict:
     return assessment
 
 
+_OFFLINE_ASSESSMENT_MERGE_KEYS = (
+    'tier2_analysis',
+    'final_verdict',
+    'final_confidence',
+    'severity',
+    'semantic_top_factors',
+    'supporting_model_factors',
+    'accepted_rows',
+    'rejected_rows',
+    'rows_processed',
+    'processed',
+    'llm_rows',
+    'results',
+    'canonical',
+    'framework_mappings',
+    'mappings',
+    'findings',
+    'evidence_items',
+    'attack_timeline',
+    'recommended_actions',
+    'upload_provenance',
+    'ioc_enrichment',
+    'impact_metadata',
+    'cluster_reasoning_state',
+    'corroboration',
+    'review_state_counts',
+    'risk_quantification',
+    'verdict',
+    'tier_metadata',
+    'decision_record',
+    'investigation_clusters',
+)
+
+
+def _should_apply_offline_workbook_assessment(rows: List[dict], payload: dict, options: dict) -> bool:
+    if not rows:
+        return False
+    disabled = payload.get('disable_offline_workbook') or options.get('disable_offline_workbook')
+    if str(disabled).lower() in {'1', 'true', 'yes'}:
+        return False
+    mode = str(payload.get('mode') or payload.get('analysis_mode') or options.get('mode') or options.get('analysis_mode') or '').lower()
+    if mode in {'offline_workbook', 'manual_upload', 'workbook'}:
+        return True
+    # csv/deep_analyze is the manual/offline analysis path. Keep the explicit
+    # mode checks for callers that label workbook uploads, but also enrich
+    # row-based CSV/JSON fixtures so the immediate API response matches the
+    # persisted offline assessment shape.
+    return any(isinstance(row, dict) for row in rows)
+
+
+def _merge_offline_workbook_assessment(assessment: dict, rows: List[dict], payload: dict, options: dict, *, assessment_id: str, org: str, auto_llm: bool) -> dict:
+    if not _should_apply_offline_workbook_assessment(rows, payload, options):
+        return assessment
+    try:
+        from src.analysis.offline_workbook_assessment import build_offline_workbook_assessment
+
+        offline = build_offline_workbook_assessment(
+            rows,
+            assessment_id=assessment_id,
+            org=org,
+            auto_llm=auto_llm,
+        )
+    except Exception:
+        logger.debug('offline workbook assessment merge failed for %s', assessment_id, exc_info=True)
+        return assessment
+    if not isinstance(offline, dict):
+        return assessment
+    for key in _OFFLINE_ASSESSMENT_MERGE_KEYS:
+        value = offline.get(key)
+        if value not in (None, [], {}):
+            assessment[key] = value
+    assessment.setdefault('telemetry', {})['offline_workbook_enriched'] = True
+    return assessment
+
+
+async def _emit_offline_decision_record(assessment: dict, *, org: str) -> None:
+    decision = assessment.get('decision_record') if isinstance(assessment, dict) else None
+    if not isinstance(decision, dict):
+        return
+    event_id = str(assessment.get('assessment_id') or decision.get('event_id') or decision.get('id') or '')
+    if not event_id:
+        return
+    verdict = str(decision.get('verdict') or assessment.get('final_verdict') or 'REVIEW')
+    try:
+        confidence = float(decision.get('confidence') if decision.get('confidence') is not None else assessment.get('final_confidence') or 0.0)
+    except Exception:
+        confidence = 0.0
+    factors = [str(f) for f in (decision.get('factors') or []) if str(f).strip()]
+    meta = dict(decision)
+    meta.setdefault('tenant_id', org)
+    meta.setdefault('assessment_id', assessment.get('assessment_id'))
+    meta.setdefault('report_id', assessment.get('report_id') or assessment.get('assessment_id'))
+    recorded = False
+    try:
+        import sys
+        seen_recorders: set[int] = set()
+        for module_name in ('src.api.server', 'api.server'):
+            server_mod = sys.modules.get(module_name)
+            if server_mod is None:
+                try:
+                    if module_name == 'src.api.server':
+                        from src.api import server as server_mod  # type: ignore
+                    else:
+                        import api.server as server_mod  # type: ignore
+                except Exception:
+                    continue
+            recorder = getattr(server_mod, '_record_decision_async', None)
+            if not recorder or id(recorder) in seen_recorders:
+                continue
+            seen_recorders.add(id(recorder))
+            await recorder(event_id, verdict, confidence, factors, meta)
+            recorded = True
+    except Exception:
+        logger.debug('offline decision async recorder unavailable for %s', event_id, exc_info=True)
+    if recorded:
+        return
+    try:
+        from src.api import runtime_state
+        runtime_state.cache_set(event_id, {
+            'event_id': event_id,
+            'id': event_id,
+            'verdict': verdict,
+            'confidence': confidence,
+            'factors': factors,
+            'tenant_id': org,
+            'ts': time.time(),
+            **meta,
+        })
+    except Exception:
+        logger.debug('offline decision cache fallback failed for %s', event_id, exc_info=True)
+
+
 def _error_llm_row(normalized_row: dict, idx: int, exc: Exception) -> dict:
     """Build a minimal llm_row payload when generation fails."""
     summary = f"LLM summary unavailable: {exc}"
@@ -4200,6 +4332,16 @@ async def run_deep_analyze_pipeline(payload: dict) -> JSONResponse:
         'ml_pipeline': ml_pipeline_result,
     }
     assessment_obj = _hydrate_assessment_semantics(assessment_obj)
+    assessment_obj = _merge_offline_workbook_assessment(
+        assessment_obj,
+        rows,
+        payload if isinstance(payload, dict) else {},
+        options if isinstance(options, dict) else {},
+        assessment_id=assessment_id,
+        org=org,
+        auto_llm=auto,
+    )
+    await _emit_offline_decision_record(assessment_obj, org=org)
     try:
         hopgraph_meta = _ingest_rows_to_hopgraph(rows, assessment_id)
     except Exception:
@@ -4353,6 +4495,10 @@ async def run_deep_analyze_pipeline(payload: dict) -> JSONResponse:
         'risk_appetite': risk_appetite,
         'batch_meta': batch_meta or {},
     }
+    for key in _OFFLINE_ASSESSMENT_MERGE_KEYS:
+        value = assessment_obj.get(key)
+        if value not in (None, [], {}):
+            resp[key] = value
 
     # Ensure the authoritative assessment object is persisted and cached
     try:

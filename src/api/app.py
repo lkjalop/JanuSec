@@ -1173,7 +1173,37 @@ try:
         except Exception:
             body = {}
         pbid = f"pb-{_uuid.uuid4().hex[:8]}"
-        playbook = {'id': pbid, 'created': _time.time(), 'steps': []}
+        graph = body.get('graph') if isinstance(body.get('graph'), dict) else {}
+        metadata = graph.get('metadata') if isinstance(graph.get('metadata'), dict) else {}
+        try:
+            confidence_threshold = float(body.get('confidence_threshold') or 0.5)
+        except Exception:
+            confidence_threshold = 0.5
+        try:
+            corroboration_count = int(metadata.get('corroboration_count') or metadata.get('corroborating_domain_count') or 0)
+        except Exception:
+            corroboration_count = 0
+        approval_state = metadata.get('approval_state') if isinstance(metadata.get('approval_state'), dict) else {}
+        missing_evidence = list(metadata.get('missing_evidence') or [])
+        guardrails = {
+            'confidence_threshold': confidence_threshold,
+            'corroborating_domain_count': corroboration_count,
+            'approval_state': approval_state.get('status') or ('pending' if approval_state.get('required') else 'not_required'),
+            'missing_evidence': missing_evidence[:8],
+            'eligible_for_response': bool(
+                confidence_threshold >= 0.62
+                and corroboration_count >= 2
+                and (approval_state.get('status') in {'approved', 'not_required'} or (not approval_state.get('required') and not approval_state.get('status')))
+                and not missing_evidence
+            ),
+        }
+        playbook = {
+            'id': pbid,
+            'created': _time.time(),
+            'steps': [],
+            'guardrails': guardrails,
+            'missing_evidence': missing_evidence[:8],
+        }
         try:
             if not hasattr(app.state, 'playbooks'):
                 app.state.playbooks = {}
@@ -8378,6 +8408,10 @@ async def lite_decisions_recent(request: Request, limit: int = 50, tenant_id: st
                         'ttl_seconds',
                         'expires_at',
                         'dependency_status',
+                        'evidence_summary',
+                        'approval_state',
+                        'assessment_id',
+                        'report_id',
                     ):
                         if k in r:
                             summary[k] = r.get(k)
@@ -8391,6 +8425,10 @@ async def lite_decisions_recent(request: Request, limit: int = 50, tenant_id: st
                         'ttl_seconds',
                         'expires_at',
                         'dependency_status',
+                        'evidence_summary',
+                        'approval_state',
+                        'assessment_id',
+                        'report_id',
                     ):
                         v = getattr(r, k, None)
                         if v is not None:
@@ -8426,6 +8464,10 @@ async def lite_decisions_recent(request: Request, limit: int = 50, tenant_id: st
                         'ttl_seconds',
                         'expires_at',
                         'dependency_status',
+                        'evidence_summary',
+                        'approval_state',
+                        'assessment_id',
+                        'report_id',
                     ):
                         if k in r:
                             summary[k] = r.get(k)
@@ -8439,6 +8481,10 @@ async def lite_decisions_recent(request: Request, limit: int = 50, tenant_id: st
                         'ttl_seconds',
                         'expires_at',
                         'dependency_status',
+                        'evidence_summary',
+                        'approval_state',
+                        'assessment_id',
+                        'report_id',
                     ):
                         v = getattr(r, k, None)
                         if v is not None:
