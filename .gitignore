@@ -48,3 +48,11 @@ frontend/static/vendor/
 .env
 *.env.local
 
+# Transient test outputs and caches
+data/assessments/
+data/llm_cache/
+artifacts/
+.claude/
+_tmp_*
+*.log
+
