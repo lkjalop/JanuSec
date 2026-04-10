@@ -201,6 +201,119 @@ def _extract_row_artifacts(rows: List[Dict[str, Any]]) -> List[str]:
     return artifacts[:20]
 
 
+def _report_factor_tokens(report: Dict[str, Any]) -> set[str]:
+    tokens: set[str] = set()
+    for row in (report.get('rows') or report.get('llm_rows') or []):
+        if not isinstance(row, dict):
+            continue
+        for factor in (row.get('factors') or []):
+            if factor:
+                tokens.add(str(factor).lower())
+    cluster_state = report.get('cluster_reasoning_state') or {}
+    for cluster in (cluster_state.get('cluster_states') or []):
+        if not isinstance(cluster, dict):
+            continue
+        for claim in (cluster.get('claims') or []):
+            fac = claim.get('factor') if isinstance(claim, dict) else None
+            if fac:
+                tokens.add(str(fac).lower())
+    return tokens
+
+
+def _soc_playbook_steps(report: Dict[str, Any], close_conditions: Dict[str, Any], leads: Dict[str, Any]) -> Dict[str, List[str]]:
+    factors = _report_factor_tokens(report)
+    rows = _extract_malicious_rows(report)
+    hosts = sorted({str(r.get('host') or r.get('hostname') or '') for r in rows if (r.get('host') or r.get('hostname'))})
+    users = sorted({str(r.get('user') or r.get('account') or '') for r in rows if (r.get('user') or r.get('account'))})
+    containment: List[str] = []
+    scoping: List[str] = []
+    blockers = list(close_conditions.get('soc_close_conditions') or [])[:4]
+
+    if any(f.startswith('email:bec_') or 'attachment' in f for f in factors):
+        containment.append("Quarantine the message, block the sender and Reply-To pair, and pause any payment or supplier-change action pending out-of-band verification.")
+        scoping.append("Identify all recipients, mailboxes, and message trace hits for the same sender, subject, attachment hash, and rewritten-link targets.")
+    if any(f.startswith('endpoint:process') or f.startswith('endpoint:fileless') for f in factors):
+        containment.append(f"Isolate affected hosts ({', '.join(hosts[:3]) or 'impacted endpoints'}) and preserve the parent-child execution chain before killing processes.")
+        scoping.append("Check adjacent hosts for the same parent-child spawn, command-line tokens, and LOLBin usage before closing the case.")
+    if any(f.startswith('endpoint:persistence') for f in factors):
+        containment.append("Remove or disable newly created autoruns, tasks, services, IFEO keys, and startup entries only after evidence capture is complete.")
+        scoping.append("Enumerate persistence artifacts across all affected hosts to confirm whether the intrusion is contained or still resident.")
+    if any(f.startswith('net:') or f.startswith('dns:') or f.startswith('ssl:') for f in factors):
+        scoping.append("Correlate DNS, proxy, firewall, and TLS telemetry to confirm whether beaconing or exfiltration spread beyond the initial cluster.")
+    if users:
+        containment.append(f"Reset or suspend exposed identities ({', '.join(users[:3])}) if identity misuse is confirmed by corroborating telemetry.")
+
+    return {
+        'containment_steps': containment[:5],
+        'scoping_steps': scoping[:5],
+        'closure_blockers': blockers,
+        'deny_paths': list(leads.get('denial') or [])[:3],
+    }
+
+
+def _hunter_playbook_steps(report: Dict[str, Any], leads: Dict[str, Any], close_conditions: Dict[str, Any]) -> Dict[str, List[str]]:
+    factors = _report_factor_tokens(report)
+    rows = _extract_malicious_rows(report)
+    hosts = sorted({str(r.get('host') or r.get('hostname') or '') for r in rows if (r.get('host') or r.get('hostname'))})
+    users = sorted({str(r.get('user') or r.get('account') or '') for r in rows if (r.get('user') or r.get('account'))})
+    pivots: List[str] = list((leads.get('scope_expansion') or []) or [item.get('lead') for item in (leads.get('scope_expansion_details') or []) if isinstance(item, dict)])[:4]
+    deny_checks: List[str] = list(leads.get('denial') or [])[:4]
+    adjacent: List[str] = []
+
+    if any(f.startswith('email:bec_') or 'attachment' in f for f in factors):
+        pivots.append("Pivot on sender domain, Reply-To, subject drift, attachment hash, and all recipients who received the same lure in the same delivery window.")
+        deny_checks.append("Confirm whether the sender domain is expected in vendor communications and whether the payment-change request exists in the approved supplier workflow.")
+    if any(f.startswith('endpoint:process') or f.startswith('endpoint:fileless') for f in factors):
+        pivots.append("Hunt for the same parent-child process lineage, encoded command lines, RWX allocation patterns, or hollowing APIs across the fleet.")
+        adjacent.append(f"Expand to adjacent hosts ({', '.join(hosts[:4]) or 'peer endpoints'}) that share the same user, macro lineage, or outbound destinations.")
+    if any(f.startswith('endpoint:persistence') for f in factors):
+        pivots.append("Search for the same autorun key, scheduled task name, service name, or IFEO path across all hosts in the same admin domain.")
+        deny_checks.append("Check whether the persistence artifact matches a known-good admin tool rollout or software deployment baseline.")
+    if any(f.startswith('net:') or f.startswith('dns:') or f.startswith('ssl:') for f in factors):
+        pivots.append("Pivot on JA3, SNI, DNS query entropy, and periodic destination tuples to find additional staging or beaconing hosts.")
+    if users:
+        adjacent.append(f"Expand the hunt to other sessions, tokens, and hosts touched by {', '.join(users[:3])}.")
+
+    return {
+        'pivot_leads': pivots[:6],
+        'deny_checks': deny_checks[:5],
+        'adjacent_spread_checks': adjacent[:5] or list(close_conditions.get('hunter_close_conditions') or [])[:3],
+    }
+
+
+def _forensics_playbook_steps(report: Dict[str, Any], leads: Dict[str, Any], close_conditions: Dict[str, Any]) -> Dict[str, List[str]]:
+    factors = _report_factor_tokens(report)
+    rows = _extract_malicious_rows(report)
+    hosts = sorted({str(r.get('host') or r.get('hostname') or '') for r in rows if (r.get('host') or r.get('hostname'))})
+    artifact_order: List[str] = []
+    execution: List[str] = []
+    persistence: List[str] = []
+    damage: List[str] = []
+
+    artifact_order.append("Capture volatile host evidence first: memory, process tree, command-line history, and active network connections before containment or reboot.")
+    if any(f.startswith('email:bec_') or 'attachment' in f for f in factors):
+        artifact_order.append("Preserve the original message, headers, attachment bytes, extracted macro/VBA streams, and any rewritten-link or QR targets.")
+        execution.append("Prove whether the attachment was only delivered or actually opened and executed by correlating mail, browser, Office, and EDR telemetry.")
+    if any(f.startswith('endpoint:process') or f.startswith('endpoint:fileless') for f in factors):
+        execution.append("Validate the full parent-child execution chain, injected memory evidence, and whether the suspicious process tree reached network egress or credential access.")
+    if any(f.startswith('endpoint:persistence') for f in factors):
+        persistence.append("Collect autoruns, scheduled tasks, service definitions, IFEO keys, startup paths, and recent registry/file modifications before cleanup.")
+    if any(f.startswith('endpoint:ransom') for f in factors):
+        damage.append("Confirm whether backup deletion, recovery inhibition, or network share enumeration led to actual encryption, deletion, or lateral staging.")
+    if any(f.startswith('net:') or f.startswith('dns:') or f.startswith('ssl:') for f in factors):
+        damage.append("Validate beaconing or exfiltration with proxy, firewall, DNS, and TLS metadata before concluding impact scope.")
+
+    if hosts:
+        persistence.append(f"Preserve artifacts from {', '.join(hosts[:3])} in timestamp order so the chain of custody aligns with containment decisions.")
+
+    return {
+        'artifact_collection_order': artifact_order[:5],
+        'proof_of_execution_checks': execution[:5],
+        'persistence_validation': persistence[:5] or list(close_conditions.get('forensics_close_conditions') or [])[:3],
+        'damage_validation': damage[:5] or list(leads.get('closure_blockers') or [])[:3],
+    }
+
+
 def _ensure_risk_quantification(report: Dict[str, Any]) -> None:
     """Guarantee report['risk_quantification'] is populated with at least floor values.
 
@@ -312,6 +425,11 @@ def generate_persona_view(report: Dict[str, Any], persona: str, disclosure_level
 
     # Ensure risk_quantification always has a value so downstream persona blocks can read dollar figures
     _ensure_risk_quantification(report)
+    cluster_reasoning = report.get('cluster_reasoning_state') or {}
+    reasoning_summary = cluster_reasoning.get('summary') or {}
+    reasoning_seed = cluster_reasoning.get('persona_views_seed') or {}
+    corroboration = report.get('corroboration') or cluster_reasoning.get('corroboration') or {}
+    seeded_actions = list(reasoning_seed.get('action_candidates') or [])
     base = {
         "report_id": report.get("report_id"),
         "persona": persona,
@@ -327,6 +445,40 @@ def generate_persona_view(report: Dict[str, Any], persona: str, disclosure_level
             # generate typed DecisionGate objects then convert to serializable dicts
             "decision_gates": [dg.model_dump() if isinstance(dg, DecisionGate) else dg for dg in DecisionSupportEngine().generate(report)],
     }
+    if cluster_reasoning:
+        base['cluster_reasoning_state'] = {
+            'primary_cluster_id': cluster_reasoning.get('primary_cluster_id'),
+            'summary': reasoning_summary,
+            'corroboration': corroboration,
+            'persona_views_seed': reasoning_seed,
+            'alt_hypotheses': cluster_reasoning.get('alt_hypotheses') or [],
+            'claims': cluster_reasoning.get('claims') or [],
+            'leads': cluster_reasoning.get('leads') or {},
+            'reasoning_trace': cluster_reasoning.get('reasoning_trace') or {},
+            'source_reliability': cluster_reasoning.get('source_reliability') or [],
+            'what_would_flip': cluster_reasoning.get('what_would_flip') or [],
+            'disconfirming_evidence': cluster_reasoning.get('disconfirming_evidence') or [],
+            'close_conditions': cluster_reasoning.get('close_conditions') or {},
+            'provider_context': cluster_reasoning.get('provider_context') or {},
+            'top_ranked_evidence': cluster_reasoning.get('top_ranked_evidence') or [],
+            'sender_infrastructure_drift': cluster_reasoning.get('sender_infrastructure_drift') or {},
+            'executive_targeting': cluster_reasoning.get('executive_targeting') or {},
+            'attachment_analysis': cluster_reasoning.get('attachment_analysis') or [],
+        }
+        base['top_ranked_evidence'] = cluster_reasoning.get('top_ranked_evidence') or []
+        base['sender_infrastructure_drift'] = cluster_reasoning.get('sender_infrastructure_drift') or {}
+        base['executive_targeting'] = cluster_reasoning.get('executive_targeting') or {}
+        base['attachment_analysis'] = cluster_reasoning.get('attachment_analysis') or []
+        if seeded_actions:
+            existing_actions = list(base['summary_signals'].get('recommended_actions') or [])
+            merged_actions = existing_actions + [
+                {'primary_action': action, 'urgency': 'high', 'persona': persona}
+                for action in seeded_actions
+                if action
+            ]
+            base['summary_signals']['recommended_actions'] = merged_actions[:top_n]
+        if corroboration:
+            base['summary_signals']['corroboration'] = corroboration
 
     # Attach enrichment and DREAD breakdown when available (evidence + provenance)
     try:
@@ -358,11 +510,13 @@ def generate_persona_view(report: Dict[str, Any], persona: str, disclosure_level
     # Persona-specific additions
     p = persona.lower()
     if p == "executive":
-        base["headline"] = _one_liner(report)
+        base["headline"] = reasoning_summary.get('canonical_narrative') or _one_liner(report)
         base["business_impact"] = _business_impact(report)
         base["operational_next_step"] = _operational_next_step(report)
         base["control_posture"] = _control_posture(report)
         base['tier_metadata'] = report.get('tier_metadata', {})
+        if reasoning_summary.get('top_hypothesis'):
+            base['plain_english_narrative'] = reasoning_summary.get('top_hypothesis')
         tier2 = report.get('tier2_analysis') or report.get('tier2') or {}
         if tier2:
             exec_summary = tier2.get('executive_summary') or {}
@@ -402,12 +556,22 @@ def generate_persona_view(report: Dict[str, Any], persona: str, disclosure_level
 
     elif p == "soc_analyst":
         bad_rows = _extract_malicious_rows(report)
+        leads = cluster_reasoning.get('leads') or {}
+        close_conditions = cluster_reasoning.get('close_conditions') or {}
         base["timeline"] = report.get("attack_timeline", [])
         base["iocs"] = base["summary_signals"]["iocs"]
-        base["triage_focus"] = _triage_focus(report) or _triage_focus_from_rows(bad_rows)
+        base["triage_focus"] = reasoning_summary.get('top_hypothesis') or _triage_focus(report) or _triage_focus_from_rows(bad_rows)
         base["corroboration_targets"] = _corroboration_targets(report)
         base["priority"] = _soc_priority(report)
         base["containment_options"] = _containment_options(bad_rows)
+        base["closure_blockers"] = list(leads.get('closure_blockers') or [])[:4]
+        base["decision_tree"] = {
+            "confirm": list(leads.get('confirmation') or [])[:3],
+            "deny": list(leads.get('denial') or [])[:3],
+            "chase": list((leads.get('scope_expansion') or []) or [item.get('lead') for item in (leads.get('scope_expansion_details') or []) if isinstance(item, dict)])[:3],
+            "dismiss": list(close_conditions.get('soc_close_conditions') or [])[:3],
+        }
+        base.update(_soc_playbook_steps(report, close_conditions, leads))
 
     elif p == "compliance":
         reg_ids = _map_to_regulatory_controls_from_tags(mitre_tags)
@@ -419,12 +583,19 @@ def generate_persona_view(report: Dict[str, Any], persona: str, disclosure_level
         base["notification_obligations"] = _notification_obligations(report, reg_ids)
 
     elif p == "threat_hunter":
+        leads = cluster_reasoning.get('leads') or {}
+        close_conditions = cluster_reasoning.get('close_conditions') or {}
         base["factor_analysis"] = _factor_analysis_from_rows(report)
         base["statistical"] = _statistical(report)
         base["corroboration_targets"] = _corroboration_targets(report)
         base["kill_chain_stages"] = _derive_kill_chain_stages_from_tags(mitre_tags)
         base["sigma_rules"] = _generate_sigma_stubs(report)
         base["hunt_hypotheses"] = _hunt_hypotheses(report, mitre_tags)
+        base["denial_paths"] = list(leads.get('denial') or [])[:4]
+        base["scope_expansion_leads"] = list((leads.get('scope_expansion') or []) or [item.get('lead') for item in (leads.get('scope_expansion_details') or []) if isinstance(item, dict)])[:4]
+        if reasoning_summary.get('top_hypothesis'):
+            base["focus_cluster_summary"] = {'summary': reasoning_summary.get('top_hypothesis')}
+        base.update(_hunter_playbook_steps(report, leads, close_conditions))
 
     elif p == "mssp":
         rq = report.get('risk_quantification') or {}
@@ -436,6 +607,8 @@ def generate_persona_view(report: Dict[str, Any], persona: str, disclosure_level
         bad_rows = _extract_malicious_rows(report)
         all_rows = report.get('rows') or []
         evidence = report.get('network_artifacts') or report.get('related_artifacts') or []
+        leads = cluster_reasoning.get('leads') or {}
+        close_conditions = cluster_reasoning.get('close_conditions') or {}
         base["timeline"] = _build_forensic_timeline(report)
         base["artifacts_to_collect"] = _extract_row_artifacts(bad_rows or all_rows) or [
             value for value in [
@@ -446,6 +619,8 @@ def generate_persona_view(report: Dict[str, Any], persona: str, disclosure_level
         base["artifacts_to_collect"] = base["artifacts_to_collect"][:top_n]
         base["evidence_sources"] = evidence[:top_n] if isinstance(evidence, list) else []
         base["investigation_checklist"] = _forensic_checklist(bad_rows, mitre_tags)
+        base["attachment_forensics"] = cluster_reasoning.get('attachment_analysis') or []
+        base["closure_blockers"] = list(leads.get('closure_blockers') or [])[:4]
         base["chain_of_custody"] = {
             "report_id": report.get("report_id"),
             "tenant_id": report.get("tenant_id"),
@@ -455,7 +630,10 @@ def generate_persona_view(report: Dict[str, Any], persona: str, disclosure_level
                 "CloudTrail/VPN sources. Verify log ingestion lag before finalising timeline."
             ),
         }
+        if corroboration:
+            base["chain_of_custody"]["corroboration"] = corroboration
         base["corroboration_targets"] = _corroboration_targets(report)
+        base.update(_forensics_playbook_steps(report, leads, close_conditions))
 
     # Progressive disclosure: level 1 = one-liner + top action, level 2 = timeline+IOCs+gates, level 3 = full
     try:
