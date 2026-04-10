@@ -1,6 +1,12 @@
 from typing import List
 from ..canonical_event import CanonicalEvent
 
+try:
+    from src.ml.network_ml_pipeline import NetworkMLPipeline as _NMP
+    _ml_pipeline = _NMP()
+except Exception:
+    _ml_pipeline = None
+
 class FactorEmit(dict):
     pass
 
@@ -93,4 +99,33 @@ def extract_network_factors(events: List[CanonicalEvent]) -> List[FactorEmit]:
                 confidence=0.58,
                 ts=events[-1].timestamp if events else 0.0
             ))
+    # --- ML-based detectors (beacon, DNS tunnel, flow anomaly, JA3) ---
+    if _ml_pipeline is not None:
+        for e in events:
+            if e.source_type != 'network':
+                continue
+            ev = {
+                'src_ip': e.src_ip or '',
+                'dst_ip': e.dst_ip or '',
+                'dst_port': int(e.dst_port) if e.dst_port else 0,
+                'timestamp': e.timestamp or 0.0,
+                'domain': e.domain or '',
+                'query': e.raw.get('query', ''),
+                'ja3': e.raw.get('ja3', ''),
+                'bytes_out': e.raw.get('bytes_out', 0),
+                'packets': e.raw.get('packets', 0),
+                'duration': e.raw.get('duration', 0),
+            }
+            try:
+                ml_factors = _ml_pipeline.analyze_event(ev)
+            except Exception:
+                ml_factors = []
+            for mf in ml_factors:
+                out.append(FactorEmit(
+                    name=mf.get('factor', 'unknown'),
+                    nodes=[f"ip:{ev['src_ip']}"] if ev['src_ip'] else ['aggregate:network'],
+                    domain='network',
+                    confidence=mf.get('confidence', 0.5),
+                    ts=ev['timestamp'],
+                ))
     return out

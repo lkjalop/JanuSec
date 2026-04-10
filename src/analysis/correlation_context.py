@@ -57,6 +57,136 @@ FACTOR_ATTACK_SCENARIOS: Dict[str, Dict[str, Any]] = {
         ],
         "urgency": "MEDIUM",
     },
+    # --- Network ML factors ---
+    "net:beacon_statistical": {
+        "description": "Statistical periodicity detected in outbound connections — likely C2 beacon.",
+        "techniques": ["C2 beaconing (T1071)", "Periodic callback", "Cobalt Strike / Sliver heartbeat"],
+        "business_impact": "Active command-and-control channel enables remote attacker operations.",
+        "indicators": [
+            "Low coefficient of variation in connection intervals",
+            "Consistent outbound connections to same destination",
+            "Jitter-masked periodic traffic",
+        ],
+        "urgency": "HIGH",
+        "playbook": "03_c2_block",
+        "mitre": ["T1071.001", "T1573"],
+    },
+    "net:beacon_jitter_detected": {
+        "description": "Jittered C2 beacon detected via KS-test — adversary using randomized intervals.",
+        "techniques": ["Jittered C2 (T1071)", "Malleable C2 profiles"],
+        "business_impact": "Sophisticated C2 channel designed to evade simple periodic detection.",
+        "indicators": [
+            "Non-uniform interval distribution (KS test)",
+            "Repeated connections despite interval randomization",
+        ],
+        "urgency": "HIGH",
+        "playbook": "03_c2_block",
+        "mitre": ["T1071.001", "T1573"],
+    },
+    "net:beacon_periodic": {
+        "description": "Periodic outbound beaconing pattern detected.",
+        "techniques": ["C2 callback (T1071)", "Automated check-in"],
+        "business_impact": "Indicates active C2 implant on the host.",
+        "indicators": [
+            "Regular interval outbound connections",
+            "Multi-scale CV analysis triggered",
+        ],
+        "urgency": "HIGH",
+        "playbook": "03_c2_block",
+        "mitre": ["T1071.001"],
+    },
+    "dns:tunnel_entropy_high": {
+        "description": "DNS subdomain entropy exceeds threshold — possible DNS tunnel or data exfiltration.",
+        "techniques": ["DNS tunneling (T1071.004)", "Iodine / dnscat2 / dns2tcp"],
+        "business_impact": "Data exfiltration bypassing network controls via DNS.",
+        "indicators": [
+            "High Shannon entropy in DNS subdomain labels",
+            "EWMA entropy trending upward per SLD",
+        ],
+        "urgency": "HIGH",
+        "playbook": "08_network_doh_tor_block",
+        "mitre": ["T1071.004", "T1048.003"],
+    },
+    "dns:tunnel_long_query": {
+        "description": "Unusually long DNS query names — tunnel encoding suspected.",
+        "techniques": ["DNS tunnel payload encoding (T1071.004)"],
+        "business_impact": "Encoded data exfiltration via oversized DNS queries.",
+        "indicators": ["Query subdomain length > 50 characters"],
+        "urgency": "MEDIUM",
+        "mitre": ["T1071.004"],
+    },
+    "dns:tunnel_suspected": {
+        "description": "High-entropy DNS queries at elevated rate — active tunnel suspected.",
+        "techniques": ["DNS tunneling (T1071.004)", "Beaconing over DNS"],
+        "business_impact": "Covert channel for C2 or exfiltration over DNS.",
+        "indicators": [
+            "Entropy + QPS thresholds exceeded simultaneously",
+            "Subdomain patterns consistent with base32/base64 encoding",
+        ],
+        "urgency": "HIGH",
+        "playbook": "08_network_doh_tor_block",
+        "mitre": ["T1071.004", "T1048.003"],
+    },
+    "net:flow_anomaly_high": {
+        "description": "Network flow features are statistically anomalous (Isolation Forest).",
+        "techniques": ["Data exfiltration (T1041)", "Large data transfer", "Port scan"],
+        "business_impact": "Potential bulk data theft or unauthorized scanning activity.",
+        "indicators": [
+            "Anomalous bytes/packets/duration combination",
+            "Isolation Forest score > 0.7",
+        ],
+        "urgency": "HIGH",
+        "mitre": ["T1041", "T1046"],
+    },
+    "net:flow_anomaly_medium": {
+        "description": "Moderately anomalous flow detected.",
+        "techniques": ["Suspicious transfer pattern"],
+        "business_impact": "May indicate early-stage exfiltration or recon.",
+        "indicators": ["Isolation Forest score 0.5-0.7"],
+        "urgency": "MEDIUM",
+        "mitre": ["T1041"],
+    },
+    "ssl:ja3_sslbl_match": {
+        "description": "TLS client fingerprint matches known malware JA3 hash (SSLBL).",
+        "techniques": ["Known C2 TLS fingerprint (T1573.002)", "Cobalt Strike / Metasploit / Sliver"],
+        "business_impact": "High-confidence indicator of malware C2 communications.",
+        "indicators": [
+            "JA3 hash matches Abuse.ch SSLBL database",
+            "Known Cobalt Strike, Metasploit, Sliver, Trickbot, or QakBot fingerprint",
+        ],
+        "urgency": "HIGH",
+        "playbook": "03_c2_block",
+        "mitre": ["T1573.002", "T1071.001"],
+    },
+    "ssl:ja3_tfidf_rare": {
+        "description": "TLS client fingerprint is extremely rare in this environment.",
+        "techniques": ["Novel C2 client (T1573.002)", "Custom implant TLS stack"],
+        "business_impact": "Rare TLS fingerprint may indicate novel or custom malware.",
+        "indicators": [
+            "TF-IDF rarity score > 0.8",
+            "JA3 hash not seen in baseline traffic",
+        ],
+        "urgency": "MEDIUM",
+        "mitre": ["T1573.002"],
+    },
+    "ssl:ja3_known_bad": {
+        "description": "JA3 fingerprint matches curated known-bad list.",
+        "techniques": ["Malicious TLS client (T1573.002)"],
+        "business_impact": "Known malware communication pattern detected.",
+        "indicators": ["Match against curated JA3 denylist"],
+        "urgency": "HIGH",
+        "playbook": "03_c2_block",
+        "mitre": ["T1573.002"],
+    },
+    "beaconing_interval_regular": {
+        "description": "Regular connection interval pattern detected in batch analysis.",
+        "techniques": ["Automated C2 callback (T1071)"],
+        "business_impact": "Periodic beaconing indicates active C2 implant.",
+        "indicators": ["Low variance in connection intervals across batch"],
+        "urgency": "HIGH",
+        "playbook": "03_c2_block",
+        "mitre": ["T1071.001"],
+    },
 }
 
 KILL_CHAIN_ORDER: Sequence[str] = [
@@ -123,6 +253,10 @@ def enrich_correlation_context(
             "indicators": meta["indicators"],
             "urgency": meta["urgency"],
         }
+        if meta.get("playbook"):
+            entry["playbook"] = meta["playbook"]
+        if meta.get("mitre"):
+            entry["mitre"] = meta["mitre"]
         scenarios.append(entry)
 
     if not scenarios:
@@ -170,6 +304,14 @@ def enrich_correlation_context(
                     playbook_guidance.append({'mitre_id': mid, 'playbook': p['playbook']})
     except Exception:
         playbook_guidance = []
+
+    # Also pull playbook refs directly from matched scenarios
+    seen_playbooks = {g.get('playbook') for g in playbook_guidance}
+    for sc in scenarios:
+        pb = sc.get('playbook')
+        if pb and pb not in seen_playbooks:
+            playbook_guidance.append({'factor': sc['factor'], 'playbook': pb})
+            seen_playbooks.add(pb)
 
     narrative = [
         f"Correlation factors highlight {len(scenarios)} attack scenario(s).",
