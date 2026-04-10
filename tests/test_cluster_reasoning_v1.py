@@ -1,10 +1,12 @@
 from fastapi.testclient import TestClient
+from reportlab.pdfgen import canvas
 
 from src.api.app import app
 from src.analysis.offline_workbook_assessment import build_offline_workbook_assessment
 from src.analysis.auto_llm import _estimate_row_severity, _resolve_model_for_tier
 from src.api import deep_analyze_endpoints as dae
 from src.reporting.persona_views import generate_persona_view
+from src.core.attachment_vision import analyze_attachment_visual
 
 
 client = TestClient(app)
@@ -234,3 +236,84 @@ def test_attachment_clusters_emit_ocr_and_visual_confirmation_leads():
     assert any('ocr' in (item.get('lead') or '').lower() or 'visual inspection' in (item.get('lead') or '').lower() for item in confirmation_details)
     assert any('qr' in (item.get('lead') or '').lower() or 'branding' in (item.get('lead') or '').lower() for item in denial_details)
     assert any(token in missing for token in ('ocr_attachment_review', 'visual_brand_baseline', 'qr_destination_resolution'))
+
+
+def test_attachment_visual_analysis_extracts_pdf_text_and_payment_flags(tmp_path):
+    pdf_path = tmp_path / 'wire-transfer-lure.pdf'
+    c = canvas.Canvas(str(pdf_path))
+    c.drawString(72, 720, 'Urgent wire transfer update for CEO approval')
+    c.drawString(72, 700, 'Bank details changed. Verify remittance immediately.')
+    c.save()
+
+    result = analyze_attachment_visual({
+        'attachment_name': pdf_path.name,
+        'attachment_path': str(pdf_path),
+    })
+
+    assert result['enabled'] is True
+    assert result['extraction_methods']
+    assert 'wire transfer' in (result.get('extracted_text') or '').lower()
+    assert 'payment_lure' in (result.get('visual_flags') or [])
+
+
+def test_onboarding_vision_config_round_trip():
+    save = client.post(
+        '/api/v1/onboarding/vision',
+        json={
+            'tenant_id': 'demo-vision',
+            'ocr_mode': 'hybrid',
+            'external_provider': 'ollama',
+            'external_model': 'llava-latest',
+        },
+        headers={'x-api-key': 'devkey123', 'x-tenant-id': 'demo-vision'},
+    )
+    assert save.status_code == 200, save.text
+    payload = save.json()
+    assert payload['vision_analysis']['ocr_mode'] == 'hybrid'
+
+    get_resp = client.get('/api/v1/onboarding/vision/demo-vision', headers={'x-api-key': 'devkey123', 'x-tenant-id': 'demo-vision'})
+    assert get_resp.status_code == 200, get_resp.text
+    loaded = get_resp.json()
+    assert loaded['vision_analysis']['ocr_mode'] == 'hybrid'
+    assert loaded['vision_analysis']['external_model'] == 'llava-latest'
+
+
+def test_persona_playbooks_reflect_real_endpoint_and_email_factors():
+    assessment = _fixture_assessment()
+    assessment['rows'] = [
+        {
+            'row_index': 1,
+            'severity': 'high',
+            'triage_score': 0.88,
+            'verdict': 'SUSPICIOUS',
+            'source': 'mimecast',
+            'factors': ['email:bec_replyto_mismatch', 'email:attachment_ole_macro'],
+            'host': 'WS-CEO-1',
+            'user': 'ceo@shopsquire.example',
+            'description': 'Executive-targeted BEC lure with macro attachment.',
+        },
+        {
+            'row_index': 2,
+            'severity': 'critical',
+            'triage_score': 0.93,
+            'verdict': 'MALICIOUS',
+            'source': 'sysmon',
+            'host': 'WS-CEO-1',
+            'hostname': 'WS-CEO-1',
+            'user': 'ceo@shopsquire.example',
+            'factors': ['endpoint:process_tree_anomaly', 'endpoint:persistence_reg_run', 'endpoint:fileless_process_hollow'],
+            'description': 'Office-spawned shell with persistence and hollowing indicators.',
+        },
+    ]
+    assessment['llm_rows'] = list(assessment['rows'])
+    assessment = dae._hydrate_assessment_semantics(assessment)
+
+    soc = generate_persona_view(assessment, 'soc_analyst', disclosure_level=2, top_n=5)
+    hunter = generate_persona_view(assessment, 'threat_hunter', disclosure_level=2, top_n=5)
+    forensics = generate_persona_view(assessment, 'forensics', disclosure_level=2, top_n=5)
+
+    assert any('quarantine' in step.lower() or 'block the sender' in step.lower() for step in (soc.get('containment_steps') or []))
+    assert any('persistence' in step.lower() or 'autoruns' in step.lower() or 'scheduled tasks' in step.lower() for step in (soc.get('scoping_steps') or []))
+    assert any('sender domain' in step.lower() or 'attachment hash' in step.lower() or 'parent-child' in step.lower() for step in (hunter.get('pivot_leads') or []))
+    assert any('original message' in step.lower() or 'macro' in step.lower() for step in (forensics.get('artifact_collection_order') or []))
+    assert any('execution chain' in step.lower() or 'injected memory' in step.lower() for step in (forensics.get('proof_of_execution_checks') or []))
