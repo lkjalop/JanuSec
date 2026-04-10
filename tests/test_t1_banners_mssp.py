@@ -291,7 +291,8 @@ class TestCISOT1Banner:
         model = _make_model(n_mal=3, has_pii=True)
         artifact = _make_artifact(model)
         html = build_persona_section_html(artifact, "ciso")
-        assert "CONFIRMED CRITICAL INCIDENT" in html
+        assert "CRITICAL SECURITY EVENT" in html
+        assert "external validation" in html.lower()
 
     def test_includes_event_count(self):
         model = _make_model(n_mal=2)
@@ -329,14 +330,14 @@ class TestAuditT1Banner:
         model = _make_model(n_mal=2)
         artifact = _make_artifact(model)
         html = build_persona_section_html(artifact, "audit")
-        assert "AUDIT FINDING" in html
-        assert "Major Nonconformity" in html or "immediate corrective action" in html.lower()
+        assert "AUDIT REVIEW" in html
+        assert "operating evidence" in html.lower() or "owner validation" in html.lower()
 
     def test_benign_no_nonconformities(self):
         model = _make_model(n_mal=0, n_susp=0)
         artifact = _make_artifact(model)
         html = build_persona_section_html(artifact, "audit")
-        assert "No nonconformities" in html or "no nonconformity" in html.lower()
+        assert "No nonconformities" in html or "no nonconformities verified" in html.lower()
 
     def test_banner_before_control_failure_table(self):
         model = _make_model(n_mal=1)

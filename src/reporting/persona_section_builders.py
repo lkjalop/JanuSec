@@ -253,6 +253,37 @@ _PERSONA_DRIVER_REASON: dict[str, dict[str, str]] = {
     },
 }
 
+_PERSONA_DRIVER_REASON.update({
+    'compliance': {
+        'dread':       "Score {score} is driven by threat severity ({pct}%): the DREAD rating may indicate privacy, legal, or control exposure if confirmed. Treat this as an assessment trigger, not proof of notification obligation; validate serious-harm, jurisdiction, and affected-record thresholds with counsel.",
+        'correlation': "Score {score} reflects campaign breadth ({pct}%): {n_mal} correlated events may expand affected scope. APRA, NDB, GDPR, or SOCI implications require external validation of entity scope, materiality, and affected data before any notification claim.",
+        'density':     "Score {score} is pushed up by attack complexity ({pct}%): multiple distinct control exposures may exist, but control failure is not verified until operating evidence, exceptions, and expected telemetry are reviewed.",
+        'confidence':  "Score {score} is limited by detection confidence ({pct}%): regulatory or control language should remain conditional until the investigation establishes access, scope, and impact. Document this confidence boundary in the workpaper.",
+        'rarity':      "Score {score} is elevated by behavioral novelty ({pct}%): first-seen activity may indicate an emerging control gap. Record it as a conditional review item until approved-admin or benign explanations are excluded.",
+    },
+    'ciso': {
+        'dread':       "Score {score} is dominated by threat severity ({pct}%): this may be a high-impact event if confirmed. Brief leadership on current evidence, confidence boundaries, affected assets ({host}), and SOC containment options; do not assert legal or financial materiality without external validation.",
+        'correlation': "Score {score} is driven by campaign breadth ({pct}%): this event is one node in a multi-event attack pattern involving {n_mal} confirmed malicious events. The blast radius is wider than a single host; the SOC must scope all affected systems before you report definitive impact.",
+        'density':     "Score {score} reflects a complex, multi-stage intrusion ({pct}% from attack complexity). This may justify IR retainer, legal, or communications readiness if the cluster is corroborated; treat those as options until scope and business impact are validated.",
+        'confidence':  "Score {score} is below the high-confidence threshold ({pct}%): do not brief confirmed breach status until confidence improves. Brief on a security event under investigation and set a clear update cadence.",
+        'rarity':      "Score {score} peaks on behavioral novelty ({pct}%): a technique cluster with no prior precedent may suggest supply-chain or targeted activity. External expert engagement is an option if internal evidence cannot confirm or deny the hypothesis quickly.",
+    },
+    'audit': {
+        'dread':       "Score {score} is anchored by threat severity ({pct}%): record a potential material finding with bitemporal timestamps, but classify control failure only after evidence, expected control operation, and approved exceptions are validated.",
+        'correlation': "Score {score} reflects audit evidence breadth ({pct}% from correlation): {n_mal} correlated events may share one root cause. Capture each event as a separate exhibit and mark the root-cause finding as provisional until corroboration completes.",
+        'density':     "Score {score} is elevated by attack complexity ({pct}%): each distinct factor may map to a separate control exposure. Avoid declaring multiple failures until the workpaper includes operating evidence and owner confirmation.",
+        'confidence':  "Score {score} is limited by detection confidence ({pct}%): record this as an Observation rather than a Nonconformity until evidence strengthens. ISO 19011 requires verifiable evidence; document the limitation explicitly.",
+        'rarity':      "Score {score} is boosted by behavioral novelty ({pct}%): a first-seen technique cluster may indicate an emerging risk. Recommend audit-criteria review, not an automatic finding.",
+    },
+    'executive': {
+        'dread':       "Score {score} translates to a potentially material business-impact scenario if confirmed. The security team should present containment options, confidence limits, and evidence gaps before leadership approves disruptive action.",
+        'correlation': "Score {score} reflects a coordinated pattern across {n_mal} events rather than a single isolated alert. Decisions to approve isolation, engage counsel, or notify stakeholders should wait for scope and threshold validation unless urgent containment is required.",
+        'density':     "Score {score} reflects a multi-technique intrusion pattern. Financial and reputational impact modelling may be useful, but final materiality requires finance/accounting input and verified loss or interruption data.",
+        'confidence':  "Score {score} is below the Board-notification threshold at current confidence ({pct}%): the security team is investigating and will confirm within 4 hours. Avoid external claims until telemetry narrows the verdict.",
+        'rarity':      "Score {score} is elevated because this pattern has no prior precedent in your environment, suggesting a targeted or supply-chain possibility. External expert engagement is an option if internal evidence cannot confirm or deny the hypothesis quickly.",
+    },
+})
+
 _DEFAULT_DRIVER_REASON = "Score {score} is the composite of threat severity, cross-event correlation, attack complexity, detection confidence, and behavioral rarity. The top-weighted dimension for this event is {driver_label} ({pct}%), which is the primary justification for the recommended action."
 
 
@@ -1225,7 +1256,7 @@ def _compliance(artifact: dict, model: dict | None) -> str:
         ["APRA CPS 234",            _pill(apra_text[:70] + ("…" if len(apra_text) > 70 else ""), apra_variant)],
         ["SOCI Act s.30BC",         _pill(soci_text[:70] + ("…" if len(soci_text) > 70 else ""), soci_variant)],
         ["GDPR Art.33 (if in scope)", _pill(gdpr_text, gdpr_variant)],
-        ["Assessment clock",        f"Start notification clock from: <strong>{_e(datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC'))}</strong> (discovery)"],
+        ["Assessment clock",        "Validate discovery, jurisdiction, and harm threshold with legal/privacy before asserting any notification clock"],
     ]
 
     # ── Cross-framework control failure matrix ───────────────────────────────
@@ -1279,7 +1310,7 @@ def _compliance(artifact: dict, model: dict | None) -> str:
     actions: list[str] = []
     if has_pii:
         actions.append("Identify all affected data subjects and applicable data categories (Privacy Act 1988)")
-        actions.append("Route NDB Scheme and APRA notification assessment through legal and privacy review")
+        actions.append("Route NDB Scheme and APRA notification assessment through legal and privacy review before asserting obligation status")
     if has_c2:
         actions.append("Assess SOCI Act s.30BC reporting obligations if any SOCI-covered asset is in scope")
     actions.extend([
@@ -1358,10 +1389,10 @@ def _compliance(artifact: dict, model: dict | None) -> str:
 
     if _notif_frameworks:
         _fw_str = " / ".join(_notif_frameworks[:3])
-        _comp_t1 = f"Potential {_fw_str} notification obligation identified — {'72-hour clock is RUNNING' if has_pii and n_mal > 0 else 'assessment required before clock starts'}."
+        _comp_t1 = f"Potential {_fw_str} notification obligation identified - legal/privacy assessment required before any clock or obligation claim."
         _comp_t1_cls = "investigate"
     elif has_major:
-        _comp_t1 = "Control failures identified — no immediate regulatory notification obligation confirmed, but corrective action is required."
+        _comp_t1 = "Potential control exposures identified - no immediate regulatory notification obligation verified from current evidence."
         _comp_t1_cls = "review"
     else:
         _comp_t1 = "No regulatory notification obligations identified — no confirmed control failures in current evidence."
@@ -1369,13 +1400,13 @@ def _compliance(artifact: dict, model: dict | None) -> str:
 
     return _t1_banner(_comp_t1, _comp_t1_cls) + _triage_reason_block(model, 'compliance') + f"""
 <section class='panel page-break' style='margin-top:18px'>
-  <h2>Compliance / GRC — Regulatory Notification Assessment</h2>
+  <h2>Compliance / GRC - Regulatory Notification Assessment</h2>
   {_tbl(["Obligation", "Assessment"], breach_rows)}
 </section>
 
 <section class='panel' style='margin-top:18px'>
-  <h2>Cross-Framework Control Failure Matrix (ISO 19011 §6.4.7)</h2>
-  <p class='section-note'>ISO 19011 classification: <strong>Major NCF</strong> = systematic failure, immediate corrective action required. <strong>Minor NCF</strong> = corrective action within 30 days. <strong>Observation</strong> = improvement opportunity.</p>
+  <h2>Cross-Framework Potential Control Exposure Matrix (ISO 19011 §6.4.7)</h2>
+  <p class='section-note'>Control status is advisory until operating evidence, expected control behavior, approved exceptions, and owner validation are reviewed. Use framework mappings as a secondary explanation layer, not proof of breach.</p>
   {_tbl(["Evidence", "Finding", "ASD ISM", "ISO 27001", "NIST CSF", "ISO 19011"], fw_rows)}
 </section>
 
@@ -1508,9 +1539,9 @@ def _ciso(artifact: dict, model: dict | None) -> str:
     if model.get("has_pii"):
         reg_flags.append("NDB Scheme (AU): Privacy assessment required — PII confirmed in scope")
     if n_mal >= 3 and model.get("has_c2"):
-        reg_flags.append("SOCI Act s.30BC: Report to ASD ACSC if critical infrastructure asset is in scope")
+        reg_flags.append("SOCI Act s.30BC: assess reporting with counsel if critical infrastructure asset is in scope")
     if n_mal >= 5:
-        reg_flags.append("APRA CPS 234: Notify APRA within 72 hours if entity is APRA-regulated")
+        reg_flags.append("APRA CPS 234: assess notification timing if entity is APRA-regulated and material impact is confirmed")
     if not reg_flags:
         reg_flags.append("No immediate regulatory disclosure triggers confirmed — monitor as investigation proceeds")
     reg_html = "".join(f"<li>{_e(f)}</li>" for f in reg_flags)
@@ -1563,22 +1594,22 @@ def _ciso(artifact: dict, model: dict | None) -> str:
     # T1 — spec: verdict + severity + most important regulatory implication
     _reg_disclosure = None
     if model.get("has_pii") and n_mal > 0:
-        _reg_disclosure = "GDPR/NDB Art.33 disclosure assessment required"
+        _reg_disclosure = "GDPR/NDB Art.33 disclosure assessment may be required"
     elif n_mal >= 3 and model.get("has_c2"):
-        _reg_disclosure = "SOCI Act s.30BC reporting assessment required"
+        _reg_disclosure = "SOCI Act s.30BC reporting assessment may be required"
     elif n_mal >= 5:
-        _reg_disclosure = "APRA CPS 234 notification assessment required"
+        _reg_disclosure = "APRA CPS 234 notification assessment may be required"
 
     if n_mal > 0:
         _ciso_t1 = (
-            f"CONFIRMED CRITICAL INCIDENT: {n_mal} malicious event{'s' if n_mal != 1 else ''} detected"
-            + (f" — {_reg_disclosure}." if _reg_disclosure else " — escalation and containment required.")
+            f"CRITICAL SECURITY EVENT: {n_mal} malicious event{'s' if n_mal != 1 else ''} detected"
+            + (f" - {_reg_disclosure}; external validation required." if _reg_disclosure else " - escalation and containment options require owner validation.")
         )
         _ciso_t1_cls = "investigate"
     elif n_susp > 0:
         _ciso_t1 = (
             f"ELEVATED SUSPICION: {n_susp} event{'s' if n_susp != 1 else ''} require investigation"
-            + " — disclosure clock not yet running."
+            + " - no disclosure timing should be asserted before legal/privacy validation."
         )
         _ciso_t1_cls = "review"
     else:
@@ -1593,8 +1624,8 @@ def _ciso(artifact: dict, model: dict | None) -> str:
 </section>
 
 <section class='panel' style='margin-top:18px'>
-  <h2>Control Failures — ISM + ISO 19011 (§6.4.7)</h2>
-  <p class='section-note'><strong>Major NCF</strong> = systematic failure requiring immediate corrective action. <strong>Minor NCF</strong> = corrective action within 30 days. <strong>Observation</strong> = improvement opportunity.</p>
+  <h2>Potential Control Exposure - ISM + ISO 19011 (§6.4.7)</h2>
+  <p class='section-note'>This is an advisory control view. A control failure is not verified until expected operation, exceptions, owner evidence, and telemetry coverage are reviewed.</p>
   {_tbl(["Evidence", "Control Failure", "ASD ISM Refs", "ISO 19011 Class"], ctrl_fail_rows)}
 </section>
 
@@ -1794,22 +1825,22 @@ def _audit(artifact: dict, model: dict | None) -> str:
     all_finding_verdicts = [e.get("verdict") for e in ev if e.get("verdict") in ("malicious", "suspicious")]
     if n_mal > 0:
         _aud_t1 = (
-            f"AUDIT FINDING: {n_mal} confirmed control failure{'s' if n_mal != 1 else ''} "
-            f"classified as Major Nonconformity — immediate corrective action required per ISO 19011 §6.6."
+            f"AUDIT REVIEW: {n_mal} malicious event{'s' if n_mal != 1 else ''} may indicate control exposure. "
+            f"Classify nonconformity only after operating evidence and owner validation are reviewed."
         )
         _aud_t1_cls = "investigate"
     elif any(v == "suspicious" for v in all_finding_verdicts):
-        _aud_t1 = "AUDIT FINDING: Suspected control weaknesses identified — Minor Nonconformities raised, corrective actions required within 30 days."
+        _aud_t1 = "AUDIT REVIEW: Suspected control weaknesses identified - record as observations until evidence supports a nonconformity."
         _aud_t1_cls = "review"
     else:
-        _aud_t1 = "AUDIT FINDING: No nonconformities identified — all controls operating within acceptable parameters."
+        _aud_t1 = "AUDIT REVIEW: No nonconformities verified from current evidence."
         _aud_t1_cls = "complete"
 
     return _t1_banner(_aud_t1, _aud_t1_cls) + _triage_reason_block(model, 'audit') + f"""
 <section class='panel page-break' style='margin-top:18px'>
   <h2>Audit — Control Failure Findings (ISO 19011 §6.4.7)</h2>
   {scope_limitation_html}
-  <p class='section-note'>Classification: <strong>MAJOR NCF</strong> = systematic failure requiring immediate corrective action. <strong>MINOR NCF</strong> = corrective action within 30 days. <strong>OBSERVATION</strong> = no current breach but improvement required.</p>
+  <p class='section-note'>Classification remains provisional until audit evidence is verifiable. Treat suspected weaknesses as observations unless operating evidence supports a nonconformity.</p>
   {_tbl(["Evidence Code", "Control Failure", "ASD ISM Refs", "Source", "ISO 19011", "Severity"], finding_rows)}
 </section>
 

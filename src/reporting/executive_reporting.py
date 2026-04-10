@@ -1212,6 +1212,211 @@ def _framework_sections(report: Dict[str, Any]) -> List[Dict[str, Any]]:
     return sections
 
 
+def _evidence_based_advisory_sections(report: Dict[str, Any], persona: str) -> Dict[str, Any]:
+    """Build conditional advisory metadata for leadership/GRC personas.
+
+    This deliberately separates evidence from implications. The output should
+    not be read as a legal, regulatory, accounting, or architecture mandate.
+    """
+    persona_key = str(persona or "").lower()
+    if persona_key not in {"audit", "compliance", "ciso", "executive"}:
+        return {}
+
+    rows = [row for row in (report.get("rows") or []) if isinstance(row, dict)]
+    csv_model = report.get("_csv_model") or {}
+    evidence = csv_model.get("evidence") or []
+    review_counts = (report.get("review_state_counts") or report.get("review_counts") or {})
+    n_mal = int(
+        review_counts.get("confirmed_malicious")
+        or csv_model.get("malicious_count")
+        or sum(1 for ev in evidence if ev.get("verdict") == "malicious")
+        or 0
+    )
+    n_susp = int(
+        review_counts.get("needs_investigation")
+        or csv_model.get("suspicious_count")
+        or sum(1 for ev in evidence if ev.get("verdict") == "suspicious")
+        or 0
+    )
+    factors = {
+        str(f)
+        for ev in evidence
+        for f in (ev.get("factors") or [])
+        if str(f).strip()
+    }
+    factors.update(
+        str(item.get("factor_name") or item.get("factor") or "")
+        for item in (report.get("semantic_top_factors") or [])
+        if isinstance(item, dict)
+    )
+    factors = {f for f in factors if f}
+    has_pii = bool(csv_model.get("has_pii") or any("pii" in str(row).lower() or "ssn" in str(row).lower() for row in rows[:50]))
+    has_payment = any("payment" in str(row).lower() or "wire" in str(row).lower() or "invoice" in str(row).lower() for row in rows[:50])
+    has_identity = bool(csv_model.get("has_identity") or any("auth" in f.lower() or "identity" in f.lower() or "mfa" in f.lower() for f in factors))
+    has_email = bool(csv_model.get("has_email") or any("email" in f.lower() or "phish" in f.lower() or "bec" in f.lower() for f in factors))
+    has_endpoint = bool(csv_model.get("has_endpoint") or any("endpoint" in f.lower() or "process" in f.lower() or "ransom" in f.lower() for f in factors))
+    has_network = bool(csv_model.get("has_network") or csv_model.get("has_c2") or any("c2" in f.lower() or "beacon" in f.lower() or "dns" in f.lower() for f in factors))
+    has_cloud = bool(csv_model.get("has_cloud") or any("cloud" in f.lower() or "aws" in f.lower() or "azure" in f.lower() for f in factors))
+
+    confirmed_evidence = []
+    if n_mal:
+        confirmed_evidence.append(f"{n_mal} confirmed malicious event(s) in the current evidence set")
+    if n_susp:
+        confirmed_evidence.append(f"{n_susp} item(s) still require analyst investigation")
+    if has_email:
+        confirmed_evidence.append("email or sender-trust signals are present")
+    if has_identity:
+        confirmed_evidence.append("identity or authentication signals are present")
+    if has_endpoint:
+        confirmed_evidence.append("endpoint execution or persistence signals are present")
+    if has_network:
+        confirmed_evidence.append("network/C2-style signals are present")
+    if has_cloud:
+        confirmed_evidence.append("cloud control-plane or resource signals are present")
+    if not confirmed_evidence:
+        confirmed_evidence.append("no confirmed malicious activity is established by the current evidence")
+
+    def item(title: str, evidence_basis: str, assumption: str, confidence: float, owner: str, required: str) -> Dict[str, Any]:
+        return {
+            "title": title,
+            "evidence_basis": evidence_basis,
+            "assumption": assumption,
+            "confidence": round(max(0.0, min(1.0, confidence)), 2),
+            "requires_external_validation": True,
+            "recommended_owner": owner,
+            "optional_or_required": required,
+        }
+
+    architecture_options: List[Dict[str, Any]] = []
+    if has_email:
+        architecture_options.append(item(
+            "Review email authentication and supplier-change controls",
+            "Email/BEC or phishing-related factors are present.",
+            "The attack path may rely on sender trust drift or vendor impersonation if confirmed.",
+            0.72 if n_mal else 0.48,
+            "CISO / Email Security Owner",
+            "optional_budget_dependent",
+        ))
+    if has_identity:
+        architecture_options.append(item(
+            "Review conditional access, MFA enforcement, and legacy-auth blocking",
+            "Identity/authentication factors are present.",
+            "Additional identity controls may reduce recurrence if account misuse is confirmed.",
+            0.74 if n_mal else 0.5,
+            "CISO / IAM Owner",
+            "optional_budget_dependent",
+        ))
+    if has_endpoint:
+        architecture_options.append(item(
+            "Assess endpoint detection coverage and evidence retention",
+            "Endpoint execution, macro, persistence, or ransomware precursor signals are present.",
+            "EDR gaps may limit proof of execution, persistence, or damage validation.",
+            0.73 if n_mal else 0.52,
+            "CISO / Endpoint Security Owner",
+            "optional_budget_dependent",
+        ))
+    if has_network:
+        architecture_options.append(item(
+            "Assess egress monitoring, DNS logging, and proxy visibility",
+            "Network, DNS, beaconing, or C2-style signals are present.",
+            "Network visibility may be needed to confirm or deny command-and-control activity.",
+            0.7 if n_mal else 0.5,
+            "CISO / Network Security Owner",
+            "optional_budget_dependent",
+        ))
+    if has_cloud:
+        architecture_options.append(item(
+            "Review cloud audit coverage and privileged control-plane guardrails",
+            "Cloud resource or control-plane signals are present.",
+            "Cloud guardrail changes may be justified if privilege or resource abuse is confirmed.",
+            0.68 if n_mal else 0.46,
+            "CISO / Cloud Platform Owner",
+            "optional_budget_dependent",
+        ))
+
+    potential_control_exposure: List[Dict[str, Any]] = []
+    if has_email:
+        potential_control_exposure.append(item(
+            "Potential email security and supplier-change control exposure",
+            "Email trust, phishing, BEC, or vendor impersonation signals were observed.",
+            "Control impact is not verified until sender authenticity and business-process approval evidence are reviewed.",
+            0.62 if n_mal else 0.42,
+            "Compliance / Business Process Owner",
+            "conditional_review",
+        ))
+    if has_identity:
+        potential_control_exposure.append(item(
+            "Potential access-control exposure",
+            "Identity, MFA, impossible-travel, or authentication factors were observed.",
+            "A control gap is not verified until policy state, login context, and approved exceptions are checked.",
+            0.64 if n_mal else 0.44,
+            "Compliance / IAM Owner",
+            "conditional_review",
+        ))
+    if has_endpoint or has_network:
+        potential_control_exposure.append(item(
+            "Potential monitoring and incident-response control exposure",
+            "Endpoint or network telemetry is relevant to confirm execution, C2, or damage.",
+            "Control failure is not verified unless required telemetry was expected, available, and failed to detect or retain evidence.",
+            0.66 if n_mal else 0.45,
+            "Audit / Security Operations",
+            "conditional_review",
+        ))
+
+    business_review_triggers: List[Dict[str, Any]] = []
+    if has_payment:
+        business_review_triggers.append(item(
+            "Finance review may be needed for payment-fraud exposure",
+            "Payment, invoice, or wire-transfer language appears in the evidence set.",
+            "Financial materiality depends on actual transaction status, loss amount, recovery, and accounting thresholds.",
+            0.68,
+            "CFO / Finance Controller",
+            "conditional_review",
+        ))
+    if has_pii:
+        business_review_triggers.append(item(
+            "Privacy/legal review may be needed for regulated-data exposure",
+            "PII-like data or regulated-record indicators appear in the evidence set.",
+            "Notification obligations depend on confirmed access, affected records, jurisdiction, and harm threshold.",
+            0.7,
+            "Legal / Privacy Officer",
+            "conditional_review",
+        ))
+    if n_mal and (has_network or has_endpoint or has_cloud):
+        business_review_triggers.append(item(
+            "Insurer or external IR review may be appropriate if impact is confirmed",
+            "Confirmed malicious activity intersects operational security domains.",
+            "External engagement depends on incident scope, policy terms, business interruption, and budget approval.",
+            0.6,
+            "CISO / CFO",
+            "optional_budget_dependent",
+        ))
+
+    external_validation_needed = [
+        item(
+            "Validate legal, regulatory, and financial thresholds outside Janusec",
+            "Security telemetry can identify evidence and uncertainty, but not final legal/accounting materiality.",
+            "Threshold decisions require customer policy, contracts, jurisdiction, loss amount, and counsel/accounting input.",
+            0.9,
+            "Legal / CFO / Compliance",
+            "required_before_external_claim",
+        )
+    ]
+
+    return {
+        "confirmed_evidence": confirmed_evidence[:8],
+        "inferred_risk": [
+            "Implications below are conditional and require validation before external disclosure or budget commitment."
+        ],
+        "architecture_options": architecture_options[:5],
+        "potential_control_exposure": potential_control_exposure[:5],
+        "business_review_triggers": business_review_triggers[:5],
+        "external_validation_needed": external_validation_needed,
+        "budget_dependency": "Architecture changes are options for risk reduction, not mandatory remediation orders from this report alone.",
+        "confidence_boundary": "Janusec does not make definitive legal, regulatory, accounting, or materiality conclusions without verified external inputs.",
+    }
+
+
 def _inline_threat_models(report: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Generate PASTA / Diamond / MAESTRO / DREAD threat model sections inline
     from scored assessment data. Used when the pipeline didn't run build_threat_models()."""
@@ -1421,6 +1626,7 @@ def build_executive_report_artifact(payload: Dict[str, Any], options: Dict[str, 
     areas_to_investigate = _areas_to_investigate(report)
     hypothesis = _working_hypothesis(report)
     provider = _provider_label(report)
+    advisory_sections = _evidence_based_advisory_sections(report, _active_persona)
     checklist = {
         "include_overview": bool(opts.get("include_overview", True)),
         "include_claims": bool(opts.get("include_claims", True)),
@@ -1479,6 +1685,7 @@ def build_executive_report_artifact(payload: Dict[str, Any], options: Dict[str, 
             "stakeholder_gate": _build_stakeholder_gate(report),
             "cluster_reasoning_state": report.get("cluster_reasoning_state") or {},
             "corroboration": report.get("corroboration") or {},
+            "advisory_sections": advisory_sections,
         },
         "facts": {
             "review_state_counts": review_counts,
@@ -1495,6 +1702,7 @@ def build_executive_report_artifact(payload: Dict[str, Any], options: Dict[str, 
                 "window_anchor_ts": end_ts,
                 "workflow": adjudication,
             },
+            "advisory_sections": advisory_sections,
         },
         "appendix": {
             "evidence_appendix": {
@@ -1974,24 +2182,24 @@ def _render_persona_specific_section(artifact: Dict[str, Any], persona: str) -> 
         parts.append("</section>")
 
     elif persona == "ciso":
-        # CISO: regulatory obligations + detection gap
+        # CISO: conditional regulatory posture + detection gap
         parts.append(
             "<section class='panel' style='margin-top:18px'>"
-            "<h2>Regulatory Obligations</h2>"
+            "<h2>Regulatory Posture - Requires External Validation</h2>"
             "<table style='width:100%;border-collapse:collapse'>"
         )
         ndb_triggered = n_mal > 0 and severity in ("CRITICAL", "HIGH")
-        gdpr_clock = "72 hours from awareness (Art. 33)" if ndb_triggered else "Not triggered"
-        apra_clock = "Notify within 72h (CPS 234)" if ndb_triggered else "Not triggered"
-        ndb_clock = "30 days from awareness (OAIC)" if ndb_triggered else "Not triggered"
-        _ndb_status = '<strong style="color:#b91c1c">NOTIFIABLE</strong>' if ndb_triggered else 'Not triggered'
+        gdpr_clock = "Assess with counsel; Art. 33 timing applies only if in scope" if ndb_triggered else "Not indicated by current evidence"
+        apra_clock = "Assess if APRA-regulated and material impact is confirmed" if ndb_triggered else "Not indicated by current evidence"
+        ndb_clock = "Assess with privacy/legal; timing depends on serious-harm threshold" if ndb_triggered else "Not indicated by current evidence"
+        _ndb_status = '<strong style="color:#8a4b2a">ASSESSMENT REQUIRED</strong>' if ndb_triggered else 'Not indicated by current evidence'
         _pci_status = 'Review required' if n_mal > 0 else 'Not triggered'
         _pci_deadline = 'As soon as practicable' if n_mal > 0 else '\u2014'
         _leading_signals = ', '.join(top_factors[:3]) or 'none identified'
         parts.append(
             f"<tr><th align='left' style='padding:8px'>Regulation</th><th align='left' style='padding:8px'>Status</th><th align='left' style='padding:8px'>Deadline</th></tr>"
-            f"<tr><td style='padding:8px'>GDPR Art. 33</td><td style='padding:8px'>{'TRIGGERED' if ndb_triggered else 'Not triggered'}</td><td style='padding:8px'>{gdpr_clock}</td></tr>"
-            f"<tr><td style='padding:8px'>APRA CPS 234</td><td style='padding:8px'>{'TRIGGERED' if ndb_triggered else 'Not triggered'}</td><td style='padding:8px'>{apra_clock}</td></tr>"
+            f"<tr><td style='padding:8px'>GDPR Art. 33</td><td style='padding:8px'>{'Potentially implicated' if ndb_triggered else 'Not indicated'}</td><td style='padding:8px'>{gdpr_clock}</td></tr>"
+            f"<tr><td style='padding:8px'>APRA CPS 234</td><td style='padding:8px'>{'Potentially implicated' if ndb_triggered else 'Not indicated'}</td><td style='padding:8px'>{apra_clock}</td></tr>"
             f"<tr><td style='padding:8px'>NDB Scheme (Privacy Act)</td><td style='padding:8px'>{_ndb_status}</td><td style='padding:8px'>{ndb_clock}</td></tr>"
             f"<tr><td style='padding:8px'>PCI-DSS 12.10.4</td><td style='padding:8px'>{_pci_status}</td><td style='padding:8px'>{_pci_deadline}</td></tr>"
             "</table>"
@@ -2124,22 +2332,22 @@ def _render_persona_specific_section(artifact: Dict[str, Any], persona: str) -> 
         parts.append("</section>")
 
     elif persona in ("compliance", "grc"):
-        # Compliance: regulatory trigger + breach notification
+        # Compliance: conditional regulatory trigger + breach notification posture
         ndb_triggered = n_mal > 0 and severity in ("CRITICAL", "HIGH")
         parts.append(
             "<section class='panel' style='margin-top:18px'>"
-            "<h2>Regulatory Trigger Assessment</h2>"
+            "<h2>Regulatory Trigger Assessment - Conditional</h2>"
         )
         if ndb_triggered:
             parts.append(
                 "<div style='background:#fef2f2;border:2px solid #b91c1c;border-radius:12px;padding:16px;margin-bottom:16px'>"
-                "<strong style='color:#b91c1c;font-size:16px'>NDB NOTIFICATION REQUIRED</strong>"
-                f"<p>With {n_mal} confirmed malicious events and {severity} severity, the NDB scheme threshold of 'serious harm likely' is met. "
-                f"Draft notification due within 30 days of awareness (OAIC). GDPR Art. 33 requires supervisory authority notification within 72 hours.</p>"
+                "<strong style='color:#8a4b2a;font-size:16px'>PRIVACY / LEGAL ASSESSMENT REQUIRED</strong>"
+                f"<p>With {n_mal} confirmed malicious events and {severity} severity, regulated-data or serious-harm thresholds may be implicated. "
+                f"Do not assert notification status until counsel validates jurisdiction, affected records, harm threshold, and timing rules.</p>"
                 "</div>"
             )
         else:
-            parts.append("<p>No regulatory notification thresholds have been crossed based on current evidence.</p>")
+            parts.append("<p>No regulatory notification threshold is verified from the current evidence alone.</p>")
         parts.append(
             "<h3 style='margin-top:16px'>Control Status</h3>"
             "<table style='width:100%;border-collapse:collapse'>"
@@ -2221,6 +2429,63 @@ def _render_persona_specific_section(artifact: Dict[str, Any], persona: str) -> 
         )
 
     return "\n".join(parts)
+
+
+def _render_advisory_sections(artifact: Dict[str, Any], persona: str) -> str:
+    advisory = ((artifact.get("facts") or {}).get("advisory_sections") or {})
+    if not advisory or str(persona or "").lower() not in {"audit", "compliance", "ciso", "executive"}:
+        return ""
+
+    def render_items(items: Any) -> str:
+        if not isinstance(items, list) or not items:
+            return "<p class='section-note'>No advisory items generated from the current evidence.</p>"
+        rows = []
+        for item in items[:6]:
+            if not isinstance(item, dict):
+                continue
+            rows.append(
+                "<tr>"
+                f"<td style='padding:8px'><strong>{escape(str(item.get('title') or 'Advisory item'))}</strong></td>"
+                f"<td style='padding:8px'>{escape(str(item.get('evidence_basis') or 'Evidence basis not recorded'))}</td>"
+                f"<td style='padding:8px'>{escape(str(item.get('assumption') or 'Requires validation'))}</td>"
+                f"<td style='padding:8px'>{escape(str(item.get('recommended_owner') or 'Unassigned'))}</td>"
+                f"<td style='padding:8px'>{escape(str(item.get('optional_or_required') or 'conditional_review'))}</td>"
+                "</tr>"
+            )
+        if not rows:
+            return "<p class='section-note'>No advisory items generated from the current evidence.</p>"
+        return (
+            "<table style='width:100%;border-collapse:collapse'>"
+            "<tr><th align='left' style='padding:8px'>Option</th>"
+            "<th align='left' style='padding:8px'>Evidence Basis</th>"
+            "<th align='left' style='padding:8px'>Boundary / Assumption</th>"
+            "<th align='left' style='padding:8px'>Suggested Owner</th>"
+            "<th align='left' style='padding:8px'>Disposition</th></tr>"
+            + "".join(rows)
+            + "</table>"
+        )
+
+    confirmed = advisory.get("confirmed_evidence") or []
+    confirmed_html = "".join(f"<li>{escape(str(item))}</li>" for item in confirmed[:8]) or "<li>No confirmed malicious evidence established.</li>"
+    sections = [
+        "<section class='panel' style='margin-top:18px;border-left:4px solid #2c5282'>",
+        "<h2>Evidence-Based Advisory Boundary</h2>",
+        "<p class='section-note'>These are conditional advisory options. They do not assert a legal, regulatory, accounting, or architecture mandate without external validation.</p>",
+        "<h3>Confirmed Evidence</h3>",
+        f"<ul>{confirmed_html}</ul>",
+        "<h3>Security Architecture Options</h3>",
+        render_items(advisory.get("architecture_options")),
+        "<h3 style='margin-top:16px'>Potential Control Exposure</h3>",
+        render_items(advisory.get("potential_control_exposure")),
+        "<h3 style='margin-top:16px'>Business / Finance Review Triggers</h3>",
+        render_items(advisory.get("business_review_triggers")),
+        "<h3 style='margin-top:16px'>External Validation Needed</h3>",
+        render_items(advisory.get("external_validation_needed")),
+        f"<p class='section-note'><strong>Budget boundary:</strong> {escape(str(advisory.get('budget_dependency') or 'Budget dependency not assessed.'))}</p>",
+        f"<p class='section-note'><strong>Confidence boundary:</strong> {escape(str(advisory.get('confidence_boundary') or 'External validation required before external claims.'))}</p>",
+        "</section>",
+    ]
+    return "".join(sections)
 
 
 def render_executive_report_html(artifact: Dict[str, Any]) -> str:
@@ -2456,6 +2721,7 @@ h2,h3,h4{{margin:0 0 12px}} table td,table th{{padding:8px 10px;border-bottom:1p
   {_render_cluster_panels(artifact.get("canonical_report", {}).get("investigation_clusters") or [], _report_persona)}
   {("<section class='grid' style='margin-top:18px'><article class='panel'><h2>Adjudication Workflow</h2><p class='small'>Labels are sourced from the existing analyst labeling workflow, not from model guesses.</p><table style='width:100%;border-collapse:collapse'><tbody><tr><td>Tenant</td><td>" + escape(str(adjudication.get("tenant") or "unknown")) + "</td></tr><tr><td>Labels in history</td><td>" + escape(str(adjudication.get("label_history_count") or 0)) + "</td></tr><tr><td>Report events labeled</td><td>" + escape(str(adjudication.get("report_event_labeled_count") or 0)) + "</td></tr><tr><td>Report events unlabeled</td><td>" + escape(str(adjudication.get("report_event_unlabeled_count") or 0)) + "</td></tr><tr><td>Single-label endpoint</td><td>" + escape(str(((adjudication.get("workflow") or {}).get("single_label_endpoint") or ""))) + "</td></tr><tr><td>CSV import</td><td>" + escape(str(((adjudication.get("workflow") or {}).get("csv_import_endpoint") or ""))) + "</td></tr><tr><td>CSV export</td><td>" + escape(str(((adjudication.get("workflow") or {}).get("csv_export_endpoint") or ""))) + "</td></tr></tbody></table></article>" + ("<article class='panel'><h2>Framework Sections</h2>" + "".join(framework_html) + "</article>" if framework_html else "<article class='panel'><h2>Framework Sections</h2><p class='small'>No canonical framework mappings were present, so this section is intentionally omitted from the executive body.</p></article>") + "</section>")}
   {_render_persona_specific_section(artifact, _report_persona)}
+  {_render_advisory_sections(artifact, _report_persona)}
   {("<section class='page-break' style='margin-top:18px'><h2>Evidence Appendix</h2>" + _render_appendix_tables(appendix.get("evidence_appendix") or {}) + "</section>") if checklist.get("include_appendix", True) else ""}
 </div>
 </body>
