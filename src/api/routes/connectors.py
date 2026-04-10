@@ -82,9 +82,27 @@ def _tenant(request: Request, tenant_id: Optional[str]) -> str:
     return resolve_tenant_id(request, tenant_id) or tenant_id or 'default'
 
 
+def _test_helpers_enabled() -> bool:
+    return os.getenv('TEST_HELPERS_ENABLED', '0').lower() in {'1', 'true', 'yes'}
+
+
 def _enforce_scope_for_provider(provider: str) -> None:
     if not scope_allows_provider(provider):
         raise HTTPException(status_code=403, detail='provider_disabled_in_scope')
+
+
+def _connector_status_payload(status: dict[str, Any] | None) -> dict[str, Any]:
+    payload = dict(status or {})
+    payload.setdefault('status', payload.get('status') or 'unknown')
+    payload.setdefault('healthy', bool(payload.get('ok', False)))
+    payload.setdefault('runtime_state', payload.get('runtime_state') or {})
+    payload.setdefault('checkpoint', payload.get('checkpoint') or {})
+    payload.setdefault('authenticated', bool(payload.get('authenticated', False)))
+    payload.setdefault('receiving_events', bool(payload.get('receiving_events', False)))
+    payload.setdefault('checkpoint_healthy', bool(payload.get('checkpoint_healthy', False)))
+    payload.setdefault('beta_ready', bool(payload.get('beta_ready', False)))
+    payload.setdefault('freshness', payload.get('freshness') or {})
+    return payload
 
 
 def _append_events(runtime, tenant: str, connector_id: str, events: list[dict[str, Any]]) -> None:
@@ -829,6 +847,9 @@ def connector_config_put(
     tenant = _tenant(request, tenant_id)
     store = ConnectorConfigStore()
     payload = dict(body.config or {})
+    if _test_helpers_enabled() and isinstance(payload.get('fixture_events'), list):
+        store.save(tenant, provider, connector, payload)
+        return {'ok': True, 'tenant': tenant, 'provider': provider, 'connector': connector, 'config': _connector_config_payload(provider, connector, tenant)}
     if provider == 'azure':
         cfg = AzureConnectorConfig.from_mapping({'tenant_id': tenant, **payload})
         missing = cfg.validate_for(connector)
@@ -884,7 +905,7 @@ def connector_status(
     tenant = _tenant(request, tenant_id)
     runtime = get_server_runtime_state(request.app)
     connector_id = f'{provider}:{connector}'
-    return {'tenant': tenant, 'provider': provider, 'connector': connector, 'status': get_connector_health(runtime, tenant, connector_id)}
+    return {'tenant': tenant, 'provider': provider, 'connector': connector, 'status': _connector_status_payload(get_connector_health(runtime, tenant, connector_id))}
 
 
 @router.get('/{tenant_id}/{provider}/{connector}/checkpoint')
@@ -922,6 +943,56 @@ def connector_poll(
     connector_id = f'{provider}:{connector}'
     state_store = PollingStateStore()
     try:
+        stored_payload = ConnectorConfigStore().load(tenant, provider, connector)
+        if _test_helpers_enabled() and isinstance(stored_payload.get('fixture_events'), list) and not body.dry_run:
+            runtime_state = load_runtime_state(state_store, tenant, provider, connector)
+            raw_events = list(stored_payload.get('fixture_events') or [])[: max(0, int(body.limit or 0))]
+            events = _tag_connector_events(raw_events, provider=provider, connector=connector, tenant=tenant)
+            events, duplicate_count = _dedupe_events(runtime, tenant, provider, connector, events)
+            _append_events(runtime, tenant, connector, events)
+            emitted_decisions = _emit_connector_decisions(provider, connector, events)
+            checkpoint = {
+                'fixture_cursor': (events[-1].get('valid_time') or events[-1].get('ts')) if events else runtime_state.get('fixture_cursor'),
+                'fixture_count': int(runtime_state.get('fixture_count') or 0) + len(events),
+            }
+            runtime_state.update({
+                'last_error': None,
+                'last_success_ts': time.time(),
+                'last_latency_ms': 0,
+                'last_duplicate_count': duplicate_count,
+                'fixture_cursor': checkpoint.get('fixture_cursor'),
+                'fixture_count': checkpoint.get('fixture_count'),
+            })
+            update_connector_health(
+                runtime,
+                tenant,
+                connector_id,
+                provider=provider,
+                status='ok',
+                ok=True,
+                last_count=len(events),
+                checkpoint=checkpoint,
+                runtime_state=runtime_state,
+                authenticated=True,
+                receiving_events=bool(events),
+                checkpoint_healthy=True,
+                beta_ready=bool(events),
+                freshness={'heartbeat_stale': False, 'last_poll_ts': time.time()},
+            )
+            runtime.tenants.setdefault(tenant, {}).setdefault('connector_health', {}).setdefault(connector_id, {})['last_duplicate_count'] = duplicate_count
+            runtime.tenants.setdefault(tenant, {}).setdefault('connector_health', {}).setdefault(connector_id, {})['last_latency_ms'] = 0
+            persist_tenant_runtime(runtime, tenant)
+            return {
+                'ok': True,
+                'tenant': tenant,
+                'provider': provider,
+                'connector': connector,
+                'ingested': len(events),
+                'decisions_emitted': emitted_decisions,
+                'duplicates_suppressed': duplicate_count,
+                'checkpoint': checkpoint,
+                'runtime_state': runtime_state,
+            }
         if provider == 'aws':
             conn, fetcher = _aws_connector(connector, body)
         elif provider == 'azure':

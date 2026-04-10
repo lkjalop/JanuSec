@@ -305,6 +305,7 @@ def update_connector_health(
     last_count: int = 0,
     error: str | None = None,
     checkpoint: "dict | None" = None,
+    **metadata: Any,
 ) -> None:
     """Update connector health state in the runtime store."""
     try:
@@ -323,6 +324,14 @@ def update_connector_health(
             'last_count': last_count,
             'last_poll_ts': now,
         })
+        existing.setdefault('authenticated', bool(ok))
+        existing.setdefault('receiving_events', bool(last_count))
+        existing.setdefault('checkpoint_healthy', checkpoint is not None)
+        existing.setdefault('beta_ready', bool(ok))
+        freshness = existing.setdefault('freshness', {})
+        if isinstance(freshness, dict):
+            freshness.setdefault('last_poll_ts', now)
+            freshness.setdefault('heartbeat_stale', False)
         if ok:
             existing['last_ok_ts'] = now
             existing['consecutive_failures'] = 0
@@ -331,6 +340,9 @@ def update_connector_health(
             existing['consecutive_failures'] = existing.get('consecutive_failures', 0) + 1
         if checkpoint is not None:
             existing['checkpoint'] = checkpoint
+        for key, value in metadata.items():
+            if value is not None:
+                existing[key] = value
     except Exception:
         pass
 

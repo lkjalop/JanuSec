@@ -22,6 +22,84 @@ IDENTITY_CONNECTORS = (("okta", "okta"), ("sailpoint", "sailpoint"))
 EMAIL_CONNECTORS = (("email", "mimecast"), ("email", "proofpoint"))
 
 
+def _fixture_events(provider: str, connector: str) -> List[Dict[str, Any]]:
+    base = {
+        "tenant_id": "default",
+        "entity": "ceo@shopsquire.example",
+        "user": "ceo@shopsquire.example",
+        "ip": "203.0.113.99",
+        "severity": "high",
+    }
+    ts = {
+        "cloudtrail": "2026-04-10T00:00:00Z",
+        "guardduty": "2026-04-10T00:01:00Z",
+        "securityhub": "2026-04-10T00:02:00Z",
+        "vpcflow": "2026-04-10T00:03:00Z",
+        "eventhub": "2026-04-10T00:04:00Z",
+        "entra_signin": "2026-04-10T00:05:00Z",
+        "entra_audit": "2026-04-10T00:06:00Z",
+        "defender_cloud": "2026-04-10T00:07:00Z",
+        "okta": "2026-04-10T00:08:00Z",
+        "sailpoint": "2026-04-10T00:09:00Z",
+        "mimecast": "2026-04-10T00:10:00Z",
+        "proofpoint": "2026-04-10T00:11:00Z",
+    }.get(connector, "2026-04-10T00:00:00Z")
+    event = {
+        **base,
+        "id": f"fixture-{provider}-{connector}",
+        "event_id": f"fixture-{provider}-{connector}",
+        "ts": ts,
+        "valid_time": ts,
+        "source": connector,
+        "source_kind": connector,
+        "connector_id": f"{provider}:{connector}",
+        "description": f"Fixture {provider}/{connector} suspicious executive access event",
+        "factors": ["live:fixture", f"{provider}:{connector}"],
+    }
+    if provider == "email":
+        event.update({
+            "domain": "email",
+            "sender": "accounts@ingramfake.com.au",
+            "subject": "Updated invoice for acquisition deposit",
+            "threat_names": ["supplier_impersonation", "credential_phish"],
+            "reason": "sender infrastructure drift and executive-targeted finance lure",
+        })
+    if provider in {"okta", "sailpoint", "azure"}:
+        event.update({"domain": "identity", "actor": "ceo@shopsquire.example"})
+    if provider == "aws":
+        event.update({"domain": "cloud", "account_id": "123456789012", "action": "ConsoleLogin"})
+    return [event]
+
+
+def _seed_fixture_configs(
+    *,
+    base: str,
+    tenant_id: str,
+    headers: Dict[str, str],
+    scope: str,
+    timeout: int,
+    include_email: bool,
+) -> None:
+    for provider, connector in _iter_targets(scope):
+        if provider == "email" and not include_email:
+            continue
+        config: Dict[str, Any] = {"fixture_events": _fixture_events(provider, connector)}
+        if provider == "azure":
+            config.update({"tenant_id": "fixture-tenant", "client_id": "fixture-client", "client_secret": "fixture-secret", "eventhub_connection_string": "Endpoint=sb://fixture/", "eventhub_name": "fixture", "subscription_id": "fixture-sub"})
+        elif provider == "okta":
+            config.update({"org_url": "https://fixture.okta.example", "api_token": "fixture-token"})
+        elif provider == "sailpoint":
+            config.update({"base_url": "https://fixture.identitynow.example", "client_id": "fixture-client", "client_secret": "fixture-secret"})
+        elif provider == "email":
+            config.update({"client_id": "fixture-client", "client_secret": "fixture-secret", "token_url": "https://fixture.email.example/token"})
+        _put_json(
+            f"{base}/api/v1/connectors/{tenant_id}/{provider}/{connector}/config",
+            headers,
+            {"config": config},
+            timeout=timeout,
+        )
+
+
 def _headers(api_key: str, tenant_id: str) -> Dict[str, str]:
     return {
         "x-api-key": api_key,
@@ -38,6 +116,12 @@ def _get_json(url: str, headers: Dict[str, str], timeout: int = 20) -> Dict[str,
 
 def _post_json(url: str, headers: Dict[str, str], payload: Dict[str, Any], timeout: int = 60) -> Dict[str, Any]:
     resp = requests.post(url, headers=headers, json=payload, timeout=timeout)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def _put_json(url: str, headers: Dict[str, str], payload: Dict[str, Any], timeout: int = 60) -> Dict[str, Any]:
+    resp = requests.put(url, headers=headers, json=payload, timeout=timeout)
     resp.raise_for_status()
     return resp.json()
 
@@ -75,6 +159,24 @@ def _checkpoint_advanced(before: Any, after: Any) -> bool:
                 return True
         return False
     return str(before) != str(after)
+
+
+def _as_epoch(value: Any) -> float | None:
+    if value in (None, "", [], {}):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    try:
+        text = str(value).strip()
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        import datetime as _dt
+        return _dt.datetime.fromisoformat(text).timestamp()
+    except Exception:
+        try:
+            return float(value)
+        except Exception:
+            return None
 
 
 def _connector_sequence(
@@ -164,7 +266,12 @@ def _check_live_lane_chronology(assessment: Dict[str, Any]) -> List[str]:
             continue
         saw_bitemporal = True
         try:
-            if float(transaction_time) < float(valid_time):
+            transaction_epoch = _as_epoch(transaction_time)
+            valid_epoch = _as_epoch(valid_time)
+            if transaction_epoch is None or valid_epoch is None:
+                failures.append(f"invalid_bitemporal:{row.get('row_index')}")
+                continue
+            if transaction_epoch < valid_epoch:
                 failures.append(f"transaction_before_valid:{row.get('row_index')}")
         except Exception:
             failures.append(f"invalid_bitemporal:{row.get('row_index')}")
@@ -293,6 +400,7 @@ def main(argv: List[str]) -> int:
     ap.add_argument("--timeout", type=int, default=60,
                     help="HTTP request timeout in seconds (default: 60)")
     ap.add_argument("--out", default=None)
+    ap.add_argument("--fixture-mode", action="store_true", help="Seed deterministic connector fixture_events through the guarded TEST_HELPERS path before polling.")
     ap.add_argument("--build-live-lane", action="store_true", help="Build a live-lane assessment after polling configured connectors.")
     ap.add_argument("--include-email", action="store_true", help="Include Mimecast/Proofpoint in the live-lane assessment.")
     ap.add_argument("--azure-export-pack", action="append", default=[], help="Path to exported Azure replay pack directory or file.")
@@ -308,9 +416,23 @@ def main(argv: List[str]) -> int:
         "base": base,
         "scope": args.scope,
         "started_ts": int(time.time()),
+        "fixture_mode": bool(args.fixture_mode),
         "results": [],
     }
     exit_code = 0
+    if args.fixture_mode:
+        try:
+            _seed_fixture_configs(
+                base=base,
+                tenant_id=args.tenant_id,
+                headers=headers,
+                scope=args.scope,
+                timeout=args.timeout,
+                include_email=bool(args.include_email),
+            )
+        except Exception as exc:
+            report["fixture_seed_failure"] = str(exc)
+            exit_code = 1
     for provider, connector in _iter_targets(args.scope):
         try:
             result = _connector_sequence(
@@ -408,14 +530,14 @@ def main(argv: List[str]) -> int:
                 continue
             verdict = (entry.get("verdict") or {}).get("final_verdict")
             confidence = (entry.get("verdict") or {}).get("final_confidence")
+            pack = entry.get("pack") or "pack"
+            print(f"  REPLAY {provider}/{pack} verdict={verdict} confidence={confidence}", file=sys.stderr)
     if report.get("live_lane_assessment"):
         live = report["live_lane_assessment"]
         if live.get("failures"):
             print(f"  FAIL  live-lane  failures={live.get('failures')}", file=sys.stderr)
         else:
             print(f"  PASS  live-lane  assessment={live.get('assessment_id')} cluster={live.get('cluster_id')} rows={live.get('row_count')}", file=sys.stderr)
-            pack = entry.get("pack") or "pack"
-            print(f"  REPLAY {provider}/{pack} verdict={verdict} confidence={confidence}", file=sys.stderr)
     print(f"\n[{overall}] {passed}/{total} connectors passed", file=sys.stderr)
 
     return exit_code
