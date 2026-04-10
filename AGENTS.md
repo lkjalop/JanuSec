@@ -81,6 +81,15 @@ These pages are intentionally framework-free and use the same dark theme variabl
 - Don’t: replace or rename `frontend/static/janusec-platform-complete-LIVE.html`.
 - Don’t: default the root to any other template without updating `DEFAULT_FRONTEND`.
 
+## Local Dump Folder Policy
+
+- `dump/` is user-owned scratch and acceptance material. It may contain XLSX/CSV/PDF upload packs, UI complaint screenshots, benchmark artifacts, report exports, presentation files, and notes.
+- Treat `dump/` as local evidence, not disposable generated junk. Never delete, broad-stash, or clean it by default.
+- `dump/` is ignored in Git so it can stay messy and local without polluting commits. Ignored does not mean safe to remove.
+- If a dump file becomes a formal regression asset, promote a copy into a durable fixture path such as `tests/fixtures/manual_upload/`, `tests/fixtures/ui_screenshots/`, or `tests/fixtures/email_replay/`.
+- For cleanup, use path-limited targets such as `tmp_*`, `__pycache__/`, `.pytest_cache/`, generated tenant validation folders, and runtime polling state. Explicitly exclude `dump/`.
+- Prefer organizing local dump material into folders like `dump/input_packs/`, `dump/screenshots/`, `dump/reports/`, `dump/shopsquire/`, and `dump/notes/` rather than deleting it.
+
 ## Quick Verification
 
 - LIVE console: `http://localhost:8080/`
@@ -198,4 +207,3 @@ If you are an AI coding agent, please follow these conventions when modifying th
 ## Optional Crypto Verification Dependencies
 
 - **DKIM verification:** The project can perform cryptographic DKIM checks when `dkimpy` is installed in the runtime environment. Agents and operators should install `dkimpy` (for example, `pip install dkimpy>=0.9.0`) and restart the server to enable `verify_dkim()` paths that require raw RFC822 message bytes. See `docs/enable_dkim.md` for details on payload fields and example usage.
-

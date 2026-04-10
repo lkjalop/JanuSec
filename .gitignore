@@ -1,5 +1,10 @@
 node_modules/
 
+# User-owned scratch, acceptance artifacts, screenshots, upload packs, and
+# presentation/benchmark material. Keep local and dirty; do not clean or stash
+# by default. Promote formal fixtures into tests/fixtures/ instead.
+dump/
+
 # Python virtual environments
 .venv/
 .venv-ci/
