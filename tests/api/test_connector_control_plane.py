@@ -154,6 +154,12 @@ def test_status_connectors_endpoint_uses_runtime_health(client):
     connectors = r.json()['connectors']
     names = {entry['name'] for entry in connectors}
     assert 'aws:cloudtrail' in names or 'azure:entra_signin' in names
+    sample = connectors[0]
+    assert 'authenticated' in sample
+    assert 'receiving_events' in sample
+    assert 'checkpoint_healthy' in sample
+    assert 'beta_ready' in sample
+    assert 'freshness' in sample
 
 
 def test_status_connectors_includes_runtime_projection_fields(monkeypatch, client):
@@ -176,3 +182,8 @@ def test_status_connectors_includes_runtime_projection_fields(monkeypatch, clien
     assert 'last_latency_ms' in entry
     assert 'runtime_state' in entry
     assert 'circuit_open' in entry
+    assert 'authenticated' in entry
+    assert 'receiving_events' in entry
+    assert 'checkpoint_healthy' in entry
+    assert 'beta_ready' in entry
+    assert isinstance(entry.get('freshness') or {}, dict)

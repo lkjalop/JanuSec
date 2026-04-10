@@ -66,6 +66,12 @@ from src.analysis.correlation_context import (
     build_attack_chain_visualization,
     enrich_correlation_context,
 )
+from src.core.correlation.cluster_reasoning import (
+    build_cluster_reasoning_root,
+    build_cluster_reasoning_state,
+    compact_cluster_reasoning_state,
+    parse_guided_analyst_note,
+)
 from src.repositories.historical_incidents_repo import HISTORICAL_REPO
 try:
     from src.incidents.aggregator import GLOBAL_INCIDENTS
@@ -2656,6 +2662,10 @@ def _hydrate_assessment_semantics(assessment: dict) -> dict:
     assessment['evidence_rows'] = normalized_rows
     assessment['correlation_clusters'] = clusters
     assessment['persona_reports'] = persona_reports
+    try:
+        _apply_cluster_reasoning_to_assessment(assessment, trigger_reason='assessment_hydrate')
+    except Exception:
+        pass
     return assessment
 
 
@@ -3929,6 +3939,8 @@ async def run_deep_analyze_pipeline(payload: dict) -> JSONResponse:
         'risk_appetite': risk_appetite,
         'reviews': {},  # row_index -> {status, notes, reviewer_tag, updated_ts}
         'batch_meta': batch_meta or {},
+        'cluster_reasoning_state': {},
+        'corroboration': {},
     }
     assessment_obj = _hydrate_assessment_semantics(assessment_obj)
     try:
@@ -3967,6 +3979,8 @@ async def run_deep_analyze_pipeline(payload: dict) -> JSONResponse:
         'evidence_rows': assessment_obj.get('evidence_rows') or [],
         'correlation_clusters': assessment_obj.get('correlation_clusters') or [],
         'persona_reports': assessment_obj.get('persona_reports') or {},
+        'cluster_reasoning_state': assessment_obj.get('cluster_reasoning_state') or {},
+        'corroboration': assessment_obj.get('corroboration') or {},
     }
 
     # Schedule background LLM row generation so the HTTP response is fast even when providers are slow
@@ -4066,6 +4080,8 @@ async def run_deep_analyze_pipeline(payload: dict) -> JSONResponse:
         'evidence_rows': assessment_obj.get('evidence_rows') or [],
         'correlation_clusters': assessment_obj.get('correlation_clusters') or [],
         'persona_reports': assessment_obj.get('persona_reports') or {},
+        'cluster_reasoning_state': assessment_obj.get('cluster_reasoning_state') or {},
+        'corroboration': assessment_obj.get('corroboration') or {},
         'risk_appetite': risk_appetite,
         'batch_meta': batch_meta or {},
     }
@@ -4432,6 +4448,8 @@ async def get_assessment(assessment_id: str):
     resp.setdefault('pipeline_stages', persisted.get('pipeline_stages') or in_mem.get('pipeline_stages') or [{'idx': s.idx, 'name': s.name} for s in PIPELINE_SPEC])
     resp.setdefault('stage_status', persisted.get('stage_status') or in_mem.get('stage_status') or [])
     resp.setdefault('telemetry', in_mem.get('telemetry') or persisted.get('telemetry') or {})
+    resp.setdefault('cluster_reasoning_state', persisted.get('cluster_reasoning_state') or in_mem.get('cluster_reasoning_state') or {})
+    resp.setdefault('corroboration', persisted.get('corroboration') or in_mem.get('corroboration') or {})
     llm_rows = (
         resp.get('llm_rows')
         or in_mem.get('llm_rows')
@@ -5235,6 +5253,703 @@ def _factor_frequency(rows: list[dict]) -> dict[str,int]:
                 continue
     return freq
 
+
+_CLUSTER_REASONING_VERSION = 'cluster-reasoning-v1'
+_CLUSTER_SEVERITY_SCORES = {
+    'critical': 1.0,
+    'high': 0.82,
+    'medium': 0.58,
+    'low': 0.28,
+    'info': 0.12,
+}
+
+
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    try:
+        if value is None:
+            return float(default)
+        return float(value)
+    except Exception:
+        return float(default)
+
+
+def _cluster_rows(cluster: dict | None, rows: list[dict]) -> list[dict]:
+    if not isinstance(cluster, dict):
+        return []
+    refs = {
+        int(ref)
+        for ref in (cluster.get('row_refs') or [])
+        if ref is not None
+    }
+    out: list[dict] = []
+    for row in rows:
+        try:
+            idx = int(row.get('row_index') or 0)
+        except Exception:
+            idx = 0
+        if idx in refs:
+            out.append(row)
+    return out
+
+
+def _cluster_review_entries(assessment: dict, cluster: dict | None, cluster_rows: list[dict]) -> list[dict]:
+    reviews = assessment.get('reviews') or {}
+    cluster_reviews = assessment.get('cluster_reviews') or {}
+    if not isinstance(reviews, dict):
+        reviews = {}
+    if not isinstance(cluster_reviews, dict):
+        cluster_reviews = {}
+    cluster_id = str((cluster or {}).get('cluster_id') or '')
+    row_refs = {
+        int(row.get('row_index') or 0)
+        for row in cluster_rows
+        if isinstance(row, dict)
+    }
+    entries: list[dict] = []
+    for key, value in reviews.items():
+        if not isinstance(value, dict):
+            continue
+        include = False
+        if cluster_id and str(value.get('cluster_id') or '') == cluster_id:
+            include = True
+        try:
+            include = include or int(key) in row_refs
+        except Exception:
+            pass
+        if include:
+            entries.append(value)
+    if cluster_id:
+        cluster_value = cluster_reviews.get(cluster_id)
+        if isinstance(cluster_value, dict):
+            entries.append(cluster_value)
+    return entries
+
+
+def _build_cluster_analyst_state(assessment: dict, cluster: dict | None, cluster_rows: list[dict]) -> dict:
+    entries = _cluster_review_entries(assessment, cluster, cluster_rows)
+    latest_gate = assessment.get('_latest_gate') or {}
+    factors_added: list[str] = []
+    factors_removed: list[str] = []
+    hypotheses: list[str] = []
+    disposition_delta = 0.0
+    confidence_override = None
+    statuses: list[str] = []
+    decisions: list[str] = []
+    for entry in entries:
+        statuses.append(str(entry.get('status') or ''))
+        if entry.get('confirm_or_deny'):
+            decisions.append(str(entry.get('confirm_or_deny')))
+        for item in (entry.get('factors_added') or []):
+            if item:
+                factors_added.append(str(item))
+        for item in (entry.get('factors_removed') or []):
+            if item:
+                factors_removed.append(str(item))
+        hypothesis = entry.get('hypothesis')
+        if hypothesis:
+            hypotheses.append(str(hypothesis))
+        if entry.get('disposition_delta') is not None:
+            disposition_delta += _safe_float(entry.get('disposition_delta'))
+        if entry.get('confidence_override') is not None:
+            confidence_override = _safe_float(entry.get('confidence_override'))
+    return {
+        'review_status': statuses[-1] if statuses else 'unreviewed',
+        'review_count': len(entries),
+        'hypothesis': hypotheses[-1] if hypotheses else '',
+        'hypotheses': list(dict.fromkeys(hypotheses))[:5],
+        'confirm_or_deny': decisions[-1] if decisions else '',
+        'factors_added': list(dict.fromkeys(factors_added))[:12],
+        'factors_removed': list(dict.fromkeys(factors_removed))[:12],
+        'confidence_override': confidence_override,
+        'disposition_delta': round(disposition_delta, 3),
+        'gate_status': latest_gate.get('gate_verdict') or 'ungated',
+        'gate_ts': latest_gate.get('gate_ts'),
+    }
+
+
+def _estimate_ewma_score(assessment: dict, cluster: dict | None) -> float:
+    graph_summary = assessment.get('graph_summary') or {}
+    matrix = graph_summary.get('correlation_smoothed') or graph_summary.get('correlation') or {}
+    values: list[float] = []
+    try:
+        if isinstance(matrix, dict):
+            for _, row in matrix.items():
+                if isinstance(row, dict):
+                    for _, val in row.items():
+                        values.append(_safe_float(val))
+        elif isinstance(matrix, list):
+            for item in matrix:
+                if isinstance(item, (list, tuple)) and len(item) >= 3:
+                    values.append(_safe_float(item[2]))
+    except Exception:
+        values = []
+    if values:
+        return round(min(1.0, max(values)), 3)
+    if isinstance(cluster, dict):
+        return round(min(1.0, _safe_float(cluster.get('confidence'))), 3)
+    return 0.0
+
+
+def _estimate_pattern_support(assessment: dict, cluster_rows: list[dict], include_temporal: bool = False) -> tuple[float, list[dict]]:
+    missing = _infer_missing_log_classes(cluster_rows)
+    factor_freq = _factor_frequency(cluster_rows)
+    dominant = sorted(factor_freq.items(), key=lambda kv: kv[1], reverse=True)[:4]
+    dominant_bonus = min(0.35, sum(min(0.08, cnt * 0.04) for _, cnt in dominant))
+    support = min(1.0, 0.15 + dominant_bonus + (0.08 if not missing else 0.0))
+    evidence_used = [
+        {'type': 'factor_frequency', 'factor': name, 'count': count}
+        for name, count in dominant
+    ]
+    if include_temporal:
+        try:
+            engine = _get_trag_engine()
+            tenant = assessment.get('org') or assessment.get('tenant') or 'default'
+            query_bits = []
+            for row in cluster_rows[:6]:
+                for field in ('description', 'event_type', 'user', 'host', 'process', 'domain', 'ip'):
+                    val = row.get(field)
+                    if val:
+                        query_bits.append(str(val))
+            if engine and query_bits:
+                neighbours = engine.query(' '.join(query_bits)[:400], tenant=tenant, top_k=4, window_seconds=24 * 3600)
+                if neighbours:
+                    support = min(1.0, support + min(0.4, 0.1 * len(neighbours)))
+                    evidence_used.extend(
+                        {
+                            'type': 'temporal_neighbor',
+                            'entity': n.get('entity') or n.get('user') or n.get('host'),
+                            'severity': n.get('severity'),
+                        }
+                        for n in neighbours[:3]
+                        if isinstance(n, dict)
+                    )
+        except Exception:
+            pass
+    return round(support, 3), evidence_used[:8]
+
+
+def _cluster_graph_score(assessment: dict, cluster: dict | None) -> float:
+    graph_summary = assessment.get('graph_summary') or {}
+    candidates = [
+        (cluster or {}).get('confidence'),
+        graph_summary.get('confidence'),
+        ((graph_summary.get('graph_confidence_breakdown') or {}).get('path')),
+    ]
+    for candidate in candidates:
+        value = _safe_float(candidate, default=-1.0)
+        if value >= 0.0:
+            return round(min(1.0, value), 3)
+    return 0.0
+
+
+def _cluster_routing_snapshot(assessment: dict, cluster: dict | None, cluster_rows: list[dict], analyst_state: dict, include_temporal: bool = False) -> dict:
+    severity = str((cluster or {}).get('severity') or 'low').lower()
+    severity_score = _CLUSTER_SEVERITY_SCORES.get(severity, 0.2)
+    graph_score = _cluster_graph_score(assessment, cluster)
+    ewma_score = _estimate_ewma_score(assessment, cluster)
+    pattern_support_score, evidence_used = _estimate_pattern_support(assessment, cluster_rows, include_temporal=include_temporal)
+    cluster_size = len(cluster_rows)
+    cluster_size_score = min(1.0, cluster_size / 4.0)
+    analyst_boost = min(
+        0.2,
+        (0.04 * len(analyst_state.get('factors_added') or []))
+        + (0.03 if analyst_state.get('hypothesis') else 0.0)
+        + max(0.0, _safe_float(analyst_state.get('disposition_delta')) * 0.08),
+    )
+    confidence_override = analyst_state.get('confidence_override')
+    if confidence_override is not None:
+        analyst_boost += max(0.0, min(0.12, _safe_float(confidence_override) - 0.5))
+    routing_score = (
+        0.27 * severity_score
+        + 0.25 * graph_score
+        + 0.18 * ewma_score
+        + 0.2 * pattern_support_score
+        + 0.1 * cluster_size_score
+        + analyst_boost
+    )
+    routing_score = round(min(1.0, routing_score), 3)
+    high_signal = (
+        (severity_score >= 0.82 and cluster_size >= 2 and routing_score >= 0.55)
+        or (severity_score >= 0.58 and routing_score >= 0.68 and (ewma_score >= 0.45 or pattern_support_score >= 0.45))
+    )
+    return {
+        'cluster_size': cluster_size,
+        'severity_score': round(severity_score, 3),
+        'graph_score': graph_score,
+        'ewma_score': ewma_score,
+        'pattern_support_score': pattern_support_score,
+        'routing_score': routing_score,
+        'high_signal': bool(high_signal),
+        'reasoning_mode': 'deep' if high_signal else 'cheap',
+        'routing_mode': 'cluster-first' if cluster_size >= 2 else 'row-first',
+        'evidence_used': evidence_used,
+    }
+
+
+def _should_auto_corroborate(cluster: dict | None, routing: dict, analyst_state: dict) -> bool:
+    severity = str((cluster or {}).get('severity') or 'low').lower()
+    if severity in {'critical', 'high'}:
+        return bool(routing.get('high_signal'))
+    if severity == 'medium':
+        return bool(
+            routing.get('routing_score', 0.0) >= 0.72
+            and (
+                routing.get('ewma_score', 0.0) >= 0.45
+                or routing.get('pattern_support_score', 0.0) >= 0.45
+                or analyst_state.get('factors_added')
+            )
+        )
+    return False
+
+
+def _build_cluster_claims(cluster: dict, cluster_rows: list[dict], summary: dict, routing: dict) -> list[dict]:
+    row_refs = [int(r.get('row_index')) for r in cluster_rows if isinstance(r, dict) and r.get('row_index') is not None][:8]
+    claims: list[dict] = [
+        {
+            'claim': summary.get('canonical_narrative') or 'Correlated activity spans multiple rows and should be handled as one incident candidate.',
+            'claim_type': 'fact',
+            'confidence': round(min(0.99, max(0.35, routing.get('routing_score', 0.0))), 3),
+            'evidence_refs': row_refs[:5],
+            'counter_evidence': [],
+            'assumptions': [],
+        },
+        {
+            'claim': summary.get('top_hypothesis') or 'Shared telemetry suggests one primary attack path.',
+            'claim_type': 'inference',
+            'confidence': round(min(0.95, max(0.3, routing.get('pattern_support_score', 0.0) + 0.25)), 3),
+            'evidence_refs': row_refs[:4],
+            'counter_evidence': _bounded_unique_strings(summary.get('contradictions'), 3),
+            'assumptions': ['Cluster members represent the same operator or campaign until disproved.'],
+        },
+    ]
+    if summary.get('missing_telemetry'):
+        claims.append({
+            'claim': 'Final confidence is constrained by missing telemetry that could confirm or deny the cluster path.',
+            'claim_type': 'assumption',
+            'confidence': round(min(0.8, max(0.2, 0.45 + 0.05 * len(summary.get('missing_telemetry') or []))), 3),
+            'evidence_refs': row_refs[:3],
+            'counter_evidence': [],
+            'assumptions': _bounded_unique_strings(summary.get('missing_telemetry'), 4),
+        })
+    return claims[:4]
+
+
+def _build_cluster_alt_hypotheses(cluster: dict, cluster_rows: list[dict], analyst_state: dict, factor_freq: dict[str, int]) -> list[dict]:
+    primary_factor = next(iter(sorted(factor_freq.items(), key=lambda kv: kv[1], reverse=True)), ('shared telemetry', 0))[0].replace('_', ' ')
+    cluster_desc = cluster.get('reason_summary') or cluster.get('business_significance') or primary_factor
+    alt_hypotheses = [
+        {
+            'hypothesis': f'Legitimate operational or admin change produced {cluster_desc}.',
+            'confidence': 0.22,
+            'weakness': 'No explicit change window or owner confirmation is attached yet.',
+            'evidence_refs': [int(r.get('row_index')) for r in cluster_rows[:2] if r.get('row_index') is not None],
+        }
+    ]
+    if analyst_state.get('factors_removed'):
+        alt_hypotheses.append({
+            'hypothesis': 'One or more correlated factors may be coincidental rather than one attack path.',
+            'confidence': 0.31,
+            'weakness': 'Analyst removed factors, so the shared path needs manual validation.',
+            'evidence_refs': [int(r.get('row_index')) for r in cluster_rows[:3] if r.get('row_index') is not None],
+        })
+    return alt_hypotheses[:3]
+
+
+def _build_cluster_leads(cluster: dict, summary: dict, analyst_state: dict) -> dict:
+    requested = _bounded_unique_strings(analyst_state.get('requested_telemetry'), 6)
+    missing = _bounded_unique_strings(summary.get('missing_telemetry'), 6)
+    recommended = _bounded_unique_strings(summary.get('recommended_actions'), 6)
+    next_best = recommended[:2]
+    confirmation = requested[:2] or missing[:2] or ['Validate the highest-confidence shared pivot in a second source before escalating further.']
+    denial = [
+        'Check for approved administrative change, maintenance, or owner-confirmed business context matching the same rows.',
+        'Confirm whether baseline activity explains the shared pivot before treating it as one attack chain.',
+    ]
+    return {
+        'next_best': next_best,
+        'confirmation': confirmation,
+        'denial': denial,
+        'high_value_missing_telemetry': missing[:3],
+        'next_best_details': [
+            {
+                'lead': lead,
+                'expected_information_gain': round(0.72 - (idx * 0.08), 3),
+                'artifact_availability': 'available_now',
+                'why_it_matters': 'This is the fastest path to collapse duplicate row work into one validated cluster decision.',
+            }
+            for idx, lead in enumerate(next_best)
+        ],
+        'confirmation_details': [
+            {
+                'lead': lead,
+                'expected_information_gain': round(0.79 - (idx * 0.06), 3),
+                'artifact_availability': 'requires_live_pull' if lead in missing else 'available_now',
+                'why_it_matters': 'This evidence can directly confirm the top cluster hypothesis or strengthen corroboration.',
+            }
+            for idx, lead in enumerate(confirmation)
+        ],
+        'denial_details': [
+            {
+                'lead': lead,
+                'expected_information_gain': round(0.64 - (idx * 0.06), 3),
+                'artifact_availability': 'requires_owner_validation',
+                'why_it_matters': 'This check is the fastest route to safely de-escalate a false-positive cluster.',
+            }
+            for idx, lead in enumerate(denial)
+        ],
+        'scope_expansion_details': [
+            {
+                'lead': 'Pivot from the shared identity, host, or cloud resource into adjacent rows before opening a second incident.',
+                'expected_information_gain': 0.58,
+                'artifact_availability': 'available_now',
+                'why_it_matters': 'This keeps scope expansion focused on the same cluster instead of spawning duplicate analyst work.',
+            }
+        ],
+        'closure_blockers': missing[:2] or ['Document whether missing telemetry blocks final escalation or closure.'],
+        'lead_outcomes': [],
+    }
+
+
+def _build_source_reliability(cluster_rows: list[dict], routing: dict) -> list[dict]:
+    seen: set[str] = set()
+    items: list[dict] = []
+    for row in cluster_rows:
+        source = str(row.get('source_sheet') or row.get('source') or row.get('_source') or row.get('sheet') or 'unknown').strip()
+        if not source or source in seen:
+            continue
+        seen.add(source)
+        reliability_type = 'direct_artifact'
+        if 'summary' in source.lower() or 'overview' in source.lower():
+            reliability_type = 'derived'
+        elif any(token in source.lower() for token in ('azure', 'aad', 'identity', 'graph')):
+            reliability_type = 'heuristic'
+        weight = 0.95 if reliability_type == 'direct_artifact' else 0.7 if reliability_type == 'heuristic' else 0.62
+        items.append({
+            'source': source,
+            'type': reliability_type,
+            'weight': round(min(0.99, max(weight, routing.get('pattern_support_score', 0.0))), 3),
+            'why_it_matters': f'{source} contributed shared evidence used in the cluster routing and corroboration score.',
+        })
+    return items[:6]
+
+
+def _build_cluster_close_conditions(summary: dict, leads: dict) -> dict:
+    confirmation = list(leads.get('confirmation') or [])
+    denial = list(leads.get('denial') or [])
+    blockers = list(leads.get('closure_blockers') or [])
+    missing = list(summary.get('missing_telemetry') or [])
+    return {
+        'soc_close_conditions': [
+            confirmation[0] if confirmation else 'Validate the highest-confidence pivot before closing the incident.',
+            'Containment is confirmed for the affected identities, hosts, or cloud resources.',
+            blockers[0] if blockers else 'Record whether further telemetry is still blocking closure.',
+        ],
+        'hunter_close_conditions': [
+            denial[0] if denial else 'Rule out the strongest benign explanation before closing the hunt.',
+            'Expand adjacent pivots only while they materially increase evidence quality.',
+            missing[0] if missing else 'Document why no further hunt pivots are required.',
+        ],
+        'forensics_close_conditions': [
+            'Preserve key artifacts and custody notes before evidence ages out.',
+            missing[0] if missing else 'Capture the highest-value missing telemetry before finalizing the timeline.',
+            'Record whether any delayed or backfilled evidence changed the verdict.',
+        ],
+    }
+
+
+def _build_cluster_provider_context(assessment: dict, cluster_rows: list[dict], routing: dict) -> dict:
+    dependency_logs = (((assessment.get('dependency_status') or {}).get('logs')) or {})
+    valid_times = [row.get('timestamp_epoch') or row.get('event_ts') or row.get('ts') for row in cluster_rows if row.get('timestamp_epoch') or row.get('event_ts') or row.get('ts')]
+    connector_names = sorted({
+        str(row.get('connector_id') or row.get('provider') or row.get('source') or row.get('source_sheet') or '').strip()
+        for row in cluster_rows
+        if str(row.get('connector_id') or row.get('provider') or row.get('source') or row.get('source_sheet') or '').strip()
+    })[:8]
+    connector_snapshot = assessment.get('connector_health_snapshot') or {}
+    connector_status = []
+    stale_connectors: list[str] = []
+    missing_sources = list(dependency_logs.get('missing_sources') or [])
+    for name in connector_names:
+        item = dict((connector_snapshot.get(name) or {}) if isinstance(connector_snapshot, dict) else {})
+        freshness = item.get('freshness') or {}
+        heartbeat_stale = bool(freshness.get('heartbeat_stale'))
+        if heartbeat_stale:
+            stale_connectors.append(name)
+        if not item:
+            item = {
+                'provider': name.split(':', 1)[0] if ':' in name else '',
+                'status': 'unknown',
+                'authenticated': False,
+                'receiving_events': False,
+                'checkpoint_healthy': False,
+                'beta_ready': False,
+                'freshness': {},
+            }
+        item['connector'] = name
+        connector_status.append(item)
+    if not connector_status and isinstance(connector_snapshot, dict):
+        for name, raw in list(connector_snapshot.items())[:8]:
+            item = dict(raw or {})
+            item['connector'] = name
+            connector_status.append(item)
+    if stale_connectors:
+        missing_sources.extend([name for name in stale_connectors if name not in missing_sources])
+    email_sources = [
+        {
+            'connector': str(row.get('connector_id') or row.get('source_kind') or row.get('source') or 'email'),
+            'sender': row.get('sender'),
+            'subject': row.get('subject'),
+            'threat_names': list(row.get('threat_names') or []),
+            'reason': row.get('reason') or row.get('action'),
+        }
+        for row in cluster_rows
+        if str(row.get('domain') or row.get('domain_hint') or '').lower() == 'email'
+        or str(row.get('source_kind') or '').lower() in {'mimecast', 'proofpoint', 'microsoft_graph_email', 'email'}
+    ][:6]
+    if not email_sources:
+        assessment_rows = list(assessment.get('rows') or assessment.get('llm_rows') or [])
+        email_sources = [
+            {
+                'connector': str(row.get('connector_id') or row.get('source_kind') or row.get('source') or 'email'),
+                'sender': row.get('sender'),
+                'subject': row.get('subject'),
+                'threat_names': list(row.get('threat_names') or []),
+                'reason': row.get('reason') or row.get('action'),
+            }
+            for row in assessment_rows
+            if str(row.get('domain') or row.get('domain_hint') or '').lower() == 'email'
+            or str(row.get('source_kind') or '').lower() in {'mimecast', 'proofpoint', 'microsoft_graph_email', 'email'}
+        ][:6]
+    return {
+        'affected_hosts': _bounded_unique_strings([row.get('host') or row.get('hostname') for row in cluster_rows], 6),
+        'affected_identities': _bounded_unique_strings([row.get('user') or row.get('username') or row.get('entity') for row in cluster_rows], 6),
+        'valid_time': min(valid_times) if valid_times else None,
+        'transaction_time': int(time.time()),
+        'backfill_observed': bool(dependency_logs.get('missing_sources') or dependency_logs.get('gaps')),
+        'connector_freshness': {
+            'available': dependency_logs.get('available') if dependency_logs.get('available') is not None else bool(connector_status),
+            'missing_sources': missing_sources,
+            'gaps': dependency_logs.get('gaps') or [],
+            'seconds_since_ok': dependency_logs.get('seconds_since_ok'),
+        },
+        'connector_status': connector_status,
+        'email_evidence': email_sources,
+    }
+
+
+def _bounded_unique_strings(values: list[Any] | None, limit: int) -> list[str]:
+    seen: list[str] = []
+    for value in values or []:
+        text = str(value or '').strip()
+        if not text or text in seen:
+            continue
+        seen.append(text)
+        if len(seen) >= limit:
+            break
+    return seen
+
+
+def _build_cluster_reasoning_state(
+    assessment: dict,
+    cluster: dict,
+    cluster_rows: list[dict],
+    *,
+    trigger_reason: str,
+    include_temporal: bool = False,
+    prior_state: dict | None = None,
+    force_corroboration: bool = False,
+) -> dict:
+    analyst_state = _build_cluster_analyst_state(assessment, cluster, cluster_rows)
+    routing = _cluster_routing_snapshot(assessment, cluster, cluster_rows, analyst_state, include_temporal=include_temporal)
+    factor_freq = _factor_frequency(cluster_rows)
+    missing_logs = _infer_missing_log_classes(cluster_rows)
+    primary_factor = next(iter(sorted(factor_freq.items(), key=lambda kv: kv[1], reverse=True)), ('shared_telemetry', 0))
+    contradictions = []
+    if analyst_state.get('factors_removed'):
+        contradictions.append('Analyst removed one or more initially-correlated factors that need manual validation.')
+    if not routing.get('high_signal'):
+        contradictions.append('Shared evidence is present but not yet strong enough for blanket deep escalation.')
+    recommended_actions = [
+        f"Validate rows {', '.join('#' + str(r) for r in (cluster.get('row_refs') or [])[:5])} as one incident before duplicating analyst work.",
+        f"Collect {', '.join((cluster.get('recommended_logs') or missing_logs or ['identity and endpoint logs'])[:3])}.",
+        'Use cluster pivots first, then expand to adjacent rows only if corroboration strengthens the case.',
+    ]
+    summary = {
+        'canonical_narrative': (
+            f"Cluster {cluster.get('cluster_id')} groups {len(cluster_rows)} correlated row(s) around "
+            f"{cluster.get('reason_summary') or cluster.get('business_significance') or 'shared telemetry'}."
+        ),
+        'top_hypothesis': (
+            analyst_state.get('hypothesis')
+            or f"Likely {primary_factor[0].replace('_', ' ')} sequence spanning correlated evidence."
+        ),
+        'supporting_evidence': [
+            f"Severity {cluster.get('severity')} with cluster confidence {cluster.get('confidence')}.",
+            cluster.get('business_significance') or 'Business significance still requires human confirmation.',
+            cluster.get('blast_radius_summary') or 'Blast radius still being refined.',
+        ],
+        'contradictions': contradictions[:3],
+        'missing_telemetry': (missing_logs or cluster.get('recommended_logs') or [])[:6],
+        'recommended_actions': recommended_actions[:5],
+    }
+    corroboration_status = 'deferred'
+    corroboration_verdict = 'needs_more_evidence'
+    corroboration_confidence = routing.get('routing_score', 0.0)
+    should_corroborate = force_corroboration or _should_auto_corroborate(cluster, routing, analyst_state)
+    if should_corroborate:
+        corroboration_status = 'completed'
+        corroboration_confidence = round(
+            min(
+                1.0,
+                routing.get('routing_score', 0.0)
+                + min(0.12, 0.03 * len(analyst_state.get('factors_added') or []))
+                + max(0.0, min(0.08, _safe_float(analyst_state.get('disposition_delta')) * 0.08)),
+            ),
+            3,
+        )
+        if corroboration_confidence >= 0.78:
+            corroboration_verdict = 'corroborated_high_signal'
+        elif corroboration_confidence >= 0.62:
+            corroboration_verdict = 'corroborated_medium_signal'
+        else:
+            corroboration_verdict = 'mixed_signal'
+    disconfirming = list(contradictions)
+    if analyst_state.get('factors_removed'):
+        disconfirming.append('Analyst removed one or more cluster factors during confirm/deny review.')
+    claims = _build_cluster_claims(cluster, cluster_rows, summary, routing)
+    alt_hypotheses = _build_cluster_alt_hypotheses(cluster, cluster_rows, analyst_state, factor_freq)
+    leads = _build_cluster_leads(cluster, summary, analyst_state)
+    provider_context = _build_cluster_provider_context(assessment, cluster_rows, routing)
+    return build_cluster_reasoning_state(
+        assessment_id=assessment.get('assessment_id'),
+        cluster_id=cluster.get('cluster_id'),
+        session_id=assessment.get('session_id'),
+        version=_CLUSTER_REASONING_VERSION,
+        generated_ts=int(time.time()),
+        trigger_reason=trigger_reason,
+        routing_mode=routing.get('routing_mode'),
+        reasoning_mode=routing.get('reasoning_mode'),
+        cluster_size=routing.get('cluster_size'),
+        severity_score=routing.get('severity_score'),
+        graph_score=routing.get('graph_score'),
+        ewma_score=routing.get('ewma_score'),
+        pattern_support_score=routing.get('pattern_support_score'),
+        routing_score=routing.get('routing_score'),
+        analyst_state=analyst_state,
+        canonical_narrative=summary['canonical_narrative'],
+        top_hypothesis=summary['top_hypothesis'],
+        supporting_evidence=summary['supporting_evidence'],
+        contradictions=summary['contradictions'],
+        missing_telemetry=summary['missing_telemetry'],
+        recommended_actions=summary['recommended_actions'],
+        corroboration_status=corroboration_status,
+        corroboration_verdict=corroboration_verdict,
+        corroboration_confidence=corroboration_confidence,
+        corroboration_run_ts=int(time.time()) if should_corroborate else None,
+        evidence_used=routing.get('evidence_used') or [],
+        alt_hypotheses=alt_hypotheses,
+        claims=claims,
+        leads=leads,
+        source_reliability=_build_source_reliability(cluster_rows, routing),
+        what_would_flip=[
+            'Owner-approved change window and second-source confirmation downgrade the attack-chain assumption.',
+            'If missing telemetry disproves the shared pivot, de-escalate the cluster to isolated handling.',
+        ],
+        disconfirming_evidence=disconfirming,
+        persona_seed_claims=[summary['canonical_narrative'], summary['top_hypothesis']],
+        persona_seed_actions=recommended_actions[:3],
+        persona_seed_missing_telemetry=summary['missing_telemetry'][:4],
+        temporal_rag_sources=routing.get('evidence_used') or [],
+        shared_pivots=_bounded_unique_strings((cluster.get('shared_pivots') or []), 8),
+        provider_context=provider_context,
+        prior_state=prior_state,
+        evidence_row_indices=[int(r.get('row_index')) for r in cluster_rows if r.get('row_index') is not None][:12],
+        close_conditions=_build_cluster_close_conditions(summary, leads),
+    )
+
+
+def _compact_cluster_reasoning_state(state: dict | None) -> dict:
+    return compact_cluster_reasoning_state(state)
+
+
+def _apply_cluster_reasoning_to_assessment(
+    assessment: dict,
+    *,
+    preferred_cluster_id: str | None = None,
+    trigger_reason: str,
+    include_temporal: bool = False,
+    force_corroboration: bool = False,
+) -> dict:
+    clusters = assessment.get('correlation_clusters') or []
+    rows = assessment.get('llm_rows') or assessment.get('rows') or []
+    cluster_states: list[dict] = []
+    prior_root = assessment.get('cluster_reasoning_state') or {}
+    prior_states = {
+        str(item.get('cluster_id')): item
+        for item in (prior_root.get('cluster_states') or [])
+        if isinstance(item, dict) and item.get('cluster_id')
+    }
+    for cluster in clusters:
+        cluster_id = str(cluster.get('cluster_id') or '')
+        cluster_rows = _cluster_rows(cluster, rows)
+        if len(cluster_rows) < 2:
+            continue
+        state = _build_cluster_reasoning_state(
+            assessment,
+            cluster,
+            cluster_rows,
+            trigger_reason=trigger_reason,
+            include_temporal=include_temporal and (preferred_cluster_id is None or preferred_cluster_id == cluster_id),
+            prior_state=prior_states.get(cluster_id),
+            force_corroboration=force_corroboration and (preferred_cluster_id is None or preferred_cluster_id == cluster_id),
+        )
+        cluster_states.append(state)
+    cluster_states.sort(
+        key=lambda item: (
+            _safe_float(item.get('routing_score')),
+            _safe_float(item.get('severity_score')),
+            _safe_float(item.get('cluster_size')),
+        ),
+        reverse=True,
+    )
+    primary = None
+    if preferred_cluster_id:
+        primary = next((item for item in cluster_states if item.get('cluster_id') == preferred_cluster_id), None)
+    if primary is None and cluster_states:
+        primary = cluster_states[0]
+    root = build_cluster_reasoning_root(
+        assessment_id=assessment.get('assessment_id'),
+        session_id=assessment.get('session_id'),
+        version=_CLUSTER_REASONING_VERSION,
+        generated_ts=int(time.time()),
+        cluster_states=cluster_states,
+        preferred_cluster_id=preferred_cluster_id,
+    )
+    assessment['cluster_reasoning_state'] = root
+    assessment['corroboration'] = root.get('corroboration') or {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        cluster_id = row.get('correlation_cluster_id')
+        if not cluster_id:
+            continue
+        state = next((item for item in cluster_states if item.get('cluster_id') == cluster_id), None)
+        if state:
+            row['cluster_reasoning_state'] = _compact_cluster_reasoning_state(state)
+            row['corroboration'] = state.get('corroboration') or {}
+    return assessment
+
+
+def _select_primary_cluster(assessment: dict, rows: list[dict], limit: int) -> tuple[dict | None, list[dict], str]:
+    clusters = assessment.get('correlation_clusters') or []
+    if clusters:
+        cluster = clusters[0]
+        cluster_rows = _cluster_rows(cluster, rows)
+        if len(cluster_rows) >= 2:
+            return cluster, cluster_rows[:limit], 'cluster-first'
+    ranked = _rank_rows_for_investigate(rows)
+    return None, ranked[:limit], 'row-first'
+
 def _generate_persona_expansions(narrative: str, evidence_table: list[dict], missing_logs: list[str]) -> dict[str, dict]:
     personas = ['analyst','manager','technical','forensics']
     expansions: dict[str, dict] = {}
@@ -5265,8 +5980,7 @@ async def build_investigate(assessment_id: str, request: Request):
         payload = {}
     limit = int(payload.get('limit') or os.getenv('INVESTIGATE_ROW_LIMIT','30') or 30)
     all_rows = assessment.get('llm_rows') or assessment.get('rows') or []
-    ranked = _rank_rows_for_investigate(all_rows)
-    top_rows = ranked[:limit]
+    cluster, top_rows, routing_mode = _select_primary_cluster(assessment, all_rows, limit)
     missing_logs = _infer_missing_log_classes(top_rows)
     factor_freq = _factor_frequency(top_rows)
     investigate_id = f"investigate-{uuid.uuid4().hex[:10]}"
@@ -5279,6 +5993,9 @@ async def build_investigate(assessment_id: str, request: Request):
         'missing_logs_initial': missing_logs,
         'factor_frequency_initial': factor_freq,
         'rows_ref': [r.get('row_index') for r in top_rows if isinstance(r, dict)],
+        'cluster_id': (cluster or {}).get('cluster_id'),
+        'routing_mode': routing_mode,
+        'reasoning_mode': 'deep' if cluster else 'cheap',
         'limit': limit,
     }
     INVESTIGATE_STORE[investigate_id] = record
@@ -5315,10 +6032,18 @@ def _start_investigate_worker(app, interval_seconds: int = 3):
                         continue
                     try:
                         rows_all = assessment.get('llm_rows') or assessment.get('rows') or []
-                        # reconstruct top rows from indices or fallback rank
-                        top_rows = [r for r in rows_all if r.get('row_index') in rec.get('rows_ref', [])]
+                        cluster = None
+                        cluster_id = rec.get('cluster_id')
+                        if cluster_id:
+                            cluster = next((c for c in (assessment.get('correlation_clusters') or []) if c.get('cluster_id') == cluster_id), None)
+                        # reconstruct top rows from cluster first, then refs, then ranked fallback
+                        top_rows = _cluster_rows(cluster, rows_all) if cluster else []
                         if not top_rows:
-                            top_rows = _rank_rows_for_investigate(rows_all)[: rec.get('limit', 30)]
+                            top_rows = [r for r in rows_all if r.get('row_index') in rec.get('rows_ref', [])]
+                        if not top_rows:
+                            cluster, top_rows, routing_mode = _select_primary_cluster(assessment, rows_all, rec.get('limit', 30))
+                            rec['cluster_id'] = (cluster or {}).get('cluster_id')
+                            rec['routing_mode'] = routing_mode
                         missing_logs = _infer_missing_log_classes(top_rows)
                         factor_freq = _factor_frequency(top_rows)
                         # compute ml_score for each top row if not present
@@ -5339,6 +6064,26 @@ def _start_investigate_worker(app, interval_seconds: int = 3):
                             session_summary, session_explain = await _resolve_session_context(session_id, None, None)
                         except Exception:
                             session_summary = None; session_explain = None
+
+                        try:
+                            _apply_cluster_reasoning_to_assessment(
+                                assessment,
+                                preferred_cluster_id=(cluster or {}).get('cluster_id'),
+                                trigger_reason='investigate_build',
+                                include_temporal=True,
+                            )
+                        except Exception:
+                            pass
+
+                        active_reasoning = assessment.get('cluster_reasoning_state') or {}
+                        active_cluster_state = None
+                        if rec.get('cluster_id'):
+                            active_cluster_state = next(
+                                (item for item in (active_reasoning.get('cluster_states') or []) if item.get('cluster_id') == rec.get('cluster_id')),
+                                None,
+                            )
+                        if active_cluster_state is None and active_reasoning.get('cluster_states'):
+                            active_cluster_state = active_reasoning['cluster_states'][0]
 
                         prompt = _build_investigate_prompt(assessment, top_rows, missing_logs, factor_freq)
                         # Inject hopgraph stats and temporal ordering when available
@@ -5369,6 +6114,14 @@ def _start_investigate_worker(app, interval_seconds: int = 3):
                                 # create lightweight ordered snippet
                                 ordered = sorted([ (float(r.get('ts') or r.get('time') or r.get('timestamp') or 0), r.get('row_index')) for r in top_rows ], key=lambda x: x[0])
                                 extra_ctx.append(f"Temporal order (row_index by ts): {[i[1] for i in ordered][:30]}")
+                            if active_cluster_state:
+                                extra_ctx.append(
+                                    "Canonical cluster reasoning: "
+                                    + json.dumps(
+                                        _compact_cluster_reasoning_state(active_cluster_state),
+                                        default=str,
+                                    )[:1400]
+                                )
                             if extra_ctx:
                                 prompt = prompt + "\n\nAdditional session context:\n" + "\n".join(extra_ctx)
                         except Exception:
@@ -5415,6 +6168,8 @@ def _start_investigate_worker(app, interval_seconds: int = 3):
 
                         rec.update({
                             'status': 'ready',
+                            'cluster_reasoning_state': active_cluster_state or {},
+                            'corroboration': (active_cluster_state or {}).get('corroboration') or {},
                             'narrative': narrative,
                             'evidence_table': evidence,
                             'missing_logs': missing_logs,
@@ -5424,6 +6179,14 @@ def _start_investigate_worker(app, interval_seconds: int = 3):
                             'persona_expanded': persona_expanded,
                             'updated': int(time.time()),
                         })
+                        try:
+                            assessment['cluster_reasoning_state'] = assessment.get('cluster_reasoning_state') or {}
+                            assessment['corroboration'] = (assessment.get('cluster_reasoning_state') or {}).get('corroboration') or {}
+                            assessment['latest_investigate_id'] = iid
+                            _store_assessment(assessment.get('org'), assessment.get('assessment_id'), assessment)
+                            REPORT_STORE[aid] = assessment
+                        except Exception:
+                            pass
                         # persist
                         path = rec.get('persisted_path') or _investigate_persist_path(assessment, iid)
                         if path:
@@ -6202,28 +6965,181 @@ async def update_row_review(assessment_id: str, row_index: int, payload: dict | 
     if status not in {'not_started','triaged','escalated','dismissed','investigated'}:
         status = 'triaged' if status else 'not_started'
     notes = data.get('notes') or ''
+    parsed_note = parse_guided_analyst_note(notes)
     # PII minimization: store professional tag instead of raw user identity
     reviewer_tag = data.get('reviewer_tag') or data.get('reviewer_role') or data.get('reviewer') or 'analyst'
     if isinstance(reviewer_tag, str):
         reviewer_tag = reviewer_tag[:64]
+    try:
+        target_row = _resolve_row_from_assessment(assessment_id, row_index) or {}
+    except Exception:
+        target_row = {}
+    cluster_id = data.get('cluster_id') or target_row.get('correlation_cluster_id')
+    requested_telemetry = [str(v) for v in ((data.get('requested_telemetry') or parsed_note.get('requested_telemetry') or [])[:12])]
     reviews[str(row_index)] = {
         'status': status,
+        'confirm_or_deny': str(data.get('confirm_or_deny') or parsed_note.get('confirm_or_deny') or status)[:64],
         'notes': notes,
         'reviewer_tag': reviewer_tag,
         'updated_ts': int(time.time()),
+        'cluster_id': cluster_id,
+        'hypothesis': str(data.get('hypothesis') or parsed_note.get('hypothesis') or '')[:400],
+        'disposition_delta': _safe_float(data.get('disposition_delta') if data.get('disposition_delta') is not None else parsed_note.get('disposition_delta')),
+        'factors_added': [str(v) for v in ((data.get('factors_added') or parsed_note.get('factors_added') or [])[:12])],
+        'factors_removed': [str(v) for v in ((data.get('factors_removed') or parsed_note.get('factors_removed') or [])[:12])],
+        'confidence_override': (
+            max(0.0, min(1.0, _safe_float(data.get('confidence_override'))))
+            if data.get('confidence_override') is not None else None
+        ),
+        'requested_telemetry': requested_telemetry,
     }
+    try:
+        _apply_cluster_reasoning_to_assessment(
+            assessment,
+            preferred_cluster_id=cluster_id,
+            trigger_reason='row_review',
+            include_temporal=True,
+            force_corroboration=bool(cluster_id),
+        )
+    except Exception:
+        pass
     REPORT_STORE[assessment_id] = {**in_mem, **assessment}
     # Persist back to disk best-effort
     try:
-        repo_root = os.getcwd()
         path = assessment.get('persisted_path')
         if path:
             with open(path + '.tmp', 'w', encoding='utf-8') as fh:
-                fh.write(json.dumps(assessment))
+                fh.write(json.dumps(assessment, default=str))
             os.replace(path + '.tmp', path)
     except Exception:
         pass
-    return JSONResponse({'ok': True, 'assessment_id': assessment_id, 'row_index': row_index, 'review': reviews[str(row_index)]})
+    compact_state = {}
+    try:
+        root_state = assessment.get('cluster_reasoning_state') or {}
+        compact_state = next(
+            (_compact_cluster_reasoning_state(item) for item in (root_state.get('cluster_states') or []) if item.get('cluster_id') == cluster_id),
+            {},
+        )
+    except Exception:
+        compact_state = {}
+    return JSONResponse({
+        'ok': True,
+        'assessment_id': assessment_id,
+        'row_index': row_index,
+        'review': reviews[str(row_index)],
+        'cluster_reasoning_state': compact_state,
+        'corroboration': compact_state.get('corroboration') or assessment.get('corroboration') or {},
+    })
+
+
+@router.post('/{assessment_id}/clusters/{cluster_id}/review')
+async def update_cluster_review(assessment_id: str, cluster_id: str, payload: dict | None = None):
+    data = payload or {}
+    in_mem = REPORT_STORE.get(assessment_id) or {}
+    assessment = _load_assessment_from_disk(assessment_id, in_mem.get('persisted_path')) or in_mem
+    if not assessment:
+        return JSONResponse({'detail': 'not_found'}, status_code=404)
+    cluster_reviews = assessment.get('cluster_reviews')
+    if not isinstance(cluster_reviews, dict):
+        cluster_reviews = {}
+        assessment['cluster_reviews'] = cluster_reviews
+    notes = str(data.get('notes') or '')[:2000]
+    parsed_note = parse_guided_analyst_note(notes)
+    status = str(data.get('status') or data.get('verdict') or 'investigated').lower()
+    if status not in {'confirmed', 'denied', 'deferred', 'investigated', 'escalated'}:
+        status = 'investigated'
+    reviewer_tag = str(data.get('reviewer_tag') or data.get('reviewer_role') or 'analyst')[:64]
+    cluster_reviews[cluster_id] = {
+        'status': status,
+        'confirm_or_deny': str(data.get('confirm_or_deny') or parsed_note.get('confirm_or_deny') or status)[:64],
+        'notes': notes,
+        'reviewer_tag': reviewer_tag,
+        'updated_ts': int(time.time()),
+        'cluster_id': cluster_id,
+        'hypothesis': str(data.get('hypothesis') or parsed_note.get('hypothesis') or '')[:400],
+        'disposition_delta': _safe_float(data.get('disposition_delta') if data.get('disposition_delta') is not None else parsed_note.get('disposition_delta')),
+        'factors_added': [str(v) for v in ((data.get('factors_added') or parsed_note.get('factors_added') or [])[:12])],
+        'factors_removed': [str(v) for v in ((data.get('factors_removed') or parsed_note.get('factors_removed') or [])[:12])],
+        'requested_telemetry': [str(v) for v in ((data.get('requested_telemetry') or parsed_note.get('requested_telemetry') or [])[:12])],
+        'confidence_override': (
+            max(0.0, min(1.0, _safe_float(data.get('confidence_override'))))
+            if data.get('confidence_override') is not None else None
+        ),
+    }
+    try:
+        _apply_cluster_reasoning_to_assessment(
+            assessment,
+            preferred_cluster_id=cluster_id,
+            trigger_reason='cluster_review',
+            include_temporal=True,
+            force_corroboration=status in {'confirmed', 'escalated'},
+        )
+    except Exception:
+        pass
+    REPORT_STORE[assessment_id] = {**in_mem, **assessment}
+    try:
+        path = assessment.get('persisted_path')
+        if path:
+            with open(path + '.tmp', 'w', encoding='utf-8') as fh:
+                fh.write(json.dumps(assessment, default=str))
+            os.replace(path + '.tmp', path)
+    except Exception:
+        pass
+    root_state = assessment.get('cluster_reasoning_state') or {}
+    compact_state = next(
+        (compact_cluster_reasoning_state(item) for item in (root_state.get('cluster_states') or []) if item.get('cluster_id') == cluster_id),
+        {},
+    )
+    return JSONResponse({
+        'ok': True,
+        'assessment_id': assessment_id,
+        'cluster_id': cluster_id,
+        'review': cluster_reviews[cluster_id],
+        'cluster_reasoning_state': compact_state,
+        'corroboration': compact_state.get('corroboration') or assessment.get('corroboration') or {},
+    })
+
+
+@router.get('/{assessment_id}/clusters/{cluster_id}')
+async def get_cluster_detail(assessment_id: str, cluster_id: str):
+    in_mem = REPORT_STORE.get(assessment_id) or {}
+    assessment = _load_assessment_from_disk(assessment_id, in_mem.get('persisted_path')) or in_mem
+    if not assessment:
+        return JSONResponse({'detail': 'not_found'}, status_code=404)
+    root_state = assessment.get('cluster_reasoning_state') or {}
+    cluster_state = next(
+        (item for item in (root_state.get('cluster_states') or []) if item.get('cluster_id') == cluster_id),
+        None,
+    )
+    if not cluster_state:
+        return JSONResponse({'detail': 'cluster_not_found'}, status_code=404)
+    rows = assessment.get('llm_rows') or assessment.get('rows') or []
+    member_rows = []
+    member_refs = set(int(v) for v in (cluster_state.get('evidence_row_indices') or []) if isinstance(v, int))
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        row_index = row.get('row_index')
+        if row.get('correlation_cluster_id') != cluster_id and row_index not in member_refs:
+            continue
+        member_rows.append({
+            'row_index': row_index,
+            'severity': row.get('severity'),
+            'entity': row.get('entity'),
+            'description': row.get('description'),
+            'source': row.get('source_sheet') or row.get('source') or row.get('_source') or 'unknown',
+            'correlation_type': row.get('correlation_type') or row.get('type'),
+            'triage_score': row.get('triage_score') or row.get('risk_score') or row.get('score'),
+            'mitre': row.get('mitre') or [],
+        })
+    return JSONResponse({
+        'assessment_id': assessment_id,
+        'cluster_id': cluster_id,
+        'cluster_detail': compact_cluster_reasoning_state(cluster_state),
+        'member_rows': member_rows[:25],
+        'analyst_delta': (cluster_state.get('analyst_state') or {}),
+        'corroboration': cluster_state.get('corroboration') or {},
+    })
 
 
 @router.post('/{assessment_id}/gate', summary='Human-gate: analyst sign-off before CISO/Exec/Audit reports')
@@ -6283,6 +7199,15 @@ async def gate_assessment_for_escalation(assessment_id: str, request: Request):
     existing_gates.append(gate_record)
     assessment['_human_gates'] = existing_gates
     assessment['_latest_gate'] = gate_record
+    try:
+        _apply_cluster_reasoning_to_assessment(
+            assessment,
+            trigger_reason='gate_review',
+            include_temporal=True,
+            force_corroboration=verdict in ('approve', 'conditional'),
+        )
+    except Exception:
+        pass
     REPORT_STORE[assessment_id] = {**in_mem, **assessment}
 
     # Persist best-effort
@@ -6302,6 +7227,8 @@ async def gate_assessment_for_escalation(assessment_id: str, request: Request):
         'gate_verdict': verdict,
         'gate_personas': gate_personas,
         'assessment_id': assessment_id,
+        'cluster_reasoning_state': assessment.get('cluster_reasoning_state') or {},
+        'corroboration': assessment.get('corroboration') or {},
         'message': (
             f"Gate APPROVED — {len(gate_personas)} persona reports unlocked for {reviewer_tag}"
             if verdict == 'approve' else
@@ -6327,4 +7254,6 @@ async def get_gate_status(assessment_id: str):
         'gated': bool(latest and latest.get('gate_verdict') == 'approve'),
         'latest_gate': latest,
         'gate_count': len(gates),
+        'cluster_reasoning_state': assessment.get('cluster_reasoning_state') or {},
+        'corroboration': assessment.get('corroboration') or {},
     })

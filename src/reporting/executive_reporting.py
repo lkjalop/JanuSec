@@ -5,6 +5,7 @@ import json
 import sqlite3
 import time
 import re
+from collections import Counter
 from datetime import datetime, timezone
 from html import escape
 from typing import Any, Dict, List
@@ -563,60 +564,69 @@ def _executive_title(report: Dict[str, Any]) -> str:
 
 
 def _persona_headline(report: Dict[str, Any], persona: str) -> str:
-    """P2-8: Persona-specific headline — substantively different per audience.
+    """P2-8: Persona-specific headline -- substantively different per audience.
 
     Each persona's first sentence should be the one thing their role cares about most.
     """
     rq = report.get("risk_quantification") or {}
     csv_model = (report.get("canonical_report") or report).get("_csv_model") or {}
-    n_mal = int(csv_model.get("malicious_count") or
-                (report.get("verdict") or {}).get("confirmed_malicious") or
-                (report.get("canonical") or {}).get("malicious_row_count") or 0)
-    n_sus = int(csv_model.get("suspicious_count") or
-                (report.get("canonical") or {}).get("suspicious_row_count") or 0)
-    overall = str(rq.get("severity") or csv_model.get("overall_risk") or
-                  (report.get("verdict") or {}).get("final_verdict") or "LOW").upper()
+    review_counts = report.get("review_state_counts") or {}
+    if not review_counts:
+        review_counts = dict(Counter(str((row or {}).get("review_state") or "").lower() for row in (report.get("rows") or []) if isinstance(row, dict)))
+    final_verdict = str((report.get("verdict") or {}).get("final_verdict") or report.get("final_verdict") or "REVIEW").upper()
+    n_mal = int(review_counts.get("confirmed_malicious") or csv_model.get("malicious_count") or (report.get("verdict") or {}).get("confirmed_malicious") or (report.get("canonical") or {}).get("malicious_row_count") or 0)
+    n_sus = int(review_counts.get("needs_investigation") or csv_model.get("suspicious_count") or (report.get("canonical") or {}).get("suspicious_row_count") or 0)
+    n_unknown = int(review_counts.get("unknown") or 0)
+    overall = str(rq.get("severity") or csv_model.get("overall_risk") or final_verdict or "LOW").upper()
     exp_loss = int(rq.get("expected_loss_usd") or 0)
-    has_pii = bool(csv_model.get("has_email") or csv_model.get("has_pii"))
-    has_c2 = bool(csv_model.get("has_c2"))
-    has_exfil = any("data_exfiltration_confirmed" in (ev.get("factors") or [])
-                    for ev in (csv_model.get("evidence") or []))
-    # Grab primary adversary IP for context
+    factor_names = [str(entry.get("factor_name") or "") for entry in (report.get("semantic_top_factors") or [])]
+    impact = report.get("impact_metadata") or {}
+    corroboration = report.get("corroboration") or (report.get("cluster_reasoning_state") or {}).get("corroboration") or {}
+    has_pii = bool(csv_model.get("has_email") or csv_model.get("has_pii") or impact.get("affected_identities"))
+    has_c2 = bool(csv_model.get("has_c2") or any(any(token in factor.lower() for token in ("c2", "beacon", "tor_exit")) for factor in factor_names))
+    has_exfil = any(token in factor.lower() for factor in factor_names for token in ("data_exfiltration", "exfil", "vpc_external_flow"))
     attacker_ips = ((csv_model.get("attack_story") or {}).get("attacker_ips") or [])
-    primary_ip = (attacker_ips[0] if attacker_ips else
-                  (report.get("canonical") or {}).get("top_c2_ip") or "")
-    # Hosts at risk
+    primary_ip = attacker_ips[0] if attacker_ips else (report.get("canonical") or {}).get("top_c2_ip") or ""
     all_hosts = (csv_model.get("attack_story") or {}).get("internal_hosts") or []
-    _canonical_host = (report.get("canonical") or {}).get("host_most_affected") or ""
-    host_summary = (f"{all_hosts[0]}" if len(all_hosts) == 1
-                    else f"{len(all_hosts)} hosts" if len(all_hosts) > 1
-                    else _canonical_host if _canonical_host else "affected systems")
+    canonical_host = (report.get("canonical") or {}).get("host_most_affected") or ""
+    impacted_hosts = list(impact.get("affected_hosts") or [])
+    host_count = len(impacted_hosts) or len(all_hosts)
+    host_summary = (
+        f"{impacted_hosts[0]}" if len(impacted_hosts) == 1
+        else f"{host_count} hosts" if host_count > 1
+        else f"{all_hosts[0]}" if len(all_hosts) == 1
+        else canonical_host if canonical_host else "affected systems"
+    )
+    corroboration_confidence = float(corroboration.get("confidence") or 0.0)
 
     p = (persona or "executive").lower()
 
     if p in ("soc", "soc_analyst"):
-        if n_mal > 0:
+        if final_verdict == "THREAT" or n_mal > 0:
             actions = f"{n_mal} event{'s' if n_mal > 1 else ''} require immediate isolation"
-            return (f"P1 — {actions} | {host_summary}"
-                    + (f" | C2: {primary_ip}" if primary_ip else ""))
-        if n_sus > 0:
-            return f"P2 — {n_sus} suspicious event{'s need' if n_sus > 1 else ' needs'} investigation | No confirmed threat"
-        return "P3 — No confirmed threats | Review complete — all events benign"
+            return f"P1 -- {actions} | {host_summary}" + (f" | C2: {primary_ip}" if primary_ip else "")
+        if overall in ("CRITICAL", "HIGH") or n_sus > 0 or n_unknown > 0:
+            review_count = n_sus or n_unknown
+            return f"P2 -- {review_count} suspicious event{'s need' if review_count > 1 else ' needs'} investigation | Corroboration pending"
+        return "P3 -- No confirmed threats | Review complete -- all events benign"
 
     if p in ("forensic", "forensics"):
-        if n_mal > 0:
-            return (f"Evidence chain: {n_mal} confirmed malicious event{'s' if n_mal > 1 else ''} on {host_summary}"
-                    + (" | Exfiltration confirmed" if has_exfil else ""))
-        if n_sus > 0:
-            return f"Evidence under review: {n_sus} suspicious events — timeline confidence MEDIUM"
+        if final_verdict == "THREAT" or n_mal > 0:
+            return f"Evidence chain: {n_mal} confirmed malicious event{'s' if n_mal > 1 else ''} on {host_summary}" + (" | Exfiltration confirmed" if has_exfil else "")
+        if overall in ("CRITICAL", "HIGH") or n_sus > 0 or n_unknown > 0:
+            review_count = n_sus or n_unknown
+            confidence_label = "HIGH" if corroboration_confidence >= 0.78 else "MEDIUM"
+            return f"Evidence under review: {review_count} suspicious events -- timeline confidence {confidence_label}"
         return "Evidence chain: INTACT | No malicious activity confirmed in dataset"
 
     if p == "threat_hunter":
-        if has_c2 and primary_ip:
-            return f"Hunt pivot: C2 infrastructure {primary_ip} — expand hunt to related subnet and user scope"
-        if n_mal > 0:
-            return f"Technique cluster confirmed | {n_mal} malicious events — generate hunt hypotheses"
-        return "Threat hunt: negative result — recommend baseline calibration"
+        if has_c2 and primary_ip and (final_verdict == "THREAT" or n_mal > 0):
+            return f"Hunt pivot: C2 infrastructure {primary_ip} -- expand hunt to related subnet and user scope"
+        if final_verdict == "THREAT" or n_mal > 0:
+            return f"Technique cluster confirmed | {n_mal} malicious events -- generate hunt hypotheses"
+        if overall in ("CRITICAL", "HIGH") or n_sus > 0 or n_unknown > 0:
+            return "Threat hunt: correlated hostile sequence under review -- expand pivots before closing"
+        return "Threat hunt: negative result -- recommend baseline calibration"
 
     if p in ("ciso",):
         lines = []
@@ -629,32 +639,52 @@ def _persona_headline(report: Dict[str, Any], persona: str) -> str:
         if exp_loss:
             lines.append(f"exposure est. ${exp_loss:,}")
         if lines:
-            return " | ".join(lines).capitalize() + " — executive decision required"
-        if n_sus > 0:
-            return "Under investigation — no confirmed breach yet | Monitoring active"
+            return " | ".join(lines).capitalize() + " -- executive decision required"
+        if n_sus > 0 or n_unknown > 0:
+            return "Under investigation -- no confirmed breach yet | Monitoring active"
         return "No material risk confirmed | Current controls effective"
 
     if p in ("executive", "board"):
         if overall in ("CRITICAL",):
-            return "Active security incident — customer data may be at risk — decision required now"
+            return "Active security incident -- customer data may be at risk -- decision required now"
         if overall == "HIGH":
-            return "Serious security incident — under active containment — board update recommended"
-        if n_sus > 0:
-            return "Suspected security activity — investigation in progress — no confirmed breach"
-        return "Security review complete — no confirmed threats identified"
+            return "Serious security incident -- under active containment -- board update recommended"
+        if n_sus > 0 or n_unknown > 0:
+            return "Suspected security activity -- investigation in progress -- no confirmed breach"
+        return "Security review complete -- no confirmed threats identified"
 
-    if p in ("compliance", "audit", "grc"):
-        if has_pii and n_mal > 0:
-            return "GDPR Art.33 notification clock running — PII confirmed in scope — legal review required"
-        if n_mal > 0:
-            return f"Control failures confirmed: {n_mal} events — framework mapping and remediation required"
+    if p in ("compliance", "grc"):
+        if has_pii and (final_verdict == "THREAT" or n_mal > 0):
+            return "GDPR Art.33 notification clock running -- PII confirmed in scope -- legal review required"
+        if final_verdict == "THREAT" or n_mal > 0:
+            return f"Control failures confirmed: {n_mal} events -- framework mapping and remediation required"
         return "Compliance review: no control failures confirmed | Documentation complete"
 
-    # Fallback to generic title
+    if p == "audit":
+        if final_verdict == "THREAT" or n_mal > 0:
+            return f"Audit evidence package required -- {n_mal} malicious events need control traceability"
+        if n_sus > 0 or n_unknown > 0:
+            return "Audit review in progress -- evidence completeness and label coverage still pending"
+        return "Audit review complete -- no material control exceptions confirmed"
+
     return _executive_title(report)
 
-
 def _focus_cluster_summary(report: Dict[str, Any]) -> Dict[str, Any]:
+    cluster_reasoning = report.get("cluster_reasoning_state") or {}
+    reasoning_summary = cluster_reasoning.get("summary") or {}
+    if reasoning_summary.get("canonical_narrative"):
+        return {
+            "headline": "Why this cluster was prioritized",
+            "narrative": str(reasoning_summary.get("canonical_narrative") or ""),
+            "why_it_matters": (
+                f"Routing: {cluster_reasoning.get('routing_mode') or 'unknown'} | "
+                f"Reasoning: {cluster_reasoning.get('reasoning_mode') or 'unknown'} | "
+                f"Graph score: {cluster_reasoning.get('graph_score') or 'n/a'}"
+            ),
+            "entities": list((cluster_reasoning.get("shared_pivots") or [])[:3]),
+            "evidence_refs": list((cluster_reasoning.get("corroboration") or {}).get("evidence_used") or [])[:6],
+            "component_count": len(cluster_reasoning.get("cluster_states") or []),
+        }
     appendix = report.get("evidence_appendix") or {}
     focus = appendix.get("focus_cluster") or {}
     evidence_rows = [row for row in (appendix.get("source_evidence_rows") or []) if isinstance(row, dict)]
@@ -1447,6 +1477,8 @@ def build_executive_report_artifact(payload: Dict[str, Any], options: Dict[str, 
             "working_hypothesis": hypothesis,
             "provider": provider,
             "stakeholder_gate": _build_stakeholder_gate(report),
+            "cluster_reasoning_state": report.get("cluster_reasoning_state") or {},
+            "corroboration": report.get("corroboration") or {},
         },
         "facts": {
             "review_state_counts": review_counts,
@@ -1470,6 +1502,8 @@ def build_executive_report_artifact(payload: Dict[str, Any], options: Dict[str, 
                 "key_evidence_reviewed": key_evidence,
                 "focus_cluster_explainability": focus_cluster_explainability,
                 "source_rows": len(appendix.get("source_evidence_rows") or []),
+                "cluster_reasoning_state": report.get("cluster_reasoning_state") or {},
+                "corroboration": report.get("corroboration") or {},
             },
             "top_findings": (report.get("findings") or [])[:8],
             "tier2": report.get("_replay_tier2") or {},
@@ -1568,10 +1602,114 @@ def _render_appendix_tables(appendix_payload: Dict[str, Any]) -> str:
     source_rows = appendix_payload.get("source_evidence_rows") or []
     non_technical = appendix_payload.get("non_technical_findings") or []
     key_evidence = appendix_payload.get("key_evidence_reviewed") or []
+    cluster_reasoning = appendix_payload.get("cluster_reasoning_state") or {}
+    corroboration = appendix_payload.get("corroboration") or cluster_reasoning.get("corroboration") or {}
+    analyst_state = cluster_reasoning.get("analyst_state") or {}
+    temporal_sources = cluster_reasoning.get("temporal_rag_sources") or []
+    close_conditions = cluster_reasoning.get("close_conditions") or {}
+    provider_context = cluster_reasoning.get("provider_context") or {}
+    connector_freshness = provider_context.get("connector_freshness") or {}
+    connector_status = provider_context.get("connector_status") or []
+    email_evidence = provider_context.get("email_evidence") or []
 
     focus_explain = appendix_payload.get("focus_cluster_explainability") or {}
 
     parts = [
+        "<article class='panel'><h3>Cluster Reasoning</h3>"
+        + _render_simple_table(
+            ["Field", "Value", "Why It Matters"],
+            [
+                ["Cluster ID", cluster_reasoning.get("cluster_id") or cluster_reasoning.get("primary_cluster_id"), "The canonical reasoning unit used for this report."],
+                ["Routing Mode", cluster_reasoning.get("routing_mode"), "Shows whether the system escalated by cluster or by isolated row."],
+                ["Reasoning Mode", cluster_reasoning.get("reasoning_mode"), "Deep mode indicates correlated synthesis instead of cheap row summarization."],
+                ["Cluster Size", cluster_reasoning.get("cluster_size"), "Larger clusters suggest shared pivots and lower duplicate triage effort."],
+                ["Top Hypothesis", ((cluster_reasoning.get("summary") or {}).get("top_hypothesis") or ""), "The leading attack explanation from the preserved reasoning state."],
+                ["Narrative", ((cluster_reasoning.get("summary") or {}).get("canonical_narrative") or ""), "The canonical story reused by all personas."],
+            ],
+        )
+        + "</article>",
+        "<article class='panel'><h3>Corroboration</h3>"
+        + _render_simple_table(
+            ["Field", "Value", "Why It Matters"],
+            [
+                ["Status", corroboration.get("status"), "Shows whether the second-pass corroboration completed or was deferred."],
+                ["Verdict", corroboration.get("verdict"), "The corroboration outcome attached to the canonical cluster."],
+                ["Confidence", corroboration.get("confidence"), "How strongly the corroboration evidence supports the current position."],
+                ["Delta From Initial", corroboration.get("delta_from_initial"), "Shows whether corroboration strengthened or weakened the initial routing signal."],
+                ["Evidence Used", ", ".join(str(v) for v in (corroboration.get("evidence_used") or [])), "Independent evidence sources used to support or challenge the cluster."],
+                ["TemporalRAG Sources", ", ".join(str(v) for v in temporal_sources), "Prior-event and historical evidence context preserved for the cluster."],
+            ],
+        )
+        + "</article>",
+        "<article class='panel'><h3>Connector Freshness</h3>"
+        + _render_simple_table(
+            ["Field", "Value", "Why It Matters"],
+            [
+                ["Available", connector_freshness.get("available"), "Shows whether the underlying log lane is currently fresh enough for confidence."],
+                ["Missing Sources", ", ".join(str(v) for v in (connector_freshness.get("missing_sources") or [])), "Missing sources explain why some leads still require manual validation."],
+                ["Freshness Gaps", ", ".join(str((item or {}).get("message") or (item or {}).get("name") or "") for item in (connector_freshness.get("gaps") or [])), "Late or stale sources can weaken corroboration and should be visible to operators."],
+                ["Backfill Observed", provider_context.get("backfill_observed"), "Shows whether delayed evidence may have changed the current verdict."],
+            ],
+        )
+        + "</article>",
+        "<article class='panel'><h3>Connector Status</h3>"
+        + _render_simple_table(
+            ["Connector", "Status", "Why It Matters"],
+            [
+                [
+                    item.get("connector"),
+                    f"auth={bool(item.get('authenticated'))} | events={bool(item.get('receiving_events'))} | checkpoint={bool(item.get('checkpoint_healthy'))} | beta_ready={bool(item.get('beta_ready'))}",
+                    "A denial path is weaker if the contributing log lane is stale, unauthenticated, or not checkpoint healthy.",
+                ]
+                for item in connector_status[:8]
+            ],
+        )
+        + "</article>",
+        "<article class='panel'><h3>Email Provenance</h3>"
+        + _render_simple_table(
+            ["Connector", "Evidence", "Why It Matters"],
+            [
+                [
+                    item.get("connector"),
+                    " | ".join(
+                        str(v)
+                        for v in [
+                            item.get("sender"),
+                            item.get("subject"),
+                            ", ".join(str(x) for x in (item.get("threat_names") or []) if x),
+                            item.get("reason"),
+                        ]
+                        if v
+                    ),
+                    "Shows which SEG or email lane contributed sender, attachment, or delivery-context evidence.",
+                ]
+                for item in email_evidence[:6]
+            ],
+        )
+        + "</article>",
+        "<article class='panel'><h3>Analyst Delta</h3>"
+        + _render_simple_table(
+            ["Field", "Value", "Why It Matters"],
+            [
+                ["Review Status", analyst_state.get("review_status"), "Current analyst review posture for the cluster."],
+                ["Gate Status", analyst_state.get("gate_status"), "Shows whether human approval is still required before response."],
+                ["Hypothesis", analyst_state.get("hypothesis"), "Analyst-aligned working hypothesis carried into persona outputs."],
+                ["Factors Added", ", ".join(str(v) for v in (analyst_state.get("factors_added") or [])), "Signals introduced during analyst enrichment or re-review."],
+                ["Factors Removed", ", ".join(str(v) for v in (analyst_state.get("factors_removed") or [])), "Signals rejected during corroboration or analyst review."],
+                ["Disposition Delta", analyst_state.get("disposition_delta"), "Net change between initial machine assessment and current analyst disposition."],
+            ],
+        )
+        + "</article>",
+        "<article class='panel'><h3>Close Conditions</h3>"
+        + _render_simple_table(
+            ["Persona", "Conditions", "Why It Matters"],
+            [
+                ["SOC Analyst", " | ".join(str(v) for v in (close_conditions.get("soc_close_conditions") or [])), "Defines when operators can safely close or de-escalate the incident."],
+                ["Threat Hunter", " | ".join(str(v) for v in (close_conditions.get("hunter_close_conditions") or [])), "Keeps hunts open only while denial or expansion still adds evidence value."],
+                ["Forensics", " | ".join(str(v) for v in (close_conditions.get("forensics_close_conditions") or [])), "Preserves chain-of-custody and missing-artifact requirements before case closure."],
+            ],
+        )
+        + "</article>",
         "<article class='panel'><h3>Focus Cluster</h3>"
         + _render_simple_table(
             ["Metric", "Value", "Why It Matters"],
@@ -1668,7 +1806,7 @@ def _render_appendix_tables(appendix_payload: Dict[str, Any]) -> str:
 
 def _render_evidence_citations(refs: List[Any]) -> str:
     tokens = [str(ref).strip() for ref in refs if str(ref).strip()]
-    return ", ".join(tokens) if tokens else "No evidence citation attached."
+    return ", ".join(tokens) if tokens else "Evidence linkage pending."
 
 
 def _render_status_badge(value: Any) -> str:
@@ -1698,7 +1836,29 @@ def _factor_badge(factor_name: str) -> str:
     return f"<span style='display:inline-block;padding:2px 7px;border-radius:10px;font-size:11px;font-weight:600;background:{colour};color:#fff;margin:2px'>{escape(label)}</span>"
 
 
-def _render_cluster_panels(clusters: List[Dict[str, Any]]) -> str:
+def _persona_cluster_action(cl: Dict[str, Any], persona: str) -> str:
+    entity = str(cl.get("pivot_entity") or "the lead entity")
+    severity = str(cl.get("severity") or "LOW").upper()
+    timeline = cl.get("timeline_events") or []
+    first_ts = ""
+    if timeline:
+        try:
+            first_ts = str((timeline[0] or {}).get("ts") or (timeline[0] or {}).get("timestamp") or "")[:19]
+        except Exception:
+            first_ts = ""
+    default_map = {
+        "threat_hunter": f"Pivot on {entity} across the surrounding window{f' from {first_ts}' if first_ts else ''}; validate ATT&CK-aligned follow-on activity.",
+        "forensics": f"Preserve artefacts for {entity}{f' starting at {first_ts}' if first_ts else ''} and extend collection before containment.",
+        "compliance": f"Map the {severity.lower()} cluster for {entity} to concrete control obligations and capture supporting citations before notification decisions.",
+        "audit": f"Record {entity} as a control-traceability cluster and retain the supporting evidence references before opening a finding.",
+        "ciso": f"Use the {severity.lower()} cluster around {entity} to confirm exposure, blast radius, and owner accountability.",
+        "executive": f"Treat {entity} as the current decision anchor and escalate only if the cluster changes customer, operational, or regulatory impact.",
+        "mssp": f"Package the cluster around {entity} with severity, evidence, and next-step ownership for the client handoff.",
+    }
+    return default_map.get(persona, f"Validate the cluster around {entity}, confirm scope, and escalate with evidence-backed findings.")
+
+
+def _render_cluster_panels(clusters: List[Dict[str, Any]], persona: str = "executive") -> str:
     """Render one <article> per investigation cluster for a war-room multi-panel view."""
     if not clusters:
         return ""
@@ -1722,7 +1882,7 @@ def _render_cluster_panels(clusters: List[Dict[str, Any]]) -> str:
                 desc = str(ev.get("description") or ev.get("summary") or ev.get("event_type") or "")[:80]
                 timeline_html += f"<li><span style='color:#9ca3af'>{escape(ts)}</span> {escape(desc)}</li>"
             timeline_html += "</ul>"
-        action = str(cl.get("recommended_action") or cl.get("action") or "Analyst review required.")
+        action = str(cl.get("recommended_action") or cl.get("action") or _persona_cluster_action(cl, persona))
         confidence = cl.get("confidence")
         conf_txt = f" &nbsp;· {int(float(confidence)*100)}%" if confidence is not None else ""
         ioc_count = len(cl.get("iocs") or [])
@@ -1756,8 +1916,25 @@ def _render_persona_specific_section(artifact: Dict[str, Any], persona: str) -> 
     evidence = csv_model.get("evidence") or []
     top_factors = [str(e.get("factor_name") or "") for e in (report.get("semantic_top_factors") or [])[:5]]
     impact = report.get("impact_metadata") or {}
+    cluster_reasoning = report.get("cluster_reasoning_state") or {}
+    corroboration = report.get("corroboration") or cluster_reasoning.get("corroboration") or {}
     hosts = sorted(impact.get("affected_hosts") or [])[:6]
     identities = sorted(impact.get("affected_identities") or [])[:6]
+    persona_aliases = {
+        "executive": {"leadership", "executive"},
+        "ciso": {"leadership", "ciso"},
+        "soc_analyst": {"soc_analyst", "soc"},
+        "threat_hunter": {"threat_hunter", "hunter"},
+        "forensics": {"forensics", "forensic"},
+        "compliance": {"compliance", "grc"},
+        "audit": {"audit", "compliance", "grc"},
+        "mssp": {"mssp"},
+    }
+    persona_actions = [
+        str(action.get("primary_action") or "").strip()
+        for action in (report.get("recommended_actions") or [])
+        if str(action.get("primary_action") or "").strip() and str(action.get("persona") or "").strip().lower() in persona_aliases.get(persona, set())
+    ]
     parts: list[str] = []
 
     if persona == "executive":
@@ -1784,6 +1961,16 @@ def _render_persona_specific_section(artifact: Dict[str, Any], persona: str) -> 
                 "<li><strong>Approve customer notification</strong> if NDB threshold is met (yes / no)</li>"
                 "</ul>"
             )
+        parts.append(
+            "<h3 style='margin-top:16px'>Leadership Playbook</h3>"
+            + "<ul>"
+            + "".join(f"<li>{escape(item)}</li>" for item in (persona_actions[:3] or [
+                "Confirm whether the strongest cluster changes customer, legal, or payment impact before any external statement.",
+                "Authorize containment only after corroboration and owner validation are complete.",
+                "Track the decision log and notification threshold as the incident scope changes.",
+            ]))
+            + "</ul>"
+        )
         parts.append("</section>")
 
     elif persona == "ciso":
@@ -1812,6 +1999,14 @@ def _render_persona_specific_section(artifact: Dict[str, Any], persona: str) -> 
             f"<p class='small'>JanuSec identified {len(top_factors)} signal categories across the dataset. "
             f"Leading signals: {_leading_signals}. "
             f"Review whether your existing SIEM/XDR detected these same patterns independently.</p>"
+            "<h3 style='margin-top:16px'>Risk Leadership Playbook</h3>"
+            + "<ul>"
+            + "".join(f"<li>{escape(item)}</li>" for item in (persona_actions[:4] or [
+                "Use corroboration confidence and regulatory clocks to decide escalation timing.",
+                "Validate whether the strongest cluster changes breach, disclosure, or insurer posture.",
+                "Assign accountable owners for identity, endpoint, and cloud follow-up actions.",
+            ]))
+            + "</ul>"
             "</section>"
         )
 
@@ -1848,7 +2043,17 @@ def _render_persona_specific_section(artifact: Dict[str, Any], persona: str) -> 
             parts.append(f"<li><strong>{escape(entity)}</strong> \u2014 {sev} \u2014 {count} events \u2014 investigate {', '.join(str(d) for d in (c.get('domains') or [])[:3])}</li>")
         if not clusters:
             parts.append("<li>No investigation clusters identified.</li>")
-        parts.append("</ol></section>")
+        parts.append("</ol>")
+        parts.append(
+            "<h3 style='margin-top:16px'>SOC Runbook</h3>"
+            + "<ul>"
+            + "".join(f"<li>{escape(item)}</li>" for item in (persona_actions[:4] or [
+                "Validate the primary cluster against identity, cloud, and network telemetry before containment.",
+                "Escalate only when corroboration or analyst review strengthens the cluster verdict.",
+                "Use the preserved cluster state instead of triaging the same pivots row by row.",
+            ]))
+            + "</ul></section>"
+        )
 
     elif persona in ("forensic", "forensics"):
         # Forensics: chain of custody header + artifact inventory
@@ -1868,7 +2073,17 @@ def _render_persona_specific_section(artifact: Dict[str, Any], persona: str) -> 
             f"<tr><td style='padding:8px'>Affected hosts</td><td style='padding:8px'>{_hosts_str}</td></tr>"
             f"<tr><td style='padding:8px'>Affected identities</td><td style='padding:8px'>{_identities_str}</td></tr>"
             f"<tr><td style='padding:8px'>Legal hold</td><td style='padding:8px'>{_legal_hold}</td></tr>"
+            f"<tr><td style='padding:8px'>Corroboration verdict</td><td style='padding:8px'>{escape(str(corroboration.get('verdict') or 'pending'))}</td></tr>"
             "</table></section>"
+        )
+        parts.append(
+            "<section class='panel' style='margin-top:18px'><h2>Forensic Playbook</h2><ul>"
+            + "".join(f"<li>{escape(item)}</li>" for item in (persona_actions[:4] or [
+                "Preserve the lead cluster artefacts before any destructive containment action.",
+                "Record analyst delta, corroboration result, and evidence source lineage in the case file.",
+                "Expand collection to adjacent hosts or identities only when shared pivots support the same sequence.",
+            ]))
+            + "</ul></section>"
         )
 
     elif persona == "threat_hunter":
@@ -1897,6 +2112,15 @@ def _render_persona_specific_section(artifact: Dict[str, Any], persona: str) -> 
                 "<p class='small'>Techniques observed in this investigation:</p>"
                 f"<div>{_mitre_badges}</div>"
             )
+        parts.append(
+            "<h3 style='margin-top:16px'>Hunt Playbook</h3><ul>"
+            + "".join(f"<li>{escape(item)}</li>" for item in (persona_actions[:4] or [
+                "Pivot on the strongest shared identity, IP, or resource across adjacent sources.",
+                "Use TemporalRAG neighbours to test whether this cluster matches prior hostile patterns.",
+                "Challenge the cluster with approved-admin and change-ticket context before declaring new technique coverage.",
+            ]))
+            + "</ul>"
+        )
         parts.append("</section>")
 
     elif persona in ("compliance", "grc"):
@@ -1923,7 +2147,14 @@ def _render_persona_specific_section(artifact: Dict[str, Any], persona: str) -> 
             "<tr><td style='padding:8px'>ISO 27001 A.12.4 (Logging)</td><td style='padding:8px'>Evidence available in investigation</td></tr>"
             "<tr><td style='padding:8px'>ISO 27001 A.16.1 (Incident management)</td><td style='padding:8px'>Investigation in progress</td></tr>"
             f"<tr><td style='padding:8px'>NIST CSF DE.AE-3 (Event correlation)</td><td style='padding:8px'>{'Cross-source correlation active' if len(csv_model.get('pivots') or []) > 0 else 'Single-source analysis'}</td></tr>"
-            "</table></section>"
+            "</table>"
+            "<h3 style='margin-top:16px'>Compliance Playbook</h3><ul>"
+            + "".join(f"<li>{escape(item)}</li>" for item in (persona_actions[:4] or [
+                "Tie each confirmed claim to a concrete evidence source before notifying regulators.",
+                "Use the analyst delta to explain what changed between initial triage and notification posture.",
+                "Track whether corroboration completed before asserting control failure or disclosure scope.",
+            ]))
+            + "</ul></section>"
         )
 
     elif persona == "audit":
@@ -1952,7 +2183,14 @@ def _render_persona_specific_section(artifact: Dict[str, Any], persona: str) -> 
             f"<tr><td style='padding:8px'>A.12.4.1</td><td style='padding:8px'>Event logging</td><td style='padding:8px'>{_logging_status}</td></tr>"
             f"<tr><td style='padding:8px'>A.16.1.4</td><td style='padding:8px'>Incident assessment</td><td style='padding:8px'>{_incident_status}</td></tr>"
             f"<tr><td style='padding:8px'>A.9.2.3</td><td style='padding:8px'>Privilege management</td><td style='padding:8px'>{_privilege_status}</td></tr>"
-            "</table></section>"
+            "</table>"
+            "<h3 style='margin-top:16px'>Audit Playbook</h3><ul>"
+            + "".join(f"<li>{escape(item)}</li>" for item in (persona_actions[:4] or [
+                "Verify that the canonical cluster reasoning state matches the cited evidence rows.",
+                "Confirm that corroboration status and analyst delta are retained in the final case package.",
+                "Record any remaining unknown rows before closing the control-traceability record.",
+            ]))
+            + "</ul></section>"
         )
 
     elif persona == "mssp":
@@ -2008,6 +2246,9 @@ def render_executive_report_html(artifact: Dict[str, Any]) -> str:
     framework_sections = facts.get("framework_sections") or []
     adjudication = (facts.get("adjudication") or {}).get("workflow") or {}
     focus_cluster_summary = overview.get("focus_cluster_summary") or {}
+    cluster_reasoning = ((appendix.get("evidence_appendix") or {}).get("cluster_reasoning_state") or {})
+    corroboration = ((appendix.get("evidence_appendix") or {}).get("corroboration") or {})
+    analyst_state = cluster_reasoning.get("analyst_state") or {}
     areas_to_investigate = overview.get("areas_to_investigate") or []
     provider = str(overview.get("provider") or "Cloud")
     provider_style = PROVIDER_STYLE.get(provider, PROVIDER_STYLE["Cloud"])
@@ -2159,6 +2400,8 @@ h2,h3,h4{{margin:0 0 12px}} table td,table th{{padding:8px 10px;border-bottom:1p
         <div class='small'><strong>Focus of investigation:</strong> {escape(str(focus_cluster_summary.get("narrative") or ""))}</div>
         <div class='small'><strong>Why this was prioritized:</strong> {escape(str(focus_cluster_summary.get("why_it_matters") or ""))}</div>
         <div class='small'><strong>Evidence:</strong> {escape(_render_evidence_citations(focus_cluster_summary.get("evidence_refs") or []))}</div>
+        <div class='small'><strong>Routing mode:</strong> {escape(str(cluster_reasoning.get("routing_mode") or "unknown"))}</div>
+        <div class='small'><strong>Reasoning mode:</strong> {escape(str(cluster_reasoning.get("reasoning_mode") or "unknown"))}</div>
       </article>
       <article class="panel">
         <h2>Report Metadata</h2>
@@ -2171,6 +2414,8 @@ h2,h3,h4{{margin:0 0 12px}} table td,table th{{padding:8px 10px;border-bottom:1p
         <h2>Immediate Decision Required</h2>
         {("<ol>" + "".join(f"<li>{escape(item)}</li>" for item in immediate_decision_list) + "</ol>") if immediate_decision_list else f"<p>{escape(immediate_decision)}</p>"}
         <div class='small'><strong>Evidence basis:</strong> {escape(_render_evidence_citations(overview.get("action_basis_refs") or []))}</div>
+        <div class='small'><strong>Corroboration:</strong> {escape(str(corroboration.get("verdict") or corroboration.get("status") or "pending"))} {escape(str(corroboration.get("confidence") or ""))}</div>
+        <div class='small'><strong>Analyst delta:</strong> {escape(str(analyst_state.get("hypothesis") or "No analyst delta preserved yet."))}</div>
         <div class="section-split">
           <div>
             <h3>Already Done</h3>
@@ -2208,7 +2453,7 @@ h2,h3,h4{{margin:0 0 12px}} table td,table th{{padding:8px 10px;border-bottom:1p
   {("<article class='panel'><h2>Claims</h2><table style='width:100%;border-collapse:collapse'><thead><tr><th align='left'>Claim</th><th align='left'>Status</th><th align='left'>Possible business effect</th><th align='left'>Action / owner</th><th align='left'>Evidence</th></tr></thead><tbody>" + (''.join(claim_rows) or "<tr><td colspan='5'>No claims available.</td></tr>") + "</tbody></table></article>") if checklist.get("include_claims", True) else ""}
   {"</section>" if checklist.get("include_claims", True) else ""}
   {("<section class='panel' style='margin-top:18px'><h2>Trend Windows</h2><div class='trend-grid'>" + trends_html + "</div></section>") if checklist.get("include_trends", True) else ""}
-  {_render_cluster_panels(artifact.get("canonical_report", {}).get("investigation_clusters") or [])}
+  {_render_cluster_panels(artifact.get("canonical_report", {}).get("investigation_clusters") or [], _report_persona)}
   {("<section class='grid' style='margin-top:18px'><article class='panel'><h2>Adjudication Workflow</h2><p class='small'>Labels are sourced from the existing analyst labeling workflow, not from model guesses.</p><table style='width:100%;border-collapse:collapse'><tbody><tr><td>Tenant</td><td>" + escape(str(adjudication.get("tenant") or "unknown")) + "</td></tr><tr><td>Labels in history</td><td>" + escape(str(adjudication.get("label_history_count") or 0)) + "</td></tr><tr><td>Report events labeled</td><td>" + escape(str(adjudication.get("report_event_labeled_count") or 0)) + "</td></tr><tr><td>Report events unlabeled</td><td>" + escape(str(adjudication.get("report_event_unlabeled_count") or 0)) + "</td></tr><tr><td>Single-label endpoint</td><td>" + escape(str(((adjudication.get("workflow") or {}).get("single_label_endpoint") or ""))) + "</td></tr><tr><td>CSV import</td><td>" + escape(str(((adjudication.get("workflow") or {}).get("csv_import_endpoint") or ""))) + "</td></tr><tr><td>CSV export</td><td>" + escape(str(((adjudication.get("workflow") or {}).get("csv_export_endpoint") or ""))) + "</td></tr></tbody></table></article>" + ("<article class='panel'><h2>Framework Sections</h2>" + "".join(framework_html) + "</article>" if framework_html else "<article class='panel'><h2>Framework Sections</h2><p class='small'>No canonical framework mappings were present, so this section is intentionally omitted from the executive body.</p></article>") + "</section>")}
   {_render_persona_specific_section(artifact, _report_persona)}
   {("<section class='page-break' style='margin-top:18px'><h2>Evidence Appendix</h2>" + _render_appendix_tables(appendix.get("evidence_appendix") or {}) + "</section>") if checklist.get("include_appendix", True) else ""}

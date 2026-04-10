@@ -70,6 +70,14 @@ class ConnectorConfigRequest(BaseModel):
     config: Dict[str, Any]
 
 
+class LiveLaneAssessmentRequest(BaseModel):
+    providers: list[str] | None = None
+    connectors: list[str] | None = None
+    limit_per_lane: int = 250
+    auto_llm: bool = True
+    include_email: bool = True
+
+
 def _tenant(request: Request, tenant_id: Optional[str]) -> str:
     return resolve_tenant_id(request, tenant_id) or tenant_id or 'default'
 
@@ -103,6 +111,156 @@ def _append_events(runtime, tenant: str, connector_id: str, events: list[dict[st
         bucket.extend(events)
         if len(bucket) > 5000:
             del bucket[:-5000]
+
+
+def _event_timestamp_value(event: Dict[str, Any]) -> float | None:
+    for key in ('valid_time', 'event_ts', 'ts', 'timestamp', 'createdDateTime', 'activityDateTime'):
+        raw = event.get(key)
+        if raw in (None, '', [], {}):
+            continue
+        try:
+            if isinstance(raw, (int, float)):
+                value = float(raw)
+                return value if value > 0 else None
+            text = str(raw).strip()
+            if not text:
+                continue
+            if text.endswith('Z'):
+                text = text[:-1] + '+00:00'
+            import datetime as _dt
+            return _dt.datetime.fromisoformat(text).timestamp()
+        except Exception:
+            continue
+    return None
+
+
+def _tag_connector_events(
+    events: list[dict[str, Any]],
+    *,
+    provider: str,
+    connector: str,
+    tenant: str,
+) -> list[dict[str, Any]]:
+    now = time.time()
+    sheet_label = {
+        'cloudtrail': 'CloudTrail',
+        'guardduty': 'GuardDuty',
+        'securityhub': 'SecurityHub',
+        'vpcflow': 'VPCFlow',
+        'eventhub': 'AzureEventHub',
+        'entra_signin': 'EntraSignIn',
+        'entra_audit': 'EntraAudit',
+        'defender_cloud': 'DefenderCloud',
+        'okta': 'Okta',
+        'sailpoint': 'SailPoint',
+        'mimecast': 'Mimecast',
+        'proofpoint': 'Proofpoint',
+    }.get(connector, connector)
+    tagged: list[dict[str, Any]] = []
+    for raw in events or []:
+        if not isinstance(raw, dict):
+            continue
+        event = dict(raw)
+        event.setdefault('tenant_id', tenant)
+        event.setdefault('connector_id', f'{provider}:{connector}')
+        event.setdefault('source', connector)
+        event.setdefault('source_kind', connector)
+        event.setdefault('sheet', sheet_label)
+        valid_ts = _event_timestamp_value(event)
+        if valid_ts is not None:
+            event.setdefault('valid_time', valid_ts)
+            event.setdefault('ts', valid_ts)
+            event.setdefault('timestamp_epoch', valid_ts)
+        event.setdefault('transaction_time', now)
+        tagged.append(event)
+    return tagged
+
+
+def _runtime_events_to_assessment_rows(
+    runtime,
+    *,
+    tenant: str,
+    provider_filter: set[str],
+    connector_filter: set[str],
+    limit_per_lane: int,
+    include_email: bool,
+) -> list[dict[str, Any]]:
+    tenant_state = runtime.tenants.get(tenant, {}) if runtime is not None else {}
+    buckets = [
+        list(tenant_state.get('recent_cloud_audit_events') or []),
+        list(tenant_state.get('recent_iam_events') or []),
+        list(tenant_state.get('recent_network_events') or []),
+        list(tenant_state.get('recent_email_events') or []),
+    ]
+    rows: list[dict[str, Any]] = []
+    per_lane: dict[str, int] = {}
+    for bucket in buckets:
+        for event in reversed(bucket):
+            if not isinstance(event, dict):
+                continue
+            connector_id = str(event.get('connector_id') or '').strip().lower()
+            provider = connector_id.split(':', 1)[0] if ':' in connector_id else str(event.get('provider') or '').strip().lower()
+            connector = connector_id.split(':', 1)[1] if ':' in connector_id else str(event.get('source_kind') or event.get('source') or '').strip().lower()
+            if connector in {'mimecast', 'proofpoint'} and not include_email:
+                continue
+            if provider_filter and provider not in provider_filter:
+                continue
+            if connector_filter and connector not in connector_filter:
+                continue
+            if per_lane.get(connector_id, 0) >= limit_per_lane:
+                continue
+            row = dict(event)
+            row['row_index'] = len(rows)
+            row.setdefault('fingerprint', row.get('id') or row.get('event_id') or f'{connector_id}:{per_lane.get(connector_id, 0)}')
+            row.setdefault('source_file', f'{connector or "live"}.json')
+            row.setdefault('description', row.get('description') or row.get('reason') or row.get('subject') or row.get('action') or row.get('event_type') or 'Live connector evidence')
+            row.setdefault('export_source', connector or provider or 'live')
+            row.setdefault('provider_profile', provider or 'generic')
+            row.setdefault('intake_mode', 'live')
+            row.setdefault('review_state', 'needs_investigation')
+            rows.append(row)
+            per_lane[connector_id] = per_lane.get(connector_id, 0) + 1
+    return rows
+
+
+def _build_live_lane_assessment(
+    *,
+    request: Request,
+    tenant: str,
+    providers: list[str] | None,
+    connectors: list[str] | None,
+    limit_per_lane: int,
+    auto_llm: bool,
+    include_email: bool,
+) -> dict[str, Any]:
+    runtime = get_server_runtime_state(request.app)
+    provider_filter = {str(item).strip().lower() for item in (providers or []) if str(item).strip()}
+    connector_filter = {str(item).strip().lower() for item in (connectors or []) if str(item).strip()}
+    rows = _runtime_events_to_assessment_rows(
+        runtime,
+        tenant=tenant,
+        provider_filter=provider_filter,
+        connector_filter=connector_filter,
+        limit_per_lane=max(1, int(limit_per_lane or 250)),
+        include_email=include_email,
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail='no_live_connector_events')
+    from src.analysis.offline_workbook_assessment import build_offline_workbook_assessment
+    from src.api.deep_analyze_endpoints import _hydrate_assessment_semantics, _persist_assessment_state
+    assessment_id = f'live-lane-{tenant}-{hashlib.sha256(str(time.time()).encode("utf-8")).hexdigest()[:8]}'
+    assessment = build_offline_workbook_assessment(rows, assessment_id=assessment_id, org=tenant, auto_llm=auto_llm)
+    assessment['live_lane'] = {
+        'providers': sorted(provider_filter) or ['aws', 'azure', 'okta', 'sailpoint', 'email'],
+        'connectors': sorted(connector_filter),
+        'generated_from_runtime': True,
+    }
+    assessment['connector_health_snapshot'] = get_connector_health(runtime, tenant)
+    assessment['intake_mode'] = 'live'
+    assessment['provider_profile'] = 'multi_cloud'
+    assessment = _hydrate_assessment_semantics(assessment)
+    _persist_assessment_state(assessment_id, assessment)
+    return assessment
 
 
 def _event_fingerprint(event: Dict[str, Any]) -> str:
@@ -852,6 +1010,7 @@ def connector_poll(
             connector=connector,
             policy=RetryPolicy(),
         )
+        events = _tag_connector_events(events, provider=provider, connector=connector, tenant=tenant)
         events, duplicate_count = _dedupe_events(runtime, tenant, provider, connector, events)
         _append_events(runtime, tenant, connector, events)
         emitted_decisions = _emit_connector_decisions(provider, connector, events)
@@ -916,3 +1075,24 @@ def connector_backfill(
     api_key: Optional[str] = Header(None, alias='x-api-key'),
 ) -> Dict[str, Any]:
     return connector_poll(tenant_id, provider, connector, request, body, api_key)
+
+
+@router.post('/{tenant_id}/assessment/live_lane')
+def build_live_lane_assessment(
+    tenant_id: str,
+    request: Request,
+    body: LiveLaneAssessmentRequest = Body(default=LiveLaneAssessmentRequest()),
+    api_key: Optional[str] = Header(None, alias='x-api-key'),
+) -> Dict[str, Any]:
+    if not api_key:
+        raise HTTPException(status_code=401, detail='missing_api_key')
+    tenant = _tenant(request, tenant_id)
+    return _build_live_lane_assessment(
+        request=request,
+        tenant=tenant,
+        providers=body.providers,
+        connectors=body.connectors,
+        limit_per_lane=body.limit_per_lane,
+        auto_llm=body.auto_llm,
+        include_email=body.include_email,
+    )
