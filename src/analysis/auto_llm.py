@@ -27,6 +27,86 @@ SIGNAL_HINTS = {
 }
 
 
+def _get_hopgraph_instance():
+    """Return the global HopGraph instance if available, else None."""
+    try:
+        from src.graph.hopgraph import GLOBAL_HOPGRAPH
+        return GLOBAL_HOPGRAPH
+    except Exception:
+        pass
+    try:
+        import sys
+        mod = sys.modules.get('src.graph.hopgraph')
+        if mod:
+            return getattr(mod, 'GLOBAL_HOPGRAPH', None)
+    except Exception:
+        pass
+    return None
+
+
+def build_hop_chain_narrative(row: Dict[str, Any], max_depth: int = 4, top_k: int = 3) -> str | None:
+    """Call explain_chain() for entities in the row and build a human-readable narrative.
+
+    Returns a multi-line string suitable for direct injection into an LLM prompt,
+    or None if no chains were found or the graph is unavailable.
+    """
+    graph = _get_hopgraph_instance()
+    if graph is None or not hasattr(graph, 'explain_chain'):
+        return None
+
+    # Gather candidate start nodes from the row
+    candidates = []
+    for field in ('host', 'hostname', 'user', 'sourceIPAddress', 'src_ip', 'process', 'process_name', 'domain'):
+        val = row.get(field)
+        if val and isinstance(val, str):
+            candidates.append(val)
+    if not candidates:
+        return None
+
+    all_chains = []
+    seen_paths = set()
+    for start_node in candidates[:4]:  # limit to 4 starting entities
+        try:
+            result = graph.explain_chain(start_node, max_depth=max_depth, top_k=top_k)
+        except Exception:
+            continue
+        for chain in (result.get('chains') or []):
+            path_key = tuple(chain.get('nodes', []))
+            if path_key in seen_paths or len(path_key) < 2:
+                continue
+            seen_paths.add(path_key)
+            all_chains.append(chain)
+
+    if not all_chains:
+        return None
+
+    # Sort by score descending, take top 5 chains across all start nodes
+    all_chains.sort(key=lambda c: c.get('score', 0), reverse=True)
+    top_chains = all_chains[:5]
+
+    lines = ["HOPGRAPH ATTACK CHAIN NARRATIVE (pre-computed multi-hop correlation):"]
+    for i, chain in enumerate(top_chains, 1):
+        nodes = chain.get('nodes', [])
+        score = chain.get('score', 0)
+        hops = chain.get('hops', [])
+        lines.append(f"  Chain {i} (score={score:.3f}, {len(hops)} hops):")
+        lines.append(f"    Path: {' → '.join(nodes)}")
+        for hop in hops:
+            src = hop.get('src', '?')
+            dst = hop.get('dst', '?')
+            etype = hop.get('etype', '?')
+            weight = hop.get('weight', 0)
+            age_s = hop.get('age_seconds', 0)
+            age_label = f"{age_s:.0f}s ago" if age_s < 3600 else f"{age_s/3600:.1f}h ago"
+            lines.append(f"      {src} --[{etype} w={weight:.2f} {age_label}]--> {dst}")
+        # Edge-type breakdown if available
+        etac = chain.get('edge_type_avg_contrib')
+        if etac:
+            breakdown = ', '.join(f"{k}={v:.3f}" for k, v in etac.items())
+            lines.append(f"    Edge contributions: {breakdown}")
+    return '\n'.join(lines)
+
+
 def _resolve_model_for_tier(tier: str, context: Dict[str, Any] | None = None) -> str:
     """Return preferred model name for a tier, honoring context and env vars.
 
@@ -39,6 +119,30 @@ def _resolve_model_for_tier(tier: str, context: Dict[str, Any] | None = None) ->
     try:
         if context and context.get('model'):
             return context.get('model')
+    except Exception:
+        pass
+    try:
+        if tier == 'tier2' and context:
+            cluster_size = int(
+                context.get('cluster_size')
+                or ((context.get('cluster_reasoning_state') or {}).get('cluster_size'))
+                or 0
+            )
+            routing_score = float(
+                context.get('routing_score')
+                or ((context.get('cluster_reasoning_state') or {}).get('routing_score'))
+                or 0.0
+            )
+            reasoning_mode = str(
+                context.get('reasoning_mode')
+                or ((context.get('cluster_reasoning_state') or {}).get('reasoning_mode'))
+                or ''
+            ).lower()
+            cluster_model = os.getenv('T2_CLUSTER_MODEL')
+            min_cluster_size = int(os.getenv('T2_CLUSTER_MIN_SIZE', '2') or 2)
+            min_routing_score = float(os.getenv('T2_CLUSTER_ROUTING_THRESHOLD', '0.62') or 0.62)
+            if cluster_model and cluster_size >= min_cluster_size and (routing_score >= min_routing_score or reasoning_mode == 'deep'):
+                return cluster_model
     except Exception:
         pass
     return os.getenv(env_key) or ollama_fallback
@@ -78,7 +182,24 @@ def _estimate_row_severity(row: Dict[str, Any]) -> float:
         triage = 0.0
     verdict = (row.get('verdict') or '').upper()
     verdict_weight = 1.0 if verdict in {'CRITICAL','HIGH','MALICIOUS'} else (0.6 if verdict == 'SUSPICIOUS' else 0.25)
-    score = (dread_score * 0.35) + (corr * 0.25) + (triage * 0.25) + (verdict_weight * 0.15)
+    cluster_bonus = 0.0
+    try:
+        cluster_state = row.get('cluster_reasoning_state') or {}
+        cluster_size = int(row.get('cluster_size') or cluster_state.get('cluster_size') or (2 if row.get('correlation_cluster_id') else 0))
+        routing_score = float(row.get('routing_score') or cluster_state.get('routing_score') or 0.0)
+        graph_score = float(row.get('graph_score') or cluster_state.get('graph_score') or 0.0)
+        analyst_state = cluster_state.get('analyst_state') or {}
+        analyst_delta = float(analyst_state.get('disposition_delta') or 0.0)
+        cluster_bonus = min(
+            0.2,
+            (0.05 if cluster_size >= 2 else 0.0)
+            + min(0.08, routing_score * 0.1)
+            + min(0.04, graph_score * 0.08)
+            + max(0.0, min(0.03, analyst_delta * 0.03)),
+        )
+    except Exception:
+        cluster_bonus = 0.0
+    score = (dread_score * 0.35) + (corr * 0.25) + (triage * 0.25) + (verdict_weight * 0.15) + cluster_bonus
     return max(0.0, min(1.0, score))
 
 
@@ -513,7 +634,14 @@ def build_tier2_prompt(row: Dict[str, Any], context: Dict[str, Any]) -> str:
         status_lines.append("Kill-chain phases: " + ', '.join(kill_chain.get('phases', [])))
     hopgraph_ctx = context.get('hopgraph_context')
     if hopgraph_ctx:
-        status_lines.append("HopGraph snippet: " + json.dumps(hopgraph_ctx, default=str)[:260])
+        status_lines.append("HopGraph context: " + json.dumps(hopgraph_ctx, default=str)[:400])
+    # Inject full hop-chain narrative from explain_chain() when available
+    hop_narrative = context.get('hop_chain_narrative')
+    if not hop_narrative:
+        hop_narrative = build_hop_chain_narrative(row)
+    if hop_narrative:
+        prompt_lines.append(hop_narrative)
+        prompt_lines.append("")
     if status_lines:
         prompt_lines.append("PIPELINE / ENRICHMENT STATUS:")
         prompt_lines.extend(status_lines)
@@ -1130,6 +1258,9 @@ def build_llm_row(row: Dict[str, Any], context: Dict[str, Any], assessment: Dict
         'user': row.get('user') or None,
         'verdict': row.get('verdict') or row.get('decision') or rec.get('classification') or '',
         'factors': list(row.get('factors') or []),
+        'correlation_cluster_id': row.get('correlation_cluster_id'),
+        'cluster_reasoning_state': row.get('cluster_reasoning_state') or {},
+        'corroboration': row.get('corroboration') or {},
         'what_it_does': rec.get('what_it_does'),
         'can_attackers_use': rec.get('can_attackers_use'),
         'llm_summary': rec.get('llm_summary') or '',
