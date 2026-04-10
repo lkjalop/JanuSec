@@ -80,6 +80,7 @@ except Exception:
 from src.integrations.vector_db import VECTOR_LOG_SEARCH
 import hashlib
 import datetime
+from types import SimpleNamespace
 from typing import Any, Dict, List, Set, Tuple
 
 from src.artifact.models import ArtifactObservation, ArtifactType, Verdict, stable_artifact_id, map_risk_to_verdict
@@ -424,6 +425,214 @@ def _build_mapping_bundle(canonical: Dict[str, Any] | None, rows: List[dict] | N
         "maestro": maestro,
         "diamond": diamond,
     }
+
+
+def _is_truthy_flag(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    return str(value).strip().lower() in {"1", "true", "yes", "on", "enabled"}
+
+
+def _endpoint_email_ml_enabled(payload: dict, options: dict) -> bool:
+    return any(
+        _is_truthy_flag(candidate)
+        for candidate in (
+            options.get("enable_endpoint_email_ml"),
+            payload.get("enable_endpoint_email_ml"),
+            os.getenv("ENABLE_ENDPOINT_EMAIL_ML_PIPELINE", "0"),
+        )
+    )
+
+
+def _infer_ml_domain(row: dict) -> str:
+    for key in ("source_type", "domain_type", "source_kind", "source_platform", "source"):
+        value = str(row.get(key) or "").strip().lower()
+        if not value:
+            continue
+        if any(token in value for token in ("email", "mail", "mimecast", "proofpoint")):
+            return "email"
+        if any(token in value for token in ("endpoint", "sysmon", "evtx", "defender")):
+            return "endpoint"
+        if "network" in value:
+            return "network"
+    if row.get("attachment_name") or row.get("sender") or row.get("from"):
+        return "email"
+    if row.get("process_name") or row.get("process") or row.get("parent_process"):
+        return "endpoint"
+    return "other"
+
+
+def _build_endpoint_email_runtime(rows: List[dict], payload: dict) -> SimpleNamespace:
+    sanitized_events: List[dict] = []
+    email_messages: List[dict] = []
+    provided_messages = payload.get("email_messages") or []
+    if isinstance(provided_messages, list):
+        for item in provided_messages:
+            if isinstance(item, dict):
+                email_messages.append(dict(item))
+
+    for idx, row in enumerate(rows or []):
+        flat = _flatten_row_payload(row, idx)
+        domain = _infer_ml_domain(flat)
+        headers = flat.get("headers")
+        if not isinstance(headers, dict):
+            headers = {}
+        sender = flat.get("sender") or flat.get("from") or headers.get("from") or ""
+        reply_to = flat.get("reply_to") or headers.get("reply-to") or ""
+        recipients = flat.get("to") or flat.get("recipient") or headers.get("to") or ""
+        urls = flat.get("urls") or flat.get("extracted_urls") or []
+        if not isinstance(urls, list):
+            urls = [urls] if urls else []
+
+        event = dict(flat)
+        event.setdefault("timestamp", flat.get("timestamp") or flat.get("ts") or time.time())
+        event.setdefault("type", "mail" if domain == "email" else domain)
+        event.setdefault("source_platform", domain)
+        event.setdefault("headers", headers)
+        if sender:
+            event.setdefault("sender", sender)
+            event.setdefault("from", sender)
+        if reply_to:
+            event.setdefault("reply_to", reply_to)
+        if recipients:
+            event.setdefault("to", recipients)
+        if urls:
+            event["urls"] = [str(u) for u in urls if u]
+        sanitized_events.append(event)
+
+        attachments = flat.get("attachments")
+        if isinstance(attachments, list):
+            for attachment in attachments:
+                if not isinstance(attachment, dict):
+                    continue
+                filename = attachment.get("filename") or attachment.get("name")
+                if not filename:
+                    continue
+                email_messages.append(
+                    {
+                        "filename": filename,
+                        "content": attachment.get("content") or attachment.get("bytes") or attachment.get("data"),
+                        "mime": attachment.get("mime") or attachment.get("content_type") or "",
+                        "sender_domain": attachment.get("sender_domain") or flat.get("sender_domain") or "",
+                        "sha256": attachment.get("sha256") or attachment.get("hash_sha256") or "",
+                    }
+                )
+        elif flat.get("attachment_name"):
+            email_messages.append(
+                {
+                    "filename": flat.get("attachment_name"),
+                    "content": flat.get("attachment_content") or flat.get("content") or flat.get("raw_bytes"),
+                    "mime": flat.get("mime") or flat.get("attachment_mime") or "",
+                    "sender_domain": flat.get("sender_domain") or "",
+                    "sha256": flat.get("sha256") or flat.get("hash_sha256") or "",
+                }
+            )
+
+    return SimpleNamespace(sanitized_events=sanitized_events, email_messages=email_messages)
+
+
+def _score_row_against_ml_factor(row: dict, factor: dict) -> float:
+    factor_name = str(factor.get("factor") or "")
+    row_domain = _infer_ml_domain(row)
+    expected_domain = "email" if factor_name.startswith("email:") else "endpoint" if factor_name.startswith("endpoint:") else ""
+    if expected_domain and row_domain != expected_domain:
+        return -1.0
+
+    score = 0.0
+    if expected_domain:
+        score += 0.5
+
+    row_host = str(row.get("host") or row.get("hostname") or "").lower()
+    row_proc = str(row.get("process") or row.get("process_name") or "").lower()
+    row_parent = str(row.get("parent_process") or row.get("parent") or "").lower()
+    row_sha = str(row.get("sha256") or row.get("hash_sha256") or "").lower()
+    row_file = str(row.get("attachment_name") or row.get("file_name") or row.get("filename") or "").lower()
+    row_sender_domain = str(row.get("sender_domain") or row.get("from_domain") or row.get("domain") or "").lower()
+
+    factor_host = str(factor.get("hostname") or factor.get("host") or "").lower()
+    factor_proc = str(factor.get("process") or "").lower()
+    factor_parent = str(factor.get("parent") or "").lower()
+    factor_sha = str(factor.get("sha256") or "").lower()
+    factor_file = str(factor.get("filename") or "").lower()
+    factor_sender_domain = str(factor.get("sender_domain") or factor.get("from_domain") or factor.get("domain") or "").lower()
+
+    if factor_host and row_host and factor_host == row_host:
+        score += 2.0
+    if factor_proc and row_proc and factor_proc == row_proc:
+        score += 2.0
+    if factor_parent and row_parent and factor_parent == row_parent:
+        score += 1.5
+    if factor_sha and row_sha and factor_sha == row_sha:
+        score += 2.0
+    if factor_file and row_file and factor_file == row_file:
+        score += 1.5
+    if factor_sender_domain and row_sender_domain and factor_sender_domain == row_sender_domain:
+        score += 2.0
+    if score <= 0.0 and expected_domain and row_domain == expected_domain:
+        score += 0.25
+    return score
+
+
+def _apply_endpoint_email_ml(rows: List[dict], payload: dict, tenant_id: str, event_id: str) -> tuple[List[dict], Dict[str, Any]]:
+    try:
+        from src.core.ml_pipeline import get_pipeline  # type: ignore
+    except Exception:
+        return rows, {"enabled": False, "status": "pipeline_unavailable", "factors": []}
+
+    runtime = _build_endpoint_email_runtime(rows, payload)
+    try:
+        result = get_pipeline().run(runtime, tenant_id=tenant_id, event_id=event_id)
+        result_dict = result.as_dict() if hasattr(result, "as_dict") else dict(result or {})
+    except Exception as exc:
+        return rows, {"enabled": True, "status": f"pipeline_error:{type(exc).__name__}", "factors": []}
+
+    updated_rows = [dict(r) for r in (rows or [])]
+    factor_names: List[str] = []
+    assigned = 0
+    for factor in result_dict.get("factors") or []:
+        if not isinstance(factor, dict):
+            continue
+        factor_name = str(factor.get("factor") or "").strip()
+        if not factor_name:
+            continue
+        factor_names.append(factor_name)
+        best_idx = None
+        best_score = -1.0
+        for idx, row in enumerate(updated_rows):
+            score = _score_row_against_ml_factor(_flatten_row_payload(row, idx), factor)
+            if score > best_score:
+                best_score = score
+                best_idx = idx
+        if best_idx is None or best_score <= 0.0:
+            continue
+        target = updated_rows[best_idx]
+        current_factors = list(target.get("factors") or [])
+        if factor_name not in current_factors:
+            current_factors.append(factor_name)
+        target["factors"] = current_factors
+        factor_contributions = list(target.get("factor_contributions") or [])
+        factor_contributions.append(
+            {
+                "factor": factor_name,
+                "score": float(factor.get("score") or 0.0),
+                "source": "endpoint_email_ml",
+                "reason": factor.get("reason") or "",
+            }
+        )
+        target["factor_contributions"] = factor_contributions[-12:]
+        target["ml_score"] = max(float(target.get("ml_score") or 0.0), float(factor.get("score") or 0.0))
+        target.setdefault("_ml_pipeline_hits", []).append(factor)
+        assigned += 1
+
+    result_dict["enabled"] = True
+    result_dict["status"] = "ok"
+    result_dict["factor_names"] = list(dict.fromkeys(factor_names))
+    result_dict["assigned_factor_count"] = assigned
+    result_dict["runtime_event_count"] = len(getattr(runtime, "sanitized_events", []) or [])
+    result_dict["runtime_email_message_count"] = len(getattr(runtime, "email_messages", []) or [])
+    return updated_rows, result_dict
 
 
 class StageBase:
@@ -2907,6 +3116,50 @@ def _llm_row_entry(assessment: dict, idx: int, orig: dict) -> dict | None:
         return None
 
 
+def _ensure_llm_rows_available(assessment: dict) -> dict:
+    """Best-effort compatibility fallback for auto-LLM assessments.
+
+    Some callers poll assessment endpoints immediately and expect row-level
+    summaries to exist even when no rows were queued/promoted into the normal
+    background LLM path. Synthesize lightweight llm_rows from raw rows when the
+    assessment requested auto_llm but currently lacks usable summaries.
+    """
+    if not isinstance(assessment, dict):
+        return assessment
+    try:
+        auto_llm = bool(
+            assessment.get('auto_llm')
+            or ((assessment.get('options') or {}).get('auto_llm'))
+        )
+    except Exception:
+        auto_llm = False
+    if not auto_llm:
+        return assessment
+
+    existing = assessment.get('llm_rows') or []
+    try:
+        if existing and any((row.get('llm_summary') or row.get('summary') or row.get('llm_output')) for row in existing if isinstance(row, dict)):
+            return assessment
+    except Exception:
+        pass
+
+    raw_rows = assessment.get('rows') or []
+    if not isinstance(raw_rows, list) or not raw_rows:
+        return assessment
+
+    synthesized: list[dict] = []
+    for idx, row in enumerate(raw_rows):
+        if not isinstance(row, dict):
+            continue
+        llm_row = _llm_row_entry(assessment, idx, row)
+        if llm_row:
+            synthesized.append(llm_row)
+    if synthesized:
+        assessment['llm_rows'] = synthesized
+        assessment['llm_rows_count'] = len(synthesized)
+    return assessment
+
+
 def _processed_row_indexes(assessment: dict) -> Set[int]:
     rows = assessment.get('llm_rows') or []
     result: Set[int] = set()
@@ -3868,11 +4121,16 @@ async def run_deep_analyze_pipeline(payload: dict) -> JSONResponse:
     risk_appetite = (payload.get('risk_appetite') or options.get('risk_appetite') or os.getenv('DEFAULT_RISK_APPETITE') or 'medium').lower()
     if risk_appetite not in {'low','medium','high'}:
         risk_appetite = 'medium'
+    org = payload.get('org') or payload.get('tenant') or 'unknown'
+    ml_pipeline_result: Dict[str, Any] = {'enabled': False, 'status': 'disabled', 'factors': []}
+    if _endpoint_email_ml_enabled(payload, options):
+        rows, ml_pipeline_result = _apply_endpoint_email_ml(rows, payload, tenant_id=org, event_id=f"ml-{uuid.uuid4().hex[:12]}")
     ctx = {
         'rows': rows,
         'options': {**options, 'auto_llm': auto, 'risk_appetite': risk_appetite},
         'analyze_mode': payload.get('analyze_mode') or options.get('analyze_mode') or 'basic',
         'risk_appetite': risk_appetite,
+        'factors': list(ml_pipeline_result.get('factor_names') or []),
     }
     pipeline_plan = [{'idx': step.idx, 'name': step.name} for step in PIPELINE_SPEC]
 
@@ -3899,8 +4157,6 @@ async def run_deep_analyze_pipeline(payload: dict) -> JSONResponse:
             return path
         except Exception:
             return None
-
-    org = payload.get('org') or payload.get('tenant') or 'unknown'
 
     # Run lightweight stage registry locally for canonical/mapping hints
     stage_status = []
@@ -3941,6 +4197,7 @@ async def run_deep_analyze_pipeline(payload: dict) -> JSONResponse:
         'batch_meta': batch_meta or {},
         'cluster_reasoning_state': {},
         'corroboration': {},
+        'ml_pipeline': ml_pipeline_result,
     }
     assessment_obj = _hydrate_assessment_semantics(assessment_obj)
     try:
@@ -3951,6 +4208,9 @@ async def run_deep_analyze_pipeline(payload: dict) -> JSONResponse:
         'hopgraph_ingested_rows': hopgraph_meta.get('ingested') or 0,
         'timeline_rows': hopgraph_meta.get('timeline_rows') or 0,
         'timeline_span_seconds': hopgraph_meta.get('timespan_seconds') or 0.0,
+        'endpoint_email_ml_enabled': bool(ml_pipeline_result.get('enabled')),
+        'endpoint_email_ml_factor_count': len(ml_pipeline_result.get('factor_names') or []),
+        'endpoint_email_ml_assigned_factor_count': int(ml_pipeline_result.get('assigned_factor_count') or 0),
     })
     assessment_obj['telemetry'] = telemetry
     assessment_obj['temporal_context'] = {
@@ -3981,6 +4241,7 @@ async def run_deep_analyze_pipeline(payload: dict) -> JSONResponse:
         'persona_reports': assessment_obj.get('persona_reports') or {},
         'cluster_reasoning_state': assessment_obj.get('cluster_reasoning_state') or {},
         'corroboration': assessment_obj.get('corroboration') or {},
+        'ml_pipeline': ml_pipeline_result,
     }
 
     # Schedule background LLM row generation so the HTTP response is fast even when providers are slow
@@ -4014,7 +4275,12 @@ async def run_deep_analyze_pipeline(payload: dict) -> JSONResponse:
             # some test environments may not have a real worker; run a lightweight in-process progression
             async def _local_runner():
                 try:
-                    proc_ctx = {'rows': rows, 'options': ctx.get('options', {}), 'analyze_mode': ctx.get('analyze_mode')}
+                    proc_ctx = {
+                        'rows': rows,
+                        'options': ctx.get('options', {}),
+                        'analyze_mode': ctx.get('analyze_mode'),
+                        'factors': list(ml_pipeline_result.get('factor_names') or []),
+                    }
                     statuses = []
                     active = list(STAGE_REGISTRY)
                     if proc_ctx.get('analyze_mode') == 'advanced':
@@ -4037,6 +4303,7 @@ async def run_deep_analyze_pipeline(payload: dict) -> JSONResponse:
                     try:
                         _store_assessment(org, assessment_id, assessment_obj)
                         REPORT_STORE[assessment_id]['status'] = 'completed'
+                        REPORT_STORE[assessment_id]['ml_pipeline'] = ml_pipeline_result
                     except Exception:
                         pass
                 except Exception:
@@ -4082,6 +4349,7 @@ async def run_deep_analyze_pipeline(payload: dict) -> JSONResponse:
         'persona_reports': assessment_obj.get('persona_reports') or {},
         'cluster_reasoning_state': assessment_obj.get('cluster_reasoning_state') or {},
         'corroboration': assessment_obj.get('corroboration') or {},
+        'ml_pipeline': ml_pipeline_result,
         'risk_appetite': risk_appetite,
         'batch_meta': batch_meta or {},
     }
@@ -4258,8 +4526,14 @@ async def csv_deep_analyze(request: Request):
         payload = await request.json()
     except Exception:
         payload = {}
-    fallback = _build_lite_assessment(payload, persist=False)
-    return JSONResponse(fallback)
+    try:
+        resp = await run_deep_analyze_pipeline(payload)
+        if resp is None:
+            raise RuntimeError('pipeline_unavailable')
+        return resp
+    except Exception:
+        fallback = _build_lite_assessment(payload, persist=False)
+        return JSONResponse(fallback)
 
 @router.get('/{parent_id}/batches')
 async def list_batches(parent_id: str):
@@ -4490,6 +4764,10 @@ async def get_assessment(assessment_id: str):
             resp = _hydrate_assessment_semantics(resp)
         except Exception:
             pass
+    try:
+        resp = _ensure_llm_rows_available(resp)
+    except Exception:
+        pass
 
     REPORT_STORE[assessment_id] = {**in_mem, **resp}
     return JSONResponse(resp)
@@ -4517,9 +4795,17 @@ async def get_assessment_rows(assessment_id: str):
 
     persisted = _load_assessment_from_disk(assessment_id, (REPORT_STORE.get(assessment_id) or {}).get('persisted_path'))
     if persisted:
+        try:
+            persisted = _ensure_llm_rows_available(persisted)
+        except Exception:
+            pass
         rows = persisted.get('llm_rows') or persisted.get('rows') or []
         return JSONResponse({'assessment_id': assessment_id, 'rows': rows, 'row_count': len(rows)})
     in_mem = REPORT_STORE.get(assessment_id) or {}
+    try:
+        in_mem = _ensure_llm_rows_available(in_mem)
+    except Exception:
+        pass
     rows = in_mem.get('llm_rows') or in_mem.get('rows') or []
     return JSONResponse({'assessment_id': assessment_id, 'rows': rows, 'row_count': len(rows)})
 
@@ -5820,6 +6106,62 @@ def _build_cluster_reasoning_state(
     alt_hypotheses = _build_cluster_alt_hypotheses(cluster, cluster_rows, analyst_state, factor_freq)
     leads = _build_cluster_leads(cluster, summary, analyst_state)
     provider_context = _build_cluster_provider_context(assessment, cluster_rows, routing)
+    sender_domains = []
+    reply_domains = []
+    baseline_domains = []
+    targeted_identities = []
+    top_ranked_evidence = []
+    attachment_analysis = []
+    for row in cluster_rows:
+        visual = row.get('attachment_visual_analysis') if isinstance(row.get('attachment_visual_analysis'), dict) else {}
+        if visual:
+            attachment_analysis.append(dict(visual))
+        sender = str(row.get('sender_domain') or row.get('from_domain') or '')
+        reply_to = str(row.get('reply_to_domain') or '')
+        baseline = str(row.get('trusted_supplier_domain') or row.get('baseline_sender_domain') or row.get('supplier_domain') or '')
+        if sender:
+            sender_domains.append(sender)
+        if reply_to:
+            reply_domains.append(reply_to)
+        if baseline:
+            baseline_domains.append(baseline)
+        identity = str(row.get('user') or row.get('userPrincipalName') or row.get('recipient') or row.get('entity') or '').strip()
+        if identity and any(token in identity.lower() for token in ('ceo', 'cfo', 'finance', 'accounts', 'payroll', 'director', 'executive')) and identity not in targeted_identities:
+            targeted_identities.append(identity)
+    sender_drift_signals = []
+    if sender_domains and baseline_domains and sender_domains[0] != baseline_domains[0]:
+        sender_drift_signals.append(f'sender:{sender_domains[0]} baseline:{baseline_domains[0]}')
+    if reply_domains and sender_domains and reply_domains[0] != sender_domains[0]:
+        sender_drift_signals.append(f'reply_to:{reply_domains[0]} sender:{sender_domains[0]}')
+    if attachment_analysis:
+        for item in attachment_analysis[:2]:
+            preview = str(item.get('text_preview') or '').strip()
+            if preview:
+                top_ranked_evidence.append({
+                    'title': preview[:140],
+                    'why_it_matters': 'Attachment extraction produced direct lure or execution context for the cluster.',
+                    'evidence_refs': [int(r.get('row_index')) for r in cluster_rows if r.get('row_index') is not None][:3],
+                    'confidence': round(_safe_float(item.get('confidence')), 3),
+                })
+    top_ranked_evidence = ([{
+        'title': summary['canonical_narrative'],
+        'why_it_matters': 'This narrative is the preserved cluster story presented to every persona.',
+        'evidence_refs': [int(r.get('row_index')) for r in cluster_rows if r.get('row_index') is not None][:4],
+        'confidence': round(_safe_float(routing.get('routing_score')), 3),
+    }] + top_ranked_evidence)[:5]
+    sender_infrastructure_drift = {
+        'present': bool(sender_drift_signals),
+        'summary': 'Sender or reply infrastructure drift suggests impersonation or supplier-baseline mismatch.' if sender_drift_signals else 'No sender infrastructure drift was preserved in this cluster.',
+        'signals': sender_drift_signals[:4],
+        'confidence': round(min(0.95, 0.42 + (0.18 * len(sender_drift_signals))), 3) if sender_drift_signals else 0.0,
+    }
+    executive_targeting = {
+        'present': bool(targeted_identities),
+        'summary': (f"Executive or finance-targeted identities were included in the cluster: {', '.join(targeted_identities[:3])}." if targeted_identities else 'No explicit executive-targeting marker was preserved in this cluster.'),
+        'identities': targeted_identities[:4],
+        'confidence': round(min(0.95, 0.61 + (0.08 * min(len(targeted_identities), 3))), 3) if targeted_identities else 0.0,
+    }
+    provider_context['attachment_analysis'] = attachment_analysis[:6]
     return build_cluster_reasoning_state(
         assessment_id=assessment.get('assessment_id'),
         cluster_id=cluster.get('cluster_id'),
@@ -5861,6 +6203,10 @@ def _build_cluster_reasoning_state(
         persona_seed_missing_telemetry=summary['missing_telemetry'][:4],
         temporal_rag_sources=routing.get('evidence_used') or [],
         shared_pivots=_bounded_unique_strings((cluster.get('shared_pivots') or []), 8),
+        top_ranked_evidence=top_ranked_evidence[:5],
+        sender_infrastructure_drift=sender_infrastructure_drift,
+        executive_targeting=executive_targeting,
+        attachment_analysis=attachment_analysis[:6],
         provider_context=provider_context,
         prior_state=prior_state,
         evidence_row_indices=[int(r.get('row_index')) for r in cluster_rows if r.get('row_index') is not None][:12],

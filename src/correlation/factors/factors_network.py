@@ -110,8 +110,9 @@ def extract_network_factors(events: List[CanonicalEvent]) -> List[FactorEmit]:
                 'dst_port': int(e.dst_port) if e.dst_port else 0,
                 'timestamp': e.timestamp or 0.0,
                 'domain': e.domain or '',
-                'query': e.raw.get('query', ''),
+                'dns_query': e.raw.get('dns_query') or e.raw.get('query_name') or e.raw.get('query', ''),
                 'ja3': e.raw.get('ja3', ''),
+                'sni': e.raw.get('sni') or e.raw.get('server_name') or '',
                 'bytes_out': e.raw.get('bytes_out', 0),
                 'packets': e.raw.get('packets', 0),
                 'duration': e.raw.get('duration', 0),
@@ -119,13 +120,18 @@ def extract_network_factors(events: List[CanonicalEvent]) -> List[FactorEmit]:
             try:
                 ml_factors = _ml_pipeline.analyze_event(ev)
             except Exception:
-                ml_factors = []
-            for mf in ml_factors:
+                ml_factors = {}
+            factor_names = []
+            if isinstance(ml_factors, dict):
+                factor_names = list(ml_factors.get('factors') or [])
+            elif isinstance(ml_factors, list):
+                factor_names = list(ml_factors)
+            for mf in factor_names:
                 out.append(FactorEmit(
-                    name=mf.get('factor', 'unknown'),
+                    name=str(mf or 'unknown'),
                     nodes=[f"ip:{ev['src_ip']}"] if ev['src_ip'] else ['aggregate:network'],
                     domain='network',
-                    confidence=mf.get('confidence', 0.5),
+                    confidence=float(((ml_factors.get('details') or {}).get('beacon') or {}).get('confidence') or 0.5) if isinstance(ml_factors, dict) else 0.5,
                     ts=ev['timestamp'],
                 ))
     return out
