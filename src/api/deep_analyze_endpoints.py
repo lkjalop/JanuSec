@@ -7478,10 +7478,31 @@ async def get_cluster_detail(assessment_id: str, cluster_id: str):
             'triage_score': row.get('triage_score') or row.get('risk_score') or row.get('score'),
             'mitre': row.get('mitre') or [],
         })
+    compact_state = compact_cluster_reasoning_state(cluster_state)
+    try:
+        full_member_rows = [
+            row for row in rows
+            if isinstance(row, dict)
+            and (row.get('correlation_cluster_id') == cluster_id or row.get('row_index') in member_refs)
+        ]
+        refreshed_provider_context = _build_cluster_provider_context(
+            assessment,
+            full_member_rows,
+            cluster_state,
+        )
+        existing_provider_context = dict(compact_state.get('provider_context') or {})
+        existing_provider_context.update({
+            key: value
+            for key, value in refreshed_provider_context.items()
+            if value not in (None, [], {})
+        })
+        compact_state['provider_context'] = existing_provider_context
+    except Exception:
+        pass
     return JSONResponse({
         'assessment_id': assessment_id,
         'cluster_id': cluster_id,
-        'cluster_detail': compact_cluster_reasoning_state(cluster_state),
+        'cluster_detail': compact_state,
         'member_rows': member_rows[:25],
         'analyst_delta': (cluster_state.get('analyst_state') or {}),
         'corroboration': cluster_state.get('corroboration') or {},

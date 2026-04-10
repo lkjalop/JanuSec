@@ -187,3 +187,44 @@ def test_status_connectors_includes_runtime_projection_fields(monkeypatch, clien
     assert 'checkpoint_healthy' in entry
     assert 'beta_ready' in entry
     assert isinstance(entry.get('freshness') or {}, dict)
+
+
+def test_connector_fixture_poll_path_is_guarded_and_populates_health(client):
+    cfg = client.put(
+        '/api/v1/connectors/fixturetenant/email/mimecast/config',
+        headers=_headers(),
+        json={
+            'config': {
+                'fixture_events': [
+                    {
+                        'id': 'fixture-email-1',
+                        'source_kind': 'mimecast',
+                        'connector_id': 'email:mimecast',
+                        'domain': 'email',
+                        'sender': 'accounts@ingramfake.com.au',
+                        'subject': 'Updated invoice for acquisition deposit',
+                        'ts': '2026-04-10T00:10:00Z',
+                        'valid_time': '2026-04-10T00:10:00Z',
+                    }
+                ]
+            }
+        },
+    )
+    assert cfg.status_code == 200
+
+    poll = client.post(
+        '/api/v1/connectors/fixturetenant/email/mimecast/poll',
+        headers=_headers(),
+        json={'since_ts': 0},
+    )
+    assert poll.status_code == 200, poll.text
+    assert poll.json()['ingested'] == 1
+
+    status = client.get('/api/v1/connectors/fixturetenant/email/mimecast/status', headers=_headers())
+    assert status.status_code == 200
+    payload = status.json()['status']
+    assert payload['healthy'] is True
+    assert payload['authenticated'] is True
+    assert payload['receiving_events'] is True
+    assert payload['checkpoint_healthy'] is True
+    assert payload['runtime_state'].get('fixture_count') == 1

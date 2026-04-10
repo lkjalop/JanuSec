@@ -5772,6 +5772,42 @@ try:
 
 
     _ensure_iam_connector_routes()
+
+
+    def _ensure_connector_control_plane_routes() -> None:
+        """Ensure live connector control-plane routes are mounted.
+
+        Full-route startup currently mounts IAM connector compatibility routes,
+        but the AWS/Azure/Okta/SailPoint/email control plane can be absent when
+        local validation starts the canonical app directly. Keep this defensive
+        and idempotent so test/lite and full startup expose the same live-lane
+        validation surface.
+        """
+        try:
+            required = '/api/v1/connectors/{tenant_id}/assessment/live_lane'
+            present = any(getattr(r, 'path', None) == required for r in app.router.routes)
+            if not present:
+                try:
+                    from src.api.routes import connectors as _connectors_ctrl
+                    app.include_router(_connectors_ctrl.router)
+                    logger.info('Late-mounted connector control-plane router to restore %s', required)
+                except Exception as exc:
+                    logger.debug('connector control-plane late-mount failed: %s', exc)
+
+            status_required = '/api/v1/status/connectors'
+            status_present = any(getattr(r, 'path', None) == status_required for r in app.router.routes)
+            if not status_present:
+                try:
+                    from src.api.status_connectors import router as _status_connectors_router
+                    app.include_router(_status_connectors_router)
+                    logger.info('Late-mounted connector status router to restore %s', status_required)
+                except Exception as exc:
+                    logger.debug('connector status late-mount failed: %s', exc)
+        except Exception:
+            pass
+
+
+    _ensure_connector_control_plane_routes()
 except Exception:
     pass
 
