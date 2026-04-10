@@ -766,6 +766,7 @@ except Exception:
 from .hunt_summary import router as hunt_router
 from .admin_rule_endpoints import router as admin_rule_router
 from .decision_feedback_endpoints import router as decision_feedback_router
+from .abtests import router as abtests_router
 from .ab_test_admin import router as ab_test_admin_router
 from .admin_abtests import router as admin_abtests_router
 from .factors_taxonomy_endpoints import router as factors_router
@@ -1087,6 +1088,18 @@ async def lifespan(app: FastAPI):
         pass
 
 app = FastAPI(title='Threat Platform API', version='4.1.0', lifespan=lifespan)
+
+# Keep canonical console dependencies mounted on the module-level app as well as
+# factory-built variants so local startup and Playwright exercise the same routes.
+try:
+    app.include_router(abtests_router)
+except Exception:
+    pass
+try:
+    if hopgraph_stream_router is not None:
+        app.include_router(hopgraph_stream_router)
+except Exception:
+    pass
 
 # FastAPI/Starlette compatibility: newer versions may drop app.add_event_handler.
 if not hasattr(app, 'add_event_handler'):
@@ -3003,6 +3016,10 @@ except Exception:
             pass
     try:
         app.include_router(admin_abtests_router)
+    except Exception:
+        pass
+    try:
+        app.include_router(abtests_router)
     except Exception:
         pass
     # include admin_arc router deterministically if available
@@ -6141,10 +6158,11 @@ async def _add_security_headers(request: Request, call_next: Callable[[Request],
             relaxed_prefixes = ('/react', '/assets', '/', '/ui', '/static', '/spa')
             if any(path.startswith(pfx) for pfx in relaxed_prefixes):
                 # Allow inline styles and same-origin scripts; permit data: for images/fonts used by build
+                # Also allow CDN sources used by investigate.html (d3, lucide icons)
                 csp = (
                     "default-src 'self'; "
-                    "script-src 'self' 'unsafe-inline'; "
-                    "style-src 'self' 'unsafe-inline'; "
+                    "script-src 'self' 'unsafe-inline' https://unpkg.com https://cdn.jsdelivr.net; "
+                    "style-src 'self' 'unsafe-inline' https://unpkg.com https://cdn.jsdelivr.net; "
                     "img-src 'self' data: blob:; "
                     "font-src 'self' data:; "
                     "connect-src 'self'; "
@@ -6272,6 +6290,14 @@ try:
 except Exception:
     logger.debug('tenant_provisioning module not present or failed to import')
 try:
+    from .onboarding_endpoints import router as onboarding_router
+    try:
+        app.include_router(onboarding_router)
+    except Exception:
+        logger.debug('Failed to include onboarding_endpoints router')
+except Exception:
+    logger.debug('onboarding_endpoints module not present or failed to import')
+try:
     from .kape_jobs_endpoints import router as kape_jobs_router
     try:
         app.include_router(kape_jobs_router)
@@ -6389,6 +6415,11 @@ try:
     app.include_router(factors_label_router)
 except Exception:
     logger.debug('Failed to include factors_label_router')
+try:
+    from .analyst_review_endpoints import router as analyst_review_router
+    app.include_router(analyst_review_router)
+except Exception:
+    logger.debug('Failed to include analyst_review_router')
 try:
     from .ingest_controller_endpoints import router as unified_ingest_router
     app.include_router(unified_ingest_router)
@@ -7563,12 +7594,17 @@ async def incident_add_comment(iid: str, payload: dict, request: Request):
         raise HTTPException(status_code=404, detail='incident_not_found')
     return record
 
-DEFAULT_FRONTEND = os.getenv('DEFAULT_FRONTEND', 'react').lower()  # 'react' or 'console'
+DEFAULT_FRONTEND = os.getenv('DEFAULT_FRONTEND', 'react').lower()  # 'react', 'console', or 'investigate'
 
 # Serve frontend at root based on DEFAULT_FRONTEND toggle
 @app.get("/", include_in_schema=False)
 async def serve_root():
     # Prefer explicitly requested frontend
+    if DEFAULT_FRONTEND == 'investigate':
+        investigate_path = os.path.join(static_path, 'investigate.html')
+        if os.path.exists(investigate_path):
+            logger.info("Serving Investigation Console frontend at root")
+            return FileResponse(investigate_path)
     if DEFAULT_FRONTEND == 'console':
         # Prefer the LIVE design page if present
         live_path = os.path.join(static_path, 'janusec-platform-complete-LIVE.html')
