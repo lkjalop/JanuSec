@@ -38,7 +38,7 @@ FACTOR_TO_MITRE = {
     # Credential Access
     'credential:dump_cache': ['T1003'],
     'credential:phish': ['T1566.001'],
-    'credential:leak': ['T1081'],
+    'credential:leak': ['T1552.001'],
 
     # Discovery
     'discovery:network': ['T1046'],
@@ -273,7 +273,87 @@ FACTOR_TO_MITRE = {
     # Default fallbacks for unknown but useful factor prefixes
     'net': ['T1071'],
     'endpoint': ['T1059'],
-    'persistence': ['T1543','T1547']
+    'persistence': ['T1543','T1547'],
+
+    # ── URL Risk Scorer ────────────────────────────────────────────────────
+    'email:url_entropy_high':        ['T1566.001', 'T1027'],
+    'email:url_homoglyph':           ['T1566.001', 'T1036'],
+    'email:url_redirect_chain':      ['T1566.001', 'T1027.006'],
+    'email:url_fresh_domain':        ['T1566.001', 'T1583.001'],
+    'email:url_dga_candidate':       ['T1568', 'T1071.001'],
+
+    # ── AttachmentRiskAnalyzer ────────────────────────────────────────────
+    'email:attachment_double_ext':   ['T1566.001', 'T1036.007'],
+    'email:attachment_zip_bomb':     ['T1566.001', 'T1499'],
+    'email:attachment_ole_macro':    ['T1566.001', 'T1204.002', 'T1059.005'],
+    'email:attachment_rtf_exploit':  ['T1566.001', 'T1203', 'T1204.002'],
+    'email:attachment_html_smuggling': ['T1566.001', 'T1027.006'],
+    'email:attachment_polyglot':     ['T1566.001', 'T1036'],
+    'email:attachment_lnk_target':   ['T1566.001', 'T1547.009'],
+
+    # ── BECScoringModel ───────────────────────────────────────────────────
+    'email:bec_sender_anomaly':      ['T1566.003', 'T1036'],
+    'email:bec_replyto_mismatch':    ['T1566.003', 'T1036'],
+    'email:bec_first_contact':       ['T1566.003'],
+    'email:bec_display_name_spoof':  ['T1566.003', 'T1036'],
+    'email:bec_urgency_pressure':    ['T1566.003'],
+    'email:bec_lookalike_advanced':  ['T1566.003', 'T1036'],
+
+    # ── ProcessTreeAnomalyDetector ────────────────────────────────────────
+    'endpoint:process_tree_anomaly': ['T1059', 'T1566.001', 'T1204.002'],
+    'endpoint:cmdline_rarity_high':  ['T1059', 'T1027'],
+    'endpoint:orphan_process':       ['T1055', 'T1036'],
+    'endpoint:process_depth_spike':  ['T1055', 'T1059'],
+    'endpoint:lolbin_child_unusual': ['T1218', 'T1059'],
+    'endpoint:process_masquerade':   ['T1036.005', 'T1055'],
+
+    # ── PersistenceScoringModel ───────────────────────────────────────────
+    'endpoint:persistence_reg_run':      ['T1547.001'],
+    'endpoint:persistence_service_new':  ['T1543.003'],
+    'endpoint:persistence_task_new':     ['T1053.005'],
+    'endpoint:persistence_startup_lnk':  ['T1547.009'],
+    'endpoint:persistence_wmi_sub':      ['T1546.003'],
+    'endpoint:persistence_ifeo':         ['T1546.012'],
+    'endpoint:persistence_dll_search':   ['T1574.001'],
+    'endpoint:persistence_bootkit':      ['T1542.003'],
+    'endpoint:persistence_burst':        ['T1547', 'T1053'],
+    'endpoint:persistence_novel':        ['T1547', 'T1053'],
+    'endpoint:persistence_ld_preload':   ['T1574.006'],
+    'endpoint:persistence_profile_mod':  ['T1546.004'],
+    'endpoint:persistence_systemd_drop': ['T1543.002'],
+
+    # ── AdvancedEndpointThreats: Fileless ────────────────────────────────
+    'endpoint:fileless_reflective_load': ['T1055.001', 'T1620'],
+    'endpoint:fileless_process_hollow':  ['T1055.012'],
+    'endpoint:fileless_shellcode_alloc': ['T1055', 'T1620'],
+
+    # ── AdvancedEndpointThreats: eBPF / Kernel ───────────────────────────
+    'endpoint:ebpf_prog_load_unusual':   ['T1014', 'T1547'],
+    'endpoint:kernel_module_novel':      ['T1547.006', 'T1014'],
+    'endpoint:kernel_symbol_hook':       ['T1014', 'T1562'],
+    'endpoint:proc_hide_indicator':      ['T1014', 'T1562.001'],
+
+    # ── AdvancedEndpointThreats: Steganography ───────────────────────────
+    'endpoint:steg_tool_execution':      ['T1027', 'T1048'],
+    'endpoint:steg_image_entropy_flat':  ['T1027'],
+    'endpoint:steg_polyglot_image':      ['T1027', 'T1566.001'],
+
+    # ── AdvancedEndpointThreats: Supply Chain ────────────────────────────
+    'endpoint:npm_postinstall_exec':     ['T1195.001', 'T1059.001'],
+    'endpoint:pip_setup_exec':           ['T1195.001', 'T1059.004'],
+    'endpoint:build_tool_network':       ['T1195.001', 'T1071.001'],
+    'endpoint:dev_tool_modified':        ['T1195.001', 'T1554'],
+    'endpoint:ci_runner_escalation':     ['T1195.001', 'T1548'],
+
+    # ── AdvancedEndpointThreats: Macros ──────────────────────────────────
+    'endpoint:xlm_macro_execution':      ['T1137.001', 'T1204.002'],
+    'endpoint:dde_command_injection':    ['T1559.002', 'T1204.002'],
+    'endpoint:vba_environ_recon':        ['T1082', 'T1059.005'],
+
+    # ── AdvancedEndpointThreats: Ransomware (non-file-encryption) ────────
+    'endpoint:ransom_network_share_enum': ['T1021.002', 'T1083'],
+    'endpoint:ransom_backup_catalog_del': ['T1490'],
+    'endpoint:ransom_inhibit_recovery':   ['T1490'],
 }
 
 # Minimal, conservative ATT&CK associations for AI-specific factors to aid ATT&CK-only views.
