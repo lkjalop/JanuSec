@@ -138,10 +138,12 @@ class HopGraph:
         Path(self.wal_path).parent.mkdir(parents=True, exist_ok=True)
         Path(self.snapshot_path).parent.mkdir(parents=True, exist_ok=True)
         # Optional SQLite persistence backend (write-through)
+        # Enabled by default unless explicitly disabled. Override with
+        # HOPGRAPH_PERSISTENCE_ENABLED=0 to revert to WAL-only mode.
         self.backend = None
         self._prune_thread_started = False
         try:
-            _enabled = (os.getenv('HOPGRAPH_PERSISTENCE_ENABLED','0').lower() in {'1','true','yes'})
+            _enabled = os.getenv('HOPGRAPH_PERSISTENCE_ENABLED', '1').lower() not in {'0', 'false', 'no'}
             if _enabled:
                 try:
                     from src.core.graph.persistence.sqlite_backend import SQLiteHopGraphBackend  # type: ignore

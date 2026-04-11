@@ -51,12 +51,27 @@ def _providers() -> List[str]:
 
 
 def _autopoll_api_key() -> str:
-    return (
+    key = (
         os.getenv('CONNECTOR_AUTOPOLL_API_KEY')
         or os.getenv('API_KEY')
         or os.getenv('DEFAULT_API_KEY')
-        or 'devkey123'
     )
+    if not key:
+        # Fail closed in production — operators must configure an API key.
+        # Only fall back to devkey123 when TEST_HELPERS_ENABLED is explicitly set
+        # to avoid shipping an open back-door in production deployments.
+        if os.getenv('TEST_HELPERS_ENABLED', '0').lower() in {'1', 'true', 'yes'}:
+            return 'devkey123'
+        import warnings
+        warnings.warn(
+            'CONNECTOR_AUTOPOLL_API_KEY is not configured. '
+            'Connector auto-poll will fail authentication. '
+            'Set CONNECTOR_AUTOPOLL_API_KEY or API_KEY environment variable.',
+            RuntimeWarning,
+            stacklevel=2,
+        )
+        return ''
+    return key
 
 
 def _connectors_for_provider(provider: str) -> List[str]:

@@ -993,6 +993,12 @@ async def lifespan(app: FastAPI):
             _start_flush(app)
         except Exception:
             pass
+        # Start nightly assessment backup scheduler
+        try:
+            from src.backup.assessment_backup import schedule_nightly_backup as _sched_backup
+            _sched_backup()
+        except Exception:
+            pass
         try:
             await asyncio.sleep(0)  # yield so the task is scheduled
         except Exception:
