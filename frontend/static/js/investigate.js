@@ -329,8 +329,11 @@
 
   $('btnAddMore').addEventListener('click', function () { fileInput.click(); });
 
-  // Personas requiring human-gate approval before reports are generated
+  // Personas requiring human-gate approval before reports are generated.
+  // CISO/Executive/Audit = management gate (analyst must certify findings).
+  // SOC/TH/Compliance = NLP confirmation gate (analyst writes free-text verdict).
   var GATED_PERSONAS = ['ciso', 'executive', 'audit'];
+  var NLP_GATED_PERSONAS = ['soc_analyst', 'threat_hunter', 'compliance'];  // require analyst NLP confirmation
 
   // Analyst approves the gate — POSTs to backend and unlocks gated persona chips
   function approveHumanGate() {
@@ -356,6 +359,37 @@
     }).catch(function () {
       toast('Gate approval failed — server error', 'error');
     });
+  }
+
+  // ── NLP confirmation gate (SOC / Threat Hunter / Compliance) ─────────────
+  // Each NLP-gated persona shows a text-input where the analyst writes their
+  // verdict before the report is displayed. The text is submitted to the gate
+  // endpoint with gate_verdict='nlp_confirm' so it is persisted in the audit.
+  function submitNlpGate(persona, text) {
+    var aid = state.assessmentId;
+    if (!aid) { toast('Run analysis first', 'error'); return; }
+    var nlpText = (text || '').trim();
+    if (nlpText.length < 10) { toast('Please enter at least 10 characters to confirm your assessment.', 'error'); return; }
+    fetch('/api/v1/assessments/' + encodeURIComponent(aid) + '/gate', {
+      method: 'POST',
+      headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders()),
+      body: JSON.stringify({
+        gate_verdict: 'nlp_confirm',
+        reviewer_tag: persona,
+        notes: nlpText,
+        gate_personas: [persona],
+      }),
+    }).then(function (r) { return r.json(); }).then(function (d) {
+      if (d.ok) {
+        state._nlpGateConfirmed = state._nlpGateConfirmed || {};
+        state._nlpGateConfirmed[persona] = nlpText;
+        toast('Assessment confirmed — ' + PERSONA_LABELS[persona] + ' report generated', 'success');
+        renderPersonaChips();
+        renderReport();
+      } else {
+        toast('Confirmation failed: ' + (d.detail || 'unknown error'), 'error');
+      }
+    }).catch(function () { toast('Confirmation failed — server error', 'error'); });
   }
 
   // ── Persona chip rendering ───────────────────────────────────────────────
@@ -385,6 +419,18 @@
       container.appendChild(chip);
     });
     // Gate approval button — appears once an assessment exists
+    // NLP-gate confirmation badges for SOC/TH/Compliance personas
+    if (state.assessmentId) {
+      NLP_GATED_PERSONAS.forEach(function (np) {
+        var confirmed = (state._nlpGateConfirmed || {})[np];
+        if (!confirmed) return;
+        var badge = document.createElement('span');
+        badge.style.cssText = 'margin-left:4px;font-size:10px;padding:2px 6px;border-radius:10px;background:rgba(63,168,96,.15);color:#3FA860;border:1px solid rgba(63,168,96,.3);';
+        badge.textContent = '✓ ' + (PERSONA_LABELS[np] || np);
+        badge.title = 'NLP-confirmed: ' + confirmed.slice(0, 80);
+        container.appendChild(badge);
+      });
+    }
     if (state.assessmentId) {
       var gateBtn = document.createElement('button');
       gateBtn.id = 'btnApproveGate';
@@ -481,9 +527,9 @@
       // Step 3: Build enriched evidence rows from assessment
       buildEvidenceFromAssessment(assessment);
 
-      // Step 3b: Render graph + timeline visualizations
+      // Step 3b: Render graph + timeline visualizations  [B1 fix: graphCanvas not graphContent]
       $('graphEmpty').style.display = 'none';
-      $('graphContent').style.display = '';
+      $('graphCanvas').style.display = 'flex';
       $('timelineEmpty').style.display = 'none';
       $('timelineContent').style.display = '';
       renderGraph(state.evidenceRows);
@@ -688,6 +734,7 @@
       tr.setAttribute('data-idx', row.row_index);
       tr.innerHTML =
         '<td>' + row.row_index + '</td>' +
+        '<td><span class="corr-icon" title="' + (row.type === 'correlated' ? 'Correlated across sources' : 'Isolated') + '">' + (row.type === 'correlated' ? '●' : '') + '</span></td>' +
         '<td><span class="text-xs">' + escHtml(shortSource(row.source)) + '</span></td>' +
         '<td><span class="sev-pill sev-pill--' + row.severity + '">' + row.severity.toUpperCase() + '</span></td>' +
         '<td><span class="text-xs">' + escHtml(row.type) + '</span></td>' +
@@ -776,34 +823,44 @@
   });
 
   async function requestRowLLM(idx, btn) {
+    // Get selected thinking mode from the dropdown (if present)
+    var modeEl = document.getElementById('thinkingModeSelect');
+    var thinkingMode = (modeEl && modeEl.value) || 'preserved';
     if (btn) { btn.disabled = true; btn.textContent = '…'; }
     try {
       if (!state.assessmentId) { toast('No assessment — run Analyze first', 'error'); return; }
       var row = state.allRows[idx] || {};
-      var resp = await fetch('/api/v1/csv/deep_analyze', {
+      // Use the tier2_thinking endpoint for full thinking-mode support (B5 fix)
+      var resp = await fetch('/api/v1/csv/tier2_thinking', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({
           rows: [{ row_index: idx, raw: row }],
-          options: { auto_llm: true },
           org: localStorage.getItem('org') || 'local',
+          assessment_id: state.assessmentId,
+          persona: state.currentPersona || 'soc_analyst',
+          thinking_mode: thinkingMode,
+          thinking_budget: 1024,
         }),
       });
-      if (!resp.ok) throw new Error('LLM request failed');
+      if (!resp.ok) throw new Error('LLM request failed: ' + resp.status);
       var data = await resp.json();
-      // Poll for the LLM result
-      var aid = data.assessment_id;
-      var result = await pollAssessment(aid, 60000);
-      var llmRows = result.llm_rows || [];
-      if (llmRows.length > 0 && state.evidenceRows) {
-        var evRow = state.evidenceRows.find(function (r) { return r.row_index === idx; });
-        if (evRow) {
-          evRow._hasLlm = true;
-          evRow._llmSummary = llmRows[0];
-          showDetail(evRow);
-        }
+      // Compose the LLM summary object with thinking blocks
+      var llmSummary = {
+        summary: data.text || '',
+        thinking_blocks: data.thinking_blocks || [],
+        thinking_mode: data.thinking_mode || thinkingMode,
+        reasoning_summary: data.reasoning_summary || '',
+        meta: data.meta || {},
+      };
+      var evRow = state.evidenceRows && state.evidenceRows.find(function (r) { return r.row_index === idx; });
+      if (evRow) {
+        evRow._hasLlm = true;
+        evRow._llmSummary = llmSummary;
+        showDetail(evRow);
       }
-      toast('T1 summary generated for row ' + idx, 'success');
+      renderEvidenceTable(state.evidenceRows || []);
+      toast('T1 summary generated (' + thinkingMode + ' thinking) for row ' + idx, 'success');
     } catch (err) {
       toast('LLM error: ' + err.message, 'error');
     } finally {
@@ -857,6 +914,7 @@
     var mappings = assessment.mappings || {};
     var rows = state.allRows || [];
     var evRows = state.evidenceRows || [];
+    var persona = state.currentPersona || 'soc_analyst';
 
     // Build headline based on severity distribution
     var critCount = evRows.filter(function (r) { return r.severity === 'critical'; }).length;
@@ -877,8 +935,32 @@
       headline = 'P3 — ' + totalRows + ' events reviewed | No confirmed threat';
     }
 
-    // Build report sections
+    // Build report sections — persona-differentiated content
     var sections = [];
+
+    // ── Persona-specific introduction ────────────────────────────────────
+    var personaIntros = {
+      soc_analyst: 'You are reviewing this dataset as a <b>Tier 1 SOC Analyst</b>. Your objective is triage: ' +
+        'identify true-positive events, isolate affected hosts, and escalate confirmed findings within SLA. ' +
+        'Evidence is ranked by triage score. Focus on Critical/High correlated events first.',
+      ciso: 'This report is framed for <b>CISO-level review</b>. The focus is on business risk, control-gap ' +
+        'remediation, and board communication. Precise technical details are available in the Evidence tab.',
+      executive: 'This <b>Executive Summary</b> conveys material risk, estimated business impact, and immediate actions ' +
+        'in plain language. No technical jargon. Board and management communication ready.',
+      threat_hunter: 'You are operating as a <b>Threat Hunter</b>. This view emphasises behavioral rarity, correlated ' +
+        'kill-chain paths, and hypothesis-driven hunting leads. Prioritize anomalous events that evade signature detection.',
+      forensics: 'This <b>Digital Forensics</b> view supports court-admissible documentation. Each finding includes ' +
+        'its chain of custody context. Preserve evidence order and do not apply remediation before forensic capture.',
+      compliance: 'This <b>Compliance review</b> maps findings against NDB Scheme, APRA CPS 234, ISO 27001, and relevant ' +
+        'controls. Each critical event includes a notification-trigger assessment.',
+      audit: 'This <b>Audit-ready report</b> documents control effectiveness, identifies nonconformities, and tracks ' +
+        'remediation obligations per ISO 19011 audit standards.',
+      mssp: 'This report is framed for <b>MSSP operations</b>. Multi-tenant context is included. SLA breach risks, ' +
+        'escalation thresholds, and client notification requirements are highlighted.',
+    };
+    if (personaIntros[persona]) {
+      sections.push({ title: 'Analyst Context — ' + (PERSONA_LABELS[persona] || persona), html: '<p>' + personaIntros[persona] + '</p>' });
+    }
 
     // What We Found
     var findingsHtml = '<p>';
@@ -893,17 +975,32 @@
     findingsHtml += '</p>';
     sections.push({ title: 'What We Found', html: findingsHtml });
 
-    // Immediate Actions
-    var actionsHtml = '<ul>';
-    if (critCount > 0) {
-      actionsHtml += '<li><b>NOW:</b> Review the ' + critCount + ' critical event' + (critCount !== 1 ? 's' : '') + ' in the Evidence tab — confirm whether affected entities require isolation.</li>';
-      actionsHtml += '<li><b>NOW:</b> Check if correlated entities appear in other monitoring tools not included in this upload.</li>';
-    }
-    if (highCount > 0) {
-      actionsHtml += '<li><b>4h:</b> Investigate ' + highCount + ' high-severity events — validate whether observed access changes were authorized.</li>';
-    }
-    actionsHtml += '<li><b>Next:</b> Use the Evidence tab to drill into individual events. Click T1 for AI-assisted summary of any row.</li>';
-    actionsHtml += '</ul>';
+    // Persona-specific action lists
+    var actionsByPersona = {
+      soc_analyst: critCount > 0
+        ? '<li><b>NOW:</b> Isolate affected entities — open incident before any remediation. Do not reboot (volatile memory matters).</li>' +
+          '<li><b>NOW:</b> Correlated events = same incident, do not close independently.</li>' +
+          '<li><b>60min:</b> Confirm or deny each critical finding. Post triage result to incident ticket.</li>'
+        : '<li><b>Next:</b> Review all High events within 4h SLA. Mark benign activity as tuning candidates.</li>',
+      threat_hunter: '<li><b>Pivot:</b> For each correlated entity, pivot to MITRE ATT&CK Execution / Persistence sub-techniques.</li>' +
+        '<li><b>Hunt:</b> Check for LOLBAS usage and beacon jitter patterns in Network source.</li>' +
+        '<li><b>IOC:</b> Extract process hashes, destination IPs, and JA3 fingerprints for proactive hunting across other tenants.</li>',
+      forensics: '<li><b>Preserve:</b> Memory dump and full PCAP before containment — capture per ISO 19011 §6.4.5.</li>' +
+        '<li><b>Chain of custody:</b> Document each artefact with hash, timestamp, and analyst identity before transfer.</li>' +
+        '<li><b>Do NOT:</b> Apply patches or cleanup until forensic capture is complete.</li>',
+      compliance: '<li><b>NDB:</b> Assess whether eligible data breach threshold under s.26WB is met (serious harm test).</li>' +
+        '<li><b>CPS 234:</b> Determine if the finding meets APRA §36 "material incident" notification obligation.</li>' +
+        '<li><b>ISO 27001:</b> Log each critical event as a Nonconformity under clause 10.1 with remediation owner and date.</li>',
+      ciso: '<li><b>Risk:</b> Review board risk register — update threat landscape rating if P1 confirmed.</li>' +
+        '<li><b>Control gaps:</b> Identify which Annex A controls failed and schedule remediation review.</li>' +
+        '<li><b>Communication:</b> Prepare brief for board/exec within 24h if P1 confirmed; include business impact and recovery plan.</li>',
+    };
+    var defaultActions = (critCount > 0
+      ? '<li><b>NOW:</b> Review the ' + critCount + ' critical event' + (critCount !== 1 ? 's' : '') + ' in the Evidence tab.</li>'
+      : '') +
+      (highCount > 0 ? '<li><b>4h:</b> Investigate ' + highCount + ' high-severity events.</li>' : '') +
+      '<li><b>Next:</b> Use Evidence tab. Click T1 for per-row AI summary.</li>';
+    var actionsHtml = '<ul>' + (actionsByPersona[persona] || defaultActions) + '</ul>';
     sections.push({ title: 'Immediate Actions', html: actionsHtml });
 
     // Source Summary
@@ -947,6 +1044,45 @@
 
   function renderReport() {
     var artifact = state.reportArtifacts[state.currentPersona];
+    var persona = state.currentPersona || 'soc_analyst';
+
+    // NLP gate: for SOC/TH/Compliance, if not yet confirmed, show confirmation form
+    if (artifact && NLP_GATED_PERSONAS.indexOf(persona) >= 0 && state.assessmentId) {
+      var confirmed = (state._nlpGateConfirmed || {})[persona];
+      if (!confirmed) {
+        $('reportEmpty').style.display = 'none';
+        $('reportLoading').style.display = 'none';
+        $('reportContent').style.display = '';
+        var headlineEl = $('reportHeadline');
+        headlineEl.textContent = 'NLP Confirmation Required — ' + (PERSONA_LABELS[persona] || persona);
+        headlineEl.style.borderLeftColor = 'var(--accent)';
+        var body = $('reportBody');
+        var nlpPrompts = {
+          soc_analyst: 'Document your triage verdict: summarise what you have reviewed, any true positives confirmed, and your recommended immediate action.',
+          threat_hunter: 'Record your hunting hypothesis: what technique or attacker behaviour are you assessing, and what evidence confirms or denies it?',
+          compliance: 'State your compliance determination: which regulatory obligations are triggered, and what notification or remediation actions are required?',
+        };
+        body.innerHTML =
+          '<div class="report-section">' +
+          '<div class="report-section__title">Analyst NLP Confirmation — ' + escHtml(PERSONA_LABELS[persona] || persona) + '</div>' +
+          '<div class="report-section__body">' +
+          '<p style="font-size:12px;">' + escHtml(nlpPrompts[persona] || 'Confirm your assessment before the report is generated.') + '</p>' +
+          '<textarea id="nlpGateInput" style="width:100%;min-height:80px;margin-top:8px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);padding:8px;font-family:inherit;font-size:12px;resize:vertical;" placeholder="Enter your confirmation..."></textarea>' +
+          '<div style="margin-top:8px;display:flex;gap:8px;">' +
+          '<button class="btn-primary" id="btnNlpConfirm" style="font-size:12px;padding:6px 14px;">\uD83E\uDD16 Confirm &amp; Generate Report</button>' +
+          '</div></div></div>';
+        var confirmBtn = document.getElementById('btnNlpConfirm');
+        if (confirmBtn) {
+          confirmBtn.addEventListener('click', function () {
+            var txt = (document.getElementById('nlpGateInput') || {}).value || '';
+            submitNlpGate(persona, txt);
+          });
+        }
+        renderPersonaChips();
+        return;
+      }
+    }
+
     if (!artifact) {
       $('reportEmpty').style.display = '';
       $('reportContent').style.display = 'none';
@@ -975,6 +1111,15 @@
         '<div class="report-section__body">' + sec.html + '</div>';
       body.appendChild(div);
     });
+
+    // Show NLP confirmation badge if confirmed
+    var confirmed = (state._nlpGateConfirmed || {})[persona];
+    if (confirmed) {
+      var badge = document.createElement('div');
+      badge.style.cssText = 'margin-top:10px;padding:8px 12px;background:rgba(63,168,96,.1);border:1px solid rgba(63,168,96,.3);border-radius:6px;font-size:11px;color:#3FA860;';
+      badge.innerHTML = '<b>\u2713 NLP Confirmed by ' + escHtml(PERSONA_LABELS[persona] || persona) + ':</b> ' + escHtml(confirmed.slice(0, 160)) + (confirmed.length > 160 ? '\u2026' : '');
+      body.appendChild(badge);
+    }
 
     renderPersonaChips();
   }
@@ -1177,10 +1322,33 @@
       var llm = row._llmSummary;
       html += '<div class="report-section"><div class="report-section__title">AI Summary (T1)</div><div class="report-section__body">';
       html += '<p>' + escHtml(llm.summary || llm.llm_summary || llm.narrative || JSON.stringify(llm).substring(0, 500)) + '</p>';
+      // Render thinking blocks if present (B5: LLM thinking modes)
+      var blocks = llm.thinking_blocks || [];
+      if (blocks.length) {
+        var thinkBlocks = blocks.filter(function(b) { return b.type === 'thinking'; });
+        var thinkMode = llm.thinking_mode || 'preserved';
+        if (thinkBlocks.length) {
+          html += '<details style="margin-top:8px;font-size:11px;"><summary style="cursor:pointer;color:var(--text-muted);font-weight:500;">\uD83E\uDDE0 Chain-of-Thought — ' + escHtml(thinkMode) + ' (' + thinkBlocks.length + ' turn' + (thinkBlocks.length !== 1 ? 's' : '') + ')</summary>';
+          html += '<div style="margin-top:6px;display:flex;flex-direction:column;gap:6px;">';
+          thinkBlocks.forEach(function(b) {
+            html += '<div style="padding:6px 10px;background:rgba(74,99,231,.08);border-left:3px solid var(--accent);border-radius:0 4px 4px 0;font-size:11px;color:var(--text-secondary);">' +
+              '<span style="font-size:10px;font-weight:600;color:var(--accent);letter-spacing:.04em;">Turn ' + (b.turn || '?') + '</span><br>' +
+              escHtml(b.content) + '</div>';
+          });
+          html += '</div></details>';
+        }
+        if (llm.reasoning_summary) {
+          html += '<p style="margin-top:6px;font-size:11px;color:var(--text-muted);font-style:italic;">\uD83D\uDD0D Reasoning summary: ' + escHtml(llm.reasoning_summary) + '</p>';
+        }
+      }
       html += '</div></div>';
     } else {
-      html += '<div class="mt-3"><button class="btn-primary" id="btnDetailLLM" data-idx="' + row.row_index + '">';
-      html += '<i data-lucide="sparkles" style="width:14px;height:14px;"></i> Generate T1 Summary</button></div>';
+      html += '<div class="mt-3" style="display:flex;gap:6px;flex-wrap:wrap;">';
+      html += '<button class="btn-primary" id="btnDetailLLM" data-idx="' + row.row_index + '">';
+      html += '<i data-lucide="sparkles" style="width:14px;height:14px;"></i> Generate T1 Summary</button>';
+      // Thinking mode dropdown
+      html += '<select id="thinkingModeSelect" style="font-size:11px;padding:4px 8px;"><option value="preserved">Preserved Thinking</option><option value="turn_level">Turn-Level Thinking</option><option value="interleaved">Interleaved Thinking</option></select>';
+      html += '</div>';
     }
 
     // Raw data (collapsed)
@@ -1388,6 +1556,41 @@
   $('btnExportPDF').addEventListener('click', function () {
     // Trigger server-side PDF generation
     window.open('/api/v1/report/ingestion?format=html&include_model=true&include_scenarios=true', '_blank');
+  });
+
+  // ── Send to SIEM (B4 fix: was unwired) ──────────────────────────────────
+  $('btnSendSIEM').addEventListener('click', function () {
+    if (!state.evidenceRows || !state.evidenceRows.length) { toast('No evidence to send — run Analyze first', 'error'); return; }
+    var critCount = state.evidenceRows.filter(function (r) { return r.severity === 'critical'; }).length;
+    var highCount = state.evidenceRows.filter(function (r) { return r.severity === 'high'; }).length;
+    var payload = {
+      source: 'janusec-investigation',
+      assessment_id: state.assessmentId || null,
+      persona: state.currentPersona || 'soc_analyst',
+      org: localStorage.getItem('org') || 'local',
+      event_count: state.evidenceRows.length,
+      critical: critCount,
+      high: highCount,
+      headline: state.assessment && (state.assessment.headline || state.assessment.report_title) || (state.evidenceRows.length + ' events'),
+      evidence_summary: state.evidenceRows.slice(0, 20).map(function (r) {
+        return { severity: r.severity, entity: r.entity, description: r.description, triage_score: r.triage_score };
+      }),
+    };
+    fetch('/api/v1/webhooks/test', {
+      method: 'POST',
+      headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders()),
+      body: JSON.stringify({ service: 'siem', payload: payload }),
+    }).then(function (r) { return r.json(); }).then(function (d) {
+      toast('Dispatched to SIEM — ' + (d.message || d.status || 'ok'), 'success');
+    }).catch(function (e) {
+      // Graceful degradation: copy to clipboard as JSON for manual SIEM paste
+      try {
+        navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
+        toast('SIEM webhook unavailable — evidence copied to clipboard', 'error');
+      } catch (_) {
+        toast('SIEM dispatch failed: ' + e.message, 'error');
+      }
+    });
   });
 
   // ── Graph Viz B: D3 Force Graph ──────────────────────────────────────────

@@ -328,6 +328,9 @@
     .toast--error { border-color: rgba(229,72,72,.4); }
     .toast--success { border-color: rgba(63,168,96,.4); }
 
+    .detail-backdrop { display: none; }
+    .detail-backdrop.open { display: block; }
+
     /* ── Misc ──────────────────────────────────────────────────────── */
     .text-xs { font-size: 11px; }
     .text-sm { font-size: 13px; }
@@ -710,6 +713,9 @@
     </div><!-- /investigate-layout -->
   </div><!-- /main-col -->
 </div><!-- /page -->
+
+<!-- ── Detail backdrop (click-outside-to-close) ── -->
+<div id="detailBackdrop" style="display:none;position:fixed;inset:0;z-index:90;background:rgba(0,0,0,0.35);" class="detail-backdrop"></div>
 
 <div class="toast-container" id="toastContainer"></div>
 

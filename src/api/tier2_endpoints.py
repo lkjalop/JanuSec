@@ -228,4 +228,111 @@ async def tier2_sse(request: Request):
             yield f"data: {json.dumps(c)}\n\n"
 
     return StreamingResponse(emitter_fallback(), media_type='text/event-stream')
+
+
+# ── Thinking modes endpoint ───────────────────────────────────────────────
+# Supports three modes:
+#   - preserved  : full extended-thinking block preserved alongside final answer
+#   - turn_level : reasoning reconstructed turn-by-turn (each chain-of-thought step)
+#   - interleaved: thinking and text blocks interleaved in a single streaming response
+@router.post('/tier2_thinking')
+async def tier2_thinking(request: Request):
+    """Return LLM analysis with configurable thinking-mode metadata.
+
+    Request JSON keys:
+        rows         - list of evidence row dicts (required)
+        org          - tenant id (optional)
+        assessment_id- assessment for context (optional)
+        thinking_mode - 'preserved' | 'turn_level' | 'interleaved' (default: 'preserved')
+        thinking_budget - max tokens for thinking (default: 1024)
+    Response keys (always present even in mock):
+        text          - final answer text
+        thinking_mode - mode used
+        thinking_blocks - list of {type:'thinking'|'text', content: str, turn: int}
+        reasoning_summary - 1-sentence distillation of chain-of-thought
+        meta          - provider / timing info
+    """
+    try:
+        payload: Dict[str, Any] = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail='invalid_payload')
+
+    thinking_mode = str(payload.get('thinking_mode') or 'preserved').lower()
+    if thinking_mode not in ('preserved', 'turn_level', 'interleaved'):
+        raise HTTPException(status_code=400, detail='invalid_thinking_mode — use preserved|turn_level|interleaved')
+    thinking_budget = int(payload.get('thinking_budget') or 1024)
+    rows = payload.get('rows') or []
+    org = payload.get('org') or None
+
+    prompt = _compose_prompt(payload)
+    cost_estimate = 0.015 * max(1, len(rows)) + 0.005 * (thinking_budget // 512)
+    _finops_guard(cost_estimate, tenant=org)
+
+    # Build thinking blocks — mock-mode produces synthetic chain-of-thought;
+    # real Ollama/Claude providers use extended thinking if available.
+    thinking_blocks: list[dict] = []
+    reasoning_summary = ''
+    final_text = ''
+
+    if os.getenv('LLM_MOCK', '0').lower() in ('1', 'true', 'yes'):
+        # Deterministic mock thinking — realistic chain-of-thought structure
+        import hashlib as _h
+        h = _h.sha256(prompt.encode()).hexdigest()[:8]
+        mock_steps = [
+            f'[Turn 1] Parsing {len(rows)} evidence rows. Checking for cross-source correlation by entity overlap.',
+            f'[Turn 2] Severity distribution analysis: identifying critical/high anchor events for triage priority.',
+            f'[Turn 3] Mapping indicators to MITRE ATT&CK. Checking LOLBAS patterns and beacon jitter signatures.',
+            f'[Turn 4] Composing persona-tailored narrative for {payload.get("persona", "soc_analyst")}: focus on actionable triage steps.',
+        ]
+        if thinking_mode == 'preserved':
+            # All thinking preserved as a single block, then final answer
+            thinking_blocks = [
+                {'type': 'thinking', 'content': '\n'.join(mock_steps), 'turn': 0},
+                {'type': 'text', 'content': f'[Mock-{h}] Analysis complete. {len(rows)} events evaluated.', 'turn': 1},
+            ]
+        elif thinking_mode == 'turn_level':
+            for i, step in enumerate(mock_steps):
+                thinking_blocks.append({'type': 'thinking', 'content': step, 'turn': i + 1})
+            thinking_blocks.append({'type': 'text', 'content': f'[Mock-{h}] Final answer after {len(mock_steps)} reasoning turns.', 'turn': len(mock_steps) + 1})
+        else:  # interleaved
+            for i, step in enumerate(mock_steps):
+                thinking_blocks.append({'type': 'thinking', 'content': step, 'turn': i + 1})
+                thinking_blocks.append({'type': 'text', 'content': f'Interim observation {i+1}: {step.split("]",1)[-1].strip()[:80]}', 'turn': i + 1})
+        reasoning_summary = f'Chain-of-thought ({len(mock_steps)} turns): {mock_steps[-1]}'
+        final_text = next((b['content'] for b in reversed(thinking_blocks) if b['type'] == 'text'), 'Analysis complete.')
+    else:
+        # Real LLM path — request extended thinking if supported
+        resp_dict = _generate_tier2_response(prompt, payload)
+        base_text = resp_dict.get('text', '') if isinstance(resp_dict, dict) else str(resp_dict)
+        meta = resp_dict.get('meta', {}) if isinstance(resp_dict, dict) else {}
+        # If the provider returned thinking_blocks, use them; otherwise synthesise from text
+        raw_blocks = meta.get('thinking_blocks') or []
+        if raw_blocks:
+            thinking_blocks = raw_blocks
+        else:
+            # Strip out any <thinking>…</thinking> tags from the text if present
+            import re as _re
+            think_pat = _re.compile(r'<thinking>(.*?)</thinking>', _re.DOTALL | _re.IGNORECASE)
+            found = think_pat.findall(base_text)
+            clean_text = think_pat.sub('', base_text).strip()
+            if found:
+                thinking_blocks = [{'type': 'thinking', 'content': t.strip(), 'turn': i+1} for i, t in enumerate(found)]
+                thinking_blocks.append({'type': 'text', 'content': clean_text, 'turn': len(found)+1})
+            else:
+                thinking_blocks = [{'type': 'text', 'content': base_text, 'turn': 1}]
+        final_thoughts = [b['content'] for b in thinking_blocks if b.get('type') == 'thinking']
+        reasoning_summary = final_thoughts[-1][:200] if final_thoughts else ''
+        final_text = next((b['content'] for b in reversed(thinking_blocks) if b['type'] == 'text'), base_text)
+
+    return JSONResponse({
+        'status': 'ok',
+        'thinking_mode': thinking_mode,
+        'thinking_blocks': thinking_blocks,
+        'reasoning_summary': reasoning_summary,
+        'text': final_text,
+        'cost_estimate': cost_estimate,
+        'assessment_id': payload.get('assessment_id'),
+        'meta': {'provider': 'mock' if os.getenv('LLM_MOCK', '0') != '0' else 'live', 'thinking_budget': thinking_budget},
+    })
+
 __all__ = ["router"]
