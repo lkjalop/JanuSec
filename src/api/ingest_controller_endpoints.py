@@ -24,34 +24,51 @@ _BATCH_MAX = int(os.getenv('INGEST_BATCH_MAX','250') or 250)
 _FLUSH_INTERVAL = float(os.getenv('INGEST_FLUSH_INTERVAL_SECONDS','1.5') or 1.5)
 _EWMA_ALPHA_BASE = float(os.getenv('ADAPTIVE_EWMA_BASE_ALPHA','0.6') or 0.6)
 
+# Module-level stores — persist across requests reliably regardless of whether
+# app.state is stable (Starlette TestClient can recreate State between requests
+# in some configurations, especially when asyncio.Queue is involved in the init dict).
+_INGEST_RATE_BUCKETS: Dict[str, Dict[str, Any]] = {}
+_INGEST_STATE: Dict[str, Any] = {}  # singleton ingest state, keyed by app id
+
+# Fallback global singleton for cases where app id is unstable
+_GLOBAL_INGEST_STATE: Dict[str, Any] = {}
+
 # Canonical field set for downstream HopGraph / ranking logic.
 CANONICAL_FIELDS = [
     'user','host','process','file_hash','domain','ip','ip_dst','cloud_resource','role',
     'proto','port','port_dst'  # added for Suricata adapter enrichment
 ]
 
+def _make_fresh_state() -> Dict[str, Any]:
+    return {
+        'stats': {},
+        'batch': [],
+        'factor_counts': {},
+        'factor_smoothed': {},
+        'ewma_alpha': _EWMA_ALPHA_BASE,
+        'sse_queue': asyncio.Queue(maxsize=1000),
+        'enrichment_ready': {'asn': False, 'kev': False, 'epss': False},
+        'suppressed_factors': set(),
+        'rate': {},
+        'hmac_secrets': [],
+        'volatility_history': [],
+        'last_alpha_adjust_ts': 0.0,
+        'event_index': {},
+    }
+
+
 def _get_state(app) -> Dict[str, Any]:
-    if not hasattr(app.state, 'unified_ingest_state'):
-        app.state.unified_ingest_state = {
-            'stats': {},            # sensor -> {count,last_ts,unknown_fields:set}
-            'batch': [],            # list of canonical envelopes pending flush
-            'factor_counts': {},    # factor -> raw count
-            'factor_smoothed': {},  # factor -> smoothed value
-            'ewma_alpha': _EWMA_ALPHA_BASE,
-            'sse_queue': asyncio.Queue(maxsize=1000),
-            'enrichment_ready': {
-                'asn': False,
-                'kev': False,
-                'epss': False,
-            },
-            'suppressed_factors': set(),  # analyst-suppressed (do not emit in SSE deltas)
-            'rate': {},  # sensor -> {tokens, last_refill}
-            'hmac_secrets': [],  # list of {'secret':str,'added':ts,'expires':ts|None}
-            'volatility_history': [],  # list of {'ts':ts,'volatility':v,'alpha':a,'top_factors':[(factor,count),...]}
-            'last_alpha_adjust_ts': 0.0,
-            'event_index': {},       # event_id -> envelope (lightweight index)
-        }
-    return app.state.unified_ingest_state
+    # Primary: use global singleton so state persists regardless of app id stability.
+    # The global singleton is initialized once and reused for the lifetime of the module.
+    global _GLOBAL_INGEST_STATE
+    if not _GLOBAL_INGEST_STATE:
+        _GLOBAL_INGEST_STATE.update(_make_fresh_state())
+    # Also mirror to app.state for callers that access it via request.app.state
+    try:
+        app.state.unified_ingest_state = _GLOBAL_INGEST_STATE
+    except Exception:
+        pass
+    return _GLOBAL_INGEST_STATE
 
 
 async def _get_soar_engine(app) -> SOARPlaybookEngine | None:
@@ -177,8 +194,8 @@ def _canonical_envelope(sensor: str, raw: Dict[str, Any]) -> Dict[str, Any]:
             # Defer attaching to env['raw'] until raw assigned below
             if wazuh_cats:
                 env['_wazuh_rule_categories_pending'] = wazuh_cats
-    else:
-        # Generic mapping
+    elif s not in {'sysmon','endpoint','wef','etw','cloudtrail'}:
+        # Generic mapping — only for sensors not handled above
         env['ip'] = raw.get('ip') or raw.get('src_ip')
         env['ip_dst'] = raw.get('ip_dst') or raw.get('dest_ip')
         env['domain'] = raw.get('domain')
@@ -241,15 +258,23 @@ def _rate_check(state: Dict[str, Any], sensor: str) -> bool:
     capacity = int(os.getenv('INGEST_RATE_CAPACITY','200') or 200)
     refill_per_sec = float(os.getenv('INGEST_RATE_REFILL_PER_SEC','50') or 50.0)
     now = time.time()
-    bucket = state['rate'].setdefault(sensor, {'tokens': capacity, 'last_refill': now})
+    # Use module-level bucket store for reliable persistence across requests.
+    # Also mirror into state['rate'] for metrics/status endpoints.
+    bucket = _INGEST_RATE_BUCKETS.get(sensor)
+    # Reset bucket when capacity env var changes (e.g. test overrides)
+    if bucket is None or bucket.get('_capacity') != capacity:
+        bucket = {'tokens': capacity, 'last_refill': now, '_capacity': capacity}
+        _INGEST_RATE_BUCKETS[sensor] = bucket
     # Refill
     elapsed = now - bucket['last_refill']
     if elapsed > 0:
         bucket['tokens'] = min(capacity, bucket['tokens'] + elapsed * refill_per_sec)
         bucket['last_refill'] = now
     if bucket['tokens'] < 1:
+        state['rate'][sensor] = bucket
         return False
     bucket['tokens'] -= 1
+    state['rate'][sensor] = bucket
     return True
 
 def _factorize(sensor: str, env: Dict[str, Any]) -> List[str]:
@@ -522,6 +547,30 @@ def setup_lifespan(app):  # pragma: no cover
         # If lifespan attachment fails, silently continue (tests will still run)
         pass
 
+@router.post('/force_flush', include_in_schema=False)
+async def ingest_force_flush_early(request: Request) -> Dict[str, Any]:
+    """Registered before /{sensor} wildcard so /force_flush is matched correctly."""
+    app = request.app
+    state = _get_state(app)
+    batch = state['batch'][:]
+    state['batch'].clear()
+    new_factors: List[str] = []
+    for ev in batch:
+        facs = _factorize(ev.get('sensor', 'generic'), ev)
+        for f in facs:
+            state['factor_counts'][f] = state['factor_counts'].get(f, 0) + 1
+            prev = state['factor_smoothed'].get(f, 0.0)
+            cur = state['factor_counts'][f]
+            state['factor_smoothed'][f] = state['ewma_alpha'] * cur + (1 - state['ewma_alpha']) * prev
+        new_factors.extend(facs)
+    volatility = _compute_volatility(state)
+    top_factors = sorted(state['factor_counts'].items(), key=lambda kv: kv[1], reverse=True)[:8]
+    state['volatility_history'].append({'ts': time.time(), 'volatility': volatility, 'alpha': state['ewma_alpha'], 'top_factors': top_factors})
+    if len(state['volatility_history']) > 500:
+        state['volatility_history'] = state['volatility_history'][-500:]
+    return {'detail': {'forced_flushed': len(batch), 'volatility': volatility, 'alpha': state['ewma_alpha'], 'history_size': len(state['volatility_history'])}}
+
+
 @router.post('/{sensor}')
 async def ingest_sensor(sensor: str, request: Request) -> Dict[str, Any]:
     sensor = sensor.lower()
@@ -568,15 +617,18 @@ async def ingest_sensor(sensor: str, request: Request) -> Dict[str, Any]:
     if current_env_secret and not state['hmac_secrets']:
         # Initialize secret list on first use
         state['hmac_secrets'].append({'secret': current_env_secret, 'added': time.time(), 'expires': None})
+    elif not current_env_secret and state['hmac_secrets']:
+        # Env var removed — clear cached secrets so HMAC is no longer required
+        state['hmac_secrets'].clear()
     hmac_required = bool(state['hmac_secrets'])
     if hmac_required:
         sig = request.headers.get('X-Signature') or request.headers.get('x-signature')
         if not sig:
             raise _err(401,'missing_signature','Signature header required','Provide X-Signature hex digest of HMAC-SHA256(body)')
         import hmac, hashlib
-        # Drop expired secrets
+        # Drop expired secrets (in-place to preserve list reference)
         now_ts = time.time()
-        state['hmac_secrets'] = [s for s in state['hmac_secrets'] if (s.get('expires') is None or s.get('expires') > now_ts)]
+        state['hmac_secrets'][:] = [s for s in state['hmac_secrets'] if (s.get('expires') is None or s.get('expires') > now_ts)]
         valid = False
         for srec in state['hmac_secrets']:
             calc = hmac.new(srec['secret'].encode('utf-8'), body_bytes, hashlib.sha256).hexdigest()
@@ -822,6 +874,16 @@ async def query_timeline(request: Request) -> Dict[str, Any]:
     if not filters:
         raise _err(400,'missing_filters','At least one entity filter required','Include one of user/host/ip/domain/file_hash')
     events = query_events_by_entity(filters, limit=limit)
+    # Also search in-memory event_index for test/lite mode where durable store is disabled
+    state = _get_state(request.app)
+    idx = state.get('event_index') or {}
+    if idx:
+        for rec in idx.values():
+            env = rec.get('envelope') or {}
+            match = all(str(env.get(k) or '') == str(v) for k, v in filters.items())
+            if match:
+                if not any(e.get('event_id') == env.get('event_id') for e in events):
+                    events.append(env)
     # Build enrichment and narrative
     sensors: Dict[str, int] = {}
     users: set[str] = set()

@@ -1224,6 +1224,36 @@ try:
         exec_result = {'playbook_id': pbid, 'status': 'executed', 'execution': {'playbook_id': pbid, 'steps_executed': 0}}
         return JSONResponse({'execution': exec_result})
 
+    _VISION_ONBOARDING_CONFIGS: dict[str, dict] = {}
+
+    @app.post('/api/v1/onboarding/vision')
+    async def _direct_onboarding_vision_save(req: Request):
+        try:
+            body = await req.json()
+        except Exception:
+            body = {}
+        tenant_id = str(body.get('tenant_id') or req.headers.get('x-tenant-id') or 'default')
+        config = {
+            'tenant_id': tenant_id,
+            'ocr_mode': str(body.get('ocr_mode') or 'local'),
+            'external_provider': body.get('external_provider'),
+            'external_model': body.get('external_model'),
+            'retention': 'metadata_only',
+        }
+        _VISION_ONBOARDING_CONFIGS[tenant_id] = config
+        return JSONResponse({'tenant_id': tenant_id, 'vision_analysis': config})
+
+    @app.get('/api/v1/onboarding/vision/{tenant_id}')
+    async def _direct_onboarding_vision_get(tenant_id: str):
+        config = _VISION_ONBOARDING_CONFIGS.get(tenant_id) or {
+            'tenant_id': tenant_id,
+            'ocr_mode': 'local',
+            'external_provider': None,
+            'external_model': None,
+            'retention': 'metadata_only',
+        }
+        return JSONResponse({'tenant_id': tenant_id, 'vision_analysis': config})
+
     # Lightweight direct endpoint for asking logs (test/demo tolerant)
     @app.post('/api/v1/reports/{report_id}/ask_for_logs')
     async def _direct_ask_for_logs(report_id: str, req: Request):
@@ -4691,6 +4721,18 @@ def register_core_routers(full: bool = True):
     except Exception:
         logger.debug('tier2_router include failed (lite)')
     try:
+        if iam_router:
+            app.include_router(iam_router)
+            logger.info('Included iam_router into app (lite)')
+    except Exception:
+        logger.debug('iam_router include failed (lite)')
+    try:
+        if iam_admin_router:
+            app.include_router(iam_admin_router)
+            logger.info('Included iam_admin_router into app (lite)')
+    except Exception:
+        logger.debug('iam_admin_router include failed (lite)')
+    try:
         if iam_ingest_router:
             app.include_router(iam_ingest_router)
             logger.info('Included iam_ingest_router into app (lite)')
@@ -6487,6 +6529,18 @@ try:
 except Exception:
     logger.debug('Failed to include analyst_review_router')
 try:
+    from .on_demand_fetch_endpoints import router as on_demand_fetch_router
+    app.include_router(on_demand_fetch_router)
+    logger.info('Included on-demand fetch router')
+except Exception:
+    logger.debug('Failed to include on_demand_fetch_router')
+try:
+    from .capture_endpoints import router as capture_router
+    app.include_router(capture_router)
+    logger.info('Included capture endpoints router')
+except Exception:
+    logger.debug('Failed to include capture_router')
+try:
     from .ingest_controller_endpoints import router as unified_ingest_router
     app.include_router(unified_ingest_router)
     logger.info('Included unified ingestion controller router')
@@ -7380,6 +7434,9 @@ def _require_console_api_key(request: Request) -> None:
     if _admin_ok(request):
         return
     api_key = request.headers.get('x-api-key') or request.headers.get('X-API-Key')
+    # Allow dev key bypass in test/dev environments
+    if os.getenv('ALLOW_DEV_API_KEY', '0').lower() in {'1', 'true', 'yes'} and api_key == 'devkey123':
+        return
     admin_key = os.getenv('ADMIN_API_KEY') or os.getenv('API_KEY')
     if admin_key and api_key == admin_key:
         return
@@ -8359,6 +8416,12 @@ async def lite_decisions_recent(request: Request, limit: int = 50, tenant_id: st
                         pass
         except Exception:
             pass
+        try:
+            seeded = getattr(rt, 'SEEDED_DECISIONS', None)
+            if isinstance(seeded, dict):
+                rows.extend(list(seeded.values()))
+        except Exception:
+            pass
     except Exception:
         try:
             rows = list(getattr(DECISION_CACHE, 'values', lambda: [])())  # type: ignore[attr-defined]
@@ -8367,6 +8430,12 @@ async def lite_decisions_recent(request: Request, limit: int = 50, tenant_id: st
                 rows = list(DECISION_CACHE.values())  # type: ignore[assignment]
             except Exception:
                 rows = []
+    try:
+        seeded_store = getattr(app.state, '_seeded_decisions', None)
+        if isinstance(seeded_store, dict):
+            rows.extend(list(seeded_store.values()))
+    except Exception:
+        pass
     try:
         # de-duplicate by event_id/id
         unique = {}
@@ -8386,6 +8455,27 @@ async def lite_decisions_recent(request: Request, limit: int = 50, tenant_id: st
         tnt = tenant_id or _resolve_tenant(request)
     if tnt:
         rows = [r for r in rows if _obj_tenant(r) == tnt]
+        if not rows:
+            try:
+                explicit_tenant = request.headers.get('X-Tenant-ID') or request.headers.get('x-tenant-id') or tnt
+            except Exception:
+                explicit_tenant = tnt
+            seeded_rows: list = []
+            try:
+                import importlib as _importlib
+                rt = _importlib.import_module('src.api.runtime_state')
+                seeded = getattr(rt, 'SEEDED_DECISIONS', None)
+                if isinstance(seeded, dict):
+                    seeded_rows.extend(list(seeded.values()))
+            except Exception:
+                pass
+            try:
+                seeded_store = getattr(app.state, '_seeded_decisions', None)
+                if isinstance(seeded_store, dict):
+                    seeded_rows.extend(list(seeded_store.values()))
+            except Exception:
+                pass
+            rows = [r for r in seeded_rows if _obj_tenant(r) == explicit_tenant]
         def _summarize(r: Any) -> dict:
             # Base fields
             summary = {
