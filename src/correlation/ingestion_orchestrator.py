@@ -23,6 +23,11 @@ from .killchain_reconstruct import reconstruct_kill_chain
 from .explanations.mappings import build_explanations
 from src.core.baseline_context import build_baseline_context
 
+try:
+    from src.core.mappings.factor_to_mitre import FACTOR_TO_MITRE as _FACTOR_TO_MITRE
+except Exception:
+    _FACTOR_TO_MITRE = {}
+
 PARSERS = {
     'email': parse_email_record,
     'network': parse_network_record,
@@ -88,6 +93,10 @@ def ingest_records(records: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
     if baseline_ctx:
         explanations['baseline_context'] = baseline_ctx
+
+    # --- Wire factors and events into HopGraph ---
+    _wire_to_hopgraph(events, factors)
+
     return {
         'events_count': len(events),
         'factors': factors,
@@ -95,3 +104,61 @@ def ingest_records(records: List[Dict[str, Any]]) -> Dict[str, Any]:
         'explanations': explanations,
         'baseline_context': baseline_ctx
     }
+
+
+def _wire_to_hopgraph(events: List[CanonicalEvent], factors: List[Any]) -> None:
+    """Push ingested events + emitted factors into the global HopGraph.
+
+    For each canonical event: ingest entity edges via graph.ingest_event().
+    For each factor: call graph.add_node_factor() on every listed node so that
+    explain_chain() can surface factors and downstream MITRE lookups.
+    """
+    try:
+        from src.graph.hopgraph import GLOBAL_HOPGRAPH as _graph  # type: ignore
+        if _graph is None:
+            return
+    except Exception:
+        return
+
+    # Ingest canonical events (creates nodes + edges for host/user/ip/domain/process/hash)
+    for ev in events:
+        try:
+            ev_dict = {
+                'host': ev.host,
+                'user': ev.user,
+                'process': ev.process,
+                'src_ip': ev.src_ip,
+                'dst_ip': ev.dst_ip,
+                'domain': ev.domain,
+                'file_hash': ev.file_hash,
+                'ts': ev.timestamp,
+                'parent_process': ev.raw.get('parent_process') if ev.raw else None,
+                'sensor': ev.source_type,
+                'tenant': ev.tenant,
+            }
+            _graph.ingest_event(ev_dict, source='sensor')
+        except Exception:
+            pass
+
+    # Attach factors to relevant graph nodes and stamp MITRE tags
+    for f in factors:
+        factor_name = f.get('name') if isinstance(f, dict) else None
+        if not factor_name:
+            continue
+        nodes_list = f.get('nodes') if isinstance(f, dict) else []
+        if not nodes_list:
+            continue
+        mitre_ids = _FACTOR_TO_MITRE.get(factor_name, [])
+        for node_id in nodes_list:
+            try:
+                _graph.add_node_factor(node_id, factor_name)
+                # Stamp MITRE technique IDs onto the node for playbook lookup in explain_chain
+                if mitre_ids:
+                    try:
+                        existing = _graph.nodes.get(node_id, {}).get('mitre_tags') or []
+                        merged = list(set(existing) | set(mitre_ids))
+                        _graph.add_node_attr(node_id, mitre_tags=merged)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
