@@ -1,1 +1,0 @@
-{"actions": {"*": [["sts:AssumeRole", 1]]}, "edges": {"*": {"arn:aws:iam::111111111111:role/TargetRole": 6.5}, "arn:aws:iam::111111111111:role/TargetRole": {}}}

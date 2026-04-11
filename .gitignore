@@ -61,3 +61,38 @@ artifacts/
 _tmp_*
 *.log
 
+# ── Runtime state (never commit) ─────────────────────────────────────────────
+# These files are generated at server startup / runtime and change on every run.
+# They must not be tracked — committing them causes constant dirty-tree noise
+# and can leak tenant state, session data, and internal metrics to git history.
+
+# Tenant and session runtime state
+data/tenants/
+data/sessions/
+data/file_batches/
+data/integrations/
+data/memory_jobs/
+data/uploads/
+
+# Offline baselines, models, and ephemeral analysis artefacts
+data/offline_baselines/
+data/tfidf_model.json
+data/tfidf_vectorizer.pkl
+data/correlation_chains*.jsonl
+data/chain_of_custody.jsonl
+data/events.jsonl
+data/crq_shadow.json
+data/log_heartbeat.json
+data/hopgraph_snapshot.json
+data/ewma_history.json
+data/case_queue.json
+data/incident_*.json
+
+# Audit/JSONL event logs (high-churn runtime outputs)
+audits/
+*.jsonl
+
+# Model registry caches
+models/registry/index.json
+models/registry/model-*.json
+
