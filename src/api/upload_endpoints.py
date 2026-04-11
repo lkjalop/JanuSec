@@ -1398,6 +1398,306 @@ async def get_upload_stats(
 
 __all__ = ['router']
 
+
+# ── Workbook sheet-aware analysis endpoint ──────────────────────────────────
+# These sheet names are the eight security-domain tabs used in Janusec
+# test datasets (and real multi-domain XLSX uploads).  "Overview" and
+# similar metadata-only sheets are skipped so the pipeline only receives
+# genuine security events.
+
+_JANUSEC_DATA_SHEETS: set[str] = {
+    'Identity', 'Endpoint', 'Network',
+    'Cloud_AWS', 'Cloud_Azure',
+    'Email', 'Data_Movement', 'Change_Context',
+}
+_SHEET_DOMAIN: dict[str, str] = {
+    'Identity': 'identity',
+    'Endpoint': 'endpoint',
+    'Network': 'network',
+    'Cloud_AWS': 'cloud_aws',
+    'Cloud_Azure': 'cloud_azure',
+    'Email': 'email',
+    'Data_Movement': 'data_movement',
+    'Change_Context': 'change_context',
+}
+# Sheets that contain workbook-level metadata rather than event rows.
+# Any sheet whose name (case-insensitive) starts with one of these tokens
+# is treated as metadata and excluded from the event row set.
+_METADATA_SHEET_PREFIXES: tuple[str, ...] = (
+    'overview', 'summary', 'readme', 'instructions', 'about', 'cover',
+)
+
+# Entity extraction field sets per domain
+_IP_FIELDS = ('src_ip', 'dst_ip', 'ip', 'source_ip', 'destination_ip', 'remote_ip', 'ip_address', 'client_ip', 'server_ip')
+_USER_FIELDS = ('user', 'username', 'user_principal_name', 'account', 'principal', 'actor', 'caller', 'identity', 'requestor')
+_HOST_FIELDS = ('host', 'hostname', 'computer', 'device', 'endpoint', 'machine', 'asset')
+
+
+def _is_metadata_sheet(sheet_name: str) -> bool:
+    return sheet_name.lower().startswith(_METADATA_SHEET_PREFIXES)
+
+
+def _extract_entity_set(row: dict[str, Any], fields: tuple[str, ...]) -> set[str]:
+    vals: set[str] = set()
+    for f in fields:
+        v = str(row.get(f) or '').strip()
+        if v and v.lower() not in ('', 'none', 'null', 'nan', '-'):
+            vals.add(v)
+    return vals
+
+
+def _compute_crq_estimate(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Lightweight FAIR-shadow CRQ estimate over a row set.
+
+    Returns lef, lm, expected_loss, and per-severity counts.
+    These are approximations only — not a certified FAIR assessment.
+    """
+    sev_counts: dict[str, int] = {'critical': 0, 'high': 0, 'medium': 0, 'low': 0, 'unknown': 0}
+    lm_by_sev = {'critical': 1000.0, 'high': 200.0, 'medium': 50.0, 'low': 5.0, 'unknown': 10.0}
+    sev_keywords = {
+        'critical': ('lsass', 'exfil', 'c2', 'ransomware', 'reflective dll', 'mimikatz', 'confirmed_malicious', 'crit'),
+        'high': ('lateral', 'beacon', 'privilege escalation', 'powershell', 'wmi', 'psexec', 'high', 'alert'),
+        'medium': ('suspicious', 'anomal', 'medium', 'review', 'investigate'),
+        'low': ('low', 'informational', 'benign', 'noise'),
+    }
+    for row in rows:
+        blob = ' '.join(str(v).lower() for v in row.values() if v)
+        assigned = 'unknown'
+        for sev, keywords in sev_keywords.items():
+            if any(k in blob for k in keywords):
+                assigned = sev
+                break
+        sev_counts[assigned] += 1
+
+    lef = float(max(1, len(rows)))
+    expected_loss = sum(sev_counts[s] * lm_by_sev[s] for s in sev_counts)
+    lm_weighted = expected_loss / lef if lef > 0 else 0.0
+    exposure_tier = (
+        'critical' if expected_loss >= 100_000
+        else 'high' if expected_loss >= 10_000
+        else 'medium' if expected_loss >= 1_000
+        else 'low'
+    )
+    return {
+        'lef': lef,
+        'lm': round(lm_weighted, 2),
+        'expected_loss': round(expected_loss, 2),
+        'expected_loss_formatted': f'${expected_loss:,.0f}',
+        'exposure_tier': exposure_tier,
+        'severity_counts': sev_counts,
+    }
+
+
+@router.post('/workbook_sheets')
+async def upload_workbook_sheets(
+    files: list[UploadFile] = File(...),
+    request: Request = None,
+) -> JSONResponse:
+    """Parse all data sheets from an XLSX workbook and return normalized event rows.
+
+    Unlike /upload/files (which reads only the active Overview sheet), this
+    endpoint reads **every** data sheet, skips metadata-only sheets, assigns a
+    domain field per sheet, collects cross-sheet entity pivots (IPs / users /
+    hosts shared across ≥2 sheets), and computes a CRQ financial-exposure
+    estimate over the full row set.
+
+    Used by investigate.js so that uploading a multi-sheet security workbook
+    surfaces all 100–200 events rather than the 18-row Overview summary.
+    """
+    if not files:
+        raise HTTPException(status_code=400, detail='no_files')
+    if len(files) > 5:
+        raise HTTPException(status_code=400, detail='max_5_files')
+
+    try:
+        import openpyxl
+    except ImportError:
+        raise HTTPException(status_code=503, detail='openpyxl_missing')
+
+    all_results: list[dict[str, Any]] = []
+
+    for upload in files:
+        content = await upload.read()
+        filename = upload.filename or 'workbook.xlsx'
+        lower = filename.lower()
+
+        if not (lower.endswith('.xlsx') or lower.endswith('.xlsm')):
+            # Pass through non-Excel files unchanged
+            all_results.append({'filename': filename, 'status': 'skipped', 'reason': 'not_excel'})
+            continue
+
+        try:
+            from io import BytesIO
+            bio = BytesIO(content)
+            wb = openpyxl.load_workbook(bio, read_only=True, data_only=True)
+        except Exception as exc:
+            all_results.append({'filename': filename, 'status': 'error', 'error': str(exc)})
+            continue
+
+        sheet_summaries: list[dict[str, Any]] = []
+        all_rows: list[dict[str, Any]] = []
+        row_global_idx = 0
+
+        # Entity sets per sheet for cross-sheet pivot detection
+        sheet_ips: dict[str, set[str]] = {}
+        sheet_users: dict[str, set[str]] = {}
+        sheet_hosts: dict[str, set[str]] = {}
+
+        for sheet_name in wb.sheetnames:
+            # Skip metadata-only sheets
+            if _is_metadata_sheet(sheet_name):
+                sheet_summaries.append({'sheet': sheet_name, 'status': 'skipped', 'reason': 'metadata_sheet'})
+                continue
+
+            try:
+                ws = wb[sheet_name]
+                rows_iter = ws.iter_rows(values_only=True)
+                # First row = headers
+                header_row = next(rows_iter, None)
+                if not header_row:
+                    sheet_summaries.append({'sheet': sheet_name, 'status': 'skipped', 'reason': 'empty_sheet'})
+                    continue
+
+                headers = [str(c).strip() if c is not None else f'col_{i}' for i, c in enumerate(header_row)]
+                # Skip sheets with no meaningful headers (all blank)
+                if not any(h for h in headers if h and not h.startswith('col_')):
+                    sheet_summaries.append({'sheet': sheet_name, 'status': 'skipped', 'reason': 'no_headers'})
+                    continue
+
+                domain = _SHEET_DOMAIN.get(sheet_name) or sheet_name.lower().replace(' ', '_')
+                sheet_row_count = 0
+                ips_in_sheet: set[str] = set()
+                users_in_sheet: set[str] = set()
+                hosts_in_sheet: set[str] = set()
+                MAX_SHEET_ROWS = int(os.getenv('WORKBOOK_MAX_ROWS_PER_SHEET', '5000') or 5000)
+
+                for raw_row in rows_iter:
+                    if sheet_row_count >= MAX_SHEET_ROWS:
+                        break
+                    cell_vals = [str(c).strip() if c is not None else '' for c in raw_row]
+                    # Skip empty rows
+                    if not any(cell_vals):
+                        continue
+
+                    row_dict: dict[str, Any] = {
+                        headers[i]: cell_vals[i] if i < len(cell_vals) else ''
+                        for i in range(len(headers))
+                    }
+                    # Attach workbook metadata
+                    row_dict['_sheet'] = sheet_name
+                    row_dict['_domain'] = domain
+                    row_dict['_source'] = filename
+                    row_dict['row_index'] = row_global_idx
+
+                    # Collect entities for pivot detection
+                    ips_in_sheet.update(_extract_entity_set(row_dict, _IP_FIELDS))
+                    users_in_sheet.update(_extract_entity_set(row_dict, _USER_FIELDS))
+                    hosts_in_sheet.update(_extract_entity_set(row_dict, _HOST_FIELDS))
+
+                    all_rows.append(row_dict)
+                    row_global_idx += 1
+                    sheet_row_count += 1
+
+                sheet_ips[sheet_name] = ips_in_sheet
+                sheet_users[sheet_name] = users_in_sheet
+                sheet_hosts[sheet_name] = hosts_in_sheet
+
+                sheet_summaries.append({
+                    'sheet': sheet_name,
+                    'domain': domain,
+                    'row_count': sheet_row_count,
+                    'headers': headers[:20],
+                    'status': 'parsed',
+                })
+            except Exception as sheet_exc:
+                sheet_summaries.append({'sheet': sheet_name, 'status': 'error', 'error': str(sheet_exc)})
+
+        # ── Cross-sheet entity pivot detection ───────────────────────────────
+        # A "pivot" is an entity value (IP, user, or host) that appears in
+        # events from at least two different sheets — exactly the kind of
+        # cross-source correlation that catches the C2 pivot in the critical
+        # test dataset (91.219.236.12 shared across Network and Cloud_AWS/Azure).
+        pivot_ips: dict[str, list[str]] = {}
+        pivot_users: dict[str, list[str]] = {}
+        pivot_hosts: dict[str, list[str]] = {}
+
+        all_parsed_sheets = [s for s in sheet_summaries if s.get('status') == 'parsed']
+        sheet_names_parsed = [s['sheet'] for s in all_parsed_sheets]
+
+        for sn_a in sheet_names_parsed:
+            for sn_b in sheet_names_parsed:
+                if sn_b <= sn_a:
+                    continue
+                shared_ips = sheet_ips.get(sn_a, set()) & sheet_ips.get(sn_b, set())
+                for ip in shared_ips:
+                    pivot_ips.setdefault(ip, [])
+                    for sn in (sn_a, sn_b):
+                        if sn not in pivot_ips[ip]:
+                            pivot_ips[ip].append(sn)
+                shared_users = sheet_users.get(sn_a, set()) & sheet_users.get(sn_b, set())
+                for u in shared_users:
+                    pivot_users.setdefault(u, [])
+                    for sn in (sn_a, sn_b):
+                        if sn not in pivot_users[u]:
+                            pivot_users[u].append(sn)
+                shared_hosts = sheet_hosts.get(sn_a, set()) & sheet_hosts.get(sn_b, set())
+                for h in shared_hosts:
+                    pivot_hosts.setdefault(h, [])
+                    for sn in (sn_a, sn_b):
+                        if sn not in pivot_hosts[h]:
+                            pivot_hosts[h].append(sn)
+
+        # Annotate rows with cross-sheet pivot flags
+        pivot_ip_set = set(pivot_ips.keys())
+        pivot_user_set = set(pivot_users.keys())
+        pivot_host_set = set(pivot_hosts.keys())
+
+        for row in all_rows:
+            row_ips = _extract_entity_set(row, _IP_FIELDS)
+            row_users = _extract_entity_set(row, _USER_FIELDS)
+            row_hosts = _extract_entity_set(row, _HOST_FIELDS)
+            matched_ips = row_ips & pivot_ip_set
+            matched_users = row_users & pivot_user_set
+            matched_hosts = row_hosts & pivot_host_set
+            if matched_ips or matched_users or matched_hosts:
+                row['_cross_sheet_pivot'] = True
+                row['_pivot_ips'] = sorted(matched_ips)
+                row['_pivot_users'] = sorted(matched_users)
+                row['_pivot_hosts'] = sorted(matched_hosts)
+                # Add a factor tag so the deep_analyze pipeline weights this row higher
+                existing = row.get('factors') or []
+                if isinstance(existing, list):
+                    if 'cross_sheet_pivot' not in existing:
+                        existing.append('cross_sheet_pivot')
+                    row['factors'] = existing
+
+        # ── CRQ estimate ─────────────────────────────────────────────────────
+        crq = _compute_crq_estimate(all_rows)
+
+        # Build entity pivot summary for the UI
+        entity_pivots = {
+            'ips': {ip: sheets for ip, sheets in pivot_ips.items() if len(sheets) >= 2},
+            'users': {u: sheets for u, sheets in pivot_users.items() if len(sheets) >= 2},
+            'hosts': {h: sheets for h, sheets in pivot_hosts.items() if len(sheets) >= 2},
+        }
+        pivoted_rows = sum(1 for r in all_rows if r.get('_cross_sheet_pivot'))
+
+        all_results.append({
+            'filename': filename,
+            'status': 'parsed',
+            'total_rows': len(all_rows),
+            'sheets_parsed': len(all_parsed_sheets),
+            'sheet_summaries': sheet_summaries,
+            'rows': all_rows,
+            'entity_pivots': entity_pivots,
+            'pivoted_row_count': pivoted_rows,
+            'crq': crq,
+            'sha256': hashlib.sha256(content).hexdigest(),
+        })
+
+    return JSONResponse({'status': 'ok', 'results': all_results})
+
+
 # ------------------------- Tabular Pagination & Pattern Detection -------------------------
 
 TABULAR_SESSIONS: dict[str, dict[str, Any]] = {}
