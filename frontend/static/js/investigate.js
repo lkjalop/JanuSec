@@ -1347,6 +1347,29 @@
     if (btn) btn.addEventListener('click', function () { detachTab(name.toLowerCase()); });
   });
 
+  // Wire graph control buttons (Zoom-Fit, Layout re-heat)
+  var _btnZoomFit = $('btnGraphZoomFit');
+  if (_btnZoomFit) {
+    _btnZoomFit.addEventListener('click', function () {
+      if (_hopGraphState.svg && _hopGraphState.zoom) {
+        _hopGraphState.svg.transition().duration(400).call(
+          _hopGraphState.zoom.transform, d3.zoomIdentity
+        );
+      }
+    });
+  }
+  var _btnLayout = $('btnGraphLayout');
+  if (_btnLayout) {
+    _btnLayout.addEventListener('click', function () {
+      if (_hopGraphState.sim) {
+        _hopGraphState.sim.alphaTarget(0.3).restart();
+        setTimeout(function () {
+          if (_hopGraphState.sim) _hopGraphState.sim.alphaTarget(0);
+        }, 1500);
+      }
+    });
+  }
+
   // ── Export ───────────────────────────────────────────────────────────────
   $('btnExportEvidence').addEventListener('click', function () {
     if (!state.evidenceRows || !state.evidenceRows.length) { toast('No evidence to export', 'error'); return; }
@@ -1420,9 +1443,12 @@
     var NODE_COLORS = { user: '#4A63E7', ip: '#E54848', resource: '#2DB67C', detection: '#FF8A3C', source: '#708090', other: '#E0C446' };
     var SEV_R = { critical: 10, high: 8, medium: 6, low: 5 };
 
+    var zoom = d3.zoom().scaleExtent([0.25, 3]).on('zoom', function (event) { g.attr('transform', event.transform); });
     var svg = d3.select(canvas).append('svg').attr('width', W).attr('height', H).style('display', 'block').style('border-radius', 'var(--radius-lg)');
     var g = svg.append('g');
-    svg.call(d3.zoom().scaleExtent([0.25, 3]).on('zoom', function (event) { g.attr('transform', event.transform); }));
+    svg.call(zoom);
+    _hopGraphState.svg = svg;
+    _hopGraphState.zoom = zoom;
 
     var lgData = [{ l: 'User', c: NODE_COLORS.user }, { l: 'IP', c: NODE_COLORS.ip }, { l: 'Resource', c: NODE_COLORS.resource }, { l: 'Detection', c: NODE_COLORS.detection }, { l: 'Source', c: NODE_COLORS.source }];
     var lg = svg.append('g').attr('transform', 'translate(8,8)');
@@ -1436,6 +1462,7 @@
       .force('charge', d3.forceManyBody().strength(-220))
       .force('center', d3.forceCenter(W / 2, H / 2))
       .force('collide', d3.forceCollide().radius(22));
+    _hopGraphState.sim = sim;
 
     var link = g.append('g').selectAll('line').data(links).join('line')
       .attr('stroke', function (d) { return d.correlated ? 'rgba(74,99,231,0.6)' : 'rgba(255,255,255,0.12)'; })

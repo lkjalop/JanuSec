@@ -292,6 +292,9 @@ async def analyst_review(assessment_id: str, payload: AnalystReviewRequest, requ
     except Exception:
         pass
 
+    # --- T7+T8: Pattern learning + weight feedback (non-blocking background) ---
+    asyncio.ensure_future(_run_t7_t8(tenant))
+
     return {
         'assessment_id': assessment_id,
         'status': 'reviewed',
@@ -302,6 +305,7 @@ async def analyst_review(assessment_id: str, payload: AnalystReviewRequest, requ
         't6_llm_response': t6_llm_result.get('llm_response'),
         't6_model_used': t6_llm_result.get('model_used'),
         't6_error': t6_llm_result.get('error'),
+        't7_t8_queued': True,
         'reeval_prompt': reeval_prompt if t6_details['reeval_triggered'] else None,
         'custody_chain': {
             't3_hash': t3_hash,
@@ -311,6 +315,246 @@ async def analyst_review(assessment_id: str, payload: AnalystReviewRequest, requ
         },
         'version': assessment['analyst_review']['version'],
     }
+
+
+
+# ---------------------------------------------------------------------------
+# T7: Pattern learning — aggregate adjudication history, derive candidate weights
+# T8: Weight update — persist and push candidates to in-memory orchestrator
+# These run fire-and-forget so they never block the analyst_review response.
+# ---------------------------------------------------------------------------
+
+async def _run_t7_pattern_learning(tenant: str) -> dict:
+    """T7: Run online trainer to generate candidate factor weights from feedback.
+
+    Returns {'candidate_count', 'candidates', 'error'}.
+    """
+    try:
+        from src.ml.online_trainer import generate_candidate_weights
+        candidates = await generate_candidate_weights(window='30 days', tenant_id=tenant or None)
+        return {'candidate_count': len(candidates), 'candidates': candidates, 'error': None}
+    except Exception as exc:
+        logger.warning('T7 pattern learning skipped: %s', exc)
+        return {'candidate_count': 0, 'candidates': {}, 'error': str(exc)}
+
+
+async def _run_t8_weight_update(candidates: dict, tenant: str) -> dict:
+    """T8: Persist candidate weights and push to in-memory orchestrator.
+
+    Returns {'updated', 'error'}.
+    """
+    if not candidates:
+        return {'updated': 0, 'error': None}
+    count = 0
+    try:
+        from src.repositories.factor_weights_repo import upsert_factor_weight
+        for factor, weight in candidates.items():
+            try:
+                await upsert_factor_weight(factor, float(weight), tenant_id=tenant or None)
+                count += 1
+            except Exception:
+                pass
+    except Exception as exc:
+        logger.warning('T8 DB persist skipped: %s', exc)
+
+    # Push updated weights into in-memory orchestrator if available
+    if candidates:
+        try:
+            from src.orchestrator.core import get_orchestrator  # type: ignore
+            orch = get_orchestrator()
+            if orch is not None:
+                orch.apply_factor_weights(candidates, source='t8_bitemporal')
+        except Exception:
+            pass  # orchestrator not initialised in this process — silently skip
+
+    return {'updated': count, 'error': None}
+
+
+async def _run_t7_t8(tenant: str) -> None:
+    """Background coroutine: T7 then T8. Errors are fully suppressed."""
+    try:
+        result = await _run_t7_pattern_learning(tenant)
+        if result['candidates']:
+            await _run_t8_weight_update(result['candidates'], tenant)
+            logger.info(
+                'T7/T8 complete — tenant=%s candidates=%d updated=%d',
+                tenant, result['candidate_count'], len(result['candidates']),
+            )
+    except Exception as exc:
+        logger.warning('T7/T8 background task error: %s', exc)
+
+
+# ---------------------------------------------------------------------------
+# Compliance PDF report endpoint
+# ---------------------------------------------------------------------------
+
+def _collect_factors(assessment: dict) -> list[str]:
+    """Extract all factor strings from an assessment object."""
+    factors: list[str] = []
+    for row in (assessment.get('rows') or []):
+        for f in row.get('factors') or []:
+            if isinstance(f, str) and f not in factors:
+                factors.append(f)
+    # Top-level factors list some assessments carry
+    for f in (assessment.get('factors') or []):
+        if isinstance(f, str) and f not in factors:
+            factors.append(f)
+    return factors
+
+
+def _build_compliance_html(
+    assessment: dict,
+    factors: list[str],
+    compliance_hits: dict,
+    mitre_techniques: set,
+) -> str:
+    """Build a styled HTML compliance report suitable for PDF conversion."""
+    from html import escape
+
+    aid = assessment.get('assessment_id') or assessment.get('id') or 'unknown'
+    verdict = assessment.get('verdict') or assessment.get('action') or 'unknown'
+    score = assessment.get('triage_score') or assessment.get('confidence') or 0
+    generated = time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime())
+
+    # Framework display names
+    fw_names = {
+        'cis': 'CIS Controls v8',
+        'nist_csf': 'NIST CSF 2.0',
+        'iso27001': 'ISO/IEC 27001:2022',
+        'soc2': 'SOC 2 Type II',
+        'pci_dss': 'PCI-DSS v4.0',
+        'hipaa': 'HIPAA Security Rule',
+        'gdpr': 'GDPR',
+        'nist_800_53': 'NIST 800-53',
+    }
+
+    STYLE = """
+    <style>
+      body{font-family:Arial,sans-serif;color:#1a202c;margin:32px 40px;background:#fff}
+      h1{font-size:20px;margin-bottom:4px}
+      h2{font-size:15px;margin-top:24px;margin-bottom:8px;border-bottom:1px solid #e2e8f0;padding-bottom:4px}
+      table{border-collapse:collapse;width:100%;font-size:12px}
+      th{background:#2d3748;color:#fff;padding:6px 10px;text-align:left}
+      td{border:1px solid #e2e8f0;padding:5px 10px;vertical-align:top}
+      .meta{font-size:12px;color:#718096;margin-bottom:20px}
+      .badge{display:inline-block;padding:2px 6px;border-radius:4px;font-size:11px;font-weight:600}
+      .high{background:#fed7d7;color:#c53030}
+      .medium{background:#fefcbf;color:#b7791f}
+      .low{background:#c6f6d5;color:#276749}
+      .mitre{font-family:monospace;background:#edf2f7;padding:1px 4px;border-radius:3px;font-size:11px}
+    </style>
+    """
+
+    rows_html = ''
+    for fw_key, controls in sorted(compliance_hits.items()):
+        if not controls:
+            continue
+        fw_label = escape(fw_names.get(fw_key, fw_key.upper()))
+        controls_str = ', '.join(escape(c) for c in controls[:20])
+        rows_html += f'<tr><td><strong>{fw_label}</strong></td><td>{controls_str}</td></tr>\n'
+
+    mitre_html = ''
+    if mitre_techniques:
+        mitre_html = '<h2>MITRE ATT&amp;CK Techniques</h2><p>' + \
+            ' '.join(f'<span class="mitre">{escape(t)}</span>' for t in sorted(mitre_techniques)) + \
+            '</p>'
+
+    factor_rows = ''.join(f'<tr><td><code>{escape(f)}</code></td></tr>' for f in factors[:80])
+    framework_table_body = rows_html if rows_html else '<tr><td colspan="2" style="color:#718096">No control mappings found for active factors.</td></tr>'
+
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Compliance Report — {escape(aid)}</title>{STYLE}</head>
+<body>
+<h1>Compliance &amp; Regulatory Impact Report</h1>
+<div class="meta">
+  Assessment ID: <strong>{escape(aid)}</strong> &nbsp;|&nbsp;
+  Verdict: <strong>{escape(str(verdict))}</strong> &nbsp;|&nbsp;
+  Score: <strong>{escape(str(score))}</strong> &nbsp;|&nbsp;
+  Generated: {generated}
+</div>
+
+<h2>Framework Control Mapping</h2>
+<table>
+  <thead><tr><th>Framework</th><th>Applicable Controls</th></tr></thead>
+  <tbody>
+{framework_table_body}
+  </tbody>
+</table>
+
+{mitre_html}
+
+<h2>Active Factors ({len(factors)})</h2>
+<table>
+  <thead><tr><th>Factor ID</th></tr></thead>
+  <tbody>{factor_rows}</tbody>
+</table>
+</body>
+</html>"""
+    return html
+
+
+@router.get(
+    '/{assessment_id}/compliance_report',
+    summary='Generate compliance & MITRE ATT&CK PDF report for an assessment',
+    response_description='PDF file (application/pdf) or HTML fallback',
+)
+async def get_compliance_report(
+    assessment_id: str,
+    request: Request,
+    format: str = 'pdf',
+) -> Any:
+    """Return a compliance report (PDF or HTML) mapping detected factors to:
+    CIS Controls, NIST CSF, ISO 27001, SOC 2, PCI-DSS, HIPAA, GDPR, NIST 800-53,
+    and MITRE ATT&CK techniques.
+    """
+    import io as _io
+    from fastapi.responses import StreamingResponse, HTMLResponse
+
+    assessment = _get_assessment(request, assessment_id)
+    if not assessment:
+        raise HTTPException(status_code=404, detail='assessment_not_found')
+
+    factors = _collect_factors(assessment)
+
+    try:
+        from src.core.mappings.factor_to_compliance import get_compliance_hits
+        compliance_hits = get_compliance_hits(factors)
+    except Exception:
+        compliance_hits = {}
+
+    try:
+        from src.artifact.technique_mapping import FACTOR_TO_MITRE
+        mitre_techniques: set = set()
+        for f in factors:
+            for t in FACTOR_TO_MITRE.get(f, []):
+                mitre_techniques.add(t)
+    except Exception:
+        mitre_techniques = set()
+
+    html = _build_compliance_html(assessment, factors, compliance_hits, mitre_techniques)
+
+    if format == 'html':
+        from fastapi.responses import HTMLResponse as _HR
+        return _HR(html)
+
+    # Attempt PDF conversion via export engine
+    try:
+        from src.reporting.export import export_pdf_bytes_from_html
+        pdf_bytes = export_pdf_bytes_from_html(html)
+        if pdf_bytes:
+            fname = f'compliance_{assessment_id[:16]}.pdf'
+            return StreamingResponse(
+                _io.BytesIO(pdf_bytes),
+                media_type='application/pdf',
+                headers={'Content-Disposition': f'attachment; filename="{fname}"'},
+            )
+    except Exception as exc:
+        logger.warning('PDF export engine failed (%s); returning HTML', exc)
+
+    # Fallback: return HTML as a downloadable file
+    from fastapi.responses import HTMLResponse as _HR
+    return _HR(html, headers={'Content-Disposition': f'attachment; filename="compliance_{assessment_id[:16]}.html"'})
 
 
 @router.get('/{assessment_id}/custody_chain', summary='Get custody chain for assessment')
