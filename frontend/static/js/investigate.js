@@ -30,6 +30,7 @@
     sortDir: 'desc',
     _gateApproved: false, // human-gate: set true after analyst approves escalation personas
     workbookMeta: null,   // sheet summary + entity pivots + CRQ from workbook_sheets endpoint
+    queueView: null,      // operator queue view from /api/v1/queue/{assessment_id}
   };
 
   // ── DOM refs ─────────────────────────────────────────────────────────────
@@ -639,6 +640,22 @@
       $('pipelineBarFill').style.width = '85%';
       await generatePersonaReport(assessment);
 
+      // Step 5: Build operator queue from assessment clusters
+      if (state.assessmentId) {
+        try {
+          var qResp = await fetch('/api/v1/queue/' + encodeURIComponent(state.assessmentId) + '/build', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...authHeaders() },
+            body: JSON.stringify({ persona: state.currentPersona }),
+          });
+          if (qResp.ok) {
+            var qData = await qResp.json();
+            state.queueView = qData.queue || null;
+            renderQueuePanel();
+          }
+        } catch (_qe) { /* queue building is best-effort */ }
+      }
+
       $('pipelineBarFill').style.width = '100%';
       toast('Analysis complete — ' + state.allRows.length + ' events processed', 'success');
 
@@ -1238,6 +1255,185 @@
     // Store and render
     state.reportArtifacts[state.currentPersona] = { headline: headline, sections: sections };
     renderReport();
+  }
+
+  // ── Operator Queue Panel ─────────────────────────────────────────────────
+  // Renders the Active/Remainder/Escalated/Deferred/Cleared operator queue
+  // derived from the assessment's clusters and high-score isolated rows.
+  // The Active item is the highest-priority open item; Remainder is the
+  // sorted backlog.  Analysts can Confirm / Deny / Defer / Escalate each item.
+
+  var _QUEUE_STATE_COLORS = {
+    remainder: 'var(--accent)',
+    escalated: '#E54848',
+    deferred: '#E0C446',
+    cleared: '#3FA860',
+  };
+  var _QUEUE_SEV_COLORS = {
+    critical: '#E54848', high: '#FF8A3C', medium: '#E0C446', low: '#3FA860', unknown: 'var(--text-muted)',
+  };
+
+  function renderQueuePanel() {
+    var view = state.queueView;
+    // Find or create the queue panel element next to the report panel.
+    // We inject it into the right-rail panel area using an existing container.
+    var panelEl = $('operatorQueuePanel');
+    if (!panelEl) return; // element must exist in HTML
+
+    if (!view || !view.counts || view.counts.total === 0) {
+      panelEl.innerHTML = '<div style="padding:12px;font-size:12px;color:var(--text-muted);">No queue items — run analysis to build the operator queue.</div>';
+      return;
+    }
+
+    var html = '';
+
+    // ── Active item ──────────────────────────────────────────────────────────
+    var active = view.active;
+    if (active) {
+      var sevColor = _QUEUE_SEV_COLORS[active.severity] || 'var(--text-muted)';
+      html += '<div class="queue-item queue-item--active" data-item-id="' + escHtml(active.item_id) + '">' +
+        '<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">' +
+        '<span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--accent);">▶ Active</span>' +
+        '<span class="sev-pill sev-pill--' + escHtml(active.severity) + '">' + escHtml(active.severity) + '</span>' +
+        '<span style="font-size:10px;color:var(--text-muted);">score: ' + active.priority_score.toFixed(3) + '</span>' +
+        (active.new_evidence_available ? '<span style="font-size:10px;color:#E0C446;margin-left:auto;">\u26A0\uFE0F new evidence</span>' : '') +
+        '</div>' +
+        '<div style="font-size:12px;font-weight:600;color:var(--text-primary);margin-bottom:4px;">' + escHtml(active.title) + '</div>' +
+        (active.summary ? '<div style="font-size:11px;color:var(--text-secondary);margin-bottom:6px;">' + escHtml(active.summary.slice(0, 120)) + '</div>' : '') +
+        _renderEntityChips(active) +
+        _renderQueueActions(active) +
+        '</div>';
+    }
+
+    // ── Counts bar ───────────────────────────────────────────────────────────
+    var c = view.counts;
+    html += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin:8px 0;font-size:11px;">' +
+      ['remainder', 'escalated', 'deferred', 'cleared'].map(function (s) {
+        var count = c[s] || 0;
+        return '<span style="padding:2px 8px;border-radius:4px;background:rgba(255,255,255,0.05);color:' +
+          (_QUEUE_STATE_COLORS[s] || 'var(--text-muted)') + ';">' +
+          s + ': ' + count + '</span>';
+      }).join('') +
+      '</div>';
+
+    // ── Remainder list ───────────────────────────────────────────────────────
+    if (view.remainder && view.remainder.length) {
+      html += '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);margin-bottom:4px;">Remainder (' + view.remainder.length + ')</div>';
+      view.remainder.slice(0, 8).forEach(function (item) {
+        html += _renderQueueItemRow(item, 'remainder');
+      });
+      if (view.remainder.length > 8) {
+        html += '<div style="font-size:11px;color:var(--text-muted);padding:4px 0;">... and ' + (view.remainder.length - 8) + ' more</div>';
+      }
+    }
+
+    // ── Escalated ────────────────────────────────────────────────────────────
+    if (view.escalated && view.escalated.length) {
+      html += '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:#E54848;margin:8px 0 4px 0;">Escalated (' + view.escalated.length + ')</div>';
+      view.escalated.slice(0, 4).forEach(function (item) { html += _renderQueueItemRow(item, 'escalated'); });
+    }
+
+    // ── Deferred ─────────────────────────────────────────────────────────────
+    if (view.deferred && view.deferred.length) {
+      html += '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:#E0C446;margin:8px 0 4px 0;">Deferred (' + view.deferred.length + ')</div>';
+      view.deferred.slice(0, 4).forEach(function (item) { html += _renderQueueItemRow(item, 'deferred'); });
+    }
+
+    // ── Cleared ──────────────────────────────────────────────────────────────
+    if (view.cleared && view.cleared.length) {
+      html += '<details style="margin-top:8px;"><summary style="font-size:11px;color:var(--text-muted);cursor:pointer;">Cleared (' + view.cleared.length + ')</summary>';
+      view.cleared.slice(0, 6).forEach(function (item) { html += _renderQueueItemRow(item, 'cleared'); });
+      html += '</details>';
+    }
+
+    panelEl.innerHTML = html;
+    // Bind action buttons
+    panelEl.querySelectorAll('.queue-action-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        handleQueueAction(btn.dataset.itemId, btn.dataset.action);
+      });
+    });
+  }
+
+  function _renderEntityChips(item) {
+    var chips = [];
+    (item.shared_ips || []).slice(0, 3).forEach(function (ip) {
+      chips.push('<span style="font-size:10px;padding:1px 5px;border-radius:3px;background:rgba(239,68,68,.15);color:#E54848;">' + escHtml(ip) + '</span>');
+    });
+    (item.shared_accounts || []).slice(0, 2).forEach(function (u) {
+      chips.push('<span style="font-size:10px;padding:1px 5px;border-radius:3px;background:rgba(59,130,246,.15);color:#60a5fa;">' + escHtml(u) + '</span>');
+    });
+    (item.shared_hosts || []).slice(0, 2).forEach(function (h) {
+      chips.push('<span style="font-size:10px;padding:1px 5px;border-radius:3px;background:rgba(16,185,129,.15);color:#34d399;">' + escHtml(h) + '</span>');
+    });
+    if (!chips.length) return '';
+    return '<div style="display:flex;flex-wrap:wrap;gap:3px;margin-bottom:6px;">' + chips.join('') + '</div>';
+  }
+
+  function _renderQueueActions(item) {
+    var id = escHtml(item.item_id);
+    var state_ = item.state;
+    var btns = [];
+    if (state_ === 'remainder') {
+      btns.push('<button class="queue-action-btn" data-item-id="' + id + '" data-action="confirm" style="font-size:11px;padding:3px 10px;background:rgba(16,185,129,.2);border:1px solid #34d399;border-radius:4px;color:#34d399;cursor:pointer;">\u2714 Confirm</button>');
+      btns.push('<button class="queue-action-btn" data-item-id="' + id + '" data-action="deny" style="font-size:11px;padding:3px 10px;background:rgba(148,163,184,.1);border:1px solid var(--border);border-radius:4px;color:var(--text-muted);cursor:pointer;">\u2718 Deny</button>');
+      btns.push('<button class="queue-action-btn" data-item-id="' + id + '" data-action="escalate" style="font-size:11px;padding:3px 10px;background:rgba(239,68,68,.15);border:1px solid #E54848;border-radius:4px;color:#E54848;cursor:pointer;">\u2191 Escalate</button>');
+      btns.push('<button class="queue-action-btn" data-item-id="' + id + '" data-action="defer" style="font-size:11px;padding:3px 10px;background:rgba(234,179,8,.1);border:1px solid #E0C446;border-radius:4px;color:#E0C446;cursor:pointer;">\u23F8 Defer</button>');
+    } else if (state_ === 'escalated' || state_ === 'deferred') {
+      btns.push('<button class="queue-action-btn" data-item-id="' + id + '" data-action="reopen" style="font-size:11px;padding:3px 10px;background:rgba(59,130,246,.15);border:1px solid var(--accent);border-radius:4px;color:var(--accent);cursor:pointer;">\u21BA Reopen</button>');
+    } else if (state_ === 'cleared') {
+      btns.push('<button class="queue-action-btn" data-item-id="' + id + '" data-action="reopen" style="font-size:11px;padding:3px 10px;background:rgba(59,130,246,.1);border:1px solid var(--border);border-radius:4px;color:var(--text-muted);cursor:pointer;">\u21BA Reopen</button>');
+    }
+    if (!btns.length) return '';
+    return '<div style="display:flex;gap:6px;flex-wrap:wrap;">' + btns.join('') + '</div>';
+  }
+
+  function _renderQueueItemRow(item, stateLabel) {
+    var sevColor = _QUEUE_SEV_COLORS[item.severity] || 'var(--text-muted)';
+    return '<div class="queue-item-row" style="padding:6px 0;border-bottom:1px solid var(--border);display:flex;align-items:flex-start;gap:8px;">' +
+      '<div style="flex:1;min-width:0;">' +
+      '<div style="font-size:11px;font-weight:600;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escHtml(item.title) + '">' +
+      '<span style="color:' + sevColor + ';margin-right:4px;">\u25CF</span>' +
+      escHtml(item.title) + '</div>' +
+      (item.new_evidence_available ? '<span style="font-size:10px;color:#E0C446;">\u26A0\uFE0F new evidence</span>' : '') +
+      '</div>' +
+      '<div style="font-size:10px;color:var(--text-muted);white-space:nowrap;">' + item.evidence_refs.length + ' ref' + (item.evidence_refs.length !== 1 ? 's' : '') + '</div>' +
+      '<div>' + _renderQueueActions(item) + '</div>' +
+      '</div>';
+  }
+
+  async function handleQueueAction(itemId, action) {
+    if (!state.assessmentId) return;
+    var url = '/api/v1/queue/' + encodeURIComponent(state.assessmentId) + '/action';
+    var body = { item_id: itemId, action: action, actor: 'analyst' };
+
+    // Defer needs a reopen_at — default to 7 days from now
+    if (action === 'defer') {
+      body.reopen_at = Date.now() / 1000 + 7 * 24 * 3600;
+      body.reopen_conditions = ['corroboration_count >= 2'];
+    }
+
+    try {
+      var resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify(body),
+      });
+      if (!resp.ok) { toast('Queue action failed', 'error'); return; }
+      var data = await resp.json();
+      toast('Item ' + action + 'd → ' + (data.new_state || ''), 'success');
+      // Refresh queue view
+      var qResp = await fetch('/api/v1/queue/' + encodeURIComponent(state.assessmentId), {
+        headers: authHeaders(),
+      });
+      if (qResp.ok) {
+        var qData = await qResp.json();
+        state.queueView = qData.queue || null;
+        renderQueuePanel();
+      }
+    } catch (err) {
+      toast('Queue error: ' + err.message, 'error');
+    }
   }
 
   function renderReport() {

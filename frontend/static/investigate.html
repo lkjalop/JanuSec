@@ -592,7 +592,19 @@
               <div id="reportBody" class="report-panel"></div>
             </div>
           </div>
+
+          <!-- ── Operator Queue Panel ── -->
+          <div style="padding:16px;border-top:1px solid var(--border);">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+              <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);">Operator Queue</span>
+              <span style="font-size:10px;color:var(--text-muted);">Active / Remainder / Escalated / Deferred / Cleared</span>
+            </div>
+            <div id="operatorQueuePanel" style="font-size:12px;">
+              <div style="padding:12px;font-size:12px;color:var(--text-muted);">Run analysis to build the operator queue from assessment clusters.</div>
+            </div>
+          </div>
         </div>
+      </div>
 
         <!-- ── TAB: Evidence ── -->
         <div class="tab-content" id="tabEvidence" role="tabpanel" aria-label="Evidence table">

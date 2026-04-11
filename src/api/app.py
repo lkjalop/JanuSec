@@ -292,6 +292,10 @@ from .startup import initialize_platform_components
 from .upload_endpoints import router as upload_router
 from .pull_endpoints import router as pull_endpoints_router
 try:
+    from .queue_endpoints import router as queue_router
+except Exception:
+    queue_router = None
+try:
     from .csv_endpoints import router as csv_router
 except Exception:
     # Guard heavy import path during pytest/lite mode; router can be included later if available
@@ -5027,6 +5031,7 @@ def register_core_routers(full: bool = True):
         ('risk', 'risk_router'),
         ('temporal', 'temporal_router'),
         ('upload', 'upload_router'),
+        ('queue', 'queue_router'),
         ('stream_ingest', 'stream_router'),
         ('csv', 'csv_router'),
         ('soar', 'soar_router'),
