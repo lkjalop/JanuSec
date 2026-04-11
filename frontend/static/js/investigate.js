@@ -275,10 +275,13 @@
     if (wbMeta && wbMeta.crq) {
       var crq = wbMeta.crq;
       var crqTier = (crq.exposure_tier || '').toLowerCase();
+      // Always show range, never exact dollar, in the source-list pill
+      var crqDisplay = crq.exposure_range_formatted || crq.exposure_tier || '';
       $('sourceSummary').innerHTML =
         state.sources.length + ' source' + (state.sources.length !== 1 ? 's' : '') + ', ' + totalRows + ' rows' +
-        ' &nbsp;|&nbsp; <span class="sev-pill sev-pill--' + crqTier + '" title="CRQ exposure estimate">' +
-        escHtml(crq.expected_loss_formatted || '') + ' ' + escHtml(crq.exposure_tier || '') + '</span>';
+        ' &nbsp;|&nbsp; <span class="sev-pill sev-pill--' + crqTier + '" title="CRQ planning range (unvalidated)">' +
+        escHtml(crqDisplay) + '</span>' +
+        ' <span style="font-size:10px;color:var(--text-muted);">\u26A0\uFE0F unvalidated</span>';
     } else {
       $('sourceSummary').textContent = state.sources.length + ' source' + (state.sources.length !== 1 ? 's' : '') + ', ' + totalRows + ' rows';
     }
@@ -1114,54 +1117,91 @@
     sections.push({ title: 'Source Summary', html: sourcesHtml });
 
     // ── CRQ Financial Exposure (from workbook_sheets endpoint or assessment) ─
+    // Display a *range* (not a point estimate) and always mark as unvalidated.
+    // Exact dollar figures require a human gate: GRC/CISO/finance must confirm
+    // affected asset class, records count, regulatory obligations, and insurance
+    // coverage before a precise breach-loss number is credible.
     var crq = (state.workbookMeta && state.workbookMeta.crq) ||
               (assessment && assessment.crq_shadow) ||
               (assessment && assessment.crq) || null;
     if (crq) {
       var crqTier = (crq.exposure_tier || '').toUpperCase();
       var crqColor = {CRITICAL:'#E54848',HIGH:'#FF8A3C',MEDIUM:'#E0C446',LOW:'#3FA860'}[crqTier] || 'var(--text-muted)';
-      var crqHtml = '<div style="padding:12px;background:var(--bg-tertiary);border-radius:8px;border:1px solid var(--border);">' +
-        '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">' +
-        '<span style="font-weight:700;font-size:18px;color:' + crqColor + ';">' + escHtml(crq.expected_loss_formatted || '$' + (crq.expected_loss || 0).toLocaleString()) + '</span>' +
+
+      // Prefer the new range format; fall back gracefully to old exact format
+      // (old format kept for backward compatibility, always shown as unvalidated).
+      var er = crq.exposure_range || null;
+      var crqRangeDisplay = er
+        ? escHtml(crq.exposure_range_formatted || (er.low + ' – ' + er.high))
+        : (crq.expected_loss_formatted
+            ? escHtml(crq.expected_loss_formatted) + ' <em style="font-size:10px;font-weight:400;">(unvalidated)</em>'
+            : 'Range unavailable');
+
+      var crqHtml = '<div style="padding:12px;background:var(--bg-tertiary);border-radius:8px;border:1px solid var(--border);">';
+
+      // Tier pill + unvalidated label
+      crqHtml += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">' +
         '<span class="sev-pill sev-pill--' + (crqTier || 'info').toLowerCase() + '">' + escHtml(crqTier || 'UNKNOWN') + ' Exposure</span>' +
-        '</div>' +
-        '<table style="width:100%;font-size:11px;border-collapse:collapse;">' +
-        '<tr><td style="padding:3px 8px 3px 0;color:var(--text-muted);">Loss Event Frequency (LEF)</td><td style="color:var(--text-secondary);">' + (crq.lef || 0).toLocaleString() + ' events/yr est.</td></tr>' +
-        '<tr><td style="padding:3px 8px 3px 0;color:var(--text-muted);">Loss Magnitude (LM) weighted</td><td style="color:var(--text-secondary);">$' + (crq.lm || 0).toFixed(2) + '/event</td></tr>' +
-        '</table>';
+        '<span style="font-size:10px;color:var(--text-muted);background:rgba(255,200,0,0.12);padding:2px 7px;border-radius:4px;border:1px solid rgba(255,200,0,0.3);">' +
+        '\u26A0\uFE0F Unvalidated planning estimate</span>' +
+        '</div>';
+
+      // Range display — NOT a precise dollar figure
+      crqHtml += '<div style="font-size:15px;font-weight:700;color:' + crqColor + ';margin-bottom:4px;">' +
+        crqRangeDisplay +
+        '</div>';
+      crqHtml += '<div style="font-size:10px;color:var(--text-muted);margin-bottom:8px;">' +
+        'Telemetry-based range estimate &mdash; wide band reflects uncertainty without validated FAIR inputs.</div>';
+
       // Severity distribution
       var sevCounts = crq.severity_counts || {};
       if (Object.keys(sevCounts).some(function (k) { return sevCounts[k] > 0; })) {
-        crqHtml += '<div style="margin-top:8px;font-size:11px;color:var(--text-muted);">Event distribution: ' +
-          ['critical', 'high', 'medium', 'low'].map(function (s) {
-            return sevCounts[s] ? '<span class="sev-pill sev-pill--' + s + '" style="margin:0 2px;">' + (sevCounts[s] || 0) + ' ' + s + '</span>' : '';
+        crqHtml += '<div style="margin-bottom:8px;font-size:11px;color:var(--text-muted);">Event distribution: ' +
+          ['critical', 'high', 'medium', 'low', 'unknown'].map(function (s) {
+            return sevCounts[s] ? '<span class="sev-pill sev-pill--' + (s === 'unknown' ? 'info' : s) + '" style="margin:0 2px;">' + (sevCounts[s] || 0) + ' ' + s + '</span>' : '';
           }).filter(Boolean).join(' ') + '</div>';
       }
-      // Entity pivot summary from workbook if available
+
+      // Confidence signal
+      if (crq.confidence) {
+        var confColors = {high:'#3FA860', medium:'#E0C446', low:'#FF8A3C'};
+        crqHtml += '<div style="font-size:11px;margin-bottom:8px;">' +
+          'Classification confidence: <span style="color:' + (confColors[crq.confidence] || 'var(--text-muted)') + ';font-weight:600;">' + escHtml(crq.confidence) + '</span>' +
+          (crq.confidence === 'low' ? ' &mdash; many rows have no explicit severity signal' : '') + '</div>';
+      }
+
+      // Entity pivot summary
       if (state.workbookMeta && state.workbookMeta.pivotedRowCount > 0) {
         var ep = state.workbookMeta.entityPivots || {};
         var pivotIps = Object.keys(ep.ips || {});
         var pivotUsers = Object.keys(ep.users || {});
-        crqHtml += '<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);font-size:11px;">' +
-          '<span style="color:var(--accent);font-weight:600;">\u24D8 Cross-sheet pivots detected:</span> ' +
-          state.workbookMeta.pivotedRowCount + ' rows share entities across multiple security domains.' +
-          (pivotIps.length ? ' <b>Pivoted IPs:</b> ' + pivotIps.slice(0,3).map(function(x){return escHtml(x);}).join(', ') + (pivotIps.length > 3 ? ' +' + (pivotIps.length-3) + ' more' : '') + '.' : '') +
-          (pivotUsers.length ? ' <b>Pivoted users:</b> ' + pivotUsers.slice(0,3).map(function(x){return escHtml(x);}).join(', ') + '.' : '') +
-          ' These rows have been tagged <code>cross_sheet_pivot</code> and receive elevated triage weighting.' +
+        crqHtml += '<div style="padding:8px;background:rgba(var(--accent-rgb,59,130,246),0.08);border-radius:6px;' +
+          'border:1px solid rgba(var(--accent-rgb,59,130,246),0.2);font-size:11px;">' +
+          '<span style="color:var(--accent);font-weight:600;">\u24D8 Cross-sheet pivots:</span> ' +
+          state.workbookMeta.pivotedRowCount + ' rows share entities across multiple domain sheets.' +
+          (pivotIps.length ? ' <b>IPs:</b> ' + pivotIps.slice(0,4).map(function(x){return escHtml(x);}).join(', ') + (pivotIps.length > 4 ? ' +' + (pivotIps.length-4) + ' more' : '') + '.' : '') +
+          (pivotUsers.length ? ' <b>Users:</b> ' + pivotUsers.slice(0,3).map(function(x){return escHtml(x);}).join(', ') + '.' : '') +
+          ' Tagged <code>cross_sheet_pivot</code> — elevated triage weighting applied.' +
           '</div>';
       }
-      crqHtml += '<div style="margin-top:6px;font-size:10px;color:var(--text-muted);">CRQ estimate is a lightweight FAIR-shadow approximation — not a certified FAIR assessment. Engage GRC for formal quantification.</div>';
+
+      // Required validation note
+      crqHtml += '<div style="margin-top:8px;padding:6px 8px;background:rgba(255,200,0,0.06);border-left:3px solid #E0C446;font-size:10px;color:var(--text-muted);">' +
+        '<b>Requires human validation</b> &mdash; ' +
+        escHtml((crq.validation_note || 'Engage GRC/finance to confirm affected asset class, records at risk, regulatory obligations, insurance, and business interruption costs.')) +
+        '</div>';
+
       crqHtml += '</div>';
 
-      // Persona-specific CRQ framing
+      // Persona-specific section titles
       var crqTitles = {
-        ciso: 'Financial Risk Quantification (CRQ)',
-        executive: 'Estimated Business Impact',
-        compliance: 'Regulatory Exposure Estimate',
+        ciso: 'Financial Risk Quantification (CRQ) \u2014 Planning Stage',
+        executive: 'Estimated Business Exposure (Unvalidated)',
+        compliance: 'Regulatory Exposure Estimate (Unvalidated)',
         audit: 'Financial Risk Register Input',
-        mssp: 'Client Financial Exposure Estimate',
+        mssp: 'Client Exposure Planning Estimate',
       };
-      sections.push({ title: crqTitles[persona] || 'CRQ Exposure Estimate', html: crqHtml });
+      sections.push({ title: crqTitles[persona] || 'CRQ Exposure Estimate (Unvalidated)', html: crqHtml });
     }
 
     // Sheet breakdown (if workbook meta available)

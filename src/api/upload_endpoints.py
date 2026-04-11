@@ -1446,45 +1446,204 @@ def _extract_entity_set(row: dict[str, Any], fields: tuple[str, ...]) -> set[str
     return vals
 
 
-def _compute_crq_estimate(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    """Lightweight FAIR-shadow CRQ estimate over a row set.
+"""
+Severity classification helpers for the lightweight CRQ estimate.
 
-    Returns lef, lm, expected_loss, and per-severity counts.
-    These are approximations only — not a certified FAIR assessment.
+Design intent
+─────────────
+The goal is a *planning signal*, not a certified FAIR assessment.  We
+deliberately avoid scanning the full-row blob because column headers and
+free-text values in security workbooks contain words like "critical",
+"investigate", "high", and "c2" as noise (column names, risk-score strings,
+version numbers).  Over-eager substring matching on the whole row produces
+garbage tier labels (≥60 % rows classified as Critical on any file that has
+"critical" as a column header).
+
+Instead, we use a two-pass strategy:
+  1. Look for an *explicit* severity/risk column (most reliable).
+  2. If absent, do *word-boundary* pattern matching on a small allow-listed
+     set of indicator columns (event_type, action, alert_type, threat_indicator).
+     We never scan host/IP/user values because those are structural fields that
+     cannot bear a severity semantic.
+
+The output intentionally omits a single "expected_loss" point estimate and
+instead returns a *range* (low / mid / high) plus ``requires_human_validation``
+so the UI never presents unvalidated telemetry-derived numbers as confirmed
+breach-loss figures.  A human gate (CISO / GRC / finance confirmation) is
+required before any specific dollar amount is surfaced.
+"""
+
+import re as _re
+
+# Explicit severity-bearing column names (checked in order; first match wins).
+_SEV_COLS: tuple[str, ...] = (
+    'severity', 'risk_level', 'threat_level', 'alert_severity', 'risk_tier',
+    'event_severity', 'risk_score', 'priority',
+)
+_REVIEW_COLS: tuple[str, ...] = (
+    'review_state', 'disposition', 'action_taken', 'status', 'verdict',
+)
+
+# Columns whose *values* carry semantic attack-type signals.
+# Keep this narrow — never include IP/user/host columns.
+_INDICATOR_COLS: tuple[str, ...] = (
+    'event_type', 'action', 'alert_type', 'process', 'threat_indicator',
+    'technique', 'sub_technique', 'kill_chain_phase', 'mitre_tactic',
+)
+
+# Full-word (or phrase-boundary) patterns used only on _INDICATOR_COLS values.
+_CRIT_RE = _re.compile(
+    r'\b(lsass|mimikatz|ransomware|exfiltrat(?:ion|ed)?|reflective[\s_-]dll|'
+    r'shellcode|credential[\s_-]dump|pass[\s_-]the[\s_-]hash|golden[\s_-]ticket)\b',
+    _re.I,
+)
+_HIGH_RE = _re.compile(
+    r'\b(lateral[\s_-]movement|privilege[\s_-]escal|psexec|beaconing|'
+    r'process[\s_-]inject|wmi[\s_-]exec|hollow(?:ing)?|token[\s_-]impersonate)\b',
+    _re.I,
+)
+
+# Explicit severity string normalisation map.
+_SEV_CANONICAL: dict[str, str] = {
+    # Critical aliases
+    'critical': 'critical', 'crit': 'critical', 'p1': 'critical',
+    'very_high': 'critical', 'very high': 'critical', '4': 'critical',
+    # High aliases
+    'high': 'high', 'p2': 'high', '3': 'high',
+    # Medium aliases
+    'medium': 'medium', 'med': 'medium', 'moderate': 'medium',
+    'p3': 'medium', '2': 'medium',
+    # Low aliases
+    'low': 'low', 'info': 'low', 'informational': 'low',
+    'p4': 'low', '1': 'low', 'benign': 'low', 'false_positive': 'low',
+}
+
+
+def _classify_row_severity(row: dict[str, Any]) -> str:
+    """Return one of critical/high/medium/low/unknown for a single row dict.
+
+    Never blob-scans the full row so column-name tokens cannot inflate counts.
     """
-    sev_counts: dict[str, int] = {'critical': 0, 'high': 0, 'medium': 0, 'low': 0, 'unknown': 0}
-    lm_by_sev = {'critical': 1000.0, 'high': 200.0, 'medium': 50.0, 'low': 5.0, 'unknown': 10.0}
-    sev_keywords = {
-        'critical': ('lsass', 'exfil', 'c2', 'ransomware', 'reflective dll', 'mimikatz', 'confirmed_malicious', 'crit'),
-        'high': ('lateral', 'beacon', 'privilege escalation', 'powershell', 'wmi', 'psexec', 'high', 'alert'),
-        'medium': ('suspicious', 'anomal', 'medium', 'review', 'investigate'),
-        'low': ('low', 'informational', 'benign', 'noise'),
+    # 1. Explicit severity / risk column
+    for col in _SEV_COLS:
+        val = str(row.get(col) or '').strip().lower()
+        if val in _SEV_CANONICAL:
+            return _SEV_CANONICAL[val]
+        # Numeric risk_score: treat ≥80 as high, ≥95 as critical
+        if col == 'risk_score' and val.replace('.', '', 1).isdigit():
+            score = float(val)
+            if score >= 95:
+                return 'critical'
+            if score >= 80:
+                return 'high'
+            if score >= 50:
+                return 'medium'
+            return 'low'
+
+    # 2. Review state / disposition
+    for col in _REVIEW_COLS:
+        val = str(row.get(col) or '').strip().lower()
+        if not val:
+            continue
+        if 'confirmed_malicious' in val or 'confirmed malicious' in val:
+            return 'critical'
+        if any(t in val for t in ('escalat', 'investigate', 'incident')):
+            return 'high'
+        if any(t in val for t in ('review', 'pending', 'open')):
+            return 'medium'
+        if any(t in val for t in ('benign', 'false_positive', 'cleared', 'closed')):
+            return 'low'
+
+    # 3. Targeted indicator-column heuristic (word-boundary patterns only)
+    for col in _INDICATOR_COLS:
+        val = str(row.get(col) or '')
+        if not val:
+            continue
+        if _CRIT_RE.search(val):
+            return 'critical'
+        if _HIGH_RE.search(val):
+            return 'high'
+
+    return 'unknown'
+
+
+def _compute_crq_estimate(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Telemetry-based exposure planning estimate.
+
+    Returns an exposure *range* (not a point estimate) plus
+    ``requires_human_validation: True``.  Do not present the output as a
+    validated breach-loss figure — it is a budget-planning / risk-discussion
+    driver only.
+
+    A human gate (CISO / GRC / finance) is required to confirm:
+      - affected asset class and data types
+      - number of records / individuals at risk
+      - applicable regulatory fines and insurance coverage
+      - business interruption duration and cost
+
+    The range is deliberately wide (×3 band) to reflect that telemetry alone
+    cannot bound financial impact.
+    """
+    sev_counts: dict[str, int] = {
+        'critical': 0, 'high': 0, 'medium': 0, 'low': 0, 'unknown': 0,
     }
     for row in rows:
-        blob = ' '.join(str(v).lower() for v in row.values() if v)
-        assigned = 'unknown'
-        for sev, keywords in sev_keywords.items():
-            if any(k in blob for k in keywords):
-                assigned = sev
-                break
-        sev_counts[assigned] += 1
+        sev = _classify_row_severity(row)
+        sev_counts[sev] += 1
 
-    lef = float(max(1, len(rows)))
-    expected_loss = sum(sev_counts[s] * lm_by_sev[s] for s in sev_counts)
-    lm_weighted = expected_loss / lef if lef > 0 else 0.0
+    n_total = max(1, len(rows))
+
+    # Conservative lower bound — count only critical+high at low magnitude.
+    # Liberal upper bound — all events at elevated magnitude.
+    lm_low = {'critical': 200.0, 'high': 40.0, 'medium': 5.0, 'low': 0.5, 'unknown': 1.0}
+    lm_high = {'critical': 2_000.0, 'high': 400.0, 'medium': 50.0, 'low': 5.0, 'unknown': 10.0}
+
+    mid_loss = sum(
+        sev_counts[s] * ((lm_low[s] + lm_high[s]) / 2) for s in sev_counts
+    )
+    low_loss = sum(sev_counts[s] * lm_low[s] for s in sev_counts)
+    high_loss = sum(sev_counts[s] * lm_high[s] for s in sev_counts)
+
+    # Tier is derived from the mid-point.
     exposure_tier = (
-        'critical' if expected_loss >= 100_000
-        else 'high' if expected_loss >= 10_000
-        else 'medium' if expected_loss >= 1_000
+        'critical' if mid_loss >= 100_000
+        else 'high' if mid_loss >= 10_000
+        else 'medium' if mid_loss >= 1_000
         else 'low'
     )
+
+    def _fmt(v: float) -> str:
+        if v >= 1_000_000:
+            return f'${v / 1_000_000:.1f}M'
+        if v >= 1_000:
+            return f'${v / 1_000:.0f}k'
+        return f'${v:.0f}'
+
+    confidence = (
+        'low' if sev_counts['unknown'] / n_total > 0.4
+        else 'medium' if sev_counts['unknown'] / n_total > 0.15
+        else 'high'
+    )
+
     return {
-        'lef': lef,
-        'lm': round(lm_weighted, 2),
-        'expected_loss': round(expected_loss, 2),
-        'expected_loss_formatted': f'${expected_loss:,.0f}',
         'exposure_tier': exposure_tier,
+        'exposure_range': {
+            'low': round(low_loss),
+            'mid': round(mid_loss),
+            'high': round(high_loss),
+        },
+        'exposure_range_formatted': f'{_fmt(low_loss)} – {_fmt(high_loss)}',
+        'confidence': confidence,
+        'requires_human_validation': True,
+        'validation_note': (
+            'Telemetry-based planning estimate only. '
+            'Engage GRC/finance to validate: affected asset class, '
+            'records at risk, regulatory obligations, insurance coverage, '
+            'and business interruption costs before treating as breach-loss figure.'
+        ),
         'severity_counts': sev_counts,
+        # Keep lef for compatibility with downstream consumers.
+        'lef': float(n_total),
     }
 
 
