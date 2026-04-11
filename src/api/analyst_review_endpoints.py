@@ -4,15 +4,17 @@ Implements the analyst review loop described in the platform readiness audit:
   T3: Analyst submits labels (confirmed/benign/needs_investigation)
   T4: Bitemporal delta computed (T1 verdict vs T3 label)
   T5: Temporal RAG pattern retrieval fires
-  T6: Re-evaluation pass with analyst delta + RAG context
+  T6: Re-evaluation LLM pass with analyst delta + RAG context (FIRES ACTUAL LLM)
 
 POST /api/v1/assessments/{assessment_id}/analyst_review
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
+import os
 import time
 from typing import Any, Dict, Optional
 
@@ -132,6 +134,58 @@ def _build_reeval_prompt(assessment: dict, delta: dict, rag_patterns: list, pers
     return '\n'.join(lines)
 
 
+async def _fire_t6_llm_reeval(
+    assessment: dict,
+    delta: dict,
+    rag_patterns: list,
+    reeval_prompt: str,
+    persona: str,
+) -> dict:
+    """T6: Actually invoke the LLM for re-evaluation and return the updated narrative.
+
+    Returns a dict with keys: llm_response, model_used, tokens_used, error.
+    Falls back gracefully — a failed LLM call never blocks the endpoint.
+    """
+    if os.getenv('LLM_MOCK', '0').lower() in {'1', 'true', 'yes'}:
+        return {
+            'llm_response': f'[mock] Bitemporal re-evaluation: analyst labelled {delta.get("t3_label")}. '
+                            f'Delta type: {delta.get("delta_type")}. '
+                            f'RAG patterns used: {len(rag_patterns)}.',
+            'model_used': 'mock',
+            'tokens_used': 0,
+            'error': None,
+        }
+    try:
+        from src.analysis.auto_llm import LLMAssessmentClient, build_tier2_prompt
+        client = LLMAssessmentClient()
+        # Build a synthetic row from the assessment so the generic prompt builder works
+        rows = assessment.get('rows') or [{}]
+        representative_row = rows[0] if rows else {}
+        context = {
+            'tier': 'tier2',
+            'persona': persona,
+            'reeval_delta': delta,
+            'rag_patterns': rag_patterns[:5],
+            'bitemporal_reeval': True,
+            'reeval_prompt_prefix': reeval_prompt,
+        }
+        result = client.summarize_row(representative_row, context)
+        return {
+            'llm_response': result.get('summary') or result.get('response') or str(result),
+            'model_used': result.get('model_used') or result.get('model') or 'unknown',
+            'tokens_used': result.get('tokens_used') or 0,
+            'error': None,
+        }
+    except Exception as exc:
+        logger.warning('T6 LLM re-eval failed (graceful degradation): %s', exc)
+        return {
+            'llm_response': None,
+            'model_used': None,
+            'tokens_used': 0,
+            'error': str(exc),
+        }
+
+
 @router.post('/{assessment_id}/analyst_review', summary='Submit analyst review (T3→T6 bitemporal)')
 async def analyst_review(assessment_id: str, payload: AnalystReviewRequest, request: Request) -> dict:
     """Accept an analyst label, compute bitemporal delta, query RAG, trigger re-eval.
@@ -213,6 +267,19 @@ async def analyst_review(assessment_id: str, payload: AnalystReviewRequest, requ
         'version': (assessment.get('analyst_review', {}).get('version', 0) + 1),
     }
 
+    # --- T6: Fire actual LLM re-evaluation (async, only on reversal/escalation) ---
+    t6_llm_result: dict = {}
+    if t6_details['reeval_triggered']:
+        t6_llm_result = await _fire_t6_llm_reeval(
+            assessment=assessment,
+            delta=delta,
+            rag_patterns=rag_patterns,
+            reeval_prompt=reeval_prompt,
+            persona=payload.persona,
+        )
+        assessment['analyst_review']['t6_llm_response'] = t6_llm_result.get('llm_response')
+        assessment['analyst_review']['t6_model_used'] = t6_llm_result.get('model_used')
+
     # Publish SSE event for live UI update
     try:
         from src.api.deep_analyze_endpoints import publish_llm_event
@@ -232,6 +299,9 @@ async def analyst_review(assessment_id: str, payload: AnalystReviewRequest, requ
         't4_delta': delta,
         't5_rag_patterns': len(rag_patterns),
         't6_reeval_triggered': t6_details['reeval_triggered'],
+        't6_llm_response': t6_llm_result.get('llm_response'),
+        't6_model_used': t6_llm_result.get('model_used'),
+        't6_error': t6_llm_result.get('error'),
         'reeval_prompt': reeval_prompt if t6_details['reeval_triggered'] else None,
         'custody_chain': {
             't3_hash': t3_hash,
