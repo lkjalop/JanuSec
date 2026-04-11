@@ -311,4 +311,20 @@ class SecurityOrchestrator(DecisionPersistenceMixin, RoutingMixin, BackgroundTas
         return env
 
 
-__all__ = ['SecurityOrchestrator', 'ProcessingResult']
+__all__ = ['SecurityOrchestrator', 'ProcessingResult', 'get_orchestrator', 'set_orchestrator']
+
+# ---------------------------------------------------------------------------
+# Module-level singleton for cross-module access to the running orchestrator
+# ---------------------------------------------------------------------------
+_ORCHESTRATOR_INSTANCE: 'SecurityOrchestrator | None' = None
+
+
+def get_orchestrator() -> 'SecurityOrchestrator | None':
+    """Return the running SecurityOrchestrator instance (or None if not started)."""
+    return _ORCHESTRATOR_INSTANCE
+
+
+def set_orchestrator(instance: 'SecurityOrchestrator | None') -> None:
+    """Register (or clear) the active orchestrator instance."""
+    global _ORCHESTRATOR_INSTANCE
+    _ORCHESTRATOR_INSTANCE = instance
