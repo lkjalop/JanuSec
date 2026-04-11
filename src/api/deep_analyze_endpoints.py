@@ -4257,6 +4257,69 @@ async def run_deep_analyze_pipeline(payload: dict) -> JSONResponse:
     ml_pipeline_result: Dict[str, Any] = {'enabled': False, 'status': 'disabled', 'factors': []}
     if _endpoint_email_ml_enabled(payload, options):
         rows, ml_pipeline_result = _apply_endpoint_email_ml(rows, payload, tenant_id=org, event_id=f"ml-{uuid.uuid4().hex[:12]}")
+
+    # Wire domain-specific factor extractors (email BEC, endpoint parent-process,
+    # cross-domain pivot, network ML beacon). Merges factors back into matching rows.
+    try:
+        from src.correlation.ingestion_orchestrator import run_ingestion as _run_ingestion
+        from src.correlation.canonical_event import CanonicalEvent as _CE
+        _canon_events: list = []
+        for _r in rows:
+            if not isinstance(_r, dict):
+                continue
+            try:
+                _src = str(_r.get('source') or _r.get('log_source') or _r.get('ingest_source') or '').lower()
+                _st = ('email' if any(k in _src for k in ('email','mail','smtp','exchange','o365'))
+                       else 'endpoint' if any(k in _src for k in ('edr','endpoint','sysmon','wef','etw','crowdstrike','sentinelone'))
+                       else 'network' if any(k in _src for k in ('zeek','suricata','netflow','vpcflow','dns','network'))
+                       else 'generic')
+                _ce = _CE(
+                    source_type=_st,
+                    host=_r.get('host') or _r.get('hostname') or _r.get('device_name') or '',
+                    user=_r.get('user') or _r.get('username') or _r.get('actor') or '',
+                    process=_r.get('process') or _r.get('process_name') or '',
+                    file_hash=_r.get('sha256') or _r.get('file_hash') or '',
+                    src_ip=_r.get('src_ip') or _r.get('ip') or '',
+                    dst_ip=_r.get('dst_ip') or '',
+                    domain=_r.get('domain') or _r.get('fqdn') or '',
+                    uri=_r.get('uri') or _r.get('url') or '',
+                    subject=_r.get('subject') or '',
+                    attachment_type=_r.get('attachment_type') or '',
+                    file_name=_r.get('file_name') or _r.get('filename') or '',
+                    mailbox=_r.get('mailbox') or '',
+                    threat_tags=list(_r.get('threat_tags') or _r.get('tags') or []),
+                    raw=_r,
+                    timestamp=float(_r.get('ts') or _r.get('timestamp') or 0),
+                )
+                _canon_events.append(_ce)
+            except Exception:
+                pass
+        if _canon_events:
+            _domain_factors = _run_ingestion(_canon_events)
+            # Merge returned FactorEmit objects back into matching rows
+            for _fac in (_domain_factors or []):
+                _fname = _fac.get('name') or ''
+                if not _fname:
+                    continue
+                _fhost = ''
+                for _n in (_fac.get('nodes') or []):
+                    if isinstance(_n, str) and _n.startswith('host:'):
+                        _fhost = _n[5:]
+                        break
+                for _row in rows:
+                    if not isinstance(_row, dict):
+                        continue
+                    _rhost = _row.get('host') or _row.get('hostname') or _row.get('device_name') or ''
+                    if _fhost and _rhost and _fhost != _rhost:
+                        continue
+                    _rf = list(_row.get('factors') or [])
+                    if _fname not in _rf:
+                        _rf.append(_fname)
+                        _row['factors'] = _rf
+                    break  # assign to first matching row only
+    except Exception as _exc:
+        logger.debug('Domain factor extractor wiring skipped: %s', _exc)
+
     ctx = {
         'rows': rows,
         'options': {**options, 'auto_llm': auto, 'risk_appetite': risk_appetite},

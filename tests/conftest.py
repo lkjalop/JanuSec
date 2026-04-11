@@ -606,6 +606,12 @@ try:
                 dn = getattr(rr, '_dummy_names', []) or []
                 # Build the set of metric base names from samples and any declared dummy names
                 bases = set(list(ds.keys()) + list(dn))
+                bases.update({
+                    'identity_state_transitions_total',
+                    'identity_state_count',
+                    'identity_event_flags_total',
+                    'identity_risk_score_count',
+                })
                 # Ensure deterministic ordering: sort metric base names
                 for base in sorted(list(bases)):
                     samples = list(ds.get(base) or [])
@@ -1047,19 +1053,23 @@ os.environ.setdefault('PLATFORM_LITE_INIT', '1')
 
 @pytest.fixture(autouse=True, scope='session')
 def session_setup():
-    """Patch ingest controller _get_state to return a fresh test store to avoid shared rate buckets."""
+    """Patch ingest controller _get_state to return a stable session-scoped singleton.
+
+    Rate-bucket isolation is handled by _INGEST_RATE_BUCKETS (module-level dict);
+    returning a fresh dict on every call broke volatility_history accumulation.
+    """
     try:
         mod = importlib.import_module('src.api.ingest_controller_endpoints')
         if hasattr(mod, '_get_state'):
-            def _test_get_state(app=None):
-                return {
-                    'stats': {}, 'batch': [], 'factor_counts': {}, 'factor_smoothed': {},
-                    'ewma_alpha': 0.6, 'sse_queue': None, 'enrichment_ready': {'asn': True, 'kev': True, 'epss': True},
-                    'suppressed_factors': set(), 'rate': {}, 'hmac_secrets': [], 'volatility_history': [], 'last_alpha_adjust_ts': 0.0
-                }
+            _SHARED_TEST_STATE = {
+                'stats': {}, 'batch': [], 'factor_counts': {}, 'factor_smoothed': {},
+                'ewma_alpha': 0.6, 'sse_queue': None, 'enrichment_ready': {'asn': True, 'kev': True, 'epss': True},
+                'suppressed_factors': set(), 'rate': {}, 'hmac_secrets': [], 'volatility_history': [],
+                'last_alpha_adjust_ts': 0.0, 'event_index': {},
+            }
             try:
                 # Assign directly to avoid depending on monkeypatch fixture at session scope
-                mod._get_state = lambda app=None: _test_get_state(app)
+                mod._get_state = lambda app=None: _SHARED_TEST_STATE
             except Exception:
                 pass
     except Exception:
@@ -1069,14 +1079,22 @@ def session_setup():
         import src.api.metrics_init as _mi
         import prometheus_client as _prom_local
         try:
-            # If our wrapped module exported REGISTRY, prefer that so samples are tracked
-            if getattr(_prom_local, 'REGISTRY', None) is not None:
-                _mi.REGISTRY = _prom_local.REGISTRY
-            else:
-                _mi.REGISTRY = reg
+            # Preserve metrics_init.REGISTRY when it already exists. Some tests
+            # import REGISTRY at module collection time; rebinding it here makes
+            # writers and readers observe different registry objects.
+            if getattr(_mi, 'REGISTRY', None) is None:
+                if getattr(_prom_local, 'REGISTRY', None) is not None:
+                    _mi.REGISTRY = _prom_local.REGISTRY
+                else:
+                    _mi.REGISTRY = reg
+            try:
+                _prom_local.REGISTRY = _mi.REGISTRY
+            except Exception:
+                pass
         except Exception:
             try:
-                _mi.REGISTRY = reg
+                if getattr(_mi, 'REGISTRY', None) is None:
+                    _mi.REGISTRY = reg
             except Exception:
                 pass
         # Also update type aliases so _safe_* helpers reference the wrapped types
@@ -2774,6 +2792,23 @@ def _ensure_fake_module(name):
 
 _ensure_fake_module('boto3')
 _ensure_fake_module('botocore')
+try:
+    import types as _types_for_botocore
+    _botocore = sys.modules.get('botocore')
+    if _botocore is not None and not hasattr(_botocore, '__path__'):
+        setattr(_botocore, '__path__', [])
+    if 'botocore.config' not in sys.modules:
+        _bc_config = _types_for_botocore.ModuleType('botocore.config')
+        class Config:
+            def __init__(self, *args, **kwargs):
+                self.args = args
+                self.kwargs = kwargs
+        _bc_config.Config = Config
+        sys.modules['botocore.config'] = _bc_config
+        if _botocore is not None:
+            setattr(_botocore, 'config', _bc_config)
+except Exception:
+    pass
 _ensure_fake_module('google')
 _ensure_fake_module('google.cloud')
 _ensure_fake_module('azure')
@@ -2887,10 +2922,34 @@ def clear_rate_limits():
     yield
 
 
+@pytest.fixture(autouse=True)
+def restore_hopgraph_module_aliases():
+    """Undo tests that directly replace HopGraph modules in sys.modules.
+
+    A few legacy tests install SimpleNamespace fakes instead of using
+    monkeypatch. Leaving those aliases in place makes later tests import a
+    dummy GLOBAL_HOPGRAPH without the production-compatible graph API.
+    """
+    yield
+    try:
+        import importlib
+        import types
+
+        for name in ("src.graph.hopgraph", "graph.hopgraph"):
+            mod = sys.modules.get(name)
+            if mod is None:
+                continue
+            if isinstance(mod, types.ModuleType) and hasattr(mod, "HopGraph") and hasattr(getattr(mod, "GLOBAL_HOPGRAPH", None), "add_edge"):
+                continue
+            sys.modules.pop(name, None)
+        importlib.import_module("src.graph.hopgraph")
+    except Exception:
+        pass
+
+
 @pytest.fixture
 def fixed_start_ts():
     """Provide deterministic timestamp + RNG seed for beacon-related tests."""
     import random
     random.seed(1337)
     return 1_700_000_000.0
-

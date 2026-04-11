@@ -180,6 +180,12 @@ def metric_gauge(component: str, what: str, desc: str, labels: Iterable[str] | N
     try:
         if hasattr(reg, '_dummy_samples'):
             class _ForwardGauge:
+                def set(self, v=0):
+                    try:
+                        reg._dummy_samples[name] = [type('S', (), {'name': name, 'labels': {}, 'value': float(v)})()]
+                    except Exception:
+                        return None
+
                 def labels(self, *a, **kw):
                     lab = {}
                     try:

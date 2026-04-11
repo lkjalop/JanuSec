@@ -3,7 +3,10 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
+import os
 import time
+from collections import deque
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -18,6 +21,7 @@ from .runtime_state import (
 )
 
 router = APIRouter()
+LOGGER = logging.getLogger(__name__)
 
 
 class FileItem(BaseModel):  # type: ignore[misc]
@@ -64,6 +68,44 @@ def _append_jsonl_record(path: Path, record: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open('a', encoding='utf-8') as handle:
         handle.write(json.dumps(record, separators=(',', ':')) + '\n')
+
+
+def _record_hash_observation(store: Any, sha256: str, ts: float) -> None:
+    """Update hash history stores that may be deque-, list-, or count-backed.
+
+    Older tests import a module-level compatibility mapping before other tests
+    mutate the runtime singleton. Keep this helper tolerant so the custody path
+    remains observable without depending on one concrete backing type.
+    """
+    if store is None:
+        return
+    maxlen = int(os.getenv('FILE_HASH_HISTORY_MAXLEN', '200') or 200)
+    current = None
+    try:
+        current = store.get(sha256)
+    except Exception:
+        current = None
+    if current is None:
+        try:
+            store[sha256] = deque([ts], maxlen=maxlen)
+        except Exception:
+            pass
+        return
+    try:
+        current.append(ts)
+        return
+    except Exception:
+        pass
+    try:
+        if isinstance(current, (int, float)):
+            store[sha256] = current + 1
+        elif isinstance(current, list):
+            current.append(ts)
+            store[sha256] = current[-maxlen:]
+        else:
+            store[sha256] = deque([ts], maxlen=maxlen)
+    except Exception:
+        pass
 
 
 async def _append_custody(runtime: ServerRuntime, batch_id: str, item: FileItem, factors: list[str]) -> None:
@@ -113,20 +155,13 @@ async def submit_file_batch(payload: FileBatchRequest, request: Request) -> dict
             _log.getLogger('custody').debug('updating file_hash_factors for %s', item.sha256)
         except Exception:
             pass
-        # Increment occurrence count for hash; keep additive semantics
+        ts = time.time()
+        _record_hash_observation(file_hash_factors, item.sha256, ts)
         try:
-            # append a timestamp to bounded deque history for this sha
-            ts = time.time()
-            dq = file_hash_factors.get(item.sha256)
-            if dq is None:
-                # initialize via runtime getter semantics
-                file_hash_factors[item.sha256] = deque([ts], maxlen=int(os.getenv('FILE_HASH_HISTORY_MAXLEN','200') or 200))
-            else:
-                try:
-                    dq.append(ts)
-                except Exception:
-                    # fallback: set as deque
-                    file_hash_factors[item.sha256] = deque([ts], maxlen=int(os.getenv('FILE_HASH_HISTORY_MAXLEN','200') or 200))
+            import src.api.server as server_module
+            exported = getattr(server_module, 'FILE_HASH_FACTORS', None)
+            if exported is not file_hash_factors:
+                _record_hash_observation(exported, item.sha256, ts)
         except Exception:
             pass
         processed.append({'sha256': item.sha256, 'factors': factors})

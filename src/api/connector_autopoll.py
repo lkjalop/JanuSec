@@ -27,6 +27,12 @@ logger = logging.getLogger(__name__)
 # Connectors polled per provider (extend as you add new connectors)
 _AZURE_CONNECTORS = ['entra_signin', 'entra_audit', 'defender_cloud', 'eventhub', 'nsg_flow', 'azure_activity']
 _AWS_CONNECTORS   = ['cloudtrail', 'guardduty', 'securityhub', 'vpcflow', 'detective', 'macie']
+# New vendor connectors — polled via their own connector classes when credentials are configured
+_CROWDSTRIKE_CONNECTORS = ['detections', 'incidents']
+_SENTINELONE_CONNECTORS = ['threats', 'alerts']
+_INSPECTOR_CONNECTORS   = ['findings']
+_CLOUDWATCH_CONNECTORS  = ['log_events']
+_AZURE_MONITOR_CONNECTORS = ['log_analytics']
 
 
 def _autopoll_enabled() -> bool:
@@ -47,7 +53,19 @@ def _tenants() -> List[str]:
 
 def _providers() -> List[str]:
     raw = os.getenv('CONNECTOR_AUTOPOLL_PROVIDERS', 'aws,azure') or 'aws,azure'
-    return [p.strip().lower() for p in raw.split(',') if p.strip()]
+    configured = [p.strip().lower() for p in raw.split(',') if p.strip()]
+    # Auto-add vendor providers when their credentials are present (unless the env
+    # var was explicitly set, in which case trust the operator's list exactly).
+    if 'CONNECTOR_AUTOPOLL_PROVIDERS' not in os.environ:
+        if os.getenv('CS_FALCON_CLIENT_ID'):
+            configured.append('crowdstrike')
+        if os.getenv('S1_API_TOKEN'):
+            configured.append('sentinelone')
+        if os.getenv('AWS_CW_LOG_GROUPS') or os.getenv('AWS_VPCFLOW_LOG_GROUP'):
+            configured.append('cloudwatch')
+        if os.getenv('AZURE_MONITOR_WORKSPACE_ID'):
+            configured.append('azure_monitor')
+    return list(dict.fromkeys(configured))
 
 
 def _autopoll_api_key() -> str:
@@ -78,7 +96,72 @@ def _connectors_for_provider(provider: str) -> List[str]:
     raw = os.getenv(f'CONNECTOR_AUTOPOLL_{provider.upper()}_CONNECTORS', '')
     if raw:
         return [c.strip() for c in raw.split(',') if c.strip()]
-    return _AZURE_CONNECTORS if provider == 'azure' else _AWS_CONNECTORS
+    _MAP = {
+        'azure': _AZURE_CONNECTORS,
+        'aws': _AWS_CONNECTORS,
+        'crowdstrike': _CROWDSTRIKE_CONNECTORS,
+        'sentinelone': _SENTINELONE_CONNECTORS,
+        'inspector': _INSPECTOR_CONNECTORS,
+        'cloudwatch': _CLOUDWATCH_CONNECTORS,
+        'azure_monitor': _AZURE_MONITOR_CONNECTORS,
+    }
+    return _MAP.get(provider, [])
+
+
+def _poll_vendor(provider: str, connector: str, tenant: str) -> Dict[str, Any]:
+    """Poll a vendor-specific connector (CrowdStrike, SentinelOne, Inspector, CloudWatch, AzureMonitor).
+
+    Each connector is instantiated with no config args — it reads all credentials from
+    environment variables using its own os.getenv() calls. Returns early (skipped=True)
+    when required credentials are absent.
+    """
+    try:
+        if provider == 'crowdstrike':
+            if not os.getenv('CS_FALCON_CLIENT_ID') or not os.getenv('CS_FALCON_CLIENT_SECRET'):
+                return {'ok': False, 'skipped': True, 'reason': 'missing_credentials'}
+            from src.connectors.crowdstrike.connector import CrowdStrikeConnector
+            c = CrowdStrikeConnector()
+            events = list(c.fetch_detections() if connector == 'detections' else c.fetch_incidents())
+
+        elif provider == 'sentinelone':
+            if not os.getenv('S1_MGMT_URL') or not os.getenv('S1_API_TOKEN'):
+                return {'ok': False, 'skipped': True, 'reason': 'missing_credentials'}
+            from src.connectors.sentinelone.connector import SentinelOneConnector
+            c = SentinelOneConnector()
+            events = list(c.fetch_threats() if connector == 'threats' else c.fetch_alerts())
+
+        elif provider == 'inspector':
+            if not os.getenv('AWS_ACCESS_KEY_ID') and not os.getenv('AWS_ROLE_ARN') and not os.getenv('AWS_CONTAINER_CREDENTIALS_RELATIVE_URI'):
+                return {'ok': False, 'skipped': True, 'reason': 'missing_credentials'}
+            from src.connectors.aws.inspector import InspectorConnector
+            from src.connectors.aws.base import AWSConnectorConfig
+            c = InspectorConnector(AWSConnectorConfig())
+            events = list(c.fetch_events())
+
+        elif provider == 'cloudwatch':
+            if not os.getenv('AWS_CW_LOG_GROUPS') and not os.getenv('AWS_VPCFLOW_LOG_GROUP'):
+                return {'ok': False, 'skipped': True, 'reason': 'missing_config'}
+            from src.connectors.aws.cloudwatch import CloudWatchConnector
+            from src.connectors.aws.base import AWSConnectorConfig
+            c = CloudWatchConnector(AWSConnectorConfig())
+            events = list(c.fetch_events())
+
+        elif provider == 'azure_monitor':
+            if not os.getenv('AZURE_MONITOR_WORKSPACE_ID'):
+                return {'ok': False, 'skipped': True, 'reason': 'missing_config'}
+            from src.connectors.azure.monitor import AzureMonitorConnector
+            c = AzureMonitorConnector()
+            events = list(c.fetch_events())
+
+        else:
+            return {'ok': False, 'error': f'unknown_vendor_provider:{provider}'}
+
+        count = len(events)
+        logger.info('autopoll vendor: %s/%s → %d events', provider, connector, count)
+        return {'ok': True, 'ingested': count, 'provider': provider, 'connector': connector}
+    except Exception as exc:
+        logger.warning('autopoll vendor: %s/%s failed: %s', provider, connector, exc)
+        return {'ok': False, 'error': str(exc)}
 
 
 def _poll_one(app: Any, tenant: str, provider: str, connector: str, api_key: str) -> Dict[str, Any]:
@@ -109,6 +192,8 @@ def _poll_one(app: Any, tenant: str, provider: str, connector: str, api_key: str
             conn, fetcher = _aws_connector(connector, body)
         elif provider == 'azure':
             conn, fetcher = _azure_connector(connector, body, tenant)
+        elif provider in ('crowdstrike', 'sentinelone', 'inspector', 'cloudwatch', 'azure_monitor'):
+            return _poll_vendor(provider, connector, tenant)
         else:
             return {'ok': False, 'error': 'unknown_provider'}
 

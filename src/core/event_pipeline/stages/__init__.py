@@ -14,7 +14,7 @@ from .advanced import (
     quality_stage,
 )
 from .base import StageContext, StageDefinition, StageResult
-from .network import beacon_stage, domain_novelty_stage, egress_stage, rare_token_stage
+from .network import beacon_stage, domain_novelty_stage, egress_stage, network_ml_stage, rare_token_stage
 from .primitives import (
     adaptive_pre_stage,
     auth_burst_stage,
@@ -87,6 +87,7 @@ STAGE_DEFINITIONS: list[StageDefinition] = [
     StageDefinition('beacon', beacon_stage, heavy=True),
     StageDefinition('egress', egress_stage, heavy=True),
     StageDefinition('domain_novelty', domain_novelty_stage, heavy=True),
+    StageDefinition('network_ml', network_ml_stage, heavy=True),
     StageDefinition('rare_token', rare_token_stage),
     StageDefinition('hunt_lanes', hunt_lanes_stage),
     StageDefinition('correlation', correlation_stage),
@@ -102,6 +103,7 @@ __all__ = [
     'StageResult',
     'StageContext',
     'STAGE_DEFINITIONS',
+    'network_ml_stage',
     '_lazy_runner',
 ]
 

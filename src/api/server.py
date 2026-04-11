@@ -2902,7 +2902,20 @@ async def _guardrail_single_pass(
     if drift_value is not None and drift_value >= drift_threshold:
         alerts.append(('drift', {'drift': drift_value}))
 
-    window = list(DECISION_CACHE.values())[-RECENT_DECISION_WINDOW:]
+    cache_values = []
+    try:
+        from src.api import runtime_state as _runtime_state
+        runtime_cache = getattr(_runtime_state, 'DECISION_CACHE', None)
+        if runtime_cache is not None:
+            cache_values = list(runtime_cache.values())
+    except Exception:
+        cache_values = []
+    try:
+        if not cache_values:
+            cache_values = list(DECISION_CACHE.values())
+    except Exception:
+        cache_values = []
+    window = cache_values[-RECENT_DECISION_WINDOW:]
     latencies = [float(getattr(rec, 'processing_time_ms', 0) or 0) for rec in window if getattr(rec, 'processing_time_ms', None) is not None]
     if latencies:
         latencies.sort()
@@ -4586,6 +4599,13 @@ async def decisions_recent(limit: int = 50, tenant_id: str | None = None, reques
         return data
     def _merge_recent_cache_rows(data: list[dict[str, Any]]) -> list[dict[str, Any]]:
         cache = DECISION_CACHE if isinstance(DECISION_CACHE, dict) else {}
+        try:
+            from src.api import runtime_state as _rt  # type: ignore
+            seeded = getattr(_rt, 'SEEDED_DECISIONS', None)
+            if isinstance(seeded, dict):
+                cache = {**cache, **seeded}
+        except Exception:
+            pass
         if not cache:
             return data
         seen = {str(row.get('event_id') or row.get('id') or '') for row in data}

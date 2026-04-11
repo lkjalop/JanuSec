@@ -999,6 +999,13 @@ async def lifespan(app: FastAPI):
             _sched_backup()
         except Exception:
             pass
+        # Register SecurityOrchestrator singleton so T8 weight-push works
+        try:
+            from src.orchestrator.core import SecurityOrchestrator, set_orchestrator as _set_orch
+            _set_orch(SecurityOrchestrator())
+            logger.info('SecurityOrchestrator singleton registered')
+        except Exception:
+            pass
         try:
             await asyncio.sleep(0)  # yield so the task is scheduled
         except Exception:
@@ -6534,6 +6541,12 @@ try:
     app.include_router(analyst_review_router)
 except Exception:
     logger.debug('Failed to include analyst_review_router')
+try:
+    from .compliance_coverage_endpoints import router as compliance_coverage_router
+    app.include_router(compliance_coverage_router)
+    logger.info('Included compliance_coverage router')
+except Exception:
+    logger.debug('Failed to include compliance_coverage_router')
 try:
     from .on_demand_fetch_endpoints import router as on_demand_fetch_router
     app.include_router(on_demand_fetch_router)

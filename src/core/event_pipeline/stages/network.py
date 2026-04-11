@@ -211,3 +211,59 @@ async def rare_token_stage(event: dict, ctx: StageContext) -> StageResult:
             except Exception:
                 pass
     return StageResult(name='rare_token', factors=factors)
+
+
+# ---------------------------------------------------------------------------
+# NetworkMLPipeline stage — beacon, exfil, DGA, C2, tunnel ML detectors
+# Lazy singleton: loaded on first use, silently skipped when unavailable.
+# ---------------------------------------------------------------------------
+_network_ml_pipeline = None
+_network_ml_tried = False
+
+
+def _get_network_ml_pipeline():
+    global _network_ml_pipeline, _network_ml_tried
+    if not _network_ml_tried:
+        _network_ml_tried = True
+        try:
+            from src.ml.network_ml_pipeline import NetworkMLPipeline  # type: ignore
+            _network_ml_pipeline = NetworkMLPipeline()
+        except Exception:
+            _network_ml_pipeline = None
+    return _network_ml_pipeline
+
+
+@timed_stage('network_ml')
+async def network_ml_stage(event: dict, ctx: StageContext) -> StageResult:
+    """Run NetworkMLPipeline beacon/exfil/DGA/C2-tunnel detectors on each flow event."""
+    factors: list[str] = []
+    pipeline = _get_network_ml_pipeline()
+    if pipeline is None:
+        return StageResult(name='network_ml', factors=factors)
+    try:
+        flow = {
+            'src_ip': event.get('src_ip') or event.get('source_ip') or '',
+            'dst_ip': event.get('dst_ip') or event.get('destination_ip') or '',
+            'dst_port': event.get('dst_port') or event.get('destination_port') or 0,
+            'proto': event.get('proto') or event.get('protocol') or '',
+            'bytes_out': event.get('bytes_out') or event.get('out_bytes') or 0,
+            'bytes_in': event.get('bytes_in') or event.get('in_bytes') or 0,
+            'duration': event.get('duration') or event.get('conn_duration') or 0.0,
+            'domain': event.get('domain') or event.get('fqdn') or event.get('dst_domain') or '',
+            'ja3': event.get('ja3') or '',
+            'ja3s': event.get('ja3s') or '',
+        }
+        ml_result = pipeline.run_flow(flow)
+        for fac in (ml_result.get('factors') or []):
+            if isinstance(fac, str):
+                factors.append(fac)
+            elif isinstance(fac, dict):
+                fname = fac.get('factor') or fac.get('name') or ''
+                if fname:
+                    factors.append(fname)
+    except Exception as exc:
+        try:
+            ctx.logger.debug('network_ml stage error: %s', exc)
+        except Exception:
+            pass
+    return StageResult(name='network_ml', factors=factors)

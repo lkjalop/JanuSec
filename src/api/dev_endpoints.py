@@ -222,6 +222,13 @@ async def dev_seed_decisions(payload: dict, request: Request):
             pass
         now = int(time.time())
         seeded: list[str] = []
+        seeded_store = getattr(runtime_state, 'SEEDED_DECISIONS', None)
+        if not isinstance(seeded_store, dict):
+            seeded_store = {}
+            try:
+                setattr(runtime_state, 'SEEDED_DECISIONS', seeded_store)
+            except Exception:
+                pass
         for i in range(1, max(1, cnt) + 1):
             eid = f"{prefix}-{i}"
             rec = {
@@ -234,6 +241,10 @@ async def dev_seed_decisions(payload: dict, request: Request):
                 'ts': now + i,
                 'mitre_techniques': ['T1059'],
             }
+            try:
+                seeded_store[eid] = rec
+            except Exception:
+                pass
             try:
                 # Use cache_set helper for normalization
                 runtime_state.cache_set(eid, rec)
@@ -251,6 +262,13 @@ async def dev_seed_decisions(payload: dict, request: Request):
             # Mirror into any app/server DECISION_CACHE bindings to keep routes consistent
             try:
                 from . import app as app_module
+                app_obj = getattr(app_module, 'app', None)
+                if app_obj is not None:
+                    app_seeded_store = getattr(app_obj.state, '_seeded_decisions', None)
+                    if not isinstance(app_seeded_store, dict):
+                        app_seeded_store = {}
+                        setattr(app_obj.state, '_seeded_decisions', app_seeded_store)
+                    app_seeded_store[eid] = rec
                 app_cache = getattr(app_module, 'DECISION_CACHE', None)
                 if isinstance(app_cache, dict):
                     app_cache[eid] = rec

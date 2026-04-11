@@ -331,6 +331,7 @@ class ActionDispatcher:
 
     async def dispatch(self, decision: ActionDecision) -> None:
         global _succ_total, _fail_total
+        global _slo_success_rate_g, _slo_success_rate_tenant_g
         await _ensure_rl_background()
         await _ensure_outbox_background(self)
         start = asyncio.get_running_loop().time()
@@ -850,6 +851,23 @@ class ActionDispatcher:
                     pass
             except Exception:
                 pass
+        try:
+            if _slo_success_rate_g is None:
+                _slo_success_rate_g = metric_gauge('slo','success_rate','Dispatch success rate (0-1)')
+            if _slo_success_rate_tenant_g is None:
+                _slo_success_rate_tenant_g = metric_gauge('slo','success_rate_tenant','Dispatch success rate by tenant', labels=['tenant_id'])
+            total = max(1, _succ_total + _fail_total)
+            rate = _succ_total / total
+            if _slo_success_rate_g is not None:
+                _slo_success_rate_g.set(rate)
+            if _slo_success_rate_tenant_g is not None:
+                tid = decision.tenant_id or 'default'
+                t_s = _tenant_succ.get(tid, 0)
+                t_f = _tenant_fail.get(tid, 0)
+                trate = t_s / max(1, (t_s + t_f))
+                _slo_success_rate_tenant_g.labels(tid).set(trate)
+        except Exception:
+            pass
         # In tests, wait for pending sink tasks to complete so counters/gauges are updated
         try:
             if os.getenv('PYTEST_CURRENT_TEST') and pending:
