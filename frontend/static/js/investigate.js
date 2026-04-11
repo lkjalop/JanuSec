@@ -29,6 +29,7 @@
     sortCol: 'triage_score',
     sortDir: 'desc',
     _gateApproved: false, // human-gate: set true after analyst approves escalation personas
+    workbookMeta: null,   // sheet summary + entity pivots + CRQ from workbook_sheets endpoint
   };
 
   // ── DOM refs ─────────────────────────────────────────────────────────────
@@ -254,18 +255,33 @@
     state.sources.forEach(function (src, idx) {
       totalRows += src.rows.length;
       var iconName = TYPE_ICONS[src.type] || 'file';
+      var sheetLabel = (src.meta && src.meta.sheets)
+        ? ' <span style="font-size:10px;color:var(--accent);">' + src.meta.sheets + ' sheets' +
+          (src.meta.pivots > 0 ? ' · ' + src.meta.pivots + ' pivots' : '') + '</span>'
+        : '';
       var el = document.createElement('div');
       el.className = 'source-item';
       el.innerHTML =
         '<i data-lucide="' + iconName + '" class="source-item__icon"></i>' +
-        '<span class="source-item__name">' + escHtml(src.name) + '</span>' +
+        '<span class="source-item__name">' + escHtml(src.name) + sheetLabel + '</span>' +
         '<span class="source-item__type">' + escHtml(TYPE_LABELS[src.type] || src.type) + '</span>' +
         '<span class="source-item__count">' + src.rows.length + ' rows</span>' +
         '<span class="source-item__status source-item__status--' + (src.status || 'ok') + '"></span>';
       container.appendChild(el);
     });
     $('sourceListRow').style.display = state.sources.length ? '' : 'none';
-    $('sourceSummary').textContent = state.sources.length + ' source' + (state.sources.length !== 1 ? 's' : '') + ', ' + totalRows + ' rows';
+    // Show workbook CRQ if available
+    var wbMeta = state.workbookMeta;
+    if (wbMeta && wbMeta.crq) {
+      var crq = wbMeta.crq;
+      var crqTier = (crq.exposure_tier || '').toLowerCase();
+      $('sourceSummary').innerHTML =
+        state.sources.length + ' source' + (state.sources.length !== 1 ? 's' : '') + ', ' + totalRows + ' rows' +
+        ' &nbsp;|&nbsp; <span class="sev-pill sev-pill--' + crqTier + '" title="CRQ exposure estimate">' +
+        escHtml(crq.expected_loss_formatted || '') + ' ' + escHtml(crq.exposure_tier || '') + '</span>';
+    } else {
+      $('sourceSummary').textContent = state.sources.length + ' source' + (state.sources.length !== 1 ? 's' : '') + ', ' + totalRows + ' rows';
+    }
     $('btnAnalyze').disabled = totalRows === 0;
     state.allRows = [];
     state.sources.forEach(function (src) {
@@ -276,12 +292,89 @@
   }
 
   // ── Upload handling ──────────────────────────────────────────────────────
+  // For Excel workbooks we first let SheetJS parse all sheets locally (to
+  // give immediate feedback), then re-upload to /api/v1/upload/workbook_sheets
+  // so the backend can:
+  //   • skip metadata-only sheets (Overview, Summary, etc.)
+  //   • assign domain context per data sheet
+  //   • run cross-sheet entity pivot detection
+  //   • compute a CRQ financial-exposure estimate
+  // The server-normalized rows replace the client-parsed rows so the
+  // deep_analyze pipeline gets properly structured events.
+
+  async function enhanceExcelWithBackend(file, clientRows) {
+    var ext = (file.name || '').split('.').pop().toLowerCase();
+    if (ext !== 'xlsx' && ext !== 'xlsm') return null;
+    try {
+      var fd = new FormData();
+      fd.append('files', file);
+      var resp = await fetch('/api/v1/upload/workbook_sheets', {
+        method: 'POST',
+        headers: authHeaders(),   // no Content-Type — FormData sets its own boundary
+        body: fd,
+      });
+      if (!resp.ok) return null;
+      var data = await resp.json();
+      var result = (data.results || [])[0];
+      if (!result || result.status !== 'parsed') return null;
+      return result;
+    } catch (_) { return null; }
+  }
+
   function handleFiles(fileList) {
     var files = Array.from(fileList);
     if (!files.length) return;
 
     var promises = files.map(function (f) {
-      return parseFile(f).then(function (result) {
+      return parseFile(f).then(async function (result) {
+        var ext = (f.name || '').split('.').pop().toLowerCase();
+        var isExcel = ext === 'xlsx' || ext === 'xlsm';
+
+        if (isExcel) {
+          // Always attempt backend enhancement for XLSX — it provides cross-sheet
+          // correlation, domain tagging, and CRQ that client-side XLSX.js cannot.
+          var backendResult = await enhanceExcelWithBackend(f, result.rows);
+          if (backendResult && backendResult.rows && backendResult.rows.length > 0) {
+            var backendRows = backendResult.rows;
+            var sheetSummaries = backendResult.sheet_summaries || [];
+            var parsedSheets = sheetSummaries.filter(function (s) { return s.status === 'parsed'; });
+
+            // Merge any client-side rows from sheets the backend returned 0 rows for
+            // (shouldn't happen, but belt-and-braces).
+            var backendRowIdx = new Set(backendRows.map(function (r) {
+              return (r._sheet || '') + '|' + r.row_index;
+            }));
+
+            // Store workbook context in state for the report panel
+            state.workbookMeta = {
+              filename: f.name,
+              sheets: parsedSheets,
+              entityPivots: backendResult.entity_pivots || {},
+              pivotedRowCount: backendResult.pivoted_row_count || 0,
+              crq: backendResult.crq || null,
+              sha256: backendResult.sha256 || null,
+            };
+
+            var sheetList = parsedSheets.map(function (s) {
+              return s.sheet + ' (' + s.row_count + ')';
+            }).join(', ');
+
+            toast('\u2714 Workbook parsed: ' + backendRows.length + ' events across ' + parsedSheets.length + ' sheet(s): ' + sheetList, 'success');
+
+            state.sources.push({
+              name: f.name,
+              type: result.type,
+              rows: backendRows,
+              rowCount: backendRows.length,
+              status: backendRows.length > 0 ? 'ok' : 'err',
+              meta: { sheets: parsedSheets.length, pivots: backendResult.pivoted_row_count || 0 },
+            });
+            return;
+          }
+          // Backend unavailable — fall back to client-parsed rows with a warning
+          toast('\u26A0 Backend workbook parse unavailable — using client-parsed rows (' + result.rows.length + '). Cross-sheet correlation may be limited.', 'warning');
+        }
+
         state.sources.push({
           name: result.name,
           type: result.type,
@@ -297,7 +390,10 @@
 
     Promise.all(promises).then(function () {
       renderSourceList();
-      toast(files.length + ' file' + (files.length !== 1 ? 's' : '') + ' loaded', 'success');
+      // Only show default-toast if we haven't already shown a workbook-specific one
+      if (!state.workbookMeta) {
+        toast(files.length + ' file' + (files.length !== 1 ? 's' : '') + ' loaded', 'success');
+      }
     });
   }
 
@@ -318,6 +414,7 @@
 
   $('btnClearSources').addEventListener('click', function () {
     state.sources = []; state.allRows = [];
+    state.workbookMeta = null;
     renderSourceList();
     $('sevSummary').classList.remove('has-data');
     $('reportEmpty').style.display = '';
@@ -1015,6 +1112,67 @@
     });
     sourcesHtml += '</tbody></table>';
     sections.push({ title: 'Source Summary', html: sourcesHtml });
+
+    // ── CRQ Financial Exposure (from workbook_sheets endpoint or assessment) ─
+    var crq = (state.workbookMeta && state.workbookMeta.crq) ||
+              (assessment && assessment.crq_shadow) ||
+              (assessment && assessment.crq) || null;
+    if (crq) {
+      var crqTier = (crq.exposure_tier || '').toUpperCase();
+      var crqColor = {CRITICAL:'#E54848',HIGH:'#FF8A3C',MEDIUM:'#E0C446',LOW:'#3FA860'}[crqTier] || 'var(--text-muted)';
+      var crqHtml = '<div style="padding:12px;background:var(--bg-tertiary);border-radius:8px;border:1px solid var(--border);">' +
+        '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">' +
+        '<span style="font-weight:700;font-size:18px;color:' + crqColor + ';">' + escHtml(crq.expected_loss_formatted || '$' + (crq.expected_loss || 0).toLocaleString()) + '</span>' +
+        '<span class="sev-pill sev-pill--' + (crqTier || 'info').toLowerCase() + '">' + escHtml(crqTier || 'UNKNOWN') + ' Exposure</span>' +
+        '</div>' +
+        '<table style="width:100%;font-size:11px;border-collapse:collapse;">' +
+        '<tr><td style="padding:3px 8px 3px 0;color:var(--text-muted);">Loss Event Frequency (LEF)</td><td style="color:var(--text-secondary);">' + (crq.lef || 0).toLocaleString() + ' events/yr est.</td></tr>' +
+        '<tr><td style="padding:3px 8px 3px 0;color:var(--text-muted);">Loss Magnitude (LM) weighted</td><td style="color:var(--text-secondary);">$' + (crq.lm || 0).toFixed(2) + '/event</td></tr>' +
+        '</table>';
+      // Severity distribution
+      var sevCounts = crq.severity_counts || {};
+      if (Object.keys(sevCounts).some(function (k) { return sevCounts[k] > 0; })) {
+        crqHtml += '<div style="margin-top:8px;font-size:11px;color:var(--text-muted);">Event distribution: ' +
+          ['critical', 'high', 'medium', 'low'].map(function (s) {
+            return sevCounts[s] ? '<span class="sev-pill sev-pill--' + s + '" style="margin:0 2px;">' + (sevCounts[s] || 0) + ' ' + s + '</span>' : '';
+          }).filter(Boolean).join(' ') + '</div>';
+      }
+      // Entity pivot summary from workbook if available
+      if (state.workbookMeta && state.workbookMeta.pivotedRowCount > 0) {
+        var ep = state.workbookMeta.entityPivots || {};
+        var pivotIps = Object.keys(ep.ips || {});
+        var pivotUsers = Object.keys(ep.users || {});
+        crqHtml += '<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);font-size:11px;">' +
+          '<span style="color:var(--accent);font-weight:600;">\u24D8 Cross-sheet pivots detected:</span> ' +
+          state.workbookMeta.pivotedRowCount + ' rows share entities across multiple security domains.' +
+          (pivotIps.length ? ' <b>Pivoted IPs:</b> ' + pivotIps.slice(0,3).map(function(x){return escHtml(x);}).join(', ') + (pivotIps.length > 3 ? ' +' + (pivotIps.length-3) + ' more' : '') + '.' : '') +
+          (pivotUsers.length ? ' <b>Pivoted users:</b> ' + pivotUsers.slice(0,3).map(function(x){return escHtml(x);}).join(', ') + '.' : '') +
+          ' These rows have been tagged <code>cross_sheet_pivot</code> and receive elevated triage weighting.' +
+          '</div>';
+      }
+      crqHtml += '<div style="margin-top:6px;font-size:10px;color:var(--text-muted);">CRQ estimate is a lightweight FAIR-shadow approximation — not a certified FAIR assessment. Engage GRC for formal quantification.</div>';
+      crqHtml += '</div>';
+
+      // Persona-specific CRQ framing
+      var crqTitles = {
+        ciso: 'Financial Risk Quantification (CRQ)',
+        executive: 'Estimated Business Impact',
+        compliance: 'Regulatory Exposure Estimate',
+        audit: 'Financial Risk Register Input',
+        mssp: 'Client Financial Exposure Estimate',
+      };
+      sections.push({ title: crqTitles[persona] || 'CRQ Exposure Estimate', html: crqHtml });
+    }
+
+    // Sheet breakdown (if workbook meta available)
+    if (state.workbookMeta && state.workbookMeta.sheets && state.workbookMeta.sheets.length > 1) {
+      var sheetsHtml = '<table class="ev-table" style="font-size:12px;"><thead><tr><th>Sheet</th><th>Domain</th><th>Events</th></tr></thead><tbody>';
+      state.workbookMeta.sheets.forEach(function (s) {
+        sheetsHtml += '<tr><td>' + escHtml(s.sheet) + '</td><td><span class="sev-pill sev-pill--info">' + escHtml(s.domain || '') + '</span></td><td>' + (s.row_count || 0) + '</td></tr>';
+      });
+      sheetsHtml += '</tbody></table>';
+      sections.push({ title: 'Workbook Sheet Breakdown', html: sheetsHtml });
+    }
 
     // Framework Mappings (if available)
     if (mappings.mitre && Object.keys(mappings.mitre).length) {
