@@ -1,1 +1,0 @@
-{"tenants": {"slice-b-tenant": [["reg_run", "reg add hkcu\\software\\microsoft\\windows\\currentversion\\run /v updater /d evil.exe"], ["schtask", "schtasks.exe /create /sc minute /mo 5 /tn updater /tr evil.exe"], ["service", "sc.exe create updater binpath= evil.exe"]]}, "saved_at": 1775918125.407878}

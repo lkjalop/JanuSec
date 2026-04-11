@@ -60,8 +60,24 @@ artifacts/
 .claude/
 _tmp_*
 *.log
+data/approval_keystore.json
+data/bec_state.json
+data/persistence_baseline.json
+data/test_snap.json
+data/test_hg_snapshot*.json
+data/tfidf/
+data/incidents/
+data/jobs/
+data/queues/
+data/replays/
+data/resign_jobs/
+data/training/
+pytest_output*.txt
+pytest_combined*.txt
+hopgraph_out*.txt
+smoke_out*.txt
+models/registry/upload_tmp_*.json
 
-# ── Runtime state (never commit) ─────────────────────────────────────────────
 # These files are generated at server startup / runtime and change on every run.
 # They must not be tracked — committing them causes constant dirty-tree noise
 # and can leak tenant state, session data, and internal metrics to git history.
