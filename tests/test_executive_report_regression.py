@@ -1,13 +1,55 @@
 import json
 from pathlib import Path
+from datetime import datetime, timezone
 
 from scripts.offline_replay_harness import _load_rows
 from src.analysis.offline_workbook_assessment import build_offline_workbook_assessment
 from src.reporting.executive_reporting import build_executive_report_artifact, render_executive_report_html
 
 
+def _seed_regression_labels(rows: list[dict]) -> list[dict]:
+    malicious_sources = {
+        "email_message",
+        "attachment_forensics",
+        "attachment_detonation",
+        "click_telemetry",
+        "cloudtrail",
+        "guardduty",
+        "securityhub",
+        "entra_signin",
+        "entra_audit",
+        "defender_incident",
+        "endpoint",
+        "network",
+    }
+    benign_sources = {"supplier_baseline", "vendor_master_history", "mailbox_trace"}
+    labelled = []
+    benign_cloud_seeded = False
+    for row in rows:
+        rec = dict(row)
+        raw_ts = rec.get("timestamp") or rec.get("createdDateTime") or rec.get("eventTime") or rec.get("time")
+        if raw_ts and not rec.get("timestamp_epoch"):
+            try:
+                rec["timestamp_epoch"] = datetime.fromisoformat(str(raw_ts).replace("Z", "+00:00")).astimezone(timezone.utc).timestamp()
+            except Exception:
+                pass
+        source = str(rec.get("export_source") or rec.get("source_kind") or rec.get("sheet") or "").lower()
+        if source == "cloudtrail" and not benign_cloud_seeded:
+            rec["_janusec_label"] = "BENIGN_BACKGROUND"
+            rec["review_state"] = "reviewed_benign"
+            benign_cloud_seeded = True
+        elif source in malicious_sources:
+            rec["_janusec_label"] = "MALICIOUS_IDENTITY_CHAIN"
+            rec["review_state"] = "confirmed_malicious"
+        elif source in benign_sources:
+            rec["_janusec_label"] = "BENIGN_BACKGROUND"
+            rec["review_state"] = "reviewed_benign"
+        labelled.append(rec)
+    return labelled
+
+
 def _build_artifact(pack_path: str, org: str) -> dict:
-    rows = _load_rows(Path(pack_path))
+    rows = _seed_regression_labels(_load_rows(Path(pack_path)))
     assessment = build_offline_workbook_assessment(
         rows,
         assessment_id=Path(pack_path).name + "-regression",
@@ -31,7 +73,7 @@ def _build_artifact(pack_path: str, org: str) -> dict:
 
 def test_aws_replay_pack_seeds_review_state_and_attack_mappings(monkeypatch):
     monkeypatch.setenv("LLM_MOCK", "1")
-    artifact = _build_artifact("dump/tests/janusec_test_packs/aws_123456789012", "123456789012")
+    artifact = _build_artifact("tests/fixtures/export_packs/aws_email_compromise_chain", "123456789012")
 
     counts = artifact["facts"]["review_state_counts"]
     assert counts["confirmed_malicious"] > 0
@@ -50,7 +92,7 @@ def test_aws_replay_pack_seeds_review_state_and_attack_mappings(monkeypatch):
 
 def test_executive_report_layout_keeps_key_evidence_in_appendix_only(monkeypatch):
     monkeypatch.setenv("LLM_MOCK", "1")
-    artifact = _build_artifact("dump/tests/janusec_test_packs/azure_contoso_dev", "contoso.dev")
+    artifact = _build_artifact("tests/fixtures/export_packs/azure_email_compromise_chain", "contoso.dev")
     html = render_executive_report_html(artifact)
 
     assert "Working Hypothesis" in html
@@ -63,7 +105,7 @@ def test_executive_report_layout_keeps_key_evidence_in_appendix_only(monkeypatch
 
 def test_appendix_uses_event_grade_citations_and_humanized_timeline(monkeypatch):
     monkeypatch.setenv("LLM_MOCK", "1")
-    artifact = _build_artifact("dump/tests/janusec_test_packs/azure_contoso_dev", "contoso.dev")
+    artifact = _build_artifact("tests/fixtures/export_packs/azure_email_compromise_chain", "contoso.dev")
     appendix = artifact["appendix"]["evidence_appendix"]
     evidence_rows = appendix.get("source_evidence_rows") or []
     timeline = appendix.get("timeline_evidence") or []
@@ -79,7 +121,7 @@ def test_appendix_uses_event_grade_citations_and_humanized_timeline(monkeypatch)
 def test_label_workflow_is_merged_into_executive_artifact(monkeypatch):
     monkeypatch.setenv("LLM_MOCK", "1")
     assessment = build_offline_workbook_assessment(
-        _load_rows(Path("dump/tests/janusec_test_packs/aws_123456789012")),
+        _seed_regression_labels(_load_rows(Path("tests/fixtures/export_packs/aws_email_compromise_chain"))),
         assessment_id="aws-workflow-merge",
         org="123456789012",
         auto_llm=True,

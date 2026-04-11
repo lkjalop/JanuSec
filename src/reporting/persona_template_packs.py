@@ -549,7 +549,17 @@ def build_evidence_appendix(report: Dict[str, Any]) -> Dict[str, Any]:
                 'source_kind': row.get('source_kind') or row.get('export_source') or row.get('sheet') or row.get('source_file'),
                 'source_file': row.get('source_file'),
                 'label': row.get('_janusec_label'),
-                'timestamp': row.get('createdDateTime') or row.get('activityDateTime') or row.get('eventTimestamp') or row.get('time') or row.get('event_ts') or row.get('ts'),
+                'timestamp': (
+                    row.get('createdDateTime')
+                    or row.get('activityDateTime')
+                    or row.get('eventTimestamp')
+                    or row.get('time')
+                    or row.get('timestamp')
+                    or row.get('event_time')
+                    or row.get('event_ts')
+                    or row.get('ts')
+                    or row.get('timestamp_epoch')
+                ),
                 'user': row.get('userPrincipalName') or row.get('caller') or row.get('user') or row.get('principal'),
                 'ip': row.get('ipAddress') or row.get('src_ip') or row.get('source_ip') or row.get('dst_ip'),
                 'resource': _humanize_resource(row.get('resourceId') or row.get('resource') or row.get('id')),

@@ -421,6 +421,16 @@ def get_permission_graph(runtime: ServerRuntime | None = None, tenant_id: str | 
     tmap = runtime.tenants.get(tid)
     if tmap is None:
         tmap = get_tenant_runtime(runtime, tid)
+    if tmap is None:
+        tmap = {
+            'file_hash_factors': defaultdict(lambda: deque(maxlen=_default_file_hash_history_maxlen())),
+            'nx_rate_tracker': defaultdict(lambda: deque(maxlen=50)),
+            'ewma_history': {},
+            'beacon_scores': {},
+            'fp_labels': {},
+            'last_access': time.time(),
+        }
+        runtime.tenants[tid] = tmap
     if 'permission_graph' not in tmap or tmap.get('permission_graph') is None:
         base = Path(os.getenv('TENANT_PERSIST_DIR','data/tenants')) / tid
         base.mkdir(parents=True, exist_ok=True)

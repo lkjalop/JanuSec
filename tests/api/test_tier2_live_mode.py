@@ -7,6 +7,8 @@ from fastapi.testclient import TestClient
 def test_tier2_hard_fails_in_live_mode_without_provider(monkeypatch):
     monkeypatch.setenv('ENV', 'prod')
     monkeypatch.setenv('TIER2_ALLOW_PLACEHOLDER', '0')
+    # Must clear LLM_MOCK so the function reaches the real provider availability check
+    monkeypatch.delenv('LLM_MOCK', raising=False)
 
     from src.api import tier2_endpoints as mod
 

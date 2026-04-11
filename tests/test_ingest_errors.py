@@ -53,10 +53,21 @@ def test_timestamp_drift_error():
 def test_rate_limit_error():
     os.environ['INGEST_RATE_CAPACITY'] = '1'
     os.environ['INGEST_RATE_REFILL_PER_SEC'] = '0'
-    # First request should pass
-    r1 = client.post('/api/v1/ingest/suricata', data=json.dumps(BASIC_EVENT))
-    # Second immediate request should trigger 429
-    r2 = client.post('/api/v1/ingest/suricata', data=json.dumps(BASIC_EVENT))
-    assert r2.status_code == 429
-    body = r2.json()
-    assert body['detail']['error_code'] == 'rate_limited'
+    try:
+        # First request should pass
+        r1 = client.post('/api/v1/ingest/suricata', data=json.dumps(BASIC_EVENT))
+        # Second immediate request should trigger 429
+        r2 = client.post('/api/v1/ingest/suricata', data=json.dumps(BASIC_EVENT))
+        assert r2.status_code == 429
+        body = r2.json()
+        assert body['detail']['error_code'] == 'rate_limited'
+    finally:
+        # Restore defaults so subsequent tests are not rate-blocked
+        os.environ.pop('INGEST_RATE_CAPACITY', None)
+        os.environ.pop('INGEST_RATE_REFILL_PER_SEC', None)
+        # Clear the in-process rate bucket so the next test starts fresh
+        try:
+            from src.api.ingest_controller_endpoints import _INGEST_RATE_BUCKETS
+            _INGEST_RATE_BUCKETS.pop('suricata', None)
+        except Exception:
+            pass

@@ -1,0 +1,334 @@
+{
+  "entity_pairs": {},
+  "family_profiles": {
+    "cloud_action": {
+      "N": 7.0,
+      "df": {
+        "block": 1.0,
+        "click": 2.0,
+        "consolelogin": 1.0,
+        "hold": 1.0,
+        "privilege-change": 1.0,
+        "prod-finance-bucket": 1.0,
+        "user.authentication.failed": 1.0
+      }
+    },
+    "command": {
+      "N": 1.0,
+      "df": {
+        "-enc": 1.0,
+        "cmd.exe": 1.0,
+        "powershell": 1.0,
+        "sqbfafga": 1.0
+      }
+    },
+    "email": {
+      "N": 3.0,
+      "df": {
+        "acquisition": 2.0,
+        "and": 1.0,
+        "anyone.": 1.0,
+        "call": 1.0,
+        "deposit": 2.0,
+        "for": 2.0,
+        "invoice": 2.0,
+        "invoice.pdf.exe": 1.0,
+        "not": 1.0,
+        "now": 1.0,
+        "please": 1.0,
+        "process": 1.0,
+        "the": 1.0,
+        "transfer": 1.0,
+        "updated": 2.0,
+        "urgent:": 1.0
+      }
+    },
+    "path": {
+      "N": 0.0,
+      "df": {}
+    },
+    "process": {
+      "N": 1.0,
+      "df": {
+        "cmd.exe": 1.0,
+        "winword.exe": 1.0
+      }
+    }
+  },
+  "graph_edge_meta": {
+    "cloud:cloud:prod-finance-bucket->consolelogin->prod-finance-bucket=>mimecast:ceo@shopsquire.example->hold->email": {
+      "count": 1,
+      "last_seen_ts": 1775918099.5810812
+    },
+    "cloud:row:1->cloudtrail->cloud=>cloud:row:2->cloudtrail->cloud": {
+      "count": 1,
+      "last_seen_ts": 1775918099.5810812
+    },
+    "cloud:row:2->cloudtrail->cloud=>okta:alice@example.com->user.authentication.failed->identity": {
+      "count": 1,
+      "last_seen_ts": 1775918099.5810812
+    },
+    "identity:alice@example.com->entrasignin->identity=>proofpoint:bob@example.com->click->email": {
+      "count": 1,
+      "last_seen_ts": 1775918099.5810812
+    },
+    "mimecast:bob@example.com->block->email=>cloud:cloud:prod-finance-bucket->consolelogin->prod-finance-bucket": {
+      "count": 1,
+      "last_seen_ts": 1775918099.5810812
+    },
+    "mimecast:ceo@shopsquire.example->hold->email=>proofpoint:ceo@shopsquire.example->click->email": {
+      "count": 1,
+      "last_seen_ts": 1775918099.5810812
+    },
+    "okta:alice@example.com->user.authentication.failed->identity=>identity:alice@example.com->entrasignin->identity": {
+      "count": 1,
+      "last_seen_ts": 1775918099.5810812
+    },
+    "other:row:1->unknown->other=>endpoint:host:WS-CEO-1->unknown->ws-ceo-1": {
+      "count": 1,
+      "last_seen_ts": 1775918124.9324555
+    },
+    "proofpoint:bob@example.com->click->email=>mimecast:bob@example.com->block->email": {
+      "count": 1,
+      "last_seen_ts": 1775918099.5810812
+    },
+    "proofpoint:ceo@shopsquire.example->click->email=>identity:ceo@shopsquire.example->entrasignin->identity": {
+      "count": 1,
+      "last_seen_ts": 1775918099.5810812
+    }
+  },
+  "graph_edges": {
+    "cloud:cloud:prod-finance-bucket->consolelogin->prod-finance-bucket=>mimecast:ceo@shopsquire.example->hold->email": 1,
+    "cloud:row:1->cloudtrail->cloud=>cloud:row:2->cloudtrail->cloud": 1,
+    "cloud:row:2->cloudtrail->cloud=>okta:alice@example.com->user.authentication.failed->identity": 1,
+    "identity:alice@example.com->entrasignin->identity=>proofpoint:bob@example.com->click->email": 1,
+    "mimecast:bob@example.com->block->email=>cloud:cloud:prod-finance-bucket->consolelogin->prod-finance-bucket": 1,
+    "mimecast:ceo@shopsquire.example->hold->email=>proofpoint:ceo@shopsquire.example->click->email": 1,
+    "okta:alice@example.com->user.authentication.failed->identity=>identity:alice@example.com->entrasignin->identity": 1,
+    "other:row:1->unknown->other=>endpoint:host:WS-CEO-1->unknown->ws-ceo-1": 1,
+    "proofpoint:bob@example.com->click->email=>mimecast:bob@example.com->block->email": 1,
+    "proofpoint:ceo@shopsquire.example->click->email=>identity:ceo@shopsquire.example->entrasignin->identity": 1
+  },
+  "graph_path_meta": {
+    "cloud:row:1->cloudtrail->cloud | cloud:row:2->cloudtrail->cloud | okta:alice@example.com->user.authentication.failed->identity | identity:alice@example.com->entrasignin->identity | proofpoint:bob@example.com->click->email | mimecast:bob@example.com->block->email | cloud:cloud:prod-finance-bucket->consolelogin->prod-finance-bucket | mimecast:ceo@shopsquire.example->hold->email": {
+      "count": 1,
+      "last_seen_ts": 1775918099.5810812
+    },
+    "other:row:1->unknown->other | endpoint:host:WS-CEO-1->unknown->ws-ceo-1": {
+      "count": 1,
+      "last_seen_ts": 1775918124.9324555
+    }
+  },
+  "graph_paths": {
+    "cloud:row:1->cloudtrail->cloud | cloud:row:2->cloudtrail->cloud | okta:alice@example.com->user.authentication.failed->identity | identity:alice@example.com->entrasignin->identity | proofpoint:bob@example.com->click->email | mimecast:bob@example.com->block->email | cloud:cloud:prod-finance-bucket->consolelogin->prod-finance-bucket | mimecast:ceo@shopsquire.example->hold->email": 1,
+    "other:row:1->unknown->other | endpoint:host:WS-CEO-1->unknown->ws-ceo-1": 1
+  },
+  "profiles": {
+    "default:cloud": {
+      "N": 3.0,
+      "df": {
+        "123": 2.0,
+        "123.0": 2.0,
+        "123456789012": 1.0,
+        "1775779200.0": 1.0,
+        "1775918098.3929484": 1.0,
+        "1775918099.311081": 1.0,
+        "1775918099.4780824": 1.0,
+        "2026-04-10t00:00:00z": 1.0,
+        "203.0.113.99": 1.0,
+        "arn:aws:iam::123456789012:user": 1.0,
+        "aws": 3.0,
+        "aws-evt-1": 1.0,
+        "aws:cloudtrail": 3.0,
+        "ceo": 1.0,
+        "cloudtrail": 3.0,
+        "cloudtrail.json": 3.0,
+        "connector": 2.0,
+        "consolelogin": 1.0,
+        "default": 3.0,
+        "evidence": 2.0,
+        "evt-1": 1.0,
+        "evt-dupe": 1.0,
+        "false": 3.0,
+        "live": 3.0,
+        "needs_investigation": 3.0,
+        "prod-finance-bucket": 1.0,
+        "shopsquire.example": 1.0
+      }
+    },
+    "default:email": {
+      "N": 4.0,
+      "df": {
+        "0.5": 1.0,
+        "0.78": 1.0,
+        "0.8": 2.0,
+        "1767225600.0": 2.0,
+        "1775779260.0": 1.0,
+        "1775779320.0": 1.0,
+        "1775918099.2090864": 1.0,
+        "1775918099.2620847": 1.0,
+        "1775918099.5420814": 1.0,
+        "1775918099.5620813": 1.0,
+        "2026-01-01t00:00:00z": 2.0,
+        "2026-04-10t00:01:00z": 1.0,
+        "2026-04-10t00:02:00z": 1.0,
+        "accounts": 2.0,
+        "acquisition": 2.0,
+        "attacker": 2.0,
+        "block": 1.0,
+        "bob": 2.0,
+        "ceo": 2.0,
+        "click": 2.0,
+        "default": 4.0,
+        "deposit": 2.0,
+        "email": 4.0,
+        "email:mimecast": 2.0,
+        "email:mimecast:0": 1.0,
+        "email:mimecast:1": 1.0,
+        "email:proofpoint": 2.0,
+        "email:proofpoint:0": 1.0,
+        "email:proofpoint:1": 1.0,
+        "example.com": 2.0,
+        "false": 4.0,
+        "for": 2.0,
+        "high": 3.0,
+        "hold": 1.0,
+        "ingramfake.com.au": 2.0,
+        "invoice": 2.0,
+        "live": 4.0,
+        "medium": 1.0,
+        "mimecast": 2.0,
+        "mimecast.json": 2.0,
+        "needs_investigation": 4.0,
+        "proofpoint": 2.0,
+        "proofpoint.json": 2.0,
+        "shopsquire.example": 2.0,
+        "updated": 2.0
+      }
+    },
+    "default:endpoint": {
+      "N": 1.0,
+      "df": {
+        "-enc": 1.0,
+        "0.0": 1.0,
+        "0.87": 1.0,
+        "cmd.exe": 1.0,
+        "endpoint": 1.0,
+        "false": 1.0,
+        "powershell": 1.0,
+        "sqbfafga": 1.0,
+        "sysmon": 1.0,
+        "unknown": 1.0,
+        "winword.exe": 1.0,
+        "ws-ceo-1": 1.0
+      }
+    },
+    "default:identity": {
+      "N": 4.0,
+      "df": {
+        "1767225600.0": 2.0,
+        "1775779500.0": 1.0,
+        "1775918098.9186127": 1.0,
+        "1775918099.0770855": 1.0,
+        "1775918099.1390836": 1.0,
+        "1775918099.4920812": 1.0,
+        "2026-01-01t00:00:00z": 1.0,
+        "2026-04-10t00:05:00z": 1.0,
+        "203.0.113.9": 1.0,
+        "203.0.113.99": 1.0,
+        "365": 1.0,
+        "alice": 2.0,
+        "az-evt-1": 1.0,
+        "azure": 2.0,
+        "azure:entra_signin": 2.0,
+        "azure:entra_signin:1": 1.0,
+        "azure_entra_signin": 2.0,
+        "ceo": 1.0,
+        "connector": 2.0,
+        "default": 4.0,
+        "entra_signin": 2.0,
+        "entra_signin.json": 2.0,
+        "entrasignin": 2.0,
+        "evidence": 2.0,
+        "example.com": 2.0,
+        "exchange": 1.0,
+        "false": 4.0,
+        "high": 1.0,
+        "identity": 2.0,
+        "identity_access": 2.0,
+        "live": 4.0,
+        "microsoft": 1.0,
+        "needs_investigation": 4.0,
+        "okta": 1.0,
+        "okta-evt-1": 1.0,
+        "okta.json": 1.0,
+        "okta:okta": 1.0,
+        "online": 1.0,
+        "privilege-change": 1.0,
+        "sailpoint": 1.0,
+        "sailpoint.json": 1.0,
+        "sailpoint:sailpoint": 1.0,
+        "shopsquire.example": 1.0,
+        "sp-evt-1": 1.0,
+        "user.authentication.failed": 1.0
+      }
+    },
+    "default:other": {
+      "N": 1.0,
+      "df": {
+        "0.0": 1.0,
+        "0.87": 1.0,
+        "and": 1.0,
+        "anyone.": 1.0,
+        "application": 1.0,
+        "call": 1.0,
+        "email": 1.0,
+        "false": 1.0,
+        "invoice.pdf.exe": 1.0,
+        "mimecast": 1.0,
+        "not": 1.0,
+        "now": 1.0,
+        "octet-stream": 1.0,
+        "please": 1.0,
+        "process": 1.0,
+        "shopsquire-payments.example": 1.0,
+        "the": 1.0,
+        "transfer": 1.0,
+        "tvqqaamaaaaeaaaa": 1.0,
+        "unknown": 1.0,
+        "urgent:": 1.0
+      }
+    }
+  },
+  "provider_action_frequency": {
+    "mimecast|block": 1,
+    "mimecast|hold": 1,
+    "okta|user.authentication.failed": 1,
+    "proofpoint|click": 1,
+    "sailpoint|privilege-change": 1
+  },
+  "provider_action_meta": {
+    "mimecast|block": {
+      "count": 1,
+      "last_seen_ts": 1775918099.5810812
+    },
+    "mimecast|hold": {
+      "count": 1,
+      "last_seen_ts": 1775918099.5810812
+    },
+    "okta|user.authentication.failed": {
+      "count": 1,
+      "last_seen_ts": 1775918099.5810812
+    },
+    "proofpoint|click": {
+      "count": 1,
+      "last_seen_ts": 1775918099.5810812
+    },
+    "sailpoint|privilege-change": {
+      "count": 1,
+      "last_seen_ts": 1775918099.5810812
+    }
+  },
+  "seen_suppressors": {},
+  "updated_ts": 1775918124.9324555
+}

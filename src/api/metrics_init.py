@@ -20,6 +20,21 @@ logger = logging.getLogger(__name__)
 # setting `DISABLE_METRICS_AT_IMPORT=1` in the environment.
 _DISABLE_IMPORT_COLLECT = os.getenv('DISABLE_METRICS_AT_IMPORT', '0').lower() in {'1', 'true', 'yes'}
 
+
+class _LiteRegistry:
+    def __init__(self) -> None:
+        self._dummy_samples: dict[str, list[Any]] = {}
+        self._dummy_names: list[str] = []
+        self._names_to_collectors: dict[str, Any] = {}
+
+    def collect(self) -> list[Any]:
+        families: list[Any] = []
+        names = sorted(set(list(self._dummy_samples.keys()) + list(self._dummy_names)))
+        for name in names:
+            families.append(types.SimpleNamespace(name=name, samples=list(self._dummy_samples.get(name) or [])))
+        return families
+
+
 try:
     # Allow an explicit test-mode using simple in-memory metrics for assertions
     _METRICS_TEST_MODE = (
@@ -31,7 +46,7 @@ try:
     if _METRICS_TEST_MODE:
         CollectorRegistry = None  # type: ignore
         Counter = Gauge = Histogram = None  # type: ignore
-        REGISTRY = None
+        REGISTRY = _LiteRegistry()
     else:
                     try:
                         from prometheus_client import CollectorRegistry, Counter, Gauge, Histogram  # type: ignore
@@ -178,6 +193,33 @@ ransomware_auto_incident_total: Any = None
 ransomware_missing_log_requests_total: Any = None
 
 _initialized = False
+
+
+class _MemoryCounter:
+    """Minimal counter used by legacy tests and lite-mode helpers."""
+
+    def __init__(self) -> None:
+        self.value = 0.0
+        self.counts: dict[str, float] = {}
+
+    def labels(self, *args: Any, **kwargs: Any) -> "_MemoryCounter":
+        return self
+
+    def inc(self, value: float = 1) -> None:
+        delta = value if isinstance(value, (int, float)) else 1
+        self.value += float(delta)
+        self.counts["total"] = self.counts.get("total", 0.0) + float(delta)
+
+
+COUNTERS: dict[str, Any] = {}
+
+
+def get_counter(name: str) -> Any:
+    metric = COUNTERS.get(name)
+    if metric is None:
+        metric = _MemoryCounter()
+        COUNTERS[name] = metric
+    return metric
 
 def _safe_counter(name: str, desc: str, labels: list[str] | None = None) -> Any:
     # If test-mode requested, provide an in-memory counter implementation
@@ -572,7 +614,7 @@ build_info = None
 metrics_scrape_ts = None
 
 __all__ = [
-    'ensure_metrics','delivery_attempts','dead_letter_gauge','ingest_events_counter','ingest_failures_counter',
+    'ensure_metrics','COUNTERS','get_counter','delivery_attempts','dead_letter_gauge','ingest_events_counter','ingest_failures_counter',
     'ingest_buffer_gauge','alert_ring_util_gauge','ingest_latency_hist','ingest_validation_errors',
     'decisions_counter','notifications_counter','escalations_counter','REGISTRY','build_info','metrics_scrape_ts',
     'risk_score_hist','slow_path_counter','tenant_decisions_gauge','tenant_rate_drops_gauge',
@@ -682,6 +724,19 @@ def _generate_latest_fallback_top(reg=None):
             items = list(rr.collect())
         except Exception:
             items = []
+        try:
+            ds = getattr(rr, '_dummy_samples', {}) or {}
+            dn = getattr(rr, '_dummy_names', []) or []
+            existing = {getattr(f, 'name', None) for f in items}
+            for base in sorted(set(list(ds.keys()) + list(dn))):
+                if base in existing:
+                    continue
+                samples = list(ds.get(base) or [])
+                if not samples:
+                    samples = [types.SimpleNamespace(name=base, labels={}, value=0.0)]
+                items.append(types.SimpleNamespace(name=base, type='gauge', samples=samples))
+        except Exception:
+            pass
         if items:
             seen = set()
             for f in items:

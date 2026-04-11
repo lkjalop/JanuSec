@@ -1113,7 +1113,13 @@ async def build_session(
             if isinstance(inline_sessions, list):
                 for entry in inline_sessions:
                     if isinstance(entry, dict) and entry.get('id') and isinstance(entry.get('data'), dict):
-                        inline_index[str(entry['id'])] = entry['data']
+                        data = entry['data']
+                        # Legacy inline payloads wrap canonical entity lists under
+                        # {"entities": {...}}. The active graph_sessions route
+                        # should accept the same shape as graph_session_endpoints.
+                        if isinstance(data.get('entities'), dict):
+                            data = data.get('entities') or {}
+                        inline_index[str(entry['id'])] = data
         except Exception:
             inline_index = {}
 
@@ -4324,6 +4330,7 @@ async def build_session(
             'graph': graph,
             'correlation': corr_ll,
             'correlation_smoothed': sm_ll,
+            'ewma_alpha': summary.get('ewma_alpha'),
             'session_ids': summary.get('session_ids'),
             'mapping_stats': summary.get('mapping_stats'),
         }

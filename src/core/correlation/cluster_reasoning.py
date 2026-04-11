@@ -221,6 +221,10 @@ def build_cluster_reasoning_state(
     persona_seed_missing_telemetry: list[Any] | None = None,
     temporal_rag_sources: list[Any] | None = None,
     shared_pivots: list[Any] | None = None,
+    top_ranked_evidence: list[dict[str, Any]] | None = None,
+    sender_infrastructure_drift: dict[str, Any] | None = None,
+    executive_targeting: dict[str, Any] | None = None,
+    attachment_analysis: list[dict[str, Any]] | None = None,
     provider_context: dict[str, Any] | None = None,
     prior_state: dict[str, Any] | None = None,
     evidence_row_indices: list[int] | None = None,
@@ -239,6 +243,10 @@ def build_cluster_reasoning_state(
     persona_seed_actions = _bounded_unique(persona_seed_actions, 6)
     persona_seed_missing_telemetry = _bounded_unique(persona_seed_missing_telemetry, 5)
     shared_pivots = _bounded_unique(shared_pivots, 8)
+    top_ranked_evidence = list(top_ranked_evidence or [])[:6]
+    sender_infrastructure_drift = dict(sender_infrastructure_drift or {})
+    executive_targeting = dict(executive_targeting or {})
+    attachment_analysis = list(attachment_analysis or [])[:8]
     cluster_size = max(0, int(cluster_size or 0))
     routing_score = round(_safe_float(routing_score), 3)
     corroboration_confidence = round(_safe_float(corroboration_confidence, routing_score), 3)
@@ -313,6 +321,10 @@ def build_cluster_reasoning_state(
         "disconfirming_evidence": disconfirming_evidence,
         "temporal_rag_sources": temporal_rag_sources,
         "shared_pivots": shared_pivots,
+        "top_ranked_evidence": top_ranked_evidence,
+        "sender_infrastructure_drift": sender_infrastructure_drift,
+        "executive_targeting": executive_targeting,
+        "attachment_analysis": attachment_analysis,
         "persona_views_seed": {
             "claims": persona_seed_claims or [canonical_narrative, top_hypothesis],
             "action_candidates": persona_seed_actions or recommended_actions[:3],
@@ -379,6 +391,10 @@ def build_cluster_reasoning_root(
         "source_reliability": (primary or {}).get("source_reliability") or [],
         "what_would_flip": (primary or {}).get("what_would_flip") or [],
         "disconfirming_evidence": (primary or {}).get("disconfirming_evidence") or [],
+        "top_ranked_evidence": (primary or {}).get("top_ranked_evidence") or [],
+        "sender_infrastructure_drift": (primary or {}).get("sender_infrastructure_drift") or {},
+        "executive_targeting": (primary or {}).get("executive_targeting") or {},
+        "attachment_analysis": (primary or {}).get("attachment_analysis") or [],
         "close_conditions": (primary or {}).get("close_conditions") or {},
         "provider_context": (primary or {}).get("provider_context") or {},
         "evidence_row_indices": (primary or {}).get("evidence_row_indices") or [],
@@ -417,6 +433,10 @@ def compact_cluster_reasoning_state(state: dict[str, Any] | None) -> dict[str, A
         "source_reliability": state.get("source_reliability") or [],
         "what_would_flip": state.get("what_would_flip") or [],
         "disconfirming_evidence": state.get("disconfirming_evidence") or [],
+        "top_ranked_evidence": state.get("top_ranked_evidence") or [],
+        "sender_infrastructure_drift": state.get("sender_infrastructure_drift") or {},
+        "executive_targeting": state.get("executive_targeting") or {},
+        "attachment_analysis": state.get("attachment_analysis") or [],
         "temporal_rag_sources": state.get("temporal_rag_sources") or [],
         "shared_pivots": state.get("shared_pivots") or [],
         "provider_context": state.get("provider_context") or {},

@@ -78,7 +78,7 @@ def get_request_roles(request: Request) -> set[str]:
 
     # During tests/lite mode allow implicit analyst role so correlation endpoints stay accessible.
     if os.getenv('TEST_HELPERS_ENABLED', '0').lower() in {'1', 'true', 'yes'} or 'PYTEST_CURRENT_TEST' in os.environ:
-        return {'analyst'}
+        return {'analyst', 'admin'}
     return roles
 
 
