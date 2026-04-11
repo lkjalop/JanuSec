@@ -354,6 +354,21 @@ FACTOR_TO_MITRE = {
     'endpoint:ransom_network_share_enum': ['T1021.002', 'T1083'],
     'endpoint:ransom_backup_catalog_del': ['T1490'],
     'endpoint:ransom_inhibit_recovery':   ['T1490'],
+
+    # ── URLRiskScorer (missing entries) ──────────────────────────────────
+    'email:url_shortener':               ['T1566.001'],
+    'email:url_brand_impersonation':     ['T1566.001', 'T1036'],
+    'email:attachment_high_entropy':     ['T1027', 'T1566.001'],
+
+    # ── Cross-domain correlation ──────────────────────────────────────────
+    'cross_domain_user_pivot':           ['T1078', 'T1021', 'T1550'],
+    'cross_domain_host_pivot':           ['T1021', 'T1550'],
+    'cross_domain_ip_pivot':             ['T1071', 'T1090'],
+    'email_to_endpoint_chain':           ['T1566.001', 'T1204.002', 'T1059'],
+    'event_isolated_single_domain':      [],   # informational — no technique
+    'multi_stage_escalation_chain':      ['T1078', 'T1068', 'T1021'],
+    'data_staging_then_exfil':           ['T1020', 'T1041'],
+    'exfil_after_staging':               ['T1041', 'T1020'],
 }
 
 # Minimal, conservative ATT&CK associations for AI-specific factors to aid ATT&CK-only views.
