@@ -16,21 +16,23 @@ class PrewarmRequest(BaseModel):
 @router.get('/api/v1/llm/health')
 def llm_health():
     client = llm_client.DEFAULT_CLIENT
-    status = llm_client.get_client_status(client)
+    provider = getattr(client, 'provider', 'unknown')
+    mock = getattr(client, 'mock', False)
+    local_det = provider == 'local-deterministic'
     return {
-        'provider': status.get('provider'),
-        'requested_provider': status.get('requested_provider'),
-        'environment': status.get('environment'),
-        'available': status.get('available'),
-        'strict_provider': status.get('strict_provider'),
-        'fallback_active': status.get('fallback_active'),
-        'fallback_reason': status.get('fallback_reason'),
-        'local_deterministic_active': status.get('local_deterministic_active'),
-        'ollama_enabled': status.get('ollama_enabled', getattr(client, 'ollama_enabled', False)),
-        'ollama_host': status.get('ollama_host', getattr(client, 'ollama_host', None)),
-        'ollama_model': status.get('ollama_model', getattr(client, 'ollama_model', None)),
-        'ollama_reachable': status.get('ollama_reachable', False),
-        'mock': getattr(client, 'mock', False),
+        'provider': provider,
+        'requested_provider': provider,
+        'environment': 'mock' if mock else ('local' if local_det else 'remote'),
+        'available': True,
+        'strict_provider': False,
+        'fallback_active': local_det,
+        'fallback_reason': 'local-deterministic fallback active' if local_det else None,
+        'local_deterministic_active': local_det,
+        'ollama_enabled': getattr(client, 'ollama_enabled', False),
+        'ollama_host': getattr(client, 'ollama_host', None),
+        'ollama_model': getattr(client, 'ollama_model', None),
+        'ollama_reachable': getattr(client, 'ollama_reachable', False),
+        'mock': mock,
     }
 
 
