@@ -1,0 +1,6 @@
+timestamp,src_ip,dst_ip,user,action,severity,event_type,host,description
+2026-04-10T00:01:00Z,10.0.0.1,203.0.113.5,alice@example.com,ConsoleLogin,high,auth,dc01.corp,Successful login from unusual IP
+2026-04-10T00:02:00Z,10.0.0.1,203.0.113.5,alice@example.com,PutObject,medium,data_exfil,dc01.corp,Large S3 upload after login
+2026-04-10T00:03:00Z,10.0.0.2,198.51.100.7,bob@example.com,CreateUser,high,privilege_escalation,ws02.corp,New admin user created
+2026-04-10T00:04:00Z,10.0.0.3,203.0.113.5,carol@example.com,GetSecretValue,critical,credential_access,db01.corp,Secrets Manager access from workstation
+2026-04-10T00:05:00Z,10.0.0.1,198.51.100.7,alice@example.com,InvokeFunction,medium,execution,dc01.corp,Lambda invocation from same source IP

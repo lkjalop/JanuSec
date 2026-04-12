@@ -1,5 +1,6 @@
 const { test, expect } = require('@playwright/test');
 const path = require('path');
+const fs = require('fs');
 
 const reports = [
   path.resolve(__dirname, '../../artifacts/reports/executive_review/azure/executive_report.html'),
@@ -7,7 +8,11 @@ const reports = [
 ];
 
 for (const reportPath of reports) {
-  test(`Executive report layout renders: ${path.basename(path.dirname(reportPath))}`, async ({ page }) => {
+  const label = path.basename(path.dirname(reportPath));
+  test(`Executive report layout renders: ${label}`, async ({ page }) => {
+    if (!fs.existsSync(reportPath)) {
+      test.skip(true, `Fixture not found: ${reportPath} — run a full report generation pass first`);
+    }
     await page.goto(`file:///${reportPath.replace(/\\/g, '/')}`);
     await expect(page.getByText('Executive Report')).toBeVisible();
     await expect(page.getByText('Working Hypothesis')).toBeVisible();

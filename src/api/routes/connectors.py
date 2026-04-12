@@ -962,6 +962,10 @@ def connector_poll(
                 'last_duplicate_count': duplicate_count,
                 'fixture_cursor': checkpoint.get('fixture_cursor'),
                 'fixture_count': checkpoint.get('fixture_count'),
+                # Reset circuit breaker state in fixture mode so prior
+                # real-connector failures don't block fixture validation.
+                'circuit_open_until': 0,
+                'consecutive_failures': 0,
             })
             update_connector_health(
                 runtime,
