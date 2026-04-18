@@ -85,6 +85,11 @@ from typing import Any, Dict, List, Set, Tuple
 
 from src.artifact.models import ArtifactObservation, ArtifactType, Verdict, stable_artifact_id, map_risk_to_verdict
 from src.artifact.report import build_report
+try:
+    from src.integrations.llm_client import DEFAULT_CLIENT as LLM_CLIENT
+except Exception:
+    LLM_CLIENT = None  # type: ignore
+
 _LLM_CLIENT = None
 def _get_llm_client():
     global _LLM_CLIENT
@@ -3041,12 +3046,17 @@ def _schedule_llm_generation(rows: List[dict], ctx: dict, assessment_obj: dict, 
     """Spawn a background coroutine that builds llm_rows so the HTTP response returns quickly."""
     if not rows:
         return
+    auto_llm = bool((ctx.get('options') or {}).get('auto_llm'))
+    if not auto_llm:
+        # Skip background LLM generation when caller did not request it.
+        # Running LLM on every row even with auto_llm=False starves uvicorn's thread pool.
+        logger.debug('_schedule_llm_generation: auto_llm=False — skipping background LLM for %s', assessment_id)
+        return
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
         logger.warning("No running event loop; skipping async LLM generation for %s", assessment_id)
         return
-    auto_llm = bool((ctx.get('options') or {}).get('auto_llm'))
     overrides = None
     if isinstance(payload, dict):
         try:
@@ -4970,7 +4980,8 @@ async def get_assessment(assessment_id: str):
 
     if not resp.get('persona_reports') or not resp.get('correlation_clusters') or not resp.get('evidence_rows'):
         try:
-            resp = _hydrate_assessment_semantics(resp)
+            # Run CPU-bound hydration off the event loop to avoid blocking uvicorn
+            resp = await asyncio.to_thread(_hydrate_assessment_semantics, resp)
         except Exception:
             pass
     try:
@@ -6697,7 +6708,8 @@ def _start_investigate_worker(app, interval_seconds: int = 3):
                                 narrative = resp.get('text') or (resp.get('meta') or {}).get('text') or ''
                             else:
                                 narrative = str(resp)
-                        except Exception:
+                        except Exception as _llm_exc:
+                            logger.error('investigate worker LLM call failed: %s: %s', type(_llm_exc).__name__, _llm_exc)
                             narrative = 'Composite narrative fallback: unable to reach LLM provider.'
                         # evidence table
                         evidence = []
@@ -6764,6 +6776,14 @@ def _start_investigate_worker(app, interval_seconds: int = 3):
                     await asyncio.sleep(interval_seconds)
                 except Exception:
                     pass
+    # Prefer get_running_loop() — works when called from async lifespan context
+    # (add_event_handler startup fires too early and is unavailable post-startup)
+    try:
+        running_loop = asyncio.get_running_loop()
+        running_loop.create_task(_loop())
+        return
+    except RuntimeError:
+        pass  # not in a running loop — fall through
     try:
         app.add_event_handler('startup', lambda: asyncio.create_task(_loop()))
     except Exception:
@@ -6772,6 +6792,163 @@ def _start_investigate_worker(app, interval_seconds: int = 3):
             loop.create_task(_loop())
         except Exception:
             pass
+
+@router.post('/{assessment_id}/tasks/{task_id}/expand')
+async def expand_task(assessment_id: str, task_id: str, request: Request):
+    """EXPAND endpoint — Phase 3.
+
+    Payload (JSON):
+      task_text   str  — description of the task to expand (required)
+      persona     str  — soc | ciso | compliance | hunter | ir (default: soc)
+      investigate_id str — optional; scope rows to a specific investigate record
+      force_refresh bool — bypass cache (default: false)
+
+    Returns:
+      {
+        assessment_id, task_id, persona,
+        entity_fields, check_results,      <- OPT-1 + OPT-2
+        summary, confidence,               <- LLM output
+        subtasks, iocs, mitre_techniques,  <- LLM output
+        next_pivot,                        <- LLM output
+        cache_hit, latency_ms
+      }
+    """
+    try:
+        from src.analysis.expand_engine import (
+            extract_task_entity_slice,
+            build_expand_prompt,
+            call_expand_llm,
+            load_expand_cache,
+            save_expand_cache,
+            make_task_id,
+        )
+    except ImportError as _ie:
+        raise HTTPException(status_code=500, detail=f'expand_engine not available: {_ie}')
+
+    assessment = _safe_load_assessment(assessment_id)
+    if not assessment:
+        raise HTTPException(status_code=404, detail='assessment_not_found')
+
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+
+    task_text = (payload.get('task_text') or '').strip()
+    if not task_text:
+        raise HTTPException(status_code=400, detail='task_text required')
+
+    _VALID_PERSONAS = {
+        'soc', 'soc_analyst', 'threat_hunter', 'hunter',
+        'ciso', 'forensics', 'compliance', 'audit',
+        'mssp', 'ir', 'executive',
+    }
+    _PERSONA_ALIASES = {
+        'soc_analyst': 'soc', 'threat_hunter': 'hunter',
+        'audit': 'compliance', 'executive': 'ciso',
+    }
+    persona = (payload.get('persona') or 'soc').strip().lower()
+    if persona not in _VALID_PERSONAS:
+        persona = 'soc'
+    persona = _PERSONA_ALIASES.get(persona, persona)
+
+    force_refresh = bool(payload.get('force_refresh'))
+    investigate_id_hint = payload.get('investigate_id') or None
+    # Cluster-grounded EXPAND: caller may pass cluster_id + row_refs to pin evidence
+    cluster_id_hint = payload.get('cluster_id') or None
+    row_refs_hint   = payload.get('row_refs') or []
+    model_hint      = payload.get('model') or None
+
+    # Resolve investigate record (best-effort)
+    investigate_record: dict = {}
+    if investigate_id_hint:
+        investigate_record = INVESTIGATE_STORE.get(investigate_id_hint) or {}
+    if not investigate_record and assessment.get('latest_investigate_id'):
+        investigate_record = INVESTIGATE_STORE.get(assessment['latest_investigate_id']) or {}
+
+    # Stable task_id from content (override URL param if auto-generated)
+    canonical_task_id = make_task_id(task_text, persona)
+    # If caller passed a real hash-like id, honour it; otherwise use canonical
+    effective_task_id = task_id if (len(task_id) >= 8 and task_id != 'expand') else canonical_task_id
+
+    # OPT-3: check cache first
+    if not force_refresh:
+        cached = load_expand_cache(assessment_id, effective_task_id)
+        if cached:
+            cached['cache_hit'] = True
+            return JSONResponse(cached)
+
+    t0 = time.time()
+
+    # OPT-1 + OPT-2 entity slice — prefer cluster rows when cluster_id supplied
+    if cluster_id_hint:
+        all_rows = (
+            assessment.get('normalized_rows')
+            or assessment.get('evidence_rows')
+            or assessment.get('llm_rows')
+            or assessment.get('rows')
+            or []
+        )
+        # Collect member rows by row_refs or correlation_cluster_id
+        ref_set = set(int(v) for v in row_refs_hint if isinstance(v, (int, float)) or (isinstance(v, str) and v.isdigit()))
+        cluster_rows = [
+            r for r in all_rows
+            if isinstance(r, dict) and (
+                r.get('correlation_cluster_id') == cluster_id_hint
+                or (ref_set and r.get('row_index') in ref_set)
+            )
+        ]
+        # If cluster_id found via correlation_clusters meta, also try row_refs from there
+        if not cluster_rows:
+            for c in (assessment.get('correlation_clusters') or []):
+                if str(c.get('cluster_id') or c.get('id') or '') == str(cluster_id_hint):
+                    crefs = set(int(v) for v in (c.get('row_refs') or c.get('row_indices') or []) if str(v).isdigit())
+                    cluster_rows = [r for r in all_rows if isinstance(r, dict) and r.get('row_index') in crefs]
+                    break
+        if cluster_rows:
+            # Build an entity_slice directly from cluster rows — skip task-entity matching
+            entity_slice = extract_task_entity_slice(task_text, investigate_record, assessment)
+            # Override rows with cluster-pinned rows (more targeted than task matching)
+            entity_slice['rows'] = cluster_rows[:30]
+            entity_slice['cluster_id'] = cluster_id_hint
+        else:
+            entity_slice = extract_task_entity_slice(task_text, investigate_record, assessment)
+            entity_slice['cluster_id'] = cluster_id_hint
+    else:
+        entity_slice = extract_task_entity_slice(task_text, investigate_record, assessment)
+
+    # Build prompt and call LLM
+    prompt = build_expand_prompt(task_text, entity_slice, persona)
+    llm_result = call_expand_llm(prompt, LLM_CLIENT, persona, entity_slice=entity_slice, model=model_hint)
+
+    latency_ms = int((time.time() - t0) * 1000)
+
+    result = {
+        'assessment_id': assessment_id,
+        'task_id': effective_task_id,
+        'persona': persona,
+        'cluster_id': entity_slice.get('cluster_id') or cluster_id_hint,
+        # OPT-1 + OPT-2
+        'entity_fields': entity_slice.get('entity_fields'),
+        'check_results': entity_slice.get('check_results'),
+        'matched_entities': entity_slice.get('matched_entities'),
+        'row_count': len(entity_slice.get('rows') or []),
+        # LLM output
+        'summary': llm_result.get('summary', ''),
+        'confidence': llm_result.get('confidence', 0.0),
+        'subtasks': llm_result.get('subtasks', []),
+        'iocs': llm_result.get('iocs', []),
+        'mitre_techniques': llm_result.get('mitre_techniques', []),
+        'next_pivot': llm_result.get('next_pivot', ''),
+        'fallback_generated': llm_result.get('fallback_generated', False),
+        # meta
+        'cache_hit': False,
+        'latency_ms': latency_ms,
+    }
+
+    save_expand_cache(assessment_id, effective_task_id, result)
+    return JSONResponse(result)
+
 
 @router.get('/{assessment_id}/llm/verification')
 async def assessment_llm_verification(assessment_id: str):
@@ -7667,7 +7844,65 @@ async def get_cluster_detail(assessment_id: str, cluster_id: str):
         None,
     )
     if not cluster_state:
-        return JSONResponse({'detail': 'cluster_not_found'}, status_code=404)
+        # Fallback: build compact state from correlation_clusters (produced by _hydrate_assessment_semantics)
+        correlation_clusters = assessment.get('correlation_clusters') or []
+        cluster_meta = next(
+            (c for c in correlation_clusters if str(c.get('cluster_id') or c.get('id') or '') == str(cluster_id)),
+            None,
+        )
+        if not cluster_meta:
+            return JSONResponse({'detail': 'cluster_not_found'}, status_code=404)
+        # Resolve member rows using row_refs OR correlation_cluster_id field
+        all_rows = (
+            assessment.get('normalized_rows')
+            or assessment.get('evidence_rows')
+            or assessment.get('llm_rows')
+            or assessment.get('rows')
+            or []
+        )
+        row_refs_raw = cluster_meta.get('row_refs') or cluster_meta.get('row_indices') or []
+        row_refs = set(int(v) for v in row_refs_raw if isinstance(v, (int, float)) or (isinstance(v, str) and v.isdigit()))
+        fallback_member_rows = []
+        for r in all_rows:
+            if not isinstance(r, dict):
+                continue
+            ri = r.get('row_index')
+            if r.get('correlation_cluster_id') == cluster_id or ri in row_refs:
+                fallback_member_rows.append({
+                    'row_index': ri,
+                    'severity': r.get('severity') or r.get('risk_level'),
+                    'entity': r.get('entity') or r.get('host') or r.get('username') or r.get('src_ip'),
+                    'description': r.get('description') or r.get('llm_summary') or r.get('summary') or r.get('analyst_notes'),
+                    'source': r.get('_source') or r.get('source') or r.get('_sheet') or 'unknown',
+                    'correlation_type': r.get('correlation_type') or r.get('type') or 'correlated',
+                    'triage_score': r.get('triage_score') or r.get('risk_score') or 0,
+                    'mitre': r.get('mitre_technique') or r.get('mitre') or [],
+                })
+        # Extract entities + factors from member rows for context
+        entities = list({r['entity'] for r in fallback_member_rows if r.get('entity')})[:8]
+        factors = list({f for r in all_rows if isinstance(r, dict) and r.get('row_index') in row_refs for f in (r.get('factors') or [])})[:10]
+        mitre = list({m for r in fallback_member_rows for m in (r.get('mitre') or []) if m})[:8]
+        fallback_state = {
+            'cluster_id': cluster_id,
+            'severity': cluster_meta.get('severity') or 'medium',
+            'summary': cluster_meta.get('summary') or cluster_meta.get('label') or f'Cluster {cluster_id}',
+            'entities': entities,
+            'factors': factors,
+            'mitre_techniques': mitre,
+            'row_count': len(fallback_member_rows),
+            'fallback_generated': True,
+            'provider_context': {},
+            'evidence_row_indices': list(row_refs),
+        }
+        return JSONResponse({
+            'assessment_id': assessment_id,
+            'cluster_id': cluster_id,
+            'cluster_detail': fallback_state,
+            'member_rows': fallback_member_rows[:25],
+            'analyst_delta': {},
+            'corroboration': {},
+            'fallback_generated': True,
+        })
     rows = assessment.get('llm_rows') or assessment.get('rows') or []
     member_rows = []
     member_refs = set(int(v) for v in (cluster_state.get('evidence_row_indices') or []) if isinstance(v, int))

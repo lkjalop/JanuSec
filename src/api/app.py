@@ -509,6 +509,18 @@ try:
 except Exception:
     llm_settings_router = None
 try:
+    from .tier2_canvas_endpoints import router as tier2_canvas_router
+except Exception:
+    tier2_canvas_router = None
+try:
+    from .cluster_enrich_endpoints import router as cluster_enrich_router
+except Exception:
+    cluster_enrich_router = None
+try:
+    from .llm_catalog_endpoints import router as llm_catalog_router
+except Exception:
+    llm_catalog_router = None
+try:
     from .llm_endpoints import router as llm_endpoints_router
 except Exception:
     llm_endpoints_router = None
@@ -4738,6 +4750,24 @@ def register_core_routers(full: bool = True):
     except Exception:
         logger.debug('tier2_router include failed (lite)')
     try:
+        if tier2_canvas_router:
+            app.include_router(tier2_canvas_router)
+            logger.info('Included tier2_canvas_router into app (lite)')
+    except Exception:
+        logger.debug('tier2_canvas_router include failed (lite)')
+    try:
+        if cluster_enrich_router:
+            app.include_router(cluster_enrich_router)
+            logger.info('Included cluster_enrich_router into app (lite)')
+    except Exception:
+        logger.debug('cluster_enrich_router include failed (lite)')
+    try:
+        if llm_catalog_router:
+            app.include_router(llm_catalog_router)
+            logger.info('Included llm_catalog_router into app (lite)')
+    except Exception:
+        logger.debug('llm_catalog_router include failed (lite)')
+    try:
         if iam_router:
             app.include_router(iam_router)
             logger.info('Included iam_router into app (lite)')
@@ -5087,6 +5117,9 @@ def register_core_routers(full: bool = True):
             ('config', 'config_router'),
         ('assessments', 'assessments_router'),
         ('tier2', 'tier2_router'),
+        ('tier2_canvas', 'tier2_canvas_router'),
+        ('cluster_enrich', 'cluster_enrich_router'),
+        ('llm_catalog', 'llm_catalog_router'),
         ('playbooks', 'playbook_router'),
         ('identity_hopgraph_facade', 'identity_hopgraph_facade_router'),
         ('cooccurrence_admin', 'cooccurrence_admin_router'),
@@ -8412,6 +8445,36 @@ if _LITE:
     register_core_routers(full=_LOAD_FULL)
 else:
     register_core_routers(full=True)
+
+# ── Startup route audit: fail-fast log for CEO-recording-critical routes ──────
+try:
+    _REQUIRED_ROUTES = [
+        ('GET',  '/api/v1/llm/models/catalog'),
+        ('GET',  '/api/v1/assessments/{assessment_id}/clusters/{cluster_id}'),
+        ('GET',  '/api/v1/assessments/{assessment_id}/clusters/{cluster_id}/tier2'),
+        ('GET',  '/api/v1/assessments/{assessment_id}/clusters/{cluster_id}/tier2/llm-summary'),
+        ('POST', '/api/v1/assessments/{assessment_id}/clusters/{cluster_id}/enrich'),
+        ('POST', '/api/v1/assessments/{assessment_id}/investigate/build'),
+    ]
+    _registered = {
+        (m, r.path)
+        for r in app.router.routes
+        for m in getattr(r, 'methods', {'GET'})
+    }
+    _missing_routes = [(m, p) for (m, p) in _REQUIRED_ROUTES if (m, p) not in _registered]
+    if _missing_routes:
+        logger.error(
+            'ROUTE AUDIT FAILED — missing critical routes: %s. '
+            'Lite mode? PLATFORM_LITE_INIT=%s, FAST_TEST_MODE=%s. '
+            'Check imports at app.py:512-522 for llm_catalog / cluster_enrich / tier2_canvas.',
+            _missing_routes,
+            os.getenv('PLATFORM_LITE_INIT'),
+            os.getenv('FAST_TEST_MODE'),
+        )
+    else:
+        logger.info('ROUTE AUDIT OK — all %d critical routes registered.', len(_REQUIRED_ROUTES))
+except Exception:
+    logger.exception('ROUTE AUDIT: audit itself threw')
 
 
 @app.get('/api/v1/decisions/recent')

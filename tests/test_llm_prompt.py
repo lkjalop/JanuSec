@@ -16,11 +16,13 @@ def test_prompt_token_cap_and_mock_response():
     r = client.generate('please summarize this short text')
     assert 'text' in r and 'summary' in r['text'] or r['text'] == 'summary text'
 
-    # long prompt should raise if over cap
-    client.max_tokens = 3
-    long_prompt = 'one two three four five six'
-    try:
-        client.generate(long_prompt)
-        assert False, 'Expected ValueError due to token cap'
-    except ValueError:
-        pass
+    # prompt exceeding MAX_PROMPT_WORDS should raise ValueError
+    # max_tokens is an OUTPUT limit and does not gate input prompt word count
+    import os
+    with __import__('unittest.mock', fromlist=['patch']).patch.dict(os.environ, {'MAX_PROMPT_WORDS': '3'}):
+        long_prompt = 'one two three four five six'
+        try:
+            client.generate(long_prompt)
+            assert False, 'Expected ValueError when prompt exceeds MAX_PROMPT_WORDS'
+        except ValueError:
+            pass

@@ -160,6 +160,7 @@
     .tab-bar {
       display: flex; align-items: center; background: var(--bg-secondary, #131720);
       border-bottom: 1px solid var(--border, #1E2535); padding: 0 12px; flex-shrink: 0;
+      position: relative; z-index: 100; pointer-events: auto;
     }
     .tab-btn {
       display: flex; align-items: center; gap: 6px; padding: 10px 14px;
@@ -176,8 +177,8 @@
     }
 
     /* ── Investigate layout ─────────────────────────────────────────── */
-    .investigate-layout { display: flex; flex: 1; overflow: hidden; }
-    .investigate-main { flex: 1; display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
+    .investigate-layout { display: flex; flex: 1; overflow: hidden; position: relative; z-index: 30; }
+    .investigate-main { flex: 1; display: flex; flex-direction: column; min-width: 0; overflow: hidden; position: relative; z-index: 31; }
 
     /* ── Tab content ───────────────────────────────────────────────── */
     .tab-content { flex: 1; overflow: hidden; display: none; }
@@ -211,6 +212,56 @@
     .report-section__body ul { margin: 6px 0; padding-left: 20px; }
     .report-section__body li { margin-bottom: 4px; }
     .report-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+
+    /* ── Investigate / EXPAND task cards ──────────────────────────── */
+    .task-card {
+      border: 1px solid var(--border, #1E2535);
+      border-radius: 8px; background: var(--bg-secondary, #111827);
+      margin-bottom: 10px; overflow: hidden;
+    }
+    .task-card__header {
+      display: flex; align-items: center; gap: 8px;
+      padding: 10px 14px; cursor: pointer;
+      background: var(--bg-tertiary, #1C2232);
+    }
+    .task-card__header:hover { background: rgba(74,99,231,.08); }
+    .task-card__title { flex: 1; font-size: 13px; font-weight: 500; color: var(--text-primary); }
+    .task-card__expand-btn {
+      font-size: 11px; padding: 3px 10px; border-radius: 5px;
+      background: rgba(74,99,231,.15); border: 1px solid var(--accent, #4A63E7);
+      color: var(--accent, #4A63E7); cursor: pointer; white-space: nowrap;
+    }
+    .task-card__expand-btn:hover { background: var(--accent, #4A63E7); color: #fff; }
+    .task-card__expand-btn:disabled { opacity: 0.5; cursor: default; }
+    .task-card__body { padding: 12px 14px; display: none; }
+    .task-card__body.open { display: block; }
+    .expand-panel { font-size: 12px; }
+    .expand-panel__summary { color: var(--text-secondary); margin-bottom: 10px; line-height: 1.5; }
+    .expand-check-badges { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+    .expand-badge {
+      font-size: 10px; padding: 2px 8px; border-radius: 10px; font-weight: 600;
+    }
+    .expand-badge--critical { background: rgba(229,72,72,.15); color: #E54848; border: 1px solid rgba(229,72,72,.3); }
+    .expand-badge--warning { background: rgba(255,138,60,.12); color: #FF8A3C; border: 1px solid rgba(255,138,60,.3); }
+    .expand-badge--info { background: rgba(107,114,128,.1); color: #6B7280; border: 1px solid rgba(107,114,128,.2); }
+    .expand-subtask-list { list-style: none; padding: 0; margin: 0 0 10px; }
+    .expand-subtask-list li {
+      padding: 6px 10px; border-radius: 5px; margin-bottom: 4px;
+      background: var(--bg-tertiary); display: flex; align-items: center; gap: 8px;
+      font-size: 12px;
+    }
+    .expand-subtask-list li .stask-priority { font-size: 10px; padding: 1px 6px; border-radius: 8px; font-weight: 600; }
+    .stask-priority--high { background: rgba(229,72,72,.15); color: #E54848; }
+    .stask-priority--medium { background: rgba(255,138,60,.12); color: #FF8A3C; }
+    .stask-priority--low { background: rgba(107,114,128,.1); color: #6B7280; }
+    .expand-ioc-list { list-style: none; padding: 0; margin: 0 0 10px; font-family: monospace; }
+    .expand-ioc-list li { padding: 3px 0; color: var(--text-secondary); }
+    .expand-ioc-list .ioc-type { font-size: 10px; color: var(--text-muted); margin-right: 6px; text-transform: uppercase; }
+    .expand-pivot { padding: 8px 12px; background: rgba(74,99,231,.08); border-left: 3px solid var(--accent, #4A63E7); border-radius: 4px; color: var(--text-secondary); }
+    .expand-loading { font-size: 12px; color: var(--text-muted); padding: 12px 0; }
+    .expand-error { font-size: 12px; color: #E54848; padding: 8px; }
+    .entity-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 10px; }
+    .entity-chip { font-size: 10px; padding: 2px 7px; border-radius: 8px; background: rgba(74,99,231,.1); border: 1px solid rgba(74,99,231,.2); color: var(--accent,#4A63E7); font-family: monospace; }
 
     /* ── Evidence table ────────────────────────────────────────────── */
     .evidence-toolbar {
@@ -534,6 +585,10 @@
           <button class="tab-btn" role="tab" data-tab="timeline" aria-selected="false">
             <i data-lucide="clock"></i> Timeline
           </button>
+          <button class="tab-btn" role="tab" data-tab="investigate" aria-selected="false" id="tabBtnInvestigate">
+            <i data-lucide="search"></i> Investigate
+            <span class="badge" id="investigateBadge" style="display:none;">●</span>
+          </button>
           <div style="flex:1;"></div>
           <button class="btn-detach" id="btnDetachActive" title="Detach current tab to new window">
             <i data-lucide="external-link" style="width:13px;height:13px;"></i> Detach
@@ -602,6 +657,11 @@
             <div id="operatorQueuePanel" style="font-size:12px;">
               <div style="padding:12px;font-size:12px;color:var(--text-muted);">Run analysis to build the operator queue from assessment clusters.</div>
             </div>
+          </div>
+
+          <!-- ── Cluster List Panel ── -->
+          <div id="clusterListPanel" style="display:none;padding:16px;border-top:1px solid var(--border);">
+            <!-- populated by storeClusters() / renderClusterList() -->
           </div>
         </div>
       </div>
@@ -702,6 +762,51 @@
           </div>
         </div>
 
+        <!-- ── TAB: Investigate (EXPAND) ── -->
+        <div class="tab-content" id="tabInvestigate" role="tabpanel" aria-label="Deep investigate">
+          <div class="tab-scroll" style="padding:12px;">
+
+            <!-- Empty state -->
+            <div id="investigateEmpty" class="empty-state">
+              <i data-lucide="search"></i>
+              <p class="empty-state__title">Composite Investigation</p>
+              <p class="empty-state__hint">Run analysis first, then click <strong>Build Investigate</strong> to generate a deep narrative with expandable task cards.</p>
+            </div>
+
+            <!-- Build button + persona selector -->
+            <div id="investigateActions" style="display:none;margin-bottom:12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+              <select id="investigatePersonaSelect" style="font-size:12px;padding:4px 8px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);">
+                <option value="soc">SOC Analyst</option>
+                <option value="ciso">CISO</option>
+                <option value="compliance">Compliance</option>
+                <option value="hunter">Threat Hunter</option>
+                <option value="ir">IR Responder</option>
+              </select>
+              <button class="btn-primary" id="btnBuildInvestigate" style="font-size:12px;padding:6px 14px;">
+                <i data-lucide="zap" style="width:13px;height:13px;"></i> Build Investigate
+              </button>
+              <span id="investigateStatusBadge" style="font-size:11px;color:var(--text-muted);"></span>
+            </div>
+
+            <!-- Loading spinner -->
+            <div id="investigateLoading" style="display:none;padding:32px;text-align:center;">
+              <div class="skeleton skel-heading" style="width:60%;margin:0 auto 12px;"></div>
+              <div class="skeleton skel-text" style="width:80%;margin:0 auto 8px;"></div>
+              <div class="skeleton skel-text" style="width:65%;margin:0 auto;"></div>
+              <p style="font-size:12px;color:var(--text-muted);margin-top:12px;" id="investigatePollingMsg">Building composite narrative…</p>
+            </div>
+
+            <!-- Results container -->
+            <div id="investigateResults" style="display:none;">
+              <!-- Narrative block -->
+              <div id="investigateNarrative" class="report-section" style="margin-bottom:16px;"></div>
+              <!-- Task cards -->
+              <div id="investigateTaskCards"></div>
+            </div>
+
+          </div>
+        </div>
+
       </div><!-- /investigate-main -->
 
       <!-- ── DETAIL PANEL (row drill-down, slides in from right) ── -->
@@ -797,5 +902,90 @@
   // Lucide icons
   lucide.createIcons();
 </script>
+
+<!-- ── Cluster Drawer Modal ─────────────────────────────────────── -->
+<div id="clusterDrawer" class="cluster-drawer" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="clusterDrawerTitle">
+  <div class="cluster-drawer__backdrop" onclick="(function(){var d=document.getElementById('clusterDrawer');if(d){d.classList.remove('open');d.style.display='none';}})()"></div>
+  <div class="cluster-drawer__panel">
+    <div class="cluster-drawer__header">
+      <div>
+        <div id="clusterDrawerTitle" class="cluster-drawer__title">Cluster Detail</div>
+        <div id="clusterDrawerMeta" class="cluster-drawer__meta"></div>
+      </div>
+      <button class="cluster-drawer__close" onclick="(function(){var d=document.getElementById('clusterDrawer');if(d){d.classList.remove('open');d.style.display='none';}})()">✕</button>
+    </div>
+
+    <!-- Model selector -->
+    <div class="cluster-drawer__controls">
+      <div id="clusterModelSelWrap" style="display:flex;align-items:center;gap:8px;">
+        <label style="font-size:11px;color:var(--text-muted);">Model:</label>
+        <!-- per-cluster <select id="llmModelSel_{id}"> injected by _ensureClusterElements() -->
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;">
+        <button class="btn-primary" style="font-size:11px;padding:4px 12px;"
+          onclick="window._triggerLlmSummary(window.state.activeClusterId)">
+          ⚡ Summarise (Qwen)
+        </button>
+        <button id="btnDeepenMistral" class="btn-secondary" style="font-size:11px;padding:4px 12px;"
+          title="Mistral can take 2+ minutes locally — runs deep analysis, human-approved"
+          onclick="(function(){
+            var cid=window.state.activeClusterId;
+            var sel=document.getElementById('llmModelSel_'+cid);
+            if(sel)sel.value='mistral-small3.2:24b';
+            window._triggerLlmSummary(cid,null,true,window.state.currentPersona);
+          })()">
+          🔬 Deepen with Mistral <span style="font-size:9px;color:var(--text-muted);">(2+ min)</span>
+        </button>
+        <button class="btn-secondary" style="font-size:11px;padding:4px 12px;"
+          onclick="window._triggerClusterEnrich(window.state.activeClusterId)">
+          🔍 CRAG + LLM Enrich
+        </button>
+        <button class="btn-secondary" style="font-size:11px;padding:4px 12px;"
+          onclick="window._triggerHuntSweep(window.state.activeClusterId)">
+          🎯 Hunt Sweep
+        </button>
+      </div>
+    </div>
+
+    <!-- Dynamic result containers (per-cluster ids injected by _ensureClusterElements) -->
+    <div id="clusterDrawerBody" class="cluster-drawer__body">
+      <div style="color:var(--text-muted);font-size:12px;padding:16px;">
+        Select a cluster action above to begin.
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+.cluster-drawer { position:fixed; inset:0; z-index:9000; display:flex; align-items:flex-end; justify-content:flex-end; }
+.cluster-drawer__backdrop { position:absolute; inset:0; background:rgba(0,0,0,.55); }
+.cluster-drawer__panel { position:relative; z-index:1; width:520px; max-width:95vw; height:100vh; background:var(--surface,#13161e); border-left:1px solid var(--border,#2a2d3a); display:flex; flex-direction:column; overflow:hidden; }
+.cluster-drawer__header { display:flex; align-items:flex-start; justify-content:space-between; padding:16px; border-bottom:1px solid var(--border,#2a2d3a); }
+.cluster-drawer__title { font-size:14px; font-weight:700; color:var(--text,#e8ebf0); }
+.cluster-drawer__meta { font-size:12px; color:var(--text-muted,#7a7f8e); margin-top:4px; }
+.cluster-drawer__close { background:none; border:none; color:var(--text-muted,#7a7f8e); font-size:16px; cursor:pointer; padding:4px; }
+.cluster-drawer__controls { padding:12px 16px; border-bottom:1px solid var(--border,#2a2d3a); }
+.cluster-drawer__body { flex:1; overflow-y:auto; padding:12px 16px; }
+.cluster-list-header { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; color:var(--text-muted,#7a7f8e); margin-bottom:6px; }
+.cluster-item { display:flex; align-items:center; gap:8px; padding:8px 10px; border-radius:6px; border:1px solid var(--border,#2a2d3a); margin-bottom:4px; cursor:pointer; background:var(--surface-raised,#1a1d27); }
+.cluster-item:hover { border-color:var(--accent,#7c6af7); }
+.cluster-item__sev { font-size:10px; font-weight:700; padding:2px 6px; border-radius:4px; background:var(--border,#2a2d3a); }
+.cluster-item--critical .cluster-item__sev { background:#5c1111; color:#ff8080; }
+.cluster-item--high .cluster-item__sev     { background:#4a2800; color:#ffaa55; }
+.cluster-item--medium .cluster-item__sev   { background:#1e3a1e; color:#7fff7f; }
+.cluster-item__label { flex:1; font-size:12px; color:var(--text,#e8ebf0); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.cluster-item__rows { font-size:10px; color:var(--text-muted,#7a7f8e); }
+.cluster-result-block { background:var(--surface-raised,#1a1d27); border:1px solid var(--border,#2a2d3a); border-radius:6px; padding:12px; margin-bottom:10px; }
+.cluster-model-sel { background:var(--surface,#13161e); color:var(--text,#e8ebf0); border:1px solid var(--border,#2a2d3a); border-radius:4px; padding:3px 8px; font-size:11px; }
+.persona-steps { padding-left:18px; margin:8px 0; }
+.persona-steps li { margin-bottom:6px; font-size:12px; }
+.llm-summary-block p { margin:6px 0; font-size:12px; line-height:1.5; }
+.loading-dot { color:var(--text-muted,#7a7f8e); font-size:12px; }
+.cluster-error { color:#ff8080; font-size:12px; }
+.badge--ok   { background:#1e3a1e; color:#7fff7f; }
+.badge--warn { background:#4a2800; color:#ffaa55; }
+.badge--crit { background:#5c1111; color:#ff8080; }
+.enrich-block,.hunt-block { font-size:12px; }
+</style>
 </body>
 </html>
