@@ -1689,7 +1689,7 @@ def _flatten_row_payload(row: dict | None, fallback_index: int) -> dict:
     for key, value in row.items():
         if key == 'raw':
             continue
-        merged.setdefault(key, value)
+        merged[key] = value  # outer wrapper fields win (row_index must be global, not per-file)
     row_index_value = merged.get('row_index', fallback_index)
     try:
         if isinstance(row_index_value, int):
