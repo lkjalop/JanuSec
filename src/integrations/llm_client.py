@@ -323,11 +323,15 @@ class LLMClient(BaseLLMClient):
                 logger.info('LLMClient startup: provider=%s ollama_enabled=%s ollama_host=%s ollama_model=%s timeout=%s', self.provider, self.ollama_enabled, self.ollama_host, self.ollama_model, self.ollama_timeout)
 
     def _enforce_token_cap(self, prompt: str, max_tokens: Optional[int]) -> int:
-        # naive token estimate: words
+        # Check prompt input size against MAX_PROMPT_WORDS (default 6000).
+        # max_tokens controls OUTPUT length — do NOT compare prompt words against it.
         est = len(prompt.split())
-        cap = max_tokens or self.max_tokens
-        if est > cap:
-            raise ValueError(f'Prompt size {est} exceeds token cap {cap}')
+        try:
+            prompt_word_limit = int(os.getenv('MAX_PROMPT_WORDS', '6000'))
+        except Exception:
+            prompt_word_limit = 6000
+        if est > prompt_word_limit:
+            raise ValueError(f'Prompt size {est} words exceeds context limit {prompt_word_limit}')
         return est
 
     def reserve_tenant_budget(self, tenant_id: str, amount: float) -> bool:

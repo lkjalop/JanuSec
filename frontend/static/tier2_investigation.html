@@ -1,0 +1,1359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tier 2 Investigation Canvas — JanuSec</title>
+  <style>
+    /* ── Reset / base ──────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg-primary:    #0A0E1A;
+      --bg-secondary:  #131929;
+      --bg-tertiary:   #0D111C;
+      --border:        #1E2535;
+      --text-primary:  #E2E8F0;
+      --text-secondary:#9CA3AF;
+      --text-muted:    #6B7280;
+      --accent:        #4A63E7;
+      --accent-subtle: rgba(74,99,231,.15);
+      --critical:      #E53935;
+      --high:          #FF6D00;
+      --medium:        #FFB300;
+      --safe:          #3FA860;
+      --bg-hover:      rgba(255,255,255,.04);
+    }
+    body { background: var(--bg-primary); color: var(--text-primary);
+           font-family: -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+           font-size: 13px; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+
+    /* ── Top bar ────────────────────────────────────────────────────── */
+    #topBar {
+      display: flex; align-items: center; gap: 12px; padding: 10px 18px;
+      border-bottom: 1px solid var(--border); background: var(--bg-secondary); flex-shrink: 0;
+    }
+    #topBar .back-btn {
+      background: none; border: 1px solid var(--border); color: var(--text-muted);
+      padding: 4px 10px; border-radius: 6px; cursor: pointer; font-size: 12px;
+    }
+    #topBar .back-btn:hover { color: var(--text-primary); border-color: var(--text-muted); }
+    #clusterBadge {
+      font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em;
+      color: var(--text-muted);
+    }
+    #clusterTitle { font-size: 15px; font-weight: 700; color: var(--text-primary); flex: 1; }
+    #phaseBadge {
+      font-size: 11px; padding: 3px 10px; border-radius: 10px; font-weight: 700;
+      background: var(--accent-subtle); border: 1px solid var(--accent); color: var(--accent);
+    }
+    .status-badge {
+      font-size: 10px; padding: 2px 8px; border-radius: 8px; font-weight: 700;
+      background: rgba(63,168,96,.12); border: 1px solid rgba(63,168,96,.35); color: var(--safe);
+    }
+
+    /* ── Phase rail ─────────────────────────────────────────────────── */
+    #phaseRail {
+      display: flex; align-items: center; gap: 0; padding: 0 18px;
+      background: var(--bg-tertiary); border-bottom: 1px solid var(--border); flex-shrink: 0;
+    }
+    .phase-step {
+      display: flex; align-items: center; gap: 8px; padding: 10px 16px;
+      font-size: 11px; font-weight: 600; color: var(--text-muted); cursor: default;
+      border-bottom: 2px solid transparent; white-space: nowrap; transition: all .15s;
+    }
+    .phase-step.active { color: var(--accent); border-bottom-color: var(--accent); }
+    .phase-step.done   { color: var(--safe);   border-bottom-color: var(--safe); }
+    .phase-step.locked { color: var(--text-muted); opacity: .45; }
+    .phase-step .phase-num {
+      width: 20px; height: 20px; border-radius: 50%; display: flex; align-items: center;
+      justify-content: center; font-size: 10px; font-weight: 800;
+      background: var(--bg-secondary); border: 1px solid currentColor;
+    }
+    .phase-arrow { color: var(--border); font-size: 10px; padding: 0 2px; }
+
+    /* ── Main split pane ────────────────────────────────────────────── */
+    #splitPane { display: flex; flex: 1; overflow: hidden; }
+
+    /* ── Left: evidence chain ───────────────────────────────────────── */
+    #evidencePane {
+      width: 38%; min-width: 280px; max-width: 55%;
+      border-right: 1px solid var(--border); display: flex; flex-direction: column;
+      overflow: hidden;
+    }
+    #evidencePaneHeader {
+      padding: 10px 14px; border-bottom: 1px solid var(--border);
+      font-size: 11px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .06em; color: var(--text-muted); background: var(--bg-secondary);
+      display: flex; align-items: center; justify-content: space-between; flex-shrink: 0;
+    }
+    #evidenceList { flex: 1; overflow-y: auto; padding: 8px; }
+    .ev-row {
+      display: flex; gap: 8px; padding: 8px 10px; border-radius: 6px;
+      border: 1px solid var(--border); background: var(--bg-tertiary);
+      margin-bottom: 6px; cursor: pointer; transition: border-color .12s;
+    }
+    .ev-row:hover { border-color: var(--accent); }
+    .ev-row.highlighted { border-color: var(--accent); background: var(--accent-subtle); }
+    .ev-sev {
+      font-size: 9px; font-weight: 800; text-transform: uppercase;
+      writing-mode: vertical-rl; text-orientation: mixed; letter-spacing: .05em;
+      padding: 2px 0; color: var(--text-muted); min-width: 14px; text-align: center;
+    }
+    .ev-body { flex: 1; min-width: 0; }
+    .ev-desc { font-size: 12px; color: var(--text-primary); line-height: 1.4;
+               white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .ev-meta { font-size: 10px; color: var(--text-muted); margin-top: 2px; }
+    .mitre-chip {
+      display: inline-block; font-size: 9px; font-weight: 700; padding: 1px 5px;
+      border-radius: 3px; background: rgba(74,99,231,.15); border: 1px solid rgba(74,99,231,.3);
+      color: var(--accent); margin: 0 2px 2px 0; white-space: nowrap; vertical-align: middle;
+    }
+
+    /* resize handle between panes */
+    #paneResizer {
+      width: 5px; cursor: col-resize; background: transparent; flex-shrink: 0;
+      transition: background .15s;
+    }
+    #paneResizer:hover, #paneResizer.dragging { background: rgba(74,99,231,.35); }
+
+    /* ── Right: guided workflow ─────────────────────────────────────── */
+    #workflowPane { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+    #workflowPaneHeader {
+      padding: 10px 16px; border-bottom: 1px solid var(--border);
+      background: var(--bg-secondary); flex-shrink: 0;
+      display: flex; align-items: center; gap: 10px;
+    }
+    #workflowPaneTitle { font-size: 13px; font-weight: 600; color: var(--text-primary); flex: 1; }
+    #workflowBody { flex: 1; overflow-y: auto; padding: 16px; }
+
+    /* ── Step card ──────────────────────────────────────────────────── */
+    .step-card {
+      background: var(--bg-secondary); border: 1px solid var(--border);
+      border-radius: 8px; margin-bottom: 12px; overflow: hidden;
+    }
+    .step-card.active-step { border-color: var(--accent); }
+    .step-card.done-step   { border-color: var(--safe); opacity: .85; }
+    .step-card.locked-step { opacity: .4; pointer-events: none; }
+    .step-header {
+      display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px;
+      cursor: pointer;
+    }
+    .step-num {
+      width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center;
+      justify-content: center; font-size: 11px; font-weight: 800; flex-shrink: 0;
+      background: var(--bg-tertiary); border: 1px solid var(--border); color: var(--text-muted);
+    }
+    .step-card.active-step .step-num { border-color: var(--accent); color: var(--accent); }
+    .step-card.done-step   .step-num { border-color: var(--safe); color: var(--safe); background: rgba(63,168,96,.1); }
+    .step-title { font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 2px; }
+    .step-persona { font-size: 10px; font-weight: 700; text-transform: uppercase;
+                    letter-spacing: .06em; color: var(--text-muted); }
+    .step-body { padding: 0 14px 14px 48px; }
+    .step-instructions {
+      font-size: 12px; line-height: 1.65; color: var(--text-secondary);
+      background: var(--bg-tertiary); border-radius: 6px; padding: 10px 12px; margin-bottom: 10px;
+    }
+    .step-evidence-refs { font-size: 11px; color: var(--text-muted); margin-bottom: 8px; }
+    .step-evidence-refs span {
+      display: inline-block; padding: 1px 6px; border-radius: 3px; margin-right: 4px;
+      background: var(--accent-subtle); border: 1px solid rgba(74,99,231,.25); color: var(--accent);
+      cursor: pointer; font-size: 10px;
+    }
+    .step-evidence-refs span:hover { background: rgba(74,99,231,.25); }
+    .decision-row { display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+    .decision-btn {
+      padding: 5px 14px; border-radius: 6px; font-size: 12px; font-weight: 600;
+      border: 1px solid var(--border); background: var(--bg-tertiary); color: var(--text-muted);
+      cursor: pointer; transition: all .12s;
+    }
+    .decision-btn:hover               { border-color: var(--text-muted); color: var(--text-primary); }
+    .decision-btn.selected-yes        { border-color: var(--safe); background: rgba(63,168,96,.12); color: var(--safe); }
+    .decision-btn.selected-no         { border-color: var(--critical); background: rgba(229,57,53,.08); color: var(--critical); }
+    .decision-btn.selected-partial    { border-color: var(--medium); background: rgba(255,179,0,.08); color: var(--medium); }
+    .decision-btn.selected-escalate   { border-color: var(--high); background: rgba(255,109,0,.08); color: var(--high); }
+    .step-notes {
+      width: 100%; min-height: 56px; background: var(--bg-tertiary);
+      border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary);
+      font-family: inherit; font-size: 12px; padding: 8px; resize: vertical; margin-bottom: 8px;
+    }
+    .step-notes:focus { outline: none; border-color: var(--accent); }
+    .step-log { font-size: 10px; color: var(--text-muted); font-style: italic; }
+    .btn-primary {
+      display: inline-flex; align-items: center; gap: 6px; padding: 6px 16px;
+      background: var(--accent); color: #fff; border: none; border-radius: 6px;
+      cursor: pointer; font-size: 12px; font-weight: 600; transition: opacity .12s;
+    }
+    .btn-primary:hover { opacity: .88; }
+    .btn-secondary {
+      display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px;
+      background: none; color: var(--text-muted); border: 1px solid var(--border);
+      border-radius: 6px; cursor: pointer; font-size: 12px; transition: all .12s;
+    }
+    .btn-secondary:hover { border-color: var(--text-muted); color: var(--text-primary); }
+
+    /* ── Decision log sidebar ───────────────────────────────────────── */
+    #decisionLogPanel {
+      width: 0; overflow: hidden; border-left: 0 solid var(--border);
+      transition: width .2s, border-left-width .2s; flex-shrink: 0;
+      display: flex; flex-direction: column; background: var(--bg-secondary);
+    }
+    #decisionLogPanel.open { width: 280px; border-left-width: 1px; }
+    #decisionLogHeader {
+      padding: 10px 14px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+      font-size: 11px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .06em; color: var(--text-muted);
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    #decisionLogBody { flex: 1; overflow-y: auto; padding: 8px; }
+    .log-entry {
+      padding: 7px 10px; border-radius: 5px; border: 1px solid var(--border);
+      background: var(--bg-tertiary); margin-bottom: 6px; font-size: 11px;
+    }
+    .log-entry-phase { font-weight: 700; color: var(--accent); font-size: 10px; margin-bottom: 2px; }
+    .log-entry-decision { font-weight: 600; color: var(--text-primary); }
+    .log-entry-notes { color: var(--text-muted); margin-top: 2px; font-style: italic; }
+    .log-entry-ts { font-size: 9px; color: var(--text-muted); margin-top: 3px; }
+
+    /* ── Hand-off modal ────────────────────────────────────────────── */
+    #handoffContent { white-space: pre-wrap; }
+    #handoffContent strong { color: var(--text-primary); }
+
+    /* ── Toast ──────────────────────────────────────────────────────── */
+    #t2Toast {
+      position: fixed; bottom: 20px; right: 20px; z-index: 9999;
+      background: var(--bg-secondary); border: 1px solid var(--border);
+      border-radius: 8px; padding: 10px 16px; font-size: 12px;
+      box-shadow: 0 4px 20px rgba(0,0,0,.4); display: none;
+      max-width: 320px; color: var(--text-primary);
+    }
+    #t2Toast.show { display: block; }
+
+    /* ── Scrollbar ──────────────────────────────────────────────────── */
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  </style>
+</head>
+<body>
+
+<!-- Top bar -->
+<div id="topBar">
+  <button class="back-btn" id="btnBackToInvestigate">← Investigate</button>
+  <div>
+    <div id="clusterBadge">CLUSTER</div>
+  </div>
+  <div id="clusterTitle">Loading…</div>
+  <div id="phaseBadge">Phase 1 — Contain</div>
+  <span class="status-badge" id="statusBadge">In Progress</span>
+  <!-- SLA clock (Feature 2) -->
+  <span id="slaClock" style="display:none;font-size:11px;font-weight:700;padding:3px 10px;border-radius:10px;background:rgba(63,168,96,.12);border:1px solid rgba(63,168,96,.3);color:var(--safe);">⏱ —</span>
+  <!-- Persona filter (Feature 1) -->
+  <select id="personaFilter" style="font-size:11px;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-muted);border-radius:6px;padding:4px 8px;">
+    <option value="">All roles</option>
+    <option value="soc">SOC Analyst</option>
+    <option value="hunter">Threat Hunter</option>
+    <option value="forensics">Forensics</option>
+    <option value="ciso">CISO / Executive</option>
+    <option value="compliance">Compliance / Legal</option>
+  </select>
+  <select id="tier2ModelSelect" title="LLM model for Tier 2 deepening and persona briefings" style="font-size:11px;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-muted);border-radius:6px;padding:4px 8px;max-width:210px;">
+    <option value="qwen2.5:14b">Qwen 2.5 14B  ★ (best overall)</option>
+    <option value="qwen3:14b">Qwen 3 14B (deep reasoning)</option>
+    <option value="qwen3:30b">Qwen 3 30B (highest quality)</option>
+    <option value="mistral-small3.2:24b">Mistral Small 3.2 24B (fastest)</option>
+  </select>
+  <button class="btn-secondary" id="btnToggleLog" style="font-size:11px;padding:4px 10px;">Decision Log ▶</button>
+  <button class="btn-primary" id="btnSubmitPhase" style="font-size:11px;padding:5px 14px;">Complete Phase →</button>
+</div>
+
+<!-- Escalate hand-off modal (Feature 4) -->
+<div id="handoffModal" style="display:none;position:fixed;inset:0;z-index:9000;background:rgba(0,0,0,.6);align-items:center;justify-content:center;">
+  <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;padding:24px;max-width:520px;width:92%;box-shadow:0 8px 40px rgba(0,0,0,.5);">
+    <div style="font-size:11px;font-weight:700;color:var(--high);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px;">⬆ Escalation Hand-off Brief</div>
+    <div id="handoffContent" style="font-size:12px;color:var(--text-secondary);line-height:1.6;"></div>
+    <div style="margin-top:16px;display:flex;gap:8px;">
+      <button id="handoffCopy" class="btn-secondary" style="font-size:11px;">Copy to clipboard</button>
+      <button id="handoffClose" class="btn-primary" style="font-size:11px;">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Phase progress rail -->
+<div id="phaseRail">
+  <div class="phase-step active" data-phase="contain">
+    <span class="phase-num">1</span> Contain
+  </div>
+  <div class="phase-arrow">›</div>
+  <div class="phase-step locked" data-phase="investigate">
+    <span class="phase-num">2</span> Investigate
+  </div>
+  <div class="phase-arrow">›</div>
+  <div class="phase-step locked" data-phase="notify">
+    <span class="phase-num">3</span> Notify
+  </div>
+  <div class="phase-arrow">›</div>
+  <div class="phase-step locked" data-phase="remediate">
+    <span class="phase-num">4</span> Remediate
+  </div>
+  <div class="phase-arrow">›</div>
+  <div class="phase-step locked" data-phase="report">
+    <span class="phase-num">5</span> Report
+  </div>
+</div>
+
+<!-- Split pane -->
+<div id="splitPane">
+
+  <!-- Left: evidence chain (pinned) -->
+  <div id="evidencePane">
+    <div id="evidencePaneHeader">
+      <span>Evidence Chain</span>
+      <span id="evidenceCount" style="color:var(--text-muted);font-size:10px;"></span>
+    </div>
+    <div id="evidenceList">
+      <div style="padding:20px;color:var(--text-muted);font-size:12px;">Loading evidence…</div>
+    </div>
+  </div>
+
+  <!-- Resize handle -->
+  <div id="paneResizer"></div>
+
+  <!-- Right: guided workflow + decision log -->
+  <div style="flex:1;display:flex;overflow:hidden;">
+    <div id="workflowPane">
+      <div id="workflowPaneHeader">
+        <div id="workflowPaneTitle">Phase 1 — Contain: Immediate Response Steps</div>
+        <button class="btn-secondary" id="btnPrevPhase" style="font-size:11px;padding:4px 10px;" disabled>← Prev</button>
+        <button class="btn-secondary" id="btnNextPhase" style="font-size:11px;padding:4px 10px;">Next →</button>
+      </div>
+      <div id="workflowBody">
+        <div style="padding:20px;color:var(--text-muted);font-size:12px;">Loading steps…</div>
+      </div>
+    </div>
+
+    <div id="decisionLogPanel">
+      <div id="decisionLogHeader">
+        <span>Decision Log</span>
+        <button class="btn-secondary" id="btnCloseLog" style="font-size:10px;padding:2px 6px;">✕</button>
+      </div>
+      <div id="decisionLogBody">
+        <div style="padding:12px;color:var(--text-muted);font-size:11px;">No decisions logged yet.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="t2Toast"></div>
+
+<script>
+(function () {
+  'use strict';
+
+  /* ── URL params ─────────────────────────────────────────────── */
+  var params    = new URLSearchParams(location.search);
+  var ASSESSMENT_ID = params.get('assessment_id') || '';
+  var CLUSTER_ID    = params.get('cluster_id') || '';
+  var API_KEY  = localStorage.getItem('apiKey') || '';
+  var TENANT_ID = localStorage.getItem('tenantId') || 'default';
+
+  /* ── State ──────────────────────────────────────────────────── */
+  var state = {
+    cluster: null,
+    steps: [],          // [{id, phase, persona, title, instructions, row_refs, decision, notes, logged_at}]
+    currentPhase: 0,    // 0-based index into PHASES
+    decisionLog: [],    // [{phase, step, decision, notes, ts}]
+    evidenceRows: [],
+    highlightedRowRef: null,
+  };
+
+  var PHASES = ['contain', 'investigate', 'notify', 'remediate', 'report'];
+  var PHASE_LABELS = {
+    contain:     'Phase 1 — Contain',
+    investigate: 'Phase 2 — Investigate',
+    notify:      'Phase 3 — Notify',
+    remediate:   'Phase 4 — Remediate',
+    report:      'Phase 5 — Report',
+  };
+
+  /* ── Helpers ────────────────────────────────────────────────── */
+  function $ (id) { return document.getElementById(id); }
+
+  function escHtml(s) {
+    return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+                          .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+  }
+
+  function toast(msg, type) {
+    var el = $('t2Toast');
+    el.textContent = msg;
+    el.style.borderColor = type === 'error' ? 'var(--critical)' :
+                           type === 'success' ? 'var(--safe)' : 'var(--border)';
+    el.classList.add('show');
+    clearTimeout(el._t);
+    el._t = setTimeout(function () { el.classList.remove('show'); }, 3000);
+  }
+
+  function authHeaders() {
+    return { 'X-API-Key': API_KEY, 'X-Tenant-ID': TENANT_ID, 'Content-Type': 'application/json' };
+  }
+
+  function selectedTier2Model() {
+    var el = $('tier2ModelSelect');
+    return (el && el.value) || params.get('llm_model') || localStorage.getItem('tier2LlmModel') || 'qwen2.5:14b';
+  }
+
+  function populateTier2ModelSelect(catalog) {
+    var sel = $('tier2ModelSelect');
+    if (!sel) return;
+    var wanted = params.get('llm_model') || localStorage.getItem('tier2LlmModel') || 'qwen2.5:14b';
+    var models = (catalog && catalog.models) || [];
+    sel.innerHTML = '';
+    if (!models.length) {
+      ['qwen2.5:14b', 'qwen3:14b', 'qwen3:30b', 'mistral-small3.2:24b'].forEach(function (mid) {
+        var opt = document.createElement('option');
+        opt.value = mid;
+        opt.textContent = mid;
+        sel.appendChild(opt);
+      });
+    } else {
+      models.forEach(function (m) {
+        var opt = document.createElement('option');
+        opt.value = m.id;
+        opt.textContent = m.disabled_reason ? (m.label || m.id) + ' - ' + m.disabled_reason : (m.label || m.id);
+        opt.disabled = !m.available;
+        if (opt.disabled) opt.style.color = '#6B7280';
+        sel.appendChild(opt);
+      });
+    }
+    var hasWanted = Array.prototype.some.call(sel.options, function (opt) { return opt.value === wanted; });
+    if (!hasWanted) {
+      var fallback = document.createElement('option');
+      fallback.value = wanted;
+      fallback.textContent = wanted;
+      sel.appendChild(fallback);
+    }
+    sel.value = wanted;
+    sel.onchange = function () {
+      try { localStorage.setItem('tier2LlmModel', sel.value); } catch (_) {}
+      toast('Tier 2 LLM model set to ' + sel.value, 'success');
+    };
+  }
+
+  function loadTier2ModelCatalog() {
+    fetch('/api/v1/llm/models/catalog', { headers: authHeaders() })
+      .then(function (r) { return r.ok ? r.json() : { models: [] }; })
+      .then(populateTier2ModelSelect)
+      .catch(function () { populateTier2ModelSelect({ models: [] }); });
+  }
+
+  function sevColor(sev) {
+    return {critical:'var(--critical)',high:'var(--high)',medium:'var(--medium)',low:'var(--safe)'}
+           [(sev||'').toLowerCase()] || 'var(--text-muted)';
+  }
+
+  /* ── Phase rail ─────────────────────────────────────────────── */
+  function renderPhaseRail() {
+    var phase = PHASES[state.currentPhase];
+    document.querySelectorAll('.phase-step').forEach(function (el, i) {
+      el.classList.remove('active', 'done', 'locked');
+      if (i < state.currentPhase)       el.classList.add('done');
+      else if (i === state.currentPhase) el.classList.add('active');
+      else                               el.classList.add('locked');
+    });
+    $('phaseBadge').textContent = PHASE_LABELS[phase] || phase;
+    $('workflowPaneTitle').textContent = (PHASE_LABELS[phase] || phase) + ': ' + _phaseTagline(phase);
+    $('btnPrevPhase').disabled = state.currentPhase === 0;
+    $('btnNextPhase').disabled = state.currentPhase === PHASES.length - 1;
+  }
+
+  function _phaseTagline(phase) {
+    return {
+      contain:     'Immediate Response Steps',
+      investigate: 'Root Cause & Scope',
+      notify:      'Disclosure & Escalation',
+      remediate:   'Eradicate & Harden',
+      report:      'Document & Close',
+    }[phase] || '';
+  }
+
+  /* ── Fix 1: normalise raw assessment row fields → display fields ────────
+     Raw rows from investigate.js (assessment format) use different field names
+     than the T2 canvas expects. Map them so the evidence panel shows real content.  */
+  function _normaliseRow(r) {
+    if (!r) return r;
+    // Already normalised (has display fields)
+    if (r._t2_normalised) return r;
+    var n = Object.assign({}, r);
+    // description: prefer analyst_notes > description > event_type
+    if (!n.description && n.analyst_notes) n.description = n.analyst_notes;
+    if (!n.description && n.event_type)    n.description = n.event_type;
+    // user: prefer username > user > account
+    if (!n.user && n.username) n.user = n.username;
+    if (!n.user && n.account)  n.user = n.account;
+    // hostname: prefer hostname > host > asset
+    if (!n.hostname && n.host)  n.hostname = n.host;
+    if (!n.hostname && n.asset) n.hostname = n.asset;
+    // src_ip: prefer src_ip > internal_ip > source_ip
+    if (!n.src_ip && n.internal_ip) n.src_ip = n.internal_ip;
+    if (!n.src_ip && n.source_ip)   n.src_ip = n.source_ip;
+    // timestamp: prefer date_utc > timestamp > event_time
+    if (!n.timestamp && n.date_utc)    n.timestamp = n.date_utc;
+    if (!n.timestamp && n.event_time)  n.timestamp = n.event_time;
+    // mitre: always an array — handle string or array input
+    if (!n.mitre || !n.mitre.length) {
+      var tech = n.mitre_technique || n.mitre_techniques || n.technique || '';
+      if (Array.isArray(tech)) n.mitre = tech;
+      else if (tech) n.mitre = [tech];
+    }
+    // severity: prefer triage_score-derived or _severity > severity
+    if (!n.severity && n._severity) n.severity = n._severity;
+    n._t2_normalised = true;
+    return n;
+  }
+
+  /* ── Evidence pane ──────────────────────────────────────────── */
+  function renderEvidenceList(rows) {
+    var el = $('evidenceList');
+    if (!rows || !rows.length) {
+      el.innerHTML = '<div style="padding:16px;color:var(--text-muted);font-size:12px;">No evidence rows attached to this cluster.</div>';
+      $('evidenceCount').textContent = '';
+      return;
+    }
+    $('evidenceCount').textContent = rows.length + ' events';
+    el.innerHTML = rows.map(function (r, i) {
+      r = _normaliseRow(r);
+      var sev = r.severity || 'low';
+      var mitre = (r.mitre || []).slice(0,3).map(function(t){ return '<span class="mitre-chip">' + escHtml(t) + '</span>'; }).join('');
+      var ref = r.row_index !== undefined ? r.row_index : (r.row_number !== undefined ? r.row_number : i);
+      var ts  = (r.timestamp || '').slice(0, 16).replace('T', ' ');
+      var desc = (r.description || r.event_type || 'Event').slice(0, 120);
+      var entity = [r.user, r.hostname].filter(Boolean).join(' · ');
+      return '<div class="ev-row" data-row-ref="' + ref + '">' +
+        '<div class="ev-sev" style="color:' + sevColor(sev) + ';">' + escHtml(sev) + '</div>' +
+        '<div class="ev-body">' +
+          '<div class="ev-desc" title="' + escHtml(r.description || '') + '">' + escHtml(desc) + '</div>' +
+          '<div class="ev-meta">' +
+            (ts ? '<span style="color:var(--text-muted);margin-right:6px;">' + escHtml(ts) + '</span>' : '') +
+            escHtml(entity) +
+            (r.src_ip ? ' · ' + escHtml(r.src_ip) : '') +
+            (mitre ? ' &nbsp;' + mitre : '') +
+          '</div>' +
+        '</div>' +
+      '</div>';
+    }).join('');
+
+    // Wire highlight on click
+    el.querySelectorAll('.ev-row').forEach(function (row) {
+      row.addEventListener('click', function () {
+        el.querySelectorAll('.ev-row').forEach(function (r) { r.classList.remove('highlighted'); });
+        row.classList.add('highlighted');
+        state.highlightedRowRef = row.getAttribute('data-row-ref');
+        // Highlight matching step evidence refs
+        document.querySelectorAll('.step-evidence-refs span[data-ref]').forEach(function (s) {
+          s.style.background = s.getAttribute('data-ref') === state.highlightedRowRef
+            ? 'rgba(74,99,231,.35)' : '';
+        });
+      });
+    });
+  }
+
+  /* ── Fix 2: MITRE playbook substeps (client-side, no LLM) ──────────────
+     Keyed by T-code prefix. Steps are shown in a collapsible "▸ Playbook"
+     section on each step card. Entity tokens like {account} are replaced with
+     the first account/host/IP from evidence_pins at render time.            */
+  var _PLAYBOOK = {
+    'T1078': [  // Valid Accounts
+      'Verify {account} last login time vs normal business hours — anomalous time raises confidence',
+      'Pull all role assignments: az role assignment list --assignee {account} (Azure) or Get-ADGroupMember -Identity {account}',
+      'Check recent privileged group additions: search AAD/AD audit log for "Add member to role" past 14 days',
+      'Revoke all active sessions: az ad user revoke-sign-in-sessions --id {account}',
+      'Disable login: az ad user update --id {account} --account-enabled false',
+      'Reset MFA — remove all registered authenticator methods, force re-enrol on next access',
+      'Check for service principal or app registration attached to {account} — those tokens survive account disable',
+    ],
+    'T1110': [  // Brute Force (all sub-techniques)
+      'Correlate all failed logon events (4625) for {account} — map source IPs, timestamps, and SubStatus codes',
+      'SubStatus 0xC000006A = bad password / valid username → confirms username enumeration is occurring',
+      'Check if spray is below lockout threshold — attackers deliberately space attempts to avoid lockout',
+      'Identify all accounts targeted from same source IP — spray typically hits 10-50 accounts',
+      'Block source IP/subnet at perimeter and WAF: {ip}',
+      'Enable Smart Lockout / Identity Protection risk policies for affected accounts',
+      'Hunt for any successful login from the same source IP around the same time window',
+    ],
+    'T1021': [  // Remote Services
+      'Pull auth logs for lateral movement: 4624 Type 3 (network) and Type 10 (remote interactive) on {host}',
+      'Check for new scheduled tasks or services created within 30 min of the lateral move on {host}',
+      'Verify SSH authorized_keys on {host}: cat /home/{account}/.ssh/authorized_keys — compare to backup',
+      'Pull WMI remote execution: Get-WinEvent -FilterHashtable @{LogName="Microsoft-Windows-WMI-Activity/Operational"} on {host}',
+      'Check SMB named-pipe connections: Get-SmbSession on all DCs at time of lateral move',
+    ],
+    'T1053': [  // Scheduled Tasks
+      'List all scheduled tasks created or modified: schtasks /query /fo LIST /v | findstr /C:"Status" /C:"Run As User" /C:"Task To Run"',
+      'Check WMI subscriptions: Get-WMIObject -Namespace root\\subscription -Class __EventFilter on {host}',
+      'Review Startup folder: dir "%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup" on {host}',
+      'Check registry Run keys: Get-ItemProperty HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run',
+      'Verify task binary hash against known-good baseline',
+    ],
+    'T1059': [  // Command & Scripting
+      'Pull PowerShell block logging (4104) for {account} on {host} — look for encoded commands',
+      'Check AMSI verdict in event data — if bypass detected, treat as confirmed execution',
+      'Review cmd.exe / powershell.exe parent process lineage from Sysmon Event ID 1',
+      'Search for dropped scripts in TEMP, AppData, and ProgramData directories on {host}',
+    ],
+    'T1071': [  // C2 Application Layer
+      'Pull all DNS queries to {ip} or related domains from {host} — calculate beacon interval',
+      'Check for domain fronting: inspect TLS SNI vs Host header in proxy logs',
+      'Calculate dwell time: first beacon timestamp → now',
+      'Block at DNS and proxy layers: {ip}',
+      'Add SIEM/EDR detection rule for subsequent beacons from same C2 pattern',
+    ],
+    'T1041': [  // Exfiltration over C2
+      'Calculate data volume sent to {ip}: sum bytes_out from proxy/firewall logs',
+      'Identify staging directory: check TEMP, %USERPROFILE%, and ProgramData on {host}',
+      'Pull DLP alerts for {account} in same time window',
+      'Check cloud storage access: audit S3/OneDrive/SharePoint access logs for {account}',
+      'Determine data classification of accessed files — PII/IP/regulated data changes notification obligation',
+    ],
+    'T1048': [  // Exfiltration over Alternative Protocol
+      'Check DNS exfil: unusually long subdomains or high query frequency to single domain from {host}',
+      'Check ICMP tunnel: unusually large ICMP payloads from {host}',
+      'Review HTTPS POST volume to {ip} — exfil often appears as a single large POST',
+      'Pull netflow for {host} — identify any non-standard ports with outbound data',
+    ],
+  };
+
+  /** Return playbook steps for a set of MITRE technique IDs, substituting entity tokens. */
+  function _getPlaybookSteps(mitreIds, ep) {
+    var account = (ep && (ep.accounts||[])[0]) || '{account}';
+    var host    = (ep && (ep.hosts||[])[0])    || '{host}';
+    var ip      = (ep && (ep.ips||[])[0])      || '{ip}';
+    var results = [];
+    (mitreIds || []).forEach(function (tid) {
+      // Match on T-code prefix (e.g. T1110.003 → T1110)
+      var prefix = tid.split('.')[0];
+      var steps = _PLAYBOOK[prefix];
+      if (steps && !results._seenKey) {
+        results._seenKey = prefix;
+        steps.forEach(function (s) {
+          results.push(
+            s.replace(/\{account\}/g, account)
+             .replace(/\{host\}/g, host)
+             .replace(/\{ip\}/g, ip)
+          );
+        });
+      }
+    });
+    return results;
+  }
+
+  /* ── Feature 1: Persona filter mapping ──────────────────────────── */
+  var _PERSONA_KEYWORDS = {
+    soc:        ['soc analyst', 'soc'],
+    hunter:     ['threat hunter', 'hunter'],
+    forensics:  ['forensics', 'forensic'],
+    ciso:       ['ciso', 'executive', 'ciso / executive'],
+    compliance: ['compliance', 'legal', 'compliance / legal'],
+  };
+
+  function _stepMatchesPersona(step, filterVal) {
+    if (!filterVal) return true;
+    var keywords = _PERSONA_KEYWORDS[filterVal] || [];
+    var persona  = (step.persona || '').toLowerCase();
+    return keywords.some(function (k) { return persona.indexOf(k) >= 0; });
+  }
+
+  /* ── Step cards ─────────────────────────────────────────────── */
+  function renderWorkflowSteps() {
+    var phase = PHASES[state.currentPhase];
+    var personaFilter = ($('personaFilter') || {}).value || '';
+    var steps = state.steps.filter(function (s) {
+      return s.phase === phase && _stepMatchesPersona(s, personaFilter);
+    });
+    var body = $('workflowBody');
+    if (!steps.length) {
+      body.innerHTML = '<div style="padding:24px;color:var(--text-muted);font-size:12px;">No steps defined for this phase. Click "Complete Phase" to advance.</div>';
+      return;
+    }
+    body.innerHTML = steps.map(function (step, idx) {
+      var decided    = !!step.decision;
+      var decStatus  = step.finding_status || '';
+      var cardClass  = decided ? 'done-step' : (idx === 0 ? 'active-step' : '');
+      var decisionBtns = ['Yes — Confirmed', 'No — Denied', 'Partial', 'Escalate'].map(function (label) {
+        var val = label.split(' ')[0].toLowerCase().replace('—','').trim();
+        var sel = step.decision === val ? ' selected-' + val : '';
+        return '<button class="decision-btn' + sel + '" data-step-id="' + escHtml(step.id) + '" data-decision="' + val + '">' + escHtml(label) + '</button>';
+      }).join('');
+      var refs = (step.row_refs || []).slice(0, 8).map(function (r) {
+        return '<span data-ref="' + r + '" title="Jump to row ' + r + '">Row #' + r + '</span>';
+      }).join('');
+      var logNote = step.logged_at ? '<div class="step-log">Logged ' + new Date(step.logged_at).toLocaleTimeString() + (step.notes ? ' · ' + escHtml(step.notes.slice(0,50)) : '') + '</div>' : '';
+
+      // ── Why this was flagged ────────────────────────────────────────────
+      var whyHtml = '';
+      if (step.why_flagged) {
+        whyHtml = '<div style="background:rgba(74,99,231,.08);border-left:3px solid var(--accent);' +
+          'padding:6px 10px;margin-bottom:8px;border-radius:0 4px 4px 0;">' +
+          '<div style="font-size:10px;font-weight:700;color:var(--accent);margin-bottom:2px;text-transform:uppercase;letter-spacing:.06em;">Why flagged</div>' +
+          '<div style="font-size:11px;color:var(--text-secondary);">' + escHtml(step.why_flagged) + '</div>' +
+          '</div>';
+      }
+
+      // ── Collapsible evidence drill-down ────────────────────────────────
+      var ep = step.evidence_pins || {};
+      var drillRows = [];
+      if ((ep.accounts||[]).length)   drillRows.push('<tr><td style="color:var(--text-muted);padding:2px 8px 2px 0;white-space:nowrap;">Accounts</td><td style="font-family:monospace;font-size:11px;">' + ep.accounts.map(escHtml).join(', ') + '</td></tr>');
+      if ((ep.hosts||[]).length)      drillRows.push('<tr><td style="color:var(--text-muted);padding:2px 8px 2px 0;white-space:nowrap;">Hosts</td><td style="font-family:monospace;font-size:11px;">' + ep.hosts.map(escHtml).join(', ') + '</td></tr>');
+      if ((ep.ips||[]).length)        drillRows.push('<tr><td style="color:var(--text-muted);padding:2px 8px 2px 0;white-space:nowrap;">External IPs</td><td style="font-family:monospace;font-size:11px;">' + ep.ips.map(escHtml).join(', ') + '</td></tr>');
+      if ((ep.mitre||[]).length)      drillRows.push('<tr><td style="color:var(--text-muted);padding:2px 8px 2px 0;white-space:nowrap;">ATT&amp;CK</td><td style="font-family:monospace;font-size:11px;">' + ep.mitre.map(escHtml).join(' · ') + '</td></tr>');
+      if ((ep.timestamps||[]).length) drillRows.push('<tr><td style="color:var(--text-muted);padding:2px 8px 2px 0;white-space:nowrap;">First/last seen</td><td style="font-family:monospace;font-size:11px;">' + escHtml(ep.timestamps[0]) + (ep.timestamps.length>1?' → '+escHtml(ep.timestamps[ep.timestamps.length-1]):'') + '</td></tr>');
+      if ((ep.event_types||[]).length) drillRows.push('<tr><td style="color:var(--text-muted);padding:2px 8px 2px 0;white-space:nowrap;">Event types</td><td style="font-size:11px;">' + ep.event_types.slice(0,4).map(escHtml).join(', ') + '</td></tr>');
+      if ((ep.descriptions||[]).length) drillRows.push('<tr><td style="color:var(--text-muted);padding:2px 8px 2px 0;white-space:nowrap;vertical-align:top;">Descriptions</td><td style="font-size:11px;">' + ep.descriptions.slice(0,3).map(function(d){return '<div style="margin-bottom:2px;">'+escHtml(d)+'</div>';}).join('') + '</td></tr>');
+
+      var drillHtml = '';
+      if (drillRows.length) {
+        drillHtml = '<div style="margin-bottom:8px;">' +
+          '<button onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display===\'none\'?\'block\':\'none\';this.textContent=this.textContent.includes(\'▸\')?\'▾ Evidence details\':\'▸ Evidence details\';" ' +
+          'style="font-size:10px;color:var(--accent);background:none;border:none;cursor:pointer;padding:0;margin-bottom:4px;">▸ Evidence details</button>' +
+          '<div style="display:none;background:rgba(0,0,0,.2);border-radius:4px;padding:8px 10px;">' +
+          '<table style="border-collapse:collapse;width:100%;">' + drillRows.join('') + '</table>' +
+          '</div></div>';
+      }
+
+      // ── Fix 2: MITRE playbook substeps ─────────────────────────────────
+      var playbookHtml = '';
+      var pbSteps = _getPlaybookSteps(ep.mitre || [], ep);
+      if (pbSteps.length) {
+        playbookHtml = '<div style="margin-bottom:8px;">' +
+          '<button onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display===\'none\'?\'block\':\'none\';this.textContent=this.textContent.includes(\'▸\')?\'▾ Playbook\':\'▸ Playbook\';" ' +
+          'style="font-size:10px;color:#FACC15;background:none;border:none;cursor:pointer;padding:0;margin-bottom:4px;">▸ Playbook</button>' +
+          '<div style="display:none;background:rgba(250,204,21,.04);border:1px solid rgba(250,204,21,.15);border-radius:4px;padding:8px 10px;">' +
+          '<div style="font-size:10px;font-weight:700;color:#FACC15;margin-bottom:6px;text-transform:uppercase;letter-spacing:.06em;">Standard Procedure — ' + escHtml((ep.mitre||[])[0]||'') + '</div>' +
+          pbSteps.map(function(s,i){
+            return '<div style="display:flex;gap:8px;margin-bottom:5px;font-size:11px;color:var(--text-secondary);">' +
+              '<span style="color:#FACC15;font-weight:700;flex-shrink:0;">' + (i+1) + '.</span>' +
+              '<span style="font-family:monospace;">' + escHtml(s) + '</span>' +
+              '</div>';
+          }).join('') +
+          '</div></div>';
+      }
+
+      // ── Fix 3: Structured findings form ────────────────────────────────
+      // Status dropdown + "What did you find?" observable + "New IOC discovered" field
+      // Values are persisted on the step object alongside the free-text notes.
+      var statusColors = {
+        '': 'var(--text-muted)', confirmed: 'var(--safe)',
+        'ruled-out': '#60A5FA', escalated: 'var(--high)',
+        investigating: 'var(--accent)',
+      };
+      var statusOpts = [
+        ['', '— Status —'],
+        ['confirmed',    'Confirmed'],
+        ['ruled-out',    'Ruled Out'],
+        ['escalated',    'Escalated'],
+        ['investigating','Still Investigating'],
+      ].map(function(o){
+        var sel = decStatus === o[0] ? ' selected' : '';
+        return '<option value="' + o[0] + '"' + sel + '>' + o[1] + '</option>';
+      }).join('');
+
+      var findingsHtml =
+        '<div style="margin-top:8px;display:grid;gap:6px;">' +
+          '<div style="display:flex;gap:6px;align-items:center;">' +
+            '<label style="font-size:10px;color:var(--text-muted);white-space:nowrap;min-width:52px;">Status</label>' +
+            '<select class="step-status" data-step-id="' + escHtml(step.id) + '" ' +
+              'style="font-size:11px;flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:' + (statusColors[decStatus]||'var(--text-muted)') + ';border-radius:4px;padding:3px 6px;">' +
+              statusOpts +
+            '</select>' +
+          '</div>' +
+          '<div style="display:flex;gap:6px;align-items:flex-start;">' +
+            '<label style="font-size:10px;color:var(--text-muted);white-space:nowrap;min-width:52px;padding-top:3px;">Finding</label>' +
+            '<input type="text" class="step-finding" data-step-id="' + escHtml(step.id) + '" ' +
+              'value="' + escHtml(step.finding || '') + '" ' +
+              'placeholder="What did you find? (or \'Not found — …\')" ' +
+              'style="font-size:11px;flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);border-radius:4px;padding:3px 6px;">' +
+          '</div>' +
+          '<div style="display:flex;gap:6px;align-items:flex-start;">' +
+            '<label style="font-size:10px;color:#F87171;white-space:nowrap;min-width:52px;padding-top:3px;">New IOC</label>' +
+            '<input type="text" class="step-ioc" data-step-id="' + escHtml(step.id) + '" ' +
+              'value="' + escHtml(step.new_ioc || '') + '" ' +
+              'placeholder="Any new indicator discovered during this step" ' +
+              'style="font-size:11px;flex:1;background:var(--bg-tertiary);border:1px solid rgba(248,113,113,.25);color:var(--text-primary);border-radius:4px;padding:3px 6px;">' +
+          '</div>' +
+          '<div style="display:flex;gap:6px;align-items:flex-start;">' +
+            '<label style="font-size:10px;color:var(--text-muted);white-space:nowrap;min-width:52px;padding-top:3px;">Notes</label>' +
+            '<textarea class="step-notes" data-step-id="' + escHtml(step.id) + '" rows="2" ' +
+              'placeholder="Additional context, commands run, escalation recipient…" ' +
+              'style="font-size:11px;flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);border-radius:4px;padding:3px 6px;resize:vertical;">' +
+              escHtml(step.notes || '') +
+            '</textarea>' +
+          '</div>' +
+        '</div>';
+
+      return '<div class="step-card ' + cardClass + '" id="step-card-' + escHtml(step.id) + '">' +
+        '<div class="step-header">' +
+          '<div class="step-num">' + (idx + 1) + '</div>' +
+          '<div style="flex:1;">' +
+            '<div class="step-title">' + escHtml(step.title) + '</div>' +
+            '<div class="step-persona">' + escHtml(step.persona || '') + '</div>' +
+          '</div>' +
+          (decided ? '<span style="font-size:10px;padding:2px 8px;border-radius:10px;background:rgba(63,168,96,.15);color:var(--safe);border:1px solid rgba(63,168,96,.3);">' + escHtml(decStatus || step.decision) + '</span>' : '') +
+        '</div>' +
+        '<div class="step-body">' +
+          whyHtml +
+          drillHtml +
+          playbookHtml +
+          '<div class="step-instructions" style="white-space:pre-wrap;">' + escHtml(step.instructions) + '</div>' +
+          (refs ? '<div class="step-evidence-refs">Evidence rows: ' + refs + '</div>' : '') +
+          '<div class="decision-row">' + decisionBtns + '</div>' +
+          findingsHtml +
+          logNote +
+        '</div>' +
+      '</div>';
+    }).join('');
+
+    // Wire decision buttons — capture structured findings fields at click time
+    body.querySelectorAll('.decision-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var stepId   = btn.getAttribute('data-step-id');
+        var decision = btn.getAttribute('data-decision');
+        var step = state.steps.filter(function (s) { return s.id === stepId; })[0];
+        if (!step) return;
+        step.decision = decision;
+        step.logged_at = Date.now();
+        // Collect all structured fields from the findings form
+        var notesEl   = body.querySelector('textarea.step-notes[data-step-id="' + stepId + '"]');
+        var statusEl  = body.querySelector('select.step-status[data-step-id="' + stepId + '"]');
+        var findingEl = body.querySelector('input.step-finding[data-step-id="' + stepId + '"]');
+        var iocEl     = body.querySelector('input.step-ioc[data-step-id="' + stepId + '"]');
+        step.notes          = notesEl   ? notesEl.value.trim()   : '';
+        step.finding_status = statusEl  ? statusEl.value         : '';
+        step.finding        = findingEl ? findingEl.value.trim() : '';
+        step.new_ioc        = iocEl     ? iocEl.value.trim()     : '';
+        _logDecision(step);
+        // Feature 4: show hand-off brief when Escalate is chosen
+        if (decision === 'escalate') {
+          _showHandoff(step);
+        }
+        renderWorkflowSteps();
+        renderDecisionLog();
+        _persistDecision(step);
+      });
+    });
+
+    // Auto-save structured fields on blur (no button click needed)
+    body.querySelectorAll('.step-status,.step-finding,.step-ioc,.step-notes').forEach(function (el) {
+      el.addEventListener('change', function () {
+        var stepId = el.getAttribute('data-step-id');
+        var step   = state.steps.filter(function (s) { return s.id === stepId; })[0];
+        if (!step) return;
+        if (el.classList.contains('step-status'))  step.finding_status = el.value;
+        if (el.classList.contains('step-finding')) step.finding = el.value.trim();
+        if (el.classList.contains('step-ioc'))     step.new_ioc = el.value.trim();
+        if (el.classList.contains('step-notes'))   step.notes   = el.value.trim();
+      });
+    });
+
+    // Wire evidence ref → highlight in evidence pane
+    body.querySelectorAll('.step-evidence-refs span[data-ref]').forEach(function (span) {
+      span.addEventListener('click', function () {
+        var ref = span.getAttribute('data-ref');
+        var evRow = document.querySelector('#evidenceList .ev-row[data-row-ref="' + ref + '"]');
+        if (evRow) {
+          document.querySelectorAll('#evidenceList .ev-row').forEach(function (r) { r.classList.remove('highlighted'); });
+          evRow.classList.add('highlighted');
+          evRow.scrollIntoView({ block: 'center' });
+        }
+      });
+    });
+  }
+
+  /* ── Decision log ───────────────────────────────────────────── */
+  function _logDecision(step) {
+    state.decisionLog = state.decisionLog.filter(function (d) { return d.step_id !== step.id; });
+    state.decisionLog.push({
+      step_id:        step.id,
+      phase:          step.phase,
+      title:          step.title,
+      decision:       step.decision,
+      finding_status: step.finding_status || '',
+      finding:        step.finding        || '',
+      new_ioc:        step.new_ioc        || '',
+      notes:          step.notes          || '',
+      ts:             step.logged_at,
+    });
+  }
+
+  function renderDecisionLog() {
+    var body = $('decisionLogBody');
+    if (!state.decisionLog.length) {
+      body.innerHTML = '<div style="padding:12px;color:var(--text-muted);font-size:11px;">No decisions logged yet.</div>';
+      return;
+    }
+    body.innerHTML = state.decisionLog.slice().reverse().map(function (d) {
+      var decColor = { yes:'var(--safe)', no:'var(--critical)', partial:'var(--medium)', escalate:'var(--high)' }[d.decision] || 'var(--text-muted)';
+      var statusBadge = d.finding_status
+        ? '<span style="font-size:10px;padding:1px 6px;border-radius:8px;background:rgba(255,255,255,.06);margin-left:4px;">' + escHtml(d.finding_status) + '</span>'
+        : '';
+      var findingLine = d.finding
+        ? '<div style="font-size:11px;color:var(--text-secondary);margin-top:2px;">&#x1F50E; ' + escHtml(d.finding.slice(0, 100)) + '</div>'
+        : '';
+      var iocLine = d.new_ioc
+        ? '<div style="font-size:11px;color:#F87171;margin-top:2px;">&#x26A0; IOC: ' + escHtml(d.new_ioc.slice(0, 100)) + '</div>'
+        : '';
+      return '<div class="log-entry">' +
+        '<div class="log-entry-phase">' + escHtml(PHASE_LABELS[d.phase] || d.phase) + '</div>' +
+        '<div class="log-entry-decision" style="color:' + decColor + ';">' + escHtml(d.decision.toUpperCase()) + ' — ' + escHtml(d.title) + statusBadge + '</div>' +
+        findingLine +
+        iocLine +
+        (d.notes ? '<div class="log-entry-notes">' + escHtml(d.notes.slice(0, 80)) + '</div>' : '') +
+        '<div class="log-entry-ts">' + new Date(d.ts).toLocaleTimeString() + '</div>' +
+      '</div>';
+    }).join('');
+  }
+
+  /* ── Phase navigation ───────────────────────────────────────── */
+  function advancePhase() {
+    // Check all steps in current phase have a decision
+    var phase = PHASES[state.currentPhase];
+    var undecided = state.steps.filter(function (s) { return s.phase === phase && !s.decision; });
+    if (undecided.length) {
+      toast(undecided.length + ' step(s) still need a decision before advancing.', 'warning');
+      return;
+    }
+    if (state.currentPhase < PHASES.length - 1) {
+      state.currentPhase++;
+      renderPhaseRail();
+      renderWorkflowSteps();
+      toast('Advanced to ' + PHASE_LABELS[PHASES[state.currentPhase]], 'success');
+      if (state.currentPhase === PHASES.length - 1) {
+        $('btnSubmitPhase').textContent = 'Complete Investigation ✓';
+      }
+      _persistPhaseAdvance();
+    } else {
+      _finaliseInvestigation();
+    }
+  }
+
+  /* ── Backend calls ──────────────────────────────────────────── */
+  function loadTier2Steps() {
+    if (!ASSESSMENT_ID || !CLUSTER_ID) {
+      _useFallbackSteps();
+      return;
+    }
+    fetch('/api/v1/assessments/' + encodeURIComponent(ASSESSMENT_ID) +
+          '/clusters/' + encodeURIComponent(CLUSTER_ID) + '/tier2',
+          { headers: authHeaders() })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (data) {
+        if (data && data.steps) {
+          state.steps = data.steps;
+          if (data.cluster) _applyClusterMeta(data.cluster);
+          renderWorkflowSteps();
+        } else {
+          _useFallbackSteps();
+        }
+      })
+      .catch(function () { _useFallbackSteps(); });
+  }
+
+  function _persistDecision(step) {
+    if (!ASSESSMENT_ID || !CLUSTER_ID) return;
+    fetch('/api/v1/assessments/' + encodeURIComponent(ASSESSMENT_ID) +
+          '/clusters/' + encodeURIComponent(CLUSTER_ID) + '/tier2/decisions',
+          { method: 'POST', headers: authHeaders(),
+            body: JSON.stringify({
+              step_id:        step.id,
+              phase:          step.phase,
+              decision:       step.decision,
+              notes:          step.notes          || '',
+              finding_status: step.finding_status || '',
+              finding:        step.finding        || '',
+              new_ioc:        step.new_ioc        || '',
+              logged_at:      step.logged_at,
+            }) })
+      .catch(function () {});
+  }
+
+  function _persistPhaseAdvance() {
+    if (!ASSESSMENT_ID || !CLUSTER_ID) return;
+    fetch('/api/v1/assessments/' + encodeURIComponent(ASSESSMENT_ID) +
+          '/clusters/' + encodeURIComponent(CLUSTER_ID) + '/tier2/phase',
+          { method: 'POST', headers: authHeaders(),
+            body: JSON.stringify({ phase: PHASES[state.currentPhase], decision_log: state.decisionLog }) })
+      .catch(function () {});
+  }
+
+  function _finaliseInvestigation() {
+    if (!ASSESSMENT_ID || !CLUSTER_ID) { toast('Investigation complete (offline mode).', 'success'); return; }
+    fetch('/api/v1/assessments/' + encodeURIComponent(ASSESSMENT_ID) +
+          '/clusters/' + encodeURIComponent(CLUSTER_ID) + '/tier2/finalise',
+          { method: 'POST', headers: authHeaders(),
+            body: JSON.stringify({ decision_log: state.decisionLog }) })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (data) {
+        toast('Investigation finalised. Amended report sent to CISO/Executive/Audit/Compliance.', 'success');
+        $('statusBadge').textContent = 'Closed';
+        $('statusBadge').style.background = 'rgba(63,168,96,.15)';
+        $('btnSubmitPhase').disabled = true;
+      })
+      .catch(function () { toast('Investigation complete (no backend).', 'success'); });
+  }
+
+  /* ── Load cluster detail from investigate page state or backend ── */
+  function loadClusterDetail() {
+    // Try to pull from opener window's state first (instant, no network round-trip)
+    try {
+      var opener = window.opener;
+      if (opener && opener.state && opener.state.clusterMap && opener.state.clusterMap[CLUSTER_ID]) {
+        var c = opener.state.clusterMap[CLUSTER_ID];
+        _applyClusterMeta(c);
+        // Pull evidence rows — try row_index (investigate.js stores rows keyed by
+        // row_index 0-based) AND row_number (some formats use 1-based)
+        var openerRows = opener.state.evidenceRows || [];
+        state.evidenceRows = (c.row_refs || []).map(function (ref) {
+          return openerRows.find(function (r) {
+                   return r.row_index === ref || r.row_number === ref ||
+                          Number(r.row_index) === Number(ref) || Number(r.row_number) === Number(ref);
+                 }) ||
+                 { row_number: ref, row_index: ref, description: 'Row #' + ref, severity: 'unknown' };
+        });
+        renderEvidenceList(state.evidenceRows);
+        loadTier2Steps();
+        return;
+      }
+    } catch (e) {}
+
+    // Fallback: fetch from backend
+    if (!ASSESSMENT_ID || !CLUSTER_ID) {
+      $('clusterTitle').textContent = 'No cluster selected. Open from Investigate page.';
+      _useFallbackSteps();
+      return;
+    }
+    fetch('/api/v1/assessments/' + encodeURIComponent(ASSESSMENT_ID) +
+          '/clusters/' + encodeURIComponent(CLUSTER_ID),
+          { headers: authHeaders() })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (c) {
+        if (c) {
+          _applyClusterMeta(c);
+          // Populate evidence rows from cluster endpoint response
+          if (c.cluster_rows && c.cluster_rows.length) {
+            state.evidenceRows = c.cluster_rows;
+          } else if (c.row_refs && c.row_refs.length) {
+            // Create stubs so row-ref chips still resolve to *something*
+            state.evidenceRows = c.row_refs.map(function (ref) {
+              return { row_number: ref, row_index: ref, description: 'Row #' + ref, severity: 'unknown' };
+            });
+          }
+          renderEvidenceList(state.evidenceRows);
+        } else {
+          // Assessment not in memory (server restart). Steps may still come from disk.
+          $('clusterTitle').textContent = CLUSTER_ID + ' — assessment not cached (server restart?). Steps load from disk.';
+          renderEvidenceList([]);
+        }
+        loadTier2Steps();
+      })
+      .catch(function () {
+        $('clusterTitle').textContent = CLUSTER_ID + ' (backend unreachable)';
+        renderEvidenceList([]);
+        loadTier2Steps();
+      });
+  }
+
+  function _applyClusterMeta(c) {
+    state.cluster = c;
+    var sev = c.severity || 'unknown';
+    $('clusterBadge').textContent = ((c.cluster_id || 'CLUSTER') + ' · ' + sev).toUpperCase();
+    $('clusterBadge').style.color = {critical:'var(--critical)',high:'var(--high)',medium:'var(--medium)',low:'var(--safe)'}[sev.toLowerCase()] || 'var(--text-muted)';
+    var pivots = (c.shared_accounts || c.shared_hosts || c.shared_external_ips || []).slice(0,3);
+    $('clusterTitle').textContent = pivots.length
+      ? pivots.join(', ') + ' — ' + (c.business_significance || 'Security Cluster')
+      : (c.business_significance || c.cluster_id || 'Security Cluster');
+    // Feature 2: SLA clock
+    _startSlaClock(sev, c.flagged_at || c.created_at || c.first_seen || null);
+  }
+
+  /* ── Feature 2: SLA clock ───────────────────────────────────────── */
+  var _slaTimer = null;
+  var _SLA_MINUTES = { critical: 60, high: 240, medium: 1440, low: 4320 };
+
+  function _startSlaClock(sev, flaggedAt) {
+    if (_slaTimer) clearInterval(_slaTimer);
+    var slaMins  = _SLA_MINUTES[(sev||'').toLowerCase()] || 240;
+    var startMs  = flaggedAt ? new Date(flaggedAt).getTime() : Date.now();
+    if (isNaN(startMs)) startMs = Date.now();
+    var clockEl  = $('slaClock');
+    clockEl.style.display = '';
+
+    function _tick() {
+      var elapsedMs  = Date.now() - startMs;
+      var elapsedMin = Math.floor(elapsedMs / 60000);
+      var pct        = elapsedMin / slaMins;
+      var h = Math.floor(elapsedMin / 60);
+      var m = elapsedMin % 60;
+      var elapsed = h > 0 ? h + 'h ' + m + 'm' : m + 'm';
+      var remaining = slaMins - elapsedMin;
+      var remStr = remaining <= 0 ? 'OVERDUE' :
+                   remaining < 60 ? remaining + 'm left' :
+                   Math.floor(remaining/60) + 'h ' + (remaining%60) + 'm left';
+      clockEl.textContent = '⏱ ' + elapsed + ' · ' + remStr + ' (' + (sev||'').toUpperCase() + ' SLA ' + slaMins + 'm)';
+      // Color: green → amber → red
+      if (pct >= 1.0) {
+        clockEl.style.background = 'rgba(229,57,53,.15)';
+        clockEl.style.borderColor = 'rgba(229,57,53,.4)';
+        clockEl.style.color = 'var(--critical)';
+      } else if (pct >= 0.75) {
+        clockEl.style.background = 'rgba(255,109,0,.12)';
+        clockEl.style.borderColor = 'rgba(255,109,0,.35)';
+        clockEl.style.color = 'var(--high)';
+      } else if (pct >= 0.5) {
+        clockEl.style.background = 'rgba(255,179,0,.10)';
+        clockEl.style.borderColor = 'rgba(255,179,0,.3)';
+        clockEl.style.color = 'var(--medium)';
+      } else {
+        clockEl.style.background = 'rgba(63,168,96,.12)';
+        clockEl.style.borderColor = 'rgba(63,168,96,.3)';
+        clockEl.style.color = 'var(--safe)';
+      }
+    }
+    _tick();
+    _slaTimer = setInterval(_tick, 30000); // update every 30s
+  }
+
+  /* ── Feature 4: Escalation hand-off brief ───────────────────────── */
+  /* Deterministic — no LLM needed. Formats from existing step + findings data. */
+  var _ESCALATE_TARGET = {
+    'SOC Analyst':            'Threat Hunter / Senior SOC',
+    'Threat Hunter':          'Incident Commander / CISO',
+    'Forensics':              'Senior Forensics Lead',
+    'CISO / Compliance':      'Legal Counsel / Executive',
+    'SOC Analyst / CISO':     'CISO',
+    'SOC Analyst / Finance':  'Finance Controller + CISO',
+    'Threat Hunter / Network':'Network Security Engineering',
+  };
+
+  function _showHandoff(step) {
+    var cluster    = state.cluster || {};
+    var cid        = cluster.cluster_id || CLUSTER_ID || '?';
+    var sev        = (cluster.severity || 'unknown').toUpperCase();
+    var pivots     = (cluster.shared_accounts || cluster.shared_hosts || []).slice(0,3).join(', ') || 'affected entities';
+    var target     = _ESCALATE_TARGET[step.persona] || 'Senior Analyst / CISO';
+    var ep         = step.evidence_pins || {};
+    var accounts   = (ep.accounts || []).slice(0,3).join(', ') || 'unknown';
+    var hosts      = (ep.hosts    || []).slice(0,3).join(', ') || 'unknown';
+    var ips        = (ep.ips      || []).slice(0,3).join(', ') || 'none identified';
+    var mitre      = (ep.mitre    || []).slice(0,4).join(', ') || 'undetermined';
+    var finding    = step.finding || 'No finding recorded yet — escalating for coverage.';
+    var ioc        = step.new_ioc ? '\n• New IOC discovered: ' + step.new_ioc : '';
+    var ts         = new Date().toISOString().replace('T',' ').slice(0,19) + ' UTC';
+
+    var brief =
+      '─── ESCALATION HAND-OFF ───────────────────────────────\n' +
+      'Cluster:   ' + cid + ' [' + sev + ']\n' +
+      'Time:      ' + ts + '\n' +
+      'Escalated to: ' + target + '\n' +
+      'From step: ' + step.title + ' (' + (step.persona || '?') + ')\n' +
+      '\n' +
+      'WHAT WE KNOW\n' +
+      '• Key entities: ' + pivots + '\n' +
+      '• Accounts:   ' + accounts + '\n' +
+      '• Hosts:      ' + hosts + '\n' +
+      '• External IPs: ' + ips + '\n' +
+      '• ATT&CK:     ' + mitre + '\n' +
+      '\n' +
+      'FINDING SO FAR\n' +
+      '• ' + finding + ioc + '\n' +
+      (step.notes ? '• Notes: ' + step.notes + '\n' : '') +
+      '\n' +
+      'WHAT YOU NEED TO DO\n' +
+      '• Review the step "' + step.title + '" — instructions below.\n' +
+      '• Confirm or escalate further based on your authority level.\n' +
+      '• Update the Decision Log with your decision + finding.\n' +
+      '\n' +
+      'STEP INSTRUCTIONS\n' +
+      (step.instructions || '(see T2 canvas)') + '\n' +
+      '────────────────────────────────────────────────────────';
+
+    var modal   = $('handoffModal');
+    var content = $('handoffContent');
+    content.innerHTML = escHtml(brief);
+    modal.style.display = 'flex';
+    // Wire copy button
+    $('handoffCopy').onclick = function () {
+      navigator.clipboard.writeText(brief).then(function () {
+        toast('Hand-off brief copied to clipboard', 'success');
+      }).catch(function () {
+        toast('Copy failed — select text manually', 'error');
+      });
+    };
+    $('handoffClose').onclick = function () { modal.style.display = 'none'; };
+    modal.onclick = function (e) { if (e.target === modal) modal.style.display = 'none'; };
+  }
+
+  /* ── Fallback steps when no backend endpoint exists ─────────── */
+  function _useFallbackSteps() {
+    var cluster = state.cluster || {};
+    var sev = cluster.severity || 'high';
+    var pivots = (cluster.shared_accounts || cluster.shared_hosts || cluster.shared_external_ips || []).slice(0, 3);
+    var pivotText = pivots.length ? pivots.join(', ') : 'affected accounts and hosts';
+    var refs = cluster.row_refs || [];
+    var topRefs = refs.slice(0, 5);
+    var mitre = (cluster.top_mitre || []).slice(0, 4).join(', ') || 'undetermined';
+
+    state.steps = [
+      // CONTAIN
+      { id: 'c1', phase: 'contain', persona: 'SOC Analyst',
+        title: 'Isolate affected accounts and hosts',
+        instructions: 'Disable or quarantine ' + pivotText + ' immediately to prevent lateral movement. '
+          + 'If cloud identities: revoke active sessions and rotate credentials. '
+          + 'If on-premise hosts: isolate from network segment before any investigation step.',
+        row_refs: topRefs },
+      { id: 'c2', phase: 'contain', persona: 'SOC Analyst',
+        title: 'Block known malicious IPs and destinations',
+        instructions: 'Apply firewall or proxy block rules for any external IPs or domains identified in evidence rows. '
+          + 'Confirm the block is effective and does not affect business-critical services before moving on.',
+        row_refs: topRefs },
+      { id: 'c3', phase: 'contain', persona: 'SOC Analyst / CISO',
+        title: 'Confirm containment scope and get CISO sign-off',
+        instructions: 'List every identity, host, and data path you have contained. '
+          + 'Confirm the scope covers all row_refs in this cluster (' + topRefs.map(function(r){return '#'+r;}).join(', ') + '). '
+          + 'Get written or recorded CISO acknowledgement before proceeding to investigation.',
+        row_refs: topRefs },
+
+      // INVESTIGATE
+      { id: 'i1', phase: 'investigate', persona: 'SOC Analyst / Threat Hunter',
+        title: 'Reconstruct the attack timeline',
+        instructions: 'Order events chronologically. Identify first-touch, lateral movement, and objectives. '
+          + 'ATT&CK techniques in scope: ' + mitre + '. '
+          + 'Check adjacent log sources (EDR, DNS, email) for activity ±48h from the first event.',
+        row_refs: topRefs },
+      { id: 'i2', phase: 'investigate', persona: 'Threat Hunter',
+        title: 'Expand scope — confirm blast radius',
+        instructions: 'Pivot on ' + pivotText + ' in all available data sources. '
+          + 'Answer: did the attacker reach any data-bearing, privileged, or production assets beyond what is already known? '
+          + 'Document every additional asset found and add to the scope list.',
+        row_refs: topRefs },
+      { id: 'i3', phase: 'investigate', persona: 'Forensics',
+        title: 'Preserve volatile evidence',
+        instructions: 'Collect memory dumps, process trees, network captures, and filesystem diffs from isolated hosts before any remediation step. '
+          + 'Chain of custody must be documented before evidence is removed or systems are wiped.',
+        row_refs: topRefs },
+
+      // NOTIFY
+      { id: 'n1', phase: 'notify', persona: 'CISO / Compliance',
+        title: 'Determine regulatory notification obligations',
+        instructions: 'Based on the confirmed scope: does this meet GDPR Article 33 / HIPAA Breach / PCI DSS 12.10.4 notification thresholds? '
+          + 'Document the determination with the name of the regulation, the threshold criteria, and whether it was met.',
+        row_refs: topRefs },
+      { id: 'n2', phase: 'notify', persona: 'Executive / CISO',
+        title: 'Notify affected stakeholders',
+        instructions: 'Send internal incident notification to executive leadership, legal, and HR as appropriate. '
+          + 'If external notification is required (customers, regulators), draft the communication and get legal review before sending. '
+          + 'Log every notification with recipient, timestamp, and method.',
+        row_refs: [] },
+
+      // REMEDIATE
+      { id: 'r1', phase: 'remediate', persona: 'SOC Analyst / IT Ops',
+        title: 'Eradicate malicious presence',
+        instructions: 'Remove all identified malicious files, scripts, scheduled tasks, and persistence mechanisms from affected systems. '
+          + 'Confirm removal with EDR or filesystem verification. '
+          + 'Do not restore systems to production until eradication is confirmed.',
+        row_refs: topRefs },
+      { id: 'r2', phase: 'remediate', persona: 'IT Ops / Security Engineering',
+        title: 'Patch and harden affected systems',
+        instructions: 'Apply patches for any CVEs or misconfigurations exploited. '
+          + 'Enforce MFA, rotate all credentials, tighten IAM roles. '
+          + 'Document each hardening action with before/after configuration state.',
+        row_refs: [] },
+
+      // REPORT
+      { id: 'rep1', phase: 'report', persona: 'SOC Analyst / Compliance',
+        title: 'Write incident report',
+        instructions: 'Produce the incident report covering: timeline, initial vector, lateral path, data impacted, containment actions, eradication, and hardening changes. '
+          + 'The decision log from this canvas is the primary source for the timeline section.',
+        row_refs: [] },
+      { id: 'rep2', phase: 'report', persona: 'CISO',
+        title: 'CISO sign-off and lessons learned',
+        instructions: 'Review the incident report. Document lessons learned and assign action items to prevent recurrence. '
+          + 'Close the incident ticket only after this sign-off is recorded.',
+        row_refs: [] },
+    ];
+
+    renderWorkflowSteps();
+    // Also build evidence list from cluster rows if available
+    if (state.cluster && state.cluster.row_refs && !state.evidenceRows.length) {
+      state.evidenceRows = state.cluster.row_refs.map(function (r) {
+        return { row_number: r, description: 'Row #' + r, severity: state.cluster.severity || 'unknown' };
+      });
+      renderEvidenceList(state.evidenceRows);
+    }
+  }
+
+  /* ── Split-pane resize ──────────────────────────────────────── */
+  (function wirePaneResize() {
+    var handle = $('paneResizer');
+    var left   = $('evidencePane');
+    var pane   = $('splitPane');
+    var dragging = false;
+    handle.addEventListener('mousedown', function (e) {
+      e.preventDefault(); dragging = true;
+      handle.classList.add('dragging');
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+    });
+    document.addEventListener('mousemove', function (e) {
+      if (!dragging) return;
+      var rect = pane.getBoundingClientRect();
+      var newW = Math.max(200, Math.min(pane.offsetWidth * 0.6, e.clientX - rect.left));
+      left.style.width = newW + 'px';
+    });
+    document.addEventListener('mouseup', function () {
+      if (dragging) { dragging = false; handle.classList.remove('dragging'); document.body.style.cursor = ''; document.body.style.userSelect = ''; }
+    });
+  })();
+
+  /* ── Top-bar wiring ─────────────────────────────────────────── */
+  $('btnBackToInvestigate').addEventListener('click', function () {
+    if (document.referrer && document.referrer.includes('investigate')) {
+      history.back();
+    } else {
+      location.href = 'investigate.html';
+    }
+  });
+
+  $('btnToggleLog').addEventListener('click', function () {
+    var panel = $('decisionLogPanel');
+    panel.classList.toggle('open');
+    $('btnToggleLog').textContent = panel.classList.contains('open') ? 'Decision Log ▼' : 'Decision Log ▶';
+  });
+
+  $('btnCloseLog').addEventListener('click', function () {
+    $('decisionLogPanel').classList.remove('open');
+    $('btnToggleLog').textContent = 'Decision Log ▶';
+  });
+
+  $('btnSubmitPhase').addEventListener('click', advancePhase);
+  $('btnNextPhase').addEventListener('click', function () {
+    state.currentPhase = Math.min(PHASES.length - 1, state.currentPhase + 1);
+    renderPhaseRail(); renderWorkflowSteps();
+  });
+  $('btnPrevPhase').addEventListener('click', function () {
+    state.currentPhase = Math.max(0, state.currentPhase - 1);
+    renderPhaseRail(); renderWorkflowSteps();
+  });
+
+  // Feature 1: persona filter re-renders steps on change
+  $('personaFilter').addEventListener('change', function () {
+    renderWorkflowSteps();
+  });
+
+  /* ── Boot ───────────────────────────────────────────────────── */
+  renderPhaseRail();
+  loadTier2ModelCatalog();
+  loadClusterDetail();
+
+})();
+</script>
+</body>
+</html>

@@ -31,7 +31,11 @@
     _gateApproved: false, // human-gate: set true after analyst approves escalation personas
     workbookMeta: null,   // sheet summary + entity pivots + CRQ from workbook_sheets endpoint
     queueView: null,      // operator queue view from /api/v1/queue/{assessment_id}
+    clusterMap: {},        // cluster_id -> cluster object from correlation_clusters
+    activeClusterId: null, // currently open cluster in drawer
   };
+  window.state = state;
+  var _hopGraphState = { svg: null, zoom: null, sim: null };
 
   // ── DOM refs ─────────────────────────────────────────────────────────────
   var $ = function (id) { return document.getElementById(id); };
@@ -39,8 +43,8 @@
   // ── Helpers ──────────────────────────────────────────────────────────────
   function authHeaders() {
     var h = { 'x-api-key': API_KEY };
-    var tenant = localStorage.getItem('tenantId');
-    if (tenant) h['X-Tenant-ID'] = tenant;
+    var tenant = localStorage.getItem('tenantId') || 'default';
+    h['X-Tenant-ID'] = tenant;
     return h;
   }
 
@@ -124,6 +128,8 @@
           return 'json_array';
         }
         if (parsed.pack_id) return 'manifest';
+        // Janusec dataset envelope: object with "events" array
+        if (parsed.events && Array.isArray(parsed.events)) return 'json_array';
       } catch (_) { /* not valid JSON */ }
     }
     return ext || 'unknown';
@@ -235,7 +241,14 @@
     else if (type === 'azure_defender' || type === 'json_value') arr = parsed.value || [];
     else if (type === 'aws_config') arr = parsed.configurationItems || parsed.complianceResults || [];
     else if (Array.isArray(parsed)) arr = parsed;
-    else { arr = [parsed]; }
+    else {
+      // Try common array envelope keys before wrapping the whole object as 1 row
+      var _envKeys = ['events', 'items', 'data', 'alerts', 'logs', 'entries', 'results', 'rows'];
+      for (var _ki = 0; _ki < _envKeys.length; _ki++) {
+        if (Array.isArray(parsed[_envKeys[_ki]])) { arr = parsed[_envKeys[_ki]]; break; }
+      }
+      if (!arr.length) arr = [parsed];
+    }
 
     arr.forEach(function (item, idx) {
       if (typeof item === 'object' && item !== null) {
@@ -559,9 +572,10 @@
   var _activeWs = null;
 
   function connectProgressWs(assessmentId, onPct) {
+    if (!window.ENABLE_INVESTIGATE_PROGRESS_WS) return;
     if (_activeWs) { try { _activeWs.close(); } catch(_) {} _activeWs = null; }
     var proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    var wsUrl = proto + '://' + location.host + '/api/v1/csv/deep_analyze/ws/progress/' + encodeURIComponent(assessmentId);
+    var wsUrl = proto + '://' + location.host + '/api/v1/assessments/ws/progress/' + encodeURIComponent(assessmentId);
     try {
       var ws = new WebSocket(wsUrl);
       _activeWs = ws;
@@ -610,6 +624,9 @@
       if (!analyzeResp.ok) throw new Error('Pipeline failed: ' + analyzeResp.status);
       var analyzeData = await analyzeResp.json();
       state.assessmentId = analyzeData.assessment_id || analyzeData.report_id;
+      // Use the POST response as the initial assessment — it already contains
+      // results, canonical, and mappings. Polling may enrich it but must not block.
+      state.assessment = analyzeData;
       $('pipelineBarFill').style.width = '50%';
 
       // Connect WebSocket for real-time progress updates (falls back to manual steps if unavailable)
@@ -620,13 +637,24 @@
         });
       }
 
-      // Step 2: Poll for assessment completion (quick — pipeline stages are fast)
-      var assessment = await pollAssessment(state.assessmentId);
+      // Step 2: Best-effort quick poll — 5 s cap. Falls back to POST response if slow.
+      var polled = await pollAssessment(state.assessmentId, 5000);
+      // Merge: prefer analyzeData clusters if poll returns early without them
+      var assessment = Object.assign({}, analyzeData, polled || {});
+      if (!(polled && polled.correlation_clusters && polled.correlation_clusters.length)) {
+        assessment.correlation_clusters = analyzeData.correlation_clusters || [];
+      }
+      if (!(polled && polled.evidence_rows && polled.evidence_rows.length)) {
+        assessment.evidence_rows = analyzeData.evidence_rows || analyzeData.rows || [];
+      }
+      if (!assessment.assessment_id) assessment = analyzeData;
       state.assessment = assessment;
       $('pipelineBarFill').style.width = '70%';
 
       // Step 3: Build enriched evidence rows from assessment
       buildEvidenceFromAssessment(assessment);
+      // Step 3c: Store clusters in state.clusterMap and render cluster list
+      storeClusters(assessment.correlation_clusters || []);
 
       // Step 3b: Render graph + timeline visualizations  [B1 fix: graphCanvas not graphContent]
       $('graphEmpty').style.display = 'none';
@@ -677,23 +705,26 @@
   }
 
   async function pollAssessment(id, maxWait) {
-    maxWait = maxWait || 30000;
+    maxWait = maxWait || 5000; // default 5 s — GET endpoint may be slow
     var start = Date.now();
     while (Date.now() - start < maxWait) {
       try {
-        var resp = await fetch('/api/v1/csv/deep_analyze/assessments/' + encodeURIComponent(id), {
-          headers: authHeaders(),
+        var ctrl = new AbortController();
+        var _pt = setTimeout(function () { ctrl.abort(); }, 3000); // 3 s per-request timeout
+        var resp = await fetch('/api/v1/assessments/' + encodeURIComponent(id), {
+          headers: authHeaders(), signal: ctrl.signal,
         });
+        clearTimeout(_pt);
         if (resp.ok) {
           var data = await resp.json();
           if (data.status === 'complete' || data.status === 'completed' || data.rows_processed > 0) {
             return data;
           }
         }
-      } catch (_) { /* retry */ }
-      await new Promise(function (r) { setTimeout(r, 1000); });
+      } catch (_) { /* timed out or network error — retry or give up */ }
+      await new Promise(function (r) { setTimeout(r, 500); });
     }
-    // Return whatever we have even if not fully complete
+    // Return whatever we have (POST response was already stored as state.assessment)
     return state.assessment || {};
   }
 
@@ -810,20 +841,31 @@
       counts[bucket][r.severity] = (counts[bucket][r.severity] || 0) + 1;
     });
 
-    ['correlated', 'isolated'].forEach(function (bucket) {
-      var container = $('sev' + bucket.charAt(0).toUpperCase() + bucket.slice(1));
-      var total = 0;
-      container.querySelectorAll('.sev-box').forEach(function (box) {
-        var filterKey = box.getAttribute('data-filter');
-        var sev = filterKey.split('-')[1];
-        var count = counts[bucket][sev] || 0;
-        total += count;
-        box.querySelector('.sev-box__count').textContent = String(count);
-      });
-      $('sev' + bucket.charAt(0).toUpperCase() + bucket.slice(1) + 'Total').textContent = total + ' total';
-    });
+    function setText(id, value) {
+      var el = $(id);
+      if (el) el.textContent = String(value);
+    }
 
-    $('sevSummary').classList.add('has-data');
+    function setBucket(bucket, prefix, totalId) {
+      var total = 0;
+      [
+        ['critical', 'crit'],
+        ['high', 'high'],
+        ['medium', 'med'],
+        ['low', 'low'],
+      ].forEach(function (pair) {
+        var count = counts[bucket][pair[0]] || 0;
+        total += count;
+        setText(prefix + '_' + pair[1], count);
+      });
+      setText(totalId, total + ' total');
+    }
+
+    setBucket('correlated', 'sc', 'sc_total');
+    setBucket('isolated', 'si', 'si_total');
+
+    var summary = $('sevSummary');
+    if (summary) summary.classList.add('has-data');
   }
 
   // Severity box click → filter evidence table
@@ -989,13 +1031,16 @@
   async function generatePersonaReport(assessment) {
     var persona = PERSONA_ALIASES[state.currentPersona] || state.currentPersona;
     try {
+      var ctrl = new AbortController();
+      var _tmo = setTimeout(function () { ctrl.abort(); }, 8000); // 8s hard timeout — LLM may hang
       var url = '/api/v1/report/ingestion?format=json&persona=' + encodeURIComponent(persona) + '&include_model=true&include_scenarios=true';
-      var resp = await fetch(url, { headers: authHeaders() });
+      var resp = await fetch(url, { headers: authHeaders(), signal: ctrl.signal });
+      clearTimeout(_tmo);
       if (resp.ok) {
         var reportData = await resp.json();
         if (buildBackendReport(reportData, assessment)) return;
       }
-    } catch (_) { /* fall through */ }
+    } catch (_) { /* timed out or endpoint unavailable — fall through to local report */ }
     buildLocalReport(assessment);
   }
 
@@ -2091,6 +2136,15 @@
         .attr('x2', function (d) { return d.target.x; }).attr('y2', function (d) { return d.target.y; });
       node.attr('transform', function (d) { return 'translate(' + d.x + ',' + d.y + ')'; });
     });
+
+    try {
+      window._lastHopGraphRender = {
+        nodes: (nodes || []).length,
+        links: (links || []).length,
+        renderedAt: Date.now(),
+        hasClusters: Object.keys(state.clusterMap || {}).length > 0,
+      };
+    } catch (_e) {}
   }
 
   function guessEntityType(entity, row) {
@@ -2175,6 +2229,15 @@
     });
     parts.push('</svg>');
     canvas.innerHTML = parts.join('');
+
+    try {
+      window._lastTimelineRender = {
+        rows: (rowsWithTime || []).length,
+        sources: Object.keys(srcGroups || {}),
+        renderedAt: Date.now(),
+        hasTimestamps: (rowsWithTime || []).length > 0,
+      };
+    } catch (_e) {}
   }
 
   function extractTimestamp(row) {
@@ -2298,5 +2361,689 @@
   window.loadHistoryEntry = loadHistoryEntry;
   window.renderHistory = renderHistory;
   window.toast = toast;
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // INVESTIGATE TAB — Build narrative + EXPAND task cards
+  // ══════════════════════════════════════════════════════════════════════════
+
+  var _investigateState = {
+    investigateId: null,
+    status: 'idle',       // idle | building | ready | failed
+    record: null,         // last fetched investigate record
+    _pollTimer: null,
+    expandCache: {},      // taskId -> expand result
+  };
+
+  // ── Show/hide actions bar based on assessmentId availability ─────────────
+  function _syncInvestigateActions() {
+    var act = $('investigateActions');
+    var empty = $('investigateEmpty');
+    if (!act || !empty) return;
+    if (state.assessmentId) {
+      act.style.display = 'flex';
+      empty.style.display = 'none';
+    } else {
+      act.style.display = 'none';
+      empty.style.display = '';
+    }
+  }
+
+  // Wire up tab switch to sync actions
+  var _origSwitchTab = switchTab;
+  switchTab = function (name) {
+    _origSwitchTab(name);
+    if (name === 'investigate') _syncInvestigateActions();
+  };
+
+  // ── Build investigate ────────────────────────────────────────────────────
+  async function buildInvestigate() {
+    if (!state.assessmentId) { toast('Run analysis first', 'warn'); return; }
+    var persona = ($('investigatePersonaSelect') || {}).value || 'soc';
+    var btn = $('btnBuildInvestigate');
+    if (btn) btn.disabled = true;
+
+    $('investigateResults').style.display = 'none';
+    $('investigateLoading').style.display = '';
+    $('investigateStatusBadge').textContent = 'Queuing…';
+    _investigateState.status = 'building';
+    // show badge on tab
+    var badge = $('investigateBadge');
+    if (badge) { badge.style.display = ''; badge.textContent = '⏳'; }
+
+    try {
+      var resp = await fetch(
+        '/api/v1/assessments/' + encodeURIComponent(state.assessmentId) + '/investigate/build',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...authHeaders() },
+          body: JSON.stringify({ persona: persona }),
+        }
+      );
+      if (!resp.ok) throw new Error('build returned ' + resp.status);
+      var data = await resp.json();
+      _investigateState.investigateId = data.investigate_id;
+      $('investigateStatusBadge').textContent = 'Building…';
+      _pollInvestigateStatus();
+    } catch (err) {
+      $('investigateLoading').style.display = 'none';
+      $('investigateStatusBadge').textContent = 'Error: ' + err.message;
+      if (btn) btn.disabled = false;
+      toast('Investigate build failed: ' + err.message, 'error');
+    }
+  }
+
+  // ── Poll for investigate completion ──────────────────────────────────────
+  function _pollInvestigateStatus() {
+    if (_investigateState._pollTimer) clearTimeout(_investigateState._pollTimer);
+    var attempt = 0;
+    var maxAttempts = 80; // 80 × 3s = 4 min
+
+    function _poll() {
+      if (!_investigateState.investigateId || !state.assessmentId) return;
+      var pollMsg = $('investigatePollingMsg');
+      if (pollMsg) pollMsg.textContent = 'Building narrative… (' + attempt + 's elapsed)';
+      attempt += 3;
+
+      fetch(
+        '/api/v1/assessments/' + encodeURIComponent(state.assessmentId) +
+        '/investigate/' + encodeURIComponent(_investigateState.investigateId),
+        { headers: authHeaders() }
+      )
+        .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
+        .then(function (rec) {
+          var st = rec.status || '';
+          if (st === 'ready') {
+            _investigateState.status = 'ready';
+            _investigateState.record = rec;
+            _renderInvestigateResults(rec);
+          } else if (st === 'failed') {
+            _investigateState.status = 'failed';
+            $('investigateLoading').style.display = 'none';
+            $('investigateStatusBadge').textContent = 'Failed: ' + (rec.error || 'unknown');
+            var btn = $('btnBuildInvestigate');
+            if (btn) btn.disabled = false;
+            toast('Investigate failed: ' + (rec.error || ''), 'error');
+          } else if (attempt < maxAttempts * 3) {
+            _investigateState._pollTimer = setTimeout(_poll, 3000);
+          } else {
+            $('investigateLoading').style.display = 'none';
+            $('investigateStatusBadge').textContent = 'Timed out waiting for narrative';
+            var btn = $('btnBuildInvestigate');
+            if (btn) btn.disabled = false;
+          }
+        })
+        .catch(function () {
+          if (attempt < maxAttempts * 3) {
+            _investigateState._pollTimer = setTimeout(_poll, 3000);
+          }
+        });
+    }
+    _investigateState._pollTimer = setTimeout(_poll, 2000);
+  }
+
+  // ── Render results ────────────────────────────────────────────────────────
+  function _renderInvestigateResults(rec) {
+    $('investigateLoading').style.display = 'none';
+    $('investigateResults').style.display = '';
+    $('investigateStatusBadge').textContent = 'Ready';
+    var btn = $('btnBuildInvestigate');
+    if (btn) btn.disabled = false;
+    var badge = $('investigateBadge');
+    if (badge) { badge.style.display = ''; badge.textContent = '✓'; }
+
+    // Narrative block
+    var narrativeEl = $('investigateNarrative');
+    if (narrativeEl) {
+      narrativeEl.innerHTML =
+        '<div class="report-section__title">Composite Narrative</div>' +
+        '<div class="report-section__body">' +
+        '<p>' + escHtml(rec.narrative || 'No narrative generated.') + '</p>' +
+        (rec.missing_logs && rec.missing_logs.length
+          ? '<p style="color:var(--text-muted);font-size:11px;margin-top:8px;">Missing log classes: ' + escHtml(rec.missing_logs.join(', ')) + '</p>'
+          : '') +
+        '</div>';
+    }
+
+    // Task cards from persona_expanded
+    var cardsEl = $('investigateTaskCards');
+    if (!cardsEl) return;
+    cardsEl.innerHTML = '';
+
+    var persona = ($('investigatePersonaSelect') || {}).value || 'soc';
+    var tasks = _extractTasksFromRecord(rec, persona);
+    if (!tasks.length) {
+      cardsEl.innerHTML = '<p style="font-size:12px;color:var(--text-muted);padding:8px 0;">No structured tasks found in this narrative.</p>';
+      return;
+    }
+
+    tasks.forEach(function (task, idx) {
+      var taskId = _stableTaskId(task.text, persona);
+      var card = _buildTaskCard(task, taskId, idx, persona);
+      cardsEl.appendChild(card);
+    });
+  }
+
+  // ── Extract tasks from investigate record ────────────────────────────────
+  function _extractTasksFromRecord(rec, persona) {
+    // Try persona_expanded first
+    var expanded = rec.persona_expanded;
+    if (expanded && typeof expanded === 'object') {
+      var pKey = persona === 'soc' ? 'soc_analyst' : persona;
+      var pData = expanded[pKey] || expanded[persona] || expanded['soc_analyst'] || expanded['soc'] || null;
+      if (pData) {
+        var lines = _splitIntoTasks(pData);
+        if (lines.length) return lines.map(function (t) { return { text: t }; });
+      }
+    }
+    // Fall back to splitting narrative into paragraphs
+    var narrative = rec.narrative || '';
+    return _splitIntoTasks(narrative).map(function (t) { return { text: t }; });
+  }
+
+  function _splitIntoTasks(text) {
+    if (!text) return [];
+    // Split on numbered lines (1. ..., • ...) or double-newline paragraphs
+    var lines = String(text)
+      .split(/\n+/)
+      .map(function (l) { return l.trim(); })
+      .filter(function (l) { return l.length > 20; });
+    // If only 1 line (no structure), split on '. ' sentence boundary
+    if (lines.length === 1 && lines[0].length > 200) {
+      lines = lines[0].match(/[^.!?]+[.!?]+/g) || lines;
+      lines = lines.filter(function (l) { return l.trim().length > 20; });
+    }
+    return lines.slice(0, 12); // max 12 task cards
+  }
+
+  function _stableTaskId(text, persona) {
+    // Simple client-side hash (djb2) to produce a stable short ID
+    var s = (persona + '::' + text.trim().toLowerCase());
+    var h = 5381;
+    for (var i = 0; i < s.length; i++) {
+      h = ((h << 5) + h + s.charCodeAt(i)) >>> 0;
+    }
+    return h.toString(16).padStart(8, '0');
+  }
+
+  // ── Build a single task card DOM element ────────────────────────────────
+  function _buildTaskCard(task, taskId, idx, persona) {
+    var card = document.createElement('div');
+    card.className = 'task-card';
+    card.setAttribute('data-task-id', taskId);
+
+    var headerDiv = document.createElement('div');
+    headerDiv.className = 'task-card__header';
+    headerDiv.innerHTML =
+      '<span style="font-size:10px;color:var(--text-muted);min-width:20px;">#' + (idx + 1) + '</span>' +
+      '<span class="task-card__title">' + escHtml(task.text.slice(0, 180)) + (task.text.length > 180 ? '…' : '') + '</span>' +
+      '<button class="task-card__expand-btn" data-task-id="' + taskId + '" data-persona="' + persona + '">' +
+      'EXPAND ▼</button>';
+
+    var bodyDiv = document.createElement('div');
+    bodyDiv.className = 'task-card__body';
+    bodyDiv.id = 'expand-body-' + taskId;
+
+    card.appendChild(headerDiv);
+    card.appendChild(bodyDiv);
+
+    // Toggle body on header click
+    headerDiv.addEventListener('click', function (e) {
+      if (e.target.classList.contains('task-card__expand-btn')) return;
+      bodyDiv.classList.toggle('open');
+    });
+
+    // EXPAND button: call backend
+    var expandBtn = headerDiv.querySelector('.task-card__expand-btn');
+    if (expandBtn) {
+      expandBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        bodyDiv.classList.add('open');
+        _triggerExpand(task.text, taskId, persona, bodyDiv, expandBtn);
+      });
+    }
+
+    return card;
+  }
+
+  // ── Trigger EXPAND API call ───────────────────────────────────────────────
+  async function _triggerExpand(taskText, taskId, persona, bodyEl, btnEl) {
+    if (!state.assessmentId) { toast('No assessment loaded', 'warn'); return; }
+
+    // Check in-memory cache first
+    if (_investigateState.expandCache[taskId]) {
+      _renderExpandPanel(bodyEl, _investigateState.expandCache[taskId]);
+      return;
+    }
+
+    if (btnEl) btnEl.disabled = true;
+    bodyEl.innerHTML = '<div class="expand-loading">⏳ Expanding… querying LLM and running automated checks…</div>';
+
+    // Pin EXPAND to the active cluster when one is open
+    var activeCid = state.activeClusterId || null;
+    var cluster = activeCid ? (state.clusterMap || {})[activeCid] : null;
+    var rowRefs = cluster ? (cluster.row_refs || cluster.row_indices || []) : [];
+    var modelEl = activeCid ? document.getElementById('llmModelSel_' + activeCid) : null;
+    var model = (modelEl && modelEl.value) || null;
+
+    try {
+      var resp = await fetch(
+        '/api/v1/assessments/' + encodeURIComponent(state.assessmentId) +
+        '/tasks/' + encodeURIComponent(taskId) + '/expand',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...authHeaders() },
+          body: JSON.stringify({
+            task_text: taskText,
+            persona: persona,
+            investigate_id: _investigateState.investigateId || undefined,
+            cluster_id: activeCid || undefined,
+            row_refs: rowRefs.length ? rowRefs : undefined,
+            model: model || undefined,
+          }),
+        }
+      );
+      if (!resp.ok) throw new Error('expand returned ' + resp.status);
+      var data = await resp.json();
+      _investigateState.expandCache[taskId] = data;
+      _renderExpandPanel(bodyEl, data);
+    } catch (err) {
+      bodyEl.innerHTML = '<div class="expand-error">Expand failed: ' + escHtml(err.message) + '</div>';
+    } finally {
+      if (btnEl) { btnEl.disabled = false; btnEl.textContent = 'EXPAND ▲'; }
+    }
+  }
+
+  // ── Render expand panel content ───────────────────────────────────────────
+  function _renderExpandPanel(bodyEl, data) {
+    var html = '<div class="expand-panel">';
+
+    // Entity chips
+    var ef = data.entity_fields || {};
+    var allEntities = [];
+    ['users', 'ips', 'hosts'].forEach(function (cat) {
+      (ef[cat] || []).slice(0, 4).forEach(function (v) {
+        allEntities.push('<span class="entity-chip">' + escHtml(v) + '</span>');
+      });
+    });
+    if (allEntities.length) {
+      html += '<div class="entity-chips">' + allEntities.join('') + '</div>';
+    }
+
+    // Automated check badges
+    var checks = data.check_results || [];
+    var triggered = checks.filter(function (c) { return c.triggered; });
+    if (triggered.length) {
+      html += '<div class="expand-check-badges">';
+      triggered.forEach(function (c) {
+        var cls = 'expand-badge--' + (c.severity || 'info');
+        html += '<span class="expand-badge ' + escHtml(cls) + '" title="' + escHtml(c.detail || '') + '">' +
+          escHtml(c.label) + '</span>';
+      });
+      html += '</div>';
+    }
+
+    // Summary
+    if (data.summary) {
+      html += '<div class="expand-panel__summary">' + escHtml(data.summary) + '</div>';
+    }
+
+    // Subtasks
+    var subtasks = data.subtasks || [];
+    if (subtasks.length) {
+      html += '<div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-bottom:5px;">Subtasks</div>';
+      html += '<ul class="expand-subtask-list">';
+      subtasks.forEach(function (st) {
+        var priCls = 'stask-priority--' + (st.priority || 'medium');
+        var refs = (st.evidence_refs || []).slice(0, 5);
+        var refsHtml = refs.length ? ' <span style="font-size:9px;color:var(--text-muted);font-family:monospace;">[rows: ' + refs.join(', ') + ']</span>' : '';
+        var criteria = st.success_criteria ? '<div style="font-size:10px;color:var(--text-muted);padding-left:8px;margin-top:2px;">✓ ' + escHtml(st.success_criteria) + '</div>' : '';
+        html += '<li style="flex-direction:column;align-items:flex-start;">' +
+          '<div style="display:flex;align-items:center;gap:6px;width:100%;">' +
+          '<span class="stask-priority ' + priCls + '">' + escHtml(st.priority || 'med') + '</span>' +
+          '<span style="flex:1;">' + escHtml(st.action || '') + '</span>' +
+          (st.entity ? '<span style="font-size:10px;color:var(--text-muted);font-family:monospace;">' + escHtml(st.entity) + '</span>' : '') +
+          refsHtml +
+          '</div>' +
+          criteria +
+          '</li>';
+      });
+      html += '</ul>';
+    }
+
+    // IOCs
+    var iocs = data.iocs || [];
+    if (iocs.length) {
+      html += '<div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-bottom:5px;">Indicators</div>';
+      html += '<ul class="expand-ioc-list">';
+      iocs.slice(0, 8).forEach(function (ioc) {
+        html += '<li><span class="ioc-type">' + escHtml(ioc.type || 'ioc') + '</span>' +
+          escHtml(ioc.value || '') +
+          (ioc.context ? ' <span style="color:var(--text-muted);font-size:10px;">— ' + escHtml(ioc.context) + '</span>' : '') +
+          '</li>';
+      });
+      html += '</ul>';
+    }
+
+    // MITRE techniques
+    var ttps = data.mitre_techniques || [];
+    if (ttps.length) {
+      html += '<div style="margin-bottom:8px;"><span style="font-size:10px;color:var(--text-muted);">MITRE: </span>' +
+        ttps.slice(0, 6).map(function (t) {
+          return '<span style="font-size:10px;font-family:monospace;padding:1px 5px;background:rgba(74,99,231,.1);border-radius:3px;color:var(--accent,#4A63E7);margin-right:4px;">' + escHtml(t) + '</span>';
+        }).join('') + '</div>';
+    }
+
+    // Next pivot
+    if (data.next_pivot) {
+      html += '<div class="expand-pivot">🔍 <b>Next pivot:</b> ' + escHtml(data.next_pivot) + '</div>';
+    }
+
+    // Confidence + latency meta
+    html += '<div style="margin-top:10px;font-size:10px;color:var(--text-muted);">' +
+      'Confidence: ' + Math.round((data.confidence || 0) * 100) + '%' +
+      (data.cache_hit ? ' · cache hit' : '') +
+      (data.latency_ms ? ' · ' + data.latency_ms + 'ms' : '') +
+      '</div>';
+
+    html += '</div>';
+    bodyEl.innerHTML = html;
+  }
+
+  // ── Wire up Build Investigate button ────────────────────────────────────
+  var btnBuild = $('btnBuildInvestigate');
+  if (btnBuild) {
+    btnBuild.addEventListener('click', function () { buildInvestigate(); });
+  }
+
+  // Sync investigate actions whenever assessmentId changes
+  // (hooked by overriding the pipeline completion path)
+  var _origGeneratePersonaReport = generatePersonaReport;
+  generatePersonaReport = async function (assessment) {
+    var result = await _origGeneratePersonaReport(assessment);
+    _syncInvestigateActions();
+    return result;
+  };
+
+  window.buildInvestigate = buildInvestigate;
+
+  // ── Cluster Map + Drawer ─────────────────────────────────────────────────
+
+  var CLUSTER_MODELS = [
+    { value: 'qwen2.5:14b',          label: 'Qwen 2.5 14B  ★ (best overall · fast)' },
+    { value: 'qwen3:14b',            label: 'Qwen 3 14B (deep reasoning · slower)' },
+    { value: 'qwen3:30b',            label: 'Qwen 3 30B (highest quality · slowest)' },
+    { value: 'mistral-small3.2:24b', label: 'Mistral Small 3.2 24B (fastest · latency)' },
+  ]; // fallback only — overwritten by loadModelCatalog()
+
+  async function loadModelCatalog() {
+    try {
+      var resp = await fetch('/api/v1/llm/models/catalog', { headers: authHeaders() });
+      if (!resp.ok) return;
+      var data = await resp.json();
+      var models = (data.models || []).filter(function (m) { return m.tier === 'local'; });
+      if (!models.length) return;
+      CLUSTER_MODELS = models.map(function (m) {
+        return {
+          value: m.id,
+          label: m.label + (m.recommended ? '  ★' : '') + (!m.available ? '  (offline)' : ''),
+          disabled: !m.available,
+        };
+      });
+    } catch (_e) { /* keep fallback */ }
+  }
+
+  loadModelCatalog();
+
+  function storeClusters(clusters) {
+    state.clusterMap = {};
+    if (!Array.isArray(clusters)) return;
+    clusters.forEach(function (c) {
+      var cid = String(c.cluster_id || c.id || '');
+      if (cid) state.clusterMap[cid] = c;
+    });
+    renderClusterList();
+  }
+
+  function renderClusterList() {
+    var panel = $('clusterListPanel');
+    if (!panel) return;
+    var ids = Object.keys(state.clusterMap);
+    if (!ids.length) { panel.style.display = 'none'; return; }
+    panel.style.display = '';
+    var html = '<div class="cluster-list-header">Clusters (' + ids.length + ')</div>';
+    ids.forEach(function (cid) {
+      var c = state.clusterMap[cid];
+      var sev = (c.severity || 'medium').toLowerCase();
+      var rows = c.row_count || (c.row_refs || []).length || 0;
+      var label = c.label || c.summary || ('Cluster ' + cid);
+      html += '<div class="cluster-item cluster-item--' + sev + '">' +
+        '<span class="cluster-item__sev" onclick="window.openClusterDetail(\'' + escHtml(cid) + '\')">' + escHtml(sev.toUpperCase()) + '</span>' +
+        '<span class="cluster-item__label" onclick="window.openClusterDetail(\'' + escHtml(cid) + '\')">' + escHtml(String(label).slice(0, 60)) + '</span>' +
+        '<span class="cluster-item__rows">' + rows + ' rows</span>' +
+        '<button class="btn-secondary" style="font-size:10px;padding:2px 8px;" ' +
+          'onclick="event.stopPropagation(); window.openTier2Canvas(\'' + escHtml(cid) + '\')">' +
+          'Open Tier 2' +
+        '</button>' +
+        '</div>';
+    });
+    panel.innerHTML = html;
+  }
+
+  window.openClusterDetail = function (clusterId) {
+    state.activeClusterId = String(clusterId);
+    var drawer = $('clusterDrawer');
+    if (!drawer) return;
+    var c = state.clusterMap[clusterId] || {};
+    var sev = (c.severity || 'medium').toLowerCase();
+    var label = c.label || c.summary || ('Cluster ' + clusterId);
+    var rows = c.row_count || (c.row_refs || []).length || 0;
+    var entities = (c.entities || c.top_entities || []).slice(0, 6);
+
+    $('clusterDrawerTitle').textContent = label;
+    $('clusterDrawerMeta').innerHTML =
+      '<span class="sev-pill sev-pill--' + sev + '">' + sev.toUpperCase() + '</span> ' +
+      rows + ' rows' +
+      (entities.length ? ' · ' + entities.map(function (e) { return '<span class="entity-chip">' + escHtml(String(e)) + '</span>'; }).join(' ') : '');
+
+    // Reset result containers
+    var summaryEl = $('llmSummaryResult_' + clusterId);
+    var enrichEl  = $('enrichResult_'    + clusterId);
+    var huntEl    = $('huntResult_'      + clusterId);
+    if (summaryEl) summaryEl.innerHTML = '';
+    if (enrichEl)  enrichEl.innerHTML  = '';
+    if (huntEl)    huntEl.innerHTML    = '';
+
+    // Ensure per-cluster elements exist inside the drawer template
+    _ensureClusterElements(clusterId);
+
+    drawer.classList.add('open');
+    drawer.style.display = '';
+  };
+
+  window.openTier2Canvas = function (clusterId) {
+    if (!state.assessmentId) { toast('Run Analyze first', 'warn'); return; }
+    var persona = state.currentPersona || 'soc_analyst';
+    var modelEl = document.getElementById('llmModelSel_' + clusterId);
+    var model = (modelEl && modelEl.value) || 'qwen2.5:14b';
+    var url = '/static/tier2_investigation.html' +
+              '?assessment_id=' + encodeURIComponent(state.assessmentId) +
+              '&cluster_id='    + encodeURIComponent(clusterId) +
+              '&persona='       + encodeURIComponent(persona) +
+              '&llm_model='     + encodeURIComponent(model);
+    window.open(url, '_blank', 'width=1400,height=900');
+  };
+
+  function _ensureClusterElements(cid) {
+    var container = $('clusterDrawerBody');
+    if (!container) return;
+    if ($('llmSummaryResult_' + cid)) return; // already created
+    var frag = document.createElement('div');
+    frag.id = 'clusterResultsFor_' + cid;
+    frag.innerHTML =
+      '<div id="llmSummaryResult_' + cid + '" class="cluster-result-block" style="display:none;"></div>' +
+      '<div id="enrichResult_'    + cid + '" class="cluster-result-block" style="display:none;"></div>' +
+      '<div id="huntResult_'      + cid + '" class="cluster-result-block" style="display:none;"></div>';
+    container.appendChild(frag);
+    // Model selector
+    var sel = $('llmModelSel_' + cid);
+    if (!sel) {
+      var selWrap = $('clusterModelSelWrap');
+      if (selWrap) {
+        var newSel = document.createElement('select');
+        newSel.id = 'llmModelSel_' + cid;
+        newSel.className = 'cluster-model-sel';
+        CLUSTER_MODELS.forEach(function (m) {
+          var opt = document.createElement('option');
+          opt.value = m.value; opt.textContent = m.label;
+          if (m.disabled) opt.disabled = true;
+          newSel.appendChild(opt);
+        });
+        selWrap.appendChild(newSel);
+      }
+    }
+  }
+
+  window._triggerLlmSummary = async function (clusterId, assessmentId, forceRefresh, persona) {
+    assessmentId = assessmentId || state.assessmentId;
+    clusterId    = clusterId    || state.activeClusterId;
+    persona      = persona      || state.currentPersona || 'soc_analyst';
+    forceRefresh = !!forceRefresh;
+    var selEl = $('llmModelSel_' + clusterId);
+    var model = (selEl && selEl.value) || 'qwen2.5:14b';
+    _ensureClusterElements(clusterId);
+    var el = $('llmSummaryResult_' + clusterId);
+    if (el) { el.style.display = ''; el.innerHTML = '<span class="loading-dot">Summarising with ' + model + '…</span>'; }
+    try {
+      var url = '/api/v1/assessments/' + encodeURIComponent(assessmentId) +
+                '/clusters/' + encodeURIComponent(clusterId) +
+                '/tier2/llm-summary?model=' + encodeURIComponent(model) +
+                (forceRefresh ? '&force_refresh=true' : '');
+      var ctrl = new AbortController();
+      var _tmo = setTimeout(function () { ctrl.abort(); }, 180000); // 3 min for Mistral
+      var resp = await fetch(url, {
+        headers: Object.assign({ 'x-persona': persona }, authHeaders()),
+        signal: ctrl.signal,
+      });
+      clearTimeout(_tmo);
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      var data = await resp.json();
+      if (el) el.innerHTML = _renderLlmSummary(data, clusterId, model);
+    } catch (err) {
+      if (el) el.innerHTML = '<span class="cluster-error">Summarise failed: ' + escHtml(err.message) + '</span>';
+      toast('LLM summary failed: ' + err.message, 'error');
+    }
+  };
+
+  window._triggerClusterEnrich = async function (clusterId, assessmentId, forceRefresh, model) {
+    assessmentId = assessmentId || state.assessmentId;
+    clusterId    = clusterId    || state.activeClusterId;
+    forceRefresh = !!forceRefresh;
+    model        = model || (($('llmModelSel_' + clusterId) || {}).value) || 'qwen2.5:14b';
+    _ensureClusterElements(clusterId);
+    var el = $('enrichResult_' + clusterId);
+    if (el) { el.style.display = ''; el.innerHTML = '<span class="loading-dot">Running CRAG enrich…</span>'; }
+    try {
+      var url = '/api/v1/assessments/' + encodeURIComponent(assessmentId) +
+                '/clusters/' + encodeURIComponent(clusterId) + '/enrich';
+      var ctrl = new AbortController();
+      var _tmo = setTimeout(function () { ctrl.abort(); }, 60000);
+      var resp = await fetch(url, {
+        method: 'POST',
+        headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders()),
+        body: JSON.stringify({ tenant_id: 'default', force_refresh: forceRefresh, model: model }),
+        signal: ctrl.signal,
+      });
+      clearTimeout(_tmo);
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      var data = await resp.json();
+      if (el) el.innerHTML = _renderEnrichResult(data);
+    } catch (err) {
+      if (el) el.innerHTML = '<span class="cluster-error">CRAG enrich failed: ' + escHtml(err.message) + '</span>';
+      toast('CRAG enrich failed: ' + err.message, 'error');
+    }
+  };
+
+  window._triggerHuntSweep = async function (clusterId, assessmentId, forceRefresh) {
+    assessmentId = assessmentId || state.assessmentId;
+    clusterId    = clusterId    || state.activeClusterId;
+    forceRefresh = !!forceRefresh;
+    _ensureClusterElements(clusterId);
+    var el = $('huntResult_' + clusterId);
+    if (el) { el.style.display = ''; el.innerHTML = '<span class="loading-dot">Running Hunt Sweep…</span>'; }
+    try {
+      var url = '/api/v1/assessments/' + encodeURIComponent(assessmentId) +
+                '/clusters/' + encodeURIComponent(clusterId) + '/tier2';
+      var ctrl = new AbortController();
+      var _tmo = setTimeout(function () { ctrl.abort(); }, 60000);
+      var resp = await fetch(url, {
+        headers: authHeaders(),
+        signal: ctrl.signal,
+      });
+      clearTimeout(_tmo);
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      var data = await resp.json();
+      if (el) el.innerHTML = _renderHuntResult(data);
+    } catch (err) {
+      if (el) el.innerHTML = '<span class="cluster-error">Hunt sweep failed: ' + escHtml(err.message) + '</span>';
+    }
+  };
+
+  function _renderLlmSummary(data, clusterId, model) {
+    var sections = data.sections || {};
+    var steps    = data.persona_steps || [];
+    var persona  = data.persona_label || data.persona || '';
+    var focus    = data.persona_focus || '';
+    var fallback = data.fallback_generated ? '<span class="badge badge--warn">deterministic fallback</span> ' : '';
+    var html = '<div class="llm-summary-block">' +
+      fallback +
+      (persona ? '<strong>' + escHtml(persona) + '</strong>' : '') +
+      (focus   ? ' · <em>' + escHtml(focus) + '</em>' : '') +
+      ' <span style="font-size:10px;color:var(--text-muted);">via ' + escHtml(model) + '</span>';
+    if (sections.what_to_do)        html += '<p><strong>What to do:</strong> ' + escHtml(sections.what_to_do) + '</p>';
+    if (sections.investigate_next)  html += '<p><strong>Investigate next:</strong> ' + escHtml(sections.investigate_next) + '</p>';
+    if (sections.business_impact)   html += '<p><strong>Business impact:</strong> ' + escHtml(sections.business_impact) + '</p>';
+    if (steps.length) {
+      html += '<ol class="persona-steps">';
+      steps.forEach(function (s) {
+        html += '<li><strong>' + escHtml(s.title || s.action || '') + '</strong>';
+        if (s.owner)    html += ' <span class="badge">' + escHtml(s.owner) + '</span>';
+        if (s.priority) html += ' <span class="badge badge--' + (s.priority === 'P1' ? 'crit' : 'info') + '">' + escHtml(s.priority) + '</span>';
+        if (s.subtasks && s.subtasks.length) {
+          html += '<ul>' + s.subtasks.map(function (t) { return '<li>' + escHtml(t) + '</li>'; }).join('') + '</ul>';
+        }
+        if (s.evidence_refs && s.evidence_refs.length) {
+          html += '<div style="font-size:10px;color:var(--text-muted);">refs: ' + s.evidence_refs.join(', ') + '</div>';
+        }
+        html += '</li>';
+      });
+      html += '</ol>';
+    }
+    html += '</div>';
+    return html;
+  }
+
+  function _renderEnrichResult(data) {
+    var verdict = (data.verdict || data.crag_verdict || '').toUpperCase();
+    var score   = data.composite_score != null ? Math.round(data.composite_score * 100) + '%' : '';
+    var cls     = verdict === 'ACCEPT' ? 'badge--ok' : verdict === 'REFINE' ? 'badge--warn' : 'badge--crit';
+    return '<div class="enrich-block">' +
+      '<span class="badge ' + cls + '">CRAG: ' + (verdict || 'N/A') + '</span>' +
+      (score ? ' <span class="badge">' + score + ' quality</span>' : '') +
+      (data.evidence_quality_notes ? '<p>' + escHtml(data.evidence_quality_notes) + '</p>' : '') +
+      (data.skip_reason ? '<p style="color:var(--text-muted);">Skipped: ' + escHtml(data.skip_reason) + '</p>' : '') +
+      '<span style="font-size:10px;color:var(--text-muted);">Evidence-quality gate · not an authoritative verdict</span>' +
+      '</div>';
+  }
+
+  function _renderHuntResult(data) {
+    var rows = data.member_rows || [];
+    return '<div class="hunt-block">' +
+      '<strong>Tier 2 Context</strong> — ' + rows.length + ' member rows<br>' +
+      (data.cluster_detail && data.cluster_detail.summary ? '<p>' + escHtml(data.cluster_detail.summary) + '</p>' : '') +
+      '</div>';
+  }
+
+  window.storeClusters = storeClusters;
+  window.renderClusterList = renderClusterList;
 
 })();
