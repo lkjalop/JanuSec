@@ -528,7 +528,7 @@
         state.currentPersona = p;
         $('personaSelect').value = p;
         renderPersonaChips();
-        renderReport();
+        ensurePersonaReportForCurrent();
       });
       container.appendChild(chip);
     });
@@ -563,7 +563,7 @@
   $('personaSelect').addEventListener('change', function () {
     state.currentPersona = this.value;
     renderPersonaChips();
-    renderReport();
+    ensurePersonaReportForCurrent();
   });
 
   // ── Analyze button — runs pipeline + generates report ────────────────────
@@ -663,6 +663,7 @@
       $('timelineContent').style.display = '';
       renderGraph(state.evidenceRows);
       renderTimeline(state.evidenceRows);
+      renderDecisionPanel();
 
       // Step 4: Generate persona report
       $('pipelineBarFill').style.width = '85%';
@@ -1336,6 +1337,49 @@
     // Store and render
     state.reportArtifacts[state.currentPersona] = { headline: headline, sections: sections };
     renderReport();
+  }
+
+  function ensurePersonaReportForCurrent() {
+    if (!state.assessment) {
+      renderReport();
+      return;
+    }
+    if (!state.reportArtifacts[state.currentPersona]) {
+      buildLocalReport(state.assessment);
+      return;
+    }
+    renderReport();
+  }
+
+  function renderDecisionPanel() {
+    var table = $('decisionTable');
+    var body = $('decisionBody');
+    var empty = $('decisionEmpty');
+    if (!table || !body || !empty) return;
+
+    var assessment = state.assessment || {};
+    var decision = assessment.decision_record || {};
+    var verdict = decision.verdict || decision.decision || assessment.final_verdict || assessment.verdict || assessment.severity || '';
+    var confidence = decision.confidence || assessment.final_confidence || assessment.confidence || '';
+    var rationale = decision.rationale || decision.reason || decision.summary || assessment.final_verdict || assessment.verdict || '';
+    var severity = assessment.severity || assessment.final_severity || '';
+
+    body.innerHTML = '';
+    if (!verdict && !rationale && !(state.evidenceRows || []).length) {
+      table.style.display = 'none';
+      empty.style.display = '';
+      return;
+    }
+
+    var tr = document.createElement('tr');
+    tr.innerHTML =
+      '<td>' + escHtml(verdict || 'Review required') + '</td>' +
+      '<td><span class="sev-pill sev-pill--' + escHtml(String(severity || 'medium').toLowerCase()) + '">' + escHtml(severity || 'medium') + '</span></td>' +
+      '<td>' + escHtml(confidence || 'pending') + '</td>' +
+      '<td>' + escHtml(rationale || 'Assessment produced evidence requiring analyst disposition.') + '</td>';
+    body.appendChild(tr);
+    table.style.display = '';
+    empty.style.display = 'none';
   }
 
   // ── Operator Queue Panel ─────────────────────────────────────────────────
@@ -2278,7 +2322,8 @@
 
   function extractTimestamp(row) {
     var fields = ['eventTime', 'ts', 'timestamp', 'time', 'createdDateTime', 'activityDateTime',
-      'UpdatedDateTime', 'TimeGenerated', 'start', 'date', 'datetime', '@timestamp', 'event_time'];
+      'UpdatedDateTime', 'TimeGenerated', 'start', 'date', 'datetime', '@timestamp', 'event_time',
+      'timestamp_utc', 'detected_at', 'first_seen', 'last_seen', 'LogTimestamp', 'evt_time'];
     var raw = (row && row.raw) || row || {};
     for (var i = 0; i < fields.length; i++) {
       var v = raw[fields[i]] || row[fields[i]];
