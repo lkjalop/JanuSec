@@ -1022,6 +1022,13 @@ async def lifespan(app: FastAPI):
             logger.info('SecurityOrchestrator singleton registered')
         except Exception:
             pass
+        # Start investigate narrative worker (processes INVESTIGATE_QUEUE)
+        try:
+            from src.api.deep_analyze_endpoints import _start_investigate_worker as _start_inv
+            _start_inv(app)
+            logger.info('lifespan: investigate worker started')
+        except Exception:
+            pass
         try:
             await asyncio.sleep(0)  # yield so the task is scheduled
         except Exception:

@@ -585,6 +585,9 @@
           <button class="tab-btn" role="tab" data-tab="timeline" aria-selected="false">
             <i data-lucide="clock"></i> Timeline
           </button>
+          <button class="tab-btn" role="tab" data-tab="decisions" aria-selected="false">
+            <i data-lucide="clipboard-check"></i> Decisions
+          </button>
           <button class="tab-btn" role="tab" data-tab="investigate" aria-selected="false" id="tabBtnInvestigate">
             <i data-lucide="search"></i> Investigate
             <span class="badge" id="investigateBadge" style="display:none;">●</span>
@@ -664,7 +667,6 @@
             </div>
           </div>
         </div>
-      </div>
 
         <!-- ── TAB: Evidence ── -->
         <div class="tab-content" id="tabEvidence" role="tabpanel" aria-label="Evidence table">
@@ -758,6 +760,32 @@
                 <div style="flex:1;"></div>
               </div>
               <div id="timelineCanvas" style="min-height:300px;background:var(--bg-tertiary);border-radius:8px;border:1px solid var(--border);padding:16px;overflow-x:auto;"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── TAB: Decisions ── -->
+        <div class="tab-content" id="tabDecisions" role="tabpanel" aria-label="Decision log">
+          <div class="tab-scroll" style="padding:12px;">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+              <span class="text-xs text-muted" style="font-weight:600;text-transform:uppercase;letter-spacing:0.04em;">Decision Log</span>
+              <div style="flex:1;"></div>
+            </div>
+            <table class="ev-table" id="decisionTable" style="display:none;">
+              <thead>
+                <tr>
+                  <th>Decision</th>
+                  <th>Severity</th>
+                  <th>Confidence</th>
+                  <th>Rationale</th>
+                </tr>
+              </thead>
+              <tbody id="decisionBody"></tbody>
+            </table>
+            <div id="decisionEmpty" class="empty-state">
+              <i data-lucide="clipboard-check"></i>
+              <p class="empty-state__title">No decision recorded yet</p>
+              <p class="empty-state__hint">Run analysis to populate verdict, confidence, and triage decision context.</p>
             </div>
           </div>
         </div>
@@ -908,11 +936,22 @@
   <div class="cluster-drawer__backdrop" onclick="(function(){var d=document.getElementById('clusterDrawer');if(d){d.classList.remove('open');d.style.display='none';}})()"></div>
   <div class="cluster-drawer__panel">
     <div class="cluster-drawer__header">
-      <div>
+      <div style="flex:1;min-width:0;">
         <div id="clusterDrawerTitle" class="cluster-drawer__title">Cluster Detail</div>
         <div id="clusterDrawerMeta" class="cluster-drawer__meta"></div>
       </div>
-      <button class="cluster-drawer__close" onclick="(function(){var d=document.getElementById('clusterDrawer');if(d){d.classList.remove('open');d.style.display='none';}})()">✕</button>
+      <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
+        <button id="btnPopOutCluster" class="btn-secondary" style="font-size:11px;padding:3px 8px;"
+          title="Pop out cluster detail to full window"
+          onclick="(function(){
+            var cid=window.state && window.state.activeClusterId;
+            if(!cid)return;
+            var aid=window.state.assessmentId;
+            var url='/static/investigate.html?cluster='+encodeURIComponent(cid)+'&assessment='+encodeURIComponent(aid||'');
+            window.open(url,'cluster_'+cid,'width=900,height=900,resizable=yes,scrollbars=yes');
+          })()">&#8599; Pop out</button>
+        <button class="cluster-drawer__close" onclick="(function(){var d=document.getElementById('clusterDrawer');if(d){d.classList.remove('open');d.style.display='none';}})()">✕</button>
+      </div>
     </div>
 
     <!-- Model selector -->
