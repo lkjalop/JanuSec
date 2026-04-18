@@ -608,7 +608,7 @@
       $('pipelineBarFill').style.width = '20%';
       var payload = {
         rows: state.allRows.slice(0, 1000).map(function (r, idx) {
-          return { row_index: typeof r.row_index === 'number' ? r.row_index : idx, raw: r };
+          return { row_index: idx, raw: r };
         }),
         options: { auto_llm: false },
         org: localStorage.getItem('org') || 'local',
@@ -651,10 +651,10 @@
       state.assessment = assessment;
       $('pipelineBarFill').style.width = '70%';
 
-      // Step 3: Build enriched evidence rows from assessment
-      buildEvidenceFromAssessment(assessment);
-      // Step 3c: Store clusters in state.clusterMap and render cluster list
+      // Step 3c: Store clusters first so buildEvidenceFromAssessment can mark correlated rows
       storeClusters(assessment.correlation_clusters || []);
+      // Step 3: Build enriched evidence rows from assessment (uses clusterMap for correlation flags)
+      buildEvidenceFromAssessment(assessment);
 
       // Step 3b: Render graph + timeline visualizations  [B1 fix: graphCanvas not graphContent]
       $('graphEmpty').style.display = 'none';
@@ -761,14 +761,38 @@
   }
 
   function classifySeverity(row) {
-    // Priority-ordered heuristic check
+    // 1. Explicit severity string field
     var sev = (row.severity || row.Severity || row.riskLevel || row.risk_level || '').toString().toLowerCase();
     if (sev === 'critical' || sev === 'crit') return 'critical';
     if (sev === 'high') return 'high';
     if (sev === 'medium' || sev === 'med') return 'medium';
     if (sev === 'low' || sev === 'informational' || sev === 'info') return 'low';
 
-    // AWS GuardDuty: numeric severity
+    // 2. confirmed_malicious review state
+    var rs = (row.review_state || '').toLowerCase();
+    if (rs === 'confirmed_malicious') return 'critical';
+
+    // 3. threat_confidence (0-100 scale — NET fixture)
+    var tc = parseFloat(row.threat_confidence);
+    if (!isNaN(tc)) {
+      if (tc >= 90) return 'critical';
+      if (tc >= 70) return 'high';
+      if (tc >= 40) return 'medium';
+      return 'low';
+    }
+
+    // 4. risk_score: detect scale (OKTA uses 1-10, others 0-100)
+    var rs2 = parseFloat(row.risk_score);
+    if (!isNaN(rs2)) {
+      var scale = rs2 <= 10 ? 10 : 100;
+      var pct = (rs2 / scale) * 100;
+      if (pct >= 80) return 'critical';
+      if (pct >= 60) return 'high';
+      if (pct >= 30) return 'medium';
+      return 'low';
+    }
+
+    // 5. AWS GuardDuty / numeric severity (0-10)
     var numSev = parseFloat(row.Severity || row.severity);
     if (!isNaN(numSev)) {
       if (numSev >= 7) return 'critical';
@@ -777,7 +801,7 @@
       return 'low';
     }
 
-    // Azure IdP risk
+    // 6. Azure IdP riskLevel string
     if (row.riskLevel) {
       var rl = row.riskLevel.toLowerCase();
       if (rl === 'high') return 'critical';
@@ -785,27 +809,39 @@
       if (rl === 'low') return 'medium';
     }
 
-    // Keyword checks on common fields
+    // 7. Threat intel category keyword
+    var tic = (row.threat_intel_category || '').toLowerCase();
+    if (tic.includes('malware') || tic.includes('c2') || tic.includes('ransomware') || tic.includes('exfil')) return 'critical';
+    if (tic.includes('spray') || tic.includes('brute') || tic.includes('scan') || tic.includes('recon')) return 'high';
+
+    // 8. needs_investigation with no other signal = medium
+    if (rs === 'needs_investigation') return 'medium';
+
+    // 9. Keyword fallback
     var text = JSON.stringify(row).toLowerCase();
-    if (text.includes('exfil') || text.includes('ransomware') || text.includes('admin')) return 'high';
-    if (text.includes('suspicious') || text.includes('anomal')) return 'medium';
+    if (text.includes('exfil') || text.includes('ransomware') || text.includes('c2_beacon')) return 'critical';
+    if (text.includes('suspicious') || text.includes('anomal') || text.includes('spray')) return 'high';
 
     return 'low';
   }
 
   function detectCorrelation(row, idx) {
-    // Simple heuristic: if the row has cross-source entity overlap, mark as correlated
-    // In production, HopGraph provides real correlation. For now, check if entity appears in >1 source.
+    // Use backend cluster membership (set by storeClusters before buildEvidenceFromAssessment)
+    if (state.clusterMap && Object.keys(state.clusterMap).length) {
+      for (var cid in state.clusterMap) {
+        var refs = state.clusterMap[cid].row_refs || [];
+        if (refs.indexOf(idx) !== -1) return true;
+      }
+      return false;
+    }
+    // Fallback when no clusters: cross-source entity match heuristic
     var entity = extractPrimaryEntity(row);
     if (!entity || entity === '-') return false;
-    var sourceCount = 0;
     var seen = {};
+    var sourceCount = 0;
     state.allRows.forEach(function (r) {
       var src = r._source || '';
-      if (!seen[src] && extractPrimaryEntity(r) === entity) {
-        seen[src] = true;
-        sourceCount++;
-      }
+      if (!seen[src] && extractPrimaryEntity(r) === entity) { seen[src] = true; sourceCount++; }
     });
     return sourceCount > 1;
   }
