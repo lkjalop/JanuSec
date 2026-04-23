@@ -3212,23 +3212,26 @@ def _get_assessment_cached(assessment_id: str) -> dict | None:
                             return disk2
                         except Exception:
                             continue
-        # Final, more expensive fallback: inspect JSON contents for a matching assessment_id
-        try:
-            for root, _dirs, files in os.walk(base):
-                for f in files:
-                    if not f.endswith('.json'):
-                        continue
-                    path = os.path.join(root, f)
-                    try:
-                        with open(path, 'r', encoding='utf-8') as fh:
-                            cand = json.load(fh)
-                        if isinstance(cand, dict) and str(cand.get('assessment_id') or '') == str(assessment_id):
-                            REPORT_STORE[assessment_id] = cand
-                            return cand
-                    except Exception:
-                        continue
-        except Exception:
-            pass
+        # Final content scan is intentionally opt-in. On local demo machines
+        # data/assessments can contain large acceptance artifacts, and a 404
+        # lookup should not open every JSON file in that tree.
+        if str(os.getenv('ASSESSMENT_CONTENT_SCAN_FALLBACK') or '').lower() in {'1', 'true', 'yes'}:
+            try:
+                for root, _dirs, files in os.walk(base):
+                    for f in files:
+                        if not f.endswith('.json'):
+                            continue
+                        path = os.path.join(root, f)
+                        try:
+                            with open(path, 'r', encoding='utf-8') as fh:
+                                cand = json.load(fh)
+                            if isinstance(cand, dict) and str(cand.get('assessment_id') or '') == str(assessment_id):
+                                REPORT_STORE[assessment_id] = cand
+                                return cand
+                        except Exception:
+                            continue
+            except Exception:
+                pass
     except Exception:
         pass
     return None
@@ -4958,6 +4961,11 @@ async def get_assessment(assessment_id: str):
     resp.setdefault('rows_processed', resp.get('rows_processed') or max(len(llm_rows), len(raw_rows)))
 
     session_id = resp.get('session_id')
+    # Prefer in-memory clusters/rows if disk has incomplete/empty data.
+    if not resp.get('correlation_clusters'):
+        resp['correlation_clusters'] = in_mem.get('correlation_clusters') or persisted.get('correlation_clusters') or []
+    if not resp.get('evidence_rows'):
+        resp['evidence_rows'] = in_mem.get('evidence_rows') or persisted.get('evidence_rows') or []
     if session_id:
         try:
             worker_state = DEFAULT_WORKER.status(session_id)
@@ -4978,7 +4986,7 @@ async def get_assessment(assessment_id: str):
             if worker_state.get('error'):
                 resp['error'] = worker_state.get('error')
 
-    if not resp.get('persona_reports') or not resp.get('correlation_clusters') or not resp.get('evidence_rows'):
+    if not resp.get('evidence_rows') or not resp.get('correlation_clusters'):
         try:
             # Run CPU-bound hydration off the event loop to avoid blocking uvicorn
             resp = await asyncio.to_thread(_hydrate_assessment_semantics, resp)
@@ -4989,6 +4997,34 @@ async def get_assessment(assessment_id: str):
     except Exception:
         pass
 
+
+    preview_rows: list = []
+    preview_seen: set = set()
+    for cluster in (resp.get('correlation_clusters') or []):
+        for row in (cluster.get('evidence_preview') or []):
+            if not isinstance(row, dict):
+                continue
+            idx = row.get('row_index')
+            if idx is not None and idx in preview_seen:
+                continue
+            if idx is not None:
+                preview_seen.add(idx)
+            preview_rows.append(row)
+
+    try:
+        from src.core.tier1_prefill.prefill_engine import _ensure_v2_prefill_fields
+        rows_for_runtime = preview_rows or resp.get('evidence_rows') or resp.get('rows') or []
+        for cluster in (resp.get('correlation_clusters') or []):
+            prefill = cluster.get('tier1_prefill') if isinstance(cluster, dict) else None
+            if isinstance(prefill, dict) and prefill.get('incident_name'):
+                _ensure_v2_prefill_fields(prefill, cluster, _cluster_rows(cluster, rows_for_runtime))
+    except Exception:
+        pass
+
+    if preview_rows:
+        resp['normalized_rows'] = preview_rows
+    elif resp.get('evidence_rows') and not resp.get('normalized_rows'):
+        resp['normalized_rows'] = resp['evidence_rows']
     REPORT_STORE[assessment_id] = {**in_mem, **resp}
     return JSONResponse(resp)
 
@@ -5795,7 +5831,34 @@ def _cluster_rows(cluster: dict | None, rows: list[dict]) -> list[dict]:
             idx = 0
         if idx in refs:
             out.append(row)
-    return out
+    preview = [
+        row for row in (cluster.get('evidence_preview') or [])
+        if isinstance(row, dict)
+    ]
+    if out:
+        def _idx(row: dict) -> int | None:
+            for key in ('row_index', 'row_number'):
+                try:
+                    value = row.get(key)
+                    if value is not None:
+                        return int(value)
+                except Exception:
+                    continue
+            return None
+
+        if preview and len({idx for row in out for idx in [_idx(row)] if idx is not None}) < min(len(refs), len(preview)):
+            seen = set()
+            merged = []
+            for row in out + preview:
+                idx = _idx(row)
+                if idx is not None and idx in seen:
+                    continue
+                if idx is not None:
+                    seen.add(idx)
+                merged.append(row)
+            return merged
+        return out
+    return preview
 
 
 def _cluster_review_entries(assessment: dict, cluster: dict | None, cluster_rows: list[dict]) -> list[dict]:
