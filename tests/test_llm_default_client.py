@@ -28,3 +28,25 @@ def test_default_client_provider_overrides(monkeypatch):
     resp = client.generate('Provider override prompt', max_tokens=200, overrides=overrides)
     assert isinstance(resp, dict)
     assert 'text' in resp
+
+
+def test_ollama_generate_uses_per_request_model(monkeypatch):
+    monkeypatch.setenv('LLM_MOCK', '0')
+    client = LLMClient()
+    client.mock = False
+    client.provider = 'ollama'
+    client.ollama_enabled = True
+    client.ollama_model = 'configured-default'
+    client.interactive_model = None
+
+    seen = {}
+
+    def fake_ollama(prompt, max_tokens, model_override=None):
+        seen['model_override'] = model_override
+        return {'text': 'ok', 'model': model_override, 'meta': {'provider': 'ollama'}}
+
+    monkeypatch.setattr(client, '_ollama_generate', fake_ollama)
+    out = client.generate('hello', 8, model='qwen3:14b')
+
+    assert out['model'] == 'qwen3:14b'
+    assert seen['model_override'] == 'qwen3:14b'

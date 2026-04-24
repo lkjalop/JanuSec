@@ -95,6 +95,150 @@ def _safe_text(v: Any) -> str:
     return str(v)
 
 
+def _display_verdict_label(verdict: Any) -> str:
+    raw = _safe_text(verdict).strip().upper()
+    if raw in {'VALIDATED_BREACH', 'CONFIRMED_INTRUSION', 'CONFIRMED_BREACH'}:
+        return 'CONFIRMED BREACH'
+    if raw == 'NO_VALIDATED_BREACH':
+        return 'NO CONFIRMED BREACH'
+    return raw.replace('_', ' ') if raw else 'UNCERTAIN'
+
+
+_DREAD_ORDER = ('damage', 'reproducibility', 'exploitability', 'affected_users', 'discoverability')
+_ROW_REF_RE = re.compile(r'\brows?\s+([0-9][0-9,\s+]*(?:\+ ?\d+ more)?)', re.I)
+
+
+def _extract_row_refs_from_text(text: str, limit: int = 24) -> list[int]:
+    refs: list[int] = []
+    seen: set[int] = set()
+    for match in _ROW_REF_RE.finditer(text or ''):
+        for n in re.findall(r'\d+', match.group(1) or ''):
+            try:
+                value = int(n)
+            except Exception:
+                continue
+            if value in seen:
+                continue
+            seen.add(value)
+            refs.append(value)
+            if len(refs) >= limit:
+                return refs
+    return refs
+
+
+def _lead_dread(cluster: dict) -> tuple[dict, dict, bool]:
+    prefill = cluster.get('tier1_prefill') or {}
+    dn = prefill.get('dread_narrative') or {}
+    frags = dn.get('fragments') or {}
+    has_dread = any(_safe_text(frags.get(k)).strip() for k in _DREAD_ORDER) or bool(_safe_text(dn.get('rendered')).strip())
+    return dn, frags, has_dread
+
+
+def _dread_summary_for_cluster(cluster: dict, assessment: dict, *, total_rows: int, total_sources: int, ruled_out_rows: int = 0) -> Optional[dict]:
+    dn, frags, has_dread = _lead_dread(cluster)
+    if not has_dread:
+        return None
+
+    verdict = str(cluster.get('verdict') or cluster.get('final_verdict') or '').upper()
+    title = _cluster_name(cluster)
+    rows = len(cluster.get('row_refs') or [])
+    rendered = _safe_text(dn.get('rendered')).strip()
+    sabsa = _safe_text(dn.get('sabsa_coda_draft')).strip()
+    body_parts: list[str] = []
+    provenance = 'dread_llm_rendered' if rendered else 'dread_deterministic_fragments'
+    render_warning = ''
+
+    if rendered:
+        body_parts.append(rendered)
+    else:
+        for key in _DREAD_ORDER:
+            txt = _safe_text(frags.get(key)).strip()
+            if txt:
+                body_parts.append(txt)
+        if sabsa:
+            body_parts.append(sabsa)
+        render_warning = 'LLM render unavailable; deterministic evidence summary shown.'
+
+    if ruled_out_rows:
+        body_parts.append(
+            f'{ruled_out_rows:,} rows were separately ruled out as authorized security test or benign context; they are excluded from the confirmed breach scope.'
+        )
+
+    joined = ' '.join(body_parts).strip()
+    refs = _extract_row_refs_from_text(joined)
+    why = _why_confirmed_for_cluster(cluster)
+    headline_prefix = 'Likely breach - human review required' if verdict == 'LIKELY_BREACH' else 'Confirmed breach'
+    return {
+        'headline': f'{headline_prefix}: {title}',
+        'subline': f'{rows} evidence rows across {total_sources or 1} source{"s" if (total_sources or 1) != 1 else ""} - DREAD/SABSA evidence narrative',
+        'executive_summary': joined,
+        'deterministic': '\n'.join([f'{headline_prefix}: {title}', joined]),
+        'narrative_provenance': provenance,
+        'narrative_source': 'DREAD+SABSA',
+        'render_warning': render_warning,
+        'evidence_refs': refs,
+        'dread_fragments': frags,
+        'sabsa_attributes': dn.get('sabsa_attributes') or [],
+        'sabsa_coda_draft': sabsa,
+        'why_confirmed': why,
+        'scope': {
+            'breach_rows': rows,
+            'ruled_out_rows': ruled_out_rows,
+            'background_rows': max(0, int(total_rows or 0) - rows - ruled_out_rows),
+        },
+    }
+
+
+def _why_confirmed_for_cluster(cluster: dict) -> list[dict]:
+    prefill = cluster.get('tier1_prefill') or {}
+    dn, frags, _ = _lead_dread(cluster)
+    text = ' '.join(_safe_text(frags.get(k)) for k in _DREAD_ORDER).lower()
+    impact = _safe_text(prefill.get('observed_impact')).lower()
+    full = text + ' ' + impact + ' ' + _safe_text(prefill.get('verdict_reasoning')).lower()
+    gates = [
+        ('Data movement', bool(re.search(r'exfil|copy into|unload|rclone|cloud sync|transferred data|backblaze|mega', full))),
+        ('Repeated activity', bool(re.search(r'recurred|distinct days|same command|reproduc', full))),
+        ('Affected users', bool(re.search(r'account|user|service_account|privileged|affected users', full))),
+        ('Control gap', bool(re.search(r'no dlp|no pam|control gap|unconstrained|no inspection|no gate', full))),
+        ('Crown jewel', bool(re.search(r'crown jewel|sfl_data|finance_wh|ndb|cps234', full))),
+        ('Multi-source correlation', bool(re.search(r'cross-source|source types|multiple sources|correlation', full))),
+    ]
+    return [{'gate': name, 'confirmed': confirmed} for name, confirmed in gates]
+
+
+def _cached_summary_is_stale(cached: dict, lead: dict) -> bool:
+    if not cached:
+        return False
+    _, _, has_dread = _lead_dread(lead)
+    if not has_dread:
+        return False
+    source = _safe_text(cached.get('narrative_provenance') or cached.get('narrative_source')).lower()
+    if source.startswith('dread') or 'dread' in source:
+        return False
+    summary_text = _safe_text(cached.get('executive_summary') or cached.get('headline')).lower()
+    return bool(summary_text) and ('validated breach:' in summary_text or 'observed attacker action' in summary_text or 'highest finding:' in summary_text)
+
+
+def _row_geo_asn(row: dict) -> dict:
+    geo = row.get('_geo') if isinstance(row.get('_geo'), dict) else {}
+    country = (
+        row.get('geo_dst_country') or row.get('dst_country') or row.get('destination_country')
+        or row.get('country') or row.get('geo_country') or row.get('geo_src_country')
+        or row.get('src_country') or geo.get('dst_country') or geo.get('country') or geo.get('src_country') or ''
+    )
+    asn = (
+        row.get('geo_dst_asn') or row.get('destination_asn') or row.get('dst_asn')
+        or row.get('asn') or row.get('source_asn') or row.get('src_asn') or row.get('geo_src_asn')
+        or geo.get('dst_asn') or geo.get('asn') or geo.get('src_asn') or ''
+    )
+    org = (
+        row.get('geo_dst_org') or row.get('destination_as_org') or row.get('as_org')
+        or row.get('asn_org') or row.get('source_as_org') or row.get('src_as_org')
+        or geo.get('dst_org') or geo.get('as_org') or geo.get('src_org') or ''
+    )
+    return {'country': _safe_text(country), 'asn': _safe_text(asn), 'asn_org': _safe_text(org)}
+
+
 _VERDICT_RANK = {
     'VALIDATED_BREACH': 60,
     'CONFIRMED_INTRUSION': 50,
@@ -879,7 +1023,7 @@ _MITRE_PHASE: dict[str, str] = {
 _PHASE_ORDER = [
     'Reconnaissance', 'Resource Development', 'Initial Access', 'Execution',
     'Persistence', 'Privilege Escalation', 'Defense Evasion', 'Credential Access',
-    'Discovery', 'Lateral Movement', 'Collection', 'Command & Control',
+    'Discovery', 'Lateral Movement', 'Collection', 'Data Staging', 'Command & Control',
     'Exfiltration', 'Impact',
 ]
 
@@ -897,6 +1041,27 @@ def tag_kill_chain_phase(row: dict) -> str:
             base = t_str.split('.')[0]
             if base in _MITRE_PHASE:
                 return _MITRE_PHASE[base]
+    text = ' '.join(
+        _safe_text(row.get(k))
+        for k in (
+            'description', 'activityDisplayName', 'operationName', 'analyst_notes',
+            'command_line', 'process_command_line', 'process_name', 'event_simpleName',
+            'database_name', 'warehouse_name', 'query_text', 'object_name', 'dst_ip',
+            'destination_ip', 'dns_query', 'url', 'event_type'
+        )
+    ).lower()
+    if any(token in text for token in ('copy into', 'snowflake', 'unload', 'stage', 'sfl_data', 'finance_wh')):
+        return 'Data Staging'
+    if any(token in text for token in ('rclone', 'backblaze', 'mega.nz', 'mega ', 'cloud sync', 'exfil', 'bytes out', 'outbound transfer')):
+        return 'Exfiltration'
+    if any(token in text for token in ('c2', 'command-and-control', 'command and control', 'beacon', 'dns beacon', 'udp ', 'ja3')):
+        return 'Command & Control'
+    if any(token in text for token in ('rundll32', 'comsvcs', 'minidump', 'lsass', 'credential', 'token theft')):
+        return 'Credential Access'
+    if any(token in text for token in ('processrollup', 'process rollup', 'powershell', 'cmd.exe', 'process started', 'execute')):
+        return 'Execution'
+    if any(token in text for token in ('collect', 'archive', 'compress', 'staging', 'file share', 'it-scripts')):
+        return 'Collection'
     return 'Unknown'
 
 
@@ -1006,14 +1171,7 @@ async def get_executive_summary(
     if not assessment:
         raise HTTPException(status_code=404, detail='assessment_not_found')
 
-    # Return cached unless regenerate=True
     cached = assessment.get('exec_summary_llm')
-    if cached and not body.regenerate:
-        return JSONResponse({
-            'assessment_id': assessment_id,
-            **cached,
-            'from_cache': True,
-        })
 
     clusters = assessment.get('correlation_clusters') or []
     # Prefer the DuckDB-backed row count (Phase 2 ingest) over the sampled in-memory rows
@@ -1042,6 +1200,12 @@ async def get_executive_summary(
 
     sorted_clusters = sorted(clusters, key=_cluster_rank, reverse=True)
     lead = sorted_clusters[0] if sorted_clusters else {}
+    if cached and not body.regenerate and not _cached_summary_is_stale(cached, lead):
+        return JSONResponse({
+            'assessment_id': assessment_id,
+            **cached,
+            'from_cache': True,
+        })
     lead_verdict = str(lead.get('verdict') or lead.get('final_verdict') or 'UNCERTAIN').upper()
     lead_name = _cluster_name(lead) if lead else 'No lead incident'
     lead_subtitle = _cluster_subtitle(lead) if lead else ''
@@ -1108,6 +1272,11 @@ async def get_executive_summary(
         f"{count} {label}"
         for label, count in sorted(verdict_counts.items(), key=lambda x: (-x[1], x[0]))
     ) or '0 findings'
+    ruled_out_rows = sum(
+        len(c.get('row_refs') or [])
+        for c in clusters
+        if _verdict_bucket(str(c.get('verdict') or c.get('final_verdict') or '').upper()) == 'benign'
+    )
     # Geo addendum for deterministic text
     geo_travel = lead_geo.get('travel_verdict', '')
     geo_countries = lead_geo.get('geo_countries') or {}
@@ -1152,8 +1321,20 @@ async def get_executive_summary(
             + (f". A direct flight takes approximately {flight}h — consistent with business travel." if flight else '. Geographically plausible — verify with HR or travel calendar.')
         )
 
-    if lead and lead_verdict == 'VALIDATED_BREACH':
-        headline = f"Validated breach: {lead_name}"
+    dread_summary = _dread_summary_for_cluster(
+        lead,
+        assessment,
+        total_rows=int(total_rows or 0),
+        total_sources=int(total_sources or 0),
+        ruled_out_rows=ruled_out_rows,
+    ) if lead else None
+
+    if dread_summary:
+        headline = dread_summary['headline']
+        subline = dread_summary['subline']
+        executive_summary = dread_summary['executive_summary']
+    elif lead and lead_verdict in {'VALIDATED_BREACH', 'CONFIRMED_INTRUSION', 'CONFIRMED_BREACH'}:
+        headline = f"Confirmed breach: {lead_name}"
         subline = (
             f"{lead_rows} evidence rows"
             + (f" across {total_sources} sources" if total_sources else '')
@@ -1182,14 +1363,14 @@ async def get_executive_summary(
             + geo_addendum
         )
     else:
-        headline = 'No validated breach found'
+        headline = 'No confirmed breach found'
         subline = f'No correlated incident clusters were found in {total_rows} rows.'
         executive_summary = subline
     deterministic = '\n'.join([headline, subline, executive_summary])
 
     # Attempt LLM narrative for the executive_summary body (non-blocking; falls back to deterministic)
     llm_color: Optional[str] = None
-    if lead and body.regenerate:
+    if lead and body.regenerate and not dread_summary:
         try:
             llm = _get_llm(body.model)
             lead_prefill = lead.get('tier1_prefill') or {}
@@ -1314,7 +1495,14 @@ async def get_executive_summary(
                 "accounts or IPs if provided, (2) the business impact. "
                 "No bullet points, no jargon, no repeated incident name, do not start with 'The'."
             )
-            resp = await asyncio.to_thread(llm.generate, prompt, 220)
+            resp = await asyncio.to_thread(
+                llm.generate,
+                prompt,
+                220,
+                None,
+                {'ollama_model': body.model},
+                body.model,
+            )
             llm_text = (resp.get('text') or '').strip()
             if llm_text and len(llm_text) > 30 and not llm_text.startswith('{'):
                 executive_summary = llm_text
@@ -1339,6 +1527,15 @@ async def get_executive_summary(
         'model_used': body.model,
         'generated_at': int(time.time()),
         'from_cache': False,
+        'narrative_provenance': (dread_summary or {}).get('narrative_provenance') or 'legacy_deterministic_fallback',
+        'narrative_source': (dread_summary or {}).get('narrative_source') or 'legacy',
+        'render_warning': (dread_summary or {}).get('render_warning') or '',
+        'evidence_refs': (dread_summary or {}).get('evidence_refs') or [],
+        'dread_fragments': (dread_summary or {}).get('dread_fragments') or {},
+        'sabsa_attributes': (dread_summary or {}).get('sabsa_attributes') or [],
+        'sabsa_coda_draft': (dread_summary or {}).get('sabsa_coda_draft') or '',
+        'why_confirmed': (dread_summary or {}).get('why_confirmed') or [],
+        'scope': (dread_summary or {}).get('scope') or {},
         # Geo signals surfaced to the UI
         'geo_travel_verdict': lead_geo.get('travel_verdict', ''),
         'geo_countries': lead_geo.get('geo_countries', {}),
@@ -1573,6 +1770,7 @@ async def get_cluster_timeline(
             if v is not None:
                 ts_val = v
                 break
+        geo_asn = _row_geo_asn(r)
         tagged.append({
             'row_index': r.get('row_index') if 'row_index' in r else r.get('row_number'),
             'severity': r.get('severity') or r.get('risk_level') or 'info',
@@ -1585,8 +1783,9 @@ async def get_cluster_timeline(
             'src_ip': r.get('src_ip') or r.get('source_ip') or '',
             'hostname': r.get('hostname') or r.get('host') or '',
             'timestamp_raw': ts_val,
-            'country': str(r.get('country') or r.get('geo_country') or r.get('src_country') or ''),
-            'asn': str(r.get('asn') or r.get('src_asn') or r.get('as_org') or ''),
+            'country': geo_asn['country'],
+            'asn': geo_asn['asn'],
+            'asn_org': geo_asn['asn_org'],
         })
 
     # Sort: rows with timestamps first (ascending), then un-timestamped

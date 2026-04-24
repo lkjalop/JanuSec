@@ -412,7 +412,7 @@ class LLMClient(BaseLLMClient):
             self.ollama_reachable = False
             return False
 
-    def _ollama_generate(self, prompt: str, max_tokens: Optional[int]) -> Dict[str, Any]:
+    def _ollama_generate(self, prompt: str, max_tokens: Optional[int], model_override: Optional[str] = None) -> Dict[str, Any]:
         if not self._ollama_session:
             raise RuntimeError('ollama_session_unavailable')
         # Disable thinking mode for qwen3/deepseek-r1 when prompt starts with /no_think.
@@ -420,8 +420,9 @@ class LLMClient(BaseLLMClient):
         options: dict = {'num_predict': max_tokens or self.max_tokens}
         if prompt.lstrip().startswith('/no_think'):
             options['think'] = False
+        selected_model = model_override or self.ollama_model
         payload = {
-            'model': self.ollama_model,
+            'model': selected_model,
             'prompt': prompt,
             'stream': False,
             'options': options,
@@ -432,9 +433,10 @@ class LLMClient(BaseLLMClient):
         text = data.get('response') or data.get('output') or ''
         return {
             'text': text,
-            'model': data.get('model') or self.ollama_model,
+            'model': data.get('model') or selected_model,
             'meta': {
                 'provider': 'ollama',
+                'requested_model': selected_model,
                 'eval_count': data.get('eval_count'),
                 'total_duration_ms': data.get('total_duration'),
             },
@@ -601,6 +603,18 @@ class LLMClient(BaseLLMClient):
         if tenant_id is None and kwargs and isinstance(kwargs, dict):
             tenant_id = kwargs.get('tenant_id')
         provider_hint = kwargs.get('provider') if kwargs and isinstance(kwargs, dict) else None
+        requested_ollama_model = (
+            overrides_dict.get('ollama_model')
+            or overrides_dict.get('ollama_model_name')
+            or (
+                model
+                if isinstance(model, str)
+                and model
+                and model != 'gpt-like'
+                and not model.lower().startswith('gpt')
+                else None
+            )
+        )
 
         # Circuit-breaker: if tripped, short-circuit
         if tenant_id:
@@ -683,13 +697,13 @@ class LLMClient(BaseLLMClient):
                         prompt_len = len(prompt.split())
                     except Exception:
                         prompt_len = 0
-                    if self.interactive_model and (prompt_len <= int(self.interactive_prompt_token_threshold)) and not overrides_dict.get('ollama_model') and not overrides_dict.get('ollama_host'):
+                    if self.interactive_model and (prompt_len <= int(self.interactive_prompt_token_threshold)) and not requested_ollama_model and not overrides_dict.get('ollama_host'):
                         try:
                             resp = self._ollama_generate_with_host(self.ollama_host, self.interactive_model, prompt, max_tokens or self.max_tokens)
                         except Exception:
                             # fallback to default model if interactive model call fails
                             try:
-                                resp = self._ollama_generate(prompt, max_tokens or self.max_tokens)
+                                resp = self._ollama_generate(prompt, max_tokens or self.max_tokens, requested_ollama_model)
                             except Exception as exc_ollama:
                                 # Log and mark last exception, then attempt a graceful fallback to deterministic client
                                 logger.exception('Ollama generate failed, will attempt deterministic fallback: %s', exc_ollama)
@@ -703,7 +717,7 @@ class LLMClient(BaseLLMClient):
                                     # if fallback also fails, re-raise the original Ollama exception to be handled by outer retry
                                     raise
                     else:
-                        resp = self._ollama_generate(prompt, max_tokens or self.max_tokens)
+                        resp = self._ollama_generate(prompt, max_tokens or self.max_tokens, requested_ollama_model)
                     elapsed = time.time() - start
                     meta = resp.get('meta') or {}
                     meta['elapsed_s'] = elapsed
