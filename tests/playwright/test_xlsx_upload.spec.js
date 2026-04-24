@@ -18,7 +18,8 @@ test('xlsx upload smoke (no console errors)', async ({ page }) => {
   const consoleErrors = [];
   page.on('console', msg => { if (msg.type() === 'error') consoleErrors.push(msg.text()); });
 
-  await page.goto('http://localhost:8080/console');
+  const BASE = process.env.PLAYWRIGHT_BASE_URL || 'http://127.0.0.1:8000';
+  await page.goto(BASE + '/console');
   // Upload zone may remain hidden; try to open it and force the file input visible.
   await page.evaluate(() => {
     try{ if(typeof window.showUploadZone==='function') window.showUploadZone(); }catch(_){ }

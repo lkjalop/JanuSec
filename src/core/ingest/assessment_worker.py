@@ -30,6 +30,11 @@ logger = logging.getLogger(__name__)
 # ── Shared queue — ingest_endpoints posts here, worker consumes ────────────────
 _INGEST_QUEUE: asyncio.Queue = asyncio.Queue()
 
+# In-memory set of assessment_ids that are currently queued or running.
+# Used to make enqueue_job() idempotent so that _recover_queued_jobs() and
+# the upload endpoint cannot enqueue the same job twice.
+_ACTIVE_JOB_IDS: set[str] = set()
+
 # ── Triage threshold — rows below this score are noise and excluded from
 #    clustering.  They remain in DuckDB and the final evidence_rows list but
 #    are not fed to _build_correlation_clusters.  This is critical addition #1.
@@ -154,15 +159,42 @@ async def run_assessment_pipeline(
 
         # ── Stage 1: parse and store all rows ────────────────────────────────
         total_rows = 0
+        quarantined_files: list[dict] = []
+        context_files: list[dict] = []
+        telemetry_files: list[str] = []
+
+        from src.core.ingest.file_parser import parse_file
+        from src.core.ingest.input_classifier import LANE_TELEMETRY_EVIDENCE, LANE_EVALUATION_ANSWER_KEY
+
         for file_idx, (path, filename) in enumerate(file_paths):
             file_pct = int(30 * (file_idx / max(len(file_paths), 1)))
             _progress("parsing", file_pct, f"Parsing {filename}")
 
+            # Classify the file lane before parsing so rows can carry provenance.
+            file_lane = LANE_TELEMETRY_EVIDENCE
+            if filename.lower().endswith(".xlsx"):
+                try:
+                    from src.core.ingest.input_classifier import classify_xlsx_path
+                    lane_result = classify_xlsx_path(path, filename=filename)
+                    file_lane = lane_result.get("lane", LANE_TELEMETRY_EVIDENCE)
+                    if file_lane == LANE_EVALUATION_ANSWER_KEY:
+                        quarantined_files.append({"filename": filename, "lane": file_lane, "reason": lane_result.get("reason", "")})
+                        logger.info("assessment %s: quarantined %s as %s", assessment_id, filename, file_lane)
+                        continue
+                    if file_lane == "business_context":
+                        context_files.append({"filename": filename, "lane": file_lane})
+                except Exception as exc:
+                    logger.warning("lane classification failed for %s: %s", filename, exc)
+
+            if file_lane == LANE_TELEMETRY_EVIDENCE:
+                telemetry_files.append(filename)
+
             batch: list[dict] = []
             try:
-                from src.core.ingest.file_parser import parse_file
                 for row in parse_file(path, filename=filename):
                     norm = _normalize_ingest_row(row, total_rows)
+                    # Tag every row with its evidence lane for downstream policy enforcement.
+                    norm.setdefault("_lane", file_lane)
                     batch.append(norm)
                     total_rows += 1
                     if len(batch) >= PARSE_BATCH_SIZE:
@@ -229,6 +261,13 @@ async def run_assessment_pipeline(
                 "source_counts": source_counts,
             },
             "options": {"auto_llm": False, "mode": "offline_workbook"},
+            "evidence_policy": {
+                "policy_version": "1.0",
+                "allowed_finding_lanes": ["telemetry_evidence"],
+                "telemetry_inputs": telemetry_files,
+                "context_inputs": [f["filename"] for f in context_files],
+                "quarantined_inputs": quarantined_files,
+            },
         }
 
         raw_clusters: list[dict[str, Any]] = []
@@ -284,25 +323,16 @@ async def run_assessment_pipeline(
         try:
             from src.core.ingest.threat_case_builder import build_threat_cases
             raw_clusters = list(assessment.get("correlation_clusters") or clusters or [])
-            threat_cases = build_threat_cases(raw_clusters, filtered_rows)
-            assessment["raw_correlation_clusters"] = [
-                {
-                    "cluster_id": c.get("cluster_id"),
-                    "row_count": c.get("row_count") or len(c.get("row_refs") or []),
-                    "verdict": c.get("verdict") or c.get("final_verdict"),
-                    "severity": c.get("severity"),
-                    "confidence": c.get("confidence"),
-                    "lead_description": c.get("lead_description"),
-                }
-                for c in raw_clusters[:200]
-            ]
-            assessment["threat_cases"] = threat_cases
-            assessment["correlation_clusters"] = threat_cases
-            clusters = threat_cases
-            _store.update_job(assessment_id, cluster_count=len(threat_cases))
-            _progress("clustering", 70, f"Collapsed into {len(threat_cases)} threat cases")
+            layers = build_threat_cases(raw_clusters, filtered_rows)
+            assessment["raw_correlation_clusters"] = layers.get("raw_correlation_clusters") or raw_clusters
+            assessment["analysis_clusters"] = layers.get("analysis_clusters") or raw_clusters
+            assessment["threat_cases"] = layers.get("threat_cases") or []
+            assessment["correlation_clusters"] = assessment["analysis_clusters"]
+            clusters = assessment["analysis_clusters"]
+            _store.update_job(assessment_id, cluster_count=len(clusters))
+            _progress("clustering", 70, f"Classified {len(clusters)} analysis clusters")
         except Exception as exc:
-            logger.warning("threat case collapse failed for %s: %s", assessment_id, exc)
+            logger.warning("threat case layering failed for %s: %s", assessment_id, exc)
             clusters = assessment.get("correlation_clusters") or clusters
 
         if clusters:
@@ -394,6 +424,7 @@ async def _worker_loop() -> None:
     """Consume jobs from _INGEST_QUEUE indefinitely."""
     logger.info("ingest_worker: started, waiting for jobs")
     while True:
+        assessment_id = None
         try:
             job = await _INGEST_QUEUE.get()
             if job is None:  # sentinel — shutdown signal
@@ -416,6 +447,10 @@ async def _worker_loop() -> None:
         except Exception:
             logger.exception("ingest_worker: unhandled error in job loop")
         finally:
+            # Remove from active set so the same assessment_id can be re-queued
+            # if explicitly reprocessed (e.g. after a failure and recovery).
+            if assessment_id:
+                _ACTIVE_JOB_IDS.discard(assessment_id)
             try:
                 _INGEST_QUEUE.task_done()
             except Exception:
@@ -485,7 +520,11 @@ def enqueue_job(
     *,
     progress_fn: ProgressFn = _noop_progress,
 ) -> None:
-    """Post a job to the ingest queue from a sync or async context."""
+    """Post a job to the ingest queue — idempotent for the same assessment_id."""
+    if assessment_id in _ACTIVE_JOB_IDS:
+        logger.debug("ingest_worker: job %s already queued/running — skipping duplicate enqueue", assessment_id)
+        return
+    _ACTIVE_JOB_IDS.add(assessment_id)
     job = {
         "assessment_id": assessment_id,
         "org": org,
@@ -495,4 +534,5 @@ def enqueue_job(
     try:
         _INGEST_QUEUE.put_nowait(job)
     except asyncio.QueueFull:
+        _ACTIVE_JOB_IDS.discard(assessment_id)
         logger.error("ingest queue full — job %s dropped", assessment_id)

@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Any, Callable, Dict, Iterable, Optional
+from typing import Any, Callable, Dict, Iterable, List, Optional
 
 from .base import AzureConnectorConfig, load_checkpoint, save_checkpoint, azure_envelope
 from .normalizer import normalize_entra_audit, normalize_entra_signin
@@ -29,11 +30,22 @@ class EntraIDConnector:
         self.cfg = cfg
         self.name = 'entra_id'
         self.ck = load_checkpoint(self.name, cfg)
-        # request_json is kept for test injection.
-        # In production, the real MSAL + Graph API path is used when msal is
-        # installed and client_id / client_secret / tenant_id are configured.
         self._request_json = request_json
         self._msal_app: Optional[Any] = None
+        if not _MSAL_AVAILABLE and (cfg.client_id or cfg.client_secret):
+            logger.warning(
+                'EntraIDConnector: msal not installed but Azure credentials are configured. '
+                'Auth will fail at first use. pip install msal'
+            )
+
+    @staticmethod
+    def check_ready(cfg: Optional[AzureConnectorConfig] = None) -> tuple[bool, str]:
+        """Return (ok, reason) — call at startup to surface missing dependencies."""
+        if not _MSAL_AVAILABLE:
+            return False, 'msal not installed; pip install msal'
+        if cfg is not None and not (cfg.client_id and cfg.client_secret and cfg.tenant_id):
+            return False, 'client_id, client_secret, and tenant_id are required'
+        return True, 'ok'
 
     # ------------------------------------------------------------------
     # Token acquisition
@@ -126,6 +138,20 @@ class EntraIDConnector:
     # Public fetch interface
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _streaming_active() -> bool:
+        return os.environ.get('JANUSEC_STREAMING_MODE', '').lower() in ('1', 'true', 'yes')
+
+    @staticmethod
+    def _stream_emit(rows: List[Dict[str, Any]], source: str) -> None:
+        if not rows:
+            return
+        try:
+            from src.connectors.stream_emitter import emit_to_stream_sync
+            emit_to_stream_sync(rows, source=source)
+        except Exception as exc:
+            logger.warning('EntraID stream emit (%s) failed: %s', source, exc)
+
     def fetch_signins(self, since_ts: Any = None) -> Iterable[Dict[str, Any]]:
         since_ts = since_ts or self.ck.get('signins_last_ts')
         if self._use_real_graph():
@@ -141,6 +167,7 @@ class EntraIDConnector:
             return
 
         newest = self.ck.get('signins_last_ts')
+        collected: List[Dict[str, Any]] = []
         for row in (payload.get('value') or []):
             normalized = normalize_entra_signin(row, self.cfg.tenant_id)
             env = azure_envelope(
@@ -151,10 +178,13 @@ class EntraIDConnector:
             )
             env.update(normalized)
             newest = normalized.get('ts') or newest
+            collected.append(env)
             yield env
         if newest:
             self.ck['signins_last_ts'] = newest
             save_checkpoint(self.name, self.cfg, self.ck)
+        if self._streaming_active():
+            self._stream_emit(collected, 'azure_signin')
 
     def fetch_audits(self, since_ts: Any = None) -> Iterable[Dict[str, Any]]:
         since_ts = since_ts or self.ck.get('audits_last_ts')
@@ -171,6 +201,7 @@ class EntraIDConnector:
             return
 
         newest = self.ck.get('audits_last_ts')
+        collected: List[Dict[str, Any]] = []
         for row in (payload.get('value') or []):
             normalized = normalize_entra_audit(row, self.cfg.tenant_id)
             env = azure_envelope(
@@ -181,7 +212,10 @@ class EntraIDConnector:
             )
             env.update(normalized)
             newest = normalized.get('ts') or newest
+            collected.append(env)
             yield env
         if newest:
             self.ck['audits_last_ts'] = newest
             save_checkpoint(self.name, self.cfg, self.ck)
+        if self._streaming_active():
+            self._stream_emit(collected, 'azure_entra_audit')

@@ -22,7 +22,7 @@ export default defineConfig({
   // This lets CI or local runs point tests at a deterministic static shim.
   ...(process.env.PLAYWRIGHT_BASE_URL ? {} : {
     webServer: {
-      command: 'python -m uvicorn src.api.app:app --host 0.0.0.0 --port 8080',
+      command: 'C:\\AI\\janusec\\.venv\\Scripts\\python.exe -m uvicorn src.api.app:app --host 0.0.0.0 --port 8080',
       port: 8080,
       timeout: 120_000,
       reuseExistingServer: !process.env.CI,
@@ -40,6 +40,11 @@ export default defineConfig({
         RATE_LIMIT_ENABLED: '0',
         API_KEYS_JSON: '[{"key":"janusec-playwright-local","scopes":["*"]}]',
         PLAYWRIGHT_API_KEY: 'janusec-playwright-local',
+        DEBUG_DIAGNOSTICS: '1',
+        JANUSEC_DEV_MODE: '1',
+        JANUSEC_INGEST_DB: 'data/ingest/pw_santos_webserver.duckdb',
+        JANUSEC_DISABLE_T1_PREFILL: '1',
+        JANUSEC_ASYNC_LEGACY_HYDRATE: '0',
         LLM_MOCK: '1',
         DISABLE_DB: '0',
         HOPGRAPH_PERSISTENCE_ENABLED: '0',

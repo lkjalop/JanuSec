@@ -31,6 +31,13 @@ from typing import Any, Callable, Awaitable
 
 logger = logging.getLogger(__name__)
 
+try:
+    import boto3 as _boto3  # type: ignore
+    _BOTO3_AVAILABLE = True
+except ImportError:
+    _boto3 = None  # type: ignore[assignment]
+    _BOTO3_AVAILABLE = False
+
 _SQS_QUEUE_URL = os.getenv('SQS_QUEUE_URL', '')
 _SQS_REGION = os.getenv('SQS_REGION', 'us-east-1')
 _MAX_MESSAGES = max(1, min(10, int(os.getenv('SQS_MAX_MESSAGES', '10'))))
@@ -152,10 +159,24 @@ class SQSPoller:
         self._running = False
         self._task: asyncio.Task | None = None
 
+    @staticmethod
+    def check_ready() -> tuple[bool, str]:
+        """Return (ok, message) — call at startup to surface missing dependencies."""
+        if not _BOTO3_AVAILABLE:
+            return False, 'boto3 not installed; pip install boto3'
+        if not _SQS_QUEUE_URL:
+            return False, 'SQS_QUEUE_URL env var not set'
+        return True, 'ok'
+
     async def start(self) -> None:
         if not self.queue_url:
             logger.info('sqs_consumer: SQS_QUEUE_URL not set — poller disabled')
             return
+        if not _BOTO3_AVAILABLE:
+            raise ImportError(
+                'sqs_consumer: boto3 is required but not installed. '
+                f'pip install boto3  (SQS_QUEUE_URL={self.queue_url!r} is configured)'
+            )
         self._running = True
         self._task = asyncio.create_task(self._poll_loop())
         logger.info('sqs_consumer: started polling %s', self.queue_url)
@@ -170,13 +191,7 @@ class SQSPoller:
                 pass
 
     async def _poll_loop(self) -> None:
-        try:
-            import boto3  # type: ignore
-        except ImportError:
-            logger.warning('sqs_consumer: boto3 not installed — poller stopped')
-            return
-
-        client = boto3.client('sqs', region_name=_SQS_REGION)
+        client = _boto3.client('sqs', region_name=_SQS_REGION)
         loop = asyncio.get_event_loop()
 
         while self._running:

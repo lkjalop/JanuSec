@@ -142,14 +142,35 @@ class SailPointCollector:
             self._record_metrics("forward", {"event_count": len(events), "status": "error"})
             return 0
 
+    async def forward_to_stream(self, events: List[Dict[str, Any]]) -> int:
+        """Emit events to the streaming ingest API when JANUSEC_STREAMING_MODE is active."""
+        if not events:
+            return 0
+        try:
+            from src.connectors.stream_emitter import emit_to_stream
+            result = await emit_to_stream(events, source='sailpoint')
+            count = result.get('accepted', 0)
+            self._last_forward_count = count
+            self._record_metrics("stream_forward", {"event_count": count, "status": "ok"})
+            return count
+        except Exception:
+            self._last_error = "stream_forward_failed"
+            LOGGER.exception("Failed to stream-forward SailPoint events")
+            self._record_metrics("stream_forward", {"event_count": len(events), "status": "error"})
+            return 0
+
     # ------------------------------------------------------------------- loop
     async def start_loop(self, interval_seconds: Optional[int] = None) -> None:
         interval = interval_seconds or int(os.getenv("SAILPOINT_POLL_INTERVAL", "600"))
+        streaming = os.getenv('JANUSEC_STREAMING_MODE', '').lower() in ('1', 'true', 'yes')
         while True:
             try:
                 events = await self.poll_events()
                 if events:
-                    await self.forward_to_ingest(events)
+                    if streaming:
+                        await self.forward_to_stream(events)
+                    else:
+                        await self.forward_to_ingest(events)
             except Exception:  # pragma: no cover
                 LOGGER.exception("SailPointCollector loop error")
             await asyncio.sleep(interval)

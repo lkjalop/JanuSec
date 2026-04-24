@@ -308,8 +308,17 @@ class DeepAnalyzeWorker:
                             dest = os.path.join(base, org, datepart)
                             os.makedirs(dest, exist_ok=True)
                             path = os.path.join(dest, f"{assessment_id}.json")
+                            # Merge into existing file to preserve correlation_clusters, evidence_rows etc.
+                            merged = {}
+                            if os.path.exists(path):
+                                try:
+                                    with open(path, 'r', encoding='utf-8') as _fh:
+                                        merged = json.load(_fh)
+                                except Exception:
+                                    merged = {}
+                            merged.update(out)
                             with open(path + '.tmp', 'w', encoding='utf-8') as fh:
-                                fh.write(json.dumps(out))
+                                fh.write(json.dumps(merged))
                             os.replace(path + '.tmp', path)
                             wrote = True
                             break

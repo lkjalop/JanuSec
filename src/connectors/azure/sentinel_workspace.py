@@ -134,8 +134,11 @@ class _TokenProvider:
                 data = json.load(resp)
             return data['access_token'], time.time() + int(data.get('expires_in', 3600))
         except Exception as exc:
-            logger.warning('Sentinel token acquisition failed: %s', exc)
-            return 'NO_TOKEN', time.time() + 60
+            raise RuntimeError(
+                f'Sentinel token acquisition failed for tenant {cfg.tenant_id!r}: {exc}. '
+                'Check AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, '
+                'and network connectivity to login.microsoftonline.com.'
+            ) from exc
 
     def headers(self, scope: str) -> Dict[str, str]:
         return {
@@ -193,6 +196,21 @@ class SentinelWorkspaceConnector:
         self.cfg = cfg or SentinelWorkspaceConfig()
         self._tokens = _TokenProvider(self.cfg)
         self._http = _http_fn or _http
+        if not _MSAL_AVAILABLE and (self.cfg.client_id or self.cfg.client_secret):
+            logger.warning(
+                'SentinelWorkspaceConnector: msal not installed but Azure credentials are configured. '
+                'Auth will fail at first use. pip install msal'
+            )
+
+    @staticmethod
+    def check_ready(cfg: Optional[SentinelWorkspaceConfig] = None) -> tuple[bool, str]:
+        """Return (ok, reason) — call at startup to surface missing dependencies."""
+        if not _MSAL_AVAILABLE:
+            return False, 'msal not installed; pip install msal'
+        _cfg = cfg or SentinelWorkspaceConfig()
+        if not _cfg.is_configured:
+            return False, 'AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID, SENTINEL_RESOURCE_GROUP, and SENTINEL_WORKSPACE_NAME are required'
+        return True, 'ok'
 
     # ------------------------------------------------------------------
     # Incidents

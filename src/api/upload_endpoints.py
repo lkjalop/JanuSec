@@ -82,7 +82,7 @@ class FileProcessor:
             return 'excel'
         if extension in {'.csv'}:
             return 'csv'
-        if extension in {'.json', '.jsonl'}:
+        if extension in {'.json', '.jsonl', '.ndjson'}:
             return 'json'
         if extension in {'.evtx'}:
             return 'evtx'
@@ -1691,6 +1691,30 @@ async def upload_workbook_sheets(
             wb = openpyxl.load_workbook(bio, read_only=True, data_only=True)
         except Exception as exc:
             all_results.append({'filename': filename, 'status': 'error', 'error': str(exc)})
+            continue
+
+        try:
+            from src.core.ingest.input_classifier import classify_xlsx_sheets
+            classification = classify_xlsx_sheets(wb.sheetnames, filename=filename)
+            if not classification.get('evidence_allowed'):
+                all_results.append({
+                    'filename': filename,
+                    'status': 'rejected',
+                    'reason': classification.get('reason'),
+                    'lane': classification.get('lane'),
+                    'provenance': 'evaluation_data' if classification.get('lane') == 'evaluation_answer_key' else 'business_context',
+                    'matched_sheets': classification.get('matched_sheets') or [],
+                    'rows': [],
+                    'row_count': 0,
+                })
+                wb.close()
+                continue
+        except Exception as exc:
+            all_results.append({'filename': filename, 'status': 'error', 'error': f'classification_failed: {exc}'})
+            try:
+                wb.close()
+            except Exception:
+                pass
             continue
 
         sheet_summaries: list[dict[str, Any]] = []

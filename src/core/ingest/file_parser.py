@@ -200,6 +200,24 @@ def _parse_xlsx(path: str, source: str) -> Iterator[dict]:
         logger.warning("XLSX open failed for %s: %s", path, exc)
         return
 
+    try:
+        from src.core.ingest.input_classifier import classify_xlsx_sheets
+        classification = classify_xlsx_sheets(wb.sheetnames, filename=source)
+        if not classification.get("evidence_allowed"):
+            logger.warning(
+                "XLSX quarantined from evidence lane: source=%s lane=%s reason=%s sheets=%s",
+                source,
+                classification.get("lane"),
+                classification.get("reason"),
+                classification.get("matched_sheets"),
+            )
+            wb.close()
+            return
+    except Exception as exc:
+        logger.warning("XLSX classification failed for %s: %s", source, exc)
+        wb.close()
+        return
+
     for sheet_name in wb.sheetnames:
         ws = wb[sheet_name]
         headers: list[str] | None = None

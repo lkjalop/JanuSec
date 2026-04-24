@@ -28,15 +28,20 @@ const JSON_FILE   = path.join(FILES_DIR, 'janusec_cloud_identity_v1.json');
 const CSV_FILE    = path.join(FILES_DIR, 'janusec_network_v1.csv');
 const XLSX_FILE   = path.join(FILES_DIR, 'janusec_enrichment_context_v1.xlsx');
 
-const AUTH_HEADERS = { 'x-api-key': 'janusec-playwright-local', 'x-tenant-id': 'default' };
+const API_KEY = process.env.JANUSEC_PLAYWRIGHT_API_KEY || 'devkey123';
+const AUTH_HEADERS = { 'x-api-key': API_KEY, 'x-tenant-id': 'default' };
 
 let assessmentId = '';
 
 async function setAuth(page) {
   await page.addInitScript(() => {
-    localStorage.setItem('apiKey', 'janusec-playwright-local');
+    localStorage.setItem('apiKey', window.__JANUSEC_TEST_API_KEY__ || 'devkey123');
     localStorage.setItem('tenantId', 'default');
   });
+  await page.addInitScript(key => {
+    window.__JANUSEC_TEST_API_KEY__ = key;
+    localStorage.setItem('apiKey', key);
+  }, API_KEY);
 }
 
 async function mockLlmRoutes(page) {
@@ -249,7 +254,7 @@ test('8. Network CSV contributes rows', async ({ request }) => {
 });
 
 // ── Test 9: XLSX enrichment rows present ─────────────────────────────────────
-test('9. XLSX enrichment rows present in assessment payload', async ({ request }) => {
+test('9. XLSX enrichment rows are not counted as assessment evidence', async ({ request }) => {
   const res = await request.get(`${API_BASE}/api/v1/assessments/${assessmentId}`, {
     headers: AUTH_HEADERS,
   });
@@ -259,7 +264,7 @@ test('9. XLSX enrichment rows present in assessment payload', async ({ request }
   const xlsxCount = Object.entries(counts)
     .filter(([source]) => /xlsx|excel|enrichment/i.test(source))
     .reduce((n, [, count]) => n + Number(count || 0), 0);
-  expect(xlsxCount, `No XLSX enrichment rows in source_counts: ${JSON.stringify(counts)}`).toBeGreaterThan(0);
+  expect(xlsxCount, `Enrichment rows must be quarantined, source_counts: ${JSON.stringify(counts)}`).toBe(0);
 });
 
 // ── Test 10: Clusters reference real entities ─────────────────────────────────

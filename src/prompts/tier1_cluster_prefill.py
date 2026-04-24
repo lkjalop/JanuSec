@@ -24,6 +24,12 @@ def _build_enrichment_context(all_rows: list[dict[str, Any]]) -> str:
         sheet = str(r.get('_sheet') or '').strip()
         if not sheet:
             continue
+        try:
+            from src.core.ingest.input_classifier import is_non_evidence_sheet
+            if is_non_evidence_sheet(sheet):
+                continue
+        except Exception:
+            pass
         sl = sheet.lower()
         if 'vendor' in sl or 'customer' in sl:
             name = r.get('name') or r.get('vendor_name') or r.get('company') or ''

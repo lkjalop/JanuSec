@@ -24,12 +24,22 @@ LOGGER = logging.getLogger(__name__)
 class BaseLLMClient:
     provider = 'base'
 
-    def generate(self, prompt: str, max_tokens: int = 512, tenant_id: str | None = None, overrides: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    def generate(self, prompt: str, max_tokens: int = 512, tenant_id: str | None = None, overrides: Dict[str, Any] | None = None, model: str | None = None, **kwargs: Any) -> Dict[str, Any]:
         raise NotImplementedError()
 
     def stream_generate(self, prompt: str, max_tokens: int = 512, tenant_id: str | None = None) -> Iterator[Dict[str, Any]]:
         # yields fragments {'text': str, 'meta': {...}}
         raise NotImplementedError()
+
+    def generate_batch(self, prompts: list, max_tokens: int | None = None, tenant_id: str | None = None, overrides: Dict[str, Any] | None = None, model: str | None = None) -> list:
+        """Serial fallback batch implementation — subclasses may override with concurrency."""
+        out = []
+        for p in prompts:
+            try:
+                out.append(self.generate(p, max_tokens=max_tokens or 512, tenant_id=tenant_id, overrides=overrides, model=model))
+            except Exception as exc:
+                out.append({'error': str(exc)})
+        return out
 
     def reserve_tenant_budget(self, tenant_id: str, cost: float) -> bool:
         # best-effort budget reservation (default allows everything)
@@ -57,13 +67,20 @@ class LocalDeterministicClient(BaseLLMClient):
         })
         return text
 
-    def generate(self, prompt: str, max_tokens: int = 512, tenant_id: str | None = None, overrides: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    def generate(self, prompt: str, max_tokens: int = 512, tenant_id: str | None = None, overrides: Dict[str, Any] | None = None, model: str | None = None, **kwargs: Any) -> Dict[str, Any]:
         try:
             text = self._deterministic_text(prompt, max_tokens)
-            return {'text': text, 'meta': {'provider': self.provider, 'prompt_hash': hashlib.sha256(prompt.encode()).hexdigest()}}
+            return {'text': text, 'meta': {'provider': self.provider, 'model': model, 'prompt_hash': hashlib.sha256(prompt.encode()).hexdigest()}}
         except Exception as exc:
             LOGGER.exception('LocalDeterministicClient.generate failed')
             return {'text': 'error', 'meta': {'error': str(exc)}}
+
+    def generate_batch(self, prompts: list, max_tokens: int | None = None, tenant_id: str | None = None, overrides: Dict[str, Any] | None = None, model: str | None = None) -> list:
+        """Deterministic batch — returns one result per prompt in input order."""
+        return [
+            self.generate(p, max_tokens=max_tokens or 512, tenant_id=tenant_id, overrides=overrides, model=model)
+            for p in prompts
+        ]
 
     def stream_generate(self, prompt: str, max_tokens: int = 512, tenant_id: str | None = None):
         # yield small chunks deterministically

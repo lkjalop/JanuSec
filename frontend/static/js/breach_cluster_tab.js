@@ -242,11 +242,11 @@
     var p = (cluster || {}).tier1_prefill || {};
     var full = (d.parts.map(function (x) { return x.text; }).join(' ') + ' ' + JSON.stringify(p.observed_impact || {})).toLowerCase();
     var gates = [
-      ['Data movement', /exfil|copy into|unload|rclone|cloud sync|transferred data|backblaze|mega/.test(full)],
+      ['Data movement', /exfil|copy into|unload|rclone|cloud sync|transferred data|cloud storage/.test(full)],
       ['Repeated activity', /recurred|distinct days|same command|reproduc/.test(full)],
       ['Affected users', /account|user|service_account|privileged|affected users/.test(full)],
       ['Control gap', /no dlp|no pam|control gap|unconstrained|no inspection|no gate/.test(full)],
-      ['Crown jewel', /crown jewel|sfl_data|finance_wh|ndb|cps234/.test(full)],
+      ['Crown jewel', /crown jewel|regulated data|critical data|protected data|ndb|cps234/.test(full)],
       ['Multi-source correlation', /cross-source|source types|multiple sources|correlation/.test(full)]
     ];
     return '<div class="bct-why-ladder">' + gates.map(function (g) {
@@ -299,12 +299,12 @@
     var known = [];
     var unknown = [];
     if (/rclone/.test(text)) known.push('Tool: rclone file-sync activity');
-    if (/backblaze/.test(text)) known.push('Destination: Backblaze B2 cloud storage');
-    if (/sfl_data|finance_wh/.test(text)) known.push('Crown jewels: SFL_DATA / FINANCE_WH');
+    if (/cloud storage|external storage|object storage/.test(text)) known.push('Destination: external cloud storage indicated by evidence');
+    if (/crown jewel|regulated data|critical data|protected data/.test(text)) known.push('Crown-jewel or protected data indicator present in evidence');
     if (/no dlp/.test(text) || /no pam/.test(text)) known.push('Control gaps: DLP/PAM coverage missing in evidence');
     if (/service account|privileged|finance|standard user/.test(text)) known.push('Affected roles: service account, privileged/IT, finance, standard users');
-    if (!/pii|customer|payroll|secret|source code|credential dump/.test(text)) unknown.push('Exact record contents copied from Snowflake are unknown from current evidence');
-    if (!/attacker-owned|external owner|malicious owner/.test(text)) unknown.push('Backblaze account ownership is unknown from current evidence');
+    if (!/pii|customer|payroll|secret|source code|credential dump/.test(text)) unknown.push('Exact data contents are unknown from current evidence');
+    if (!/attacker-owned|external owner|malicious owner/.test(text)) unknown.push('External destination ownership is unknown from current evidence');
     if (!known.length) known.push('Evidence-confirmed facts are limited to the cited rows');
     return '<div class="bct-known-unknown"><div><strong>Known</strong><ul>' + known.map(function (x) { return '<li>' + _esc(x) + '</li>'; }).join('') + '</ul></div><div><strong>Unknown / not proven</strong><ul>' + unknown.map(function (x) { return '<li>' + _esc(x) + '</li>'; }).join('') + '</ul></div></div>';
   }
@@ -313,7 +313,7 @@
     var d = _dreadInfo(cluster);
     var text = d.parts.map(function (x) { return x.text; }).join(' ') + ' ' + JSON.stringify(((cluster || {}).tier1_prefill || {}).observed_impact || {});
     var names = [];
-    ['SFL_DATA', 'FINANCE_WH', 'fs01', 'it-scripts', 'SVC_SFL_ANALYTICS_FED', 'marcus.delacroix', 'Backblaze B2'].forEach(function (needle) {
+    ['crown jewel', 'regulated data', 'critical data', 'protected data'].forEach(function (needle) {
       if (text.toLowerCase().indexOf(needle.toLowerCase()) !== -1 && names.indexOf(needle) === -1) names.push(needle);
     });
     if (!names.length) return '';
@@ -563,14 +563,14 @@
     var baseRefs = refs.length ? refs : [];
     if (persona === 'threat_hunter') {
       return [
-        { title: 'Hunt for matching rclone/cloud-sync activity across peer hosts', priority: 'P1', evidence_refs: baseRefs, subtasks: [{ label: 'Search endpoint and proxy logs for rclone, Backblaze, Mega, and matching command signatures' }] },
+        { title: 'Hunt for matching file-sync activity across peer hosts', priority: 'P1', evidence_refs: baseRefs, subtasks: [{ label: 'Search endpoint and proxy logs for cloud-sync tools, external storage, and matching command signatures' }] },
         { title: 'Expand infrastructure scope around reused IPs and ASNs', priority: 'P2', evidence_refs: baseRefs, subtasks: [{ label: 'Pivot on destination IPs, DNS, ASN, JA3/JA4, and repeated egress timing' }] }
       ];
     }
     if (persona === 'forensics') {
       return [
         { title: 'Preserve endpoint process tree and command-line evidence', priority: 'P1', evidence_refs: baseRefs, subtasks: [{ label: 'Collect process lineage, binary hash, parent process, persistence artifacts, and relevant disk paths' }] },
-        { title: 'Preserve Snowflake query history and unload-stage evidence', priority: 'P1', evidence_refs: baseRefs, subtasks: [{ label: 'Export query text, actor, warehouse, database, stage, timestamp, and result metadata' }] }
+        { title: 'Preserve data-platform query history and unload-stage evidence', priority: 'P1', evidence_refs: baseRefs, subtasks: [{ label: 'Export query text, actor, warehouse, database, stage, timestamp, and result metadata' }] }
       ];
     }
     return [
@@ -714,7 +714,7 @@
     if (frags.exploitability && /no dlp|no pam|no gate|unconstrained|without baseline/i.test(frags.exploitability)) {
       checks.push('Confirm control gap described in exploitability fragment has been remediated before closing the case.');
     }
-    if (frags.damage && /exfil|copy into|unload|rclone|backblaze|mega/i.test(frags.damage)) {
+    if (frags.damage && /exfil|copy into|unload|rclone|external storage|cloud storage/i.test(frags.damage)) {
       checks.push('Validate data-loss scope: request DLP/CASB logs for the exfiltration window and confirm no secondary staging.');
     }
     if ((cluster.affected_accounts || []).length > 2) {
@@ -1011,7 +1011,7 @@
     var d = _dreadInfo(cluster);
     d.parts.forEach(function (part) {
       var text = part.text || '';
-      ['SFL_DATA', 'FINANCE_WH', '\\\\fs01\\it-scripts', 'fs01', 'Backblaze B2', 'mega.nz'].forEach(function (needle) {
+      ['crown jewel', 'regulated data', 'critical data', 'protected data', 'external storage'].forEach(function (needle) {
         if (text.toLowerCase().indexOf(needle.toLowerCase()) !== -1) extraAssets.push(needle);
       });
     });
