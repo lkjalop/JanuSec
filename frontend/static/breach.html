@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JanuSec — Breach Assessment</title>
+  <link rel="stylesheet" href="/static/css/theme.css">
+  <link rel="stylesheet" href="/static/css/breach.css">
+</head>
+<body>
+
+  <!-- ── Nav bar ──────────────────────────────────────────────────────────── -->
+  <nav class="br-nav">
+    <div style="display:flex;align-items:center;gap:8px;">
+      <span class="br-nav__brand">JanuSec</span>
+      <span class="br-nav__beta">beta</span>
+    </div>
+    <div class="br-nav__actions">
+      <button class="br-nav__btn br-nav__btn--primary" onclick="window.location.href='/static/breach.html'">+ New analysis</button>
+      <button class="br-nav__btn" onclick="window.location.href='/static/history.html'">History</button>
+      <button class="br-nav__btn" onclick="window.location.href='/static/settings.html'">⚙</button>
+    </div>
+  </nav>
+
+  <!-- ── Tab bar ──────────────────────────────────────────────────────────── -->
+  <div class="br-tabs" id="br-tabbar">
+    <!-- populated by breach.js updateTabBar() -->
+  </div>
+
+  <!-- ── Live feed strip ──────────────────────────────────────────────────── -->
+  <div class="br-livefeed">
+    <div class="br-livefeed__dot" id="br-livefeed-dot"></div>
+    <span id="br-livefeed-status">No live source connected</span>
+    <span style="margin-left:auto;display:flex;gap:6px;">
+      <button class="br-livefeed__btn" onclick="_liveToast('Wazuh')">Wazuh</button>
+      <button class="br-livefeed__btn" onclick="_liveToast('Sentinel')">Sentinel</button>
+      <button class="br-livefeed__btn" onclick="_liveToast('Splunk')">Splunk</button>
+      <button class="br-livefeed__btn" onclick="_liveToast('Defender')">Defender</button>
+    </span>
+  </div>
+
+  <!-- ── Main content ─────────────────────────────────────────────────────── -->
+  <div class="br-body">
+    <div id="br-content">
+      <!-- Populated by breach.js -->
+      <div style="padding:48px 0;text-align:center;color:var(--text-muted);font-size:13px;">
+        Loading…
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Scripts ──────────────────────────────────────────────────────────── -->
+  <script>
+    // Live feed "coming soon" toast
+    function _liveToast(src) {
+      var el = document.createElement('div');
+      el.className = 'br-toast';
+      el.textContent = src + ' integration — coming soon';
+      document.body.appendChild(el);
+      setTimeout(function () { el.remove(); }, 2500);
+    }
+  </script>
+
+  <!-- D3 for swimlane + graph (loaded before breach.js) -->
+  <script src="/static/js/vendors/d3.min.js" onerror="console.warn('D3 not found — swimlane disabled')"></script>
+
+  <!-- Core breach JS -->
+  <script src="/static/js/breach.js"></script>
+
+  <!-- Swimlane + cluster tab + hopgraph (A4, A5, A6) — loaded when available -->
+  <script src="/static/js/breach_swimlane.js" onerror=""></script>
+  <script src="/static/js/breach_cluster_tab.js" onerror=""></script>
+  <script src="/static/js/breach_hopgraph.js" onerror="console.warn('breach_hopgraph.js not found')"></script>
+
+</body>
+</html>

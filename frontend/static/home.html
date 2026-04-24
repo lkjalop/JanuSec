@@ -1,0 +1,1196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JanuSec — Live Operations</title>
+  <link rel="stylesheet" href="/static/css/theme.css">
+  <link rel="stylesheet" href="/static/css/theme-pro.css">
+  <script src="/static/js/vendors/lucide.min.js"></script>
+  <style>
+    html, body { height: 100%; margin: 0; overflow: hidden; font-family: var(--font-sans, 'Inter', 'Segoe UI', sans-serif); }
+    * { box-sizing: border-box; }
+    .page { display: flex; height: 100vh; background: var(--bg-primary, #0B0E14); color: var(--text-primary, #E8EBF0); }
+
+    /* ── Sidebar ── */
+    .sidebar {
+      width: 200px; flex-shrink: 0;
+      background: var(--bg-secondary, #131720);
+      border-right: 1px solid var(--border, #1E2535);
+      display: flex; flex-direction: column; z-index: 10; overflow: hidden;
+    }
+    .sidebar__logo {
+      display: flex; align-items: center; gap: 10px;
+      padding: 14px 16px; border-bottom: 1px solid var(--border, #1E2535);
+      font-size: 15px; font-weight: 700; color: var(--text-primary, #E8EBF0);
+    }
+    .sidebar__logo i { color: var(--accent, #4A63E7); width: 22px; height: 22px; flex-shrink: 0; }
+    .sidebar__beta {
+      font-size: 10px; color: var(--text-muted, #6B7280);
+      padding: 1px 5px; border: 1px solid var(--border, #1E2535);
+      border-radius: 3px; margin-left: 2px;
+    }
+    .nav-section { padding: 6px 0; }
+    .nav-section + .nav-section { border-top: 1px solid var(--border, #1E2535); }
+    .nav-item {
+      display: flex; align-items: center; gap: 10px;
+      padding: 9px 16px; font-size: 13px; font-weight: 500;
+      color: var(--text-secondary, #9CA3AF); cursor: pointer;
+      text-decoration: none; transition: background 0.15s, color 0.15s;
+    }
+    .nav-item:hover { background: rgba(255,255,255,0.04); color: var(--text-primary, #E8EBF0); }
+    .nav-item.active { background: rgba(74,99,231,0.12); color: var(--accent, #4A63E7); }
+    .nav-item i { width: 16px; height: 16px; flex-shrink: 0; }
+    .nav-badge {
+      margin-left: auto; background: var(--danger, #E54848);
+      color: white; font-size: 10px; font-weight: 700;
+      padding: 2px 5px; border-radius: 8px; min-width: 18px; text-align: center;
+    }
+    .nav-badge--warn { background: var(--warning, #FF8A3C); }
+    .sidebar__spacer { flex: 1; }
+
+    /* ── Main column ── */
+    .main-col {
+      flex: 1; display: flex; flex-direction: column; min-width: 0; overflow: hidden;
+    }
+
+    /* ── Connector health bar (replaces upload zone) ── */
+    .connector-bar {
+      background: var(--bg-secondary, #131720);
+      border-bottom: 1px solid var(--border, #1E2535);
+      padding: 8px 16px; flex-shrink: 0;
+    }
+    .connector-bar__header {
+      display: flex; align-items: center; gap: 10px; margin-bottom: 6px;
+    }
+    .connector-bar__title {
+      font-size: 11px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 0.07em; color: var(--text-muted, #6B7280);
+    }
+    .env-badge {
+      font-size: 10px; font-weight: 700; padding: 2px 8px;
+      border-radius: 10px; text-transform: uppercase; letter-spacing: 0.05em;
+    }
+    .env-badge--cloud { background: rgba(99,102,241,0.18); color: #818CF8; border: 1px solid rgba(99,102,241,0.3); }
+    .env-badge--onprem { background: rgba(16,185,129,0.18); color: #34D399; border: 1px solid rgba(16,185,129,0.3); }
+    .env-badge--hybrid { background: rgba(245,158,11,0.18); color: #FCD34D; border: 1px solid rgba(245,158,11,0.3); }
+    .env-badge--unknown { background: rgba(107,114,128,0.18); color: #9CA3AF; border: 1px solid rgba(107,114,128,0.3); }
+    .connector-chips {
+      display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+    }
+    .connector-chip {
+      display: flex; align-items: center; gap: 5px;
+      padding: 3px 10px; border-radius: 4px; font-size: 12px;
+      background: var(--bg-tertiary, #1C2232);
+      border: 1px solid var(--border, #1E2535);
+      color: var(--text-secondary, #9CA3AF);
+    }
+    .conn-dot {
+      width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
+    }
+    .conn-dot--ok { background: var(--safe, #3FA860); box-shadow: 0 0 4px rgba(63,168,96,0.5); }
+    .conn-dot--warn { background: var(--warning, #FF8A3C); box-shadow: 0 0 4px rgba(255,138,60,0.5); }
+    .conn-dot--err { background: var(--danger, #E54848); box-shadow: 0 0 4px rgba(229,72,72,0.5); }
+    .conn-dot--idle { background: var(--text-muted, #6B7280); }
+    .connector-bar__refresh {
+      margin-left: auto; font-size: 11px; color: var(--text-muted, #6B7280);
+      display: flex; align-items: center; gap: 5px;
+    }
+    .live-pulse {
+      width: 7px; height: 7px; border-radius: 50%;
+      background: var(--safe, #3FA860);
+      animation: live-pulse 2s ease-in-out infinite;
+    }
+    @keyframes live-pulse {
+      0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(63,168,96,0.4); }
+      50% { opacity: 0.7; box-shadow: 0 0 0 4px rgba(63,168,96,0); }
+    }
+
+    /* ── Metrics strip ── */
+    .metrics-strip {
+      background: var(--bg-secondary, #131720);
+      border-bottom: 1px solid var(--border, #1E2535);
+      padding: 6px 16px; flex-shrink: 0;
+      display: flex; align-items: center; gap: 20px; flex-wrap: wrap;
+    }
+    .metric-tile {
+      display: flex; align-items: center; gap: 7px;
+      font-size: 13px; font-weight: 500; color: var(--text-secondary, #9CA3AF);
+    }
+    .metric-tile__val { font-weight: 700; font-size: 15px; }
+    .metric-tile__val--crit { color: var(--danger, #E54848); }
+    .metric-tile__val--high { color: var(--warning, #FF8A3C); }
+    .metric-tile__val--good { color: var(--safe, #3FA860); }
+    .metric-tile__val--neutral { color: var(--text-primary, #E8EBF0); }
+    .metrics-strip__sep { width: 1px; height: 20px; background: var(--border, #1E2535); }
+    .metrics-strip__actions { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+    .btn-sm {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 5px 10px; border-radius: 5px; font-size: 12px; font-weight: 600;
+      border: 1px solid var(--border, #1E2535); cursor: pointer;
+      background: var(--bg-tertiary, #1C2232); color: var(--text-primary, #E8EBF0);
+      transition: background 0.15s;
+    }
+    .btn-sm:hover { background: rgba(255,255,255,0.07); }
+    .btn-sm--primary { background: var(--accent, #4A63E7); border-color: var(--accent, #4A63E7); color: white; }
+    .btn-sm--primary:hover { background: #5a73f7; }
+    .btn-sm--pause { background: rgba(255,138,60,0.15); border-color: rgba(255,138,60,0.3); color: var(--warning, #FF8A3C); }
+    .refresh-countdown {
+      font-size: 11px; color: var(--text-muted, #6B7280); min-width: 50px; text-align: right;
+    }
+
+    /* ── Severity summary (same as investigate.html) ── */
+    .sev-summary {
+      flex-shrink: 0;
+      padding: 8px 16px;
+      background: var(--bg-secondary, #131720);
+      border-bottom: 1px solid var(--border, #1E2535);
+      display: none;
+    }
+    .sev-summary.has-data { display: block; }
+    .sev-grid { display: flex; flex-direction: column; gap: 4px; }
+    .sev-row { display: flex; align-items: center; gap: 10px; }
+    .sev-row__label {
+      font-size: 10px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.06em; color: var(--text-muted, #6B7280); width: 70px; flex-shrink: 0;
+    }
+    .sev-row__boxes { display: flex; gap: 5px; }
+    .sev-total { font-size: 11px; color: var(--text-muted, #6B7280); margin-left: 4px; min-width: 50px; }
+    .sev-box {
+      display: flex; align-items: center; gap: 5px;
+      padding: 3px 9px; border-radius: 4px; font-size: 11px;
+      font-weight: 700; border: 1px solid; cursor: pointer;
+      transition: filter 0.15s, transform 0.1s;
+    }
+    .sev-box:hover { filter: brightness(1.2); transform: translateY(-1px); }
+    .sev-box__count { font-size: 14px; font-weight: 800; }
+    .sev-box--critical { background: rgba(229,72,72,.18); color: #E54848; border-color: rgba(229,72,72,.35); }
+    .sev-box--high     { background: rgba(255,138,60,.15); color: #FF8A3C; border-color: rgba(255,138,60,.3); }
+    .sev-box--medium   { background: rgba(224,196,70,.12); color: #E0C446; border-color: rgba(224,196,70,.25); }
+    .sev-box--low      { background: rgba(63,168,96,.12);  color: #3FA860; border-color: rgba(63,168,96,.25); }
+
+    /* ── Main layout: tabs + detail panel ── */
+    .investigate-layout { display: flex; flex: 1; overflow: hidden; min-height: 0; }
+    .investigate-main { flex: 1; display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
+
+    /* ── Tab bar ── */
+    .tab-bar {
+      display: flex; align-items: center; gap: 0;
+      padding: 0 16px;
+      background: var(--bg-secondary, #131720);
+      border-bottom: 1px solid var(--border, #1E2535);
+      flex-shrink: 0;
+    }
+    .tab-btn {
+      display: flex; align-items: center; gap: 6px;
+      padding: 10px 14px; font-size: 13px; font-weight: 500;
+      color: var(--text-muted, #6B7280); background: none; border: none;
+      border-bottom: 2px solid transparent; cursor: pointer;
+      transition: color 0.15s, border-color 0.15s;
+    }
+    .tab-btn:hover { color: var(--text-primary, #E8EBF0); }
+    .tab-btn.active { color: var(--accent, #4A63E7); border-bottom-color: var(--accent, #4A63E7); }
+    .tab-btn i { width: 14px; height: 14px; }
+    .badge {
+      background: var(--danger, #E54848); color: white;
+      font-size: 10px; padding: 1px 5px; border-radius: 8px; font-weight: 700;
+    }
+    .badge--warn { background: var(--warning, #FF8A3C); }
+    .badge--accent { background: var(--accent, #4A63E7); }
+    .tab-content { flex: 1; overflow: hidden; display: none; min-height: 0; }
+    .tab-content.active { display: flex; flex-direction: column; }
+    .tab-scroll { flex: 1; overflow-y: auto; padding: 16px; }
+
+    /* ── Evidence table (same structure as investigate.html) ── */
+    .ev-toolbar {
+      display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+      padding: 8px 16px; border-bottom: 1px solid var(--border, #1E2535);
+      background: var(--bg-secondary, #131720); flex-shrink: 0;
+    }
+    .filter-chip {
+      padding: 4px 11px; border-radius: 14px; font-size: 12px; font-weight: 500;
+      background: var(--bg-tertiary, #1C2232);
+      border: 1px solid var(--border, #1E2535);
+      color: var(--text-secondary, #9CA3AF); cursor: pointer;
+    }
+    .filter-chip.active {
+      background: rgba(74,99,231,0.15); border-color: rgba(74,99,231,0.4); color: var(--accent, #4A63E7);
+    }
+    .ev-count { font-size: 12px; color: var(--text-muted, #6B7280); margin-left: auto; }
+    .evidence-container { flex: 1; overflow: auto; min-height: 0; }
+    .ev-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .ev-table thead th {
+      padding: 8px 10px; text-align: left; font-size: 11px; font-weight: 600;
+      text-transform: uppercase; letter-spacing: 0.05em;
+      color: var(--text-muted, #6B7280); background: var(--bg-secondary, #131720);
+      border-bottom: 1px solid var(--border, #1E2535); position: sticky; top: 0; z-index: 2;
+      white-space: nowrap; cursor: pointer; user-select: none;
+    }
+    .ev-table thead th:hover { color: var(--text-primary, #E8EBF0); }
+    .ev-table tbody tr {
+      border-bottom: 1px solid var(--border, #1E2535);
+      cursor: pointer; transition: background 0.1s;
+    }
+    .ev-table tbody tr:hover { background: rgba(255,255,255,0.03); }
+    .ev-table tbody tr.selected { background: rgba(74,99,231,0.08); }
+    .ev-table td { padding: 7px 10px; color: var(--text-secondary, #9CA3AF); vertical-align: middle; }
+    .sev-pill {
+      display: inline-block; padding: 2px 7px; border-radius: 4px;
+      font-size: 10px; font-weight: 700; letter-spacing: 0.04em;
+    }
+    .sev-pill--critical { background: rgba(229,72,72,.18); color: #E54848; }
+    .sev-pill--high     { background: rgba(255,138,60,.15); color: #FF8A3C; }
+    .sev-pill--medium   { background: rgba(224,196,70,.12); color: #E0C446; }
+    .sev-pill--low      { background: rgba(63,168,96,.12);  color: #3FA860; }
+    .corr-dot { font-size: 10px; }
+    .corr-dot--c { color: var(--accent, #4A63E7); }
+    .corr-dot--i { color: var(--text-muted, #6B7280); }
+
+    /* ── Stage button ── */
+    .stage-btn {
+      display: inline-flex; align-items: center; gap: 3px;
+      padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;
+      background: rgba(74,99,231,0.15); border: 1px solid rgba(74,99,231,0.3);
+      color: var(--accent, #4A63E7); cursor: pointer; white-space: nowrap;
+      transition: background 0.15s;
+    }
+    .stage-btn:hover { background: rgba(74,99,231,0.28); }
+    .stage-btn--staged {
+      background: rgba(63,168,96,0.15); border-color: rgba(63,168,96,0.3);
+      color: var(--safe, #3FA860); cursor: default;
+    }
+
+    /* ── Stage queue tab content ── */
+    .stage-queue-list { display: flex; flex-direction: column; gap: 6px; }
+    .stage-item {
+      display: flex; align-items: center; gap: 12px;
+      padding: 10px 14px; border-radius: 6px;
+      background: var(--bg-tertiary, #1C2232);
+      border: 1px solid var(--border, #1E2535);
+    }
+    .stage-item__info { flex: 1; }
+    .stage-item__entity { font-size: 13px; font-weight: 600; color: var(--text-primary, #E8EBF0); }
+    .stage-item__desc { font-size: 12px; color: var(--text-muted, #6B7280); margin-top: 2px; }
+    .stage-queue-empty {
+      display: flex; flex-direction: column; align-items: center;
+      padding: 60px 20px; color: var(--text-muted, #6B7280); text-align: center; gap: 10px;
+    }
+    .stage-queue-empty i { width: 40px; height: 40px; opacity: 0.3; }
+    .stage-actions-bar {
+      display: flex; gap: 8px; padding: 12px 16px;
+      border-top: 1px solid var(--border, #1E2535);
+      background: var(--bg-secondary, #131720); flex-shrink: 0;
+    }
+
+    /* ── Detail panel ── */
+    .detail-panel {
+      width: 340px; flex-shrink: 0;
+      background: var(--bg-secondary, #131720);
+      border-left: 1px solid var(--border, #1E2535);
+      display: flex; flex-direction: column; overflow: hidden;
+      transition: width 250ms ease; min-height: 0;
+    }
+    .detail-panel--hidden { width: 0; border-left: none; overflow: hidden; }
+    .detail-panel__header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 14px; border-bottom: 1px solid var(--border, #1E2535);
+      font-size: 13px; font-weight: 600; flex-shrink: 0;
+    }
+    .detail-panel__body { flex: 1; overflow-y: auto; padding: 12px 14px; font-size: 13px; }
+    .detail-section { margin-bottom: 14px; }
+    .detail-label {
+      font-size: 11px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 0.04em; color: var(--text-muted, #6B7280); margin-bottom: 4px;
+    }
+    .detail-value { color: var(--text-primary, #E8EBF0); line-height: 1.5; }
+
+    /* ── Empty states ── */
+    .empty-state {
+      display: flex; flex-direction: column; align-items: center;
+      justify-content: center; gap: 12px; padding: 60px 20px;
+      color: var(--text-muted, #6B7280); text-align: center; flex: 1;
+    }
+    .empty-state i { width: 48px; height: 48px; opacity: 0.3; }
+    .empty-state__title { font-size: 16px; font-weight: 600; color: var(--text-secondary, #9CA3AF); margin: 0; }
+    .empty-state__hint { font-size: 13px; max-width: 360px; line-height: 1.6; margin: 0; }
+
+    /* ── Toast ── */
+    .toast-container { position: fixed; bottom: 20px; right: 20px; z-index: 9999; display: flex; flex-direction: column; gap: 8px; }
+    .toast {
+      padding: 10px 16px; border-radius: 6px; font-size: 13px; font-weight: 500;
+      background: var(--bg-elevated, #1C2232); border: 1px solid var(--border, #1E2535);
+      color: var(--text-primary, #E8EBF0);
+      box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+      animation: toastIn 0.2s ease;
+    }
+    .toast--success { border-left: 3px solid var(--safe, #3FA860); }
+    .toast--error   { border-left: 3px solid var(--danger, #E54848); }
+    .toast--info    { border-left: 3px solid var(--accent, #4A63E7); }
+    @keyframes toastIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+    /* ── Loading skeleton ── */
+    @keyframes skel-pulse { 0%,100%{opacity:.5} 50%{opacity:1} }
+    .skeleton { border-radius: 4px; background: var(--bg-tertiary, #1C2232); animation: skel-pulse 1.5s ease-in-out infinite; }
+  </style>
+</head>
+<body>
+<div class="page" id="page">
+
+  <!-- ── Sidebar ── -->
+  <nav class="sidebar" id="sidebar">
+    <div class="sidebar__logo">
+      <i data-lucide="shield"></i>
+      JanuSec
+      <span class="sidebar__beta">beta</span>
+    </div>
+
+    <div class="nav-section">
+      <a class="nav-item active" href="/">
+        <i data-lucide="activity"></i>
+        Live Operations
+        <span class="nav-badge live-badge" id="sidebarCritBadge" style="display:none;">0</span>
+      </a>
+      <a class="nav-item" href="/static/investigate.html">
+        <i data-lucide="search"></i>
+        Investigate
+      </a>
+    </div>
+
+    <div class="nav-section">
+      <div style="padding: 6px 16px 2px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--text-muted, #6B7280);">Threat Hunt</div>
+      <a class="nav-item" href="/static/investigate.html#graph">
+        <i data-lucide="share-2"></i>
+        HopGraph
+      </a>
+      <a class="nav-item" href="/static/factors_top20.html">
+        <i data-lucide="list-ordered"></i>
+        Factors Top-20
+      </a>
+    </div>
+
+    <div class="nav-section">
+      <div style="padding: 6px 16px 2px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--text-muted, #6B7280);">Reports</div>
+      <a class="nav-item" href="/static/metrics.html">
+        <i data-lucide="bar-chart-2"></i>
+        Metrics
+      </a>
+      <a class="nav-item" href="/static/sbom.html">
+        <i data-lucide="package"></i>
+        SBOM & Vulns
+      </a>
+      <a class="nav-item" href="/static/integrations.html">
+        <i data-lucide="plug"></i>
+        Integrations
+      </a>
+    </div>
+
+    <div class="sidebar__spacer"></div>
+
+    <div class="nav-section">
+      <a class="nav-item" href="/static/admin.html">
+        <i data-lucide="settings"></i>
+        Admin
+      </a>
+    </div>
+  </nav>
+
+  <!-- ── Main column ── -->
+  <div class="main-col">
+
+    <!-- ── Connector health bar ── -->
+    <div class="connector-bar" id="connectorBar">
+      <div class="connector-bar__header">
+        <span class="connector-bar__title">Live Connectors</span>
+        <span class="env-badge env-badge--unknown" id="envBadge">Detecting…</span>
+        <div class="connector-bar__refresh">
+          <div class="live-pulse" id="livePulse"></div>
+          <span id="connLastUpdate">–</span>
+        </div>
+      </div>
+      <div class="connector-chips" id="connectorChips">
+        <span class="skeleton" style="width:90px;height:24px;border-radius:4px;"></span>
+        <span class="skeleton" style="width:80px;height:24px;border-radius:4px;"></span>
+        <span class="skeleton" style="width:100px;height:24px;border-radius:4px;"></span>
+      </div>
+    </div>
+
+    <!-- ── Live metrics strip ── -->
+    <div class="metrics-strip" id="metricsStrip">
+      <div class="metric-tile">
+        <span class="metric-tile__val metric-tile__val--crit" id="mCrit">–</span>
+        <span>Critical</span>
+      </div>
+      <div class="metrics-strip__sep"></div>
+      <div class="metric-tile">
+        <span class="metric-tile__val metric-tile__val--high" id="mHigh">–</span>
+        <span>High</span>
+      </div>
+      <div class="metrics-strip__sep"></div>
+      <div class="metric-tile">
+        <span class="metric-tile__val metric-tile__val--neutral" id="mEventsMin">–</span>
+        <span>events/min</span>
+      </div>
+      <div class="metrics-strip__sep"></div>
+      <div class="metric-tile">
+        <span class="metric-tile__val metric-tile__val--good" id="mDetRate">–</span>
+        <span>detection rate</span>
+      </div>
+      <div class="metrics-strip__sep"></div>
+      <div class="metric-tile">
+        <span class="metric-tile__val metric-tile__val--neutral" id="mAvgResp">–</span>
+        <span>avg response</span>
+      </div>
+      <div class="metrics-strip__actions">
+        <span class="refresh-countdown" id="refreshCountdown">↻ 30s</span>
+        <button class="btn-sm btn-sm--pause" id="btnPause" onclick="togglePause()">⏸ Pause</button>
+        <button class="btn-sm" onclick="forcePoll()">↻ Now</button>
+      </div>
+    </div>
+
+    <!-- ── Severity summary ── -->
+    <section class="sev-summary" id="sevSummary" aria-label="Severity breakdown">
+      <div class="sev-grid">
+        <div class="sev-row">
+          <span class="sev-row__label">Correlated</span>
+          <div class="sev-row__boxes">
+            <div class="sev-box sev-box--critical" data-filter="correlated-critical">
+              <span class="sev-box__count" id="sc_crit">0</span> CRIT
+            </div>
+            <div class="sev-box sev-box--high"     data-filter="correlated-high">
+              <span class="sev-box__count" id="sc_high">0</span> HIGH
+            </div>
+            <div class="sev-box sev-box--medium"   data-filter="correlated-medium">
+              <span class="sev-box__count" id="sc_med">0</span> MED
+            </div>
+            <div class="sev-box sev-box--low"      data-filter="correlated-low">
+              <span class="sev-box__count" id="sc_low">0</span> LOW
+            </div>
+          </div>
+          <span class="sev-total" id="sc_total">0 total</span>
+        </div>
+        <div class="sev-row">
+          <span class="sev-row__label">Isolated</span>
+          <div class="sev-row__boxes">
+            <div class="sev-box sev-box--critical" data-filter="isolated-critical">
+              <span class="sev-box__count" id="si_crit">0</span> CRIT
+            </div>
+            <div class="sev-box sev-box--high"     data-filter="isolated-high">
+              <span class="sev-box__count" id="si_high">0</span> HIGH
+            </div>
+            <div class="sev-box sev-box--medium"   data-filter="isolated-medium">
+              <span class="sev-box__count" id="si_med">0</span> MED
+            </div>
+            <div class="sev-box sev-box--low"      data-filter="isolated-low">
+              <span class="sev-box__count" id="si_low">0</span> LOW
+            </div>
+          </div>
+          <span class="sev-total" id="si_total">0 total</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Investigation layout ── -->
+    <div class="investigate-layout">
+      <div class="investigate-main">
+
+        <!-- Tab bar -->
+        <div class="tab-bar" role="tablist">
+          <button class="tab-btn active" role="tab" data-tab="feed">
+            <i data-lucide="activity"></i> Live Feed
+            <span class="badge" id="feedBadge" style="display:none;">0</span>
+          </button>
+          <button class="tab-btn" role="tab" data-tab="graph">
+            <i data-lucide="share-2"></i> Graph
+          </button>
+          <button class="tab-btn" role="tab" data-tab="timeline">
+            <i data-lucide="clock"></i> Timeline
+          </button>
+          <button class="tab-btn" role="tab" data-tab="stage">
+            <i data-lucide="bookmark"></i> Stage Queue
+            <span class="badge badge--accent" id="stageBadge" style="display:none;">0</span>
+          </button>
+        </div>
+
+        <!-- ── TAB: Live Feed ── -->
+        <div class="tab-content active" id="tabFeed">
+          <!-- Filter toolbar -->
+          <div class="ev-toolbar">
+            <button class="filter-chip active" data-lv-filter="all">All</button>
+            <button class="filter-chip" data-lv-filter="correlated">Correlated</button>
+            <button class="filter-chip" data-lv-filter="isolated">Isolated</button>
+            <button class="filter-chip" data-lv-filter="critical">Critical</button>
+            <button class="filter-chip" data-lv-filter="high">High</button>
+            <button class="filter-chip" data-lv-filter="medium">Medium</button>
+            <span class="ev-count" id="liveCount">–</span>
+          </div>
+          <!-- Table -->
+          <div class="evidence-container">
+            <table class="ev-table" id="liveTable">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>SEV</th>
+                  <th>TYPE</th>
+                  <th>ENTITY</th>
+                  <th>DESCRIPTION</th>
+                  <th>SCORE</th>
+                  <th>MITRE</th>
+                  <th>STAGE</th>
+                </tr>
+              </thead>
+              <tbody id="liveBody">
+                <tr><td colspan="8">
+                  <div class="empty-state">
+                    <i data-lucide="activity"></i>
+                    <p class="empty-state__title">Connecting to live feed…</p>
+                    <p class="empty-state__hint">Polling for decisions from active connectors.</p>
+                  </div>
+                </td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- ── TAB: Graph ── -->
+        <div class="tab-content" id="tabGraph">
+          <div class="tab-scroll">
+            <div class="empty-state">
+              <i data-lucide="share-2"></i>
+              <p class="empty-state__title">Live Graph</p>
+              <p class="empty-state__hint">Graph renders automatically as live events accumulate. Click a row in Live Feed to highlight its node here.</p>
+              <a href="/static/csv_multi_analyzer.html" class="btn-sm btn-sm--primary" style="margin-top:8px;">→ Open Full HopGraph</a>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── TAB: Timeline ── -->
+        <div class="tab-content" id="tabTimeline">
+          <div class="tab-scroll">
+            <div class="empty-state">
+              <i data-lucide="clock"></i>
+              <p class="empty-state__title">Live Timeline</p>
+              <p class="empty-state__hint">Events appear here as they are detected from your active connectors.</p>
+            </div>
+            <div id="timelineContent" style="display:none;"></div>
+          </div>
+        </div>
+
+        <!-- ── TAB: Stage Queue ── -->
+        <div class="tab-content" id="tabStage">
+          <div class="tab-scroll">
+            <div id="stageEmpty" class="empty-state">
+              <i data-lucide="bookmark"></i>
+              <p class="empty-state__title">Stage Queue is empty</p>
+              <p class="empty-state__hint">Click <strong>[→I]</strong> on any live event to stage it for deep investigation. Staged events are sent to the Investigation Console without disturbing this live feed.</p>
+            </div>
+            <div class="stage-queue-list" id="stageList" style="display:none;"></div>
+          </div>
+          <div class="stage-actions-bar" id="stageActionsBar" style="display:none;">
+            <button class="btn-sm btn-sm--primary" onclick="openInvestigate()">
+              <i data-lucide="external-link" style="width:13px;height:13px;"></i>
+              Open in Investigation Console
+            </button>
+            <button class="btn-sm" onclick="clearStage()">
+              <i data-lucide="trash-2" style="width:13px;height:13px;"></i>
+              Clear Queue
+            </button>
+            <span style="font-size:12px;color:var(--text-muted,#6B7280);margin-left:4px;" id="stageHint">
+              investigate.html will see these events on load
+            </span>
+          </div>
+        </div>
+
+      </div><!-- end investigate-main -->
+
+      <!-- ── Detail panel ── -->
+      <div class="detail-panel detail-panel--hidden" id="detailPanel">
+        <div class="detail-panel__header">
+          <span id="detailTitle">Event Detail</span>
+          <button class="btn-sm" onclick="closeDetail()" style="padding:3px 8px;">✕</button>
+        </div>
+        <div class="detail-panel__body" id="detailBody">
+          <div class="empty-state">
+            <i data-lucide="info"></i>
+            <p class="empty-state__hint">Click a row to see details.</p>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- end investigate-layout -->
+
+  </div><!-- end main-col -->
+
+</div>
+
+<!-- Toast container -->
+<div class="toast-container" id="toastContainer"></div>
+
+<script>
+(function () {
+  'use strict';
+
+  // ── Helpers ──────────────────────────────────────────────────────────
+  function $(id) { return document.getElementById(id); }
+  function esc(s) { return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+  function trunc(s, n) { s = String(s || ''); return s.length > n ? s.slice(0, n) + '…' : s; }
+
+  function authHeaders() {
+    var key = localStorage.getItem('apiKey') || localStorage.getItem('janusec_api_key') || 'devkey123';
+    return { 'x-api-key': key, 'Content-Type': 'application/json' };
+  }
+
+  function scoreColor(v) {
+    if (v >= 0.9) return 'var(--danger, #E54848)';
+    if (v >= 0.7) return 'var(--warning, #FF8A3C)';
+    if (v >= 0.5) return '#E0C446';
+    return 'var(--safe, #3FA860)';
+  }
+
+  function toast(msg, type) {
+    type = type || 'info';
+    var div = document.createElement('div');
+    div.className = 'toast toast--' + type;
+    div.textContent = msg;
+    $('toastContainer').appendChild(div);
+    setTimeout(function () { div.remove(); }, 3500);
+  }
+
+  // ── State ─────────────────────────────────────────────────────────────
+  var state = {
+    decisions: [],
+    filter: 'all',
+    paused: false,
+    countdown: 30,
+    countdownTimer: null,
+    pollTimer: null,
+    stagedEvents: [],
+    selectedRow: null,
+    totalEvents: 0,
+  };
+
+  // ── Tab switching ─────────────────────────────────────────────────────
+  document.querySelectorAll('.tab-btn').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var tab = btn.getAttribute('data-tab');
+      switchTab(tab);
+    });
+  });
+
+  function switchTab(tab) {
+    document.querySelectorAll('.tab-btn').forEach(function (b) {
+      b.classList.toggle('active', b.getAttribute('data-tab') === tab);
+    });
+    document.querySelectorAll('.tab-content').forEach(function (c) {
+      c.classList.remove('active');
+    });
+    var el = $('tab' + tab.charAt(0).toUpperCase() + tab.slice(1));
+    if (el) el.classList.add('active');
+    if (tab === 'stage') renderStageQueue();
+  }
+
+  // ── Severity summary ──────────────────────────────────────────────────
+  function updateSeveritySummary(rows) {
+    var counts = {
+      correlated: { critical: 0, high: 0, medium: 0, low: 0 },
+      isolated:   { critical: 0, high: 0, medium: 0, low: 0 }
+    };
+    rows.forEach(function (r) {
+      var bucket = (r.correlation_state === 'correlated' || r.type === 'correlated') ? 'correlated' : 'isolated';
+      var sev = (r.severity || r.triage_severity || 'low').toLowerCase();
+      if (!counts[bucket][sev]) counts[bucket][sev] = 0;
+      counts[bucket][sev]++;
+    });
+    var idMap = {
+      correlated: { critical:'sc_crit', high:'sc_high', medium:'sc_med', low:'sc_low', total:'sc_total' },
+      isolated:   { critical:'si_crit', high:'si_high', medium:'si_med', low:'si_low', total:'si_total' }
+    };
+    ['correlated','isolated'].forEach(function (bucket) {
+      var total = 0;
+      ['critical','high','medium','low'].forEach(function (sev) {
+        var count = counts[bucket][sev] || 0;
+        total += count;
+        var el = $(idMap[bucket][sev]);
+        if (el) el.textContent = String(count);
+      });
+      var t = $(idMap[bucket].total);
+      if (t) t.textContent = total + ' total';
+    });
+    $('sevSummary').classList.add('has-data');
+
+    // Update sidebar critical badge
+    var critCount = counts.correlated.critical + counts.isolated.critical;
+    var badge = $('sidebarCritBadge');
+    if (badge) {
+      badge.textContent = String(critCount);
+      badge.style.display = critCount > 0 ? '' : 'none';
+    }
+
+    // Update feed badge
+    var feedBadge = $('feedBadge');
+    if (feedBadge) {
+      var highPlus = counts.correlated.critical + counts.correlated.high + counts.isolated.critical + counts.isolated.high;
+      feedBadge.textContent = String(highPlus);
+      feedBadge.style.display = highPlus > 0 ? '' : 'none';
+    }
+    $('liveCount').textContent = rows.length + ' live events';
+  }
+
+  // ── Sev box click → filter ────────────────────────────────────────────
+  document.querySelectorAll('.sev-box').forEach(function (box) {
+    box.addEventListener('click', function () {
+      state.filter = box.getAttribute('data-filter') || 'all';
+      switchTab('feed');
+      renderLiveTable(state.decisions);
+      document.querySelectorAll('[data-lv-filter]').forEach(function (c) { c.classList.remove('active'); });
+    });
+  });
+
+  // ── Filter chips ──────────────────────────────────────────────────────
+  document.querySelectorAll('[data-lv-filter]').forEach(function (chip) {
+    chip.addEventListener('click', function () {
+      document.querySelectorAll('[data-lv-filter]').forEach(function (c) { c.classList.remove('active'); });
+      chip.classList.add('active');
+      state.filter = chip.getAttribute('data-lv-filter');
+      renderLiveTable(state.decisions);
+    });
+  });
+
+  // ── Render live event table ───────────────────────────────────────────
+  function normalizeDecision(d) {
+    // decisions/recent returns DecisionRecord shape OR raw decision shape — handle both
+    return {
+      event_id: d.event_id || d.id || '',
+      severity: (d.triage_severity || d.severity || d.priority || 'low').toLowerCase(),
+      type: d.correlation_state || d.type || 'isolated',
+      entity: d.factors && d.factors[0] ? String(d.factors[0]).split(':').pop() : (d.entity || d.event_id || '–'),
+      description: d.reason || d.disposition || d.summary || '–',
+      triage_score: typeof d.triage_score === 'number' ? d.triage_score : parseFloat(d.triage_score || 0),
+      mitre: d.mitre_tactic || d.escalation_plan && d.escalation_plan.tier_1_contact || '–',
+      state: d.state || 'pending',
+      raw: d,
+    };
+  }
+
+  function filterDecisions(rows) {
+    var f = state.filter;
+    if (!f || f === 'all') return rows;
+    if (f === 'correlated') return rows.filter(function (r) { return r.type === 'correlated'; });
+    if (f === 'isolated')   return rows.filter(function (r) { return r.type !== 'correlated'; });
+    if (f.includes('-')) {
+      var parts = f.split('-');
+      return rows.filter(function (r) {
+        return (parts[0] === 'correlated' ? r.type === 'correlated' : r.type !== 'correlated') && r.severity === parts[1];
+      });
+    }
+    return rows.filter(function (r) { return r.severity === f; });
+  }
+
+  function renderLiveTable(decisions) {
+    state.decisions = decisions;
+    var rows = decisions.map(normalizeDecision);
+    updateSeveritySummary(rows);
+    var filtered = filterDecisions(rows);
+    var tbody = $('liveBody');
+    if (!filtered.length) {
+      tbody.innerHTML = '<tr><td colspan="8"><div class="empty-state">' +
+        '<i data-lucide="activity"></i>' +
+        '<p class="empty-state__title">No events match this filter</p>' +
+        '<p class="empty-state__hint">Try "All" to see everything.</p></div></td></tr>';
+      if (window.lucide) lucide.createIcons();
+      return;
+    }
+    tbody.innerHTML = '';
+    filtered.forEach(function (row, idx) {
+      var staged = isStaged(row.event_id);
+      var tr = document.createElement('tr');
+      tr.setAttribute('data-idx', idx);
+      if (state.selectedRow && state.selectedRow.event_id === row.event_id) tr.classList.add('selected');
+      tr.innerHTML =
+        '<td style="color:var(--text-muted,#6B7280);font-size:11px;">' + (idx+1) + '</td>' +
+        '<td><span class="sev-pill sev-pill--' + esc(row.severity) + '">' + esc(row.severity.toUpperCase()) + '</span></td>' +
+        '<td><span style="font-size:11px;">' + (row.type === 'correlated' ? '●' : '◦') + ' ' + esc(row.type) + '</span></td>' +
+        '<td style="font-weight:500;color:var(--text-primary,#E8EBF0);" title="' + esc(row.entity) + '">' + esc(trunc(row.entity, 25)) + '</td>' +
+        '<td style="color:var(--text-secondary,#9CA3AF);" title="' + esc(row.description) + '">' + esc(trunc(row.description, 38)) + '</td>' +
+        '<td style="font-weight:700;color:' + scoreColor(row.triage_score) + '">' + row.triage_score.toFixed(2) + '</td>' +
+        '<td style="font-size:11px;color:var(--text-muted,#6B7280);">' + esc(trunc(row.mitre, 18)) + '</td>' +
+        '<td><button class="stage-btn' + (staged ? ' stage-btn--staged' : '') + '" onclick="event.stopPropagation();stageEvent(\'' + esc(row.event_id) + '\')">' +
+          (staged ? '✓ Staged' : '→I') + '</button></td>';
+      tr.addEventListener('click', function () { showDetail(row); });
+      tbody.appendChild(tr);
+    });
+    if (window.lucide) lucide.createIcons();
+  }
+
+  // ── Detail panel ──────────────────────────────────────────────────────
+  function showDetail(row) {
+    state.selectedRow = row;
+    $('detailPanel').classList.remove('detail-panel--hidden');
+    $('detailTitle').textContent = 'Event — ' + trunc(row.entity, 20);
+    var d = row.raw || {};
+    var html = '';
+    html += section('Overview', [
+      ['Event ID', row.event_id],
+      ['State', row.state],
+      ['Severity', row.severity.toUpperCase()],
+      ['Type', row.type],
+      ['Triage Score', row.triage_score.toFixed(3)],
+    ]);
+    html += section('Entity', [
+      ['Entity', row.entity],
+      ['Description', row.description],
+      ['MITRE', row.mitre],
+    ]);
+    if (d.escalation_plan) {
+      var ep = d.escalation_plan;
+      html += section('Escalation', [
+        ['Priority', ep.priority],
+        ['SLA', ep.sla_minutes + ' min'],
+        ['Next Action', ep.next_action],
+        ['Tier 1', ep.tier_1_contact],
+      ]);
+    }
+    if (d.disposition) {
+      html += section('Disposition', [['Disposition', d.disposition], ['Reason', d.reason]]);
+    }
+    html += '<div class="detail-section"><div style="display:flex;gap:8px;margin-top:10px;">' +
+      '<button class="btn-sm btn-sm--primary" onclick="stageEvent(\'' + esc(row.event_id) + '\')">→ Stage for Investigation</button>' +
+      '</div></div>';
+    $('detailBody').innerHTML = html;
+    if (window.lucide) lucide.createIcons();
+    renderLiveTable(state.decisions); // re-render to sync selection highlight
+  }
+
+  function section(title, pairs) {
+    var html = '<div class="detail-section">';
+    html += '<div class="detail-label">' + esc(title) + '</div>';
+    pairs.forEach(function (p) {
+      if (!p[1] || p[1] === '–' || p[1] === 'undefined') return;
+      html += '<div style="display:flex;gap:6px;margin-bottom:4px;">' +
+        '<span style="color:var(--text-muted,#6B7280);min-width:90px;font-size:11px;">' + esc(p[0]) + '</span>' +
+        '<span class="detail-value" style="font-size:12px;">' + esc(String(p[1])) + '</span></div>';
+    });
+    html += '</div>';
+    return html;
+  }
+
+  function closeDetail() {
+    $('detailPanel').classList.add('detail-panel--hidden');
+    state.selectedRow = null;
+  }
+
+  // ── Stage for investigation ───────────────────────────────────────────
+  function isStaged(eventId) {
+    return state.stagedEvents.some(function (e) { return e.event_id === eventId; });
+  }
+
+  window.stageEvent = function (eventId) {
+    if (isStaged(eventId)) {
+      toast('Already staged', 'info');
+      return;
+    }
+    var row = state.decisions.map(normalizeDecision).find(function (r) { return r.event_id === eventId; });
+    if (!row) return;
+    state.stagedEvents.push(row);
+    persistStaged();
+    // Update badge
+    var badge = $('stageBadge');
+    badge.textContent = String(state.stagedEvents.length);
+    badge.style.display = '';
+    toast('Staged for investigation · ' + state.stagedEvents.length + ' total', 'success');
+    renderLiveTable(state.decisions);
+    renderStageQueue();
+  };
+
+  function persistStaged() {
+    try {
+      localStorage.setItem('janusec_staged_events', JSON.stringify({
+        staged_at: new Date().toISOString(),
+        source: 'live_dashboard',
+        events: state.stagedEvents,
+      }));
+    } catch (_) {}
+  }
+
+  function renderStageQueue() {
+    var list = $('stageList');
+    var empty = $('stageEmpty');
+    var actionsBar = $('stageActionsBar');
+    if (!state.stagedEvents.length) {
+      list.style.display = 'none';
+      empty.style.display = '';
+      actionsBar.style.display = 'none';
+      return;
+    }
+    empty.style.display = 'none';
+    list.style.display = '';
+    actionsBar.style.display = '';
+    list.innerHTML = '';
+    state.stagedEvents.forEach(function (row, idx) {
+      var div = document.createElement('div');
+      div.className = 'stage-item';
+      div.innerHTML =
+        '<span><span class="sev-pill sev-pill--' + esc(row.severity) + '">' + esc(row.severity.toUpperCase()) + '</span></span>' +
+        '<div class="stage-item__info">' +
+          '<div class="stage-item__entity">' + esc(row.entity) + '</div>' +
+          '<div class="stage-item__desc">' + esc(trunc(row.description, 60)) + '</div>' +
+        '</div>' +
+        '<button class="btn-sm" onclick="removeStaged(' + idx + ')">✕</button>';
+      list.appendChild(div);
+    });
+  }
+
+  window.removeStaged = function (idx) {
+    state.stagedEvents.splice(idx, 1);
+    persistStaged();
+    var badge = $('stageBadge');
+    if (state.stagedEvents.length) {
+      badge.textContent = String(state.stagedEvents.length);
+    } else {
+      badge.style.display = 'none';
+    }
+    renderStageQueue();
+    renderLiveTable(state.decisions);
+  };
+
+  window.clearStage = function () {
+    state.stagedEvents = [];
+    try { localStorage.removeItem('janusec_staged_events'); } catch (_) {}
+    var badge = $('stageBadge');
+    badge.style.display = 'none';
+    renderStageQueue();
+    renderLiveTable(state.decisions);
+    toast('Stage queue cleared', 'info');
+  };
+
+  window.openInvestigate = function () {
+    persistStaged();
+    window.open('/static/investigate.html', '_blank');
+  };
+
+  // ── API: poll decisions/recent ────────────────────────────────────────
+  async function pollDecisions() {
+    try {
+      var resp = await fetch('/api/v1/decisions/lifecycle/recent?limit=200', {
+        headers: authHeaders(),
+      });
+      if (!resp.ok) throw new Error(resp.status);
+      var data = await resp.json();
+      var decisions = Array.isArray(data) ? data : (data.decisions || data.results || data.items || []);
+      return decisions;
+    } catch (e) {
+      // Fallback to decisions_recent
+      try {
+        var resp2 = await fetch('/api/v1/decisions/recent', { headers: authHeaders() });
+        if (!resp2.ok) throw new Error(resp2.status);
+        var data2 = await resp2.json();
+        return Array.isArray(data2) ? data2 : (data2.decisions || data2.results || []);
+      } catch (e2) {
+        return [];
+      }
+    }
+  }
+
+  // ── API: poll metrics ─────────────────────────────────────────────────
+  async function pollMetrics() {
+    try {
+      var [mResp, sResp, cResp] = await Promise.all([
+        fetch('/api/v1/dashboard/metrics',   { headers: authHeaders() }),
+        fetch('/api/v1/dashboard/status',    { headers: authHeaders() }),
+        fetch('/api/v1/status/connectors',   { headers: authHeaders() }),
+      ]);
+      var metrics    = mResp.ok ? await mResp.json() : {};
+      var status     = sResp.ok ? await sResp.json() : {};
+      var connStatus = cResp.ok ? await cResp.json() : {};
+      // Merge real connector list into status so renderConnectorBar can use it
+      if (connStatus.connectors) status._connectors = connStatus.connectors;
+      renderMetrics(metrics, status);
+    } catch (_) {}
+  }
+
+  function renderMetrics(m, s) {
+    // Metrics strip
+    var crit = m.critical_threats;
+    if (crit !== undefined) {
+      $('mCrit').textContent = crit;
+      var alertCounts = (s.alerts || {});
+      $('mHigh').textContent = alertCounts.high !== undefined ? alertCounts.high : (m.high_threats || '–');
+    }
+    if (m.detection_rate != null) $('mDetRate').textContent = m.detection_rate + '%';
+    if (m.avg_response_time != null) $('mAvgResp').textContent = m.avg_response_time;
+    // Events per min: estimate from total/decisions
+    var total = (s.alerts || {}).total;
+    if (total !== undefined) $('mEventsMin').textContent = Math.round(total / 5);
+
+    // Connector chips (from status response or graceful defaults)
+    renderConnectorBar(s);
+  }
+
+  // ── Connector health bar ──────────────────────────────────────────────
+  var CONNECTOR_FAMILIES = {
+    cloud: ['azure', 'aws', 'gcp', 'defender', 'sentinel', 'cloudtrail', 'guardduty', 'crowdstrike', 'okta', 'zscaler', 'o365', 'msgraph'],
+    network: ['zeek', 'suricata', 'bro', 'pcap', 'netflow', 'sflow'],
+    identity: ['ldap', 'activedirectory', 'ad', 'okta', 'azuread', 'jumpcloud', 'duo', 'pingid'],
+    edr: ['crowdstrike', 'defender', 'sentinelone', 's1', 'carbonblack', 'cb', 'sysmon', 'cylance'],
+  };
+
+  function detectEnv(connectors) {
+    var names = connectors.map(function (c) { return (c.name || '').toLowerCase(); });
+    var hasCloud  = names.some(function (n) { return CONNECTOR_FAMILIES.cloud.some(function (k) { return n.includes(k); }); });
+    var hasNetwork = names.some(function (n) { return CONNECTOR_FAMILIES.network.some(function (k) { return n.includes(k); }); });
+    if (hasCloud && hasNetwork) return 'hybrid';
+    if (hasCloud) return 'cloud';
+    if (hasNetwork) return 'onprem';
+    return 'unknown';
+  }
+
+  function renderConnectorBar(statusData) {
+    var chips = $('connectorChips');
+    var envBadge = $('envBadge');
+
+    // Build connector list from real connector status first (_connectors injected by pollMetrics)
+    var connectors = [];
+    var rawList = (statusData && statusData._connectors) || [];
+    rawList.forEach(function (c) {
+      var s = (c.status || c.state || '').toLowerCase();
+      connectors.push({
+        name: c.name || c.connector_id || c.id || 'unknown',
+        status: s === 'active' || s === 'ok' || s === 'connected' || s === 'running' ? 'ok' :
+                s === 'warning' || s === 'lag' || s === 'degraded' ? 'warn' :
+                s === 'error' ? 'err' : 'idle',
+        detail: c.detail || c.last_error || s,
+      });
+    });
+    // Fall back to dashboard/status xdr_connection if no dedicated connector entries
+    if (!connectors.length && statusData && statusData.xdr_connection) {
+      connectors.push({
+        name: 'XDR Engine',
+        status: statusData.xdr_connection.status === 'connected' ? 'ok' : 'warn',
+        detail: statusData.xdr_connection.status,
+      });
+    }
+    // Only show from legacy status.connectors map if still nothing
+    if (!connectors.length && statusData && statusData.connectors) {
+      Object.entries(statusData.connectors).forEach(function (entry) {
+        var name = entry[0], val = entry[1];
+        connectors.push({
+          name: name,
+          status: val === 'active' || val === 'ok' || val === 'connected' ? 'ok' :
+                  val === 'warning' || val === 'lag' ? 'warn' :
+                  val === 'inactive' || val === 'error' ? 'idle' : 'idle',
+          detail: val,
+        });
+      });
+    }
+
+    if (!connectors.length) {
+      envBadge.textContent = 'No connectors';
+      envBadge.className = 'env-badge env-badge--unknown';
+      chips.innerHTML = '<span style="font-size:11px;color:var(--text-muted,#6B7280);">No connectors configured — <a href="/static/integrations.html" style="color:var(--accent,#4A63E7);">set up integrations</a></span>';
+      $('connLastUpdate').textContent = 'Updated ' + new Date().toLocaleTimeString();
+      return;
+    }
+
+    var env = detectEnv(connectors);
+    envBadge.textContent = env === 'hybrid' ? 'Hybrid' : env === 'cloud' ? 'Cloud-Native' : env === 'onprem' ? 'Private Cloud' : 'Detecting…';
+    envBadge.className = 'env-badge env-badge--' + (env === 'hybrid' ? 'hybrid' : env === 'cloud' ? 'cloud' : env === 'onprem' ? 'onprem' : 'unknown');
+
+    chips.innerHTML = '';
+    connectors.forEach(function (c) {
+      var chip = document.createElement('div');
+      chip.className = 'connector-chip';
+      chip.innerHTML = '<span class="conn-dot conn-dot--' + esc(c.status) + '"></span>' + esc(c.name);
+      if (c.detail && c.detail !== c.name) chip.title = c.detail;
+      chips.appendChild(chip);
+    });
+
+    // Update last-update time
+    $('connLastUpdate').textContent = 'Updated ' + new Date().toLocaleTimeString();
+  }
+
+  // ── Auto-refresh with countdown ───────────────────────────────────────
+  var POLL_INTERVAL = 30; // seconds
+
+  function startCountdown() {
+    if (state.countdownTimer) clearInterval(state.countdownTimer);
+    state.countdown = POLL_INTERVAL;
+    state.countdownTimer = setInterval(function () {
+      if (!state.paused) {
+        state.countdown--;
+        $('refreshCountdown').textContent = '↻ ' + state.countdown + 's';
+        if (state.countdown <= 0) {
+          state.countdown = POLL_INTERVAL;
+          doPoll();
+        }
+      }
+    }, 1000);
+  }
+
+  async function doPoll() {
+    var decisions = await pollDecisions();
+    renderLiveTable(decisions);
+    state.totalEvents = decisions.length;
+    // Poll metrics less frequently (every 3 decision polls)
+    if (!state._metricPollCount) state._metricPollCount = 0;
+    state._metricPollCount++;
+    if (state._metricPollCount % 3 === 1) await pollMetrics();
+  }
+
+  window.forcePoll = function () {
+    state.countdown = POLL_INTERVAL;
+    doPoll();
+    toast('Refreshed', 'success');
+  };
+
+  window.togglePause = function () {
+    state.paused = !state.paused;
+    var btn = $('btnPause');
+    btn.textContent = state.paused ? '▶ Resume' : '⏸ Pause';
+    btn.className = state.paused ? 'btn-sm btn-sm--primary' : 'btn-sm btn-sm--pause';
+    var pulse = $('livePulse');
+    if (state.paused) {
+      pulse.style.animation = 'none';
+      pulse.style.background = 'var(--text-muted,#6B7280)';
+    } else {
+      pulse.style.animation = '';
+      pulse.style.background = '';
+      doPoll();
+    }
+    toast(state.paused ? 'Live feed paused' : 'Live feed resumed', 'info');
+  };
+
+  // ── Onboard staged events from localStorage (set by investigate.html) ──
+  function loadStagedFromStorage() {
+    try {
+      var raw = localStorage.getItem('janusec_staged_events');
+      if (!raw) return;
+      var data = JSON.parse(raw);
+      if (data && Array.isArray(data.events)) {
+        state.stagedEvents = data.events;
+        if (state.stagedEvents.length) {
+          var badge = $('stageBadge');
+          badge.textContent = String(state.stagedEvents.length);
+          badge.style.display = '';
+        }
+      }
+    } catch (_) {}
+  }
+
+  // ── Bootstrap ─────────────────────────────────────────────────────────
+  function init() {
+    if (window.lucide) lucide.createIcons();
+    loadStagedFromStorage();
+    doPoll();
+    pollMetrics();
+    startCountdown();
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+
+})();
+</script>
+</body>
+</html>

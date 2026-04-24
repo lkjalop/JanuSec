@@ -493,6 +493,11 @@ except Exception:
     deep_analyze_router = None
     csv_deep_analyze_router = None
 try:
+    from .streaming_endpoints import router as streaming_router, ingest_router as streaming_ingest_router
+except Exception:
+    streaming_router = None
+    streaming_ingest_router = None
+try:
     from .tier2_endpoints import router as tier2_router
 except Exception:
     tier2_router = None
@@ -512,6 +517,10 @@ try:
     from .tier2_canvas_endpoints import router as tier2_canvas_router
 except Exception:
     tier2_canvas_router = None
+try:
+    from .breach_endpoints import router as breach_router
+except Exception:
+    breach_router = None
 try:
     from .cluster_enrich_endpoints import router as cluster_enrich_router
 except Exception:
@@ -1029,6 +1038,21 @@ async def lifespan(app: FastAPI):
             logger.info('lifespan: investigate worker started')
         except Exception:
             pass
+        # Start async ingest worker (processes async file upload jobs)
+        try:
+            from src.core.ingest.assessment_worker import start_worker as _start_ingest_worker
+            _start_ingest_worker(app)
+            logger.info('lifespan: ingest worker started')
+        except Exception:
+            logger.debug('lifespan: ingest worker start failed', exc_info=True)
+        # Recover streaming sessions that were open before last shutdown
+        try:
+            from src.pipeline.streaming_ingest import recover_open_sessions as _recover_sessions
+            n = _recover_sessions()
+            if n:
+                logger.info('lifespan: recovered %d streaming session(s) from SQLite', n)
+        except Exception:
+            pass
         try:
             await asyncio.sleep(0)  # yield so the task is scheduled
         except Exception:
@@ -1108,6 +1132,11 @@ async def lifespan(app: FastAPI):
             await shutdown_global_queue_async()
         except Exception:
             pass
+    except Exception:
+        pass
+    try:
+        from src.core.ingest.assessment_worker import stop_worker as _stop_ingest_worker
+        _stop_ingest_worker()
     except Exception:
         pass
     try:
@@ -2135,6 +2164,15 @@ except Exception:
 try:
     if streaming_router is not None:
         app.include_router(streaming_router)
+except Exception:
+    pass
+try:
+    from .ingest_endpoints import router as ingest_router
+except Exception:
+    ingest_router = None
+try:
+    if ingest_router is not None:
+        app.include_router(ingest_router)
 except Exception:
     pass
 try:
@@ -4763,6 +4801,12 @@ def register_core_routers(full: bool = True):
     except Exception:
         logger.debug('tier2_canvas_router include failed (lite)')
     try:
+        if breach_router:
+            app.include_router(breach_router)
+            logger.info('Included breach_router into app (lite)')
+    except Exception:
+        logger.debug('breach_router include failed (lite)')
+    try:
         if cluster_enrich_router:
             app.include_router(cluster_enrich_router)
             logger.info('Included cluster_enrich_router into app (lite)')
@@ -4840,6 +4884,14 @@ def register_core_routers(full: bool = True):
         if _cdr:
             app.include_router(_cdr)
             logger.info('Included csv_deep_analyze_router into app (lite)')
+        _sr = streaming_router
+        if _sr:
+            app.include_router(_sr)
+            logger.info('Included streaming_router into app (lite)')
+        _sir = streaming_ingest_router
+        if _sir:
+            app.include_router(_sir)
+            logger.info('Included streaming_ingest_router into app (lite)')
     except Exception as _dae_exc:
         logger.debug('deep_analyze_router include failed (lite): %s', _dae_exc, exc_info=True)
     try:
