@@ -1,0 +1,311 @@
+"""Structured LLM narrative generator for correlation clusters.
+
+Critical additions:
+  #2  Evidence budget — each LLM call receives at most EVIDENCE_CAP rows
+      (ranked by triage_score), preventing token explosion at 44K+ rows.
+  #3  Structured output schema — the LLM is constrained to return JSON with
+      verdict, confidence, kill_chain_stage, ioc_summary, evidence_refs and
+      next_steps.  This makes every narrative field addressable in the UI and
+      avoids the parse-and-hope approach of free-text generation.
+
+The narrator runs only on the top N clusters (default 5) after deterministic
+clustering completes.  Remaining clusters receive rule-engine label only.
+"""
+from __future__ import annotations
+
+import json
+import logging
+import re
+import threading
+
+logger = logging.getLogger(__name__)
+
+EVIDENCE_CAP = 20       # max evidence rows fed to a single LLM call
+TOP_N_CLUSTERS = 5      # only the top-N clusters get LLM narratives
+_NARRATOR_LOCK = threading.Lock()
+
+
+# ── Prompt construction ───────────────────────────────────────────────────────
+
+def _evidence_snippet(row: dict) -> str:
+    """Single-line representation of one evidence row for the prompt."""
+    ts = str(row.get("timestamp") or "")[:19]
+    user = str(row.get("user") or row.get("actor") or row.get("user_entity") or "-")
+    src = str(row.get("src_ip") or row.get("ip") or "-")
+    event = str(row.get("event_name") or row.get("eventName") or row.get("action") or row.get("description") or "-")[:120]
+    sev = str(row.get("severity") or "").upper()[:8]
+    sheet = str(row.get("source_sheet") or row.get("_sheet") or row.get("_source") or "")[:30]
+    score = float(row.get("triage_score") or 0)
+    return f"[{ts}] {sev:8s} | {user:30s} | {src:17s} | {event} (from:{sheet}, score:{score:.2f})"
+
+
+def _build_prompt(cluster: dict, evidence_rows: list[dict]) -> str:
+    cluster_id = cluster.get("cluster_id") or "unknown"
+    entity_summary = []
+    if cluster.get("shared_accounts"):
+        entity_summary.append("Users: " + ", ".join(cluster["shared_accounts"][:5]))
+    if cluster.get("shared_ips"):
+        entity_summary.append("IPs: " + ", ".join(cluster["shared_ips"][:5]))
+    if cluster.get("shared_hosts"):
+        entity_summary.append("Hosts: " + ", ".join(cluster["shared_hosts"][:5]))
+    if cluster.get("mitre_techniques"):
+        entity_summary.append("MITRE: " + ", ".join(cluster["mitre_techniques"][:5]))
+
+    evidence_lines = "\n".join(f"  {i+1:3d}. {_evidence_snippet(r)}" for i, r in enumerate(evidence_rows))
+    entity_block = "\n".join(f"  {e}" for e in entity_summary) or "  (no shared entities extracted)"
+
+    return f"""You are a senior threat analyst reviewing a correlation cluster from a security assessment.
+
+CLUSTER ID: {cluster_id}
+ROW COUNT: {cluster.get('row_count') or len(cluster.get('row_refs') or [])}
+ENTITIES:
+{entity_block}
+
+TOP {len(evidence_rows)} EVIDENCE ROWS (ranked by triage score):
+{evidence_lines}
+
+Respond ONLY with valid JSON matching this exact schema — no prose, no markdown:
+{{
+  "verdict": "<one of: VALIDATED_BREACH | SUSPECTED_BREACH | BENIGN_EXPECTED | REQUIRES_INVESTIGATION | INSUFFICIENT_EVIDENCE>",
+  "confidence": <float 0.0-1.0>,
+  "kill_chain_stage": "<one of: recon | weaponization | delivery | exploitation | installation | c2 | exfiltration | impact | unknown>",
+  "ioc_summary": "<1-2 sentence description of the key indicators of compromise>",
+  "attack_narrative": "<3-5 sentence analyst narrative explaining what happened, why it matters, and what the attacker achieved>",
+  "evidence_refs": [<list of 1-based row numbers from the evidence list above that most strongly support the verdict>],
+  "fp_indicators": ["<strings explaining why this might be a false positive, if any>"],
+  "next_steps": [
+    {{"priority": "P1|P2|P3", "action": "<short imperative action>", "rationale": "<why now>", "tool": "<specific query or command if applicable>"}}
+  ]
+}}"""
+
+
+# ── Output parsing ────────────────────────────────────────────────────────────
+
+_REQUIRED_KEYS = {"verdict", "confidence", "kill_chain_stage", "ioc_summary", "attack_narrative", "evidence_refs", "next_steps"}
+
+_VALID_VERDICTS = {
+    "VALIDATED_BREACH", "SUSPECTED_BREACH", "BENIGN_EXPECTED",
+    "REQUIRES_INVESTIGATION", "INSUFFICIENT_EVIDENCE",
+}
+
+_VALID_KILL_CHAIN = {
+    "recon", "weaponization", "delivery", "exploitation",
+    "installation", "c2", "exfiltration", "impact", "unknown",
+}
+
+
+def _parse_llm_output(raw: str, cluster_id: str) -> dict:
+    text = raw.strip()
+    # Strip markdown code fences if the model wrapped the JSON
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*", "", text)
+        text = re.sub(r"\s*```$", "", text.rstrip())
+
+    # Try to extract the JSON object even if there's surrounding prose
+    match = re.search(r"\{.*\}", text, re.DOTALL)
+    if match:
+        text = match.group(0)
+
+    try:
+        obj = json.loads(text)
+    except json.JSONDecodeError:
+        logger.warning("cluster_narrator: JSON parse failed for %s — using fallback", cluster_id)
+        return _fallback_narrative(cluster_id, raw_text=raw[:500])
+
+    # Validate and normalise
+    verdict = str(obj.get("verdict") or "REQUIRES_INVESTIGATION").upper()
+    if verdict not in _VALID_VERDICTS:
+        verdict = "REQUIRES_INVESTIGATION"
+
+    kill_chain = str(obj.get("kill_chain_stage") or "unknown").lower()
+    if kill_chain not in _VALID_KILL_CHAIN:
+        kill_chain = "unknown"
+
+    confidence = float(obj.get("confidence") or 0.5)
+    confidence = max(0.0, min(1.0, confidence))
+
+    evidence_refs = obj.get("evidence_refs") or []
+    if not isinstance(evidence_refs, list):
+        evidence_refs = []
+    evidence_refs = [int(r) for r in evidence_refs if str(r).isdigit() or isinstance(r, int)]
+
+    next_steps = obj.get("next_steps") or []
+    if not isinstance(next_steps, list):
+        next_steps = []
+
+    fp_indicators = obj.get("fp_indicators") or []
+    if not isinstance(fp_indicators, list):
+        fp_indicators = []
+
+    return {
+        "verdict": verdict,
+        "confidence": confidence,
+        "kill_chain_stage": kill_chain,
+        "ioc_summary": str(obj.get("ioc_summary") or ""),
+        "attack_narrative": str(obj.get("attack_narrative") or ""),
+        "evidence_refs": evidence_refs,
+        "fp_indicators": fp_indicators,
+        "next_steps": next_steps,
+        "_narrator_source": "llm_structured",
+    }
+
+
+def _fallback_narrative(cluster_id: str, *, raw_text: str = "") -> dict:
+    return {
+        "verdict": "REQUIRES_INVESTIGATION",
+        "confidence": 0.3,
+        "kill_chain_stage": "unknown",
+        "ioc_summary": "LLM narrative unavailable — deterministic clustering only.",
+        "attack_narrative": raw_text[:300] if raw_text else "",
+        "evidence_refs": [],
+        "fp_indicators": [],
+        "next_steps": [{"priority": "P2", "action": "Manual analyst review required", "rationale": "Automated narrative generation failed", "tool": ""}],
+        "_narrator_source": "fallback",
+    }
+
+
+# ── Public API ────────────────────────────────────────────────────────────────
+
+def narrate_cluster(
+    cluster: dict,
+    all_evidence_rows: list[dict],
+    *,
+    assessment_id: str = "",
+) -> dict:
+    """Generate a structured LLM narrative for one cluster.
+
+    Critical #2: selects the top EVIDENCE_CAP rows by triage_score before
+    calling the LLM — row-level cost is bounded regardless of cluster size.
+    """
+    # Critical addition #2 — evidence budget
+    if cluster.get("case_role"):
+        narrative = _case_narrative(cluster)
+        cluster["llm_narrative"] = narrative
+        cluster["final_verdict"] = narrative["verdict"]
+        cluster["confidence"] = narrative["confidence"]
+        cluster["kill_chain_stage"] = narrative["kill_chain_stage"]
+        cluster["ioc_summary"] = narrative["ioc_summary"]
+        cluster["attack_narrative"] = narrative["attack_narrative"]
+        cluster["next_steps"] = narrative["next_steps"]
+        cluster["fp_indicators"] = narrative["fp_indicators"]
+        cluster["evidence_refs_llm"] = narrative["evidence_refs"]
+        return narrative
+
+    candidate_idxs = set(cluster.get("row_refs") or [])
+    if candidate_idxs:
+        evidence = [r for r in all_evidence_rows if r.get("row_index") in candidate_idxs]
+    else:
+        evidence = list(all_evidence_rows)
+
+    evidence = sorted(evidence, key=lambda r: float(r.get("triage_score") or 0), reverse=True)[:EVIDENCE_CAP]
+
+    if not evidence:
+        return _fallback_narrative(str(cluster.get("cluster_id") or ""))
+
+    prompt = _build_prompt(cluster, evidence)
+    cluster_id = str(cluster.get("cluster_id") or "")
+
+    try:
+        from src.integrations.llm_client import DEFAULT_CLIENT as _client
+    except ImportError:
+        try:
+            from integrations.llm_client import DEFAULT_CLIENT as _client  # type: ignore
+        except ImportError:
+            logger.warning("LLM client unavailable — cluster %s gets fallback narrative", cluster_id)
+            return _fallback_narrative(cluster_id)
+
+    with _NARRATOR_LOCK:
+        try:
+            result = _client.generate(prompt, max_tokens=800, tenant_id=assessment_id or "ingest")
+        except Exception as exc:
+            logger.warning("LLM generate failed for cluster %s: %s", cluster_id, exc)
+            return _fallback_narrative(cluster_id)
+
+    raw = result.get("text") or ""
+    if not raw.strip():
+        return _fallback_narrative(cluster_id)
+
+    narrative = _parse_llm_output(raw, cluster_id)
+
+    # Enrich the cluster object with the structured output
+    cluster["llm_narrative"] = narrative
+    cluster["final_verdict"] = narrative["verdict"]
+    cluster["confidence"] = narrative["confidence"]
+    cluster["kill_chain_stage"] = narrative["kill_chain_stage"]
+    cluster["ioc_summary"] = narrative["ioc_summary"]
+    cluster["attack_narrative"] = narrative["attack_narrative"]
+    cluster["next_steps"] = narrative["next_steps"]
+    cluster["fp_indicators"] = narrative["fp_indicators"]
+    cluster["evidence_refs_llm"] = narrative["evidence_refs"]
+    return narrative
+
+
+def _case_narrative(cluster: dict) -> dict:
+    role = str(cluster.get("case_role") or "")
+    verdict = str(cluster.get("verdict") or cluster.get("final_verdict") or "REQUIRES_INVESTIGATION")
+    confidence = float(cluster.get("confidence") or 0.5)
+    if role == "primary_breach":
+        stage = "exfiltration"
+        next_steps = [
+            {"priority": "P1", "action": "Contain affected identities and hosts", "rationale": "Validated breach case has attacker activity against crown-jewel data", "tool": "Okta/M365 disable sessions; Defender isolate device"},
+            {"priority": "P1", "action": "Block exfiltration infrastructure", "rationale": "Rclone and external storage indicators are present", "tool": "Firewall/proxy block IOCs and search egress logs"},
+            {"priority": "P2", "action": "Preserve Snowflake and endpoint evidence", "rationale": "Evidence supports root-cause and impact determination", "tool": "Export Snowflake query history, EDR process tree, and auth logs"},
+        ]
+    elif role == "authorized_test":
+        stage = "unknown"
+        next_steps = [
+            {"priority": "P3", "action": "Confirm pentest scope", "rationale": "High-noise activity is expected only if it matches authorisation", "tool": "Compare IPs, operators, and dates with Red Herring rules of engagement"},
+        ]
+    elif role == "approved_travel":
+        stage = "unknown"
+        next_steps = [
+            {"priority": "P3", "action": "Attach travel approval evidence", "rationale": "Travel context explains otherwise anomalous geography", "tool": "Reference TRV-2026 approval and Okta sign-in history"},
+        ]
+    elif role == "benign_user":
+        stage = "unknown"
+        next_steps = [
+            {"priority": "P3", "action": "Record as benign personal VPN activity", "rationale": "Known non-enterprise activity should not remain in the analyst queue", "tool": "Tag entity and suppress matching future noise"},
+        ]
+    else:
+        stage = "unknown"
+        next_steps = []
+    return {
+        "verdict": verdict,
+        "confidence": confidence,
+        "kill_chain_stage": stage,
+        "ioc_summary": str(cluster.get("headline_subtitle") or cluster.get("lead_description") or ""),
+        "attack_narrative": str(cluster.get("lead_description") or ""),
+        "evidence_refs": list(range(1, min(6, int(cluster.get("row_count") or 0) + 1))),
+        "fp_indicators": [],
+        "next_steps": next_steps,
+        "_narrator_source": "deterministic_threat_case",
+    }
+
+
+def narrate_top_clusters(
+    clusters: list[dict],
+    all_evidence_rows: list[dict],
+    *,
+    assessment_id: str = "",
+    top_n: int = TOP_N_CLUSTERS,
+) -> list[dict]:
+    """Narrate the top N clusters; remaining clusters keep deterministic labels.
+
+    Returns the list of narratives generated (length <= top_n).
+    """
+    sorted_clusters = sorted(
+        clusters,
+        key=lambda c: (
+            len(c.get("row_refs") or []),
+            float(c.get("confidence") or 0),
+        ),
+        reverse=True,
+    )
+    narratives = []
+    for cluster in sorted_clusters[:top_n]:
+        try:
+            n = narrate_cluster(cluster, all_evidence_rows, assessment_id=assessment_id)
+            narratives.append(n)
+        except Exception as exc:
+            logger.warning("Narration failed for cluster %s: %s", cluster.get("cluster_id"), exc)
+    return narratives

@@ -12,9 +12,10 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import time
-from typing import Any
+from typing import Any, NamedTuple
 
 logger = logging.getLogger(__name__)
 
@@ -310,14 +311,17 @@ def _narrative_is_technical(text: str) -> bool:
 
 
 def _parse_prefill_json(raw: str, cluster_id: str) -> dict | None:
-    """Extract JSON from LLM response, tolerating markdown fences.
+    """Extract JSON from LLM response, tolerating markdown fences and thinking tags.
 
     Required fields are the original 6 (backward compat).
     New v2 schema fields (what_happened, root_cause, evidence_chain, observed_impact,
     evidence_gaps, immediate_actions) are optional pass-throughs.
     The 'reasoning' CoT scratchpad is stripped from display payload -> _cot.
     """
+    import re as _re
     text = raw.strip()
+    # Strip <think>...</think> blocks (qwen3 / deepseek-r1 thinking mode)
+    text = _re.sub(r'<think>.*?</think>', '', text, flags=_re.DOTALL).strip()
     # Strip markdown code fences
     if text.startswith('```'):
         lines = text.split('\n')
@@ -413,6 +417,15 @@ def _row_actor(row: dict) -> str:
         if value not in (None, ''):
             return _field_text(value)
     return 'affected entity'
+
+
+class PhaseEvent(NamedTuple):
+    """Structured kill-chain phase event extracted from a single row."""
+    phase: str
+    row_index: int
+    timestamp: str
+    country: str   # empty string when unavailable
+    asn: str       # empty string when unavailable
 
 
 def _detect_attack_sequence(rows: list[dict]) -> str:
@@ -512,10 +525,20 @@ def _detect_attack_sequence(rows: list[dict]) -> str:
 
     sorted_rows = sorted(rows, key=_ts_key)
     phases: list[str] = []
+    events: list[PhaseEvent] = []
     for row in sorted_rows[:100]:
         p = _phase(row)
-        if p and (not phases or phases[-1] != p):
-            phases.append(p)
+        if p:
+            ts = _ts_key(row)
+            try:
+                ridx = int(row.get('row_index') or 0)
+            except Exception:
+                ridx = 0
+            country = str(row.get('country') or row.get('geo_country') or row.get('src_country') or '')
+            asn = str(row.get('asn') or row.get('src_asn') or row.get('as_org') or '')
+            events.append(PhaseEvent(phase=p, row_index=ridx, timestamp=ts, country=country, asn=asn))
+            if not phases or phases[-1] != p:
+                phases.append(p)
 
     if not phases:
         return ''
@@ -536,11 +559,141 @@ def _detect_attack_sequence(rows: list[dict]) -> str:
     elif 'c2' in phase_set and 'initial_access' in phase_set:
         pattern = '⚠ ACCESS + C2 BEACONING'
 
-    seq_str = ' → '.join(phases[:12])
-    out = f"{len(unique)} distinct phase(s): {seq_str}"
+    seq_str = ' → '.join(unique)
+    out = f"{len(unique)} distinct phase(s): {seq_str} ({len(phases)} phase-transitions observed)"
     if pattern:
         out += f"\nPattern: {pattern}"
     return out
+
+
+def _detect_attack_sequence_events(rows: list[dict]) -> list[PhaseEvent]:
+    """Return the full ordered list of PhaseEvent objects for geo/ASN analysis.
+
+    Builds a PhaseEvent per row that maps to a known kill-chain phase.
+    Suitable for passing to _geo_sequence_summary().
+    """
+    def _phase(row: dict) -> str | None:
+        src = str(row.get('_source') or row.get('source') or '').lower()
+        event = str(
+            row.get('event_simpleName') or row.get('eventName') or
+            row.get('activityDisplayName') or row.get('event_type') or
+            row.get('operationName') or row.get('query_type') or
+            row.get('query_text') or row.get('CommandLine') or
+            row.get('command_line') or row.get('process') or ''
+        ).lower()
+        result = str(row.get('outcome_result') or row.get('result') or '').lower()
+        disposition = str(row.get('disposition') or row.get('action') or '').lower()
+        mitre = str(row.get('mitre_technique') or '').lower()
+        try:
+            bytes_out = float(row.get('orig_bytes') or row.get('bytes_sent') or row.get('bytes') or 0)
+        except Exception:
+            bytes_out = 0.0
+        if bytes_out > 10_000_000:
+            return 'exfiltration'
+        if any(t in event for t in ('copy into', 'external stage', 'unload', 'upload', 'exfil', 'mega.nz', 'backblaze', 'rclone')):
+            return 'exfiltration'
+        if 't1041' in mitre or 't1567' in mitre:
+            return 'exfiltration'
+        if any(t in event for t in ('rdp', 'smb', 'psexec', 'wmiexec', 'lateral', 'remote service')):
+            return 'lateral_movement'
+        if 't1021' in mitre or 't1570' in mitre:
+            return 'lateral_movement'
+        if any(t in event for t in ('lsass', 'mimikatz', 'ntds', 'credential dump', 'password spray', 'brute')):
+            return 'credential_access'
+        if 't1003' in mitre or 't1110' in mitre or 't1621' in mitre:
+            return 'credential_access'
+        if result in ('fail', 'failure', 'locked', 'invalid_credentials') and any(
+            s in src for s in ('okta', 'entra', 'm365')
+        ):
+            return 'credential_access'
+        if any(t in event for t in ('processrun', 'processcreate', 'processrollup', 'execute', 'powershell', 'cmd.exe', 'wscript', 'rclone')):
+            return 'execution'
+        if 't1059' in mitre:
+            return 'execution'
+        if any(t in event for t in ('scheduled task', 'autorun', 'startup', 'service install', 'registry write')):
+            return 'persistence'
+        if 't1547' in mitre or 't1053' in mitre:
+            return 'persistence'
+        if any(t in event for t in ('fileaccessed', 'fileread', 'listitems', 'searchquery', 'enum', 'recon')):
+            return 'collection'
+        if 't1083' in mitre or 't1135' in mitre or 't1114' in mitre:
+            return 'collection'
+        if any(t in event for t in ('beacon', 'dns tunnel', 'anomalous')) or row.get('ja3') or row.get('ja4'):
+            return 'c2'
+        if 't1071' in mitre:
+            return 'c2'
+        if 'email' in src or any(t in event for t in ('phish', 'url click', 'attachment open')):
+            return 'blocked_delivery' if disposition in ('block', 'blocked', 'quarantine') else 'initial_access'
+        if any(s in src for s in ('okta', 'entra', 'm365')) and result in ('success', 'allow', 'allowed'):
+            return 'initial_access'
+        return None
+
+    def _ts_key(row: dict) -> str:
+        for k in ('timestamp_utc', 'timestamp', '@timestamp', 'event_ts', 'event_time',
+                  'start_time', 'end_time', 'published', 'created', 'time', 'ts'):
+            v = row.get(k)
+            if v:
+                return str(v)
+        try:
+            return f'{int(row.get("row_index") or 0):010d}'
+        except Exception:
+            return ''
+
+    out: list[PhaseEvent] = []
+    for row in sorted(rows, key=_ts_key)[:100]:
+        p = _phase(row)
+        if p:
+            ts = _ts_key(row)
+            try:
+                ridx = int(row.get('row_index') or 0)
+            except Exception:
+                ridx = 0
+            country = str(row.get('country') or row.get('geo_country') or row.get('src_country') or '')
+            asn = str(row.get('asn') or row.get('src_asn') or row.get('as_org') or '')
+            out.append(PhaseEvent(phase=p, row_index=ridx, timestamp=ts, country=country, asn=asn))
+    return out
+
+
+def _geo_sequence_summary(events: list[PhaseEvent]) -> str:
+    """Derive geo/ASN sequence notes from PhaseEvent list for the render prompt.
+
+    Flags:
+    - ASN reuse across multiple kill-chain phases (adversarial infrastructure)
+    - Multi-country transitions (VPN/proxy chaining or distributed actor)
+
+    Returns an empty string when events lack geo data or nothing is notable.
+    """
+    if not events:
+        return ''
+
+    asn_phases: dict[str, set[str]] = {}
+    countries: list[str] = []
+    for ev in events:
+        if ev.asn:
+            asn_phases.setdefault(ev.asn, set()).add(ev.phase)
+        if ev.country:
+            if not countries or countries[-1] != ev.country:
+                countries.append(ev.country)
+
+    notes: list[str] = []
+
+    # ASN reuse: same ASN seen across 2+ distinct phases → adversarial infra
+    for asn, phases_set in asn_phases.items():
+        if len(phases_set) >= 2:
+            notes.append(
+                f'ASN {asn} reused across {len(phases_set)} kill-chain phases '
+                f'({", ".join(sorted(phases_set))}) — consistent adversarial infrastructure.'
+            )
+
+    # Country transitions: 2+ distinct countries in temporal order
+    distinct = list(dict.fromkeys(countries))
+    if len(distinct) >= 2:
+        notes.append(
+            f'Source country transitions: {" → ".join(distinct)} — '
+            f'possible VPN/proxy chaining or multi-country actor.'
+        )
+
+    return ' '.join(notes)
 
 
 def _detect_row_source(row: dict) -> str:
@@ -915,6 +1068,79 @@ def _is_generic_root_cause(value: Any) -> bool:
     return any(marker in text for marker in generic_markers)
 
 
+def _row_business_significance(row: dict, technique: str = '') -> str:
+    """Return a plain-English sentence explaining why this row matters to the business."""
+    src = str(row.get('_source') or row.get('source') or row.get('log_source') or '').lower()
+    action_raw = str(row.get('event_type') or row.get('event_action') or row.get('action') or
+                     row.get('operation') or row.get('query_type') or '').lower()
+    joined = ' '.join(str(v) for v in row.values() if isinstance(v, str)).lower()
+
+    # Cloud-sync / exfiltration tools
+    if any(t in joined for t in ('rclone', 'backblaze', 'mega.nz', 'azcopy', 'gsutil', 'aws s3 cp')):
+        dest = 'a cloud storage destination'
+        for marker, label in [('backblaze', 'Backblaze B2'), ('mega.nz', 'MEGA.nz'),
+                               ('aws s3', 'Amazon S3'), ('gsutil', 'Google Cloud Storage'),
+                               ('azcopy', 'Azure Blob Storage')]:
+            if marker in joined:
+                dest = label
+                break
+        return (f"A file-sync tool was used to copy data to {dest}. "
+                "This is a hallmark of deliberate data exfiltration — data has left the organisation.")
+
+    # Bulk DB export
+    if any(t in action_raw for t in ('unload', 'copy', 'export')) or \
+       any(t in joined for t in ('copy into', 'select *', 'rows_produced')):
+        rows_out = row.get('rows_produced') or row.get('rows_exported') or ''
+        suffix = f" ({rows_out} records)" if rows_out else ''
+        return (f"A bulk database export was executed{suffix}. "
+                "Exporting large volumes of records is a data theft indicator requiring immediate review.")
+
+    # Email / BEC
+    if any(t in joined for t in ('bcc', 'forward', 'mail', 'inbox rule', 'imap')) or 'email' in src:
+        return ("Mailbox activity was observed on a privileged account. "
+                "Attackers frequently configure forwarding rules to silently intercept email, "
+                "including financial approvals and credential resets.")
+
+    # Network beacon / C2
+    if any(t in joined for t in ('beacon', 'c2', 'cobalt', 'metasploit', 'empire')) or \
+       any(t in src for t in ('network', 'firewall', 'ids', 'proxy')):
+        dst = row.get('dst_ip') or row.get('destination') or ''
+        suffix = f" to {dst}" if dst else ''
+        return (f"A network connection{suffix} was logged that matches command-and-control communication patterns. "
+                "This indicates an attacker maintaining persistent remote access inside the environment.")
+
+    # Authentication / credential
+    if any(t in joined for t in ('login', 'sign-in', 'signin', 'authentication', 'mfa', 'password')) or \
+       any(t in src for t in ('okta', 'azure ad', 'entra', 'iam')):
+        user = row.get('user_principal_name') or row.get('username') or row.get('user') or 'an account'
+        return (f"An authentication event for {user} was recorded. "
+                "Unusual login patterns — unexpected location, timing, or MFA bypass — "
+                "indicate the account may have been compromised.")
+
+    # Endpoint / EDR process
+    if any(t in joined for t in ('process', 'executable', '.exe', 'powershell', 'cmd.exe', 'wscript')) or \
+       any(t in src for t in ('edr', 'crowdstrike', 'defender', 'falcon', 'endpoint')):
+        proc = row.get('process_name') or row.get('TargetProcessName') or ''
+        suffix = f" ({proc})" if proc else ''
+        return (f"An endpoint process{suffix} was recorded by the security agent. "
+                "Malicious processes running on corporate devices can harvest credentials, "
+                "move laterally, or stage data for exfiltration.")
+
+    # Cloud API / IAM
+    if any(t in joined for t in ('iam', 'role', 'policy', 'assume', 'cloudtrail', 'api call')) or \
+       any(t in src for t in ('aws', 'azure', 'gcp', 'cloud')):
+        return ("A privileged cloud API call was made. "
+                "Attackers use cloud API access to escalate privileges, exfiltrate data, "
+                "or establish persistence by creating new accounts or access keys.")
+
+    # MITRE technique fallback
+    if technique:
+        return f"Evidence supporting {technique} — a documented attacker technique used to achieve their objective in this incident."
+
+    return ("This event was correlated with others in the incident timeline. "
+            "Together these records form the chain of evidence showing how the attacker operated.")
+
+
 def _build_fallback_evidence_chain(rows: list[dict]) -> list[dict]:
     if not rows:
         return []
@@ -924,6 +1150,7 @@ def _build_fallback_evidence_chain(rows: list[dict]) -> list[dict]:
 
     selected: list[dict] = []
     seen_refs: set[int] = set()
+    seen_actions: set[str] = set()
     for row in sorted(rows, key=sort_key):
         ref = _row_ref(row)
         if ref in seen_refs:
@@ -931,6 +1158,11 @@ def _build_fallback_evidence_chain(rows: list[dict]) -> list[dict]:
         text = _row_action_text(row)
         if not text:
             continue
+        # Deduplicate identical action text (e.g. same rclone command appearing twice)
+        action_key = text[:120].lower()
+        if action_key in seen_actions:
+            continue
+        seen_actions.add(action_key)
         selected.append(row)
         if ref is not None:
             seen_refs.add(ref)
@@ -947,11 +1179,7 @@ def _build_fallback_evidence_chain(rows: list[dict]) -> list[dict]:
         chain.append({
             'step': idx,
             'what': f"{when + ' - ' if when else ''}{actor}: {action}",
-            'why_significant': (
-                f"Corroborates {technique} in the incident sequence."
-                if technique else
-                'Provides a timestamped evidence point for the incident sequence.'
-            ),
+            'why_significant': _row_business_significance(row, technique),
             'row_refs': [ref] if ref is not None else [],
         })
     return chain
@@ -1052,6 +1280,21 @@ def _build_fallback_evidence_gaps(cluster: dict, rows: list[dict]) -> list[dict]
     return gaps[:4]
 
 
+def _classify_subtask_autonomy(label: str, tool_command: str = '') -> str:
+    """Classify subtask autonomy tier for bounded-action display.
+
+    Returns one of: 'SAFE_TO_RUN', 'APPROVAL_REQUIRED', 'MANUAL_REVIEW', or ''.
+    """
+    combined = (label + ' ' + tool_command).lower()
+    if re.search(r'block|quarantin|isolat|revoke|reset.pass|disable|delete', combined):
+        return 'APPROVAL_REQUIRED'
+    if re.search(r'export|collect|captur|preserv|backup|snapshot|read.only|query|search|hunt|investigat', combined):
+        return 'SAFE_TO_RUN'
+    if re.search(r'notif|contact|escalat|alert|page|call', combined):
+        return 'MANUAL_REVIEW'
+    return ''
+
+
 def _build_fallback_actions(data: dict) -> list[dict]:
     actions = data.get('top_actions') or []
     if not isinstance(actions, list):
@@ -1061,6 +1304,7 @@ def _build_fallback_actions(data: dict) -> list[dict]:
         title = str(action).strip()
         if not title:
             continue
+        autonomy = _classify_subtask_autonomy(title)
         result.append({
             'priority': f'P{min(idx, 3)}',
             'persona': 'SOC',
@@ -1070,6 +1314,7 @@ def _build_fallback_actions(data: dict) -> list[dict]:
                     'label': 'Record the evidence rows used for this action.',
                     'tool_command': '',
                     'expected_finding': 'Action is grounded in the displayed cluster evidence.',
+                    'autonomy': autonomy,
                 }
             ],
         })
@@ -1115,7 +1360,7 @@ def _infer_mitre_techniques(cluster: dict, rows: list[dict]) -> list[str]:
     return list(dict.fromkeys(t for t in techniques if t))[:8]
 
 
-def _ensure_v2_prefill_fields(data: dict, cluster: dict, rows: list[dict]) -> dict:
+def _ensure_v2_prefill_fields(data: dict, cluster: dict, rows: list[dict], tenant_id: str = 'default') -> dict:
     """Populate v2 story fields when an older LLM response only returned v1 keys."""
     if not isinstance(data, dict):
         return data
@@ -1166,11 +1411,21 @@ def _ensure_v2_prefill_fields(data: dict, cluster: dict, rows: list[dict]) -> di
     if not isinstance(data.get('mitre_techniques'), list) or not data.get('mitre_techniques'):
         data['mitre_techniques'] = _infer_mitre_techniques(cluster, rows)
 
-    # Replace raw verdict code labels with an evidence-based narrative
+    # Replace raw verdict code labels or mismatched malicious-sounding text with evidence-based narrative
     _VERDICT_CODE_RE = re.compile(r'^[A-Z][A-Z_]{3,}$')
+    _MALICIOUS_IN_BENIGN_RE = re.compile(
+        r'command.and.control|c2 beacon|needs containment|attacker maintain|exfiltrat|intrusion|threat actor',
+        re.I,
+    )
     vr = str(data.get('verdict_reasoning') or '').strip()
-    if not vr or _VERDICT_CODE_RE.match(vr):
-        verdict = str(cluster.get('final_verdict') or cluster.get('verdict') or '').strip()
+    verdict = str(cluster.get('final_verdict') or cluster.get('verdict') or '').strip()
+    _benign_verdict = verdict in ('BENIGN_EXPECTED', 'NO_VALIDATED_BREACH')
+    _vr_needs_replace = (
+        not vr
+        or _VERDICT_CODE_RE.match(vr)
+        or (_benign_verdict and _MALICIOUS_IN_BENIGN_RE.search(vr))
+    )
+    if _vr_needs_replace:
         root = str(data.get('root_cause') or '').strip()
         impact = data.get('observed_impact') or {}
         actors = str(impact.get('identity') or '').strip()
@@ -1185,15 +1440,260 @@ def _ensure_v2_prefill_fields(data: dict, cluster: dict, rows: list[dict]) -> di
             parts.append(f'Affected accounts: {actors}.')
         if verdict in ('VALIDATED_BREACH', 'CONFIRMED_INTRUSION', 'LIKELY_COMPROMISE'):
             data['verdict_reasoning'] = ' '.join(parts) or 'Multi-source correlated evidence exceeds the breach investigation threshold.'
-        elif verdict == 'BENIGN_EXPECTED':
-            benign_parts = [root] if root else []
+        elif _benign_verdict:
+            short_narrative = str(data.get('short_narrative') or '').strip()
+            benign_parts: list[str] = []
+            if short_narrative and not _MALICIOUS_IN_BENIGN_RE.search(short_narrative):
+                benign_parts.append(short_narrative)
             if actors and 'No named' not in actors:
-                benign_parts.append(f'Associated accounts: {actors}.')
-            data['verdict_reasoning'] = ' '.join(benign_parts) or 'Activity matches expected or authorized patterns across correlated sources.'
+                benign_parts.append(f'Associated accounts reviewed: {actors}.')
+            benign_parts.append('No indicators of unauthorised access, data loss, or malicious intent were confirmed.')
+            data['verdict_reasoning'] = ' '.join(benign_parts)
         else:
             data['verdict_reasoning'] = root or 'Correlated evidence requires further analyst investigation.'
 
+    # Build DREAD fragments and SABSA coda (deterministic — no LLM)
+    # Only run for breach-class verdicts; skip benign clusters to avoid noise.
+    if verdict not in ('BENIGN_EXPECTED', 'NO_VALIDATED_BREACH'):
+        try:
+            from src.prefill.dread_fragments import build_dread_narrative, fragments_fill_rate
+            from src.prefill.sabsa_coda import build_sabsa_coda, derive_breached_attributes
+        except ImportError:
+            try:
+                from prefill.dread_fragments import build_dread_narrative, fragments_fill_rate  # type: ignore
+                from prefill.sabsa_coda import build_sabsa_coda, derive_breached_attributes      # type: ignore
+            except ImportError:
+                build_dread_narrative = None  # type: ignore
+
+        if build_dread_narrative is not None and not data.get('dread_narrative'):
+            frags = build_dread_narrative(rows, cluster, data, tenant_id=tenant_id)
+            fill  = fragments_fill_rate(frags)
+            attrs = derive_breached_attributes(frags)
+            coda  = build_sabsa_coda(frags, attrs)
+            data['dread_narrative'] = {
+                'fragments':          frags,
+                'fill_rate':          round(fill, 2),
+                'sabsa_attributes':   attrs,
+                'sabsa_coda_draft':   coda,
+                # 'rendered' is populated by the LLM render step in run_prefill
+            }
+
     return data
+
+
+_CONFIDENCE_FLOOR_CONFIRMED = 0.75
+_CONFIDENCE_FLOOR_LIKELY    = 0.55
+_EVIDENCE_FILL_FLOOR        = 0.60
+
+# Canonical causal order for DREAD dimensions in a breach narrative.
+# Damage first (observed harm at T1), reproducibility (patterns over time),
+# affected_users (who was present), exploitability (pre-condition context),
+# discoverability (detection endpoint — always last).
+_DREAD_CAUSAL_ORDER = [
+    'damage', 'reproducibility', 'affected_users', 'exploitability', 'discoverability',
+]
+
+
+def _order_fragments_temporally(
+    fragments: dict[str, str | None],
+) -> list[tuple[str, str]]:
+    """
+    Return (dim_label, fragment_text) pairs in causal order, skipping None.
+    Used to build the temporal-sequence block in the render prompt.
+    """
+    ordered: list[tuple[str, str]] = []
+    for dim in _DREAD_CAUSAL_ORDER:
+        val = fragments.get(dim)
+        if val:
+            ordered.append((dim.replace('_', ' ').upper(), val))
+    # Any dimension not in the canonical order (future-proofing) appended last
+    for dim, val in fragments.items():
+        if dim not in _DREAD_CAUSAL_ORDER and val:
+            ordered.append((dim.replace('_', ' ').upper(), val))
+    return ordered
+
+
+def _choose_narrative_framework(cluster: dict, rows: list[dict]) -> str:
+    """
+    Returns 'diamond' when named actor entities exist (email-format or dot-separated),
+    'pasta' when only IPs or generic entities are present.
+
+    Diamond: bind actor → capability → infrastructure → victim.
+    PASTA:   bind threat → vulnerability → attack vector → impact.
+    """
+    p = cluster.get('tier1_prefill') or {}
+    impact = p.get('observed_impact') or {}
+    actors_str = str(impact.get('identity') or '')
+    if actors_str and 'No named' not in actors_str:
+        named = [a.strip() for a in actors_str.split(',') if a.strip()]
+        if any(('@' in a or ('.' in a and len(a) > 4)) for a in named):
+            return 'diamond'
+    for row in rows[:30]:
+        for k in ('user_principal_name', 'username', 'user_email', 'email'):
+            v = str(row.get(k) or '')
+            if '@' in v or (v and '.' in v and len(v) > 4):
+                return 'diamond'
+    return 'pasta'
+
+
+def _render_dread_narrative(
+    fragments: dict[str, str | None],
+    sabsa_coda_draft: str,
+    sabsa_attributes: list[str],
+    cluster: dict,
+    rows: list[dict],
+    llm: Any,
+    model: str,
+) -> dict[str, Any]:
+    """
+    Call the LLM with the strict render prompt, validate the output against
+    the allowed entity set, and return the render result dict.
+
+    Returns:
+      { 'rendered': str, 'render_fallback': bool, 'render_quality': dict }
+    """
+    _RENDER_FAILED_SENTINEL = '{{RENDER_FAILED}}'
+
+    # Load render prompt template
+    _prompt_path = os.path.join(
+        os.path.dirname(__file__), '..', '..', 'prompts', 'dread_narrative_render.txt',
+    )
+    try:
+        with open(_prompt_path, encoding='utf-8') as f:
+            template = f.read()
+    except Exception:
+        # Fallback inline prompt when file path resolution fails
+        template = (
+            'Render a confirmed-breach executive summary from these evidence fragments.\n'
+            'Rules: cite row numbers inline, preserve entity names exactly, '
+            '150-220 words, start with "Confirmed breach — <label>."\n\n'
+            'Fragments:\n{fragment_block}\n\nSABSA coda draft: {sabsa_coda_draft}\n\nRender now.'
+        )
+
+    ordered = _order_fragments_temporally(fragments)
+    framework = _choose_narrative_framework(cluster, rows)
+
+    # Build the temporal-sequence block
+    frag_lines = []
+    for i, (dim_label, frag_text) in enumerate(ordered, 1):
+        frag_lines.append(f'  [T{i} {dim_label}]  {frag_text}')
+    fragment_block = '\n'.join(frag_lines) or '  [NO FRAGMENTS AVAILABLE]'
+
+    # Fill placeholders — replace each T-slot individually
+    filled = template
+    for i, (dim_label, frag_text) in enumerate(ordered, 1):
+        filled = filled.replace(f'{{t{i}_dim}}', dim_label)
+        filled = filled.replace(f'{{t{i}_fragment}}', frag_text)
+    # Zero out any unused T-slots
+    for i in range(len(ordered) + 1, 7):
+        filled = filled.replace(f'{{t{i}_dim}}', '[ABSENT]')
+        filled = filled.replace(f'{{t{i}_fragment}}', '[ABSENT]')
+
+    geo_notes = _geo_sequence_summary(_detect_attack_sequence_events(rows))
+    filled = filled.replace('{framework}', framework)
+    filled = filled.replace('{sabsa_attributes}', ', '.join(sabsa_attributes) or 'none identified')
+    filled = filled.replace('{sabsa_coda_draft}', sabsa_coda_draft or '[ABSENT]')
+    filled = filled.replace('{geo_asn_notes}', geo_notes)
+    filled = filled.replace('{fragment_block}', fragment_block)
+
+    # Call LLM — allow generous timeout for large models (qwen3.6:27b needs ~120s)
+    # Prefix /no_think to suppress CoT tokens from qwen3/deepseek-r1 models
+    filled_with_hint = '/no_think\n' + filled
+    rendered_text = ''
+    try:
+        result = llm.generate(
+            filled_with_hint,
+            max_tokens=320,
+            overrides={'timeout': 180},
+            model=model,
+        )
+        raw_rendered = (
+            result.get('text') or result.get('response')
+            or result.get('content') or ''
+        ).strip()
+        # Strip thinking-mode tags (qwen3 / deepseek-r1)
+        rendered_text = re.sub(r'<think>.*?</think>', '', raw_rendered, flags=re.DOTALL).strip()
+    except Exception as _e:
+        logger.warning('_render_dread_narrative: LLM call failed: %s', _e)
+        rendered_text = ''
+
+    # Check for explicit failure sentinel
+    if _RENDER_FAILED_SENTINEL in rendered_text or not rendered_text:
+        return {
+            'rendered': _raw_fragment_fallback(fragments),
+            'render_fallback': True,
+            'render_quality': {'passed': False, 'reason': 'sentinel_or_empty'},
+        }
+
+    # Entity-pin validation on the rendered output
+    allowed = _extract_entity_set(cluster, rows)
+    # Wrap text in a pseudo-prefill dict so _validate_entity_pins can scan it
+    quality = _validate_entity_pins(
+        {'short_narrative': rendered_text, 'incident_name': '', 'headline_subtitle': '', 'top_actions': []},
+        allowed,
+    )
+
+    if not quality['passed']:
+        logger.warning(
+            '_render_dread_narrative: entity pin check flagged %s — using fallback',
+            quality['flagged_tokens'],
+        )
+        # One retry with stricter prefix
+        retry_prompt = (
+            'The previous render was rejected because it introduced entity names '
+            'not present in the evidence. Be exact — use only the names given below.\n\n'
+            + filled
+        )
+        try:
+            retry_result = llm.generate('/no_think\n' + retry_prompt, max_tokens=320, overrides={'timeout': 180}, model=model)
+            retry_text = (
+                retry_result.get('text') or retry_result.get('response')
+                or retry_result.get('content') or ''
+            ).strip()
+            retry_quality = _validate_entity_pins(
+                {'short_narrative': retry_text, 'incident_name': '', 'headline_subtitle': '', 'top_actions': []},
+                allowed,
+            )
+            if retry_quality['passed'] and retry_text:
+                return {'rendered': retry_text, 'render_fallback': False, 'render_quality': retry_quality}
+        except Exception:
+            pass
+        return {
+            'rendered': _raw_fragment_fallback(fragments),
+            'render_fallback': True,
+            'render_quality': quality,
+        }
+
+    return {'rendered': rendered_text, 'render_fallback': False, 'render_quality': quality}
+
+
+def _raw_fragment_fallback(fragments: dict[str, str | None]) -> str:
+    """Concatenate non-null fragments in causal order. Used when LLM render fails."""
+    parts = [
+        fragments.get(dim)
+        for dim in _DREAD_CAUSAL_ORDER
+        if fragments.get(dim)
+    ]
+    return ' '.join(parts)
+
+
+def _gated_verdict(raw_verdict: str, confidence: float, fill_rate: float) -> str:
+    """
+    Three-valued gating for VALIDATED_BREACH verdicts.
+
+    CONFIRMED_BREACH   — confidence >= 0.75 AND evidence fill-rate >= 0.60
+    LIKELY_BREACH      — confidence >= 0.55 (human review required)
+    INVESTIGATION_REQUIRED — below both floors
+
+    Non-breach verdicts pass through unchanged.
+    """
+    if raw_verdict not in ('VALIDATED_BREACH', 'CONFIRMED_INTRUSION'):
+        return raw_verdict
+    if confidence >= _CONFIDENCE_FLOOR_CONFIRMED and fill_rate >= _EVIDENCE_FILL_FLOOR:
+        return 'CONFIRMED_BREACH'
+    if confidence >= _CONFIDENCE_FLOOR_LIKELY:
+        return 'LIKELY_BREACH'
+    return 'INVESTIGATION_REQUIRED'
 
 
 def run_prefill(
@@ -1226,13 +1726,25 @@ def run_prefill(
 
     prompts: list[str] = []
     selected_clusters: list[dict] = []
+    # Cached clusters that have DREAD fragments but no rendered narrative yet
+    render_pending: list[tuple[dict, dict, list[dict]]] = []  # (cluster, prefill, rows)
+
+    _BREACH_VERDICTS = (
+        'CONFIRMED_BREACH', 'LIKELY_BREACH', 'VALIDATED_BREACH',
+        'CONFIRMED_INTRUSION', 'LIKELY_COMPROMISE',
+    )
 
     for cluster in selected:
         # Skip if already prefilled and not stale
         existing = cluster.get('tier1_prefill')
         if existing and isinstance(existing, dict) and existing.get('incident_name'):
             rows = _get_rows_for_cluster(cluster, assessment)
-            _ensure_v2_prefill_fields(existing, cluster, rows)
+            _ensure_v2_prefill_fields(existing, cluster, rows, tenant_id=tenant_id)
+            # Collect for deferred render if fragments present but not yet rendered
+            _dn = existing.get('dread_narrative') or {}
+            _v  = cluster.get('verdict', '')
+            if _dn.get('fragments') and not _dn.get('rendered') and _v in _BREACH_VERDICTS:
+                render_pending.append((cluster, existing, rows))
             logger.debug('tier1_prefill: cluster %s already prefilled, skipping',
                          cluster.get('cluster_id'))
             continue
@@ -1244,10 +1756,11 @@ def run_prefill(
             all_assessment_rows=all_rows,
             attack_sequence=attack_seq,
         )
-        prompts.append(prompt)
+        # Disable qwen3/deepseek-r1 thinking mode — structured JSON needs speed, not CoT
+        prompts.append('/no_think\n' + prompt)
         selected_clusters.append(cluster)
 
-    if not prompts:
+    if not prompts and not render_pending:
         already = [c.get('cluster_id') for c in selected]
         return {'status': 'already_cached', 'prefilled_clusters': already, 'duration_seconds': 0}
 
@@ -1270,30 +1783,31 @@ def run_prefill(
     t0 = time.time()
     prefilled: list[str] = []
 
-    try:
-        results = llm.generate_batch(
-            prompts=prompts,
-            max_tokens=PREFILL_MAX_TOKENS,
-            tenant_id=tenant_id,
-            overrides={'timeout': PREFILL_TIMEOUT_S},
-            model=model,
-        )
-    except Exception as exc:
-        logger.warning('tier1_prefill: generate_batch failed for %s: %s', assessment_id, exc)
-        # Fall back to serial
-        results = []
-        for p in prompts:
-            try:
-                r = llm.generate(
-                    prompt=p,
-                    max_tokens=PREFILL_MAX_TOKENS,
-                    tenant_id=tenant_id,
-                    overrides={'timeout': PREFILL_TIMEOUT_S},
-                    model=model,
-                )
-                results.append(r)
-            except Exception as e:
-                results.append({'error': str(e)})
+    results: list[Any] = []
+    if prompts:
+        try:
+            results = llm.generate_batch(
+                prompts=prompts,
+                max_tokens=PREFILL_MAX_TOKENS,
+                tenant_id=tenant_id,
+                overrides={'timeout': PREFILL_TIMEOUT_S},
+                model=model,
+            )
+        except Exception as exc:
+            logger.warning('tier1_prefill: generate_batch failed for %s: %s', assessment_id, exc)
+            # Fall back to serial
+            for p in prompts:
+                try:
+                    r = llm.generate(
+                        prompt=p,
+                        max_tokens=PREFILL_MAX_TOKENS,
+                        tenant_id=tenant_id,
+                        overrides={'timeout': PREFILL_TIMEOUT_S},
+                        model=model,
+                    )
+                    results.append(r)
+                except Exception as e:
+                    results.append({'error': str(e)})
 
     # Build entity index once across ALL clusters for cross-cluster linking (Enhancement 3)
     all_clusters = assessment.get('correlation_clusters') or []
@@ -1307,13 +1821,26 @@ def run_prefill(
         confidence_meter = _compute_confidence_meter(cluster, rows)
         cluster['confidence_meter'] = confidence_meter
 
+        # Set verdict_confidence from confidence_meter when verdict engine hasn't set it
+        if cluster.get('verdict_confidence') is None and confidence_meter.get('total') is not None:
+            cluster['verdict_confidence'] = round(confidence_meter['total'] / 100.0, 2)
+
+        # Zero-row clusters cannot require human validation — they have no evidence
+        if not (cluster.get('row_refs') or rows):
+            cluster['human_validation_required'] = False
+            if cluster.get('gate_urgency') not in (None, 'LOW'):
+                cluster['gate_urgency'] = 'LOW'
+
         if isinstance(result, dict) and result.get('error'):
             logger.warning('tier1_prefill: LLM error for cluster %s: %s', cid, result['error'])
-            cluster['tier1_prefill'] = {
+            fallback_data: dict[str, Any] = {
                 '_error': result['error'],
+                '_fallback_generated': True,
                 'generated_at': int(time.time()),
                 'confidence_meter': confidence_meter,
             }
+            _ensure_v2_prefill_fields(fallback_data, cluster, rows, tenant_id=tenant_id)
+            cluster['tier1_prefill'] = fallback_data
             continue
 
         raw_text = ''
@@ -1344,7 +1871,7 @@ def run_prefill(
             # Enhancement 3: cross-cluster entity links
             cross_links = _compute_cross_cluster_links(cluster, entity_index, all_clusters)
             parsed['cross_cluster_links'] = cross_links
-            _ensure_v2_prefill_fields(parsed, cluster, rows)
+            _ensure_v2_prefill_fields(parsed, cluster, rows, tenant_id=tenant_id)
 
             cluster['tier1_prefill'] = parsed
             # Derive and attach verdict immediately so the cluster object is complete
@@ -1356,12 +1883,55 @@ def run_prefill(
                 cluster['verdict_confidence'] = v['verdict_confidence']
             except Exception as _ve:
                 logger.debug('tier1_prefill: verdict derivation failed for %s: %s', cid, _ve)
+
+            # Apply three-valued confidence-floor gating to breach verdicts
+            raw_v  = cluster.get('verdict') or ''
+            conf   = float(cluster.get('verdict_confidence') or 0)
+            dn     = parsed.get('dread_narrative') or {}
+            fill   = float(dn.get('fill_rate') or 0)
+            gated  = _gated_verdict(raw_v, conf, fill)
+            if gated != raw_v:
+                cluster['verdict'] = gated
+                logger.info(
+                    'tier1_prefill: verdict gated %s → %s (conf=%.2f fill=%.2f) cluster %s',
+                    raw_v, gated, conf, fill, cid,
+                )
             # Re-apply HVR gating now that verdict is known — don't wait for get_assessment
             try:
                 from src.api.deep_analyze_endpoints import _apply_hvr_gating
                 _apply_hvr_gating(cluster)
             except Exception as _hvr_e:
                 logger.debug('tier1_prefill: hvr re-apply failed for %s: %s', cid, _hvr_e)
+
+            # Wire: LLM narrative render — only for breach-class verdicts with fragments
+            _dn = parsed.get('dread_narrative') or {}
+            _frags = _dn.get('fragments') or {}
+            _final_verdict = cluster.get('verdict', '')
+            _is_breach_class = _final_verdict in (
+                'CONFIRMED_BREACH', 'LIKELY_BREACH', 'VALIDATED_BREACH', 'CONFIRMED_INTRUSION',
+                'LIKELY_COMPROMISE',
+            )
+            if _is_breach_class and _frags and not _dn.get('rendered'):
+                try:
+                    _render_result = _render_dread_narrative(
+                        fragments=_frags,
+                        sabsa_coda_draft=_dn.get('sabsa_coda_draft', ''),
+                        sabsa_attributes=_dn.get('sabsa_attributes', []),
+                        cluster=cluster,
+                        rows=rows,
+                        llm=llm,
+                        model=model,
+                    )
+                    _dn.update(_render_result)
+                    parsed['dread_narrative'] = _dn
+                    cluster['tier1_prefill'] = parsed
+                    logger.info(
+                        'tier1_prefill: dread narrative rendered for cluster %s (fallback=%s)',
+                        cid, _render_result.get('render_fallback'),
+                    )
+                except Exception as _re:
+                    logger.warning('tier1_prefill: dread narrative render failed for %s: %s', cid, _re)
+
             prefilled.append(cid)
             logger.info('tier1_prefill: prefilled cluster %s (%s) quality=%s verdict=%s',
                         cid, assessment_id, 'ok' if quality['passed'] else 'flagged',
@@ -1374,9 +1944,38 @@ def run_prefill(
                 'confidence_meter': confidence_meter,
             }
 
+    # Deferred render pass: cached clusters that had fragments but no rendered narrative
+    for _rcluster, _rprefill, _rrows in render_pending:
+        _rcid  = _rcluster.get('cluster_id', '?')
+        _rdn   = _rprefill.get('dread_narrative') or {}
+        _rfrgs = _rdn.get('fragments') or {}
+        if not _rfrgs or _rdn.get('rendered'):
+            continue
+        try:
+            _rr = _render_dread_narrative(
+                fragments=_rfrgs,
+                sabsa_coda_draft=_rdn.get('sabsa_coda_draft', ''),
+                sabsa_attributes=_rdn.get('sabsa_attributes', []),
+                cluster=_rcluster,
+                rows=_rrows,
+                llm=llm,
+                model=model,
+            )
+            _rdn.update(_rr)
+            _rprefill['dread_narrative'] = _rdn
+            _rcluster['tier1_prefill'] = _rprefill
+            prefilled.append(_rcid)
+            logger.info(
+                'tier1_prefill: deferred dread render for cached cluster %s (fallback=%s)',
+                _rcid, _rr.get('render_fallback'),
+            )
+        except Exception as _rre:
+            logger.warning('tier1_prefill: deferred render failed for %s: %s', _rcid, _rre)
+
     duration = round(time.time() - t0, 2)
+    status = 'ok' if prefilled else 'already_cached'
     return {
-        'status': 'ok',
+        'status': status,
         'prefilled_clusters': prefilled,
         'duration_seconds': duration,
     }

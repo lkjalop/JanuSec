@@ -1585,6 +1585,8 @@ async def get_cluster_timeline(
             'src_ip': r.get('src_ip') or r.get('source_ip') or '',
             'hostname': r.get('hostname') or r.get('host') or '',
             'timestamp_raw': ts_val,
+            'country': str(r.get('country') or r.get('geo_country') or r.get('src_country') or ''),
+            'asn': str(r.get('asn') or r.get('src_asn') or r.get('as_org') or ''),
         })
 
     # Sort: rows with timestamps first (ascending), then un-timestamped
@@ -1602,6 +1604,16 @@ async def get_cluster_timeline(
             return (1, 0)
 
     tagged.sort(key=_ts_sort_key)
+
+    # Annotate rows where the ASN appears in 2+ distinct kill-chain phases
+    _asn_phase_sets: dict[str, set[str]] = {}
+    for row in tagged:
+        asn = row.get('asn', '')
+        if asn:
+            _asn_phase_sets.setdefault(asn, set()).add(row['kill_chain_phase'])
+    _reused_asns = {asn for asn, ps in _asn_phase_sets.items() if len(ps) >= 2}
+    for row in tagged:
+        row['_asn_reused'] = bool(row.get('asn') and row['asn'] in _reused_asns)
 
     # Group by kill-chain phase in order
     phases: dict[str, list] = {}

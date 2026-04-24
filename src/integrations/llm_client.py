@@ -265,14 +265,22 @@ class LLMClient(BaseLLMClient):
             self.interactive_prompt_token_threshold = int(os.getenv('INTERACTIVE_PROMPT_TOKEN_THRESHOLD', '200') or 200)
         except Exception:
             self.interactive_prompt_token_threshold = 200
-        # If the configured model looks large (e.g. contains `:8b`), increase default timeout
+        # Scale timeout based on model size: 30b+ → 300s, 14b+ → 180s, any :Nb → 120s
         try:
-            if isinstance(self.ollama_model, str) and (':8b' in self.ollama_model or re.search(r':\d+b', self.ollama_model)):
-                # Give heavy models more time to cold-start on CPU by bumping timeout
-                self.ollama_timeout = max(self.ollama_timeout, 60.0)
+            if isinstance(self.ollama_model, str):
+                m = re.search(r':(\d+)b', self.ollama_model)
+                if m:
+                    gb = int(m.group(1))
+                    if gb >= 30:
+                        self.ollama_timeout = max(self.ollama_timeout, 300.0)
+                    elif gb >= 14:
+                        self.ollama_timeout = max(self.ollama_timeout, 180.0)
+                    else:
+                        self.ollama_timeout = max(self.ollama_timeout, 120.0)
         except Exception:
             pass
         self.ollama_enabled = (self.provider == 'ollama') or bool(stored_settings.get('ollama_base_url') or os.getenv('OLLAMA_HOST'))
+        self.ollama_reachable = False
         self._ollama_session = None
         if self.ollama_enabled:
             if requests is None:
@@ -285,6 +293,7 @@ class LLMClient(BaseLLMClient):
                     try:
                         # quick probe for version and model list
                         ok = self._probe_ollama()
+                        self.ollama_reachable = bool(ok)
                         if ok:
                             # fetch available models and auto-select if mismatch
                             try:
@@ -301,17 +310,17 @@ class LLMClient(BaseLLMClient):
                                         logger.info('Ollama models available: %s', model_ids)
                                         # Re-run timeout heuristic based on the resolved model name
                                         try:
-                                            # If model name suggests a large model (e.g., :8b, :13b), increase timeout
-                                            if isinstance(self.ollama_model, str) and (':8b' in self.ollama_model or re.search(r':\d+b', self.ollama_model)):
-                                                # bump to a larger default for heavy models unless explicitly set
-                                                try:
-                                                    env_timeout = os.getenv('OLLAMA_TIMEOUT_SECONDS')
-                                                    if not env_timeout:
-                                                        # increase by default to 60s for heavy models
-                                                        self.ollama_timeout = max(self.ollama_timeout, 60.0)
-                                                        logger.info('Adjusted ollama_timeout to %s due to heavy model %s', self.ollama_timeout, self.ollama_model)
-                                                except Exception:
-                                                    pass
+                                            if isinstance(self.ollama_model, str) and not os.getenv('OLLAMA_TIMEOUT_SECONDS'):
+                                                m2 = re.search(r':(\d+)b', self.ollama_model)
+                                                if m2:
+                                                    gb2 = int(m2.group(1))
+                                                    if gb2 >= 30:
+                                                        self.ollama_timeout = max(self.ollama_timeout, 300.0)
+                                                    elif gb2 >= 14:
+                                                        self.ollama_timeout = max(self.ollama_timeout, 180.0)
+                                                    else:
+                                                        self.ollama_timeout = max(self.ollama_timeout, 120.0)
+                                                    logger.info('Adjusted ollama_timeout to %s due to model %s', self.ollama_timeout, self.ollama_model)
                                         except Exception:
                                             pass
                             except Exception as e:
@@ -391,23 +400,31 @@ class LLMClient(BaseLLMClient):
 
     def _probe_ollama(self) -> bool:
         if not self._ollama_session:
+            self.ollama_reachable = False
             return False
         try:
             resp = self._ollama_session.get(f"{self.ollama_host}/api/version", timeout=self.ollama_timeout)
             resp.raise_for_status()
+            self.ollama_reachable = True
             return True
         except Exception as exc:
             logger.warning('Ollama probe failed: %s', exc)
+            self.ollama_reachable = False
             return False
 
     def _ollama_generate(self, prompt: str, max_tokens: Optional[int]) -> Dict[str, Any]:
         if not self._ollama_session:
             raise RuntimeError('ollama_session_unavailable')
+        # Disable thinking mode for qwen3/deepseek-r1 when prompt starts with /no_think.
+        # This skips the CoT reasoning phase, giving 5-10x faster responses for structured output.
+        options: dict = {'num_predict': max_tokens or self.max_tokens}
+        if prompt.lstrip().startswith('/no_think'):
+            options['think'] = False
         payload = {
             'model': self.ollama_model,
             'prompt': prompt,
             'stream': False,
-            'options': {'num_predict': max_tokens or self.max_tokens},
+            'options': options,
         }
         resp = self._ollama_session.post(f"{self.ollama_host}/api/generate", json=payload, timeout=self.ollama_timeout)
         resp.raise_for_status()
@@ -912,5 +929,39 @@ def generate_summary(prompt: str, max_tokens: int = 256, tenant_id: str | None =
     return DEFAULT_CLIENT.generate(prompt, max_tokens=max_tokens, tenant_id=tenant_id, overrides=overrides)
 
 
-__all__ = ['DEFAULT_CLIENT', 'generate_summary', 'BaseLLMClient', 'LocalDeterministicClient', 'LLMClient']
+def get_client_status(client: BaseLLMClient | None = None) -> dict:
+    c = client or DEFAULT_CLIENT
+    provider = getattr(c, 'provider', 'unknown')
+    ollama_enabled = bool(getattr(c, 'ollama_enabled', False))
+    ollama_reachable = bool(getattr(c, 'ollama_reachable', False))
+    openai_configured = bool(getattr(c, 'openai_key', None))
+    anthropic_configured = bool(getattr(c, 'anthropic_key', None))
+    available = (
+        provider == 'local-deterministic'
+        or (provider == 'ollama' and ollama_enabled and ollama_reachable)
+        or (provider == 'openai' and openai_configured)
+        or (provider == 'anthropic' and anthropic_configured)
+    )
+    return {
+        'model': getattr(c, 'model', 'unknown'),
+        'backend': type(c).__name__,
+        'ready': True,
+        'provider': provider,
+        'requested_provider': provider,
+        'environment': 'local' if provider in {'ollama', 'local-deterministic'} else 'remote',
+        'available': available,
+        'strict_provider': bool(getattr(c, 'strict_provider', False)),
+        'fallback_active': provider == 'local-deterministic',
+        'fallback_reason': 'local-deterministic fallback active' if provider == 'local-deterministic' else None,
+        'local_deterministic_active': provider == 'local-deterministic',
+        'client_class': type(c).__name__,
+        'ollama_enabled': ollama_enabled,
+        'ollama_host': getattr(c, 'ollama_host', None),
+        'ollama_model': getattr(c, 'ollama_model', None),
+        'ollama_reachable': ollama_reachable,
+        'openai_configured': openai_configured,
+        'anthropic_configured': anthropic_configured,
+    }
 
+
+__all__ = ['DEFAULT_CLIENT', 'generate_summary', 'get_client_status', 'BaseLLMClient', 'LocalDeterministicClient', 'LLMClient']
