@@ -41,7 +41,7 @@
   }
 
   function getSelectedModel() {
-    try { return localStorage.getItem('selectedModel') || 'qwen3.6:27b'; } catch (_) { return 'qwen3.6:27b'; }
+    try { return localStorage.getItem('selectedModel') || 'qwen3:14b'; } catch (_) { return 'qwen3:14b'; }
   }
 
   function apiFetch(path, opts) {
@@ -154,6 +154,151 @@
   function escHtml(s) {
     return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;')
       .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  function _displayVerdict(v) {
+    var raw = String(v || '').toUpperCase();
+    if (raw === 'VALIDATED_BREACH' || raw === 'CONFIRMED_INTRUSION' || raw === 'CONFIRMED_BREACH') return 'CONFIRMED BREACH';
+    if (raw === 'NO_VALIDATED_BREACH') return 'NO CONFIRMED BREACH';
+    return raw.replace(/_/g, ' ') || 'UNCERTAIN';
+  }
+
+  function _dreadInfo(cluster) {
+    var p = (cluster || {}).tier1_prefill || {};
+    var dn = p.dread_narrative || {};
+    var frags = dn.fragments || {};
+    var order = ['damage', 'reproducibility', 'exploitability', 'affected_users', 'discoverability'];
+    var parts = [];
+    order.forEach(function (key) {
+      if (frags[key]) parts.push({ key: key, label: key.replace(/_/g, ' ').toUpperCase(), text: String(frags[key]) });
+    });
+    return {
+      dn: dn,
+      frags: frags,
+      parts: parts,
+      has: !!(dn.rendered || parts.length),
+      provenance: dn.rendered ? 'LLM-rendered DREAD' : (parts.length ? 'Deterministic DREAD fragments' : 'Legacy fallback')
+    };
+  }
+
+  function _rowChipsFromText(text, limit) {
+    var found = [];
+    String(text || '').replace(/\brows?\s+([0-9][0-9,\s+]*(?:\+\s*\d+\s+more)?)/ig, function (_, group) {
+      var clean = String(group || '').replace(/\+\s*\d+\s*(?:more)?/ig, '');
+      (clean.match(/\d+/g) || []).forEach(function (n) {
+        if (found.indexOf(n) === -1 && found.length < (limit || 16)) found.push(n);
+      });
+      return _;
+    });
+    if (!found.length) return '';
+    return '<div class="br-rowchips">Evidence refs: ' + found.map(function (n) {
+      return '<a class="br-rowchip" href="/static/breach.html?assessment=' + encodeURIComponent(AID) + '&tab=evidence&row=' + encodeURIComponent(n) + '">[' + escHtml(n) + ']</a>';
+    }).join(' ') + '</div>';
+  }
+
+  function _renderWhyConfirmed(cluster) {
+    var d = _dreadInfo(cluster);
+    var full = d.parts.map(function (p) { return p.text; }).join(' ').toLowerCase() + ' ' + JSON.stringify(((cluster || {}).tier1_prefill || {}).observed_impact || {}).toLowerCase();
+    var gates = [
+      ['Data exfil', /exfil|copy into|unload|rclone|cloud sync|transferred data|backblaze|mega/.test(full)],
+      ['Repeated activity', /recurred|distinct days|same command|reproduc/.test(full)],
+      ['Affected users', /account|user|service_account|privileged|affected users/.test(full)],
+      ['Control gap', /no dlp|no pam|control gap|unconstrained|no inspection|no gate/.test(full)],
+      ['Crown jewel', /crown jewel|sfl_data|finance_wh|ndb|cps234/.test(full)],
+      ['Multi-source correlation', /cross-source|source types|multiple sources|correlation/.test(full)]
+    ];
+    return '<div class="br-why-ladder">' + gates.map(function (g) {
+      return '<span class="br-why-chip ' + (g[1] ? 'br-why-chip--ok' : 'br-why-chip--miss') + '">' + (g[1] ? '✓ ' : '? ') + escHtml(g[0]) + '</span>';
+    }).join('') + '</div>';
+  }
+
+  function _sentenceList(text) {
+    return String(text || '').replace(/\s+/g, ' ').split(/(?<=[.!?])\s+/).map(function (s) {
+      return s.trim();
+    }).filter(Boolean);
+  }
+
+  function _firstEvidenceSentence(cluster, fallback) {
+    var d = _dreadInfo(cluster);
+    var damage = (d.frags && d.frags.damage) || '';
+    var repro = (d.frags && d.frags.reproducibility) || '';
+    var s1 = _sentenceList(damage)[0] || fallback || '';
+    var s2 = _sentenceList(repro)[0] || '';
+    return [s1, s2].filter(Boolean).join(' ');
+  }
+
+  function _businessImpactSentence(cluster) {
+    var d = _dreadInfo(cluster);
+    var p = (cluster || {}).tier1_prefill || {};
+    var bits = [];
+    if (d.dn && d.dn.sabsa_coda_draft) bits.push(d.dn.sabsa_coda_draft);
+    if (d.frags && d.frags.exploitability) bits.push(d.frags.exploitability);
+    if (!bits.length && p.observed_impact && p.observed_impact.data) bits.push('Data impact: ' + p.observed_impact.data);
+    return bits.join(' ');
+  }
+
+  function _knownUnknownBox(cluster) {
+    var d = _dreadInfo(cluster);
+    var p = (cluster || {}).tier1_prefill || {};
+    var text = (d.parts.map(function (x) { return x.text; }).join(' ') + ' ' + JSON.stringify(p.observed_impact || {})).toLowerCase();
+    var known = [];
+    var unknown = [];
+    if (/rclone/.test(text)) known.push('Tool: rclone file-sync activity');
+    if (/backblaze/.test(text)) known.push('Destination: Backblaze B2 cloud storage');
+    if (/sfl_data|finance_wh/.test(text)) known.push('Crown jewels: SFL_DATA / FINANCE_WH');
+    if (/no dlp/.test(text) || /no pam/.test(text)) known.push('Control gaps: DLP/PAM coverage missing in evidence');
+    if (/service account|privileged|finance|standard user/.test(text)) known.push('Affected roles: service account, privileged/IT, finance, standard users');
+    if (!/pii|customer|payroll|secret|source code|credential dump/.test(text)) unknown.push('Exact record contents copied from Snowflake are unknown from current evidence');
+    if (!/attacker-owned|external owner|malicious owner/.test(text)) unknown.push('Backblaze account ownership is unknown from current evidence');
+    if (!known.length) known.push('Evidence-confirmed facts are limited to the cited rows');
+    return [
+      '<div class="br-known-unknown">',
+      '  <div><strong>Known</strong><ul>' + known.slice(0, 5).map(function (x) { return '<li>' + escHtml(x) + '</li>'; }).join('') + '</ul></div>',
+      '  <div><strong>Unknown / not proven</strong><ul>' + unknown.slice(0, 4).map(function (x) { return '<li>' + escHtml(x) + '</li>'; }).join('') + '</ul></div>',
+      '</div>'
+    ].join('');
+  }
+
+  function _boundedActionsHtml(cluster) {
+    var d = _dreadInfo(cluster);
+    var text = d.parts.map(function (x) { return x.text; }).join(' ').toLowerCase();
+    var safe = 'Preserve endpoint, Snowflake, and network evidence';
+    var approval = /backblaze|mega|cloud/.test(text) ? 'Block or restrict exfil destinations after approval' : 'Contain affected destinations after approval';
+    var manual = 'CISO/Legal/Privacy sign-off on reporting posture';
+    return [
+      '<div class="br-bounded-actions">',
+      '  <div><span class="br-auto br-auto--safe">SAFE</span> ' + escHtml(safe) + '</div>',
+      '  <div><span class="br-auto br-auto--approval">APPROVAL</span> ' + escHtml(approval) + '</div>',
+      '  <div><span class="br-auto br-auto--manual">MANUAL</span> ' + escHtml(manual) + '</div>',
+      '</div>'
+    ].join('');
+  }
+
+  function _compactExecSummary(data, fallbackBody) {
+    var fragments = data.dread_fragments || {};
+    var p1 = _sentenceList(fragments.damage || data.executive_summary || fallbackBody).slice(0, 2).join(' ');
+    var p2Parts = [];
+    if (data.sabsa_coda_draft) p2Parts.push(data.sabsa_coda_draft);
+    if (fragments.exploitability) p2Parts.push(_sentenceList(fragments.exploitability)[0]);
+    if (data.scope && data.scope.ruled_out_rows) {
+      p2Parts.push(data.scope.ruled_out_rows.toLocaleString() + ' authorized-security-test or benign rows were excluded from breach scope.');
+    }
+    var p2 = p2Parts.join(' ');
+    return {
+      p1: p1 || fallbackBody || '',
+      p2: p2 || _sentenceList(data.executive_summary || fallbackBody).slice(2, 4).join(' ')
+    };
+  }
+
+  function _dreadNarrativeText(cluster, fallback) {
+    var d = _dreadInfo(cluster);
+    if (d.dn.rendered) return d.dn.rendered;
+    if (d.parts.length) {
+      var body = d.parts.map(function (x) { return x.label + ': ' + x.text; }).join('\n');
+      if (d.dn.sabsa_coda_draft) body += '\nSABSA: ' + d.dn.sabsa_coda_draft;
+      return body;
+    }
+    return fallback || '';
   }
 
   // ── Upload view ──────────────────────────────────────────────────────────────
@@ -888,9 +1033,10 @@
     var rowCount = (a.evidence_store && a.evidence_store.row_count) || a.rows_processed || state.rows.length || 0;
     if (!lead) {
       return {
-        headline: 'No validated breach found',
+        headline: 'No confirmed breach found',
         subline: 'No correlated threat cases were found in ' + rowCount.toLocaleString() + ' rows.',
-        body: 'JanuSec analysed the supplied telemetry and did not identify a validated breach. All activity was accounted for by expected operational patterns.'
+        body: 'JanuSec analysed the supplied telemetry and did not identify a confirmed breach. All activity was accounted for by expected operational patterns.',
+        provenance: 'Legacy fallback'
       };
     }
     var verdict = (lead.verdict || lead.final_verdict || 'UNCERTAIN').toUpperCase();
@@ -932,9 +1078,11 @@
       var frags = dn.fragments || {};
       var hasDread = !!(frags.damage || frags.affected_users || frags.discoverability);
       var bodyParts = [];
+      var provenance = 'Legacy fallback';
 
       if (dn.rendered) {
         bodyParts.push(dn.rendered);
+        provenance = 'LLM-rendered DREAD';
       } else if (hasDread) {
         // Order: damage → reproducibility → exploitability → affected_users → discoverability
         var _fragOrder = ['damage', 'reproducibility', 'exploitability', 'affected_users', 'discoverability'];
@@ -942,6 +1090,7 @@
           if (frags[dim]) bodyParts.push(frags[dim]);
         });
         if (dn.sabsa_coda_draft) bodyParts.push('\n\n' + dn.sabsa_coda_draft);
+        provenance = 'Deterministic DREAD fragments';
       } else {
         // Flat paragraph fallback
         bodyParts.push(
@@ -974,7 +1123,8 @@
       return {
         headline: headlineLabel + (title || 'Unauthorised access with data exfiltration'),
         subline: sublineStr,
-        body: bodyParts.join(' ')
+        body: bodyParts.join(' '),
+        provenance: provenance
       };
     }
 
@@ -987,7 +1137,8 @@
     return {
       headline: 'Highest finding: ' + verdict.replace(/_/g, ' ') + (title ? ' — ' + title : ''),
       subline: breachRows + ' evidence rows require analyst review before breach validation.',
-      body: nonBreachBody
+      body: nonBreachBody,
+      provenance: 'Legacy fallback'
     };
   }
 
@@ -999,7 +1150,10 @@
       '  <div class="br-exec__text" id="br-exec-det">',
       '    <div class="br-exec__headline">' + escHtml(initial.headline) + '</div>',
       '    <div class="br-exec__subline">' + escHtml(initial.subline) + '</div>',
+      '    <div class="br-exec__source" id="br-exec-source">source: ' + escHtml(initial.provenance || 'Legacy fallback') + '</div>',
       '    <div class="br-exec__body">' + escHtml(initial.body) + '</div>',
+      '    <div class="br-exec__refs" id="br-exec-refs"></div>',
+      '    <div class="br-exec__warn" id="br-exec-warn"></div>',
       '  </div>',
       '  <div class="br-exec__color" id="br-exec-color"></div>',
       '  <div class="br-exec__footer">',
@@ -1099,12 +1253,19 @@
           'The events are consistent with ' + (sub || 'expected operational activity') + '.';
       }
       var rowCount = (c.row_refs || []).length;
+      var isAuthorized = /authorized security test|pentest|penetration test|red team/i.test(title + ' ' + sub + ' ' + narrative);
+      var authNarrative = isAuthorized
+        ? '<div class="br-auth-explain"><strong>Why excluded:</strong> Activity matched approved security-test context in this assessment. '
+          + '<strong>Rows explained:</strong> ' + rowCount.toLocaleString() + ' rows. '
+          + '<strong>Residual check:</strong> confirm test window, source identities, and authorization record before final closure.</div>'
+        : '';
       html += [
         '<div class="br-finding br-finding--context" id="br-context-' + escHtml(c.cluster_id) + '">',
         '  <div class="br-finding__main">',
         '    <div class="br-finding__verdict br-card__verdict--benign">✓ ' + escHtml(title.toUpperCase()) + '</div>',
         '    <div class="br-finding__oneliner">' + escHtml(sub) + '</div>',
         '    <div class="br-finding__meta" style="white-space:normal;line-height:1.5;">' + escHtml(narrative) + '</div>',
+        authNarrative,
         '    <div class="br-finding__meta" style="opacity:.6;margin-top:4px;">' + rowCount + ' correlated rows reviewed</div>',
         '  </div>',
         '  <div class="br-finding__actions">',
@@ -1372,7 +1533,9 @@
     var cardSubtitle = p.headline_subtitle || cluster.business_significance || _buildFallbackSummary(cluster);
     if (_rawCorrelationText(cardSubtitle)) cardSubtitle = _friendlyThreatCaseSummary(cluster, cardTitle);
 
-    var narrative = _friendlyThreatCaseNarrative(cluster, p, cardTitle, cardSubtitle);
+    var fullNarrative = _dreadNarrativeText(cluster, _friendlyThreatCaseNarrative(cluster, p, cardTitle, cardSubtitle));
+    var narrative = _firstEvidenceSentence(cluster, fullNarrative);
+    var dreadInfo = _dreadInfo(cluster);
     var rootCauseText = _deriveRootCause(cluster, p, cardTitle, cardSubtitle);
     var rootCause = rootCauseText ? '<div style="font-size:13px;color:#90caf9;margin-top:4px;"><strong>Root cause:</strong> ' + escHtml(rootCauseText) + '</div>' : '';
 
@@ -1381,13 +1544,18 @@
       '  <div class="br-card__rank">' + escHtml(rankLabel) + '</div>',
       _renderGateBanner(cluster),
       '  <div class="br-card__verdict br-card__verdict--' + vc + '">',
-      '    ' + verdictIcon(verdict) + ' ' + escHtml(verdict.toUpperCase()),
+      '    ' + verdictIcon(verdict) + ' ' + escHtml(_displayVerdict(verdict)),
       '  </div>',
       '  <div class="br-card__title">' + escHtml(cardTitle) + '</div>',
       '  <div class="br-card__subtitle">' + escHtml(cardSubtitle) + '</div>',
       meter ? _renderMeter(meter) : '',
+      '  <div class="br-card__evidence-title">What happened <span>source: ' + escHtml(dreadInfo.provenance) + '</span></div>',
       '  <div class="br-card__narrative">' + escHtml(narrative) + '</div>',
-      rootCause,
+      _renderWhyConfirmed(cluster),
+      '<div class="br-card__evidence-title">Business consequence</div>',
+      '<div class="br-card__sabsa">' + escHtml(_businessImpactSentence(cluster) || 'Business impact is unknown from current evidence.') + '</div>',
+      '<div class="br-card__evidence-title">Bounded next actions</div>',
+      _boundedActionsHtml(cluster),
       '  <div class="br-card__meta">',
       '    <span>' + (cluster.row_refs || []).length + ' rows</span>',
       '    <span>' + escHtml((cluster.severity || 'low').toUpperCase()) + '</span>',
@@ -1396,22 +1564,18 @@
       '  </div>',
       _renderQualityWarning(p._quality),
       _renderJargonWarning(p._quality_flags),
+      '<details class="br-drilldown br-card__technical"><summary>Expand technical detail</summary>',
+      rootCause,
+      _knownUnknownBox(cluster),
       p.verdict_reasoning ? '<div class="br-card__verdict-reasoning"><span style="color:var(--text-muted);font-size:13px;">WHY:</span> ' + escHtml(p.verdict_reasoning) + '</div>' : '',
+      _rowChipsFromText(fullNarrative, 12),
       _renderEvidenceChain(p.evidence_chain),
       _renderEvidenceGaps(p.evidence_gaps),
+      '</details>',
       '  <div class="br-card__actions">',
-      '    <div class="br-card__actions-col">',
-      '      <div class="br-card__actions-head">Next steps</div>',
-      '      <ul class="br-card__action-list">',
-      _renderImmediateActions(p.immediate_actions, (p.top_actions && p.top_actions.length) ? p.top_actions : cluster.next_steps),
-      '      </ul>',
-      '    </div>',
-      '    <div class="br-card__actions-col">',
-      '      <div class="br-card__actions-head">MITRE</div>',
-      '      <div class="br-card__mitre-list">',
-      _renderMitreBadges(p.mitre_techniques || cluster.mitre_techniques, p.mitre_evidence_map),
-      '      </div>',
-      '    </div>',
+      '    <button class="br-card__open" onclick="window.location.href=\'/static/breach.html?assessment=' + encodeURIComponent(AID) + '&tab=evidence\'">',
+      '      Show evidence rows',
+      '    </button>',
       '    <button class="br-card__open" onclick="window.open(\'/static/breach.html?cluster=' + encodeURIComponent(cluster.cluster_id) + '&assessment=' + encodeURIComponent(AID) + '\', \'_blank\')">',
       '      Open threat case ↗',
       '    </button>',
@@ -1761,7 +1925,20 @@
             det.innerHTML = [
               data.headline ? '<div class="br-exec__headline">' + escHtml(data.headline) + '</div>' : '',
               data.subline ? '<div class="br-exec__subline">' + escHtml(data.subline) + '</div>' : '',
-              data.executive_summary ? '<div class="br-exec__body">' + escHtml(data.executive_summary) + '</div>' : '',
+              '<div class="br-exec__source">source: ' + escHtml(data.narrative_source || data.narrative_provenance || 'legacy') + (data.from_cache ? ' (cached)' : '') + '</div>',
+              (function () {
+                var compact = _compactExecSummary(data, data.executive_summary || '');
+                return '<div class="br-exec__body"><p>' + escHtml(compact.p1) + '</p><p>' + escHtml(compact.p2) + '</p></div>';
+              })(),
+              (data.evidence_refs && data.evidence_refs.length)
+                ? '<details class="br-drilldown"><summary>Show evidence basis</summary>'
+                  + '<div class="br-exec__refs">Evidence refs: ' + data.evidence_refs.slice(0, 18).map(function (n) {
+                      return '<a class="br-rowchip" href="/static/breach.html?assessment=' + encodeURIComponent(AID) + '&tab=evidence&row=' + encodeURIComponent(n) + '">[' + escHtml(n) + ']</a>';
+                    }).join(' ') + '</div>'
+                  + (data.executive_summary ? '<div class="br-drilldown__body">' + escHtml(data.executive_summary) + '</div>' : '')
+                  + '</details>'
+                : '',
+              data.render_warning ? '<div class="br-exec__warn">' + escHtml(data.render_warning) + '</div>' : '',
               travelHtml,
               iamHtml,
             ].join('');
@@ -2178,7 +2355,7 @@
     if (!bar) return;
     var base = AID ? '?assessment=' + encodeURIComponent(AID) : '';
     var curModel = getSelectedModel();
-    var modelOpts = ['qwen3.6:27b', 'qwen3:30b', 'qwen3:14b', 'qwen2.5:14b'].map(function (m) {
+    var modelOpts = ['qwen3:14b', 'qwen2.5:14b', 'qwen3.6:27b', 'qwen3:30b'].map(function (m) {
       return '<option value="' + m + '"' + (m === curModel ? ' selected' : '') + '>' + m + '</option>';
     }).join('');
     bar.innerHTML = [

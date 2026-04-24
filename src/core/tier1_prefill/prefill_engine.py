@@ -233,7 +233,7 @@ def _compute_cross_cluster_links(
 
 # Config flag — set to False in tests to skip actual LLM calls
 PREFILL_ENABLED = True
-PREFILL_DEFAULT_MODEL = 'qwen3:30b'
+PREFILL_DEFAULT_MODEL = 'qwen3:14b'
 PREFILL_TOP_N = 3
 PREFILL_MAX_TOKENS = 1500
 PREFILL_TIMEOUT_S = 45
@@ -428,6 +428,21 @@ class PhaseEvent(NamedTuple):
     asn: str       # empty string when unavailable
 
 
+def _row_geo_asn(row: dict) -> tuple[str, str]:
+    geo = row.get('_geo') if isinstance(row.get('_geo'), dict) else {}
+    country = (
+        row.get('geo_dst_country') or row.get('dst_country') or row.get('destination_country')
+        or row.get('country') or row.get('geo_country') or row.get('geo_src_country')
+        or row.get('src_country') or geo.get('dst_country') or geo.get('country') or geo.get('src_country') or ''
+    )
+    asn = (
+        row.get('geo_dst_asn') or row.get('destination_asn') or row.get('dst_asn')
+        or row.get('asn') or row.get('source_asn') or row.get('src_asn') or row.get('geo_src_asn')
+        or geo.get('dst_asn') or geo.get('asn') or geo.get('src_asn') or ''
+    )
+    return str(country or ''), str(asn or '')
+
+
 def _detect_attack_sequence(rows: list[dict]) -> str:
     """Map cluster rows to kill-chain phases and return a sequence summary for the LLM.
 
@@ -534,8 +549,7 @@ def _detect_attack_sequence(rows: list[dict]) -> str:
                 ridx = int(row.get('row_index') or 0)
             except Exception:
                 ridx = 0
-            country = str(row.get('country') or row.get('geo_country') or row.get('src_country') or '')
-            asn = str(row.get('asn') or row.get('src_asn') or row.get('as_org') or '')
+            country, asn = _row_geo_asn(row)
             events.append(PhaseEvent(phase=p, row_index=ridx, timestamp=ts, country=country, asn=asn))
             if not phases or phases[-1] != p:
                 phases.append(p)
@@ -648,8 +662,7 @@ def _detect_attack_sequence_events(rows: list[dict]) -> list[PhaseEvent]:
                 ridx = int(row.get('row_index') or 0)
             except Exception:
                 ridx = 0
-            country = str(row.get('country') or row.get('geo_country') or row.get('src_country') or '')
-            asn = str(row.get('asn') or row.get('src_asn') or row.get('as_org') or '')
+            country, asn = _row_geo_asn(row)
             out.append(PhaseEvent(phase=p, row_index=ridx, timestamp=ts, country=country, asn=asn))
     return out
 

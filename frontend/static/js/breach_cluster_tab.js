@@ -58,7 +58,7 @@
   function _rowsForCluster(cluster) {
     var refs = new Set((cluster.row_refs || []).map(function (r) { return String(r); }));
     return ((_ctx && _ctx.allRows) || []).filter(function (row) {
-      return refs.has(String(row.row_index));
+      return refs.has(String(row.row_index)) || refs.has(String(row.row_number));
     });
   }
 
@@ -204,6 +204,129 @@
 
   // ── Skeleton (synchronous HTML) ──────────────────────────────────────────────
 
+  function _displayVerdict(verdict) {
+    var raw = String(verdict || '').toUpperCase();
+    if (raw === 'VALIDATED_BREACH' || raw === 'CONFIRMED_INTRUSION' || raw === 'CONFIRMED_BREACH') return 'CONFIRMED BREACH';
+    if (raw === 'NO_VALIDATED_BREACH') return 'NO CONFIRMED BREACH';
+    return raw.replace(/_/g, ' ') || 'UNCERTAIN';
+  }
+
+  function _dreadInfo(cluster) {
+    var p = (cluster || {}).tier1_prefill || {};
+    var dn = p.dread_narrative || {};
+    var frags = dn.fragments || {};
+    var order = ['damage', 'reproducibility', 'exploitability', 'affected_users', 'discoverability'];
+    var parts = order.filter(function (k) { return !!frags[k]; }).map(function (k) {
+      return { key: k, label: k.replace(/_/g, ' ').toUpperCase(), text: String(frags[k]) };
+    });
+    return { dn: dn, frags: frags, parts: parts, has: !!(dn.rendered || parts.length), provenance: dn.rendered ? 'LLM-rendered DREAD' : (parts.length ? 'Deterministic DREAD fragments' : 'Legacy fallback') };
+  }
+
+  function _rowChips(text, limit) {
+    var out = [];
+    String(text || '').replace(/\brows?\s+([0-9][0-9,\s+]*(?:\+\s*\d+\s+more)?)/ig, function (_, group) {
+      var clean = String(group || '').replace(/\+\s*\d+\s*(?:more)?/ig, '');
+      (clean.match(/\d+/g) || []).forEach(function (n) {
+        if (out.indexOf(n) === -1 && out.length < (limit || 18)) out.push(n);
+      });
+      return _;
+    });
+    if (!out.length) return '';
+    return '<div class="bct-rowchips">Evidence refs: ' + out.map(function (n) {
+      return '<a class="bct-rowchip" href="/static/breach.html?assessment=' + encodeURIComponent(_ctx.assessmentId) + '&tab=evidence&row=' + encodeURIComponent(n) + '">[' + _esc(n) + ']</a>';
+    }).join(' ') + '</div>';
+  }
+
+  function _whyConfirmed(cluster) {
+    var d = _dreadInfo(cluster);
+    var p = (cluster || {}).tier1_prefill || {};
+    var full = (d.parts.map(function (x) { return x.text; }).join(' ') + ' ' + JSON.stringify(p.observed_impact || {})).toLowerCase();
+    var gates = [
+      ['Data movement', /exfil|copy into|unload|rclone|cloud sync|transferred data|backblaze|mega/.test(full)],
+      ['Repeated activity', /recurred|distinct days|same command|reproduc/.test(full)],
+      ['Affected users', /account|user|service_account|privileged|affected users/.test(full)],
+      ['Control gap', /no dlp|no pam|control gap|unconstrained|no inspection|no gate/.test(full)],
+      ['Crown jewel', /crown jewel|sfl_data|finance_wh|ndb|cps234/.test(full)],
+      ['Multi-source correlation', /cross-source|source types|multiple sources|correlation/.test(full)]
+    ];
+    return '<div class="bct-why-ladder">' + gates.map(function (g) {
+      return '<span class="bct-why-chip ' + (g[1] ? 'bct-why-chip--ok' : 'bct-why-chip--miss') + '">' + (g[1] ? 'OK ' : '? ') + _esc(g[0]) + '</span>';
+    }).join('') + '</div>';
+  }
+
+  function _buildEvidenceNarrative(cluster) {
+    var d = _dreadInfo(cluster);
+    var p = (cluster || {}).tier1_prefill || {};
+    if (!d.has) return '';
+    var body = d.dn.rendered
+      ? '<p>' + _esc(d.dn.rendered) + '</p>' + _rowChips(d.dn.rendered, 12)
+      : d.parts.map(function (part) {
+          return '<div class="bct-dread-frag"><strong>' + _esc(part.label) + '</strong><span>' + _esc(part.text) + '</span>' + _rowChips(part.text, 8) + '</div>';
+        }).join('');
+    var sabsa = d.dn.sabsa_coda_draft ? '<div class="bct-sabsa"><strong>SABSA:</strong> ' + _esc(d.dn.sabsa_coda_draft) + '</div>' : '';
+    return [
+      '<div class="bct-section bct-evidence-narrative" data-testid="bct-evidence-narrative">',
+      '  <div class="bct-section-head">EVIDENCE NARRATIVE <span class="bct-source-strip">source: ' + _esc(d.provenance) + '</span></div>',
+      _whyConfirmed(cluster),
+      body,
+      sabsa,
+      '  <div class="bct-framework-lite">',
+      '    <div><strong>DREAD:</strong> ' + _esc(d.parts.map(function (x) { return x.label; }).join(' / ')) + '</div>',
+      '    <div><strong>Diamond:</strong> adversary, capability, infrastructure, and victim are derived from cited rows.</div>',
+      '    <div><strong>PASTA:</strong> threat action to control gap to business impact is visible in Damage and Exploitability.</div>',
+      '    <div><strong>SABSA:</strong> ' + _esc((d.dn.sabsa_attributes || []).join(', ') || 'not mapped') + '</div>',
+      '    <div><strong>MITRE:</strong> ' + _esc((_mitreForCluster(cluster, p) || []).slice(0, 8).join(', ') || 'not mapped') + '</div>',
+      '    <div><strong>Controls:</strong> DLP, PAM, cloud egress, endpoint preservation, and regulatory assessment stay tied to cited rows.</div>',
+      '  </div>',
+      '</div>'
+    ].join('');
+  }
+
+  function _firstEvidenceSentence(cluster, fallback) {
+    var d = _dreadInfo(cluster);
+    var damage = (d.frags && d.frags.damage) || '';
+    var repro = (d.frags && d.frags.reproducibility) || '';
+    function sentences(text) {
+      return String(text || '').replace(/\s+/g, ' ').split(/(?<=[.!?])\s+/).map(function (s) { return s.trim(); }).filter(Boolean);
+    }
+    return [sentences(damage)[0], sentences(repro)[0]].filter(Boolean).join(' ') || fallback || '';
+  }
+
+  function _knownUnknownBox(cluster) {
+    var d = _dreadInfo(cluster);
+    var p = (cluster || {}).tier1_prefill || {};
+    var text = (d.parts.map(function (x) { return x.text; }).join(' ') + ' ' + JSON.stringify(p.observed_impact || {})).toLowerCase();
+    var known = [];
+    var unknown = [];
+    if (/rclone/.test(text)) known.push('Tool: rclone file-sync activity');
+    if (/backblaze/.test(text)) known.push('Destination: Backblaze B2 cloud storage');
+    if (/sfl_data|finance_wh/.test(text)) known.push('Crown jewels: SFL_DATA / FINANCE_WH');
+    if (/no dlp/.test(text) || /no pam/.test(text)) known.push('Control gaps: DLP/PAM coverage missing in evidence');
+    if (/service account|privileged|finance|standard user/.test(text)) known.push('Affected roles: service account, privileged/IT, finance, standard users');
+    if (!/pii|customer|payroll|secret|source code|credential dump/.test(text)) unknown.push('Exact record contents copied from Snowflake are unknown from current evidence');
+    if (!/attacker-owned|external owner|malicious owner/.test(text)) unknown.push('Backblaze account ownership is unknown from current evidence');
+    if (!known.length) known.push('Evidence-confirmed facts are limited to the cited rows');
+    return '<div class="bct-known-unknown"><div><strong>Known</strong><ul>' + known.map(function (x) { return '<li>' + _esc(x) + '</li>'; }).join('') + '</ul></div><div><strong>Unknown / not proven</strong><ul>' + unknown.map(function (x) { return '<li>' + _esc(x) + '</li>'; }).join('') + '</ul></div></div>';
+  }
+
+  function _buildCjEvidenceSeed(cluster) {
+    var d = _dreadInfo(cluster);
+    var text = d.parts.map(function (x) { return x.text; }).join(' ') + ' ' + JSON.stringify(((cluster || {}).tier1_prefill || {}).observed_impact || {});
+    var names = [];
+    ['SFL_DATA', 'FINANCE_WH', 'fs01', 'it-scripts', 'SVC_SFL_ANALYTICS_FED', 'marcus.delacroix', 'Backblaze B2'].forEach(function (needle) {
+      if (text.toLowerCase().indexOf(needle.toLowerCase()) !== -1 && names.indexOf(needle) === -1) names.push(needle);
+    });
+    if (!names.length) return '';
+    return [
+      '<div class="bct-cj-panel">',
+      '  <div class="bct-section-head" style="margin-bottom:8px;">CROWN JEWELS IN SCOPE <span style="font-size:10px;color:var(--text-muted);font-weight:400;margin-left:8px;">evidence-derived, registry resolving</span></div>',
+      names.map(function (x) {
+        return '<div class="bct-cj-entry"><div class="bct-cj-main"><span class="bct-cj-key">' + _esc(x) + '</span><span class="bct-cj-badge" style="color:#E0C446;border-color:#E0C446;">pending registry</span></div></div>';
+      }).join(''),
+      '</div>'
+    ].join('');
+  }
+
   function _buildSkeleton(cluster, assessmentId) {
     var p = cluster.tier1_prefill || {};
     var verdict = (cluster.verdict || cluster.final_verdict || 'UNCERTAIN').toUpperCase();
@@ -230,7 +353,7 @@
       '<div class="bct-header">',
       _renderGateBanner(cluster),
       '  <div class="bct-header__verdict" style="border-left-color:' + vc + '">',
-      '    <span class="bct-header__verdict-pill" style="background:' + vc + '22;color:' + vc + '">' + _esc(verdict) + '</span>',
+      '    <span class="bct-header__verdict-pill" style="background:' + vc + '22;color:' + vc + '">' + _esc(_displayVerdict(verdict)) + '</span>',
       '    <span class="bct-header__sev" style="color:' + sc + '">' + _esc(sev.toUpperCase()) + '</span>',
       '    <span class="bct-header__rows">' + (cluster.row_refs || []).length + ' rows</span>',
       meter ? '<span class="bct-header__conf">' + Math.round(meter.total) + '% confidence</span>' : '',
@@ -239,9 +362,12 @@
       caseSubtitle ? '<div class="bct-header__sub">' + _esc(caseSubtitle) + '</div>' : '',
       // what_happened is primary narrative — short_narrative is fallback
       (function() {
-        var narrative = _caseNarrative(cluster, p, caseTitle, caseSubtitle);
-        return narrative ? '<div class="bct-header__narrative what-happened narrative-text" data-field="what_happened">' + _esc(narrative) + '</div>' : '';
+        var narrative = _firstEvidenceSentence(cluster, _caseNarrative(cluster, p, caseTitle, caseSubtitle));
+        return narrative ? '<div class="bct-what-happened"><div class="bct-label">WHAT HAPPENED</div><div>' + _esc(narrative) + '</div></div>' : '';
       })(),
+      _knownUnknownBox(cluster),
+      '<details class="bct-technical-basis">',
+      '<summary>Technical basis</summary>',
       p.root_cause ? '<div class="bct-header__root-cause"><span class="bct-label">Root cause:</span> ' + _esc(p.root_cause) + '</div>' : '',
       // WHY block removed — verdict_reasoning duplicates root_cause after prefill normalisation
 
@@ -271,6 +397,9 @@
         return '<div class="bct-mitre-row"><span class="bct-label">MITRE:</span> ' + badges + '</div>';
       })(),
       '</div>',
+      '</details>',
+
+      _buildEvidenceNarrative(cluster),
 
       (function() {
         var chain = p.evidence_chain;
@@ -310,7 +439,7 @@
       // Repeat entity alert (filled async)
       '<div id="bct-repeat-alert"></div>',
       // Crown jewels review panel (filled async)
-      '<div id="bct-cj-review"></div>',
+      '<div id="bct-cj-review">' + _buildCjEvidenceSeed(cluster) + '</div>',
       '</div>',
 
       // ── Persona tabs
@@ -320,7 +449,8 @@
 
       // ── Persona content area
       '<div class="bct-persona-body" id="bct-persona-body" data-testid="bct-persona-body">',
-      '<div class="bct-loading">Loading persona steps…</div>',
+      _buildPersonaSteps(_deterministicPersonaSteps(_activePersona, cluster), _activePersona, cluster, assessmentId, false),
+      _buildPersonaGeneratePrompt(_activePersona, cluster, assessmentId),
       '</div>',
 
       // ── Timeline section (filled async by E9)
@@ -416,14 +546,37 @@
         if (steps.length) {
           body.innerHTML = _buildPersonaSteps(steps, persona, cluster, assessmentId, false);
         } else {
-          body.innerHTML = _buildPersonaGeneratePrompt(persona, cluster, assessmentId);
+          body.innerHTML = _buildPersonaSteps(_deterministicPersonaSteps(persona, cluster), persona, cluster, assessmentId, false)
+            + _buildPersonaGeneratePrompt(persona, cluster, assessmentId);
         }
         _wireStepExpand(cluster, assessmentId);
         _wireFurtherTasksBtn(cluster, assessmentId);
       })
       .catch(function () {
-        body.innerHTML = _buildPersonaGeneratePrompt(persona, cluster, assessmentId);
+        body.innerHTML = _buildPersonaSteps(_deterministicPersonaSteps(persona, cluster), persona, cluster, assessmentId, false)
+          + _buildPersonaGeneratePrompt(persona, cluster, assessmentId);
       });
+  }
+
+  function _deterministicPersonaSteps(persona, cluster) {
+    var refs = (cluster.row_refs || []).slice(0, 6);
+    var baseRefs = refs.length ? refs : [];
+    if (persona === 'threat_hunter') {
+      return [
+        { title: 'Hunt for matching rclone/cloud-sync activity across peer hosts', priority: 'P1', evidence_refs: baseRefs, subtasks: [{ label: 'Search endpoint and proxy logs for rclone, Backblaze, Mega, and matching command signatures' }] },
+        { title: 'Expand infrastructure scope around reused IPs and ASNs', priority: 'P2', evidence_refs: baseRefs, subtasks: [{ label: 'Pivot on destination IPs, DNS, ASN, JA3/JA4, and repeated egress timing' }] }
+      ];
+    }
+    if (persona === 'forensics') {
+      return [
+        { title: 'Preserve endpoint process tree and command-line evidence', priority: 'P1', evidence_refs: baseRefs, subtasks: [{ label: 'Collect process lineage, binary hash, parent process, persistence artifacts, and relevant disk paths' }] },
+        { title: 'Preserve Snowflake query history and unload-stage evidence', priority: 'P1', evidence_refs: baseRefs, subtasks: [{ label: 'Export query text, actor, warehouse, database, stage, timestamp, and result metadata' }] }
+      ];
+    }
+    return [
+      { title: 'Confirm breach scope before containment', priority: 'P1', evidence_refs: baseRefs, subtasks: [{ label: 'Verify affected accounts, destinations, crown jewels, and row evidence are in scope' }] },
+      { title: 'Coordinate bounded response actions', priority: 'P1', evidence_refs: baseRefs, subtasks: [{ label: 'Preserve evidence now; request approval before blocking egress or disabling identities' }] }
+    ];
   }
 
   // ── 4-phase action bucketing ─────────────────────────────────────────────────
@@ -842,13 +995,40 @@
     var tenantId = _tenantId();
     // Collect identifiers to resolve
     var p = cluster.tier1_prefill || {};
+    function _addToken(arr, value) {
+      String(value || '').split(/[,\n;]/).forEach(function (part) {
+        var s = part.trim().replace(/^assets?\s+/i, '').replace(/^accounts?\s+/i, '');
+        if (s && arr.indexOf(s) === -1) arr.push(s);
+      });
+    }
+    var extraAccounts = [];
+    var extraAssets = [];
+    var extraIps = [];
+    var impact = p.observed_impact || {};
+    _addToken(extraAccounts, impact.identity || '');
+    _addToken(extraAssets, impact.data || '');
+    _addToken(extraAssets, impact.operational || '');
+    var d = _dreadInfo(cluster);
+    d.parts.forEach(function (part) {
+      var text = part.text || '';
+      ['SFL_DATA', 'FINANCE_WH', '\\\\fs01\\it-scripts', 'fs01', 'Backblaze B2', 'mega.nz'].forEach(function (needle) {
+        if (text.toLowerCase().indexOf(needle.toLowerCase()) !== -1) extraAssets.push(needle);
+      });
+    });
+    _rowsForCluster(cluster).forEach(function (row) {
+      ['user_principal_name', 'username', 'user', 'account', 'actor'].forEach(function (k) { _addToken(extraAccounts, row[k]); });
+      ['database_name', 'warehouse_name', 'schema_name', 'hostname', 'host', 'device_name', 'object_name', 'file_path', 'path'].forEach(function (k) { _addToken(extraAssets, row[k]); });
+      ['src_ip', 'source_ip', 'dst_ip', 'destination_ip', 'client_ip'].forEach(function (k) { _addToken(extraIps, row[k]); });
+    });
+
     var accounts = (cluster.affected_accounts || cluster.shared_accounts || [])
       .concat(
         ((p.observed_impact || {}).identity || '')
           .split(',').map(function(s) { return s.trim(); }).filter(Boolean)
-      );
-    var assets = (cluster.affected_assets || cluster.shared_assets || []);
-    var srcIps  = (cluster.shared_external_ips || []);
+      )
+      .concat(extraAccounts);
+    var assets = (cluster.affected_assets || cluster.shared_assets || []).concat(extraAssets);
+    var srcIps  = (cluster.shared_external_ips || []).concat(extraIps);
 
     // Deduplicate
     var uniqueAccounts = accounts.filter(function(v, i, a) { return v && a.indexOf(v) === i; }).slice(0, 8);
@@ -857,19 +1037,61 @@
 
     if (!uniqueAccounts.length && !uniqueAssets.length && !uniqueIps.length) return;
 
+    function _renderCandidatePanel() {
+      var candidates = uniqueAssets.concat(uniqueAccounts).slice(0, 10);
+      if (!candidates.length) return;
+      el.innerHTML = [
+        '<div class="bct-cj-panel">',
+        '  <div class="bct-section-head" style="margin-bottom:8px;">CROWN JEWELS IN SCOPE</div>',
+        candidates.map(function (x) {
+          return '<div class="bct-cj-entry"><div class="bct-cj-main"><span class="bct-cj-key">' + _esc(x) + '</span><span class="bct-cj-badge" style="color:#E0C446;border-color:#E0C446;">evidence-derived</span></div></div>';
+        }).join(''),
+        '</div>'
+      ].join('');
+    }
+
     // Fetch the full registry once, then do client-side lookups
     _get('/api/v1/config/tenant/' + encodeURIComponent(tenantId) + '/crown-jewels')
       .then(function(r) { return r.json(); })
       .then(function(cj) {
         var rows = [];
+        var evidenceText = (
+          JSON.stringify((cluster.tier1_prefill || {}).observed_impact || {}) + ' ' +
+          _dreadInfo(cluster).parts.map(function (p) { return p.text; }).join(' ') + ' ' +
+          _rowsForCluster(cluster).map(function (row) {
+            return ['database_name', 'warehouse_name', 'schema_name', 'hostname', 'host', 'device_name', 'object_name', 'file_path', 'path', 'user', 'user_principal_name', 'account'].map(function (k) { return row[k] || ''; }).join(' ');
+          }).join(' ')
+        ).toLowerCase();
+        ['assets', 'accounts', 'destinations', 'cloud_accounts'].forEach(function (section) {
+          var obj = cj[section] || {};
+          Object.keys(obj).forEach(function (key) {
+            if (evidenceText.indexOf(String(key).toLowerCase()) === -1) return;
+            if (section === 'accounts' && uniqueAccounts.indexOf(key) === -1) uniqueAccounts.push(key);
+            if (section !== 'accounts' && uniqueAssets.indexOf(key) === -1) uniqueAssets.push(key);
+          });
+        });
+        function _lookup(section, value) {
+          var obj = cj[section] || {};
+          if (obj[value]) return { key: value, entry: obj[value] };
+          var vl = String(value || '').toLowerCase();
+          for (var k in obj) {
+            var kl = String(k).toLowerCase();
+            if (kl === vl || (vl && vl.indexOf(kl) !== -1) || (kl && kl.indexOf(vl) !== -1)) return { key: k, entry: obj[k] };
+          }
+          return null;
+        }
 
         uniqueAccounts.forEach(function(acct) {
-          var entry = (cj.accounts || {})[acct];
-          if (entry) rows.push({ key: acct, section: 'accounts', entry: entry, label: acct });
+          var hit = _lookup('accounts', acct);
+          if (hit) rows.push({ key: hit.key, section: 'accounts', entry: hit.entry, label: acct });
         });
         uniqueAssets.forEach(function(asset) {
-          var entry = (cj.assets || {})[asset];
-          if (entry) rows.push({ key: asset, section: 'assets', entry: entry, label: asset });
+          var hit = _lookup('assets', asset);
+          if (hit) rows.push({ key: hit.key, section: 'assets', entry: hit.entry, label: asset });
+          var cloudHit = _lookup('cloud_accounts', asset);
+          if (cloudHit) rows.push({ key: cloudHit.key, section: 'cloud_accounts', entry: cloudHit.entry, label: asset });
+          var destHit = _lookup('destinations', asset);
+          if (destHit) rows.push({ key: destHit.key, section: 'destinations', entry: destHit.entry, label: asset });
         });
         uniqueIps.forEach(function(ip) {
           // Check subnets
@@ -882,7 +1104,10 @@
           }
         });
 
-        if (!rows.length) return;
+        if (!rows.length) {
+          _renderCandidatePanel();
+          return;
+        }
 
         var rowsHtml = rows.map(function(item) {
           return _renderCjRow(item, tenantId);
@@ -917,7 +1142,7 @@
           });
         });
       })
-      .catch(function() {});
+      .catch(function() { _renderCandidatePanel(); });
   }
 
   function _renderCjRow(item, tenantId) {

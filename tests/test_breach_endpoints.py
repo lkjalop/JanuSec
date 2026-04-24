@@ -154,6 +154,65 @@ def test_exec_summary_returns_cached(client, monkeypatch):
     assert resp.json()['llm_color'] == 'Cached colour.'
 
 
+def test_exec_summary_prefers_dread_and_ignores_stale_generic_cache(client):
+    assessment = {
+        'assessment_id': FAKE_AID,
+        'rows_processed': 43834,
+        'evidence_store': {'row_count': 43834, 'source_counts': {'endpoint': 1, 'network': 1, 'cloud': 1, 'identity': 1}},
+        'exec_summary_llm': {
+            'headline': 'Validated breach: PRIMARY BREACH',
+            'executive_summary': 'JanuSec found observed attacker action against a protected business process.',
+            'model_used': 'qwen3.6:27b',
+        },
+        'correlation_clusters': [
+            {
+                'cluster_id': 'case-primary-breach',
+                'severity': 'critical',
+                'verdict': 'VALIDATED_BREACH',
+                'row_refs': [4548, 5711, 5713, 5720],
+                'tier1_prefill': {
+                    'incident_name': 'PRIMARY BREACH',
+                    'dread_narrative': {
+                        'fragments': {
+                            'damage': 'On 2026-02-03, an actor transferred SFL_DATA and FINANCE_WH data to Backblaze B2 (rows 4548, 5711, 5713).',
+                            'reproducibility': 'The same command signature recurred across 7 distinct days (rows 12832, 15865).',
+                            'exploitability': 'No DLP inspection on cloud-sync egress and no PAM gate were observed.',
+                            'affected_users': '4 accounts affected: SVC_SFL_ANALYTICS_FED, marcus.delacroix, rachel.nakamura, aaron.blackwood.',
+                            'discoverability': 'Cross-source correlation across endpoint, network, cloud, and identity sources.',
+                        },
+                        'sabsa_coda_draft': 'Business consequence: Confidential, Reputable, and Authorised attributes degraded.',
+                        'sabsa_attributes': ['Confidential', 'Reputable', 'Authorised'],
+                    },
+                },
+            },
+            {
+                'cluster_id': 'authorized-test',
+                'severity': 'low',
+                'verdict': 'BENIGN_EXPECTED',
+                'row_refs': list(range(10)),
+                'tier1_prefill': {'incident_name': 'AUTHORIZED SECURITY TEST'},
+            },
+        ],
+        'normalized_rows': [],
+    }
+    with patch('src.api.breach_endpoints._get_assessment', return_value=assessment), \
+         patch('src.api.breach_endpoints._persist'):
+        resp = client.post(f'/api/v1/assessments/{FAKE_AID}/executive-summary',
+                           json={'regenerate': False, 'model': 'qwen3:14b'})
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data['from_cache'] is False
+    assert data['headline'].startswith('Confirmed breach:')
+    assert data['narrative_provenance'] == 'dread_deterministic_fragments'
+    assert 'SFL_DATA' in data['executive_summary']
+    assert 'FINANCE_WH' in data['executive_summary']
+    assert 'Business consequence' in data['executive_summary']
+    assert 'authorized security test' in data['executive_summary'].lower()
+    assert 5711 in data['evidence_refs']
+    assert any(g['gate'] == 'Crown jewel' and g['confirmed'] for g in data['why_confirmed'])
+
+
 # ── Sign-off ──────────────────────────────────────────────────────────────────
 
 def test_sign_off_writes_state(client, monkeypatch):
