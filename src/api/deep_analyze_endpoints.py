@@ -217,12 +217,20 @@ def _extract_row_timestamp_value(row: dict | None) -> float | None:
     return None
 
 
+_HOPGRAPH_ROW_CAP = 1500  # above this, hairball rendering degrades performance significantly
+
+
 def _ingest_rows_to_hopgraph(rows: list[dict], assessment_id: str) -> dict[str, Any]:
     if ingest_hopgraph_event is None:
         return {"ingested": 0, "timeline_rows": 0, "timespan_seconds": 0.0}
+    # Cap rows fed to HopGraph to avoid hairball/performance degradation on large uploads.
+    # When over the cap, keep the highest-triage rows so the graph shows the most suspicious activity.
+    if len(rows) > _HOPGRAPH_ROW_CAP:
+        rows = sorted(rows, key=lambda r: float((r.get('raw') or r).get('triage_score') or 0), reverse=True)[:_HOPGRAPH_ROW_CAP]
+        logger.debug('_ingest_rows_to_hopgraph: capped to %d rows for %s', _HOPGRAPH_ROW_CAP, assessment_id)
     ingested = 0
     ts_values: list[float] = []
-    for idx, wrapper in enumerate(rows[:1000]):
+    for idx, wrapper in enumerate(rows):
         base = wrapper.get("raw") if isinstance(wrapper, dict) and isinstance(wrapper.get("raw"), dict) else wrapper
         if not isinstance(base, dict):
             continue
@@ -1703,7 +1711,9 @@ def _flatten_row_payload(row: dict | None, fallback_index: int) -> dict:
 
 _TS_FIELDS = (
     'timestamp', 'Timestamp', 'ts', 'time', 'created', 'created_at', 'event_time',
-    'event_ts', 'last_seen', 'first_seen', 'TimeGenerated', 'ActivityDateTime'
+    'event_ts', 'last_seen', 'first_seen', 'TimeGenerated', 'ActivityDateTime',
+    'eventTime', '@timestamp', 'datetime', 'date_time', 'startTime', 'endTime',
+    'log_timestamp', 'detection_time', 'observed_at',
 )
 _DESC_FIELDS = (
     'analyst_notes', 'notes', 'description', 'Description', 'result_description',
@@ -1714,7 +1724,59 @@ _DESC_FIELDS = (
 _ACCOUNT_FIELDS = (
     'user_principal_name', 'userPrincipalName', 'username', 'user', 'account',
     'caller_upn', 'caller', 'requestor', 'actor', 'actor_email', 'mailbox_owner',
-    'identity', 'principal', 'principal_name', 'upn'
+    'identity', 'principal', 'principal_name', 'upn',
+    # CloudTrail nested: userIdentity.userName / userIdentity.arn
+    'userName', 'user_name', 'arn',
+    # Okta nested: actor.alternateId / actor.displayName
+    'alternateId', 'displayName',
+    # M365 / Exchange: UserId / UserKey / SendingUserSmtp
+    'UserId', 'UserKey', 'SendingUserSmtp',
+    # Entra / AAD: UserPrincipalName variation
+    'UPN', 'ObjectId',
+)
+# Nested dotted-path lookups for identity fields that live inside sub-objects.
+# Format: tuple of (dotted_path, list_index_or_None) pairs.
+# These fire after the flat-field scan and before email regex fallback.
+_ACCOUNT_NESTED_PATHS = (
+    # CloudTrail: {"userIdentity": {"userName": "...", "arn": "..."}}
+    'userIdentity.userName',
+    'userIdentity.arn',
+    'userIdentity.principalId',
+    # Okta: {"actor": {"alternateId": "...", "displayName": "..."}}
+    'actor.alternateId',
+    'actor.displayName',
+    # Entra / AAD audit: {"initiatedBy": {"user": {"userPrincipalName": "..."}}}
+    'initiatedBy.user.userPrincipalName',
+    'initiatedBy.user.id',
+    # Entra sign-in: {"userDisplayName": "..."} (already flat but keep path form for uniformity)
+    'properties.userPrincipalName',
+    'properties.userId',
+    # SailPoint: {"actor": {"name": "..."}}
+    'actor.name',
+    # Generic nested target principal
+    'target.userPrincipalName',
+    'target.id',
+)
+_HOST_NESTED_PATHS = (
+    # CloudTrail: requestParameters.instanceId
+    'requestParameters.instanceId',
+    # Defender/Sentinel: {"DeviceName": ...} (flat, but also sometimes nested)
+    'entities.0.HostName',
+    'entities.0.DeviceName',
+    # Okta target device
+    'target.0.displayName',
+    'debugContext.debugData.requestUri',
+)
+_IP_NESTED_PATHS = (
+    # CloudTrail: sourceIPAddress lives at top level but sometimes under requestParameters
+    'requestParameters.sourceIPAddress',
+    # Okta: {"client": {"ipAddress": "..."}}
+    'client.ipAddress',
+    # Entra: {"ipAddress": "..."} inside properties
+    'properties.ipAddress',
+    # AWS GuardDuty: service.action.networkConnectionAction.remoteIpDetails.ipAddressV4
+    'service.action.networkConnectionAction.remoteIpDetails.ipAddressV4',
+    'service.action.awsApiCallAction.remoteIpDetails.ipAddressV4',
 )
 _HOST_FIELDS = (
     'hostname', 'host', 'device_id', 'device_name', 'asset_name', 'computer',
@@ -1732,12 +1794,58 @@ _EMAIL_RE = re.compile(r'\b[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}\b', re.I)
 _IP_RE = re.compile(r'\b(?:\d{1,3}\.){3}\d{1,3}\b')
 _MITRE_RE = re.compile(r'\bT\d{4}(?:\.\d{3})?\b', re.I)
 _SEV_RANK = {'critical': 4, 'high': 3, 'medium': 2, 'low': 1}
+_LOW_VALUE_ACCOUNT_PIVOTS = {
+    '-', 'n/a', 'na', 'none', 'null', 'unknown',
+    'system', 'root', 'local service', 'network service',
+    'nt authority\\system', 'nt authority\\local service', 'nt authority\\network service',
+    'anonymous logon',
+}
 
 
 def _safe_text(value: Any) -> str:
     if value is None:
         return ''
     return str(value).strip()
+
+
+def _safe_identity_text(value: Any) -> str:
+    """Return scalar identity text only.
+
+    Dict/list payloads must be handled through explicit nested extractors so
+    raw provider objects do not become account pivots.
+    """
+    if value is None or isinstance(value, (dict, list, tuple, set)):
+        return ''
+    return str(value).strip()
+
+
+def _is_low_value_account_pivot(value: Any) -> bool:
+    text = _safe_identity_text(value).lower()
+    if not text:
+        return True
+    return text in _LOW_VALUE_ACCOUNT_PIVOTS or text.endswith('\\system')
+
+
+def _nested_get(obj: Any, dotted_path: str) -> Any:
+    """Resolve a dotted path through nested dicts/lists (e.g. 'actor.alternateId').
+
+    Integer path segments index into lists. Returns None if any step is missing.
+    """
+    parts = dotted_path.split('.')
+    current = obj
+    for part in parts:
+        if current is None:
+            return None
+        if isinstance(current, dict):
+            current = current.get(part)
+        elif isinstance(current, list):
+            try:
+                current = current[int(part)]
+            except (ValueError, IndexError):
+                return None
+        else:
+            return None
+    return current
 
 
 def _extract_first_value(row: dict, keys: Tuple[str, ...]) -> str:
@@ -1794,13 +1902,87 @@ def _collect_strings_from_row(row: dict) -> str:
         return str(row)
 
 
+def _extract_from_typed_array(arr: Any, type_field: str = 'type', type_values: tuple = ('User', 'user'),
+                               value_fields: tuple = ('alternateId', 'displayName', 'id', 'login')) -> List[str]:
+    """Scan an array of typed objects (e.g. Okta target[]) and extract identity values.
+
+    Avoids the `target.0.alternateId` trap that only sees the first element.
+    Returns all unique non-empty values found across matching entries.
+    """
+    results: List[str] = []
+    if not isinstance(arr, list):
+        return results
+    for entry in arr:
+        if not isinstance(entry, dict):
+            continue
+        entry_type = _safe_text(entry.get(type_field))
+        if type_values and entry_type.lower() not in {t.lower() for t in type_values}:
+            continue
+        for field in value_fields:
+            val = _safe_text(entry.get(field))
+            if val and val not in results:
+                results.append(val)
+    return results
+
+
+def _account_fallback_text(row: dict) -> str:
+    """Collect only account-bearing text for final email fallback.
+
+    This intentionally avoids scanning non-user Okta target entries, because a
+    group/application email in target[] is not an account pivot.
+    """
+    parts: List[str] = []
+    for field in _ACCOUNT_FIELDS:
+        value = _safe_identity_text(row.get(field))
+        if value:
+            parts.append(value)
+    for path in _ACCOUNT_NESTED_PATHS:
+        value = _safe_identity_text(_nested_get(row, path))
+        if value:
+            parts.append(value)
+    for arr_field in ('target', 'targets', 'actor_targets'):
+        parts.extend(_extract_from_typed_array(row.get(arr_field), type_values=('User', 'user', 'AppUser', 'SystemUser')))
+    raw = row.get('raw')
+    if isinstance(raw, dict):
+        for field in _ACCOUNT_FIELDS:
+            value = _safe_identity_text(raw.get(field))
+            if value:
+                parts.append(value)
+        for path in _ACCOUNT_NESTED_PATHS:
+            value = _safe_identity_text(_nested_get(raw, path))
+            if value:
+                parts.append(value)
+        for arr_field in ('target', 'targets', 'actor_targets'):
+            parts.extend(_extract_from_typed_array(raw.get(arr_field), type_values=('User', 'user', 'AppUser', 'SystemUser')))
+    return ' '.join(parts)
+
+
 def _extract_accounts_backend(row: dict) -> List[str]:
     values: List[str] = []
     for field in _ACCOUNT_FIELDS:
-        value = _safe_text(row.get(field))
+        value = _safe_identity_text(row.get(field))
         if value and value not in values:
             values.append(value)
-    for match in _EMAIL_RE.findall(_collect_strings_from_row(row)):
+    # Deep nested extraction (CloudTrail userIdentity, Okta actor, Entra initiatedBy, etc.)
+    for path in _ACCOUNT_NESTED_PATHS:
+        value = _safe_identity_text(_nested_get(row, path))
+        if value and value not in values:
+            values.append(value)
+    # Okta / SailPoint typed-array targets — scan ALL entries, not just index 0
+    for arr_field in ('target', 'targets', 'actor_targets'):
+        arr = row.get(arr_field)
+        for val in _extract_from_typed_array(arr, type_values=('User', 'user', 'AppUser', 'SystemUser')):
+            if val not in values:
+                values.append(val)
+    # Also handle nested raw.target for events where original payload is wrapped
+    raw = row.get('raw')
+    if isinstance(raw, dict):
+        for arr_field in ('target', 'targets'):
+            arr = raw.get(arr_field)
+            for val in _extract_from_typed_array(arr, type_values=('User', 'user', 'AppUser', 'SystemUser')):
+                if val not in values:
+                    values.append(val)
+    for match in _EMAIL_RE.findall(_account_fallback_text(row)):
         if match not in values:
             values.append(match)
     return values[:8]
@@ -1812,6 +1994,10 @@ def _extract_hosts_backend(row: dict) -> List[str]:
         value = _safe_text(row.get(field))
         if value and value not in values:
             values.append(value)
+    for path in _HOST_NESTED_PATHS:
+        value = _safe_text(_nested_get(row, path))
+        if value and value not in values:
+            values.append(value)
     return values[:8]
 
 
@@ -1820,6 +2006,10 @@ def _extract_ips_backend(row: dict) -> List[str]:
     for field in _IP_FIELDS:
         value = _safe_text(row.get(field))
         if value and value not in values:
+            values.append(value)
+    for path in _IP_NESTED_PATHS:
+        value = _safe_text(_nested_get(row, path))
+        if value and value not in values and _IP_RE.match(value):
             values.append(value)
     for match in _IP_RE.findall(_collect_strings_from_row(row)):
         if match not in values:
@@ -2128,6 +2318,149 @@ def _derive_human_validation_required(row: dict, policy_ctx: dict, guest_ctx: di
     return False
 
 
+# Verdict â†’ (urgency_label, hvr_override, playbook_status)
+# hvr_override=None means fall through to row-evidence vote.
+# VALIDATED_BREACH / CONFIRMED_INTRUSION always gate — GDPR Art.33, APRA CPS 234,
+# HIPAA, and US state breach-notification laws require human sign-off before
+# containment actions are treated as authoritative incident response.
+_VERDICT_HVR_MAP: dict = {
+    'VALIDATED_BREACH':      ('URGENT',  True,  'awaiting_urgent_signoff'),
+    'CONFIRMED_INTRUSION':   ('URGENT',  True,  'awaiting_urgent_signoff'),
+    'LIKELY_COMPROMISE':     ('HIGH',    True,  'awaiting_signoff'),
+    'SUSPICIOUS_ACTIVITY':   ('NORMAL',  None,  None),   # row-vote decides
+    'INSUFFICIENT_TELEMETRY':('NORMAL',  None,  None),   # row-vote decides
+    'BENIGN_EXPECTED':       ('LOW',     False, 'auto_triaged'),
+}
+
+
+def _apply_hvr_gating(cluster: dict, component_rows: list | None = None) -> None:
+    """Attach verdict-aware human_validation_required, gate_urgency, playbook_status.
+
+    Called twice:
+    1. In _build_correlation_clusters (pre-verdict) — uses severity + row-evidence vote.
+    2. In get_assessment after backfill_cluster_verdicts — upgrades to verdict-aware state.
+    """
+    verdict = str(cluster.get('verdict') or 'UNCERTAIN')
+    severity = str(cluster.get('severity') or 'medium').lower()
+
+    urgency, hvr_override, status_override = _VERDICT_HVR_MAP.get(
+        verdict, ('NORMAL', None, None)
+    )
+
+    # If verdict gives us a definitive answer, apply it directly
+    if hvr_override is not None:
+        cluster['human_validation_required'] = hvr_override
+        cluster['gate_urgency'] = urgency
+        cluster['playbook_status'] = status_override
+        return
+
+    # Verdict is uncertain / no verdict yet — derive from row evidence + severity
+    cluster['gate_urgency'] = urgency if urgency != 'NORMAL' else (
+        'HIGH' if severity in ('critical', 'high') else 'NORMAL'
+    )
+    if component_rows:
+        hvr_votes = [
+            _derive_human_validation_required(
+                row,
+                policy_ctx=row.get('policy_change_context') or {},
+                guest_ctx=row.get('guest_onboarding_context') or {},
+            )
+            for row in component_rows
+        ]
+        hvr = any(hvr_votes)
+    else:
+        # No rows available (post-verdict upgrade pass) — keep existing value
+        hvr = bool(cluster.get('human_validation_required', True))
+
+    cluster['human_validation_required'] = hvr
+    cluster['playbook_status'] = 'human_gated' if hvr else 'auto_triaged'
+
+
+def _initial_cluster_verdict(component_rows: list[dict], severity: str) -> dict:
+    """Deterministic pre-LLM verdict from observed impact fields."""
+    joined = ' '.join(_collect_strings_from_row(row).lower() for row in component_rows[:80])
+    payment_impact = any(
+        row.get('wire_transfer_amount_aud') not in (None, '')
+        and (
+            bool(row.get('bec_approval'))
+            or bool(row.get('attacker_reads_approval'))
+            or bool(row.get('beneficiary_account'))
+            or any(token in _collect_strings_from_row(row).lower() for token in ('approval', 'beneficiary', 'payment'))
+        )
+        for row in component_rows
+    )
+    high_impact_action = any(
+        bool(row.get('attacker_reads_approval'))
+        or any(
+            token in _collect_strings_from_row(row).lower()
+            for token in (
+                'ransomware staged',
+                'ransomware executed',
+                'malware executed',
+                'confirmed exfiltration',
+                'data exfiltration confirmed',
+                'attacker reads approval',
+            )
+        )
+        for row in component_rows
+    )
+    intrusion_observed = any(
+        bool(row.get('rule_destination') and row.get('rule_name'))
+        or any(
+            token in _collect_strings_from_row(row).lower()
+            for token in ('bcc forwarding', 'legacy imap', 'session token hijacked', 'c2 beacon', 'dns tunnel')
+        )
+        for row in component_rows
+    )
+    if payment_impact or high_impact_action:
+        return {
+            'verdict': 'VALIDATED_BREACH',
+            'verdict_confidence': 0.88,
+            'verdict_rationale': 'Deterministic evidence shows attacker action against a protected business process.',
+        }
+    if intrusion_observed:
+        return {
+            'verdict': 'CONFIRMED_INTRUSION',
+            'verdict_confidence': 0.72,
+            'verdict_rationale': 'Deterministic evidence shows attacker control or persistence, but no observed business impact field crossed the validated-breach threshold.',
+        }
+    # Benign rule-out: check for known-benign signals before escalating to compromise verdict.
+    # These fire when ALL rows in the cluster have a coherent benign explanation.
+    all_rows_have_approved_change = (
+        component_rows
+        and all(
+            (row.get('policy_change_context') or {}).get('approved_change')
+            or row.get('approved_change')
+            or row.get('change_ticket')
+            for row in component_rows
+        )
+    )
+    if all_rows_have_approved_change:
+        return {
+            'verdict': 'BENIGN_EXPECTED',
+            'verdict_confidence': 0.75,
+            'verdict_rationale': 'All correlated rows are linked to an approved change window.',
+        }
+    # If cluster is entirely internal RFC1918 traffic with no external pivot
+    external_ips = [
+        ip for row in component_rows
+        for ip in (row.get('external_ips') or [])
+    ]
+    all_accounts_empty = not any(row.get('accounts') for row in component_rows)
+    all_ips_internal = not external_ips
+    if all_ips_internal and all_accounts_empty and len(component_rows) < 5:
+        return {
+            'verdict': 'INSUFFICIENT_TELEMETRY',
+            'verdict_confidence': 0.60,
+            'verdict_rationale': 'Cluster contains only internal IPs with no account or external pivot — insufficient telemetry to assess.',
+        }
+    return {
+        'verdict': 'LIKELY_COMPROMISE' if severity in {'critical', 'high'} else 'SUSPICIOUS_ACTIVITY',
+        'verdict_confidence': 0.55 if severity in {'critical', 'high'} else 0.35,
+        'verdict_rationale': 'Correlated evidence requires investigation; no observed impact field crossed the validated-breach threshold.',
+    }
+
+
 def _build_remediation_simulation(component_rows: List[dict], severity: str) -> dict:
     joined = ' '.join(_collect_strings_from_row(row).lower() for row in component_rows)
     prod_targets = sorted({
@@ -2272,7 +2605,7 @@ def _normalize_assessment_rows(assessment: dict) -> List[dict]:
             'row_index': row_index,
             'timestamp': ts_text,
             'timestamp_epoch': _parse_backend_timestamp(ts_text),
-            'source_sheet': _safe_text(merged.get('_sheet') or merged.get('sheet') or merged.get('source') or 'unknown'),
+            'source_sheet': _safe_text(merged.get('_sheet') or merged.get('sheet') or merged.get('source') or merged.get('_source') or 'unknown'),
             'entity': _extract_first_value(merged, _ACCOUNT_FIELDS + _HOST_FIELDS + _IP_FIELDS + _RESOURCE_FIELDS) or '-',
             'description': _extract_first_value(merged, _DESC_FIELDS),
             'severity': _classify_backend_severity(merged),
@@ -2280,7 +2613,11 @@ def _normalize_assessment_rows(assessment: dict) -> List[dict]:
             'accounts': accounts,
             'hosts': hosts,
             'ips': ips,
-            'external_ips': [ip for ip in ips if not _is_private_ip_text(ip)],
+            'external_ips': [
+                ip for ip in ips
+                if not _is_private_ip_text(ip)
+                and (_is_ioc_confirmed(ip) or not _is_vendor_egress_ip(ip))
+            ],
             'resources': resources,
             'mitre': tags['mitre'],
             'atlas': tags['atlas'],
@@ -2312,22 +2649,118 @@ def _normalize_assessment_rows(assessment: dict) -> List[dict]:
     return normalized
 
 
+# Known CDN, SaaS, and major cloud egress CIDR prefixes that should never be
+# classified as attacker infrastructure without explicit IOC context.
+# These are /8 or /16 prefixes — intentionally coarse to avoid false positives
+# while keeping the list short and auditable.
+_VENDOR_EGRESS_PREFIXES: tuple[str, ...] = (
+    # Cloudflare
+    '104.16.', '104.17.', '104.18.', '104.19.', '104.20.', '104.21.', '104.22.',
+    '172.64.', '172.65.', '172.66.', '172.67.', '172.68.', '172.69.', '172.70.',
+    '162.158.', '198.41.128.', '198.41.129.',
+    # Akamai
+    '23.32.', '23.33.', '23.64.', '23.65.', '23.192.',
+    # Fastly
+    '151.101.', '199.232.',
+    # AWS CloudFront / global accelerator
+    '13.32.', '13.33.', '13.35.', '13.224.', '13.225.', '13.226.', '13.227.',
+    '205.251.', '204.246.',
+    # Google / GCP / Workspace
+    '142.250.', '142.251.', '172.217.', '172.253.',
+    '74.125.',
+    # Microsoft / Azure / M365
+    '13.104.', '13.105.', '13.106.', '13.107.',
+    '13.64.', '13.65.', '13.66.', '13.67.', '13.68.', '13.69.', '13.70.',
+    '40.64.', '40.65.', '40.66.', '40.67.', '40.68.', '40.69.', '40.70.',
+    '52.224.', '52.225.', '52.226.', '52.227.',
+    # Okta
+    '23.246.',
+    # Zscaler (common egress)
+    '165.225.',
+    # Proofpoint
+    '148.163.',
+    # Mimecast
+    '91.220.42.',
+    # Salesforce
+    '136.146.',
+    # Zoom
+    '3.7.', '3.21.', '3.22.', '3.25.',
+)
+
+
+def _is_vendor_egress_ip(ip: str) -> bool:
+    """Return True if ip looks like CDN/SaaS/cloud egress that shouldn't be attacker infra."""
+    for prefix in _VENDOR_EGRESS_PREFIXES:
+        if ip.startswith(prefix):
+            return True
+    return False
+
+
+def _is_ioc_confirmed(ip: str) -> bool:
+    """Return True if the threat intel store has an active IOC entry for this IP.
+
+    IOC hits always override the vendor allowlist — a Cloudflare IP appearing in
+    an active feed is a legitimate threat indicator (e.g. proxy abuse, malicious CDN node).
+    Fails silently so a degraded TI client never breaks clustering.
+    """
+    try:
+        from src.integrations.threat_intel_client import CLIENT as _TI
+        return bool(_TI.is_malicious_ip(ip))
+    except Exception:
+        return False
+
+
+def _extract_attacker_ips(row: dict) -> frozenset:
+    """IPs most likely to represent attacker-controlled infrastructure (source/initiator side).
+
+    Excludes RFC1918 addresses AND known CDN/SaaS/cloud egress ranges to avoid
+    misclassifying customer VPNs, cloud service IPs, and SaaS providers as C2.
+    Exception: if the TI store has an active IOC for the IP it is always included,
+    even if it falls in a vendor prefix range (e.g. abused CDN node, compromised SaaS egress).
+    """
+    result = set()
+    for field in ('src_ip', 'source_ip', 'remote_ip', 'origin_ip', 'originating_ip',
+                  'attacker_ip', 'c2_ip', 'client_ip', 'initiator_ip'):
+        v = str(row.get(field) or '').strip()
+        if not v or v in ('-', 'N/A', '', '0.0.0.0'):
+            continue
+        if _is_private_ip_text(v):
+            continue
+        # IOC-confirmed IPs bypass the vendor allowlist
+        if _is_ioc_confirmed(v) or not _is_vendor_egress_ip(v):
+            result.add(v)
+    return frozenset(result)
+
+
 def _build_pair_reason(left: dict, right: dict) -> dict | None:
     left_guest = left.get('guest_onboarding_context') or {}
     right_guest = right.get('guest_onboarding_context') or {}
     left_policy = left.get('policy_change_context') or {}
     right_policy = right.get('policy_change_context') or {}
+
+    # Attacker infrastructure pivot — must check before scoring to detect conflicts
+    left_atk_ips = _extract_attacker_ips(left)
+    right_atk_ips = _extract_attacker_ips(right)
+    shared_atk_ips = left_atk_ips & right_atk_ips
+    # Events from provably different attacker origins must never merge into one cluster
+    conflicting_atk_infra = bool(left_atk_ips and right_atk_ips and not shared_atk_ips)
+    if conflicting_atk_infra:
+        return None
+
     shared = {
-        'accounts': sorted(set(left.get('accounts') or []).intersection(right.get('accounts') or [])),
+        'accounts': sorted(
+            acc for acc in set(left.get('accounts') or []).intersection(right.get('accounts') or [])
+            if not _is_low_value_account_pivot(acc)
+        ),
         'hosts': sorted(set(left.get('hosts') or []).intersection(right.get('hosts') or [])),
-        'ips': sorted(set(left.get('ips') or []).intersection(right.get('ips') or [])),
+        'ips': sorted(set(left.get('external_ips') or []).intersection(right.get('external_ips') or [])),
         'resources': sorted(set(left.get('resources') or []).intersection(right.get('resources') or [])),
         'mitre': sorted(set(left.get('mitre') or []).intersection(right.get('mitre') or [])),
         'cloud_boundaries': sorted(set(filter(None, [left.get('cloud_boundary')])).intersection(filter(None, [right.get('cloud_boundary')]))),
         'privilege_states': sorted(set(filter(None, [left.get('privilege_state'), right.get('privilege_state')]))),
         'sessions': sorted(set(filter(None, [left.get('session_id')])).intersection(filter(None, [right.get('session_id')]))),
     }
-    strong_corroboration = bool(shared['sessions'] or shared['hosts'] or shared['ips'] or shared['resources'])
+    strong_corroboration = bool(shared['sessions'] or shared['hosts'] or shared_atk_ips or shared['resources'])
     suspicious_identity_signal = bool(
         left.get('impossible_travel') or right.get('impossible_travel')
         or 'elevated' in shared['privilege_states']
@@ -2347,7 +2780,25 @@ def _build_pair_reason(left: dict, right: dict) -> dict | None:
         or right_policy.get('approved_change')
     ) and not (strong_corroboration or suspicious_identity_signal):
         return None
+
+    # Account-only match (no technical corroboration) is insufficient on its own —
+    # a victim account appearing in two unrelated attacks must not merge those incidents.
+    account_only = (
+        bool(shared['accounts'])
+        and not shared['hosts']
+        and not shared_atk_ips
+        and not shared['ips']
+        and not shared['resources']
+        and not shared['sessions']
+        and not shared['mitre']
+    )
+    if account_only and not suspicious_identity_signal:
+        return None
+
     score = 0.0
+    if shared_atk_ips:
+        # Shared attacker infrastructure is the strongest pivot signal
+        score += 0.5
     if shared['accounts']:
         score += 0.4
     if shared['hosts']:
@@ -2380,12 +2831,34 @@ def _build_pair_reason(left: dict, right: dict) -> dict | None:
         score += 0.1
     if score < 0.45:
         return None
+
+    # Determine the dominant pivot type for UI display and LLM context
+    if shared_atk_ips:
+        pivot_type = 'attacker_ip'
+    elif shared['sessions']:
+        pivot_type = 'session'
+    elif shared['hosts']:
+        pivot_type = 'host'
+    elif shared['accounts'] and suspicious_identity_signal:
+        pivot_type = 'identity_anomaly'
+    elif shared['accounts']:
+        pivot_type = 'account'
+    elif shared['ips']:
+        pivot_type = 'network_ip'
+    elif shared['resources']:
+        pivot_type = 'resource'
+    else:
+        pivot_type = 'behavioral'
     evidence = []
+    if shared_atk_ips:
+        evidence.append({'kind': 'attacker_ips', 'values': sorted(shared_atk_ips)[:4]})
     for key in ('accounts', 'hosts', 'ips', 'resources', 'mitre', 'cloud_boundaries', 'sessions'):
         vals = shared[key]
         if vals:
             evidence.append({'kind': key, 'values': vals[:4]})
     significance_parts = []
+    if shared_atk_ips:
+        significance_parts.append(f'shared attacker IP {next(iter(shared_atk_ips))}')
     if shared['accounts']:
         significance_parts.append('shared identity activity')
     if shared['hosts']:
@@ -2406,29 +2879,223 @@ def _build_pair_reason(left: dict, right: dict) -> dict | None:
         significance_parts.append(f'within {int(time_delta // 60) or 1} minute(s)')
     return {
         'target_row_index': int(right.get('row_index') or 0),
+        'source_row_index': int(left.get('row_index') or 0),
         'shared': evidence,
         'cross_source': cross_source,
         'time_delta_seconds': int(time_delta) if time_delta is not None else None,
         'confidence': round(min(0.98, score), 2),
+        'pivot_type': pivot_type,
         'summary': '; '.join(significance_parts) or 'shared telemetry context',
     }
+
+
+def _build_cluster_lead_description(
+    component_rows: list,
+    shared_ips: list,
+    shared_accounts: list,
+    shared_hosts: list,
+    cluster_num: int,
+) -> str:
+    """Build a grounded cluster title from observed entities rather than raw description fields."""
+    # Descriptions that are too generic to be a useful incident title — reject these
+    # and fall through to the entity-based builder instead.
+    _SKIP = re.compile(
+        r'^('
+        r'correlated activity cluster'
+        r'|n/a|unknown|none|null|-|event|log entry|log'
+        r'|high.severity activity\.?'
+        r'|medium.severity activity\.?'
+        r'|low.severity activity\.?'
+        r'|critical.severity activity\.?'
+        r'|suspicious activity\.?'
+        r'|security event\.?'
+        r'|anomalous activity\.?'
+        r'|threat detected\.?'
+        r'|alert triggered\.?'
+        r'|potential threat\.?'
+        r'|investigation required\.?'
+        r'|requires investigation\.?'
+        r'|see analyst notes\.?'
+        r')$',
+        re.I,
+    )
+    # Prefer a description from the highest-triage row that looks like a named action
+    sorted_rows = sorted(component_rows, key=lambda r: float(r.get('triage_score') or 0), reverse=True)
+    for row in sorted_rows:
+        # Prefer alert_name / event_name over free-text description — they're more structured
+        for field in ('alert_name', 'event_name', 'eventName', 'activityDisplayName',
+                      'operationName', 'analyst_notes', 'description'):
+            desc = _safe_text(row.get(field) or '')
+            if desc and not _SKIP.match(desc.strip()) and 10 <= len(desc) <= 90:
+                # Skip anything that looks like a raw UUID or purely numeric event ID
+                if not re.match(r'^[0-9a-f\-]{8,}$', desc, re.I):
+                    return desc
+    # Entity-based fallback: actor â†’ verb â†’ target
+    actor = shared_accounts[0] if shared_accounts else None
+    target_host = shared_hosts[0] if shared_hosts else None
+    target_ip = shared_ips[0] if shared_ips else None
+
+    # Collect the best MITRE technique label across all rows
+    mitre_verb: str = ''
+    for row in sorted_rows[:10]:
+        mitre = row.get('mitre') or []
+        if mitre:
+            mitre_verb = str(mitre[0])
+            break
+
+    # Collect the most specific event-type label
+    event_verb: str = ''
+    for row in sorted_rows[:5]:
+        for ef in ('event_name', 'eventName', 'activityDisplayName', 'operationName', 'category'):
+            ev = _safe_text(row.get(ef) or '')
+            if ev and not _SKIP.match(ev) and len(ev) > 4:
+                event_verb = ev
+                break
+        if event_verb:
+            break
+
+    verb = event_verb or mitre_verb or 'suspicious activity'
+
+    if actor and target_ip:
+        return f"{actor} \u2192 {target_ip}: {verb}" if not event_verb else f"{actor}: {event_verb}"
+    if actor and target_host:
+        return f"{actor} on {target_host}: {verb}" if not event_verb else f"{actor}: {event_verb}"
+    if actor:
+        return f"{actor}: {verb}"
+    if target_ip:
+        return f"External IP {target_ip}: {verb}"
+    if target_host:
+        return f"Host {target_host}: {verb}"
+    # Last resort: informative placeholder with cluster number and pivot count
+    return f"Cluster {cluster_num} \u2014 {len(component_rows)} correlated events"
+
+
+def _build_cluster_reason_summary(top_links: list) -> str:
+    """Aggregate unique pivot signals rather than concatenating repeated phrases."""
+    if not top_links:
+        return ''
+    # Collect unique (pivot_type, time_bucket) combinations
+    seen: set = set()
+    parts: list = []
+    for lk in top_links:
+        summary = lk.get('summary') or ''
+        pivot = lk.get('pivot_type') or lk.get('pivot') or ''
+        # Deduplicate by normalising the summary to its first clause before the time qualifier
+        key = re.sub(r'within \d+ minute\(s\)', 'TIMED', summary)
+        if key and key not in seen:
+            seen.add(key)
+            parts.append(summary)
+    return '; '.join(parts[:3])
+
+
+# Inverted-index clustering — O(nÂ·k) where k = avg entity keys per row.
+# For super-nodes (e.g. 'system' account in 20k rows) cap the bucket to avoid O(bucketÂ²) explosions.
+_CLUSTER_BUCKET_CAP = 200  # max rows per shared key before we stop expanding that key's pairs
+
+
+def _row_refs_for_story(rows: List[dict], *needles: str, limit: int = 20) -> List[int]:
+    refs: List[int] = []
+    lowered = [n.lower() for n in needles if n]
+    if not lowered:
+        return refs
+    for row in rows:
+        blob = _collect_strings_from_row(row).lower()
+        if any(n in blob for n in lowered):
+            try:
+                refs.append(int(row.get('row_index') or 0))
+            except Exception:
+                continue
+        if len(refs) >= limit:
+            break
+    return list(dict.fromkeys(refs))
+
+
+def _build_enrichment_guided_cases(rows: List[dict]) -> List[dict]:
+    """Production assessment path never injects enrichment-derived cases."""
+    return []
+
+def _build_inverted_index(row_map: Dict[int, dict]) -> Dict[str, List[int]]:
+    """Build key â†’ [row_index, ...] inverted index for all pivot dimensions."""
+    idx: Dict[str, List[int]] = defaultdict(list)
+    for row_idx, row in row_map.items():
+        # Account / identity pivots
+        for acc in (row.get('accounts') or []):
+            if acc and not _is_low_value_account_pivot(acc):
+                idx[f'acc:{acc.lower()}'].append(row_idx)
+        # External IP pivots (only non-private, non-vendor)
+        for ip in (row.get('external_ips') or []):
+            if ip:
+                idx[f'ip:{ip}'].append(row_idx)
+        # Host pivots
+        for h in (row.get('hosts') or []):
+            if h:
+                idx[f'host:{h.lower()}'].append(row_idx)
+        # Session / correlation-id pivots — strong signal
+        sess = _safe_text(row.get('session_id') or '')
+        if sess and sess not in ('-', 'N/A'):
+            idx[f'sess:{sess}'].append(row_idx)
+        # Cloud boundary (subscription / account_id)
+        cb = _safe_text(row.get('cloud_boundary') or '')
+        if cb and cb not in ('-', 'N/A'):
+            idx[f'cloud:{cb}'].append(row_idx)
+        # MITRE technique pivots
+        for m in (row.get('mitre') or []):
+            if m:
+                idx[f'mitre:{str(m).upper()}'].append(row_idx)
+        # Attacker IP pivots (separate from external_ips — uses the filtered set)
+        for ip in _extract_attacker_ips(row):
+            idx[f'atk:{ip}'].append(row_idx)
+        # Resource pivots (S3 bucket, vault, key ARN, etc.)
+        for res in (row.get('resources') or []):
+            if res and len(res) > 4:
+                idx[f'res:{res.lower()[:80]}'].append(row_idx)
+    return idx
 
 
 def _build_correlation_clusters(rows: List[dict]) -> Tuple[List[dict], Dict[int, List[dict]]]:
     adjacency: Dict[int, List[dict]] = defaultdict(list)
     row_map = {int(row.get('row_index') or 0): row for row in rows}
+
+    # Build inverted index across all pivot dimensions — O(nÂ·k)
+    inv_idx = _build_inverted_index(row_map)
+
+    # Collect candidate pairs from index buckets — each bucket is a set of rows
+    # sharing one pivot key.  Dedup pairs with a seen set.
+    seen_pairs: Set[Tuple[int, int]] = set()
+    candidate_pairs: List[Tuple[int, int]] = []
+    for key, bucket in inv_idx.items():
+        if len(bucket) < 2:
+            continue
+        # Cap super-nodes: keep the highest-triage rows in this bucket
+        if len(bucket) > _CLUSTER_BUCKET_CAP:
+            bucket = sorted(bucket, key=lambda i: float(row_map[i].get('triage_score') or 0), reverse=True)[:_CLUSTER_BUCKET_CAP]
+        for i, left_idx in enumerate(bucket):
+            for right_idx in bucket[i + 1:]:
+                pair = (min(left_idx, right_idx), max(left_idx, right_idx))
+                if pair not in seen_pairs:
+                    seen_pairs.add(pair)
+                    candidate_pairs.append(pair)
+
+    logger.debug(
+        '_build_correlation_clusters: %d rows â†’ %d index buckets â†’ %d candidate pairs',
+        len(rows), len(inv_idx), len(candidate_pairs),
+    )
+
+    # Evaluate each candidate pair with the full reason builder
+    for left_idx, right_idx in candidate_pairs:
+        left = row_map.get(left_idx)
+        right = row_map.get(right_idx)
+        if left is None or right is None:
+            continue
+        reason = _build_pair_reason(left, right)
+        if not reason:
+            continue
+        adjacency[left_idx].append(reason)
+        reverse = dict(reason)
+        reverse['target_row_index'] = left_idx
+        adjacency[right_idx].append(reverse)
+
     indices = sorted(row_map.keys())
-    for pos, left_idx in enumerate(indices):
-        left = row_map[left_idx]
-        for right_idx in indices[pos + 1:]:
-            right = row_map[right_idx]
-            reason = _build_pair_reason(left, right)
-            if not reason:
-                continue
-            adjacency[left_idx].append(reason)
-            reverse = dict(reason)
-            reverse['target_row_index'] = left_idx
-            adjacency[right_idx].append(reverse)
 
     visited: Set[int] = set()
     clusters: List[dict] = []
@@ -2451,11 +3118,15 @@ def _build_correlation_clusters(rows: List[dict]) -> Tuple[List[dict], Dict[int,
         if len(component) < 2:
             continue
         component_rows = [row_map[idx] for idx in sorted(component)]
-        shared_accounts = sorted({item for row in component_rows for item in row.get('accounts') or []})
+        shared_accounts = sorted({
+            item for row in component_rows for item in row.get('accounts') or []
+            if not _is_low_value_account_pivot(item)
+        })
         shared_hosts = sorted({item for row in component_rows for item in row.get('hosts') or []})
         shared_ips = sorted({item for row in component_rows for item in row.get('external_ips') or []})
         shared_resources = sorted({item for row in component_rows for item in row.get('resources') or []})
         all_links = [link for idx in component for link in adjacency.get(idx, []) if int(link.get('target_row_index') or 0) in component]
+        top_links = sorted(all_links, key=lambda l: float(l.get('confidence') or 0), reverse=True)[:6]
         time_values = [row.get('timestamp_epoch') for row in component_rows if row.get('timestamp_epoch') is not None]
         cluster_id = f'cluster-{cluster_num}'
         cluster_num += 1
@@ -2480,13 +3151,22 @@ def _build_correlation_clusters(rows: List[dict]) -> Tuple[List[dict], Dict[int,
             'end': max(time_values) if time_values else None,
             'span_seconds': int(max(time_values) - min(time_values)) if len(time_values) >= 2 else 0,
             },
-            'lead_description': next((_safe_text(row.get('description')) for row in component_rows if _safe_text(row.get('description'))), 'Correlated activity cluster'),
-            'reason_summary': '; '.join(list(dict.fromkeys(
-                link.get('summary') for link in all_links if link.get('summary')
-            ))[:3]),
+            'lead_description': _build_cluster_lead_description(component_rows, shared_ips, shared_accounts, shared_hosts, cluster_num - 1),
+            'reason_summary': _build_cluster_reason_summary(top_links),
+            'top_links': [
+                {
+                    'src': int(lk.get('source_row_index') or 0),
+                    'dst': int(lk.get('target_row_index') or 0),
+                    'pivot': lk.get('pivot_type', 'unknown'),
+                    'conf': lk.get('confidence', 0.0),
+                    'summary': lk.get('summary', ''),
+                }
+                for lk in top_links[:5]
+            ],
             'business_significance': '',
             'recommended_logs': [],
         }
+        cluster.update(_initial_cluster_verdict(component_rows, cluster['severity']))
         significance = []
         if shared_accounts:
             significance.append('identity compromise or shared actor sequence')
@@ -2504,7 +3184,19 @@ def _build_correlation_clusters(rows: List[dict]) -> Tuple[List[dict], Dict[int,
         if 'active_directory' in provider_set and ('vmware' in provider_set or 'nutanix' in provider_set):
             significance.append('on-prem identity and virtualization activity suggest hybrid infrastructure lateral-movement risk')
         if 'email' in provider_set:
-            significance.append('email compromise or BEC telemetry may affect payment, approval, or executive-trust workflows')
+            # Require specific BEC indicators before surfacing payment-risk language
+            _bec_tokens = ('bcc forwarding', 'inbox rule', 'forwarding rule', 'wire transfer',
+                           'beneficiary', 'payment approval', 'finance officer')
+            _comp_rows = component_rows
+            _joined_lower = ' '.join(_collect_strings_from_row(r).lower() for r in _comp_rows[:40])
+            _bec_hits = [t for t in _bec_tokens if t in _joined_lower]
+            if len(_bec_hits) >= 2:
+                significance.append(
+                    f'BEC indicators detected ({", ".join(_bec_hits[:3])}) — '
+                    'email activity may affect payment or executive-trust workflows'
+                )
+            elif _bec_hits:
+                significance.append('email activity with possible business-process exposure — verify mailbox audit logs')
         logs = []
         if shared_accounts:
             logs.extend(['identity sign-in logs', 'MFA / Conditional Access decisions'])
@@ -2614,8 +3306,8 @@ def _build_correlation_clusters(rows: List[dict]) -> Tuple[List[dict], Dict[int,
         if posture_mode == 'none':
             logs.append('ALB access logs / VPC Flow (no perimeter firewall present)')
         cluster['recommended_logs'] = list(dict.fromkeys(logs))[:12]
-        cluster['human_validation_required'] = True
-        cluster['playbook_status'] = 'human_gated'
+        # Verdict-aware gate — never hardcode True (see _apply_hvr_gating docstring)
+        _apply_hvr_gating(cluster, component_rows)
         cluster['remediation_simulation'] = _build_remediation_simulation(component_rows, cluster['severity'])
         cluster['alb_drain_status'] = cluster.get('remediation_simulation', {}).get('alb_drain_status')
         cluster['replacement_capacity_status'] = cluster.get('remediation_simulation', {}).get('replacement_capacity_status')
@@ -2658,8 +3350,15 @@ def _build_correlation_clusters(rows: List[dict]) -> Tuple[List[dict], Dict[int,
     for row in rows:
         row.setdefault('correlation_type', 'isolated')
         row.setdefault('correlation_reasons', [])
-        row.setdefault('human_validation_required', True)
-        row.setdefault('playbook_status', 'human_gated')
+        if 'human_validation_required' not in row:
+            _row_hvr = _derive_human_validation_required(
+                row,
+                policy_ctx=row.get('policy_change_context') or {},
+                guest_ctx=row.get('guest_onboarding_context') or {},
+            )
+            row['human_validation_required'] = _row_hvr
+            row['gate_urgency'] = 'NORMAL' if _row_hvr else 'LOW'
+            row['playbook_status'] = 'human_gated' if _row_hvr else 'auto_triaged'
         row.setdefault('policy_change_context', {})
         row.setdefault('guest_onboarding_context', {})
         row.setdefault('security_posture_context', {})
@@ -2871,7 +3570,33 @@ def _hydrate_assessment_semantics(assessment: dict) -> dict:
     if not isinstance(assessment, dict):
         return assessment
     normalized_rows = _normalize_assessment_rows(assessment)
+    try:
+        from src.core.ingest.input_classifier import is_non_evidence_sheet
+        normalized_rows = [
+            row for row in normalized_rows
+            if not is_non_evidence_sheet(row.get('_sheet') or row.get('source_sheet'))
+        ]
+    except Exception:
+        pass
     clusters, _adjacency = _build_correlation_clusters(normalized_rows)
+    enrichment_cases = _build_enrichment_guided_cases(normalized_rows)
+    if enrichment_cases:
+        logger.warning(
+            'demo_cases_injected count=%d case_ids=%s',
+            len(enrichment_cases),
+            [c.get('cluster_id') for c in enrichment_cases],
+        )
+        seen_case_ids = {str(c.get('cluster_id') or '') for c in clusters}
+        clusters = [c for c in enrichment_cases if str(c.get('cluster_id') or '') not in seen_case_ids] + clusters
+        clusters.sort(
+            key=lambda item: (
+                int(item.get('case_priority') or 0),
+                _SEV_RANK.get(item.get('severity') or 'low', 0),
+                len(item.get('row_refs') or []),
+                item.get('confidence') or 0.0,
+            ),
+            reverse=True,
+        )
     persona_reports = _build_persona_reports_backend(assessment, normalized_rows, clusters)
     assessment['evidence_rows'] = normalized_rows
     assessment['correlation_clusters'] = clusters
@@ -3042,13 +3767,62 @@ def _error_llm_row(normalized_row: dict, idx: int, exc: Exception) -> dict:
     }
 
 
+def _schedule_prefill_generation(assessment_obj: dict, assessment_id: str) -> None:
+    """Fire tier-1 prefill in a background thread — always runs regardless of auto_llm.
+
+    Prefill only needs clusters (built deterministically), not row-level LLM summaries.
+    Running it unconditionally means manual uploads also get hydrated top-10 cluster cards.
+    """
+    import os as _os
+    if _os.environ.get('JANUSEC_DISABLE_T1_PREFILL'):
+        return
+    clusters = assessment_obj.get('correlation_clusters') or []
+    if not clusters:
+        logger.debug('_schedule_prefill_generation: no clusters for %s — skipping', assessment_id)
+        return
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+
+    async def _prefill_runner():
+        try:
+            from src.core.tier1_prefill.prefill_engine import run_prefill as _run_prefill
+        except ImportError:
+            try:
+                from core.tier1_prefill.prefill_engine import run_prefill as _run_prefill  # type: ignore
+            except ImportError:
+                return
+        try:
+            result = await asyncio.to_thread(
+                _run_prefill,
+                assessment=assessment_obj,
+                top_n=10,
+                tenant_id='default',
+            )
+            if result.get('prefilled_clusters'):
+                REPORT_STORE[assessment_id] = assessment_obj
+                _persist_assessment_state(assessment_id, assessment_obj)
+                logger.info(
+                    'tier1_prefill: prefilled %s clusters for assessment %s',
+                    result['prefilled_clusters'], assessment_id,
+                )
+        except Exception as exc:
+            logger.debug('tier1_prefill background task failed for %s: %s', assessment_id, exc)
+
+    try:
+        loop.create_task(_prefill_runner())
+    except Exception as exc:
+        logger.debug('tier1_prefill task scheduling failed for %s: %s', assessment_id, exc)
+
+
 def _schedule_llm_generation(rows: List[dict], ctx: dict, assessment_obj: dict, assessment_id: str, org: str, payload: dict | None):
     """Spawn a background coroutine that builds llm_rows so the HTTP response returns quickly."""
     if not rows:
         return
     auto_llm = bool((ctx.get('options') or {}).get('auto_llm'))
     if not auto_llm:
-        # Skip background LLM generation when caller did not request it.
+        # Skip row-level LLM generation when caller did not request it.
         # Running LLM on every row even with auto_llm=False starves uvicorn's thread pool.
         logger.debug('_schedule_llm_generation: auto_llm=False — skipping background LLM for %s', assessment_id)
         return
@@ -3145,7 +3919,7 @@ def _schedule_llm_generation(rows: List[dict], ctx: dict, assessment_obj: dict, 
             pass
         assessment_obj.setdefault('telemetry', {})['llm_completed_at'] = time.time()
         try:
-            _hydrate_assessment_semantics(assessment_obj)
+            await asyncio.to_thread(_hydrate_assessment_semantics, assessment_obj)
         except Exception:
             pass
         try:
@@ -3153,6 +3927,8 @@ def _schedule_llm_generation(rows: List[dict], ctx: dict, assessment_obj: dict, 
             _persist_assessment_state(assessment_id, assessment_obj)
         except Exception:
             pass
+        # Tier-1 prefill fires via _schedule_prefill_generation (already scheduled
+        # from the main pipeline path). No duplicate call needed here.
 
     try:
         loop.create_task(_runner())
@@ -3679,18 +4455,39 @@ async def get_assessment_by_id(assessment_id: str, request: Request):
     if not assessment:
         from fastapi import HTTPException as _HTTPException
         raise _HTTPException(status_code=404, detail=f"Assessment {assessment_id!r} not found")
-    # Build a normalised response the history sidebar JS can consume
-    evidence_rows = (
-        assessment.get('evidenceRows')
-        or assessment.get('evidence_rows')
-        or assessment.get('llm_rows')
-        or assessment.get('rows')
-        or []
-    )
+    # Build a normalised response the history sidebar JS can consume.
+    # Merge evidence_preview rows from all clusters — these are pre-sampled
+    # against actual row_refs, unlike evidence_rows/normalized_rows which may
+    # be a non-overlapping sample from a different part of the dataset.
+    clusters = assessment.get('correlation_clusters') or []
+    seen_idx: set = set()
+    merged_rows: list = []
+    for c in clusters:
+        for r in (c.get('evidence_preview') or []):
+            if not isinstance(r, dict):
+                continue
+            idx = r.get('row_index')
+            if idx is not None and idx in seen_idx:
+                continue
+            if idx is not None:
+                seen_idx.add(idx)
+            merged_rows.append(r)
+    # Fall back to evidence_rows only if evidence_preview produced nothing
+    if not merged_rows:
+        merged_rows = (
+            assessment.get('evidence_rows')
+            or assessment.get('evidenceRows')
+            or assessment.get('llm_rows')
+            or assessment.get('rows')
+            or []
+        )
+    evidence_rows = merged_rows
     return {
         'assessment_id': assessment_id,
         'evidenceRows': evidence_rows,
         'rows': evidence_rows,
+        'normalized_rows': evidence_rows,
+        'correlation_clusters': clusters,
         'headline': (
             assessment.get('headline')
             or assessment.get('report_title')
@@ -3700,6 +4497,8 @@ async def get_assessment_by_id(assessment_id: str, request: Request):
         'sources': assessment.get('sources') or [],
         'ts': assessment.get('ts') or assessment.get('created_at'),
         'stage_results': assessment.get('stage_results') or [],
+        'verdict': assessment.get('verdict'),
+        'confidence': assessment.get('confidence'),
     }
 
 
@@ -4473,6 +5272,9 @@ async def run_deep_analyze_pipeline(payload: dict) -> JSONResponse:
         pass
     if not _skip_llm_sched:
         _schedule_llm_generation(rows, ctx, assessment_obj, assessment_id, org, payload if isinstance(payload, dict) else {})
+        # Always schedule tier-1 prefill regardless of auto_llm — prefill only needs clusters,
+        # not row-level LLM, so it's cheap enough to run for every manual upload.
+        _schedule_prefill_generation(assessment_obj, assessment_id)
 
     # Start worker session asynchronously (best-effort). Worker should update persisted file as it progresses.
     try:
@@ -4959,13 +5761,13 @@ async def get_assessment(assessment_id: str):
     resp['llm_rows'] = llm_rows
     resp.setdefault('rows', raw_rows if raw_rows else llm_rows)
     resp.setdefault('rows_processed', resp.get('rows_processed') or max(len(llm_rows), len(raw_rows)))
-
-    session_id = resp.get('session_id')
-    # Prefer in-memory clusters/rows if disk has incomplete/empty data.
+    # Prefer in-memory clusters/rows if disk has incomplete/empty data
     if not resp.get('correlation_clusters'):
         resp['correlation_clusters'] = in_mem.get('correlation_clusters') or persisted.get('correlation_clusters') or []
     if not resp.get('evidence_rows'):
         resp['evidence_rows'] = in_mem.get('evidence_rows') or persisted.get('evidence_rows') or []
+
+    session_id = resp.get('session_id')
     if session_id:
         try:
             worker_state = DEFAULT_WORKER.status(session_id)
@@ -4986,45 +5788,127 @@ async def get_assessment(assessment_id: str):
             if worker_state.get('error'):
                 resp['error'] = worker_state.get('error')
 
+    # Only hydrate if the core fields are absent — empty persona_reports is OK
     if not resp.get('evidence_rows') or not resp.get('correlation_clusters'):
-        try:
-            # Run CPU-bound hydration off the event loop to avoid blocking uvicorn
-            resp = await asyncio.to_thread(_hydrate_assessment_semantics, resp)
-        except Exception:
-            pass
+        # Skip expensive hydration if the pipeline is still actively running
+        _active_statuses = {'running', 'processing', 'pending', 'queued'}
+        _current_status = (resp.get('status') or '').lower()
+        if _current_status not in _active_statuses:
+            try:
+                # Run CPU-bound hydration off the event loop; cap at 8s so GET never hangs
+                resp = await asyncio.wait_for(
+                    asyncio.to_thread(_hydrate_assessment_semantics, resp),
+                    timeout=8.0
+                )
+            except (asyncio.TimeoutError, Exception):
+                pass
     try:
         resp = _ensure_llm_rows_available(resp)
     except Exception:
         pass
 
-
-    preview_rows: list = []
-    preview_seen: set = set()
-    for cluster in (resp.get('correlation_clusters') or []):
-        for row in (cluster.get('evidence_preview') or []):
-            if not isinstance(row, dict):
-                continue
-            idx = row.get('row_index')
-            if idx is not None and idx in preview_seen:
-                continue
-            if idx is not None:
-                preview_seen.add(idx)
-            preview_rows.append(row)
-
+    # Retroactively derive verdict labels for any cluster that has confidence_meter
+    # but was persisted before verdict derivation was wired in.
     try:
-        from src.core.tier1_prefill.prefill_engine import _ensure_v2_prefill_fields
-        rows_for_runtime = preview_rows or resp.get('evidence_rows') or resp.get('rows') or []
-        for cluster in (resp.get('correlation_clusters') or []):
-            prefill = cluster.get('tier1_prefill') if isinstance(cluster, dict) else None
-            if isinstance(prefill, dict) and prefill.get('incident_name'):
-                _ensure_v2_prefill_fields(prefill, cluster, _cluster_rows(cluster, rows_for_runtime))
+        from src.core.verdict_engine.verdict_rules import backfill_cluster_verdicts
+        _n = backfill_cluster_verdicts(resp)
+        if _n:
+            logger.debug('get_assessment: backfilled verdicts on %d clusters', _n)
     except Exception:
         pass
 
-    if preview_rows:
-        resp['normalized_rows'] = preview_rows
+    # Phase 2: upgrade HVR gate state now that verdicts are known.
+    # _apply_hvr_gating was called at cluster-build time with no verdict (severity-only).
+    # Now that backfill has run, re-apply so VALIDATED_BREACH â†’ URGENT, BENIGN â†’ not gated.
+    try:
+        for _c in (resp.get('correlation_clusters') or []):
+            _apply_hvr_gating(_c)  # no component_rows needed — falls back to existing hvr value
+    except Exception:
+        pass
+
+    _preview_rows_for_runtime: list = []
+    _preview_seen_for_runtime: set = set()
+    for _c in (resp.get('correlation_clusters') or []):
+        for _r in (_c.get('evidence_preview') or []):
+            if not isinstance(_r, dict):
+                continue
+            _idx = _r.get('row_index')
+            if _idx is not None and _idx in _preview_seen_for_runtime:
+                continue
+            if _idx is not None:
+                _preview_seen_for_runtime.add(_idx)
+            _preview_rows_for_runtime.append(_r)
+
+    try:
+        from src.core.tier1_prefill.prefill_engine import _ensure_v2_prefill_fields
+        _rows_for_runtime = _preview_rows_for_runtime or resp.get('evidence_rows') or resp.get('rows') or []
+        for _c in (resp.get('correlation_clusters') or []):
+            _p = _c.get('tier1_prefill') if isinstance(_c, dict) else None
+            if isinstance(_c, dict) and not isinstance(_p, dict):
+                _p = {
+                    'incident_name': (_c.get('lead_description') or _c.get('cluster_id') or 'CORRELATED INCIDENT'),
+                    'headline_subtitle': _c.get('reason_summary') or _c.get('business_significance') or '',
+                    'short_narrative': _c.get('business_significance') or _c.get('reason_summary') or '',
+                    'top_actions': [
+                        'Validate the correlated evidence rows and containment scope.',
+                        'Collect the recommended missing logs before closing the incident.',
+                    ],
+                    'mitre_techniques': _c.get('top_mitre') or [],
+                    'confidence_meter': _c.get('confidence_meter'),
+                    '_fallback_generated': True,
+                }
+                _c['tier1_prefill'] = _p
+            if isinstance(_p, dict) and _p.get('incident_name'):
+                _ensure_v2_prefill_fields(_p, _c, _cluster_rows(_c, _rows_for_runtime))
+    except Exception:
+        pass
+
+    try:
+        _clusters = resp.get('correlation_clusters') or []
+        # Only backfill top_links if cluster count is small enough to be fast (skip for large assessments)
+        _needs_links = _clusters and not any(isinstance(_c, dict) and _c.get('top_links') for _c in _clusters)
+        _row_count = len(resp.get('evidence_rows') or resp.get('rows') or [])
+        if _needs_links and _row_count <= 500:
+            _rebuilt, _adj = _build_correlation_clusters(_normalize_assessment_rows(resp))
+            _exact = {
+                tuple(sorted(int(v) for v in (_c.get('row_refs') or []))): _c
+                for _c in _rebuilt
+                if isinstance(_c, dict) and _c.get('top_links')
+            }
+            for _c in _clusters:
+                if not isinstance(_c, dict) or _c.get('top_links'):
+                    continue
+                _refs = tuple(sorted(int(v) for v in (_c.get('row_refs') or []) if str(v).lstrip('-').isdigit()))
+                _match = _exact.get(_refs)
+                if _match is None and _refs:
+                    _ref_set = set(_refs)
+                    _best = None
+                    _best_overlap = 0
+                    for _candidate in _rebuilt:
+                        _cand_refs = set(int(v) for v in (_candidate.get('row_refs') or []) if str(v).lstrip('-').isdigit())
+                        _overlap = len(_ref_set & _cand_refs)
+                        if _overlap > _best_overlap:
+                            _best = _candidate
+                            _best_overlap = _overlap
+                    if _best_overlap >= 2:
+                        _match = _best
+                if _match:
+                    _c['top_links'] = _match.get('top_links') or []
+                    if not _c.get('reason_summary'):
+                        _c['reason_summary'] = _match.get('reason_summary') or ''
+    except Exception:
+        pass
+
+    # Build normalized_rows from evidence_preview across all clusters so the
+    # browser gets rows that actually match cluster row_refs.  The raw
+    # evidence_rows/normalized_rows stored on disk are often a non-overlapping
+    # sample from a different slice of the full dataset.
+    _ep_rows: list = _preview_rows_for_runtime
+    if _ep_rows:
+        resp['normalized_rows'] = _ep_rows
     elif resp.get('evidence_rows') and not resp.get('normalized_rows'):
         resp['normalized_rows'] = resp['evidence_rows']
+
     REPORT_STORE[assessment_id] = {**in_mem, **resp}
     return JSONResponse(resp)
 
@@ -8024,7 +8908,7 @@ async def gate_assessment_for_escalation(assessment_id: str, request: Request):
     This gate satisfies:
     - ISO 27001 A.16.1.4 (human assessment of security events before formal reporting)
     - GDPR Art.33 (reasoned human decision before mandatory notification)
-    - APRA CPS 234 §36 (material incident assessment by responsible officer)
+    - APRA CPS 234 Â§36 (material incident assessment by responsible officer)
     - NDB Scheme s.26WB (eligible data breach declared by responsible individual)
 
     Payload: { reviewer_tag: str, notes: str, gate_verdict: 'approve'|'reject'|'conditional',

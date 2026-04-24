@@ -236,6 +236,29 @@
         }
     }
 
+    // Translate graph-session internal verdicts to display labels.
+    // Graph sessions use escalate/watch/benign/SUSPECT — these are investigation
+    // confidence signals, NOT the six-ladder breach verdicts.
+    var _SESSION_VERDICT_DISPLAY = {
+        'escalate': 'INVESTIGATE (high confidence)',
+        'SUSPECT':  'INVESTIGATE (elevated)',
+        'watch':    'MONITOR (medium confidence)',
+        'benign':   'LOW RISK (investigation)',
+    };
+    var _SESSION_VERDICT_COLOR = {
+        'escalate': '#e05252',
+        'SUSPECT':  '#ff8c42',
+        'watch':    '#e0c446',
+        'benign':   '#52e07f',
+    };
+
+    function _sessionVerdictLabel(raw) {
+        return _SESSION_VERDICT_DISPLAY[raw] || (raw ? String(raw).toUpperCase() + ' (investigation)' : 'pending');
+    }
+    function _sessionVerdictColor(raw) {
+        return _SESSION_VERDICT_COLOR[raw] || 'var(--text-muted)';
+    }
+
     function updateLiveConsolePanel(evt){
         const summaryEl = document.getElementById('hopgraphStreamSummary');
         const logEl = document.getElementById('hopgraphStreamLog');
@@ -243,7 +266,8 @@
         const counts = summarizeOverlay(evt);
         const conf = evt.confidence != null ? Number(evt.confidence).toFixed(2) : 'n/a';
         const nodeCount = ((evt.graph_summary||{}).node_count) || '-';
-        summaryEl.textContent = `Session ${evt.session_id || 'n/a'} · verdict ${evt.verdict || 'unknown'} · conf ${conf} · nodes ${nodeCount} · supply ${counts.supply} · binary ${counts.binary} · infra ${counts.infra}`;
+        const verdictLabel = _sessionVerdictLabel(evt.verdict);
+        summaryEl.textContent = `Session ${evt.session_id || 'n/a'} · ${verdictLabel} · conf ${conf} · nodes ${nodeCount} · supply ${counts.supply} · binary ${counts.binary} · infra ${counts.infra}`;
         const item = document.createElement('div');
         item.className = 'hopgraph-stream-item';
         item.style.padding = '10px';
@@ -251,14 +275,17 @@
         item.style.borderRadius = '8px';
         item.style.background = 'var(--bg-tertiary, #1D2531)';
         const tags = formatTags(evt).map(t=>`<span class="pill" style="font-size:10px;margin-right:6px;">${window._htmlEsc ? window._htmlEsc(t) : t}</span>`).join('');
+        const vColor = _sessionVerdictColor(evt.verdict);
         item.innerHTML = `
             <div style="font-size:12px;color:var(--text-primary);margin-bottom:4px;">
                 ${window._htmlEsc ? window._htmlEsc(evt.session_id || 'session') : (evt.session_id || 'session')}
                 <span style="color:var(--text-muted);margin-left:6px;">${new Date().toLocaleTimeString()}</span>
             </div>
-            <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">
-                ${evt.verdict || 'verdict'} · conf ${conf} · diversity ${(evt.domain_diversity_score||0).toFixed ? Number(evt.domain_diversity_score).toFixed(2) : evt.domain_diversity_score}
+            <div style="font-size:11px;margin-bottom:6px;">
+                <span style="color:${vColor};font-weight:600;">${verdictLabel}</span>
+                <span style="color:var(--text-muted);"> · conf ${conf} · diversity ${(evt.domain_diversity_score||0).toFixed ? Number(evt.domain_diversity_score).toFixed(2) : evt.domain_diversity_score}</span>
             </div>
+            <div style="font-size:9px;color:var(--text-muted);margin-bottom:4px;">Investigation confidence — not a breach verdict</div>
             <div>${tags || '<span class="small">no tags</span>'}</div>
             <div style="margin-top:6px;">
                 <a href="/static/attack_graph.html" target="_blank" style="font-size:11px;color:var(--accent);text-decoration:none;">Open HopGraph</a>
@@ -274,7 +301,7 @@
         const overlaySummary = document.getElementById('overlaySummary');
         if(!overlaySummary) return;
         const counts = summarizeOverlay(evt);
-        overlaySummary.textContent = `Streamed session ${evt.session_id || 'n/a'} · verdict ${evt.verdict || 'unknown'} · supply ${counts.supply} · binary ${counts.binary} · infra ${counts.infra}`;
+        overlaySummary.textContent = `Streamed session ${evt.session_id || 'n/a'} · ${_sessionVerdictLabel(evt.verdict)} · supply ${counts.supply} · binary ${counts.binary} · infra ${counts.infra}`;
         if(typeof window.renderOverlay === 'function'){
             try{
                 const overlay = evt.hopgraph_overlay || evt.overlay || {};

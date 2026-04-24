@@ -32,11 +32,22 @@ class DefenderCloudConnector:
         self.cfg = cfg
         self.name = 'defender_cloud'
         self.ck = load_checkpoint(self.name, cfg)
-        # request_json kept for test injection.
-        # In production the real Azure Management REST API is used when msal is
-        # installed and subscription_id / client_id / client_secret are configured.
         self._request_json = request_json
         self._msal_app: Optional[Any] = None
+        if not _MSAL_AVAILABLE and (cfg.client_id or cfg.client_secret):
+            logger.warning(
+                'DefenderCloudConnector: msal not installed but Azure credentials are configured. '
+                'Auth will fail at first use. pip install msal'
+            )
+
+    @staticmethod
+    def check_ready(cfg: Optional[AzureConnectorConfig] = None) -> tuple[bool, str]:
+        """Return (ok, reason) — call at startup to surface missing dependencies."""
+        if not _MSAL_AVAILABLE:
+            return False, 'msal not installed; pip install msal'
+        if cfg is not None and not (cfg.client_id and cfg.client_secret and cfg.tenant_id):
+            return False, 'client_id, client_secret, and tenant_id are required'
+        return True, 'ok'
 
     # ------------------------------------------------------------------
     # Token acquisition (ARM scope)

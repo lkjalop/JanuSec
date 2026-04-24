@@ -249,12 +249,12 @@ def _case_narrative(cluster: dict) -> dict:
         next_steps = [
             {"priority": "P1", "action": "Contain affected identities and hosts", "rationale": "Validated breach case has attacker activity against crown-jewel data", "tool": "Okta/M365 disable sessions; Defender isolate device"},
             {"priority": "P1", "action": "Block exfiltration infrastructure", "rationale": "Rclone and external storage indicators are present", "tool": "Firewall/proxy block IOCs and search egress logs"},
-            {"priority": "P2", "action": "Preserve Snowflake and endpoint evidence", "rationale": "Evidence supports root-cause and impact determination", "tool": "Export Snowflake query history, EDR process tree, and auth logs"},
+            {"priority": "P2", "action": "Preserve data-platform and endpoint evidence", "rationale": "Evidence supports root-cause and impact determination", "tool": "Export query history, EDR process tree, and authentication logs"},
         ]
     elif role == "authorized_test":
         stage = "unknown"
         next_steps = [
-            {"priority": "P3", "action": "Confirm pentest scope", "rationale": "High-noise activity is expected only if it matches authorisation", "tool": "Compare IPs, operators, and dates with Red Herring rules of engagement"},
+            {"priority": "P3", "action": "Confirm authorized-test scope", "rationale": "High-noise activity is expected only if it matches authorisation", "tool": "Compare IPs, operators, and dates with the rules of engagement"},
         ]
     elif role == "approved_travel":
         stage = "unknown"

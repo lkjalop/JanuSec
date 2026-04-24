@@ -23,7 +23,7 @@
     "new_host": 0.25,
     "periodicity": 0.3,
     "priv_escalation": 0.5,
-    "privilege": 1.9,
+    "privilege": 1.95,
     "rare_hour": 0.2,
     "rarity": 0.25
   }

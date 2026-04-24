@@ -11,6 +11,45 @@ from src.api.tenant_helpers import resolve_tenant_id
 router = APIRouter(prefix="/api/v1/status")
 
 
+def _build_dep_status() -> Dict[str, Any]:
+    """Check optional heavy dependencies and connector readiness."""
+    deps: Dict[str, Any] = {}
+
+    # AWS
+    try:
+        from src.connectors.aws.sqs_consumer import SQSPoller
+        from src.connectors.aws.kinesis_consumer import KinesisShardConsumer
+        ok_sqs, msg_sqs = SQSPoller.check_ready()
+        ok_kin, msg_kin = KinesisShardConsumer.check_ready()
+        deps['aws_sqs'] = {'ready': ok_sqs, 'detail': msg_sqs}
+        deps['aws_kinesis'] = {'ready': ok_kin, 'detail': msg_kin}
+    except Exception as exc:
+        deps['aws'] = {'ready': False, 'detail': str(exc)}
+
+    # Azure
+    try:
+        from src.connectors.azure.entra_id import EntraIDConnector
+        from src.connectors.azure.defender_cloud import DefenderCloudConnector
+        from src.connectors.azure.sentinel_workspace import SentinelWorkspaceConnector
+        ok_e, msg_e = EntraIDConnector.check_ready()
+        ok_d, msg_d = DefenderCloudConnector.check_ready()
+        ok_s, msg_s = SentinelWorkspaceConnector.check_ready()
+        deps['azure_entra'] = {'ready': ok_e, 'detail': msg_e}
+        deps['azure_defender'] = {'ready': ok_d, 'detail': msg_d}
+        deps['azure_sentinel'] = {'ready': ok_s, 'detail': msg_s}
+    except Exception as exc:
+        deps['azure'] = {'ready': False, 'detail': str(exc)}
+
+    # Kafka
+    try:
+        import confluent_kafka  # type: ignore  # noqa: F401
+        deps['kafka'] = {'ready': True, 'detail': 'ok'}
+    except ImportError:
+        deps['kafka'] = {'ready': False, 'detail': 'confluent-kafka not installed; pip install confluent-kafka'}
+
+    return deps
+
+
 def _runtime_projection(entry: Dict[str, Any], now: float) -> Dict[str, Any]:
     runtime_state = entry.get('runtime_state') or {}
     metadata = entry.get('metadata') or {}
@@ -68,5 +107,6 @@ def connectors_status(
         'dependency_status': {
             'redis': {'healthy': True},
             'runtime_state': {'healthy': True},
+            **_build_dep_status(),
         },
     }

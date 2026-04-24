@@ -16,6 +16,7 @@ import csv
 import json
 import logging
 import os
+import shutil
 import threading
 import time
 import uuid
@@ -38,9 +39,39 @@ def _db():
         except ImportError as exc:
             raise RuntimeError("duckdb not installed — run: pip install duckdb>=0.10.0") from exc
         os.makedirs(os.path.dirname(os.path.abspath(_DB_PATH)), exist_ok=True)
-        _conn = duckdb.connect(_DB_PATH)
+        try:
+            _conn = duckdb.connect(_DB_PATH)
+        except Exception as exc:
+            if not _recover_invalid_duckdb(exc):
+                raise
+            _conn = duckdb.connect(_DB_PATH)
         _init_schema(_conn)
     return _conn
+
+
+def _recover_invalid_duckdb(exc: Exception) -> bool:
+    """Quarantine an invalid DuckDB file so uploads can continue."""
+    msg = str(exc).lower()
+    if "not a valid duckdb database file" not in msg:
+        return False
+    if not os.path.exists(_DB_PATH):
+        return False
+    stamp = time.strftime("%Y%m%d%H%M%S", time.gmtime())
+    quarantine = f"{_DB_PATH}.invalid.{stamp}"
+    try:
+        shutil.move(_DB_PATH, quarantine)
+        wal_path = f"{_DB_PATH}.wal"
+        if os.path.exists(wal_path):
+            shutil.move(wal_path, f"{quarantine}.wal")
+        logger.error(
+            "Quarantined invalid DuckDB ingest store at %s; fresh store will be created at %s",
+            quarantine,
+            _DB_PATH,
+        )
+        return True
+    except OSError:
+        logger.exception("Failed to quarantine invalid DuckDB ingest store at %s", _DB_PATH)
+        return False
 
 
 def _init_schema(conn) -> None:

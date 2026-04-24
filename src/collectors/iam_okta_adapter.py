@@ -157,9 +157,18 @@ class OktaIAMCollector(EventCollector):
             return events
 
         try:
-            return get_okta_logs()
+            result = get_okta_logs()
         except Exception as e:
             logging.error(f"Okta fetch_events error: {e}")
             return []
+
+        if result and os.environ.get('JANUSEC_STREAMING_MODE', '').lower() in ('1', 'true', 'yes'):
+            try:
+                from src.connectors.stream_emitter import emit_to_stream_sync
+                emit_to_stream_sync(result, source='okta')
+            except Exception as _se:
+                logging.warning(f"Okta stream emit failed: {_se}")
+
+        return result
 
 __all__ = ["OktaIAMCollector"]

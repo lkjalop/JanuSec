@@ -1147,6 +1147,29 @@ def _build_cluster_summary_prompt(
     timestamps_str = (pins['timestamps'][0] if pins['timestamps'] else 'unknown') + \
                      (' -> ' + pins['timestamps'][-1] if len(pins['timestamps']) > 1 else '')
 
+    # P0-2: Extract internal IPs and domains for comprehensive entity allowlist
+    int_ips: list[str] = []
+    domains: list[str] = []
+    for r in rows[:12]:
+        for f in ('src_ip', 'source_ip', 'dst_ip', 'destination_ip', 'ip'):
+            v = _safe_text(r.get(f)).strip()
+            if v and v not in int_ips and (v.startswith('10.') or v.startswith('192.168') or v.startswith('172.')):
+                int_ips.append(v)
+        for f in ('domain', 'fqdn', 'resource', 'app', 'application', 'target_resource', 'resource_name'):
+            v = _safe_text(r.get(f)).strip()
+            if v and v not in domains and '.' in v and len(v) < 80:
+                domains.append(v)
+
+    entities_allowed_block = (
+        f"ENTITIES YOU MAY NAME — HARD ALLOWLIST (output with unlisted entities is rejected):\n"
+        f"  Accounts : {', '.join(accounts) if accounts else 'none'}\n"
+        f"  Hosts    : {', '.join(hosts) if hosts else 'none'}\n"
+        f"  Ext IPs  : {', '.join(ext_ips) if ext_ips else 'none'}\n"
+        f"  Int IPs  : {', '.join(int_ips[:5]) if int_ips else 'none'}\n"
+        f"  Domains  : {', '.join(domains[:5]) if domains else 'none'}\n"
+        f"RULE: If an entity is not in the above lists, do NOT name it. Write 'no direct evidence' instead.\n"
+    )
+
     # Rich evidence block — structured rows with timestamps, sources, notes
     evidence_rows_block = _build_evidence_rows_block(rows, max_rows=8)
 
@@ -1228,17 +1251,15 @@ Attack chain: {chain}
 Blast radius summary: {blast}
 Time range: {timestamps_str}
 
-ACCOUNTS: {', '.join(accounts) if accounts else 'none'}
-HOSTS: {', '.join(hosts) if hosts else 'none'}
-EXTERNAL IPs: {', '.join(ext_ips) if ext_ips else 'none'}
+{entities_allowed_block}
 {'Known log gaps: ' + ', '.join(gaps[:4]) if gaps else ''}
 
 {prior_context_block}{mitre_attribution}{dread_block}{threat_model_block}EVIDENCE ROWS (most significant first — source | entities | technique | analyst note):
 {evidence_rows_block}"""
 
     common_rules = """THREE RULES — violating any of these produces output that will be rejected:
-1. CITATION RULE: Every factual claim must cite a row number (e.g. "row[3]"). If you cannot cite a row, write "no direct evidence".
-2. ENTITY RULE: Only name accounts, hosts, and IPs that appear verbatim in the ACCOUNTS / HOSTS / EXTERNAL IPs lists above.
+1. CITATION RULE: Every factual claim must cite a row number (e.g. "row[3]"). If you cannot cite a row, write "no direct evidence". Use "no direct evidence" AT MOST ONCE — do not repeat it throughout the output.
+2. ENTITY RULE: ONLY name entities from the ENTITIES YOU MAY NAME allowlist above. Any account, host, IP, or domain not in that list must NOT appear in your output. Invented entities cause automatic rejection.
 3. VERDICT RULE: Use INSUFFICIENT EVIDENCE when fewer than 2 rows clearly show attack behaviour. Reserve LIKELY REAL only when 2+ independent rows corroborate the same entity."""
 
     # ── Technical personas: SOC, MSSP — full CLI containment template ────────
@@ -1402,14 +1423,24 @@ Write exactly these 5 numbered sections. Do NOT use markdown headers. No CLI com
 - Current containment status: what has been done, what is still at risk.
 - Cite the DREAD score context: which damage/reach dimension is highest?
 
-3. DECISIONS REQUIRED NOW
-List 2-3 decisions that need executive or CISO sign-off within the next 4 hours.
-Format: [DECISION] <what> — <why it can't wait> — <who owns it>
+3. DECISION GATES — EXECUTIVE SIGN-OFF REQUIRED
+List 3-4 decision gates that need CISO/exec action within the next 4 hours.
+Each gate must be on its own line in EXACTLY this format:
+[GATE] <decision name> | URGENCY: <NOW/4H/24H> | OWNER: <CISO/Legal/PR/IR> | TRIGGER: <what would force YES> | CONSEQUENCE: <cost of waiting>
+
+Use these standard gate names where applicable:
+- Declare notifiable breach
+- Notify legal / outside counsel
+- Invoke IR retainer
+- Issue public statement
+- Activate crisis communications
+- Isolate affected systems (business approval)
+- Notify regulators (GDPR/HIPAA/FTC)
 
 4. REGULATORY & REPUTATIONAL EXPOSURE
 - Which data types or regulated assets are potentially affected (cite evidence rows)?
-- Applicable frameworks or breach notification windows (GDPR 72h, HIPAA 60d, etc.) if relevant.
-- Reputational risk: public-facing systems involved? Customer data at risk?
+- Applicable notification clock: GDPR (72h from awareness), HIPAA (60d), state laws — is the clock running?
+- Reputational risk: public-facing systems involved? Customer PII at risk?
 
 5. RESPONSE STATUS & VERDICT
 Choose exactly one: LIKELY REAL / LIKELY BENIGN / UNCERTAIN
@@ -1433,21 +1464,31 @@ Write exactly these 5 numbered sections. Do NOT use markdown headers.
 1. WHAT IS HAPPENING
 2-3 sentences. Identify which accounts, systems, and data types are involved, citing evidence rows.
 
-2. CONTROL FAILURES
-For each evidence row, identify which preventive or detective control should have caught this:
-Format: row[N] — <expected control> — <why it failed or was absent>
-Rate each failure: DESIGN GAP / IMPLEMENTATION GAP / MONITORING GAP.
+2. ISO 27001 ANNEX A CONTROL FAILURES
+For each failed control, use EXACTLY this format (one per line, replace placeholders with real values):
+[CTRL] A.X.Y — <control name> — <gap type: DESIGN/IMPLEMENTATION/MONITORING> — row[1]
+Example: [CTRL] A.9.1.2 — Access to networks — IMPLEMENTATION — row[3]
+Cover at minimum: A.9 (Access Control), A.12 (Operations Security), A.16 (Incident Mgmt).
+Use actual row numbers from the EVIDENCE ROWS above. Do NOT write "row[N]" literally.
 
 3. BREACH NOTIFICATION ASSESSMENT
-- Data types potentially exposed (PII, PHI, financial, IP — cite evidence rows).
-- Applicable notification windows: GDPR (72h from discovery), HIPAA (60d), state laws, contractual SLAs.
-- Clock start: when was this first detectable? (cite earliest evidence row timestamp)
-- Decision: notification required NOW / requires further investigation / not applicable.
+- Data types potentially exposed (PII, PHI, financial, IP — cite specific row numbers, e.g. row[2]).
+- GDPR clock: first detectable timestamp is from row[1]. State actual hours elapsed since that row. Threshold: 72h.
+- Other applicable clocks: HIPAA (60d), PCI DSS (immediately), NIS2 (24h initial / 72h detailed).
+- Do NOT write row[N] literally — use the actual row numbers from the evidence above.
+- Decision (choose one): NOTIFY NOW / INVESTIGATE FURTHER BEFORE NOTIFYING / NOT APPLICABLE
+- Rationale: one sentence.
 
-4. AUDIT TRAIL COMPLETENESS
-- Which evidence rows have sufficient logging for evidentiary purposes?
-- Which log sources are missing or have gaps (from telemetry_gaps block)?
-- Logging policy violations: any entities that should have been logged but weren't?
+4. AUDIT TRAIL & RISK REGISTER
+Part A — EVIDENCE QUALITY: For each row, rate STRONG / ADEQUATE / WEAK for court/audit use.
+Part B — RISK REGISTER ENTRY:
+  Risk ID: RISK-<cluster_id>
+  Asset: <entity from allowlist>
+  Threat: <threat actor / technique>
+  Likelihood: <1-5>  Impact: <1-5>  Inherent Risk: <score>
+  Control in place: <existing control or NONE>
+  Residual Risk: <score after controls>
+  Treatment: <ACCEPT/MITIGATE/TRANSFER/AVOID>
 
 5. VERDICT & REGULATORY RISK RATING
 Choose exactly one: LIKELY REAL / LIKELY BENIGN / UNCERTAIN
@@ -1998,7 +2039,10 @@ async def get_llm_cluster_summary(
             fallback_generated = True
             fallback_reason = 'llm_output_unparseable' if not sections_useful else 'llm_output_under_grounded'
         else:
-            persona_steps = []
+            persona_steps = _parse_what_to_do_steps(parsed.get('what_to_do', ''), persona)
+            # Safety net: if parse yielded nothing, use structured fallback steps
+            if not persona_steps:
+                _, persona_steps = _build_persona_fallback_summary(persona, cluster, rows)
         result = {
             'cluster_id':    cluster_id,
             'assessment_id': assessment_id,
@@ -2059,9 +2103,16 @@ def _parse_llm_summary(text: str) -> dict:
     # ── Section anchor keywords: only lines "N. <ANCHOR>..." trigger a transition ─
     SECTION_ANCHORS: dict[str, tuple[str, ...]] = {
         '1': ('WHAT IS HAPPENING', 'WHAT IS', 'SITUATION', 'SUMMARY'),
-        '2': ('WHY IT MATTERS', 'BUSINESS RISK', 'WHY IT', 'IMPACT'),
-        '3': ('IMMEDIATE ACTIONS', 'WHAT TO DO', 'REMEDIATION', 'ACTIONS', 'CONTAINMENT'),
-        '4': ('BLAST RADIUS', 'INVESTIGATE NEXT', 'INVESTIGATE', 'NEXT STEPS', 'FOLLOW'),
+        '2': ('WHY IT MATTERS', 'BUSINESS RISK', 'WHY IT', 'IMPACT',
+              'PIVOT OPPORTUNITIES', 'PIVOT OPP'),
+        '3': ('IMMEDIATE ACTIONS', 'WHAT TO DO', 'REMEDIATION', 'ACTIONS', 'CONTAINMENT',
+              'IOC EXPANSION', 'HUNTING QUERIES', 'IOC & HUNTING', 'HUNT QUERIES',
+              'DERIVED IOC', 'TOP ACTIONS', 'NEXT ACTIONS',
+              'DECISION GATES', 'DECISIONS REQUIRED', 'EXECUTIVE SIGN',
+              'ISO 27001', 'CONTROL FAILURES', 'BREACH NOTIFICATION'),
+        '4': ('BLAST RADIUS', 'INVESTIGATE NEXT', 'INVESTIGATE', 'NEXT STEPS', 'FOLLOW',
+              'LATERAL MOVEMENT', 'LATERAL MOV', 'THREAT HUNT',
+              'REGULATORY', 'REPUTATIONAL', 'AUDIT TRAIL', 'RISK REGISTER'),
         '5': ('VERDICT', 'IS THIS REAL', 'ASSESSMENT', 'CONCLUSION'),
         '6': ('PERSONA NOTES', 'PERSONA', 'ROLE-SPECIFIC', 'ROLE NOTES'),
     }
@@ -2131,6 +2182,32 @@ def _parse_llm_summary(text: str) -> dict:
             buf.append(line)
 
     flush()
+
+    # ── Strip header-echo artifacts ───────────────────────────────────────────
+    # Some models (e.g. qwen3 in thinking mode) repeat the final syllable of the
+    # section heading as the first word of the body, e.g. "ENING" after
+    # "WHAT IS HAPPENING".  Strip any leading line that is short, all-caps, and
+    # is a suffix of the section's canonical phrase.
+    _SECTION_PHRASES: dict[str, str] = {
+        'what_is_happening': 'WHAT IS HAPPENING',
+        'why_it_matters':    'WHY IT MATTERS',
+        'what_to_do':        'IMMEDIATE ACTIONS',
+        'investigate_next':  'INVESTIGATE NEXT',
+        'verdict_line':      'VERDICT',
+    }
+    for _sk, _phrase in _SECTION_PHRASES.items():
+        _sv = sections.get(_sk, '')
+        if not _sv:
+            continue
+        _first_line, *_rest_lines = _sv.splitlines()
+        _fw = _first_line.strip().rstrip(':').upper()
+        # Artifact: short, all-alpha, and is a trailing fragment of the phrase
+        if _fw and 1 <= len(_fw) <= 15 and _fw.replace(' ', '').isalpha() and _phrase.endswith(_fw):
+            sections[_sk] = '\n'.join(_rest_lines).strip()
+    # Also strip any <think>…</think> blocks that leaked into section bodies
+    import re as _re
+    for _sk in list(sections.keys()):
+        sections[_sk] = _re.sub(r'<think>.*?</think>', '', sections[_sk], flags=_re.DOTALL).strip()
 
     # ── Parse section 6 persona sub-sections ─────────────────────────────────
     # Model writes "SOC ANALYST: <bullets>" or "THREAT HUNTER: ..." etc.
@@ -2376,6 +2453,108 @@ def _render_playbook_steps(playbook: dict, entity_name: str, entity_type: str, i
         'unknowns': [fill(u) for u in playbook.get('unknowns', [])],
         'ioc_checks': playbook.get('ioc_checks', []),
     }
+
+
+def _parse_what_to_do_steps(what_to_do: str, persona: str) -> list[dict]:
+    """Convert what_to_do text into persona_steps format for confirm/deny cards.
+
+    Handles two layouts:
+    - SOC/CISO style: **Bold title:** body on one line (one card per bold item)
+    - Threat Hunter style: numbered section headers with bullet sub-items grouped
+      as subtasks under that header card
+    """
+    import re
+    # P0-1: strip code fences before line-splitting to prevent KQL blocks becoming task rows
+    what_to_do = re.sub(r'```[^`]*?```', '', what_to_do, flags=re.DOTALL)
+    owner_map = {
+        'soc_analyst': 'SOC L1', 'threat_hunter': 'Threat Hunter',
+        'ciso': 'CISO', 'forensics': 'Forensics',
+        'compliance': 'Compliance', 'mssp': 'MSSP',
+    }
+    owner = owner_map.get(persona, 'Analyst')
+    steps: list[dict] = []
+
+    # Detect TH-style numbered section headers (e.g. "1. PIVOT OPPORTUNITIES")
+    _SECTION_HDR = re.compile(r'^\d+[\.\)]\s+([A-Z][A-Z &/\-]{3,})', re.I)
+    # Sub-bullet pattern (dash, bullet, or numbered sub-item)
+    _SUBBULLET   = re.compile(r'^[\-\*\•]\s*|^\d+[\.\)]\s+(?![A-Z]{3,})')
+
+    lines = [l.strip() for l in what_to_do.splitlines()]
+
+    # ── Detect mode: if any section-header lines exist, use grouped mode ───────
+    has_section_hdrs = any(_SECTION_HDR.match(l) for l in lines if l)
+
+    if has_section_hdrs:
+        # Grouped mode: section headers become cards; bullets become subtasks
+        current_title: str | None = None
+        current_subtasks: list[dict] = []
+        prio_idx = 0
+
+        def _flush_group() -> None:
+            nonlocal prio_idx
+            if current_title:
+                priority = 'P1' if prio_idx == 0 else ('P2' if prio_idx < 3 else 'P3')
+                steps.append({
+                    'title':    current_title,
+                    'owner':    owner,
+                    'priority': priority,
+                    'subtasks': current_subtasks or [{'label': current_title, 'ref': ''}],
+                })
+                prio_idx += 1
+
+        for line in lines:
+            if not line:
+                continue
+            m = _SECTION_HDR.match(line)
+            if m:
+                _flush_group()
+                current_title = m.group(0)
+                # Strip leading number prefix to get the clean title
+                current_title = re.sub(r'^\d+[\.\)]\s*', '', current_title).strip().rstrip('.:,')
+                current_subtasks = []
+                continue
+            # Sub-bullet or narrative line → subtask
+            sub_text = _SUBBULLET.sub('', line).strip()
+            if sub_text and current_title:
+                current_subtasks.append({'label': sub_text[:250], 'ref': ''})
+            elif sub_text and not current_title:
+                # Preamble line before first header → create a step from it
+                steps.append({
+                    'title':    sub_text[:70].rstrip('.:,'),
+                    'owner':    owner,
+                    'priority': 'P1',
+                    'subtasks': [{'label': sub_text[:250], 'ref': ''}],
+                })
+        _flush_group()
+
+    else:
+        # Flat mode: each bold-labelled line or plain line becomes its own card
+        for i, line in enumerate(lines):
+            if not line:
+                continue
+            # Skip all-caps meta-headers with no bold  (e.g. "IMMEDIATE ACTIONS (SOC):")
+            if re.match(r'^[A-Z][A-Z\s]+[\(:]', line) and '**' not in line and len(line) < 70:
+                continue
+            line = re.sub(r'^[\-\*\•]\s*', '', line)
+            line = re.sub(r'^\d+[\.\)]\s*', '', line)
+            m = re.match(r'\*\*([^*]{2,60})\*\*[:\s]*(.*)', line, re.DOTALL)
+            if m:
+                title = m.group(1).strip().rstrip(':')
+                body  = m.group(2).strip()
+            else:
+                title = line[:70].rstrip('.:,')
+                body  = line
+            if not title:
+                continue
+            priority = 'P1' if i < 2 else ('P2' if i < 5 else 'P3')
+            steps.append({
+                'title':    title,
+                'owner':    owner,
+                'priority': priority,
+                'subtasks': [{'label': body[:250] if body else title, 'ref': ''}],
+            })
+
+    return steps[:10]
 
 
 def _parse_action_entities(what_to_do: str) -> list[dict]:
@@ -2746,6 +2925,1057 @@ async def refine_persona_notes(
     except Exception as exc:
         logger.exception('llm-refine failed: %s', exc)
         return {'llm_available': False, 'error': str(exc)}
+
+
+# ── Expand-step helpers ───────────────────────────────────────────────────────
+
+_TOOL_RULES: list[tuple[list[str], list[dict]]] = [
+    (['contain', 'isolat', 'quarantin'], [
+        {'label': 'Endpoint isolation (Defender)', 'cmd': 'Invoke-MgDeviceManagementManagedDeviceIsolate -ManagedDeviceId <device_id>', 'type': 'powershell'},
+        {'label': 'Block host (Windows Firewall)', 'cmd': 'netsh advfirewall firewall add rule name="Block-Host" dir=in action=block remoteip=<ip>', 'type': 'cmd'},
+    ]),
+    (['email', 'forwarding', 'mailbox', 'bcc', 'imap', 'smtp'], [
+        {'label': 'Mail trace (Exchange Online)', 'cmd': "Get-MessageTrace -SenderAddress <user> -StartDate (Get-Date).AddDays(-30) | Select Subject,Status,ToAddress", 'type': 'powershell'},
+        {'label': 'Find forwarding rules', 'cmd': "Get-InboxRule -Mailbox <user> | Select Name,ForwardTo,RedirectTo,Enabled", 'type': 'powershell'},
+        {'label': 'Audit mailbox access', 'cmd': "Search-UnifiedAuditLog -Operations 'MailItemsAccessed' -UserIds <user> -StartDate (Get-Date).AddDays(-30)", 'type': 'powershell'},
+    ]),
+    (['mfa', 'authenticat', 'push', 'factor'], [
+        {'label': 'Azure AD sign-in logs (KQL)', 'cmd': "SigninLogs | where UserPrincipalName == '<user>' | where ResultType != 0 | project TimeGenerated,ResultDescription,IPAddress,AppDisplayName | order by TimeGenerated desc", 'type': 'kql'},
+        {'label': 'Okta MFA events', 'cmd': "okta-cli events list --filter 'eventType eq \"user.mfa.attempt\"' --actor '<user>'", 'type': 'cli'},
+    ]),
+    (['nsg', 'firewall', 'network', 'traffic', 'port', 'block'], [
+        {'label': 'Azure NSG rules', 'cmd': "Get-AzNetworkSecurityGroup -Name '<nsg>' | Get-AzNetworkSecurityRuleConfig | Select Name,Direction,Access,SourceAddressPrefix,DestinationPortRange", 'type': 'powershell'},
+        {'label': 'NSG flow logs (KQL)', 'cmd': "AzureNetworkAnalytics_CL | where NSGList_s contains '<nsg>' | where FlowStatus_s == 'D' | project TimeGenerated,SrcIP_s,DestIP_s,DestPort_d", 'type': 'kql'},
+    ]),
+    (['account', 'user', 'password', 'reset', 'disable', 'revok'], [
+        {'label': 'Reset Azure AD password', 'cmd': "Update-MgUser -UserId <upn> -PasswordProfile @{ForceChangePasswordNextSignIn=$true; Password='<temp_pw>'}", 'type': 'powershell'},
+        {'label': 'Revoke all refresh tokens', 'cmd': "Revoke-MgUserSignInSession -UserId <upn>", 'type': 'powershell'},
+        {'label': 'List recent AD sign-ins', 'cmd': "Get-MgAuditLogSignIn -Filter \"userPrincipalName eq '<upn>'\" -Top 20 | Select CreatedDateTime,IPAddress,ConditionalAccessStatus", 'type': 'powershell'},
+    ]),
+    (['dns', 'c2', 'command', 'beacon', 'resolv'], [
+        {'label': 'DNS lookup (nslookup)', 'cmd': "nslookup <domain> | Select-String 'Address'", 'type': 'cmd'},
+        {'label': 'DNS history (KQL)', 'cmd': "DnsEvents | where Name == '<domain>' | project TimeGenerated,ClientIP,IPAddresses | order by TimeGenerated desc", 'type': 'kql'},
+        {'label': 'VirusTotal lookup', 'cmd': "curl -H 'x-apikey: <vt_key>' 'https://www.virustotal.com/api/v3/domains/<domain>'", 'type': 'cli'},
+    ]),
+    (['certutil', 'powershell', 'script', 'execut', 'download'], [
+        {'label': 'PowerShell event logs', 'cmd': "Get-WinEvent -FilterHashtable @{LogName='Windows PowerShell';Id=4104} | Where-Object {$_.Message -match '<keyword>'} | Select TimeCreated,Message", 'type': 'powershell'},
+        {'label': 'Process creation (KQL)', 'cmd': "SecurityEvent | where EventID == 4688 | where Process has_any ('certutil','powershell','wscript','cscript') | project TimeGenerated,Computer,Account,Process,CommandLine", 'type': 'kql'},
+    ]),
+    (['lateral', 'rdp', 'smb', 'wmi', 'remote'], [
+        {'label': 'Lateral movement (KQL)', 'cmd': "SecurityEvent | where EventID in (4624,4625) | where LogonType in (3,10) | where AccountName == '<user>' | project TimeGenerated,Computer,IpAddress,LogonType", 'type': 'kql'},
+        {'label': 'SMB connections', 'cmd': "Get-SmbSession | Where-Object {$_.ClientComputerName -eq '<ip>'} | Select ClientComputerName,ClientUserName,NumOpens", 'type': 'powershell'},
+    ]),
+]
+
+_MITRE_TOOLS: dict[str, list[dict]] = {
+    'T1566': [{'label': 'Phishing: email header analysis', 'cmd': "Get-MessageTrace -MessageId '<msg_id>' | Select *", 'type': 'powershell'}],
+    'T1078': [{'label': 'Valid accounts: check AD', 'cmd': "Get-ADUser -Identity '<user>' -Properties LastLogonDate,PasswordLastSet,LockedOut", 'type': 'powershell'}],
+    'T1071': [{'label': 'C2 traffic: proxy logs (KQL)', 'cmd': "W3CIISLog | where csUriStem contains '<path>' | project TimeGenerated,cIP,csUriStem,scStatus", 'type': 'kql'}],
+    'T1486': [{'label': 'Ransomware: shadow copies', 'cmd': "Get-WmiObject Win32_ShadowCopy | Select DeviceObject,InstallDate", 'type': 'powershell'}],
+    'T1059': [{'label': 'Script execution: 4104 events', 'cmd': "Get-WinEvent -FilterHashtable @{LogName='Windows PowerShell';Id=4104} | Select -First 20 | Format-List", 'type': 'powershell'}],
+}
+
+
+def _suggest_tools(step_title: str, cluster: dict, rows: list[dict]) -> list[dict]:
+    title_lower = step_title.lower()
+    tools: list[dict] = []
+    seen: set[str] = set()
+    for keywords, rule_tools in _TOOL_RULES:
+        if any(kw in title_lower for kw in keywords):
+            for t in rule_tools:
+                if t['label'] not in seen:
+                    seen.add(t['label'])
+                    tools.append(t)
+    mitre_tags = cluster.get('top_mitre') or []
+    for tag in mitre_tags[:3]:
+        tid = str(tag).split(':')[0].strip()
+        for t in _MITRE_TOOLS.get(tid, []):
+            if t['label'] not in seen:
+                seen.add(t['label'])
+                tools.append(t)
+    return tools[:6]
+
+
+def _mitre_to_iso27001(mitre_tags: list) -> str:
+    _MAP = {
+        'T1078': ['A.9.2.1 User registration', 'A.9.4.2 Secure log-on'],
+        'T1110': ['A.9.4.2 Secure log-on', 'A.9.4.3 Password management'],
+        'T1566': ['A.12.2.1 Anti-malware', 'A.13.2.3 Electronic messaging'],
+        'T1059': ['A.12.6.2 Software installation', 'A.12.5.1 Installation of software'],
+        'T1055': ['A.12.6.1 Technical vulnerabilities', 'A.14.2.8 System security testing'],
+        'T1071': ['A.13.1.1 Network controls', 'A.12.4.1 Event logging'],
+        'T1486': ['A.12.3.1 Information backup', 'A.16.1.5 Response to incidents'],
+        'T1003': ['A.9.2.4 Management of secret auth', 'A.12.4.2 Protection of log info'],
+        'T1114': ['A.13.2.1 Info transfer policies', 'A.9.4.1 Info access restriction'],
+        'T1087': ['A.9.2.1 User registration', 'A.12.4.1 Event logging'],
+        'T1021': ['A.9.1.2 Access to networks', 'A.13.1.3 Segregation in networks'],
+        'T1190': ['A.12.6.1 Technical vulnerabilities', 'A.14.2.3 Technical review'],
+    }
+    controls: list[str] = []
+    seen: set[str] = set()
+    for tag in mitre_tags:
+        tid = str(tag).split(':')[0].strip().upper()
+        for k, v in _MAP.items():
+            if tid.startswith(k):
+                for c in v:
+                    if c not in seen:
+                        seen.add(c)
+                        controls.append(c)
+    return ', '.join(controls[:6]) if controls else 'A.9 Access Control, A.12 Operations, A.16 Incident Management'
+
+
+def _build_expand_step_prompt(step_title: str, rows: list[dict], persona: str, cluster: dict) -> str:
+    evidence_lines: list[str] = []
+    for row in rows[:8]:
+        ref = _row_ref(row)
+        desc = _first_nonempty(row, ('analyst_notes', 'description', 'event_description', 'message', 'summary', 'activityDisplayName'))
+        user = _first_nonempty(row, ('user', 'username', 'account', 'principal', 'userPrincipalName'))
+        host = _first_nonempty(row, ('host', 'hostname', 'device', 'device_name', 'computer'))
+        ip   = _first_nonempty(row, ('src_ip', 'source_ip', 'dst_ip', 'destination_ip', 'external_ip', 'ip'))
+        ts   = _first_nonempty(row, ('timestamp_utc', 'eventTime', 'ts', 'timestamp', 'time', 'createdDateTime'))
+        evidence_lines.append(
+            f"row[{ref}]: ts={ts or '-'} user={user or '-'} host={host or '-'} ip={ip or '-'} | {(desc or '-')[:200]}"
+        )
+    cid = cluster.get('cluster_id', '?')
+    sev = cluster.get('severity', 'unknown')
+
+    if persona in ('ciso', 'executive'):
+        return f"""You are a CISO generating executive decision gates for a security incident step.
+
+Action step: {step_title}
+Cluster: {cid} (severity: {sev})
+Evidence:
+{chr(10).join(evidence_lines) or 'No rows.'}
+
+Generate exactly 4 executive decision gates. Each gate is an action the CISO/exec must approve or defer.
+Output in EXACT format:
+
+Q1: [Decision gate: e.g. "Declare this a notifiable breach under GDPR Art.33"]
+CHECK: [Trigger condition — e.g. "PII data confirmed in row[X] + 72h clock running"]
+ROW_REF: [row number(s)]
+URGENCY: [NOW / 4H / 24H]
+OWNER: [CISO / Legal / PR / IR / Board]
+
+Q2: ...
+Q3: ...
+Q4: ...
+
+Use only these gate types where evidence supports them:
+- Declare notifiable breach
+- Notify legal / outside counsel
+- Invoke IR retainer
+- Issue public statement
+- Activate crisis communications
+- Notify regulator (GDPR/HIPAA/FTC)
+- Approve business continuity plan"""
+
+    elif persona in ('compliance', 'audit'):
+        mitre_tags = cluster.get('top_mitre') or []
+        ctrl_hints = _mitre_to_iso27001(mitre_tags[:4])
+        return f"""You are a compliance officer generating ISO 27001 control gap assessments.
+
+Action step: {step_title}
+Cluster: {cid} (severity: {sev})
+MITRE techniques: {', '.join(str(t) for t in mitre_tags[:4]) or 'unknown'}
+Implicated controls (pre-mapped): {ctrl_hints}
+Evidence:
+{chr(10).join(evidence_lines) or 'No rows.'}
+
+Generate exactly 5 control assessments. For each control implicated by the evidence:
+Output in EXACT format:
+
+Q1: [Control description — e.g. "A.9.4.2: MFA enforcement gap — push notifications not blocking suspicious auth"]
+CHECK: [Evidence check — e.g. "Confirm MFA method in row[81]: was it push-only with no number matching?"]
+ROW_REF: [row number(s)]
+CTRL_REF: [ISO Annex A ref, e.g. A.9.4.2]
+FRAMEWORK: [ISO27001 / GDPR / PCI_DSS / NIST_CSF]
+STATUS: [GAP / PASSING / UNKNOWN]
+
+Q2: ...
+(Cover ISO 27001 A.9, A.12, A.16 first, then GDPR Art.33, then PCI DSS if applicable)"""
+
+    return f"""You are a senior security analyst generating specific confirm/deny investigation questions for a {persona} analyst.
+
+Action step to investigate: {step_title}
+
+Cluster: {cid} (severity: {sev})
+Evidence rows:
+{chr(10).join(evidence_lines) or 'No specific rows available.'}
+
+Generate exactly 4 investigation questions. Each question must:
+- Be answerable YES / NO / UNKNOWN by a human analyst
+- Reference a specific row number or entity from the evidence above
+- Include one concrete CHECK: command, log query, or tool the analyst can run right now
+
+Output in this EXACT format (no extra text):
+
+Q1: [specific yes/no question referencing evidence]
+CHECK: [specific CLI command, KQL, or log query]
+ROW_REF: [row number(s)]
+
+Q2: [specific yes/no question]
+CHECK: [specific command/query]
+ROW_REF: [row number(s)]
+
+Q3: [specific yes/no question]
+CHECK: [specific command/query]
+ROW_REF: [row number(s)]
+
+Q4: [specific yes/no question]
+CHECK: [specific command/query]
+ROW_REF: [row number(s)]"""
+
+
+def _parse_expand_step_output(text: str) -> list[dict]:
+    import re
+    questions: list[dict] = []
+    blocks = re.split(r'\n(?=Q\d+:)', text.strip())
+    for block in blocks:
+        block = block.strip()
+        if not re.match(r'Q\d+:', block):
+            continue
+        question = check = row_ref = urgency = owner = ctrl_ref = framework = status = ''
+        for line in block.splitlines():
+            stripped = line.strip()
+            if re.match(r'Q\d+:', stripped):
+                question = re.sub(r'^Q\d+:\s*', '', stripped).strip()
+            elif stripped.startswith('CHECK:'):
+                check = stripped[6:].strip()
+            elif stripped.startswith('ROW_REF:'):
+                row_ref = stripped[8:].strip()
+            elif stripped.startswith('URGENCY:'):
+                urgency = stripped[8:].strip()
+            elif stripped.startswith('OWNER:'):
+                owner = stripped[6:].strip()
+            elif stripped.startswith('CTRL_REF:'):
+                ctrl_ref = stripped[9:].strip()
+            elif stripped.startswith('FRAMEWORK:'):
+                framework = stripped[10:].strip()
+            elif stripped.startswith('STATUS:'):
+                status = stripped[7:].strip()
+        if question:
+            q: dict = {'question': question, 'cli_command': check, 'row_evidence': row_ref}
+            if urgency:
+                q['urgency'] = urgency
+            if owner:
+                q['owner'] = owner
+            if ctrl_ref:
+                q['ctrl_ref'] = ctrl_ref
+            if framework:
+                q['framework'] = framework
+            if status:
+                q['status'] = status
+            questions.append(q)
+    return questions[:5]
+
+
+def _build_threat_hunter_prompt(step_title: str, rows: list[dict], cluster: dict) -> str:
+    evidence_lines: list[str] = []
+    for row in rows[:10]:
+        ref  = _row_ref(row)
+        desc = _first_nonempty(row, ('analyst_notes', 'description', 'event_description', 'message', 'summary', 'activityDisplayName', 'event_type', 'action'))
+        user = _first_nonempty(row, ('user', 'username', 'account', 'principal', 'userPrincipalName', 'actor'))
+        host = _first_nonempty(row, ('host', 'hostname', 'device', 'device_name', 'computer'))
+        ip   = _first_nonempty(row, ('src_ip', 'source_ip', 'dst_ip', 'external_ip', 'ip'))
+        ts   = _first_nonempty(row, ('timestamp_utc', 'eventTime', 'ts', 'timestamp', 'time', 'createdDateTime'))
+        mitre = (row.get('mitre') or [])
+        mitre_str = ','.join(str(m) for m in mitre[:2]) if mitre else ''
+        evidence_lines.append(
+            f"row[{ref}]: ts={ts or '-'} user={user or '-'} host={host or '-'} ip={ip or '-'} mitre={mitre_str or '-'} | {(desc or '-')[:200]}"
+        )
+    cid  = cluster.get('cluster_id', '?')
+    sev  = cluster.get('severity', 'unknown')
+    mitre_top = ', '.join(str(m) for m in (cluster.get('top_mitre') or [])[:4]) or 'unknown'
+    return f"""You are a senior threat hunter generating structured intelligence for an active hunt.
+
+Hunting step: {step_title}
+Cluster: {cid} (severity: {sev}, MITRE: {mitre_top})
+
+Evidence rows (sorted by time):
+{chr(10).join(evidence_lines) or 'No specific rows available.'}
+
+Generate a threat hunting package with EXACTLY this structure (no extra text, no markdown outside code blocks):
+
+PIVOT1: [entity to pivot on] → [what to look for next]
+PIVOT_ROW: [row number(s)]
+
+PIVOT2: [entity to pivot on] → [what to look for next]
+PIVOT_ROW: [row number(s)]
+
+PIVOT3: [entity to pivot on] → [what to look for next]
+PIVOT_ROW: [row number(s)]
+
+HUNT1: [one-line description of what this query hunts]
+TYPE: kql
+QUERY:
+[complete runnable KQL query, no backticks]
+ROW_REF: [row number(s)]
+
+HUNT2: [one-line description]
+TYPE: kql|grep|powershell|splunk
+QUERY:
+[complete runnable query]
+ROW_REF: [row number(s)]
+
+HUNT3: [one-line description]
+TYPE: kql|grep|powershell|splunk
+QUERY:
+[complete runnable query]
+ROW_REF: [row number(s)]
+
+IOC1: [indicator value]
+IOC_TYPE: ip|domain|hash|username|hostname|url
+CONFIDENCE: HIGH|MEDIUM|LOW
+IOC_REASON: [one sentence why this is an IOC]
+IOC_ROW: [row number(s)]
+
+IOC2: [indicator value]
+IOC_TYPE: ip|domain|hash|username|hostname|url
+CONFIDENCE: HIGH|MEDIUM|LOW
+IOC_REASON: [one sentence]
+IOC_ROW: [row number(s)]
+
+IOC3: [indicator value]
+IOC_TYPE: ip|domain|hash|username|hostname|url
+CONFIDENCE: HIGH|MEDIUM|LOW
+IOC_REASON: [one sentence]
+IOC_ROW: [row number(s)]"""
+
+
+def _parse_threat_hunter_output(text: str) -> dict:
+    import re as _re
+    text = _re.sub(r'<think>.*?</think>', '', text, flags=_re.DOTALL).strip()
+    # Strip markdown code fences wrapping the whole output
+    text = _re.sub(r'^```[a-z]*\n?', '', text).rstrip('`').strip()
+
+    lines = text.splitlines()
+    pivots: list[dict] = []
+    hunt_queries: list[dict] = []
+    iocs: list[dict] = []
+
+    # ── Keyword aliases for flexible matching ─────────────────────────────────
+    _PIVOT_RE   = _re.compile(r'^(?:PIVOT\s*\d*|PIVOT_OPPORTUNITY\s*\d*):\s*(.+)', _re.I)
+    _HUNT_RE    = _re.compile(r'^(?:HUNT\s*\d*|HUNT_QUERY\s*\d*|QUERY\s*\d*|HUNTING_QUERY\s*\d*):\s*(.+)', _re.I)
+    _IOC_RE     = _re.compile(r'^IOC\s*\d*:\s*(.+)', _re.I)
+    _PIVOT_ROW  = _re.compile(r'^PIVOT_ROW\s*:', _re.I)
+    _TYPE_RE    = _re.compile(r'^TYPE\s*:', _re.I)
+    _QUERY_RE   = _re.compile(r'^QUERY\s*:', _re.I)
+    _ROWREF_RE  = _re.compile(r'^ROW_?REF\s*:', _re.I)
+    _IOCTYPE_RE = _re.compile(r'^IOC_?TYPE\s*:', _re.I)
+    _CONF_RE    = _re.compile(r'^CONFIDENCE\s*:', _re.I)
+    _REASON_RE  = _re.compile(r'^IOC_?REASON\s*:', _re.I)
+    _IOCROW_RE  = _re.compile(r'^IOC_?ROW\s*:', _re.I)
+    _BLOCK_START = _re.compile(r'^(?:PIVOT|HUNT|IOC|QUERY)\s*\d*:', _re.I)
+
+    def _strip_label(line: str, pattern: _re.Pattern) -> str:
+        return pattern.sub('', line).strip().lstrip(':').strip()
+
+    i = 0
+    while i < len(lines):
+        line = lines[i].strip()
+
+        # ── PIVOT ─────────────────────────────────────────────────────────────
+        m = _PIVOT_RE.match(line)
+        if m and not _HUNT_RE.match(line):
+            text_part = m.group(1).strip()
+            entity = action = ''
+            for sep in ('→', '->', '—', ':'):
+                if sep in text_part:
+                    parts = text_part.split(sep, 1)
+                    entity = parts[0].strip()
+                    action = parts[1].strip()
+                    break
+            else:
+                entity = text_part
+            row_ref = ''
+            i += 1
+            while i < len(lines):
+                l2 = lines[i].strip()
+                if _BLOCK_START.match(l2) and not _PIVOT_ROW.match(l2):
+                    break
+                if _PIVOT_ROW.match(l2):
+                    row_ref = _re.sub(r'^PIVOT_?ROW\s*:\s*', '', l2, flags=_re.I).strip()
+                elif _ROWREF_RE.match(l2):
+                    row_ref = _re.sub(r'^ROW_?REF\s*:\s*', '', l2, flags=_re.I).strip()
+                i += 1
+            if entity:
+                pivots.append({'entity': entity, 'action': action, 'row_refs': row_ref})
+            continue
+
+        # ── HUNT QUERY ────────────────────────────────────────────────────────
+        m = _HUNT_RE.match(line)
+        if m:
+            label = m.group(1).strip()
+            qtype = 'kql'
+            query_lines: list[str] = []
+            row_ref = ''
+            in_query = False
+            i += 1
+            while i < len(lines):
+                l2 = lines[i]
+                ls = l2.strip()
+                if _BLOCK_START.match(ls) and not _QUERY_RE.match(ls):
+                    break
+                if _TYPE_RE.match(ls):
+                    qtype = _re.sub(r'^TYPE\s*:\s*', '', ls, flags=_re.I).strip().lower()
+                    in_query = False
+                elif _QUERY_RE.match(ls):
+                    in_query = True
+                    rest = _re.sub(r'^QUERY\s*:\s*', '', ls, flags=_re.I).strip()
+                    if rest and not rest.startswith('```'):
+                        query_lines.append(rest)
+                elif _ROWREF_RE.match(ls):
+                    row_ref = _re.sub(r'^ROW_?REF\s*:\s*', '', ls, flags=_re.I).strip()
+                    in_query = False
+                elif in_query:
+                    clean = l2.rstrip().lstrip('`')
+                    query_lines.append(clean)
+                i += 1
+            query = '\n'.join(query_lines).strip().strip('`').strip()
+            if label or query:
+                hunt_queries.append({'label': label, 'type': qtype, 'query': query, 'row_refs': row_ref})
+            continue
+
+        # ── IOC ────────────────────────────────────────────────────────────────
+        m = _IOC_RE.match(line)
+        if m:
+            value = m.group(1).strip()
+            ioc_type = confidence = reason = row_ref = ''
+            i += 1
+            while i < len(lines):
+                l2 = lines[i].strip()
+                if _BLOCK_START.match(l2):
+                    break
+                if _IOCTYPE_RE.match(l2):
+                    ioc_type = _re.sub(r'^IOC_?TYPE\s*:\s*', '', l2, flags=_re.I).strip()
+                elif _CONF_RE.match(l2):
+                    confidence = _re.sub(r'^CONFIDENCE\s*:\s*', '', l2, flags=_re.I).strip().upper()
+                elif _REASON_RE.match(l2):
+                    reason = _re.sub(r'^IOC_?REASON\s*:\s*', '', l2, flags=_re.I).strip()
+                elif _IOCROW_RE.match(l2):
+                    row_ref = _re.sub(r'^IOC_?ROW\s*:\s*', '', l2, flags=_re.I).strip()
+                elif _ROWREF_RE.match(l2):
+                    row_ref = _re.sub(r'^ROW_?REF\s*:\s*', '', l2, flags=_re.I).strip()
+                i += 1
+            if value:
+                iocs.append({'value': value, 'type': ioc_type, 'confidence': confidence, 'reason': reason, 'row_refs': row_ref})
+            continue
+
+        i += 1
+
+    # ── Fallback: scrape free-text if structured parse yielded nothing ─────────
+    if not pivots and not hunt_queries and not iocs:
+        # Try to extract lines that look like KQL
+        for chunk in _re.split(r'\n{2,}', text):
+            chunk = chunk.strip()
+            if any(kw in chunk for kw in ('SecurityEvent', 'SigninLogs', 'NetworkFlow', 'AuditLog', 'where ', '| project')):
+                first_line = chunk.splitlines()[0][:80]
+                hunt_queries.append({'label': first_line, 'type': 'kql', 'query': chunk[:800], 'row_refs': ''})
+            elif _re.search(r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b', chunk) and len(chunk) < 80:
+                ip = _re.search(r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b', chunk).group()
+                iocs.append({'value': ip, 'type': 'ip', 'confidence': 'MEDIUM', 'reason': chunk[:120], 'row_refs': ''})
+
+    return {'pivots': pivots[:4], 'hunt_queries': hunt_queries[:4], 'iocs': iocs[:4]}
+
+
+@router.post('/{assessment_id}/clusters/{cluster_id}/expand-step')
+async def expand_cluster_step(assessment_id: str, cluster_id: str, request: Request) -> dict:
+    """Generate confirm/deny investigative questions for one action step, grounded to evidence rows."""
+    body = await request.json()
+    step_title    = body.get('step_title', '')
+    row_refs      = body.get('row_refs', [])
+    persona       = body.get('persona', 'soc_analyst')
+    model         = body.get('model', 'qwen2.5:14b')
+    force_refresh = bool(body.get('force_refresh', False))
+    tenant_id     = _get_tenant(request)
+
+    cache_key  = _safe(cluster_id) + '_expand_' + _safe(step_title[:40]) + '_' + _safe(persona) + '_' + _safe(model)
+    cache_path = _BASE / _safe(tenant_id) / _safe(assessment_id) / (cache_key + '.json')
+    if not force_refresh and cache_path.exists():
+        try:
+            return {**json.loads(cache_path.read_text(encoding='utf-8')), 'from_cache': True}
+        except Exception:
+            pass
+
+    assessment = _get_assessment(assessment_id)
+    cluster: dict = {}
+    all_rows: list[dict] = []
+    if assessment:
+        for c in (assessment.get('correlation_clusters') or []):
+            if c.get('cluster_id') == cluster_id:
+                cluster = c
+                rr_set = set(c.get('row_refs') or [])
+                all_rows = [r for r in (assessment.get('normalized_rows') or assessment.get('rows') or [])
+                            if r.get('row_number') in rr_set or r.get('row_index') in rr_set]
+                break
+
+    rows = [r for r in all_rows if r.get('row_index') in set(row_refs) or r.get('row_number') in set(row_refs)] if row_refs else all_rows[:8]
+    if not rows:
+        rows = all_rows[:8]
+
+    _LLM = _get_llm()
+    if _LLM is None:
+        return {'error': 'LLM not available', 'questions': [], 'step_title': step_title}
+
+    is_threat_hunter = persona == 'threat_hunter'
+    if is_threat_hunter:
+        prompt = _build_threat_hunter_prompt(step_title, rows, cluster)
+    else:
+        prompt = _build_expand_step_prompt(step_title, rows, persona, cluster)
+    max_tokens = 1800 if is_threat_hunter else 1200
+    try:
+        overrides = {'ollama_model': model}
+        raw = _generate_with_optional_model(_LLM, prompt=prompt, max_tokens=max_tokens,
+                                            tenant_id=tenant_id, overrides=overrides, model=model)
+        raw_text = raw.get('text') or ''
+        if is_threat_hunter:
+            hunt_data = _parse_threat_hunter_output(raw_text)
+            questions = []
+        else:
+            hunt_data = {}
+            questions = _parse_expand_step_output(raw_text)
+        # Build row evidence summary with bitemporal trace
+        rows_sorted = sorted(rows[:12], key=lambda r: (r.get('timestamp_epoch') or r.get('event_epoch') or 0))
+        row_evidence = []
+        prev_epoch: float | None = None
+        for r in rows_sorted:
+            bt = r.get('bitemporal_trace') or {}
+            event_epoch = (r.get('timestamp_epoch') or r.get('event_epoch') or
+                           bt.get('event_epoch'))
+            decision_epoch = bt.get('decision_epoch')
+            lag = bt.get('observed_lag_seconds')
+            delta_s: int | None = None
+            if prev_epoch is not None and event_epoch:
+                delta_s = int(event_epoch - prev_epoch)
+            if event_epoch:
+                prev_epoch = event_epoch
+            desc = _first_nonempty(r, (
+                'description', 'analyst_notes', 'event_description', 'message',
+                'summary', 'activityDisplayName', 'event_type', 'action',
+                'result_description', 'notes', 'raw_log',
+            ))
+            mitre_tags = r.get('mitre') or []
+            technique = (mitre_tags[0] if mitre_tags else None) or r.get('mitre_technique') or r.get('technique', '')
+            row_evidence.append({
+                'row':              r.get('row_number', r.get('row_index', '')),
+                'severity':         r.get('severity', ''),
+                'user':             _first_nonempty(r, ('user', 'username', 'account', 'principal', 'userPrincipalName', 'actor', 'subject')),
+                'hostname':         _first_nonempty(r, ('hostname', 'host', 'device_name', 'computer', 'machine', 'device', 'workstation')),
+                'src_ip':           _first_nonempty(r, ('src_ip', 'source_ip', 'ip', 'external_ip', 'client_ip', 'remote_ip')),
+                'technique':        str(technique)[:60] if technique else '',
+                'description':      (desc or '')[:160],
+                # Bitemporal fields
+                'valid_time':       bt.get('event_time') or str(r.get('timestamp', r.get('ts', r.get('event_time', '')))),
+                'transaction_time': bt.get('decision_time') or '',
+                'observed_lag_s':   lag,
+                'delta_s':          delta_s,  # seconds since previous event in temporal sequence
+            })
+        suggested_tools = _suggest_tools(step_title, cluster, rows)
+        result = {'step_title': step_title, 'questions': questions,
+                  'hunt_data': hunt_data,
+                  'persona': persona,
+                  'row_evidence': row_evidence,
+                  'suggested_tools': suggested_tools,
+                  'raw_text': raw.get('text', ''), 'cluster_id': cluster_id,
+                  'assessment_id': assessment_id, 'from_cache': False}
+        try:
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            cache_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding='utf-8')
+        except Exception:
+            pass
+        return result
+    except Exception as exc:
+        logger.exception('expand-step failed: %s', exc)
+        return {'error': str(exc), 'questions': [], 'step_title': step_title}
+
+
+# ── Threat-model helpers ─────────────────────────────────────────────────────
+
+def _build_threat_model_prompt(model_type: str, cluster: dict, rows: list[dict]) -> str:
+    evidence_lines: list[str] = []
+    for row in rows[:10]:
+        ref  = _row_ref(row)
+        desc = _first_nonempty(row, ('analyst_notes', 'description', 'event_description', 'message', 'summary'))
+        mitre = _first_nonempty(row, ('mitre_technique', 'technique_id', 'mitre'))
+        evidence_lines.append(f"row[{ref}]: mitre={mitre or '-'} | {(desc or '-')[:180]}")
+    cid    = cluster.get('cluster_id', '?')
+    sev    = cluster.get('severity', 'unknown')
+    reason = cluster.get('reason_summary') or cluster.get('business_significance') or 'shared telemetry'
+    ents   = _fallback_entities(cluster, rows)
+    entity_line = (f"accounts={ents['accounts'][:3]}, hosts={ents['hosts'][:3]}, "
+                   f"ips={ents['ips'][:3]}, domains={ents['domains'][:3]}")
+
+    if model_type == 'pasta':
+        return f"""You are performing PASTA (Process for Attack Simulation and Threat Analysis) for security cluster {cid}.
+Severity: {sev}. Reason: {reason}. Entities: {entity_line}.
+Evidence:
+{chr(10).join(evidence_lines)}
+
+Complete each PASTA stage. Cite row numbers. Under 600 words.
+
+STAGE 1 — DEFINE OBJECTIVES
+[Business objectives at risk, regulated data assets, compliance requirements]
+
+STAGE 2 — DEFINE TECHNICAL SCOPE
+[Technologies, interfaces, data flows in evidence]
+
+STAGE 3 — APPLICATION DECOMPOSITION
+[Components seen: identity, endpoint, network, email, cloud]
+
+STAGE 4 — THREAT ANALYSIS
+[Threat actors, TTPs, attack patterns matching evidence]
+
+STAGE 5 — VULNERABILITY ANALYSIS
+[Weaknesses enabling this cluster, missing controls, log gaps]
+
+STAGE 6 — ATTACK MODELLING
+[Step-by-step attacker path through the evidence rows]
+
+STAGE 7 — RISK AND IMPACT ANALYSIS
+[Financial, operational, regulatory impact; compliance controls potentially violated]"""
+
+    elif model_type == 'diamond':
+        return f"""You are applying the Diamond Model of Intrusion Analysis to security cluster {cid}.
+Severity: {sev}. Reason: {reason}. Entities: {entity_line}.
+Evidence:
+{chr(10).join(evidence_lines)}
+
+Complete each Diamond vertex. Cite row numbers. Under 500 words.
+
+ADVERSARY
+[Who is attacking? Motivation, sophistication, TTPs based on evidence]
+
+CAPABILITY
+[Tools/techniques used — MITRE techniques seen, commodity vs custom]
+
+INFRASTRUCTURE
+[IPs, domains, cloud services, C2 channels seen in evidence]
+
+VICTIM
+[Targeted accounts, hosts, services, data based on evidence]
+
+ADVERSARY-VICTIM RELATIONSHIP
+[Why this target? Business value, sector, data type]
+
+CAPABILITY-INFRASTRUCTURE PIVOT
+[How to hunt for additional infrastructure or capability variants]"""
+
+    elif model_type == 'stride':
+        return f"""You are applying STRIDE threat modelling to security cluster {cid}, followed by framework compliance mapping.
+Severity: {sev}. Reason: {reason}. Entities: {entity_line}.
+Evidence:
+{chr(10).join(evidence_lines)}
+
+Complete each STRIDE threat category AND the compliance mapping. Cite row numbers. Under 600 words.
+
+SPOOFING
+[Identity spoofing threats seen or implied by evidence. Cite rows.]
+
+TAMPERING
+[Data or log tampering threats. Any integrity violation in evidence?]
+
+REPUDIATION
+[Can actions be denied? Logging gaps enabling repudiation?]
+
+INFORMATION DISCLOSURE
+[Data exfiltration or exposure risk. What data could have left?]
+
+DENIAL OF SERVICE
+[Service disruption threats or impact on availability.]
+
+ELEVATION OF PRIVILEGE
+[Privilege escalation paths seen. MITRE techniques involved?]
+
+STRIDE SUMMARY & MITIGATIONS
+[Top 3 mitigations ranked by risk reduction. Reference specific rows.]
+
+ISO 27001 ANNEX A MAPPING
+[List violated or at-risk controls: A.9.x, A.12.x, A.16.x etc. One line each.]
+
+NIST CSF FUNCTIONS
+[Which CSF functions (Identify/Protect/Detect/Respond/Recover) are impacted?]
+
+GDPR RELEVANCE
+[Any personal data involved? Art. 5 integrity, Art. 32 security, Art. 33 notification risk?]
+
+PCI DSS REQUIREMENTS
+[Any payment data scope? Requirements 7 (access), 10 (logging), 12 (policy) impacted?]"""
+
+    elif model_type == 'dread':
+        return f"""You are performing DREAD risk scoring for security cluster {cid}.
+Severity: {sev}. Reason: {reason}. Entities: {entity_line}.
+Evidence:
+{chr(10).join(evidence_lines)}
+
+Score each DREAD dimension 1-10 with evidence-based rationale. Cite rows. Under 400 words.
+
+DAMAGE POTENTIAL
+[Score: X/10. What is the maximum damage if exploited? Data loss, system compromise, service outage?]
+
+REPRODUCIBILITY
+[Score: X/10. How easily can the attack be reproduced? Tools required, skill level?]
+
+EXPLOITABILITY
+[Score: X/10. How easy is it to exploit? Remote/local, authentication required?]
+
+AFFECTED USERS
+[Score: X/10. How many users/systems are affected? Scale of blast radius?]
+
+DISCOVERABILITY
+[Score: X/10. How easily can the vulnerability be found? Public CVE, default config?]
+
+OVERALL DREAD SCORE
+[Total: XX/50. Normalised: X.X/10. Risk tier: CRITICAL/HIGH/MEDIUM/LOW]
+
+RISK TREATMENT RECOMMENDATION
+[MITIGATE: specific control. TRANSFER: insurance/SLA. ACCEPT: conditions. AVOID: approach change.]"""
+
+    else:  # maestro
+        return f"""You are applying the MAESTRO AI/ML threat modelling framework to security cluster {cid}.
+Severity: {sev}. Reason: {reason}. Entities: {entity_line}.
+Evidence:
+{chr(10).join(evidence_lines)}
+
+Assess each MAESTRO layer. Mark N/A if not applicable. Cite rows. Under 500 words.
+
+L1 — MODEL & ALGORITHM LAYER
+[Any ML-based detection evaded? MITRE ATLAS techniques?]
+
+L2 — DATA LAYER
+[Training data, log telemetry, or SIEM data manipulated/withheld?]
+
+L3 — ECOSYSTEM & DEPENDENCIES
+[Third-party ML services, APIs, data pipelines involved?]
+
+L4 — AGENT/ORCHESTRATION LAYER
+[AI agents, SOAR playbooks, or automated responses affected?]
+
+L5 — EVALUATION FRAMEWORK
+[Detection thresholds or model confidence fail? False negative risk?]
+
+L6 — DEPLOYMENT & INFRASTRUCTURE
+[Cloud/on-prem ML infrastructure in scope?]
+
+L7 — USER & ORGANISATIONAL LAYER
+[Alert fatigue, automation bias, human-AI interaction failures?]
+
+COMPLIANCE CONTROLS POTENTIALLY VIOLATED
+[ISO 27001, NIST AI RMF, EU AI Act, GDPR — cite specifics if applicable]"""
+
+
+def _parse_threat_model_output(model_type: str, text: str) -> dict:
+    import re
+    if model_type == 'pasta':
+        stages  = ['STAGE 1', 'STAGE 2', 'STAGE 3', 'STAGE 4', 'STAGE 5', 'STAGE 6', 'STAGE 7']
+        keys    = ['objectives', 'technical_scope', 'app_decomposition', 'threat_analysis',
+                   'vulnerability_analysis', 'attack_modelling', 'risk_impact']
+    elif model_type == 'diamond':
+        stages  = ['ADVERSARY\n', 'CAPABILITY\n', 'INFRASTRUCTURE\n', 'VICTIM\n',
+                   'ADVERSARY-VICTIM', 'CAPABILITY-INFRASTRUCTURE']
+        keys    = ['adversary', 'capability', 'infrastructure', 'victim',
+                   'adversary_victim', 'capability_infrastructure']
+    elif model_type == 'stride':
+        stages  = ['SPOOFING', 'TAMPERING', 'REPUDIATION', 'INFORMATION DISCLOSURE',
+                   'DENIAL OF SERVICE', 'ELEVATION OF PRIVILEGE',
+                   'STRIDE SUMMARY', 'ISO 27001', 'NIST CSF', 'GDPR', 'PCI DSS']
+        keys    = ['spoofing', 'tampering', 'repudiation', 'information_disclosure',
+                   'denial_of_service', 'elevation_of_privilege',
+                   'stride_summary', 'iso27001_controls', 'nist_csf', 'gdpr_relevance', 'pci_dss']
+    elif model_type == 'dread':
+        stages  = ['DAMAGE POTENTIAL', 'REPRODUCIBILITY', 'EXPLOITABILITY',
+                   'AFFECTED USERS', 'DISCOVERABILITY', 'OVERALL DREAD', 'RISK TREATMENT']
+        keys    = ['damage', 'reproducibility', 'exploitability',
+                   'affected_users', 'discoverability', 'dread_score', 'risk_treatment']
+    else:
+        stages  = ['L1 —', 'L2 —', 'L3 —', 'L4 —', 'L5 —', 'L6 —', 'L7 —', 'COMPLIANCE']
+        keys    = ['model_algorithm', 'data_layer', 'ecosystem', 'agent_orchestration',
+                   'evaluation', 'deployment', 'user_org', 'compliance']
+
+    sections: dict = {}
+    current_key: str | None = None
+    buf: list[str] = []
+
+    def flush() -> None:
+        if current_key and buf:
+            sections[current_key] = '\n'.join(buf).strip()
+
+    for line in text.splitlines():
+        upper = line.strip().upper()
+        matched = False
+        for i, stage in enumerate(stages):
+            if upper.startswith(stage.upper().strip()):
+                flush()
+                buf = []
+                current_key = keys[i] if i < len(keys) else stage.lower().replace(' ', '_')
+                matched = True
+                break
+        if not matched and current_key is not None:
+            buf.append(line)
+    flush()
+    return sections
+
+
+def _build_iso27001_map(mitre_tags: list, rows: list[dict]) -> list[dict]:
+    """Map MITRE techniques to ISO 27001 Annex A controls with status inference."""
+    _CTRL_MAP: dict[str, dict] = {
+        'A.6.1.1': {'name': 'Information security roles', 'mitre': [], 'default': 'UNKNOWN'},
+        'A.9.1.2': {'name': 'Access to networks', 'mitre': ['T1021', 'T1078'], 'default': 'UNKNOWN'},
+        'A.9.2.1': {'name': 'User registration', 'mitre': ['T1078', 'T1087'], 'default': 'UNKNOWN'},
+        'A.9.4.2': {'name': 'Secure log-on (MFA)', 'mitre': ['T1078', 'T1110', 'T1556'], 'default': 'UNKNOWN'},
+        'A.9.4.3': {'name': 'Password management', 'mitre': ['T1110', 'T1003'], 'default': 'UNKNOWN'},
+        'A.12.2.1': {'name': 'Controls against malware', 'mitre': ['T1566', 'T1059', 'T1055'], 'default': 'UNKNOWN'},
+        'A.12.3.1': {'name': 'Information backup', 'mitre': ['T1486', 'T1490'], 'default': 'UNKNOWN'},
+        'A.12.4.1': {'name': 'Event logging', 'mitre': ['T1070', 'T1562'], 'default': 'UNKNOWN'},
+        'A.12.4.2': {'name': 'Protection of log info', 'mitre': ['T1070', 'T1003'], 'default': 'UNKNOWN'},
+        'A.12.6.1': {'name': 'Vulnerability management', 'mitre': ['T1190', 'T1059', 'T1055'], 'default': 'UNKNOWN'},
+        'A.13.1.1': {'name': 'Network controls', 'mitre': ['T1071', 'T1021', 'T1048'], 'default': 'UNKNOWN'},
+        'A.13.2.1': {'name': 'Info transfer policies', 'mitre': ['T1114', 'T1048', 'T1041'], 'default': 'UNKNOWN'},
+        'A.16.1.1': {'name': 'Responsibilities & procedures', 'mitre': [], 'default': 'UNKNOWN'},
+        'A.16.1.2': {'name': 'Reporting security events', 'mitre': [], 'default': 'UNKNOWN'},
+        'A.16.1.5': {'name': 'Response to incidents', 'mitre': [], 'default': 'UNKNOWN'},
+    }
+
+    results: list[dict] = []
+    for ref, ctrl in _CTRL_MAP.items():
+        implicated = any(
+            any(str(tag).upper().startswith(m) for tag in mitre_tags)
+            for m in ctrl['mitre']
+        )
+        status = 'GAP' if implicated else ctrl['default']
+
+        row_refs: list[str] = []
+        for r in rows[:10]:
+            mitre_f = r.get('mitre') or r.get('mitre_technique') or []
+            if isinstance(mitre_f, str):
+                mitre_f = [mitre_f]
+            for m_ctrl in ctrl['mitre']:
+                if any(str(t).upper().startswith(m_ctrl) for t in mitre_f):
+                    ref_val = r.get('row_number') or r.get('row_index', '')
+                    if str(ref_val) not in row_refs:
+                        row_refs.append(str(ref_val))
+
+        results.append({
+            'ref': ref,
+            'name': ctrl['name'],
+            'status': status,
+            'implicated': implicated,
+            'row_refs': row_refs[:3],
+        })
+
+    results.sort(key=lambda x: (0 if x['status'] == 'GAP' else 1 if x['status'] == 'UNKNOWN' else 2))
+    return results
+
+
+def _build_gdpr_map(cluster: dict, rows: list[dict]) -> list[dict]:
+    sev = (cluster.get('severity') or 'low').lower()
+    has_pii = any(
+        any(kw in str(r.get('description', '') + str(r.get('analyst_notes', ''))).lower()
+            for kw in ('email', 'personal', 'pii', 'user', 'account', 'customer', 'identity'))
+        for r in rows[:10]
+    )
+    art33_status = 'GAP' if (sev in ('critical', 'high') and has_pii) else 'UNKNOWN'
+    return [
+        {'ref': 'Art.33', 'name': 'Breach notification 72h', 'status': art33_status, 'note': '72h clock starts at awareness'},
+        {'ref': 'Art.32', 'name': 'Security of processing', 'status': 'UNKNOWN', 'note': 'Assess encryption + access controls'},
+        {'ref': 'Art.5(1)(f)', 'name': 'Integrity & confidentiality', 'status': 'UNKNOWN', 'note': 'Review data access logs'},
+        {'ref': 'Art.30', 'name': 'Records of processing', 'status': 'UNKNOWN', 'note': 'Check DPA register currency'},
+    ]
+
+
+def _build_pci_map(mitre_tags: list) -> list[dict]:
+    _PCI_MITRE: dict[str, dict] = {
+        'Req.6.3': {'name': 'Vulnerability management', 'mitre': ['T1190', 'T1059', 'T1055']},
+        'Req.7.2': {'name': 'Access control', 'mitre': ['T1078', 'T1021']},
+        'Req.8.3': {'name': 'MFA for admin/remote', 'mitre': ['T1078', 'T1110', 'T1556']},
+        'Req.10.3': {'name': 'Audit log protection', 'mitre': ['T1070', 'T1562']},
+        'Req.10.7': {'name': 'Failures of security controls', 'mitre': []},
+        'Req.12.10': {'name': 'Incident response plan', 'mitre': []},
+    }
+    results: list[dict] = []
+    for ref, ctrl in _PCI_MITRE.items():
+        implicated = any(
+            any(str(tag).upper().startswith(m) for tag in mitre_tags)
+            for m in ctrl['mitre']
+        )
+        results.append({
+            'ref': ref,
+            'name': ctrl['name'],
+            'status': 'GAP' if implicated else 'UNKNOWN',
+            'implicated': implicated,
+        })
+    return results
+
+
+def _build_nist_map(mitre_tags: list) -> list[dict]:
+    _NIST = [
+        {'ref': 'ID.AM-1', 'name': 'Asset inventory', 'mitre': [], 'status': 'UNKNOWN'},
+        {'ref': 'PR.AC-1', 'name': 'Identities managed', 'mitre': ['T1078', 'T1110'], 'status': 'UNKNOWN'},
+        {'ref': 'PR.AC-3', 'name': 'Remote access managed', 'mitre': ['T1021', 'T1133'], 'status': 'UNKNOWN'},
+        {'ref': 'DE.CM-1', 'name': 'Network monitoring', 'mitre': ['T1071', 'T1048'], 'status': 'UNKNOWN'},
+        {'ref': 'DE.CM-3', 'name': 'Personnel activity monitored', 'mitre': ['T1078', 'T1114'], 'status': 'UNKNOWN'},
+        {'ref': 'RS.CO-2', 'name': 'Incidents reported', 'mitre': [], 'status': 'UNKNOWN'},
+        {'ref': 'RS.RP-1', 'name': 'Response plan executed', 'mitre': [], 'status': 'UNKNOWN'},
+        {'ref': 'RC.RP-1', 'name': 'Recovery plan executed', 'mitre': [], 'status': 'UNKNOWN'},
+    ]
+    results: list[dict] = []
+    for ctrl in _NIST:
+        implicated = any(
+            any(str(tag).upper().startswith(m) for tag in mitre_tags)
+            for m in ctrl['mitre']
+        )
+        results.append({
+            'ref': ctrl['ref'],
+            'name': ctrl['name'],
+            'status': 'GAP' if implicated else ctrl['status'],
+            'implicated': implicated,
+        })
+    return results
+
+
+def _build_crq_estimate(cluster: dict, rows: list[dict]) -> dict:
+    """Simple rule-based CRQ. Analysts can override all fields."""
+    sev = (cluster.get('severity') or 'low').lower()
+    row_count = len(rows)
+    base = {'critical': 150000, 'high': 75000, 'medium': 25000, 'low': 5000}.get(sev, 10000)
+    scale = min(3.0, 1.0 + row_count / 50)
+    expected = int(base * scale)
+    max_exp = expected * 4
+    recovery = int(expected * 0.3)
+    return {
+        'expected_usd': expected,
+        'max_usd': max_exp,
+        'recovery_cost_usd': recovery,
+        'insurance_trigger': expected > 100000,
+        'confidence': 'LOW',
+        'note': 'Rule-based estimate. Analyst should override with actual exposure data.',
+    }
+
+
+def _find_earliest_row_ref(rows: list[dict]) -> str:
+    earliest: str | None = None
+    earliest_ref = ''
+    for r in rows:
+        ts = r.get('timestamp_utc') or r.get('timestamp') or r.get('event_time') or ''
+        if ts and (earliest is None or str(ts) < earliest):
+            earliest = str(ts)
+            earliest_ref = str(r.get('row_number') or r.get('row_index') or '')
+    return earliest_ref
+
+
+@router.get('/{assessment_id}/clusters/{cluster_id}/compliance-map')
+async def get_compliance_map(assessment_id: str, cluster_id: str, request: Request) -> dict:
+    """Fast MITRE → ISO27001/GDPR/PCI/NIST mapping — no LLM needed."""
+    assessment = _get_assessment(assessment_id)
+    cluster: dict = {}
+    rows: list[dict] = []
+    if assessment:
+        for c in (assessment.get('correlation_clusters') or []):
+            if c.get('cluster_id') == cluster_id:
+                cluster = c
+                rr = set(c.get('row_refs') or [])
+                rows = [r for r in (assessment.get('normalized_rows') or assessment.get('rows') or [])
+                        if r.get('row_number') in rr or r.get('row_index') in rr]
+                break
+
+    mitre_tags = cluster.get('top_mitre') or []
+    pins = _extract_evidence_pins(cluster, rows)
+
+    iso_controls = _build_iso27001_map(mitre_tags, rows)
+    gdpr = _build_gdpr_map(cluster, rows)
+    pci = _build_pci_map(mitre_tags)
+    nist = _build_nist_map(mitre_tags)
+    crq = _build_crq_estimate(cluster, rows)
+
+    return {
+        'cluster_id': cluster_id,
+        'mitre_tags': mitre_tags,
+        'iso27001': iso_controls,
+        'gdpr': gdpr,
+        'pci_dss': pci,
+        'nist_csf': nist,
+        'crq': crq,
+        'earliest_row': _find_earliest_row_ref(rows),
+    }
+
+
+@router.post('/{assessment_id}/clusters/{cluster_id}/threat-model')
+async def run_threat_model(assessment_id: str, cluster_id: str, request: Request) -> dict:
+    """Human-gated PASTA / Diamond / MAESTRO threat modelling. Results saved to disk."""
+    body          = await request.json()
+    model_type    = body.get('model_type', 'pasta')
+    model         = body.get('model', 'qwen2.5:14b')
+    force_refresh = bool(body.get('force_refresh', False))
+    tenant_id     = _get_tenant(request)
+
+    tm_dir  = _BASE / _safe(tenant_id) / _safe(assessment_id) / 'threat_models'
+    tm_path = tm_dir / f'{_safe(cluster_id)}_{model_type}.json'
+    if not force_refresh and tm_path.exists():
+        try:
+            return {**json.loads(tm_path.read_text(encoding='utf-8')), 'from_cache': True}
+        except Exception:
+            pass
+
+    assessment = _get_assessment(assessment_id)
+    cluster: dict = {}
+    rows: list[dict] = []
+    if assessment:
+        for c in (assessment.get('correlation_clusters') or []):
+            if c.get('cluster_id') == cluster_id:
+                cluster = c
+                rr_set = set(c.get('row_refs') or [])
+                rows = [r for r in (assessment.get('normalized_rows') or [])
+                        if r.get('row_number') in rr_set or r.get('row_index') in rr_set]
+                break
+    if not cluster:
+        # Use minimal cluster stub so threat model still runs against model_type + cluster_id
+        cluster = {'cluster_id': cluster_id, 'severity': 'unknown',
+                   'top_mitre': [], 'row_refs': [], 'reason_summary': ''}
+
+    _LLM = _get_llm()
+    if _LLM is None:
+        return {'error': 'LLM not available', 'model_type': model_type}
+
+    prompt = _build_threat_model_prompt(model_type, cluster, rows)
+    try:
+        overrides = {'ollama_model': model}
+        raw = _generate_with_optional_model(_LLM, prompt=prompt, max_tokens=2000,
+                                            tenant_id=tenant_id, overrides=overrides, model=model)
+        text    = raw.get('text') or ''
+        parsed  = _parse_threat_model_output(model_type, text)
+        result  = {'model_type': model_type, 'cluster_id': cluster_id, 'assessment_id': assessment_id,
+                   'model': model, 'sections': parsed, 'raw_text': text,
+                   'generated_at': time.time(), 'from_cache': False}
+        try:
+            tm_dir.mkdir(parents=True, exist_ok=True)
+            tm_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding='utf-8')
+        except Exception:
+            pass
+        return result
+    except Exception as exc:
+        logger.exception('threat-model failed: %s', exc)
+        return {'error': str(exc), 'model_type': model_type}
+
+
+# ── Investigation report save ─────────────────────────────────────────────────
+
+@router.post('/{assessment_id}/clusters/{cluster_id}/investigation-report')
+async def save_investigation_report(assessment_id: str, cluster_id: str, request: Request) -> dict:
+    """Persist analyst confirm/deny findings + report as JSON. Always returns local path."""
+    body      = await request.json()
+    tenant_id = _get_tenant(request)
+    rep_dir   = _BASE / _safe(tenant_id) / _safe(assessment_id) / 'reports'
+    rep_path  = rep_dir / f'{_safe(cluster_id)}_investigation.json'
+    report    = {**body, 'cluster_id': cluster_id, 'assessment_id': assessment_id,
+                 'generated_at': time.time()}
+    try:
+        rep_dir.mkdir(parents=True, exist_ok=True)
+        rep_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
+        saved = True
+        path_str = str(rep_path)
+    except Exception as exc:
+        saved = False
+        path_str = str(exc)
+    return {'saved': saved, 'path': path_str, 'report': report}
 
 
 __all__ = ['router']

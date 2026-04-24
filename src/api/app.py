@@ -6063,8 +6063,14 @@ async def _api_key_enforcer(request: Request, call_next: Callable[[Request], Awa
         # Quick allow for non-API or explicitly exempted paths
         if not path.startswith(_API_KEY_PATH_PREFIX) or any(path.startswith(p) for p in _API_KEY_EXCEPT_PREFIXES) or any(c in path for c in _API_KEY_EXCEPT_CONTAINS):
             return await call_next(request)
-        # Validate via shared auth dependency (accepts x-api-key or Bearer JWT)
-        x_api_key = request.headers.get('x-api-key') or request.headers.get('X-API-Key')
+        # Validate via shared auth dependency (accepts x-api-key or Bearer JWT).
+        # Also accept ?token= / ?api_key= for EventSource clients that cannot set headers.
+        x_api_key = (
+            request.headers.get('x-api-key')
+            or request.headers.get('X-API-Key')
+            or request.query_params.get('token')
+            or request.query_params.get('api_key')
+        )
         authorization = request.headers.get('Authorization')
         try:
             ctx: AuthContext = await auth_dependency(x_api_key, authorization, [])  # no extra scopes globally

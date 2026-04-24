@@ -111,7 +111,10 @@
       .then(function (r) { return r.json(); })
       .then(function (data) {
         state.assessment = data;
-        state.clusters = data.correlation_clusters || [];
+        // Prefer classified analysis_clusters; fall back to raw correlation_clusters.
+        state.clusters = data.analysis_clusters || data.correlation_clusters || [];
+        state.rawClusters = data.raw_correlation_clusters || data.correlation_clusters || [];
+        state.threatCases = data.threat_cases || [];
         state.rows = data.normalized_rows || data.evidence_rows || data.rows || [];
       })
       .catch(function (err) {
@@ -200,11 +203,11 @@
     var d = _dreadInfo(cluster);
     var full = d.parts.map(function (p) { return p.text; }).join(' ').toLowerCase() + ' ' + JSON.stringify(((cluster || {}).tier1_prefill || {}).observed_impact || {}).toLowerCase();
     var gates = [
-      ['Data exfil', /exfil|copy into|unload|rclone|cloud sync|transferred data|backblaze|mega/.test(full)],
+      ['Data exfil', /exfil|copy into|unload|rclone|cloud sync|transferred data|cloud storage/.test(full)],
       ['Repeated activity', /recurred|distinct days|same command|reproduc/.test(full)],
       ['Affected users', /account|user|service_account|privileged|affected users/.test(full)],
       ['Control gap', /no dlp|no pam|control gap|unconstrained|no inspection|no gate/.test(full)],
-      ['Crown jewel', /crown jewel|sfl_data|finance_wh|ndb|cps234/.test(full)],
+      ['Crown jewel', /crown jewel|regulated data|critical data|protected data|ndb|cps234/.test(full)],
       ['Multi-source correlation', /cross-source|source types|multiple sources|correlation/.test(full)]
     ];
     return '<div class="br-why-ladder">' + gates.map(function (g) {
@@ -244,12 +247,12 @@
     var known = [];
     var unknown = [];
     if (/rclone/.test(text)) known.push('Tool: rclone file-sync activity');
-    if (/backblaze/.test(text)) known.push('Destination: Backblaze B2 cloud storage');
-    if (/sfl_data|finance_wh/.test(text)) known.push('Crown jewels: SFL_DATA / FINANCE_WH');
+    if (/cloud storage|external storage|object storage/.test(text)) known.push('Destination: external cloud storage indicated by evidence');
+    if (/crown jewel|regulated data|critical data|protected data/.test(text)) known.push('Crown-jewel or protected data indicator present in evidence');
     if (/no dlp/.test(text) || /no pam/.test(text)) known.push('Control gaps: DLP/PAM coverage missing in evidence');
     if (/service account|privileged|finance|standard user/.test(text)) known.push('Affected roles: service account, privileged/IT, finance, standard users');
-    if (!/pii|customer|payroll|secret|source code|credential dump/.test(text)) unknown.push('Exact record contents copied from Snowflake are unknown from current evidence');
-    if (!/attacker-owned|external owner|malicious owner/.test(text)) unknown.push('Backblaze account ownership is unknown from current evidence');
+    if (!/pii|customer|payroll|secret|source code|credential dump/.test(text)) unknown.push('Exact data contents are unknown from current evidence');
+    if (!/attacker-owned|external owner|malicious owner/.test(text)) unknown.push('External destination ownership is unknown from current evidence');
     if (!known.length) known.push('Evidence-confirmed facts are limited to the cited rows');
     return [
       '<div class="br-known-unknown">',
@@ -262,8 +265,8 @@
   function _boundedActionsHtml(cluster) {
     var d = _dreadInfo(cluster);
     var text = d.parts.map(function (x) { return x.text; }).join(' ').toLowerCase();
-    var safe = 'Preserve endpoint, Snowflake, and network evidence';
-    var approval = /backblaze|mega|cloud/.test(text) ? 'Block or restrict exfil destinations after approval' : 'Contain affected destinations after approval';
+    var safe = 'Preserve endpoint, data-platform, and network evidence';
+    var approval = /external storage|object storage|cloud/.test(text) ? 'Block or restrict exfil destinations after approval' : 'Contain affected destinations after approval';
     var manual = 'CISO/Legal/Privacy sign-off on reporting posture';
     return [
       '<div class="br-bounded-actions">',
@@ -795,28 +798,34 @@
 
   function renderHome() {
     updateTabBar('breach');
-    var clusters = state.clusters;
     var a = state.assessment || {};
 
-    // Sort clusters by severity + verdict
-    var sorted = _rankClusters(clusters);
+    // Prefer presentation-layer threat_cases for top cards when available.
+    // Fall back to analysis_clusters (which fall back to correlation_clusters).
+    var topSource = (state.threatCases && state.threatCases.length > 0)
+      ? state.threatCases
+      : state.clusters;
+    var sorted = _rankClusters(topSource);
+    // Always keep full cluster inventory available for context/audit sections.
+    var allClusters = _rankClusters(state.clusters);
 
-    var html = _renderMetaLine(a, sorted);
+    var html = _renderMetaLine(a, allClusters);
     html += _renderBreachAnswerHero(sorted, a);
     html += _renderExecSummaryShell(sorted, a);
     html += _renderTopFindings(sorted);
-    html += _renderNarrativeContext(sorted);
-    html += _renderAdditionalFindings(sorted);
+    // Narrative context and additional findings use full cluster inventory.
+    html += _renderNarrativeContext(allClusters);
+    html += _renderAdditionalFindings(allClusters);
     // Only count benign clusters not already shown in narrative context section
-    var _shownBenignIds = new Set(sorted.filter(function(c){
+    var _shownBenignIds = new Set(allClusters.filter(function(c){
       return _vClass(c)==='benign' && ((c.row_refs||[]).length>0||c.case_type==='enrichment_guided');
     }).map(function(c){ return c.cluster_id; }));
-    var _hiddenBenignCount = sorted.filter(function(c){
+    var _hiddenBenignCount = allClusters.filter(function(c){
       return _vClass(c)==='benign' && !_shownBenignIds.has(c.cluster_id);
     }).length;
     html += _renderCollapsed('BENIGN', _hiddenBenignCount);
     html += _renderCollapsed('ISOLATED', a.isolated_count || 0);
-    html += _renderSwimlane(sorted, a);
+    html += _renderSwimlane(allClusters, a);
     html += _renderHopGraphMini(sorted[0]);
 
     document.getElementById('br-content').innerHTML = html;
@@ -830,7 +839,7 @@
     _loadExecSummary(true);
 
     // A4: mount D3 visualisations now that containers exist in DOM
-    _mountSwimlane(sorted);
+    _mountSwimlane(allClusters);
     _mountHopGraphMini(sorted[0] || null);
   }
 
@@ -844,7 +853,9 @@
       _renderCardLoading(c, idx);
       window.setTimeout(function () {
         _fireSinglePrefill(c.cluster_id, function () {
-          var resorted = _rankClusters(state.clusters);
+          var resorted = _rankClusters(
+            (state.threatCases && state.threatCases.length > 0) ? state.threatCases : state.clusters
+          );
           var hero = document.querySelector('[data-role="breach-answer-hero"]');
           if (hero) hero.outerHTML = _renderBreachAnswerHero(resorted, assessment);
           _loadExecSummary(true);
@@ -1013,7 +1024,7 @@
     if (rowCount > 0) {
       var unexplained = rowCount - breachRows - explainedRows;
       if (unexplained > 0) {
-        html += '<span style="opacity:.5;">' + unexplained.toLocaleString() + ' rows — background noise, no breach evidence</span>';
+        html += '<span style="opacity:.5;">' + unexplained.toLocaleString() + ' rows — unclassified telemetry, not confirmed benign</span>';
       }
     }
     if (coverageNote) {

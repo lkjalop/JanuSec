@@ -31,6 +31,8 @@ def build_correlation_keys(event: Dict[str, Any], *, extra_values: Dict[str, Any
         _append(keys, 'subscription', src.get('subscription_id'))
         _append(keys, 'interface', src.get('interface_id'))
         _append(keys, 'domain', src.get('domain'))
+        _append(keys, 'ja3', src.get('ja3') or src.get('ja3_fingerprint'))
+        _append(keys, 'asn', src.get('dest_asn') or src.get('src_asn') or src.get('asn'))
     # de-dupe, preserve order
     seen = set()
     ordered: list[str] = []

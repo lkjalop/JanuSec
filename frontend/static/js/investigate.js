@@ -62,6 +62,26 @@
     d.textContent = String(s);
     return d.innerHTML;
   }
+  var esc = escHtml;
+
+  // Lightweight markdown → safe HTML (headers, bold, bullets, line breaks)
+  function mdToHtml(s) {
+    if (!s) return '';
+    var lines = String(s).split('\n');
+    var out = [];
+    lines.forEach(function(line) {
+      var t = line
+        .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      if (/^#{3,}\s/.test(t))      { out.push('<div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted,#7a7f8e);margin:8px 0 3px;">' + t.replace(/^#{3,}\s/,'') + '</div>'); return; }
+      if (/^##\s/.test(t))         { out.push('<div style="font-size:11px;font-weight:700;color:var(--text,#e8ebf0);margin:10px 0 3px;">' + t.replace(/^##\s/,'') + '</div>'); return; }
+      if (/^#\s/.test(t))          { out.push('<div style="font-size:12px;font-weight:700;color:var(--text,#e8ebf0);margin:10px 0 4px;">' + t.replace(/^#\s/,'') + '</div>'); return; }
+      if (/^[-*]\s/.test(t))       { out.push('<div style="padding-left:14px;margin:1px 0;">• ' + t.replace(/^[-*]\s/,'').replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>') + '</div>'); return; }
+      if (/^\d+\.\s/.test(t))      { out.push('<div style="padding-left:14px;margin:1px 0;">' + t.replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>') + '</div>'); return; }
+      if (t.trim() === '')         { out.push('<div style="height:5px;"></div>'); return; }
+      out.push('<div style="margin:1px 0;">' + t.replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>').replace(/`([^`]+)`/g,'<code style="font-size:10px;background:rgba(255,255,255,.07);padding:1px 4px;border-radius:3px;">$1</code>') + '</div>');
+    });
+    return out.join('');
+  }
 
   // ── Tab switching ────────────────────────────────────────────────────────
   function switchTab(name) {
@@ -649,6 +669,14 @@
       }
       if (!assessment.assessment_id) assessment = analyzeData;
       state.assessment = assessment;
+      // Expose for Playwright tests and external tooling — read-only snapshot of the last assessment
+      window._lastAssessment = assessment;
+      window._investigateState = {
+        assessmentId: assessment.assessment_id || state.assessmentId,
+        correlationClusters: assessment.correlation_clusters || [],
+        evidenceRows: assessment.evidence_rows || assessment.rows || [],
+        status: 'ready',
+      };
       $('pipelineBarFill').style.width = '70%';
 
       // Step 3c: Store clusters first so buildEvidenceFromAssessment can mark correlated rows
@@ -729,11 +757,44 @@
     return state.assessment || {};
   }
 
+  // ── Build a row_index → cluster lookup ───────────────────────────────────
+  function buildRowClusterIndex() {
+    var idx = {}; // row_index -> {cluster_id, severity, label, row_refs}
+    if (!state.clusterMap) return idx;
+    for (var cid in state.clusterMap) {
+      var c = state.clusterMap[cid];
+      var refs = c.row_refs || [];
+      refs.forEach(function(r) { idx[r] = { cluster_id: cid, severity: c.severity || 'low', label: c.label || c.cluster_label || cid, row_refs: refs }; });
+    }
+    return idx;
+  }
+
+  // ── Semantic source tag from filename + row fields ────────────────────────
+  function semanticSource(row) {
+    var src = (row._source || '').toLowerCase();
+    var notes = (row.analyst_notes || row.llm_summary || '').toLowerCase();
+    if (src.includes('okta') || row.activityDisplayName || row.userPrincipalName) return 'identity · okta';
+    if (src.includes('m365') || src.includes('exchange') || row.MailboxOwnerUPN) return 'email · m365';
+    if (src.includes('mimecast') || src.includes('proofpoint')) return 'email · gateway';
+    if (src.includes('sailpoint')) return 'identity · iam';
+    if (src.includes('entra') || src.includes('aad') || src.includes('azure')) return 'cloud · azure';
+    if (src.includes('cloudtrail') || src.includes('guardduty') || src.includes('aws')) return 'cloud · aws';
+    if (src.includes('zeek') || src.includes('net') || src.includes('bgp') || src.includes('c2')) return 'network';
+    if (src.includes('sysmon') || src.includes('evtx') || src.includes('endpoint')) return 'endpoint';
+    if (notes.includes('c2') || notes.includes('beacon')) return 'network · c2';
+    if (row.dns_query) return 'network · dns';
+    if (row.proto === 'smb' || row.port === 445) return 'network · smb';
+    return shortSource(row._source || '?');
+  }
+
   // ── Build evidence rows from assessment ──────────────────────────────────
   function buildEvidenceFromAssessment(assessment) {
+    var rowClusterIdx = buildRowClusterIndex();
+
     var rows = state.allRows.map(function (original, idx) {
       var severity = classifySeverity(original);
-      var isCorrelated = detectCorrelation(original, idx);
+      var clusterInfo = rowClusterIdx[idx] || null;
+      var isCorrelated = !!clusterInfo || detectCorrelation(original, idx);
       var entity = extractPrimaryEntity(original);
       var description = extractDescription(original);
       var triage = computeLocalTriageScore(original, severity, isCorrelated);
@@ -741,10 +802,17 @@
       return {
         row_index: idx,
         source: original._source || 'unknown',
-        severity: severity,
+        source_label: semanticSource(original),
+        severity: clusterInfo ? (clusterInfo.severity || severity) : severity,
         type: isCorrelated ? 'correlated' : 'isolated',
+        cluster_id: clusterInfo ? clusterInfo.cluster_id : null,
+        cluster_label: clusterInfo ? clusterInfo.label : null,
+        cluster_severity: clusterInfo ? clusterInfo.severity : null,
+        cluster_row_refs: clusterInfo ? clusterInfo.row_refs : [],
         entity: entity,
         description: description,
+        mitre: original.mitre_technique || original.mitre_techniques || original.technique_id || null,
+        analyst_notes: original.analyst_notes || original.llm_summary || null,
         triage_score: triage,
         raw: original,
         _hasLlm: false,
@@ -856,7 +924,15 @@
   function extractDescription(row) {
     return row.Description || row.description || row.eventName || row.operationName ||
       row.activityDisplayName || row.riskEventType || row.displayName ||
-      row.category || row.proto || '';
+      row.category || row.proto ||
+      row.analyst_notes || row.llm_summary || row.summary ||
+      row.dns_query || row.user_agent ||
+      (row.target_app_or_resource ? 'Target: ' + row.target_app_or_resource : '') ||
+      (row.mitre_technique ? 'MITRE: ' + row.mitre_technique : '') ||
+      (row.technique_id ? 'MITRE: ' + row.technique_id : '') ||
+      (row.event_id ? 'Event ID: ' + row.event_id : '') ||
+      (row.file_hash ? 'Hash: ' + row.file_hash : '') ||
+      '';
   }
 
   function computeLocalTriageScore(row, severity, isCorrelated) {
@@ -922,23 +998,62 @@
     var filtered = filterRows(rows);
     var tbody = $('evidenceBody');
     tbody.innerHTML = '';
-    $('evidenceEmpty').style.display = filtered.length ? 'none' : '';
+    var hasRows = filtered.length > 0;
+    var tbl = $('evidenceTable');
+    if (tbl) tbl.style.display = hasRows ? '' : 'none';
+    $('evidenceEmpty').style.display = hasRows ? 'none' : '';
     $('evidenceCount').textContent = filtered.length + ' of ' + rows.length + ' events';
 
     filtered.forEach(function (row) {
       var tr = document.createElement('tr');
       tr.setAttribute('data-idx', row.row_index);
+
+      // Cluster chip
+      var clusterChip = row.cluster_id
+        ? '<span style="font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;background:rgba(124,106,247,.15);color:#a89cf7;border:1px solid rgba(124,106,247,.3);cursor:pointer;" data-open-cluster="' + escHtml(row.cluster_id) + '" title="Open cluster drawer">' + escHtml(row.cluster_id) + '</span>'
+        : '<span style="font-size:9px;color:var(--text-muted,#7a7f8e);padding:1px 5px;">isolated</span>';
+
+      // MITRE chip
+      var mitreChip = row.mitre
+        ? ' <span style="font-size:9px;padding:1px 5px;border-radius:3px;background:rgba(224,196,70,.1);color:#e0c446;border:1px solid rgba(224,196,70,.25);" title="' + escHtml(row.mitre) + '">' + escHtml(String(row.mitre).split(',')[0].trim().substring(0,12)) + '</span>'
+        : '';
+
+      // Description — use analyst_notes if description empty
+      var desc = row.description || row.analyst_notes || '';
+
       tr.innerHTML =
-        '<td>' + row.row_index + '</td>' +
-        '<td><span class="corr-icon" title="' + (row.type === 'correlated' ? 'Correlated across sources' : 'Isolated') + '">' + (row.type === 'correlated' ? '●' : '') + '</span></td>' +
-        '<td><span class="text-xs">' + escHtml(shortSource(row.source)) + '</span></td>' +
+        '<td style="color:var(--text-muted);font-size:10px;">' + row.row_index + '</td>' +
+        '<td>' + clusterChip + '</td>' +
+        '<td><span class="text-xs" style="color:var(--text-muted);">' + escHtml(row.source_label || shortSource(row.source)) + '</span></td>' +
         '<td><span class="sev-pill sev-pill--' + row.severity + '">' + row.severity.toUpperCase() + '</span></td>' +
-        '<td><span class="text-xs">' + escHtml(row.type) + '</span></td>' +
-        '<td title="' + escHtml(row.entity) + '">' + escHtml(truncate(row.entity, 30)) + '</td>' +
-        '<td title="' + escHtml(row.description) + '">' + escHtml(truncate(row.description, 40)) + '</td>' +
-        '<td style="font-weight:600; color:' + scoreColor(row.triage_score) + '">' + row.triage_score.toFixed(2) + '</td>' +
-        '<td>' + (row._hasLlm ? '<span style="color:var(--safe)">✓</span>' : '<button class="btn-secondary" style="padding:2px 6px;font-size:10px;" data-llm="' + row.row_index + '">T1</button>') + '</td>';
-      tr.addEventListener('click', function () { showDetail(row); });
+        '<td title="' + escHtml(row.entity) + '" style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escHtml(truncate(row.entity, 28)) + '</td>' +
+        '<td title="' + escHtml(desc) + '" style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escHtml(truncate(desc, 55)) + mitreChip + '</td>' +
+        '<td style="font-weight:600;color:' + scoreColor(row.triage_score) + ';font-size:11px;">' + row.triage_score.toFixed(2) + '</td>' +
+        '<td style="white-space:nowrap;">' +
+          (row._hasLlm ? '<span style="color:var(--safe);font-size:10px;">✓ T1</span>' : '<button class="btn-secondary" style="padding:2px 5px;font-size:10px;" data-llm="' + row.row_index + '">T1</button>') +
+          ' <button class="btn-secondary" style="padding:2px 5px;font-size:10px;background:rgba(124,106,247,.1);border-color:rgba(124,106,247,.3);color:#a89cf7;" data-ev-expand="' + row.row_index + '">EXPAND</button>' +
+        '</td>';
+
+      // Row click → detail panel
+      tr.addEventListener('click', function (e) {
+        // Don't trigger detail if clicking cluster chip or expand button
+        if (e.target.closest('[data-open-cluster]') || e.target.closest('[data-ev-expand]')) return;
+        showDetail(row);
+      });
+
+      // Cluster chip click → open cluster drawer
+      tr.querySelector('[data-open-cluster]') && tr.querySelector('[data-open-cluster]').addEventListener('click', function(e) {
+        e.stopPropagation();
+        var cid = e.currentTarget.getAttribute('data-open-cluster');
+        if (window._cdOpen) window._cdOpen(cid);
+      });
+
+      // EXPAND button click → row expand drawer
+      tr.querySelector('[data-ev-expand]') && tr.querySelector('[data-ev-expand]').addEventListener('click', function(e) {
+        e.stopPropagation();
+        showDetail(row);
+      });
+
       tbody.appendChild(tr);
     });
   }
@@ -963,7 +1078,9 @@
 
   function shortSource(name) {
     if (!name) return '?';
-    return name.length > 20 ? name.substring(0, 18) + '…' : name;
+    // Strip common filename noise: extensions, UUIDs, version strings
+    var s = name.replace(/\.(csv|json|xlsx|xls|txt|log)$/i, '').replace(/_v\d+[\.\d]*/i, '').replace(/janusec_/i, '');
+    return s.length > 22 ? s.substring(0, 20) + '…' : s;
   }
 
   function truncate(s, max) {
@@ -1823,11 +1940,50 @@
     html += '<div class="mb-2"><span class="sev-pill sev-pill--' + row.severity + '">' + row.severity.toUpperCase() + '</span>';
     html += ' <span class="sev-pill sev-pill--' + (row.type === 'correlated' ? 'info' : 'low') + '">' + row.type + '</span></div>';
 
+    // Cluster membership banner
+    if (row.cluster_id) {
+      var clusterRefs = row.cluster_row_refs || [];
+      html += '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 12px;margin-bottom:10px;border-radius:6px;background:rgba(124,106,247,.08);border:1px solid rgba(124,106,247,.25);">';
+      html += '<span style="font-size:10px;font-weight:700;color:#a89cf7;">CLUSTER</span>';
+      html += '<span style="font-size:11px;font-weight:700;color:var(--text,#e8ebf0);">' + escHtml(row.cluster_id) + '</span>';
+      if (row.cluster_label && row.cluster_label !== row.cluster_id) html += '<span style="font-size:10px;color:var(--text-muted);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escHtml(row.cluster_label) + '</span>';
+      html += '<span class="sev-pill sev-pill--' + (row.cluster_severity || row.severity) + '" style="font-size:9px;">' + (row.cluster_severity || row.severity).toUpperCase() + '</span>';
+      html += '<span style="font-size:10px;color:var(--text-muted);">' + clusterRefs.length + ' rows</span>';
+      html += '<button class="btn-secondary" style="padding:2px 8px;font-size:10px;" onclick="if(window._cdOpen) window._cdOpen(\'' + escHtml(row.cluster_id) + '\')">Open Cluster →</button>';
+      html += '</div>';
+
+      // Related rows in same cluster (same entity or same cluster)
+      var related = (state.evidenceRows || []).filter(function(r) {
+        return r.row_index !== row.row_index && r.cluster_id === row.cluster_id;
+      }).slice(0, 8);
+      if (related.length) {
+        html += '<div class="report-section"><div class="report-section__title">Related Rows — ' + escHtml(row.cluster_id) + '</div><div class="report-section__body" style="display:flex;flex-direction:column;gap:3px;">';
+        related.forEach(function(r) {
+          var rdesc = truncate(r.description || r.analyst_notes || r.entity || '', 50);
+          html += '<div style="display:flex;align-items:center;gap:6px;font-size:11px;padding:3px 0;border-bottom:1px solid rgba(255,255,255,.04);cursor:pointer;" onclick="showDetail(' + JSON.stringify({row_index:r.row_index,source:r.source,source_label:r.source_label,severity:r.severity,type:r.type,cluster_id:r.cluster_id,cluster_label:r.cluster_label,cluster_severity:r.cluster_severity,cluster_row_refs:r.cluster_row_refs,entity:r.entity,description:r.description,mitre:r.mitre,analyst_notes:r.analyst_notes,triage_score:r.triage_score,_hasLlm:r._hasLlm,_llmSummary:r._llmSummary,raw:r.raw}).replace(/'/g,"&#39;") + ')">';
+          html += '<span style="color:var(--text-muted);min-width:28px;">row[' + r.row_index + ']</span>';
+          html += '<span class="sev-pill sev-pill--' + r.severity + '" style="font-size:9px;">' + r.severity.substring(0,4).toUpperCase() + '</span>';
+          html += '<span style="flex:1;color:var(--text,#e8ebf0);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escHtml(rdesc || r.entity) + '</span>';
+          if (r.mitre) html += '<span style="font-size:9px;color:#e0c446;">' + escHtml(String(r.mitre).split(',')[0].trim().substring(0,12)) + '</span>';
+          html += '</div>';
+        });
+        if (clusterRefs.length > 9) html += '<div style="font-size:10px;color:var(--text-muted);padding-top:3px;">+' + (clusterRefs.length - 8) + ' more rows in this cluster</div>';
+        html += '</div></div>';
+      }
+    }
+
     html += '<div class="report-section"><div class="report-section__title">Overview</div><div class="report-section__body">';
-    html += '<p><b>Source:</b> ' + escHtml(row.source) + '</p>';
+    html += '<p><b>Source:</b> ' + escHtml(row.source_label || row.source) + '</p>';
     html += '<p><b>Entity:</b> ' + escHtml(row.entity) + '</p>';
-    html += '<p><b>Description:</b> ' + escHtml(row.description || 'N/A') + '</p>';
+    var displayDesc = row.description || row.analyst_notes || '';
+    html += '<p><b>Description:</b> ' + escHtml(displayDesc || '—') + '</p>';
+    if (row.mitre) html += '<p><b>MITRE:</b> <span style="color:#e0c446;font-family:monospace;">' + escHtml(row.mitre) + '</span></p>';
     html += '<p><b>Triage Score:</b> <span style="color:' + scoreColor(row.triage_score) + ';font-weight:600;">' + row.triage_score.toFixed(2) + '</span></p>';
+    // Analyst notes (full text if different from description)
+    if (row.analyst_notes && row.analyst_notes !== row.description) {
+      html += '<details style="margin-top:6px;"><summary style="font-size:11px;color:var(--text-muted);cursor:pointer;">Analyst Notes</summary>';
+      html += '<p style="font-size:11px;margin-top:4px;white-space:pre-wrap;color:var(--text,#e8ebf0);">' + escHtml(row.analyst_notes) + '</p></details>';
+    }
     html += '</div></div>';
 
     // Score breakdown accordion with evidence analysis and role playbook
@@ -2121,15 +2277,66 @@
       canvas.innerHTML = '<p class="text-sm text-muted" style="padding:16px">D3 library unavailable.</p>';
       return;
     }
+
+    // ── Graph cluster filter bar ──────────────────────────────────────────
+    var grFilter = $('graphClusterFilter');
+    if (!grFilter) {
+      grFilter = document.createElement('div');
+      grFilter.id = 'graphClusterFilter';
+      grFilter.style.cssText = 'display:flex;align-items:center;gap:6px;padding:6px 10px;border-bottom:1px solid var(--border,#2a2d3a);flex-shrink:0;flex-wrap:wrap;';
+      canvas.parentNode.insertBefore(grFilter, canvas);
+    }
+    var grClusterIds = ['all'];
+    if (state.clusterMap) Object.keys(state.clusterMap).sort().forEach(function(cid) { grClusterIds.push(cid); });
+    var activeGrFilter = window._grActiveFilter || 'all';
+    var showInternalIPs = window._grShowInternal !== false;
+    grFilter.innerHTML = '<span style="font-size:10px;color:var(--text-muted);font-weight:600;">Cluster:</span>' +
+      grClusterIds.map(function(cid) {
+        var isActive = cid === activeGrFilter;
+        var c = state.clusterMap && state.clusterMap[cid];
+        var label = cid === 'all' ? 'All' : cid + (c ? ' (' + (c.row_refs||[]).length + ')' : '');
+        return '<button style="font-size:10px;padding:2px 7px;border-radius:4px;cursor:pointer;border:1px solid ' + (isActive?'var(--accent,#7c6af7)':'var(--border,#2a2d3a)') + ';background:' + (isActive?'rgba(124,106,247,.15)':'transparent') + ';color:' + (isActive?'#a89cf7':'var(--text-muted)') + ';" data-gr-filter="' + escHtml(cid) + '">' + escHtml(label) + '</button>';
+      }).join('') +
+      '<span style="margin-left:8px;font-size:10px;color:var(--text-muted);">|</span>' +
+      '<label style="font-size:10px;color:var(--text-muted);cursor:pointer;user-select:none;">' +
+        '<input type="checkbox" id="grShowInternal" style="margin-right:3px;"' + (showInternalIPs ? ' checked' : '') + '>Internal IPs</label>' +
+      '<span style="font-size:10px;color:var(--text-muted);">Legend:</span>' +
+      '<span style="font-size:10px;padding:1px 6px;border-radius:3px;background:rgba(229,72,72,.2);color:#E54848;border:1px solid rgba(229,72,72,.3);">● External IP</span>' +
+      '<span style="font-size:10px;padding:1px 6px;border-radius:3px;background:rgba(74,99,231,.2);color:#8899f7;border:1px solid rgba(74,99,231,.3);">● Internal IP</span>' +
+      '<span style="font-size:10px;padding:1px 6px;border-radius:3px;background:rgba(63,168,96,.2);color:#3FA860;border:1px solid rgba(63,168,96,.3);">● User</span>';
+
+    grFilter.querySelectorAll('[data-gr-filter]').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        window._grActiveFilter = btn.getAttribute('data-gr-filter');
+        renderGraph(state.evidenceRows);
+      });
+    });
+    var grIntCheck = document.getElementById('grShowInternal');
+    if (grIntCheck) grIntCheck.addEventListener('change', function() {
+      window._grShowInternal = grIntCheck.checked;
+      renderGraph(state.evidenceRows);
+    });
+
+    // Apply cluster filter to rows
+    var filteredEvRows = evRows;
+    if (activeGrFilter !== 'all') {
+      filteredEvRows = evRows.filter(function(r) { return r.cluster_id === activeGrFilter; });
+    }
+
     var W = canvas.clientWidth || 800;
     var H = Math.max(420, canvas.clientHeight || 500);
 
     var entityMap = {};
-    evRows.forEach(function (row) {
+    filteredEvRows.forEach(function (row) {
       var e = row.entity;
       if (!e || e === '-') return;
+      var isInternal = /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(e);
+      if (isInternal && !showInternalIPs) return;
+      var nt = guessEntityType(e, row);
+      // Distinguish internal vs external IPs by nodeType
+      if (nt === 'ip') nt = isInternal ? 'ip_internal' : 'ip_external';
       if (!entityMap[e]) {
-        entityMap[e] = { id: e, label: e.length > 22 ? e.slice(0, 20) + '…' : e, nodeType: guessEntityType(e, row), severity: row.severity, count: 0, srcList: [] };
+        entityMap[e] = { id: e, label: e.length > 22 ? e.slice(0, 20) + '…' : e, nodeType: nt, severity: row.severity, count: 0, srcList: [], cluster_id: row.cluster_id, isInternal: isInternal };
       }
       entityMap[e].count++;
       if (entityMap[e].srcList.indexOf(row.source) < 0) entityMap[e].srcList.push(row.source);
@@ -2162,7 +2369,7 @@
       });
     });
 
-    var NODE_COLORS = { user: '#4A63E7', ip: '#E54848', resource: '#2DB67C', detection: '#FF8A3C', source: '#708090', other: '#E0C446' };
+    var NODE_COLORS = { user: '#3FA860', ip_external: '#E54848', ip_internal: '#4A63E7', ip: '#E54848', resource: '#2DB67C', detection: '#FF8A3C', source: '#708090', other: '#E0C446' };
     var SEV_R = { critical: 10, high: 8, medium: 6, low: 5 };
 
     var zoom = d3.zoom().scaleExtent([0.25, 3]).on('zoom', function (event) { g.attr('transform', event.transform); });
@@ -2172,7 +2379,7 @@
     _hopGraphState.svg = svg;
     _hopGraphState.zoom = zoom;
 
-    var lgData = [{ l: 'User', c: NODE_COLORS.user }, { l: 'IP', c: NODE_COLORS.ip }, { l: 'Resource', c: NODE_COLORS.resource }, { l: 'Detection', c: NODE_COLORS.detection }, { l: 'Source', c: NODE_COLORS.source }];
+    var lgData = [{ l: 'User', c: NODE_COLORS.user }, { l: 'External IP', c: NODE_COLORS.ip_external }, { l: 'Internal IP', c: NODE_COLORS.ip_internal }, { l: 'Resource', c: NODE_COLORS.resource }, { l: 'Source', c: NODE_COLORS.source }];
     var lg = svg.append('g').attr('transform', 'translate(8,8)');
     lgData.forEach(function (ld, i) {
       lg.append('circle').attr('cx', 6).attr('cy', i * 18 + 6).attr('r', 5).attr('fill', ld.c).attr('opacity', 0.85);
@@ -2245,7 +2452,43 @@
     var canvas = $('timelineCanvas');
     if (!canvas || !evRows || !evRows.length) return;
     canvas.innerHTML = '';
-    var rowsWithTime = evRows.map(function (row) {
+
+    // ── Cluster filter bar ────────────────────────────────────────────────
+    var tlFilter = $('tlClusterFilter');
+    if (!tlFilter) {
+      tlFilter = document.createElement('div');
+      tlFilter.id = 'tlClusterFilter';
+      tlFilter.style.cssText = 'display:flex;align-items:center;gap:6px;padding:6px 10px;border-bottom:1px solid var(--border,#2a2d3a);flex-shrink:0;flex-wrap:wrap;';
+      canvas.parentNode.insertBefore(tlFilter, canvas);
+    }
+    var clusterIds = ['all'];
+    if (state.clusterMap) Object.keys(state.clusterMap).sort().forEach(function(cid) { clusterIds.push(cid); });
+    var activeTlFilter = window._tlActiveFilter || 'all';
+    tlFilter.innerHTML = '<span style="font-size:10px;color:var(--text-muted);font-weight:600;">Cluster:</span>' +
+      clusterIds.map(function(cid) {
+        var c = state.clusterMap && state.clusterMap[cid];
+        var sev = c ? c.severity : '';
+        var label = cid === 'all' ? 'All' : cid + (c ? ' (' + (c.row_refs||[]).length + ')' : '');
+        var isActive = cid === activeTlFilter;
+        return '<button style="font-size:10px;padding:2px 8px;border-radius:4px;cursor:pointer;border:1px solid ' +
+          (isActive ? 'var(--accent,#7c6af7)' : 'var(--border,#2a2d3a)') +
+          ';background:' + (isActive ? 'rgba(124,106,247,.15)' : 'transparent') +
+          ';color:' + (isActive ? '#a89cf7' : 'var(--text-muted)') + ';" data-tl-filter="' + escHtml(cid) + '">' + escHtml(label) + '</button>';
+      }).join('');
+    tlFilter.querySelectorAll('[data-tl-filter]').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        window._tlActiveFilter = btn.getAttribute('data-tl-filter');
+        renderTimeline(state.evidenceRows);
+      });
+    });
+
+    // Apply cluster filter
+    var filteredEvRows = evRows;
+    if (activeTlFilter !== 'all') {
+      filteredEvRows = evRows.filter(function(r) { return r.cluster_id === activeTlFilter; });
+    }
+
+    var rowsWithTime = filteredEvRows.map(function (row) {
       return { ts: extractTimestamp(row), row: row };
     }).filter(function (r) { return r.ts; });
     if (!rowsWithTime.length) {
@@ -2294,9 +2537,9 @@
           if (!entityFirst[entity]) entityFirst[entity] = {};
           if (!entityFirst[entity][src]) entityFirst[entity][src] = { cx: cx, cy: cy };
         }
-        var ttip = escHtml((entity || '?') + ' — ' + (r.row.description || r.row.severity) + ' (' + fmtTs(r.ts) + ')');
+        var ttip = escHtml((entity || '?') + ' — ' + (r.row.description || r.row.analyst_notes || r.row.severity) + ' (' + fmtTs(r.ts) + ')');
         if (r.row.type === 'correlated') parts.push('<circle cx="' + cx + '" cy="' + cy + '" r="' + (rad + 4) + '" fill="none" stroke="' + color + '" stroke-width="1.5" opacity="0.4"/>');
-        parts.push('<circle cx="' + cx + '" cy="' + cy + '" r="' + rad + '" fill="' + color + '" opacity="0.8"><title>' + ttip + '</title></circle>');
+        parts.push('<circle cx="' + cx + '" cy="' + cy + '" r="' + rad + '" fill="' + color + '" opacity="0.85" style="cursor:pointer;" data-row-idx="' + r.row.row_index + '"><title>' + ttip + '</title></circle>');
       });
     });
     Object.keys(entityFirst).forEach(function (entity) {
@@ -2310,6 +2553,25 @@
     parts.push('</svg>');
     canvas.innerHTML = parts.join('');
 
+    // ── Dot click-through → showDetail ───────────────────────────────────
+    canvas.querySelectorAll('circle[data-row-idx]').forEach(function(circle) {
+      circle.addEventListener('click', function(e) {
+        var idx = parseInt(circle.getAttribute('data-row-idx'), 10);
+        var evRow = (state.evidenceRows || []).find(function(r) { return r.row_index === idx; });
+        if (evRow) { switchTab('evidence'); showDetail(evRow); }
+      });
+    });
+
+    // ── Deterministic cluster story panel ────────────────────────────────
+    var storyContainer = $('tlStoryPanel');
+    if (!storyContainer) {
+      storyContainer = document.createElement('div');
+      storyContainer.id = 'tlStoryPanel';
+      storyContainer.style.cssText = 'padding:10px 14px;border-top:1px solid var(--border,#2a2d3a);max-height:260px;overflow-y:auto;';
+      canvas.parentNode.appendChild(storyContainer);
+    }
+    storyContainer.innerHTML = _buildTimelineStory(activeTlFilter, rowsWithTime);
+
     try {
       window._lastTimelineRender = {
         rows: (rowsWithTime || []).length,
@@ -2318,6 +2580,64 @@
         hasTimestamps: (rowsWithTime || []).length > 0,
       };
     } catch (_e) {}
+  }
+
+  // ── Deterministic cluster story builder ──────────────────────────────────
+  function _buildTimelineStory(clusterId, rowsWithTime) {
+    var rows = rowsWithTime.slice().sort(function(a,b) { return a.ts - b.ts; });
+    if (!rows.length) return '';
+
+    var title = clusterId === 'all' ? 'Campaign Timeline' : 'Cluster Story — ' + clusterId;
+    var minTs = rows[0].ts;
+
+    // Group into phases by time delta buckets
+    var phases = [];
+    var cur = null;
+    rows.forEach(function(r) {
+      var dayN = Math.floor((r.ts - minTs) / 86400000);
+      var ev = r.row;
+      var desc = ev.description || ev.analyst_notes || ev.llm_summary || ev.eventName || ev.operationName || ev.activityDisplayName || '';
+      var entity = ev.entity || '-';
+      var mitre = ev.mitre || ev.mitre_technique || ev.technique_id || '';
+      var sev = ev.severity || 'low';
+      var cid = ev.cluster_id || (clusterId !== 'all' ? clusterId : null);
+
+      if (!cur || cur.dayN !== dayN) {
+        cur = { dayN: dayN, events: [], mitre: new Set(), entities: new Set(), maxSev: sev };
+        phases.push(cur);
+      }
+      cur.events.push({ desc: desc, entity: entity, mitre: mitre, sev: sev, idx: ev.row_index, cid: cid });
+      if (mitre) mitre.split(',').forEach(function(m) { cur.mitre.add(m.trim()); });
+      if (entity && entity !== '-') cur.entities.add(entity);
+      var sevOrder = {critical:4,high:3,medium:2,low:1};
+      if ((sevOrder[sev]||0) > (sevOrder[cur.maxSev]||0)) cur.maxSev = sev;
+    });
+
+    var SEV_COLORS_MAP = {critical:'#E54848',high:'#ffaa55',medium:'#e0c446',low:'#7a7f8e'};
+    var html = '<div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted,#7a7f8e);margin-bottom:8px;">' + escHtml(title) + ' <span style="font-weight:400;">(' + rows.length + ' events · ' + phases.length + ' day' + (phases.length!==1?'s':'') + ' · evidence-grounded)</span></div>';
+    html += '<div style="display:flex;flex-direction:column;gap:4px;">';
+
+    phases.forEach(function(ph) {
+      var topEv = ph.events[0];
+      var moreCount = ph.events.length - 1;
+      var mitreList = Array.from(ph.mitre).slice(0,3).join(', ');
+      var entityList = Array.from(ph.entities).slice(0,2).join(', ');
+      var sevColor = SEV_COLORS_MAP[ph.maxSev] || '#7a7f8e';
+      var rowRef = topEv.idx !== undefined ? 'row[' + topEv.idx + ']' : '';
+
+      html += '<div style="display:flex;gap:8px;align-items:flex-start;padding:5px 8px;border-radius:4px;background:rgba(255,255,255,.025);border-left:3px solid ' + sevColor + ';">';
+      html += '<span style="font-size:10px;font-weight:700;color:' + sevColor + ';min-width:44px;flex-shrink:0;">Day ' + (ph.dayN + 1) + '</span>';
+      html += '<div style="flex:1;min-width:0;">';
+      html += '<div style="font-size:11px;color:var(--text,#e8ebf0);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="' + escHtml(topEv.desc) + '">' + escHtml(truncate(topEv.desc || topEv.entity, 70)) + '</div>';
+      if (entityList) html += '<div style="font-size:10px;color:var(--text-muted);margin-top:1px;">Entities: <b style="color:var(--text,#e8ebf0);">' + escHtml(entityList) + '</b>' + (moreCount > 0 ? ' +' + moreCount + ' event' + (moreCount>1?'s':'') : '') + '</div>';
+      if (mitreList) html += '<div style="font-size:10px;color:#e0c446;margin-top:1px;font-family:monospace;">' + escHtml(mitreList) + '</div>';
+      html += '</div>';
+      if (rowRef) html += '<span style="font-size:10px;color:var(--accent,#7c6af7);flex-shrink:0;cursor:pointer;" onclick="var r=(state.evidenceRows||[]).find(function(x){return x.row_index===' + topEv.idx + '});if(r){switchTab(\'evidence\');showDetail(r);}">' + escHtml(rowRef) + '</span>';
+      html += '</div>';
+    });
+
+    html += '</div>';
+    return html;
   }
 
   function extractTimestamp(row) {
@@ -2522,7 +2842,8 @@
     function _poll() {
       if (!_investigateState.investigateId || !state.assessmentId) return;
       var pollMsg = $('investigatePollingMsg');
-      if (pollMsg) pollMsg.textContent = 'Building narrative… (' + attempt + 's elapsed)';
+      var eta = attempt < 60 ? 'usually 2-4 min for large datasets' : attempt < 180 ? 'still running — LLM generating…' : 'taking longer than expected — model may be slow';
+      if (pollMsg) pollMsg.textContent = 'Building composite narrative… ' + attempt + 's elapsed · ' + eta;
       attempt += 3;
 
       fetch(
@@ -2560,6 +2881,7 @@
         });
     }
     _investigateState._pollTimer = setTimeout(_poll, 2000);
+    window._invPollTimer = _investigateState._pollTimer;
   }
 
   // ── Render results ────────────────────────────────────────────────────────
@@ -2910,221 +3232,1842 @@
     panel.innerHTML = html;
   }
 
+  // ══════════════════════════════════════════════════════════════════
+  // CLUSTER DRAWER — persona-tabs, confirm/deny, EXPAND, threat models
+  // ══════════════════════════════════════════════════════════════════
+
+  var PERSONA_TABS = [
+    { key: 'soc_analyst',   label: 'SOC Analyst' },
+    { key: 'threat_hunter', label: 'Threat Hunter' },
+    { key: 'ciso',          label: 'CISO' },
+    { key: 'forensics',     label: 'Forensics' },
+    { key: 'compliance',    label: 'Compliance' },
+    { key: 'mssp',          label: 'MSSP' },
+    { key: 'threat_model',  label: 'Threat Model', icon: '\u29C1' },
+    { key: 'report',        label: '\uD83D\uDCCB Report' },
+  ];
+
+  // Per-cluster drawer state
+  // _cd[cid] = { persona, width, pdata:{p:{status,data}}, tasks:{key:bool|null}, expands:{key:{status,qs}}, tmodels:{type:{status,data}} }
+  var _cd = {};
+
+  function _cdState(cid) {
+    if (!_cd[cid]) {
+      var pdata = {};
+      PERSONA_TABS.forEach(function (t) { pdata[t.key] = { status: 'idle', data: null }; });
+      _cd[cid] = { persona: 'soc_analyst', width: 640, pdata: pdata, tasks: {}, taskDecisions: {}, expands: {},
+                   tmodels: { pasta: {status:'idle',data:null}, diamond: {status:'idle',data:null}, maestro: {status:'idle',data:null}, stride: {status:'idle',data:null}, dread: {status:'idle',data:null} },
+                   dreadOverrides: {}, activeExpand: null, notes: {},
+                   complianceMap: {}, riskRegister: {}, crqOverrides: {}, gapsOnly: {} };
+    }
+    return _cd[cid];
+  }
+
+  function _cdTaskKey(cid, persona, taskIdx, subIdx) {
+    return cid + ':' + persona + ':' + taskIdx + (subIdx != null ? ':' + subIdx : '');
+  }
+
+  window._cdClose = function () {
+    var d = $('clusterDrawer');
+    if (d) { d.classList.remove('open'); d.style.display = 'none'; }
+  };
+
+  window._cdPopOut = function () {
+    var cid = state.activeClusterId;
+    if (!cid) return;
+    var aid = state.assessmentId;
+    var url = '/static/investigate.html?cluster=' + encodeURIComponent(cid) + '&assessment=' + encodeURIComponent(aid || '');
+    window.open(url, 'cluster_' + cid, 'width=960,height=900,resizable=yes,scrollbars=yes');
+  };
+
+  function _cdModelSel() {
+    var sel = $('cdModelSel');
+    if (!sel) return 'qwen2.5:14b';
+    return sel.value || 'qwen2.5:14b';
+  }
+
+  function _cdPopulateModelSel() {
+    var sel = $('cdModelSel');
+    if (!sel) return;
+    sel.innerHTML = '';
+    CLUSTER_MODELS.forEach(function (m) {
+      var opt = document.createElement('option');
+      opt.value = m.value;
+      opt.textContent = m.label;
+      if (m.disabled) opt.disabled = true;
+      sel.appendChild(opt);
+    });
+  }
+
+  // Drag-resize from left edge
+  (function () {
+    var dragging = false, startX = 0, startW = 0;
+    function onMouseDown(e) {
+      dragging = true; startX = e.clientX;
+      var panel = $('cdPanel');
+      startW = panel ? panel.offsetWidth : 640;
+      document.body.style.userSelect = 'none';
+      document.body.style.cursor = 'col-resize';
+    }
+    function onMouseMove(e) {
+      if (!dragging) return;
+      var dx = startX - e.clientX;
+      var newW = Math.max(360, Math.min(window.innerWidth * 0.9, startW + dx));
+      var panel = $('cdPanel');
+      if (panel) { panel.style.setProperty('--cd-width', newW + 'px'); panel.style.width = newW + 'px'; }
+      var cid = state.activeClusterId;
+      if (cid && _cd[cid]) {
+        _cd[cid].width = newW;
+        _cdUpdateLayout(cid, _cd[cid].persona);
+      }
+    }
+    function onMouseUp() {
+      if (!dragging) return;
+      dragging = false;
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+    }
+    document.addEventListener('DOMContentLoaded', function () {
+      var h = $('cdResizeHandle');
+      if (h) {
+        h.addEventListener('mousedown', onMouseDown);
+        document.addEventListener('mousemove', onMouseMove);
+        document.addEventListener('mouseup', onMouseUp);
+      }
+    });
+  })();
+
   window.openClusterDetail = function (clusterId) {
     state.activeClusterId = String(clusterId);
     var drawer = $('clusterDrawer');
     if (!drawer) return;
-    var c = state.clusterMap[clusterId] || {};
+    var cs = _cdState(clusterId);
+    var c  = state.clusterMap[clusterId] || {};
     var sev = (c.severity || 'medium').toLowerCase();
     var label = c.label || c.summary || ('Cluster ' + clusterId);
-    var rows = c.row_count || (c.row_refs || []).length || 0;
-    var entities = (c.entities || c.top_entities || []).slice(0, 6);
+    var rows  = c.row_count || (c.row_refs || []).length || 0;
+    var entities = (c.entities || c.top_entities || []).slice(0, 5);
 
     $('clusterDrawerTitle').textContent = label;
     $('clusterDrawerMeta').innerHTML =
       '<span class="sev-pill sev-pill--' + sev + '">' + sev.toUpperCase() + '</span> ' +
       rows + ' rows' +
-      (entities.length ? ' · ' + entities.map(function (e) { return '<span class="entity-chip">' + escHtml(String(e)) + '</span>'; }).join(' ') : '');
+      (entities.length ? ' · ' + entities.map(function (e) {
+        return '<span class="entity-chip">' + escHtml(String(e)) + '</span>';
+      }).join(' ') : '');
 
-    // Reset result containers
-    var summaryEl = $('llmSummaryResult_' + clusterId);
-    var enrichEl  = $('enrichResult_'    + clusterId);
-    var huntEl    = $('huntResult_'      + clusterId);
-    if (summaryEl) summaryEl.innerHTML = '';
-    if (enrichEl)  enrichEl.innerHTML  = '';
-    if (huntEl)    huntEl.innerHTML    = '';
+    // Restore panel width from state
+    var panel = $('cdPanel');
+    if (panel && cs.width) panel.style.width = cs.width + 'px';
 
-    // Ensure per-cluster elements exist inside the drawer template
-    _ensureClusterElements(clusterId);
+    _cdPopulateModelSel();
+    _cdBuildTabs(clusterId);
 
-    drawer.classList.add('open');
     drawer.style.display = '';
+    drawer.classList.add('open');
+
+    // Lazy tier1_prefill: if cluster has no incident_name yet, request it on-demand
+    if (!c.tier1_prefill || !c.tier1_prefill.incident_name) {
+      _cdFetchTier1Prefill(clusterId);
+    }
+
+    // Auto-load SOC Analyst tab on open if idle
+    if (cs.pdata.soc_analyst.status === 'idle') {
+      _cdLoadPersona(clusterId, 'soc_analyst');
+    } else {
+      _cdShowPane(clusterId, cs.persona || 'soc_analyst');
+    }
   };
+
+  function _cdFetchTier1Prefill(clusterId) {
+    if (!state.assessmentId) return;
+    var base = (state.apiBase || '').replace(/\/$/, '');
+    var url = base + '/api/v1/assessments/' + encodeURIComponent(state.assessmentId) +
+              '/clusters/' + encodeURIComponent(clusterId) + '/tier1-summary';
+    var headers = { 'Content-Type': 'application/json', 'Accept': 'application/json' };
+    var apiKey = localStorage.getItem('apiKey');
+    if (apiKey) headers['X-API-Key'] = apiKey;
+    var model = _cdModelSel();
+
+    fetch(url, {
+      method: 'POST',
+      headers: headers,
+      body: JSON.stringify({ model: model }),
+    })
+      .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
+      .then(function (data) {
+        var c = state.clusterMap[clusterId];
+        if (!c) return;
+        c.tier1_prefill = data.tier1_prefill || data;
+        var name = (c.tier1_prefill || {}).incident_name;
+        if (name) {
+          c.label = name;
+          // Update drawer title if still open on this cluster
+          if (state.activeClusterId === String(clusterId)) {
+            var titleEl = document.getElementById('clusterDrawerTitle');
+            if (titleEl) titleEl.textContent = name;
+          }
+          renderClusterList();
+        }
+      })
+      .catch(function () { /* silent — prefill is best-effort */ });
+  }
 
   window.openTier2Canvas = function (clusterId) {
     if (!state.assessmentId) { toast('Run Analyze first', 'warn'); return; }
-    var persona = state.currentPersona || 'soc_analyst';
-    var modelEl = document.getElementById('llmModelSel_' + clusterId);
-    var model = (modelEl && modelEl.value) || 'qwen2.5:14b';
     var url = '/static/tier2_investigation.html' +
               '?assessment_id=' + encodeURIComponent(state.assessmentId) +
-              '&cluster_id='    + encodeURIComponent(clusterId) +
-              '&persona='       + encodeURIComponent(persona) +
-              '&llm_model='     + encodeURIComponent(model);
+              '&cluster_id=' + encodeURIComponent(clusterId) +
+              '&persona=' + encodeURIComponent(state.currentPersona || 'soc_analyst') +
+              '&llm_model=' + encodeURIComponent(_cdModelSel());
     window.open(url, '_blank', 'width=1400,height=900');
   };
 
-  function _ensureClusterElements(cid) {
-    var container = $('clusterDrawerBody');
-    if (!container) return;
-    if ($('llmSummaryResult_' + cid)) return; // already created
-    var frag = document.createElement('div');
-    frag.id = 'clusterResultsFor_' + cid;
-    frag.innerHTML =
-      '<div id="llmSummaryResult_' + cid + '" class="cluster-result-block" style="display:none;"></div>' +
-      '<div id="enrichResult_'    + cid + '" class="cluster-result-block" style="display:none;"></div>' +
-      '<div id="huntResult_'      + cid + '" class="cluster-result-block" style="display:none;"></div>';
-    container.appendChild(frag);
-    // Model selector
-    var sel = $('llmModelSel_' + cid);
-    if (!sel) {
-      var selWrap = $('clusterModelSelWrap');
-      if (selWrap) {
-        var newSel = document.createElement('select');
-        newSel.id = 'llmModelSel_' + cid;
-        newSel.className = 'cluster-model-sel';
-        CLUSTER_MODELS.forEach(function (m) {
-          var opt = document.createElement('option');
-          opt.value = m.value; opt.textContent = m.label;
-          if (m.disabled) opt.disabled = true;
-          newSel.appendChild(opt);
-        });
-        selWrap.appendChild(newSel);
-      }
+  function _cdBuildTabs(cid) {
+    var tabsEl = $('cdPersonaTabs');
+    if (!tabsEl) return;
+    tabsEl.innerHTML = '';
+    PERSONA_TABS.forEach(function (t) {
+      var btn = document.createElement('button');
+      btn.className = 'cd-ptab';
+      btn.setAttribute('role', 'tab');
+      btn.setAttribute('data-persona', t.key);
+      btn.textContent = t.label;
+      btn.onclick = function () { _cdSwitchPersona(cid, t.key); };
+      tabsEl.appendChild(btn);
+    });
+    _cdMarkActiveTab(cid);
+  }
+
+  function _cdMarkActiveTab(cid) {
+    var cs = _cdState(cid);
+    document.querySelectorAll('#cdPersonaTabs .cd-ptab').forEach(function (btn) {
+      var p = btn.getAttribute('data-persona');
+      btn.classList.toggle('active', p === cs.persona);
+      // Mark done if all tasks answered
+      if (p !== 'report' && _cdAllTasksDone(cid, p)) btn.classList.add('done');
+    });
+  }
+
+  function _cdAllTasksDone(cid, persona) {
+    var cs = _cdState(cid);
+    var pd = cs.pdata[persona];
+    if (!pd || pd.status !== 'loaded' || !pd.data) return false;
+    var steps = pd.data.persona_steps || [];
+    if (!steps.length) return false;
+    return steps.every(function (s, ti) {
+      return cs.tasks[_cdTaskKey(cid, persona, ti, null)] != null;
+    });
+  }
+
+  function _cdSwitchPersona(cid, persona) {
+    var cs = _cdState(cid);
+    cs.persona = persona;
+    _cdMarkActiveTab(cid);
+    if (persona === 'report') {
+      _cdShowReportPane(cid);
+      return;
+    }
+    if (persona === 'threat_model') {
+      _cdShowThreatModelTab(cid);
+      return;
+    }
+    var pd = cs.pdata[persona];
+    if (!pd) return;
+    if (pd.status === 'idle') {
+      _cdLoadPersona(cid, persona);
+    } else {
+      _cdShowPane(cid, persona);
     }
   }
 
-  window._triggerLlmSummary = async function (clusterId, assessmentId, forceRefresh, persona) {
-    assessmentId = assessmentId || state.assessmentId;
-    clusterId    = clusterId    || state.activeClusterId;
-    persona      = persona      || state.currentPersona || 'soc_analyst';
-    forceRefresh = !!forceRefresh;
-    var selEl = $('llmModelSel_' + clusterId);
-    var model = (selEl && selEl.value) || 'qwen2.5:14b';
-    _ensureClusterElements(clusterId);
-    var el = $('llmSummaryResult_' + clusterId);
-    if (el) { el.style.display = ''; el.innerHTML = '<span class="loading-dot">Summarising with ' + model + '…</span>'; }
-    try {
-      var url = '/api/v1/assessments/' + encodeURIComponent(assessmentId) +
-                '/clusters/' + encodeURIComponent(clusterId) +
-                '/tier2/llm-summary?model=' + encodeURIComponent(model) +
-                (forceRefresh ? '&force_refresh=true' : '');
-      var ctrl = new AbortController();
-      var _tmo = setTimeout(function () { ctrl.abort(); }, 180000); // 3 min for Mistral
-      var resp = await fetch(url, {
-        headers: Object.assign({ 'x-persona': persona }, authHeaders()),
-        signal: ctrl.signal,
-      });
-      clearTimeout(_tmo);
-      if (!resp.ok) throw new Error('HTTP ' + resp.status);
-      var data = await resp.json();
-      if (el) el.innerHTML = _renderLlmSummary(data, clusterId, model);
-    } catch (err) {
-      if (el) el.innerHTML = '<span class="cluster-error">Summarise failed: ' + escHtml(err.message) + '</span>';
-      toast('LLM summary failed: ' + err.message, 'error');
+  function _cdShowPane(cid, persona) {
+    var bodyEl = $('cdBody');
+    if (!bodyEl) return;
+    document.querySelectorAll('#cdBody .cd-pane').forEach(function (p) {
+      p.classList.remove('active');
+    });
+    var paneEl = document.getElementById('cdPane_' + cid + '_' + persona);
+    if (paneEl) {
+      paneEl.classList.add('active');
+    } else {
+      _cdRenderPane(cid, persona);
     }
+  }
+
+  async function _cdLoadPersona(cid, persona) {
+    var cs = _cdState(cid);
+    var pd = cs.pdata[persona];
+    pd.status = 'loading';
+    _cdShowPane(cid, persona);
+    var aid = state.assessmentId;
+    var model = _cdModelSel();
+    try {
+      var resp = await fetch(
+        '/api/v1/assessments/' + encodeURIComponent(aid) +
+        '/clusters/' + encodeURIComponent(cid) +
+        '/tier2/llm-summary?model=' + encodeURIComponent(model),
+        { headers: Object.assign({ 'x-persona': persona }, authHeaders()),
+          signal: AbortSignal.timeout(180000) }
+      );
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      pd.data = await resp.json();
+      pd.status = 'loaded';
+    } catch (err) {
+      pd.status = 'error';
+      pd.error = err.message;
+    }
+    _cdRenderPane(cid, persona);
+    _cdMarkActiveTab(cid);
+  }
+
+  function _cdRenderPane(cid, persona) {
+    var bodyEl = $('cdBody');
+    if (!bodyEl) return;
+    var paneId = 'cdPane_' + cid + '_' + persona;
+    var existing = document.getElementById(paneId);
+    if (existing) existing.remove();
+
+    // Deactivate all other panes
+    document.querySelectorAll('#cdBody .cd-pane').forEach(function (p) { p.classList.remove('active'); });
+
+    var pane = document.createElement('div');
+    pane.className = 'cd-pane active';
+    pane.id = paneId;
+
+    var cs = _cdState(cid);
+    var pd = cs.pdata[persona];
+
+    // 3-column layout wrapper
+    var layout = document.createElement('div');
+    layout.className = 'cd-col-layout';
+    layout.id = 'cdLayout_' + cid + '_' + persona;
+    layout.setAttribute('data-cols', '1');
+
+    // ── Column 1: Summary ─────────────────────────────────────────────
+    var col1 = document.createElement('div');
+    col1.className = 'cd-col cd-col--summary';
+    col1.id = 'cdColSummary_' + cid + '_' + persona;
+    if (pd.status === 'loading' || pd.status === 'idle') {
+      col1.innerHTML = '<div class="cd-loading"><div class="cd-spinner"></div>Generating ' + escHtml(persona.replace(/_/g,' ')) + ' briefing… (30-120s)</div>';
+    } else if (pd.status === 'error') {
+      col1.innerHTML = '<div class="cd-error">Failed: ' + escHtml(pd.error || 'unknown error') +
+        '<br><button class="btn-secondary" style="margin-top:8px;font-size:11px;" onclick="window._cdRetry(\'' + escHtml(cid) + '\',\'' + escHtml(persona) + '\')">Retry</button></div>';
+    } else if (pd.data) {
+      col1.innerHTML = _cdBuildPersonaHTML(cid, persona, pd.data, cs);
+    }
+
+    // ── Column 2: EXPAND investigate ──────────────────────────────────
+    var col2 = document.createElement('div');
+    col2.className = 'cd-col cd-col--expand';
+    col2.id = 'cdColExpand_' + cid + '_' + persona;
+    col2.innerHTML = _cdBuildExpandColHTML(cid, persona, cs);
+
+    layout.appendChild(col1);
+    layout.appendChild(col2);
+    pane.appendChild(layout);
+    bodyEl.appendChild(pane);
+
+    // Wire confirm/deny buttons
+    if (pd.status === 'loaded') _cdWireButtons(col1, cid, persona);
+
+    // Activate columns based on current state + panel width
+    _cdUpdateLayout(cid, persona);
+  }
+
+  window._cdRetry = function (cid, persona) {
+    var cs = _cdState(cid);
+    cs.pdata[persona].status = 'idle';
+    _cdLoadPersona(cid, persona);
   };
 
-  window._triggerClusterEnrich = async function (clusterId, assessmentId, forceRefresh, model) {
-    assessmentId = assessmentId || state.assessmentId;
-    clusterId    = clusterId    || state.activeClusterId;
-    forceRefresh = !!forceRefresh;
-    model        = model || (($('llmModelSel_' + clusterId) || {}).value) || 'qwen2.5:14b';
-    _ensureClusterElements(clusterId);
-    var el = $('enrichResult_' + clusterId);
-    if (el) { el.style.display = ''; el.innerHTML = '<span class="loading-dot">Running CRAG enrich…</span>'; }
-    try {
-      var url = '/api/v1/assessments/' + encodeURIComponent(assessmentId) +
-                '/clusters/' + encodeURIComponent(clusterId) + '/enrich';
-      var ctrl = new AbortController();
-      var _tmo = setTimeout(function () { ctrl.abort(); }, 60000);
-      var resp = await fetch(url, {
-        method: 'POST',
-        headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders()),
-        body: JSON.stringify({ tenant_id: 'default', force_refresh: forceRefresh, model: model }),
-        signal: ctrl.signal,
-      });
-      clearTimeout(_tmo);
-      if (!resp.ok) throw new Error('HTTP ' + resp.status);
-      var data = await resp.json();
-      if (el) el.innerHTML = _renderEnrichResult(data);
-    } catch (err) {
-      if (el) el.innerHTML = '<span class="cluster-error">CRAG enrich failed: ' + escHtml(err.message) + '</span>';
-      toast('CRAG enrich failed: ' + err.message, 'error');
-    }
-  };
-
-  window._triggerHuntSweep = async function (clusterId, assessmentId, forceRefresh) {
-    assessmentId = assessmentId || state.assessmentId;
-    clusterId    = clusterId    || state.activeClusterId;
-    forceRefresh = !!forceRefresh;
-    _ensureClusterElements(clusterId);
-    var el = $('huntResult_' + clusterId);
-    if (el) { el.style.display = ''; el.innerHTML = '<span class="loading-dot">Running Hunt Sweep…</span>'; }
-    try {
-      var url = '/api/v1/assessments/' + encodeURIComponent(assessmentId) +
-                '/clusters/' + encodeURIComponent(clusterId) + '/tier2';
-      var ctrl = new AbortController();
-      var _tmo = setTimeout(function () { ctrl.abort(); }, 60000);
-      var resp = await fetch(url, {
-        headers: authHeaders(),
-        signal: ctrl.signal,
-      });
-      clearTimeout(_tmo);
-      if (!resp.ok) throw new Error('HTTP ' + resp.status);
-      var data = await resp.json();
-      if (el) el.innerHTML = _renderHuntResult(data);
-    } catch (err) {
-      if (el) el.innerHTML = '<span class="cluster-error">Hunt sweep failed: ' + escHtml(err.message) + '</span>';
-    }
-  };
-
-  function _renderLlmSummary(data, clusterId, model) {
+  function _cdBuildPersonaHTML(cid, persona, data, cs) {
     var sections = data.sections || {};
     var steps    = data.persona_steps || [];
-    var persona  = data.persona_label || data.persona || '';
-    var focus    = data.persona_focus || '';
-    var fallback = data.fallback_generated ? '<span class="badge badge--warn">deterministic fallback</span> ' : '';
-    var html = '<div class="llm-summary-block">' +
-      fallback +
-      (persona ? '<strong>' + escHtml(persona) + '</strong>' : '') +
-      (focus   ? ' · <em>' + escHtml(focus) + '</em>' : '') +
-      ' <span style="font-size:10px;color:var(--text-muted);">via ' + escHtml(model) + '</span>';
-    if (sections.what_to_do)        html += '<p><strong>What to do:</strong> ' + escHtml(sections.what_to_do) + '</p>';
-    if (sections.investigate_next)  html += '<p><strong>Investigate next:</strong> ' + escHtml(sections.investigate_next) + '</p>';
-    if (sections.business_impact)   html += '<p><strong>Business impact:</strong> ' + escHtml(sections.business_impact) + '</p>';
-    if (steps.length) {
-      html += '<ol class="persona-steps">';
-      steps.forEach(function (s) {
-        html += '<li><strong>' + escHtml(s.title || s.action || '') + '</strong>';
-        if (s.owner)    html += ' <span class="badge">' + escHtml(s.owner) + '</span>';
-        if (s.priority) html += ' <span class="badge badge--' + (s.priority === 'P1' ? 'crit' : 'info') + '">' + escHtml(s.priority) + '</span>';
-        if (s.subtasks && s.subtasks.length) {
-          html += '<ul>' + s.subtasks.map(function (t) { return '<li>' + escHtml(t) + '</li>'; }).join('') + '</ul>';
-        }
-        if (s.evidence_refs && s.evidence_refs.length) {
-          html += '<div style="font-size:10px;color:var(--text-muted);">refs: ' + s.evidence_refs.join(', ') + '</div>';
-        }
-        html += '</li>';
-      });
-      html += '</ol>';
+    var model    = data.model || _cdModelSel();
+    var fallback = data.fallback_generated;
+    var rawText  = data.raw_text || '';
+    var aid      = data.assessment_id || state.assessmentId || '';
+
+    var verdict  = sections.verdict_line || sections.is_this_real || '';
+    var vCls = 'unc';
+    var vu = verdict.toUpperCase();
+    if (vu.indexOf('LIKELY REAL') !== -1 || vu.indexOf('CONFIRMED') !== -1 || vu.indexOf('MALICIOUS') !== -1) vCls = 'real';
+    else if (vu.indexOf('FALSE POSITIVE') !== -1 || vu.indexOf('BENIGN') !== -1) vCls = 'fp';
+    var vLabel = vCls === 'real' ? 'LIKELY REAL' : vCls === 'fp' ? 'LIKELY FALSE POSITIVE' : 'UNCERTAIN';
+    var vReason = verdict.replace(/^(LIKELY REAL|FALSE POSITIVE|LIKELY FALSE POSITIVE|UN?CERTAIN|CONFIRMED)[\s:—-]*/i,'').trim().slice(0,280);
+
+    var h = '';
+    // Meta
+    h += '<div style="font-size:10px;color:var(--text-muted,#7a7f8e);margin-bottom:12px;">';
+    h += (fallback ? '<span class="badge badge--warn" style="margin-right:4px;">fallback</span>' : '');
+    h += escHtml(data.persona_label || persona.replace('_',' ')) + ' · via ' + escHtml(model);
+    h += '</div>';
+
+    // Verdict — P0-4: remove overflow hidden so text wraps fully
+    if (vLabel) {
+      h += '<div class="cd-verdict" style="flex-wrap:wrap;align-items:flex-start;">';
+      h += '<span class="cd-verdict-badge vb--' + vCls + '" style="flex-shrink:0;">' + vLabel + '</span>';
+      if (vReason) h += '<span class="cd-verdict-text" style="min-width:100%;flex:0 0 100%;margin-top:5px;">' + escHtml(vReason) + '</span>';
+      h += '</div>';
     }
-    html += '</div>';
-    return html;
+
+    // P0-3: cap "no direct evidence" occurrences to 1 across what_is_happening
+    function _capNDE(text) {
+      var count = 0;
+      return text.replace(/no direct evidence/gi, function(m) {
+        return ++count <= 1 ? m : '[see above]';
+      });
+    }
+
+    // WHAT IS HAPPENING
+    if (sections.what_is_happening) {
+      h += '<div class="cd-section"><div class="cd-section__hd">WHAT IS HAPPENING</div>';
+      h += '<div class="cd-section__body">' + escHtml(_capNDE(sections.what_is_happening)) + '</div></div>';
+    }
+
+    // WHY IT MATTERS
+    if (sections.why_it_matters) {
+      h += '<div class="cd-section"><div class="cd-section__hd">WHY IT MATTERS</div>';
+      h += '<div class="cd-section__body">' + escHtml(sections.why_it_matters) + '</div></div>';
+    }
+
+    // TOP ACTIONS
+    var hasSteps = steps && steps.length > 0;
+    var hasTodo = !!(sections.what_to_do && sections.what_to_do.trim());
+    if (hasSteps || hasTodo) {
+      h += '<div class="cd-section"><div class="cd-section__hd">TOP ACTIONS</div>';
+      if (hasSteps) {
+        h += '<div class="cd-actions">';
+        steps.forEach(function (s, ti) {
+          var cardId = 'cdc_' + escHtml(cid) + '_' + persona + '_' + ti;
+          var title  = s.title || s.action || ('Action ' + (ti + 1));
+          var prio   = s.priority || '';
+          var owner  = s.owner || '';
+          var pCls   = (prio === 'P1' || prio === 'Critical' || prio === 'High') ? 'badge--crit' : 'badge--warn';
+          var taskDone = cs.tasks[_cdTaskKey(cid, persona, ti, null)];
+          var taskCls  = taskDone === true ? 'style="border-color:#3FA860;"' : taskDone === false ? 'style="border-color:#E54848;"' : '';
+
+          h += '<div class="cd-card" ' + taskCls + '>';
+          h += '<div class="cd-card__hd" onclick="(function(){var b=document.getElementById(\'' + cardId + '_body\');var ch=document.getElementById(\'' + cardId + '_chev\');if(b){b.classList.toggle(\'open\');if(ch)ch.classList.toggle(\'open\');}})();">';
+          h += '<span class="cd-card__title">' + escHtml(title) + '</span>';
+          h += '<span class="cd-card__badges">';
+          if (owner) h += '<span class="badge" style="font-size:10px;">' + escHtml(owner) + '</span>';
+          if (prio)  h += '<span class="badge ' + pCls + '" style="font-size:10px;">' + escHtml(prio) + '</span>';
+          h += '</span>';
+          h += '<button class="cd-card__expand-btn" onclick="event.stopPropagation();window._cdExpand(\'' + escHtml(cid) + '\',\'' + escHtml(persona) + '\',' + ti + ',\'' + escHtml(title.replace(/'/g, '&#39;')) + '\')">EXPAND</button>';
+          h += '<span class="cd-card__chev" id="' + cardId + '_chev">▼</span>';
+          h += '</div>'; // hd
+
+          h += '<div class="cd-card__body" id="' + cardId + '_body">';
+          // Subtasks
+          if (s.subtasks && s.subtasks.length) {
+            h += '<ul class="cd-subtasks">';
+            s.subtasks.forEach(function (sub, si) {
+              var label = (sub && typeof sub === 'object') ? (sub.label || '') : String(sub);
+              var refs  = (sub && typeof sub === 'object' && sub.evidence_refs && sub.evidence_refs.length)
+                ? 'rows: ' + sub.evidence_refs.join(',') : '';
+              var subKey = _cdTaskKey(cid, persona, ti, si);
+              var subDone = cs.tasks[subKey];
+              h += '<li class="cd-subtask">';
+              h += '<span class="cd-subtask__text">' + escHtml(label) + '</span>';
+              if (refs) h += '<span class="cd-subtask__ref">' + escHtml(refs) + '</span>';
+              h += '<span class="cd-subtask__btns">';
+              h += '<button class="cd-confirm-btn' + (subDone === true ? ' active' : '') + '" data-ck="' + escHtml(subKey) + '" data-val="true">✓</button>';
+              h += '<button class="cd-deny-btn'    + (subDone === false? ' active' : '') + '" data-ck="' + escHtml(subKey) + '" data-val="false">✗</button>';
+              h += '</span></li>';
+            });
+            h += '</ul>';
+          }
+          // Task-level confirm/deny
+          h += '<div style="display:flex;align-items:center;gap:6px;margin-top:6px;padding-top:6px;border-top:1px solid rgba(255,255,255,.06);">';
+          h += '<span style="font-size:10px;color:var(--text-muted,#7a7f8e);flex:1;">Task verdict:</span>';
+          var tKey = _cdTaskKey(cid, persona, ti, null);
+          h += '<button class="cd-confirm-btn' + (taskDone === true ? ' active' : '') + '" data-ck="' + escHtml(tKey) + '" data-val="true">✓ Confirm</button>';
+          h += '<button class="cd-deny-btn'    + (taskDone === false? ' active' : '') + '" data-ck="' + escHtml(tKey) + '" data-val="false">✗ Deny</button>';
+          h += '</div>';
+          // EXPAND results placeholder
+          h += '<div id="' + cardId + '_expand"></div>';
+          h += '</div>'; // body
+          h += '</div>'; // card
+        });
+        h += '</div>'; // cd-actions
+      } else {
+        h += '<div class="cd-section__body">' + escHtml(sections.what_to_do) + '</div>';
+      }
+      h += '</div>'; // cd-section
+    }
+
+    // INVESTIGATE NEXT
+    if (sections.investigate_next) {
+      h += '<div class="cd-section"><div class="cd-section__hd">INVESTIGATE NEXT</div>';
+      h += '<div class="cd-section__body">' + escHtml(sections.investigate_next) + '</div></div>';
+    }
+
+    // ANSWER TO SHARPEN ANALYSIS
+    var pq = sections.persona_questions || {};
+    var qText = (typeof pq === 'object' && !Array.isArray(pq))
+      ? (pq[persona] || pq.soc_analyst || Object.values(pq)[0] || '') : String(pq || '');
+    if (qText) {
+      var qaId = 'cdQA_' + escHtml(cid) + '_' + persona;
+      h += '<div class="cd-section"><div class="cd-section__hd">ANSWER TO SHARPEN ANALYSIS</div>';
+      h += '<div style="font-size:11px;color:var(--text-muted,#7a7f8e);margin-bottom:5px;">' + escHtml(qText) + '</div>';
+      h += '<textarea id="' + qaId + '" class="cd-sharpen-input" placeholder="Your answer (optional)…" rows="2"></textarea>';
+      h += '</div>';
+    }
+
+    // Raw output (collapsed)
+    if (rawText && rawText.length > 30) {
+      h += '<details class="cd-raw-details"><summary>Raw LLM output (' + rawText.length + ' chars)</summary>';
+      h += '<pre>' + escHtml(rawText.slice(0, 1500)) + (rawText.length > 1500 ? '\n…(truncated)' : '') + '</pre>';
+      h += '</details>';
+    }
+
+    return h;
   }
 
-  function _renderEnrichResult(data) {
-    var verdict = (data.verdict || data.crag_verdict || '').toUpperCase();
-    var score   = data.composite_score != null ? Math.round(data.composite_score * 100) + '%' : '';
-    var cls     = verdict === 'ACCEPT' ? 'badge--ok' : verdict === 'REFINE' ? 'badge--warn' : 'badge--crit';
-    return '<div class="enrich-block">' +
-      '<span class="badge ' + cls + '">CRAG: ' + (verdict || 'N/A') + '</span>' +
-      (score ? ' <span class="badge">' + score + ' quality</span>' : '') +
-      (data.evidence_quality_notes ? '<p>' + escHtml(data.evidence_quality_notes) + '</p>' : '') +
-      (data.skip_reason ? '<p style="color:var(--text-muted);">Skipped: ' + escHtml(data.skip_reason) + '</p>' : '') +
-      '<span style="font-size:10px;color:var(--text-muted);">Evidence-quality gate · not an authoritative verdict</span>' +
-      '</div>';
+  // ── Column 2: EXPAND investigation ────────────────────────────────────────
+
+  function _cdFmtLag(seconds) {
+    if (seconds == null || seconds < 0) return '';
+    if (seconds < 60)   return seconds + 's';
+    if (seconds < 3600) return Math.round(seconds / 60) + 'm';
+    if (seconds < 86400) return Math.round(seconds / 3600) + 'h';
+    return Math.round(seconds / 86400) + 'd';
   }
 
-  function _renderHuntResult(data) {
-    var rows = data.member_rows || [];
-    return '<div class="hunt-block">' +
-      '<strong>Tier 2 Context</strong> — ' + rows.length + ' member rows<br>' +
-      (data.cluster_detail && data.cluster_detail.summary ? '<p>' + escHtml(data.cluster_detail.summary) + '</p>' : '') +
-      '</div>';
+  function _cdFmtDelta(delta_s) {
+    if (delta_s == null) return '';
+    var abs = Math.abs(delta_s);
+    var sign = delta_s >= 0 ? '+' : '-';
+    return sign + _cdFmtLag(abs);
   }
 
-  window.storeClusters = storeClusters;
-  window.renderClusterList = renderClusterList;
+  function _cdShortTs(ts) {
+    if (!ts) return '—';
+    // Try to show just date+time without timezone clutter
+    var m = String(ts).match(/(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})/);
+    if (m) return m[1] + ' ' + m[2];
+    return String(ts).slice(0, 16);
+  }
+
+  function _cdBuildExpandColHTML(cid, persona, cs) {
+    var ae = cs.activeExpand;
+    var h = '<div class="cd-col-hd">';
+    h += '<span class="cd-col-title">' + (ae ? escHtml('Investigate: ' + (ae.stepTitle || '')) : 'Investigation') + '</span>';
+    if (ae) {
+      h += '<button class="cd-btn-icon" onclick="window._cdRegenExpand(\'' + escHtml(cid) + '\',\'' + escHtml(persona) + '\')" title="Regenerate questions" style="font-size:11px;">↺</button>';
+      h += '<button class="cd-btn-icon" onclick="window._cdCloseExpand(\'' + escHtml(cid) + '\',\'' + escHtml(persona) + '\')" title="Close column">✕</button>';
+    }
+    h += '</div>';
+
+    if (!ae) {
+      h += '<div class="cd-placeholder">Click <strong>EXPAND</strong> on any task card<br>to open investigation Q&amp;A here.</div>';
+      return h;
+    }
+
+    // ── Evidence rows (bitemporal table) — P0-5: sort by severity DESC ────────
+    var evidence = (ae.rowEvidence || []).slice().sort(function(a, b) {
+      var sRank = {critical:4,crit:4,high:3,medium:2,med:2,low:1};
+      var ra = sRank[(a.severity||'').toLowerCase()] || 0;
+      var rb = sRank[(b.severity||'').toLowerCase()] || 0;
+      if (rb !== ra) return rb - ra;
+      // secondary: risk_score if present
+      return (b.risk_score || 0) - (a.risk_score || 0);
+    });
+    if (evidence.length) {
+      h += '<div class="cd-section">';
+      h += '<div class="cd-section__hd">EVIDENCE ROWS <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:9px;color:var(--text-muted);">sorted by event time · bitemporal</span></div>';
+      h += '<div class="cd-bt-table">';
+      h += '<div class="cd-bt-thead">';
+      h += '<span class="cd-bt-col cd-bt-col--row">Row</span>';
+      h += '<span class="cd-bt-col cd-bt-col--sev">Sev</span>';
+      h += '<span class="cd-bt-col cd-bt-col--vt">Event Time <span class="cd-bt-hint">(valid)</span></span>';
+      h += '<span class="cd-bt-col cd-bt-col--tt">Ingested <span class="cd-bt-hint">(txn)</span></span>';
+      h += '<span class="cd-bt-col cd-bt-col--lag">Lag</span>';
+      h += '<span class="cd-bt-col cd-bt-col--Δt">Δt</span>';
+      h += '<span class="cd-bt-col cd-bt-col--desc">Event / Entity</span>';
+      h += '</div>';
+      evidence.forEach(function (r) {
+        var sevCls = (r.severity === 'critical' || r.severity === 'crit') ? 'badge--crit' :
+                     r.severity === 'high' ? 'badge--warn' :
+                     r.severity === 'medium' ? 'badge--ok' : '';
+        var desc = r.description || r.hostname || r.user || r.src_ip || '—';
+        var meta = [];
+        if (r.user)      meta.push('👤 ' + r.user);
+        if (r.hostname)  meta.push('🖥 ' + r.hostname);
+        if (r.src_ip)    meta.push('🌐 ' + r.src_ip);
+        if (r.technique) meta.push('🎯 ' + r.technique);
+        h += '<div class="cd-bt-row">';
+        h += '<span class="cd-bt-col cd-bt-col--row">' + escHtml(String(r.row)) + '</span>';
+        h += '<span class="cd-bt-col cd-bt-col--sev"><span class="badge ' + sevCls + '" style="font-size:9px;">' + escHtml((r.severity||'').slice(0,4).toUpperCase()) + '</span></span>';
+        h += '<span class="cd-bt-col cd-bt-col--vt cd-bt-ts">' + escHtml(_cdShortTs(r.valid_time)) + '</span>';
+        h += '<span class="cd-bt-col cd-bt-col--tt cd-bt-ts cd-bt-ts--txn">' + escHtml(_cdShortTs(r.transaction_time)) + '</span>';
+        h += '<span class="cd-bt-col cd-bt-col--lag cd-bt-delta">' + escHtml(_cdFmtLag(r.observed_lag_s)) + '</span>';
+        h += '<span class="cd-bt-col cd-bt-col--Δt cd-bt-delta cd-bt-delta--seq">' + escHtml(_cdFmtDelta(r.delta_s)) + '</span>';
+        h += '<span class="cd-bt-col cd-bt-col--desc">';
+        h += '<div class="cd-bt-desc">' + escHtml(desc) + '</div>';
+        if (meta.length) h += '<div class="cd-bt-meta">' + escHtml(meta.join('  ')) + '</div>';
+        h += '</span>';
+        h += '</div>';
+      });
+      h += '</div></div>'; // table + section
+    }
+
+    // ── Suggested tools ───────────────────────────────────────────────────────
+    var tools = ae.suggestedTools || [];
+    if (tools.length) {
+      h += '<div class="cd-section"><div class="cd-section__hd">SUGGESTED TOOLS</div>';
+      tools.forEach(function (t, ti) {
+        var typeLabel = t.type === 'kql' ? 'KQL' : t.type === 'powershell' ? 'PS' : t.type === 'cmd' ? 'CMD' : 'CLI';
+        var typeCls   = t.type === 'kql' ? 'cd-tool-badge--kql' : t.type === 'powershell' ? 'cd-tool-badge--ps' : 'cd-tool-badge--cli';
+        h += '<div class="cd-tool-row">';
+        h += '<span class="cd-tool-badge ' + typeCls + '">' + typeLabel + '</span>';
+        h += '<div class="cd-tool-body">';
+        h += '<div class="cd-tool-label">' + escHtml(t.label) + '</div>';
+        h += '<code class="cd-tool-cmd" id="cdToolCmd_' + cid + '_' + ti + '">' + escHtml(t.cmd) + '</code>';
+        h += '</div>';
+        h += '<button class="cd-tool-copy" onclick="window._cdCopyTool(\'' + cid + '_' + ti + '\')" title="Copy command">⎘</button>';
+        h += '</div>';
+      });
+      h += '</div>';
+    }
+
+    // ── Persona-specific Q&A / Hunt section ──────────────────────────────────
+    var expKey = cid + ':' + ae.persona + ':' + ae.taskIdx;
+    var expState = cs.expands[expKey];
+    h += '<div id="cdExpandQA_' + escHtml(cid) + '_' + escHtml(persona) + '">';
+    if (!expState || expState.status === 'loading') {
+      var loadMsg = persona === 'threat_hunter' ? 'Building hunt package…' : 'Generating investigation questions…';
+      h += '<div class="cd-loading"><div class="cd-spinner"></div>' + loadMsg + '</div>';
+    } else if (expState.status === 'loaded') {
+      if (persona === 'threat_hunter' && ae.huntData) {
+        h += _cdRenderThreatHunterExpand(ae.huntData, cid, persona, ae.taskIdx);
+      } else if (persona === 'ciso' || persona === 'executive') {
+        h += _cdRenderCISOExpand(expState.questions, cid, persona, ae.taskIdx);
+      } else if (persona === 'compliance' || persona === 'audit') {
+        h += _cdRenderComplianceExpand(expState.questions, cid, persona, ae.taskIdx);
+      } else {
+        h += _cdRenderQASection(expState.questions, cid, persona, ae.taskIdx);
+      }
+    } else {
+      h += '<div class="cd-error">Questions unavailable.</div>';
+    }
+    h += '</div>';
+
+    // ── Analyst notes ─────────────────────────────────────────────────────────
+    h += '<div class="cd-section"><div class="cd-section__hd">ANALYST NOTES</div>';
+    h += '<textarea class="cd-note-input" id="cdNoteInput_' + escHtml(cid) + '_' + escHtml(persona) + '" placeholder="Add observation, IOC, or finding…" rows="2"></textarea>';
+    h += '<button class="cd-expand-trigger" style="margin-top:5px;" onclick="window._cdAddNote(\'' + escHtml(cid) + '\',\'' + escHtml(persona) + '\')">+ Add to Report</button>';
+    var noteKey = cid + ':' + persona;
+    var notes = cs.notes[noteKey] || [];
+    notes.forEach(function (n) {
+      h += '<div class="cd-note-item">';
+      h += '<span class="cd-note-item__text">' + escHtml(n.text) + '</span>';
+      h += '<span class="cd-note-item__ts">' + escHtml(n.ts) + '</span>';
+      h += '</div>';
+    });
+    h += '</div>';
+    return h;
+  }
+
+  function _cdThCopyBtn(textToCopy) {
+    // Returns inline onclick that copies the given string
+    var escaped = textToCopy.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n');
+    return "onclick=\"(function(b){navigator.clipboard.writeText('" + escaped + "').then(function(){var t=b.textContent;b.textContent='✓';setTimeout(function(){b.textContent=t},1500)}).catch(function(){})}).call(this)\"";
+  }
+
+  function _cdThQueryCopyBtn(elemId) {
+    var eid = JSON.stringify(elemId);
+    return "onclick=\"(function(){var el=document.getElementById(" + eid + ");if(!el)return;navigator.clipboard.writeText(el.textContent||el.innerText).then(function(){var b=el.closest('.cd-tool-row').querySelector('.cd-tool-copy');if(b){var t=b.textContent;b.textContent='✓';setTimeout(function(){b.textContent=t},1500)}})})()\"";
+  }
+
+  function _cdRenderThreatHunterExpand(huntData, cid, persona, taskIdx) {
+    var cs = _cdState(cid);
+    var h = '';
+    var pivots  = huntData.pivots || [];
+    var queries = huntData.hunt_queries || [];
+    var iocs    = huntData.iocs || [];
+
+    if (!pivots.length && !queries.length && !iocs.length) {
+      h += '<div style="font-size:11px;color:var(--text-muted,#7a7f8e);padding:8px 0;">No hunt data generated — try ↺ Regenerate.</div>';
+      return h;
+    }
+
+    // ── PIVOT OPPORTUNITIES ───────────────────────────────────────────────────
+    if (pivots.length) {
+      h += '<div class="cd-section"><div class="cd-section__hd">PIVOT OPPORTUNITIES</div>';
+      h += '<div class="cd-th-pivot-list">';
+      pivots.forEach(function (p, pi) {
+        var ck  = _cdTaskKey(cid, persona, taskIdx, 'pivot' + pi);
+        var dec = cs.tasks[ck];
+        var dt  = cs.taskDecisions[ck];
+        h += '<div class="cd-th-pivot-card">';
+        // Header row: entity + arrow + action + copy
+        h += '<div class="cd-th-pivot-row">';
+        h += '<span class="cd-th-pivot-entity">' + escHtml(p.entity) + '</span>';
+        if (p.action) h += '<span class="cd-th-pivot-arrow">→</span><span class="cd-th-pivot-action">' + escHtml(p.action) + '</span>';
+        h += '<button class="cd-tool-copy" ' + _cdThCopyBtn(p.entity) + ' title="Copy entity" style="margin-left:auto;flex-shrink:0;">⎘</button>';
+        h += '</div>';
+        if (p.row_refs) h += '<div class="cd-th-pivot-ref">rows: ' + escHtml(p.row_refs) + '</div>';
+        // Confirm / deny
+        h += '<div class="cd-th-verdict-row">';
+        h += '<span class="cd-th-verdict-label">Pivot verified?</span>';
+        h += '<button class="cd-confirm-btn' + (dec===true?' active':'') + '" data-ck="' + escHtml(ck) + '" data-val="true">✓ Confirmed</button>';
+        h += '<button class="cd-deny-btn'    + (dec===false?' active':'') + '" data-ck="' + escHtml(ck) + '" data-val="false">✗ Not found</button>';
+        h += '<span class="cd-dec-ts" data-dec="' + escHtml(ck) + '">' + (dt ? escHtml(dt.ts) : '') + '</span>';
+        h += '</div>';
+        h += '</div>'; // pivot-card
+      });
+      h += '</div></div>';
+    }
+
+    // ── HUNTING QUERIES ───────────────────────────────────────────────────────
+    if (queries.length) {
+      h += '<div class="cd-section"><div class="cd-section__hd">HUNTING QUERIES</div>';
+      queries.forEach(function (q, qi) {
+        var ck  = _cdTaskKey(cid, persona, taskIdx, 'hunt' + qi);
+        var dec = cs.tasks[ck];
+        var dt  = cs.taskDecisions[ck];
+        var typeLabel = q.type === 'kql' ? 'KQL' : q.type === 'powershell' ? 'PS' : q.type === 'splunk' ? 'SPL' : q.type === 'grep' ? 'GREP' : (q.type || 'CLI').toUpperCase();
+        var typeCls   = q.type === 'kql' ? 'cd-tool-badge--kql' : q.type === 'powershell' ? 'cd-tool-badge--ps' : 'cd-tool-badge--cli';
+        var qid = 'cdHuntQ_' + cid + '_' + persona + '_' + taskIdx + '_' + qi;
+        h += '<div class="cd-th-query-card">';
+        h += '<div class="cd-tool-row">';
+        h += '<span class="cd-tool-badge ' + typeCls + '">' + typeLabel + '</span>';
+        h += '<div class="cd-tool-body">';
+        h += '<div class="cd-tool-label">' + escHtml(q.label) + '</div>';
+        h += '<code class="cd-tool-cmd" id="' + escHtml(qid) + '">' + escHtml(q.query) + '</code>';
+        if (q.row_refs) h += '<div class="cd-th-pivot-ref" style="margin-top:3px;">rows: ' + escHtml(q.row_refs) + '</div>';
+        h += '</div>';
+        h += '<button class="cd-tool-copy" ' + _cdThQueryCopyBtn(qid) + ' title="Copy query">⎘</button>';
+        h += '</div>';
+        // Confirm / deny
+        h += '<div class="cd-th-verdict-row">';
+        h += '<span class="cd-th-verdict-label">Ran query?</span>';
+        h += '<button class="cd-confirm-btn' + (dec===true?' active':'') + '" data-ck="' + escHtml(ck) + '" data-val="true">✓ Ran / Found IOCs</button>';
+        h += '<button class="cd-deny-btn'    + (dec===false?' active':'') + '" data-ck="' + escHtml(ck) + '" data-val="false">✗ Ran / Nothing</button>';
+        h += '<span class="cd-dec-ts" data-dec="' + escHtml(ck) + '">' + (dt ? escHtml(dt.ts) : '') + '</span>';
+        h += '</div>';
+        h += '</div>'; // query-card
+      });
+      h += '</div>';
+    }
+
+    // ── IOC EXPANSION ─────────────────────────────────────────────────────────
+    if (iocs.length) {
+      h += '<div class="cd-section"><div class="cd-section__hd">IOC EXPANSION</div>';
+      h += '<div class="cd-th-ioc-list">';
+      iocs.forEach(function (ioc, ii) {
+        var ck  = _cdTaskKey(cid, persona, taskIdx, 'ioc' + ii);
+        var dec = cs.tasks[ck];
+        var dt  = cs.taskDecisions[ck];
+        var confCls = ioc.confidence === 'HIGH' ? 'cd-th-conf--high' :
+                      ioc.confidence === 'MEDIUM' ? 'cd-th-conf--med' : 'cd-th-conf--low';
+        h += '<div class="cd-th-ioc-card">';
+        h += '<div class="cd-th-ioc-row">';
+        h += '<span class="cd-th-ioc-type">' + escHtml((ioc.type || '').toUpperCase()) + '</span>';
+        h += '<span class="cd-th-ioc-val">' + escHtml(ioc.value) + '</span>';
+        h += '<span class="cd-th-conf ' + confCls + '">' + escHtml(ioc.confidence || '?') + '</span>';
+        h += '<button class="cd-tool-copy" ' + _cdThCopyBtn(ioc.value) + ' title="Copy IOC" style="flex-shrink:0;">⎘</button>';
+        h += '</div>';
+        if (ioc.reason)    h += '<div class="cd-th-ioc-reason">' + escHtml(ioc.reason) + '</div>';
+        if (ioc.row_refs)  h += '<div class="cd-th-pivot-ref">rows: ' + escHtml(ioc.row_refs) + '</div>';
+        // Confirm / deny
+        h += '<div class="cd-th-verdict-row">';
+        h += '<span class="cd-th-verdict-label">IOC verdict:</span>';
+        h += '<button class="cd-confirm-btn' + (dec===true?' active':'') + '" data-ck="' + escHtml(ck) + '" data-val="true">✓ Confirmed IOC</button>';
+        h += '<button class="cd-deny-btn'    + (dec===false?' active':'') + '" data-ck="' + escHtml(ck) + '" data-val="false">✗ FP / Benign</button>';
+        h += '<span class="cd-dec-ts" data-dec="' + escHtml(ck) + '">' + (dt ? escHtml(dt.ts) : '') + '</span>';
+        h += '</div>';
+        h += '</div>'; // ioc-card
+      });
+      h += '</div></div>';
+    }
+
+    return h;
+  }
+
+  function _cdRenderQASection(questions, cid, persona, taskIdx) {
+    if (!questions || !questions.length) {
+      return '<div style="font-size:11px;color:var(--text-muted,#7a7f8e);padding:8px 0;">No questions generated for this step.</div>';
+    }
+    var cs = _cdState(cid);
+    var h = '<div class="cd-section"><div class="cd-section__hd">CONFIRM / DENY</div>';
+    questions.forEach(function (q, qi) {
+      var qKey  = _cdTaskKey(cid, persona, taskIdx, 'eq' + qi);
+      var qDone = cs.tasks[qKey];
+      var dec   = cs.taskDecisions[qKey];
+      h += '<div class="cd-expand-q">';
+      h += '<div class="cd-expand-q__question">' + escHtml(q.question || '') + '</div>';
+      var cmd = q.check || q.cli_command || '';
+      if (cmd) h += '<div class="cd-expand-q__check">$ ' + escHtml(cmd) + '</div>';
+      var ref = q.row_ref || q.row_evidence || '';
+      if (ref) h += '<div class="cd-expand-q__ref">Evidence: ' + escHtml(ref) + '</div>';
+      h += '<div class="cd-expand-q__btns">';
+      h += '<button class="cd-confirm-btn' + (qDone===true?' active':'') + '" data-ck="' + escHtml(qKey) + '" data-val="true">✓ YES</button>';
+      h += '<button class="cd-deny-btn'    + (qDone===false?' active':'') + '" data-ck="' + escHtml(qKey) + '" data-val="false">✗ NO</button>';
+      if (dec) h += '<span class="cd-dec-ts" data-dec="' + escHtml(qKey) + '">' + escHtml(dec.ts) + '</span>';
+      else     h += '<span class="cd-dec-ts" data-dec="' + escHtml(qKey) + '"></span>';
+      h += '</div></div>';
+    });
+    h += '</div>';
+    return h;
+  }
+
+  // ── CISO / Executive expand — decision gates ──────────────────────────────
+  function _cdRenderCISOExpand(questions, cid, persona, taskIdx) {
+    var cs = _cdState(cid);
+    // Fallback pattern-based urgency/owner for legacy responses without URGENCY:/OWNER: fields
+    var GATE_URGENCY = { 'breach': 'NOW', 'legal': 'NOW', 'ir retainer': '4H', 'public statement': '4H', 'isolate': '4H', 'regulat': '24H' };
+    var GATE_OWNER   = { 'breach': 'CISO+Legal', 'legal': 'General Counsel', 'ir retainer': 'CISO', 'public statement': 'PR+Legal', 'isolate': 'CISO+IT', 'regulat': 'DPO' };
+
+    function _gateUrgency(q) {
+      if (q.urgency) return q.urgency;
+      var t = (q.question || '').toLowerCase();
+      for (var k in GATE_URGENCY) { if (t.indexOf(k) !== -1) return GATE_URGENCY[k]; }
+      return '4H';
+    }
+    function _gateOwner(q) {
+      if (q.owner) return q.owner;
+      var t = (q.question || '').toLowerCase();
+      for (var k in GATE_OWNER) { if (t.indexOf(k) !== -1) return GATE_OWNER[k]; }
+      return 'CISO';
+    }
+
+    if (!questions || !questions.length) {
+      return '<div style="font-size:11px;color:var(--text-muted);padding:8px 0;">No decision gates available — try ↺ Regenerate.</div>';
+    }
+    var h = '<div class="cd-section"><div class="cd-section__hd">EXECUTIVE DECISION GATES</div>';
+    h += '<div style="font-size:10px;color:var(--text-muted);margin-bottom:8px;">Each gate requires CISO/executive sign-off. Record your decision to build the audit trail.</div>';
+    questions.forEach(function (q, qi) {
+      var qKey  = _cdTaskKey(cid, persona, taskIdx, 'gate' + qi);
+      var qDone = cs.tasks[qKey];
+      var dec   = cs.taskDecisions[qKey];
+      var urgency = _gateUrgency(q);
+      var owner   = _gateOwner(q);
+      var urgCls  = urgency === 'NOW' ? 'badge--crit' : urgency === '4H' ? 'badge--warn' : '';
+      h += '<div class="cd-ciso-gate">';
+      h += '<div class="cd-ciso-gate__header">';
+      h += '<span class="cd-ciso-gate__label">' + escHtml(q.question || 'Decision required') + '</span>';
+      h += '<span class="badge ' + urgCls + '" style="font-size:9px;flex-shrink:0;">' + escHtml(urgency) + '</span>';
+      h += '</div>';
+      if (owner) h += '<div class="cd-ciso-gate__owner">Owner: ' + escHtml(owner) + '</div>';
+      var cmd = q.check || q.cli_command || '';
+      if (cmd) h += '<div class="cd-ciso-gate__rationale">' + escHtml(cmd) + '</div>';
+      var ref = q.row_ref || q.row_evidence || '';
+      if (ref) h += '<div class="cd-expand-q__ref">Evidence: ' + escHtml(ref) + '</div>';
+      h += '<div class="cd-ciso-gate__btns">';
+      h += '<button class="cd-ciso-btn--escalate' + (qDone===true?' active':'') + '" data-ck="' + escHtml(qKey) + '" data-val="true">\u2B06 ESCALATE</button>';
+      h += '<button class="cd-ciso-btn--hold'     + (qDone==='hold'?' active':'') + '" data-ck="' + escHtml(qKey) + '" data-val="hold" style="background:rgba(224,196,70,.1);border-color:rgba(224,196,70,.4);color:#e0c446;">\u25C9 HOLD</button>';
+      h += '<button class="cd-deny-btn'            + (qDone===false?' active':'') + '" data-ck="' + escHtml(qKey) + '" data-val="false">\u2717 CLOSE</button>';
+      if (dec) h += '<span class="cd-dec-ts">' + escHtml(dec.ts) + '</span>';
+      else     h += '<span class="cd-dec-ts" data-dec="' + escHtml(qKey) + '"></span>';
+      h += '</div></div>';
+    });
+    h += '</div>';
+    return h;
+  }
+
+  // ── Compliance / Audit expand — 2-column ISO 27001 + risk register ───────────
+  function _cdRenderComplianceExpand(questions, cid, persona, taskIdx) {
+    var cs = _cdState(cid);
+    var esc = escHtml;
+
+    // LEFT column: LLM control failures + breach clock + risk register
+    var leftH = _cdBuildComplianceLeft(questions, cid, persona, taskIdx, cs);
+    // RIGHT column: compliance map sections (ISO/GDPR/PCI/NIST/CRQ)
+    var rightH = _cdBuildComplianceRight(cid, cs);
+
+    var h = '<div class="cd-compliance-2col">';
+    h += '<div class="cd-compliance-left">' + leftH + '</div>';
+    h += '<div class="cd-compliance-right" id="cdCompRight_' + esc(cid) + '">' + rightH + '</div>';
+    h += '</div>';
+
+    // Bottom: auditor findings + export
+    var noteKey = cid + ':' + persona + ':audit_findings';
+    var findings = cs.notes[noteKey] || [];
+    h += '<div class="cd-section" style="margin-top:10px;"><div class="cd-section__hd">AUDITOR FINDINGS</div>';
+    h += '<textarea class="cd-note-input" id="cdAuditNote_' + esc(cid) + '" placeholder="Enter finding: control ref · gap description · evidence refs…" rows="3"></textarea>';
+    h += '<div style="display:flex;gap:5px;margin-top:5px;">';
+    h += '<button class="cd-expand-trigger" onclick="window._cdAddAuditFinding(\'' + esc(cid) + '\',\'' + esc(persona) + '\')">+ Record Finding</button>';
+    h += '<button class="cd-send-btn cd-send-btn--active" onclick="window._cdExportISOGapReport(\'' + esc(cid) + '\',\'' + esc(persona) + '\')" style="font-size:10px;">⬇ ISO Gap Report</button>';
+    h += '<button class="cd-send-btn cd-send-btn--active" onclick="window._cdExportRiskRegister(\'' + esc(cid) + '\',\'' + esc(persona) + '\')" style="font-size:10px;">⬇ Risk Register</button>';
+    h += '</div>';
+    if (findings.length) {
+      h += '<div style="margin-top:8px;">';
+      findings.forEach(function(f) {
+        h += '<div class="cd-note-item"><span class="cd-note-item__text">' + esc(f.text) + '</span><span class="cd-note-item__ts">' + esc(f.ts) + '</span></div>';
+      });
+      h += '</div>';
+    }
+    h += '</div>';
+    return h;
+  }
+
+  function _cdBuildComplianceLeft(questions, cid, persona, taskIdx, cs) {
+    var esc = escHtml;
+    var h = '';
+
+    // LLM control failures
+    if (questions && questions.length) {
+      h += '<div class="cd-section"><div class="cd-section__hd">CONTROL GAP ASSESSMENT</div>';
+      h += '<div style="font-size:10px;color:var(--text-muted);margin-bottom:8px;">LLM-generated. Verify each finding and record auditor judgement.</div>';
+      questions.forEach(function (q, qi) {
+        var qKey  = _cdTaskKey(cid, persona, taskIdx, 'ctrl' + qi);
+        var qDone = cs.tasks[qKey];
+        var dec   = cs.taskDecisions[qKey];
+        var qText = q.question || '';
+        var ctrlRef = q.ctrl_ref || (qText.match(/A\.\d+(\.\d+)?|NIST\s[\w.-]+|PCI DSS \d+\.\d+|GDPR Art\.\s*\d+/i) || [])[0] || '';
+        var framework = q.framework || '';
+        var status = q.status || '';
+        var statusCls = status === 'GAP' ? 'cd-ctrl-status--gap' : status === 'PASSING' ? 'cd-ctrl-status--pass' : 'cd-ctrl-status--unknown';
+        h += '<div class="cd-compliance-item">';
+        h += '<div class="cd-compliance-item__header">';
+        if (ctrlRef) h += '<span class="cd-compliance-ctrl-ref">' + esc(ctrlRef) + '</span>';
+        if (framework) h += '<span class="cd-compliance-ctrl-ref" style="background:rgba(74,99,231,.12);border-color:rgba(74,99,231,.3);color:#8899f7;">' + esc(framework) + '</span>';
+        if (status) h += '<span class="cd-ctrl-row ' + statusCls + '">' + esc(status) + '</span>';
+        h += '<span class="cd-compliance-item__label">' + esc(qText) + '</span>';
+        h += '</div>';
+        var cmd = q.check || q.cli_command || '';
+        if (cmd) h += '<div class="cd-compliance-item__detail">' + esc(cmd) + '</div>';
+        var ref = q.row_ref || q.row_evidence || '';
+        if (ref) h += '<div class="cd-expand-q__ref">Evidence rows: ' + esc(ref) + '</div>';
+        h += '<div class="cd-th-verdict-row">';
+        h += '<button class="cd-confirm-btn' + (qDone===true?' active':'') + '" data-ck="' + esc(qKey) + '" data-val="true">✓ Confirmed gap</button>';
+        h += '<button class="cd-deny-btn'    + (qDone===false?' active':'') + '" data-ck="' + esc(qKey) + '" data-val="false">✗ Control in place</button>';
+        h += '<span class="cd-dec-ts" data-dec="' + esc(qKey) + '">' + (dec ? esc(dec.ts) : '') + '</span>';
+        h += '</div>';
+        h += '</div>';
+      });
+      h += '</div>';
+    } else {
+      h += '<div style="font-size:11px;color:var(--text-muted);padding:8px 0;">No control gap questions available — try ↺ Regenerate.</div>';
+    }
+
+    // Breach notification clock
+    var cm = cs.complianceMap[cid];
+    var earliestRow = cm ? cm.earliest_row : '';
+    var art33Status = (cm && cm.gdpr) ? (cm.gdpr.find(function(g){return g.ref==='Art.33';}) || {}).status || 'UNKNOWN' : 'UNKNOWN';
+    h += '<div class="cd-section cd-breach-clock">';
+    h += '<div class="cd-section__hd">GDPR ART.33 BREACH CLOCK</div>';
+    h += '<div style="font-size:10px;color:var(--text-muted);margin-bottom:6px;">72h notification window from point of awareness.</div>';
+    h += '<div style="display:flex;gap:8px;align-items:center;">';
+    h += '<span class="cd-ctrl-row ' + (art33Status === 'GAP' ? 'cd-ctrl-status--gap' : art33Status === 'PASSING' ? 'cd-ctrl-status--pass' : 'cd-ctrl-status--unknown') + '">' + esc(art33Status) + '</span>';
+    if (earliestRow) h += '<span style="font-size:10px;color:var(--text-muted);">Earliest evidence: row[' + esc(String(earliestRow)) + ']</span>';
+    h += '</div>';
+    h += '<div style="margin-top:6px;font-size:10px;color:var(--text-muted);">Clock started: <input type="datetime-local" id="cdBreachClock_' + esc(cid) + '" style="background:var(--surface,#13161e);border:1px solid var(--border,#2a2d3a);border-radius:3px;color:var(--text,#e8ebf0);font-size:10px;padding:2px 5px;"></div>';
+    h += '</div>';
+
+    // Risk register entry
+    var rr = cs.riskRegister[cid] || {};
+    h += '<div class="cd-section cd-risk-register">';
+    h += '<div class="cd-section__hd">RISK REGISTER ENTRY</div>';
+    h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:10px;">';
+    h += '<div><label style="color:var(--text-muted);">Risk ID</label><br>';
+    h += '<input class="cd-sharpen-input" style="padding:3px 6px;" value="' + esc(rr.id || '') + '" oninput="window._cdUpdateRiskRegister(\'' + esc(cid) + '\',\'' + esc(persona) + '\',\'id\',this.value)" placeholder="RISK-001"></div>';
+    h += '<div><label style="color:var(--text-muted);">Category</label><br>';
+    h += '<select class="cd-sharpen-input" style="padding:3px 6px;" onchange="window._cdUpdateRiskRegister(\'' + esc(cid) + '\',\'' + esc(persona) + '\',\'category\',this.value)">';
+    ['','Access Control','Data Breach','Malware','Insider Threat','Third Party','Supply Chain','Ransomware','Other'].forEach(function(o){
+      h += '<option' + (rr.category===o?' selected':'') + '>' + esc(o) + '</option>';
+    });
+    h += '</select></div>';
+    h += '<div><label style="color:var(--text-muted);">Inherent Risk</label><br>';
+    h += '<select class="cd-sharpen-input" style="padding:3px 6px;" onchange="window._cdUpdateRiskRegister(\'' + esc(cid) + '\',\'' + esc(persona) + '\',\'inherent\',this.value)">';
+    ['','Critical','High','Medium','Low'].forEach(function(o){
+      h += '<option' + (rr.inherent===o?' selected':'') + '>' + esc(o) + '</option>';
+    });
+    h += '</select></div>';
+    h += '<div><label style="color:var(--text-muted);">Residual Risk</label><br>';
+    h += '<select class="cd-sharpen-input" style="padding:3px 6px;" onchange="window._cdUpdateRiskRegister(\'' + esc(cid) + '\',\'' + esc(persona) + '\',\'residual\',this.value)">';
+    ['','Critical','High','Medium','Low'].forEach(function(o){
+      h += '<option' + (rr.residual===o?' selected':'') + '>' + esc(o) + '</option>';
+    });
+    h += '</select></div>';
+    h += '<div><label style="color:var(--text-muted);">Owner</label><br>';
+    h += '<input class="cd-sharpen-input" style="padding:3px 6px;" value="' + esc(rr.owner || '') + '" oninput="window._cdUpdateRiskRegister(\'' + esc(cid) + '\',\'' + esc(persona) + '\',\'owner\',this.value)" placeholder="e.g. CISO"></div>';
+    h += '<div><label style="color:var(--text-muted);">Treatment</label><br>';
+    h += '<select class="cd-sharpen-input" style="padding:3px 6px;" onchange="window._cdUpdateRiskRegister(\'' + esc(cid) + '\',\'' + esc(persona) + '\',\'treatment\',this.value)">';
+    ['','Mitigate','Accept','Transfer','Avoid'].forEach(function(o){
+      h += '<option' + (rr.treatment===o?' selected':'') + '>' + esc(o) + '</option>';
+    });
+    h += '</select></div>';
+    h += '</div></div>';
+    return h;
+  }
+
+  function _cdBuildComplianceRight(cid, cs) {
+    var esc = escHtml;
+    var cm = cs.complianceMap[cid];
+    var h = '';
+
+    if (!cm) {
+      h += '<div class="cd-section">';
+      h += '<div class="cd-section__hd">COMPLIANCE FRAMEWORK MAP</div>';
+      h += '<div style="font-size:11px;color:var(--text-muted);margin-bottom:10px;">Rule-based MITRE → ISO/GDPR/PCI/NIST mapping. No LLM required.</div>';
+      h += '<button class="cd-expand-trigger" onclick="window._cdLoadComplianceMap(\'' + esc(cid) + '\')">▶ Load Compliance Mapping</button>';
+      h += '</div>';
+      return h;
+    }
+
+    var gapsOnly = cs.gapsOnly[cid] || false;
+
+    // Gaps only toggle
+    h += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:10px;">';
+    h += '<label><input type="checkbox"' + (gapsOnly ? ' checked' : '') + ' onchange="window._cdToggleGapsOnly(\'' + esc(cid) + '\')" style="margin-right:4px;">Gaps only</label>';
+    h += '<span style="color:var(--text-muted);">MITRE tags: ' + esc((cm.mitre_tags || []).join(', ') || 'none') + '</span>';
+    h += '</div>';
+
+    function ctrlRows(controls, refKey) {
+      var out = '';
+      (controls || []).forEach(function(c) {
+        if (gapsOnly && c.status !== 'GAP') return;
+        var statusCls = c.status === 'GAP' ? 'cd-ctrl-status--gap' : c.status === 'PASSING' ? 'cd-ctrl-status--pass' : 'cd-ctrl-status--unknown';
+        var icon = c.status === 'GAP' ? '\u26A0' : c.status === 'PASSING' ? '\u2713' : '?';
+        out += '<div class="cd-ctrl-row">';
+        out += '<span class="' + statusCls + '" style="width:16px;text-align:center;flex-shrink:0;">' + icon + '</span>';
+        out += '<span style="font-weight:700;min-width:70px;flex-shrink:0;">' + esc(c.ref) + '</span>';
+        out += '<span style="flex:1;color:var(--text-muted);">' + esc(c.name) + '</span>';
+        if (c.row_refs && c.row_refs.length) out += '<span style="font-size:9px;color:var(--accent,#7c6af7);">rows[' + esc(c.row_refs.join(',')) + ']</span>';
+        if (c.note) out += '<span style="font-size:9px;color:var(--text-muted);margin-left:4px;">' + esc(c.note) + '</span>';
+        out += '</div>';
+      });
+      return out || '<div style="font-size:10px;color:var(--text-muted);padding:4px 0;">No items to show.</div>';
+    }
+
+    // ISO 27001
+    h += '<details open><summary class="cd-section__hd" style="cursor:pointer;list-style:none;">ISO 27001 Annex A</summary>';
+    h += '<div style="margin-top:6px;">' + ctrlRows(cm.iso27001) + '</div></details>';
+
+    // GDPR
+    h += '<details open style="margin-top:8px;"><summary class="cd-section__hd" style="cursor:pointer;list-style:none;">GDPR Articles</summary>';
+    h += '<div style="margin-top:6px;">' + ctrlRows(cm.gdpr) + '</div></details>';
+
+    // PCI DSS
+    h += '<details style="margin-top:8px;"><summary class="cd-section__hd" style="cursor:pointer;list-style:none;">PCI DSS Requirements</summary>';
+    h += '<div style="margin-top:6px;">' + ctrlRows(cm.pci_dss) + '</div></details>';
+
+    // NIST CSF
+    h += '<details style="margin-top:8px;"><summary class="cd-section__hd" style="cursor:pointer;list-style:none;">NIST CSF Functions</summary>';
+    h += '<div style="margin-top:6px;">' + ctrlRows(cm.nist_csf) + '</div></details>';
+
+    // CRQ
+    var crq = cm.crq || {};
+    var crqOv = cs.crqOverrides[cid] || {};
+    var expUsd = crqOv.expected_usd !== undefined ? crqOv.expected_usd : crq.expected_usd;
+    var maxUsd  = crqOv.max_usd !== undefined ? crqOv.max_usd : crq.max_usd;
+    h += '<div class="cd-crq-block" style="margin-top:10px;">';
+    h += '<div class="cd-section__hd">CYBER RISK QUANTIFICATION</div>';
+    h += '<div style="font-size:10px;color:var(--text-muted);margin-bottom:6px;">' + esc(crq.note || '') + '</div>';
+    h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:10px;">';
+    h += '<div><label style="color:var(--text-muted);">Expected loss (USD)</label><br>';
+    h += '<input class="cd-sharpen-input" style="padding:3px 6px;" type="number" value="' + esc(String(expUsd || 0)) + '" oninput="window._cdUpdateCRQ(\'' + esc(cid) + '\',\'expected_usd\',this.value)"></div>';
+    h += '<div><label style="color:var(--text-muted);">Max exposure (USD)</label><br>';
+    h += '<input class="cd-sharpen-input" style="padding:3px 6px;" type="number" value="' + esc(String(maxUsd || 0)) + '" oninput="window._cdUpdateCRQ(\'' + esc(cid) + '\',\'max_usd\',this.value)"></div>';
+    h += '<div><label style="color:var(--text-muted);">Recovery cost (USD)</label><br>';
+    h += '<input class="cd-sharpen-input" style="padding:3px 6px;" type="number" value="' + esc(String(crqOv.recovery_cost_usd !== undefined ? crqOv.recovery_cost_usd : (crq.recovery_cost_usd || 0))) + '" oninput="window._cdUpdateCRQ(\'' + esc(cid) + '\',\'recovery_cost_usd\',this.value)"></div>';
+    h += '<div style="display:flex;align-items:center;gap:6px;padding-top:14px;">';
+    h += '<label><input type="checkbox"' + ((crqOv.insurance_trigger !== undefined ? crqOv.insurance_trigger : crq.insurance_trigger) ? ' checked' : '') + ' onchange="window._cdUpdateCRQ(\'' + esc(cid) + '\',\'insurance_trigger\',this.checked)" style="margin-right:4px;">Insurance trigger</label>';
+    h += '</div>';
+    h += '</div>';
+    h += '<div style="margin-top:4px;font-size:10px;"><span style="color:var(--text-muted);">Confidence: </span><span style="color:#e0c446;">' + esc(crq.confidence || 'LOW') + '</span> (analyst overrides change this estimate)</div>';
+    h += '</div>';
+
+    return h;
+  }
+
+  window._cdLoadComplianceMap = async function (cid) {
+    var cs = _cdState(cid);
+    var rightEl = document.getElementById('cdCompRight_' + cid);
+    if (rightEl) rightEl.innerHTML = '<div class="cd-loading"><div class="cd-spinner"></div>Loading compliance map…</div>';
+    try {
+      var resp = await fetch(
+        '/api/v1/assessments/' + encodeURIComponent(state.assessmentId) +
+        '/clusters/' + encodeURIComponent(cid) + '/compliance-map',
+        { headers: authHeaders(), signal: AbortSignal.timeout(15000) }
+      );
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      var data = await resp.json();
+      cs.complianceMap[cid] = data;
+    } catch (err) {
+      if (rightEl) rightEl.innerHTML = '<div class="cd-error">Compliance map failed: ' + escHtml(err.message) + '</div>';
+      return;
+    }
+    if (rightEl) rightEl.innerHTML = _cdBuildComplianceRight(cid, cs);
+  };
+
+  window._cdToggleGapsOnly = function (cid) {
+    var cs = _cdState(cid);
+    cs.gapsOnly[cid] = !cs.gapsOnly[cid];
+    var rightEl = document.getElementById('cdCompRight_' + cid);
+    if (rightEl) rightEl.innerHTML = _cdBuildComplianceRight(cid, cs);
+  };
+
+  window._cdUpdateRiskRegister = function (cid, persona, field, value) {
+    var cs = _cdState(cid);
+    if (!cs.riskRegister[cid]) cs.riskRegister[cid] = {};
+    cs.riskRegister[cid][field] = value;
+  };
+
+  window._cdUpdateCRQ = function (cid, field, value) {
+    var cs = _cdState(cid);
+    if (!cs.crqOverrides[cid]) cs.crqOverrides[cid] = {};
+    cs.crqOverrides[cid][field] = (field === 'insurance_trigger') ? value : Number(value);
+  };
+
+  window._cdAddAuditFinding = function (cid, persona) {
+    var el = document.getElementById('cdAuditNote_' + cid);
+    if (!el || !el.value.trim()) return;
+    var cs = _cdState(cid);
+    var key = cid + ':' + persona + ':audit_findings';
+    if (!cs.notes[key]) cs.notes[key] = [];
+    var ts = new Date().toISOString().slice(0,16).replace('T',' ');
+    cs.notes[key].push({ text: el.value.trim(), ts: ts });
+    el.value = '';
+    var col2 = document.getElementById('cdColExpand_' + cid + '_' + persona);
+    if (col2) { col2.innerHTML = _cdBuildExpandColHTML(cid, persona, cs); _cdWireButtons(col2, cid, persona); }
+  };
+
+  window._cdExportISOGapReport = function (cid, persona) {
+    var cs = _cdState(cid);
+    var cm = cs.complianceMap[cid];
+    var lines = ['ISO 27001 Gap Report — Cluster ' + cid + ' — ' + new Date().toISOString(), ''];
+    if (cm && cm.iso27001) {
+      lines.push('=== ISO 27001 Annex A ===');
+      cm.iso27001.forEach(function(c) { lines.push('[' + c.status + '] ' + c.ref + ' — ' + c.name + (c.row_refs && c.row_refs.length ? ' (rows: ' + c.row_refs.join(',') + ')' : '')); });
+    }
+    if (cm && cm.gdpr) {
+      lines.push('', '=== GDPR ===');
+      cm.gdpr.forEach(function(c) { lines.push('[' + c.status + '] ' + c.ref + ' — ' + c.name + (c.note ? ': ' + c.note : '')); });
+    }
+    if (cm && cm.pci_dss) {
+      lines.push('', '=== PCI DSS ===');
+      cm.pci_dss.forEach(function(c) { lines.push('[' + c.status + '] ' + c.ref + ' — ' + c.name); });
+    }
+    if (cm && cm.nist_csf) {
+      lines.push('', '=== NIST CSF ===');
+      cm.nist_csf.forEach(function(c) { lines.push('[' + c.status + '] ' + c.ref + ' — ' + c.name); });
+    }
+    var noteKey = cid + ':' + persona + ':audit_findings';
+    var findings = cs.notes[noteKey] || [];
+    if (findings.length) {
+      lines.push('', '=== Auditor Findings ===');
+      findings.forEach(function(f) { lines.push('[' + f.ts + '] ' + f.text); });
+    }
+    var blob = new Blob([lines.join('\n')], { type: 'text/plain' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a'); a.href = url; a.download = 'iso_gap_report_' + cid + '.txt'; a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  window._cdExportRiskRegister = function (cid, persona) {
+    var cs = _cdState(cid);
+    var rr = cs.riskRegister[cid] || {};
+    var crqOv = cs.crqOverrides[cid] || {};
+    var cm = cs.complianceMap[cid] || {};
+    var crq = cm.crq || {};
+    var lines = [
+      'Risk Register Entry — Cluster ' + cid + ' — ' + new Date().toISOString(), '',
+      'Risk ID: ' + (rr.id || 'TBD'),
+      'Category: ' + (rr.category || 'TBD'),
+      'Inherent Risk: ' + (rr.inherent || 'TBD'),
+      'Residual Risk: ' + (rr.residual || 'TBD'),
+      'Owner: ' + (rr.owner || 'TBD'),
+      'Treatment: ' + (rr.treatment || 'TBD'),
+      '',
+      'CRQ — Expected Loss: $' + (crqOv.expected_usd !== undefined ? crqOv.expected_usd : (crq.expected_usd || 0)),
+      'CRQ — Max Exposure: $' + (crqOv.max_usd !== undefined ? crqOv.max_usd : (crq.max_usd || 0)),
+      'CRQ — Recovery Cost: $' + (crqOv.recovery_cost_usd !== undefined ? crqOv.recovery_cost_usd : (crq.recovery_cost_usd || 0)),
+    ];
+    var blob = new Blob([lines.join('\n')], { type: 'text/plain' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a'); a.href = url; a.download = 'risk_register_' + cid + '.txt'; a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  window._cdExportAuditFindings = function (cid, persona) {
+    window._cdExportISOGapReport(cid, persona);
+  };
+
+  window._cdCloseExpand = function (cid, persona) {
+    var cs = _cdState(cid);
+    cs.activeExpand = null;
+    var col2 = document.getElementById('cdColExpand_' + cid + '_' + persona);
+    if (col2) { col2.classList.remove('active'); col2.innerHTML = _cdBuildExpandColHTML(cid, persona, cs); }
+    var panel = document.getElementById('cdPanel');
+    if (panel) panel.style.removeProperty('--cd-width');
+    _cdUpdateLayout(cid, persona);
+  };
+
+  window._cdRegenExpand = function (cid, persona) {
+    var cs = _cdState(cid);
+    var ae = cs.activeExpand;
+    if (!ae) return;
+    var expKey = cid + ':' + persona + ':' + ae.taskIdx;
+    delete cs.expands[expKey];
+    window._cdExpand(cid, persona, ae.taskIdx, ae.stepTitle);
+  };
+
+  window._cdCopyTool = function (toolId) {
+    var el = document.getElementById('cdToolCmd_' + toolId);
+    if (!el) return;
+    navigator.clipboard.writeText(el.textContent || '').then(function () {
+      var btn = el.closest('.cd-tool-row') && el.closest('.cd-tool-row').querySelector('.cd-tool-copy');
+      if (btn) { btn.textContent = '✓'; setTimeout(function () { btn.textContent = '⎘'; }, 1500); }
+    }).catch(function () {
+      // Fallback for non-HTTPS
+      var range = document.createRange();
+      range.selectNode(el);
+      window.getSelection().removeAllRanges();
+      window.getSelection().addRange(range);
+      document.execCommand('copy');
+      window.getSelection().removeAllRanges();
+    });
+  };
+
+  window._cdAddNote = function (cid, persona) {
+    var inputId = 'cdNoteInput_' + cid + '_' + persona;
+    var input = document.getElementById(inputId);
+    if (!input || !input.value.trim()) return;
+    var cs = _cdState(cid);
+    var noteKey = cid + ':' + persona;
+    if (!cs.notes[noteKey]) cs.notes[noteKey] = [];
+    var ts = new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+    cs.notes[noteKey].push({ text: input.value.trim(), ts: ts });
+    input.value = '';
+    var col2 = document.getElementById('cdColExpand_' + cid + '_' + persona);
+    if (col2) {
+      col2.innerHTML = _cdBuildExpandColHTML(cid, persona, cs);
+      _cdWireButtons(col2, cid, persona);
+    }
+  };
+
+  // ── Column 3: Threat model ─────────────────────────────────────────────────
+
+  function _cdBuildTModelColHTML(cid, cs) {
+    var h = '<div class="cd-col-hd">';
+    h += '<span class="cd-col-title">Threat Modelling</span>';
+    h += '<button class="cd-btn-icon" onclick="window._cdCloseTModel(\'' + escHtml(cid) + '\')" title="Close column">✕</button>';
+    h += '</div>';
+
+    var btns = {
+      pasta:   'PASTA (7-stage)',
+      diamond: 'Diamond Model',
+      maestro: 'MAESTRO (AI/ML)',
+      stride:  'STRIDE',
+      dread:   'DREAD Score',
+    };
+    h += '<div class="cd-tm-btn-bar">';
+    Object.keys(btns).forEach(function (type) {
+      var tm = cs.tmodels[type] || { status: 'idle' };
+      var done = tm.status === 'loaded';
+      var loading = tm.status === 'loading';
+      h += '<button class="cd-tm-run-btn' + (done ? ' cd-tm-run-btn--done' : '') + '" ';
+      h += 'onclick="window._cdRunThreatModel(\'' + escHtml(cid) + '\',\'' + type + '\')">';
+      h += (loading ? '⟳ ' : done ? '✓ ' : '▶ ') + escHtml(btns[type]);
+      h += '</button>';
+    });
+    h += '</div>';
+
+    h += '<div id="cdTModelArea_' + escHtml(cid) + '">';
+    ['pasta','diamond','maestro','stride','dread'].forEach(function (type) {
+      var tm = cs.tmodels[type] || { status: 'idle' };
+      if (tm.status === 'loading') {
+        h += '<div class="cd-loading" id="cdTM_' + escHtml(cid) + '_' + type + '"><div class="cd-spinner"></div>Running ' + type.toUpperCase() + '…</div>';
+      } else if (tm.status === 'loaded' && tm.data) {
+        h += _cdRenderThreatModelResult(type, tm.data, cid);
+      }
+    });
+    h += '</div>';
+    return h;
+  }
+
+  function _cdRenderThreatModelResult(type, data, cid) {
+    var sections = data.sections || {};
+    var labels = {
+      pasta:   { objectives:'Stage 1: Objectives', technical_scope:'Stage 2: Technical Scope', app_decomposition:'Stage 3: App Decomposition', threat_analysis:'Stage 4: Threat Analysis', vulnerability_analysis:'Stage 5: Vulnerabilities', attack_modelling:'Stage 6: Attack Modelling', risk_impact:'Stage 7: Risk & Impact' },
+      diamond: { adversary:'Adversary', capability:'Capability', infrastructure:'Infrastructure', victim:'Victim', adversary_victim:'Adversary–Victim', capability_infrastructure:'Capability–Infrastructure' },
+      maestro: { model_algorithm:'L1: Model & Algorithm', data_layer:'L2: Data Layer', ecosystem:'L3: Ecosystem', agent_orchestration:'L4: Agent/Orchestration', evaluation:'L5: Evaluation', deployment:'L6: Deployment', user_org:'L7: User & Org', compliance:'Compliance Controls' },
+      stride:  { spoofing:'Spoofing', tampering:'Tampering', repudiation:'Repudiation', information_disclosure:'Information Disclosure', denial_of_service:'Denial of Service', elevation_of_privilege:'Elevation of Privilege', stride_summary:'Summary & Mitigations', iso27001_controls:'ISO 27001 Annex A Mapping', nist_csf:'NIST CSF Functions', gdpr_relevance:'GDPR Relevance', pci_dss:'PCI DSS Requirements' },
+      dread:   { damage:'Damage Potential', reproducibility:'Reproducibility', exploitability:'Exploitability', affected_users:'Affected Users', discoverability:'Discoverability', dread_score:'Overall DREAD Score', risk_treatment:'Risk Treatment Recommendation' },
+    }[type] || {};
+    var h = '<div class="cd-tm-result">';
+    h += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">';
+    h += '<strong style="font-size:11px;">' + type.toUpperCase() + '</strong>';
+    if (data.from_cache) h += '<span class="badge" style="font-size:10px;">cached</span>';
+    h += '<label style="font-size:10px;color:var(--text-muted,#7a7f8e);margin-left:auto;">';
+    h += '<input type="checkbox" id="cdTMReport_' + escHtml(cid) + '_' + type + '" style="margin-right:3px;">Include in report</label>';
+    h += '</div>';
+    Object.keys(sections).forEach(function (k) {
+      if (!sections[k]) return;
+      var lbl = labels[k] || k.replace(/_/g,' ');
+      h += '<div class="cd-tm-stage"><div class="cd-tm-stage__label">' + escHtml(lbl) + '</div>';
+      h += '<div class="cd-tm-stage__body">' + mdToHtml(sections[k]) + '</div></div>';
+    });
+    if (!Object.keys(sections).length && data.raw_text) {
+      h += '<div class="cd-section__body" style="font-size:11px;">' + mdToHtml(data.raw_text.slice(0, 2000)) + '</div>';
+    }
+    h += '</div>';
+    return h;
+  }
+
+  window._cdCloseTModel = function (cid) {
+    var cs = _cdState(cid);
+    _cdUpdateLayout(cid, cs.persona);
+  };
+
+  // ── Layout column manager ──────────────────────────────────────────────────
+
+  function _cdUpdateLayout(cid, persona) {
+    var panel = $('cdPanel');
+    var w = panel ? panel.offsetWidth : 640;
+    var cs = _cdState(cid);
+
+    var layout = document.getElementById('cdLayout_' + cid + '_' + persona);
+    if (!layout) return;
+
+    var col2 = document.getElementById('cdColExpand_' + cid + '_' + persona);
+
+    var hasExpand = !!(cs.activeExpand);
+
+    // Auto-widen panel when expand column is activated
+    if (hasExpand && panel) {
+      var minW = 860;
+      var curW = parseInt(getComputedStyle(panel).getPropertyValue('--cd-width') || '640', 10) || panel.offsetWidth;
+      if (curW < minW) panel.style.setProperty('--cd-width', minW + 'px');
+    }
+
+    if (col2) col2.classList.toggle('active', hasExpand);
+
+    var cols = 1 + (hasExpand ? 1 : 0);
+    layout.setAttribute('data-cols', String(cols));
+  }
+
+  function _cdWireButtons(pane, cid, persona) {
+    pane.querySelectorAll('.cd-confirm-btn,.cd-deny-btn,.cd-ciso-btn--escalate,.cd-ciso-btn--hold').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var ck  = btn.getAttribute('data-ck');
+        var rawVal = btn.getAttribute('data-val');
+        var val = rawVal === 'true' ? true : rawVal === 'false' ? false : rawVal; // support 'hold' etc
+        var cs  = _cdState(cid);
+        // Toggle: clicking the active button clears it
+        if (cs.tasks[ck] === val) {
+          cs.tasks[ck] = null;
+          delete cs.taskDecisions[ck];
+          btn.classList.remove('active');
+        } else {
+          cs.tasks[ck] = val;
+          var nowTs = new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+          cs.taskDecisions[ck] = { val: val, ts: nowTs };
+          var sibling = pane.querySelector('[data-ck="' + ck + '"]:not([data-val="' + btn.getAttribute('data-val') + '"])');
+          if (sibling) sibling.classList.remove('active');
+          btn.classList.add('active');
+          var decEl = pane.querySelector('[data-dec="' + ck + '"]');
+          if (decEl) decEl.textContent = nowTs;
+        }
+        _cdMarkActiveTab(cid);
+      });
+    });
+  }
+
+  window._cdExpand = async function (cid, persona, taskIdx, stepTitle) {
+    var cs = _cdState(cid);
+    var expKey = cid + ':' + persona + ':' + taskIdx;
+
+    // If already loaded and same task, just show col 2
+    if (cs.activeExpand && cs.activeExpand.taskIdx === taskIdx && cs.expands[expKey] && cs.expands[expKey].status === 'loaded') {
+      var col2 = document.getElementById('cdColExpand_' + cid + '_' + persona);
+      if (col2) { col2.classList.add('active'); col2.innerHTML = _cdBuildExpandColHTML(cid, persona, cs); _cdWireButtons(col2, cid, persona); }
+      _cdUpdateLayout(cid, persona);
+      return;
+    }
+
+    // Set loading state and activate col 2
+    cs.activeExpand = { persona: persona, taskIdx: taskIdx, stepTitle: stepTitle, rowEvidence: [] };
+    cs.expands[expKey] = { status: 'loading', questions: [] };
+
+    var col2 = document.getElementById('cdColExpand_' + cid + '_' + persona);
+    if (col2) { col2.classList.add('active'); col2.innerHTML = _cdBuildExpandColHTML(cid, persona, cs); }
+    _cdUpdateLayout(cid, persona);
+
+    var pd = cs.pdata[persona];
+    var rowRefs = [];
+    if (pd && pd.data && pd.data.persona_steps && pd.data.persona_steps[taskIdx]) {
+      var step = pd.data.persona_steps[taskIdx];
+      (step.subtasks || []).forEach(function (sub) {
+        if (sub && sub.evidence_refs) rowRefs = rowRefs.concat(sub.evidence_refs);
+      });
+    }
+    try {
+      var resp = await fetch(
+        '/api/v1/assessments/' + encodeURIComponent(state.assessmentId) +
+        '/clusters/' + encodeURIComponent(cid) + '/expand-step',
+        { method: 'POST',
+          headers: Object.assign({'Content-Type':'application/json'}, authHeaders()),
+          body: JSON.stringify({ step_title: stepTitle, row_refs: rowRefs,
+                                 persona: persona, model: _cdModelSel() }),
+          signal: AbortSignal.timeout(120000) }
+      );
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      var data = await resp.json();
+      cs.expands[expKey] = { status: 'loaded', questions: data.questions || [] };
+      if (cs.activeExpand && cs.activeExpand.taskIdx === taskIdx) {
+        cs.activeExpand.rowEvidence = data.row_evidence || [];
+        cs.activeExpand.suggestedTools = data.suggested_tools || [];
+        cs.activeExpand.huntData = data.hunt_data || null;
+      }
+      col2 = document.getElementById('cdColExpand_' + cid + '_' + persona);
+      if (col2) { col2.innerHTML = _cdBuildExpandColHTML(cid, persona, cs); _cdWireButtons(col2, cid, persona); }
+    } catch (err) {
+      cs.expands[expKey] = { status: 'error', questions: [] };
+      col2 = document.getElementById('cdColExpand_' + cid + '_' + persona);
+      if (col2) {
+        var qaEl = col2.querySelector('#cdExpandQA_' + cid + '_' + persona);
+        if (qaEl) qaEl.innerHTML = '<div class="cd-error">EXPAND failed: ' + escHtml(err.message) + '</div>';
+      }
+    }
+  };
+
+  window._cdRunThreatModel = async function (cid, modelType) {
+    var cs = _cdState(cid);
+    cs.tmodels[modelType] = { status: 'loading', data: null };
+
+    // Re-render the ThreatModel tab pane if active
+    var tmPane = document.getElementById('cdPane_' + cid + '_threat_model');
+    if (tmPane) tmPane.innerHTML = _cdBuildThreatModelPaneHTML(cid, cs);
+
+    try {
+      var resp = await fetch(
+        '/api/v1/assessments/' + encodeURIComponent(state.assessmentId) +
+        '/clusters/' + encodeURIComponent(cid) + '/threat-model',
+        { method: 'POST',
+          headers: Object.assign({'Content-Type':'application/json'}, authHeaders()),
+          body: JSON.stringify({ model_type: modelType, model: _cdModelSel() }),
+          signal: AbortSignal.timeout(180000) }
+      );
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      var data = await resp.json();
+      cs.tmodels[modelType] = { status: 'loaded', data: data };
+      tmPane = document.getElementById('cdPane_' + cid + '_threat_model');
+      if (tmPane) tmPane.innerHTML = _cdBuildThreatModelPaneHTML(cid, cs);
+      _cdWireDREADSliders(cid);
+    } catch (err) {
+      cs.tmodels[modelType] = { status: 'error', data: null };
+      tmPane = document.getElementById('cdPane_' + cid + '_threat_model');
+      if (tmPane) tmPane.innerHTML = _cdBuildThreatModelPaneHTML(cid, cs);
+      toast('Threat model failed: ' + err.message, 'error');
+    }
+  };
+
+  // ── ThreatModel persona tab — 3-column layout, no LLM summary ────────────────
+
+  function _cdShowThreatModelTab(cid) {
+    var bodyEl = $('cdBody');
+    if (!bodyEl) return;
+    document.querySelectorAll('#cdBody .cd-pane').forEach(function (p) { p.classList.remove('active'); });
+    var paneId = 'cdPane_' + cid + '_threat_model';
+    var existing = document.getElementById(paneId);
+    if (existing) { existing.classList.add('active'); return; }
+    var pane = document.createElement('div');
+    pane.className = 'cd-pane active';
+    pane.id = paneId;
+    var cs = _cdState(cid);
+    pane.innerHTML = _cdBuildThreatModelPaneHTML(cid, cs);
+    bodyEl.appendChild(pane);
+    _cdWireDREADSliders(cid);
+  }
+
+  function _cdBuildThreatModelPaneHTML(cid, cs) {
+    var esc = escHtml;
+    var h = '<div class="cd-tm-tab-layout">';
+
+    // COL 1: Framework runners
+    h += '<div class="cd-tm-tab-col" style="overflow-y:auto;padding:12px 14px;border-right:1px solid var(--border,#2a2d3a);">';
+    h += '<div class="cd-col-hd"><span class="cd-col-title">Threat Frameworks</span></div>';
+    var frameworks = [
+      { key: 'pasta',   label: 'PASTA (7-stage)',  desc: 'Process for Attack Simulation & Threat Analysis' },
+      { key: 'diamond', label: 'Diamond Model',    desc: 'Adversary · Capability · Infrastructure · Victim' },
+      { key: 'maestro', label: 'MAESTRO (AI/ML)',  desc: '7-layer AI threat framework' },
+      { key: 'stride',  label: 'STRIDE',           desc: 'Microsoft threat model with ISO 27001 / NIST CSF / GDPR mapping' },
+      { key: 'dread',   label: 'DREAD Score',      desc: 'Damage · Reproducibility · Exploitability · Affected Users · Discoverability' },
+    ];
+    frameworks.forEach(function(fw) {
+      var tm = cs.tmodels[fw.key] || { status: 'idle' };
+      var isLoading = tm.status === 'loading';
+      var isDone = tm.status === 'loaded';
+      var isError = tm.status === 'error';
+      h += '<div class="cd-tm-framework-card' + (isDone ? '' : ' cd-tm-framework-card__idle') + '">';
+      h += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:5px;">';
+      h += '<strong style="font-size:11px;flex:1;">' + esc(fw.label) + '</strong>';
+      if (isDone) h += '<span style="font-size:10px;color:#3FA860;">✓ Done</span>';
+      if (isError) h += '<span style="font-size:10px;color:#E54848;">✗ Failed</span>';
+      h += '</div>';
+      h += '<div style="font-size:10px;color:var(--text-muted);margin-bottom:8px;">' + esc(fw.desc) + '</div>';
+      h += '<button class="cd-tm-run-btn' + (isDone ? ' cd-tm-run-btn--done' : '') + '"';
+      h += ' onclick="window._cdRunThreatModel(\'' + esc(cid) + '\',\'' + fw.key + '\')">';
+      h += (isLoading ? '\u27F3 Running…' : isDone ? '\u27F3 Re-run' : '\u25B6 Run') + ' ' + esc(fw.label);
+      h += '</button>';
+      h += '</div>';
+    });
+    h += '</div>';
+
+    // COL 2: MITRE coverage table + STRIDE result if loaded
+    h += '<div class="cd-tm-tab-col" style="overflow-y:auto;padding:12px 14px;border-right:1px solid var(--border,#2a2d3a);">';
+    h += '<div class="cd-col-hd"><span class="cd-col-title">Analysis</span></div>';
+
+    // MITRE coverage — extract from any loaded persona data
+    var mitreList = [];
+    var clusterData = state.clusterMap && state.clusterMap[cid];
+    if (clusterData) {
+      mitreList = (clusterData.top_mitre || clusterData.mitre || []).slice(0, 10);
+    }
+    if (!mitreList.length) {
+      // Try to extract from loaded pdata
+      var pdKeys = Object.keys(cs.pdata);
+      for (var pi = 0; pi < pdKeys.length; pi++) {
+        var pd = cs.pdata[pdKeys[pi]];
+        if (pd && pd.data && pd.data.cluster_mitre) { mitreList = pd.data.cluster_mitre.slice(0, 10); break; }
+      }
+    }
+    h += '<div class="cd-section"><div class="cd-section__hd">MITRE ATT&CK COVERAGE</div>';
+    if (mitreList.length) {
+      mitreList.forEach(function(t) {
+        h += '<div class="cd-mitre-bar">';
+        h += '<span style="font-size:10px;font-family:monospace;min-width:80px;color:var(--accent,#7c6af7);">' + esc(String(t)) + '</span>';
+        h += '<div style="flex:1;height:6px;background:rgba(124,106,247,.2);border-radius:3px;overflow:hidden;">';
+        h += '<div style="width:60%;height:100%;background:var(--accent,#7c6af7);border-radius:3px;"></div></div>';
+        h += '</div>';
+      });
+    } else {
+      h += '<div style="font-size:10px;color:var(--text-muted);">No MITRE tags available. Run a persona tab first or load data.</div>';
+    }
+    h += '</div>';
+
+    // STRIDE results if loaded
+    var strideTm = cs.tmodels['stride'];
+    if (strideTm && strideTm.status === 'loaded' && strideTm.data) {
+      h += '<div class="cd-section" style="margin-top:10px;"><div class="cd-section__hd">STRIDE ANALYSIS</div>';
+      h += _cdRenderThreatModelResult('stride', strideTm.data, cid);
+      h += '</div>';
+    } else {
+      h += '<div class="cd-section" style="margin-top:10px;"><div class="cd-section__hd">STRIDE</div>';
+      h += '<div style="font-size:10px;color:var(--text-muted);margin-bottom:8px;">Not yet run — click ▶ Run STRIDE in the frameworks column.</div>';
+      h += '</div>';
+    }
+    h += '</div>';
+
+    // COL 3: Compliance map + DREAD sliders
+    h += '<div class="cd-tm-tab-col" style="overflow-y:auto;padding:12px 14px;">';
+    h += '<div class="cd-col-hd"><span class="cd-col-title">Compliance & Scoring</span></div>';
+
+    // DREAD sliders if loaded
+    var dreadTm = cs.tmodels['dread'];
+    if (dreadTm && dreadTm.status === 'loaded' && dreadTm.data) {
+      h += '<div class="cd-section"><div class="cd-section__hd">DREAD SCORE — ANALYST ADJUSTMENT</div>';
+      var dreadDims = ['damage','reproducibility','exploitability','affected_users','discoverability'];
+      var dreadLabels = { damage:'Damage', reproducibility:'Reproducibility', exploitability:'Exploitability', affected_users:'Affected Users', discoverability:'Discoverability' };
+      var dreadOv = cs.dreadOverrides[cid] || {};
+      var sections = (dreadTm.data.sections || {});
+      dreadDims.forEach(function(dim) {
+        var llmVal = _cdParseDREADScore(sections[dim] || '');
+        var analystVal = dreadOv[dim] !== undefined ? dreadOv[dim] : llmVal;
+        h += '<div class="cd-dread-slider">';
+        h += '<div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:3px;">';
+        h += '<span>' + esc(dreadLabels[dim]) + '</span>';
+        h += '<span style="color:var(--text-muted);">LLM: <b style="color:var(--text,#e8ebf0);">' + (llmVal||'?') + '</b>';
+        if (dreadOv[dim] !== undefined && dreadOv[dim] !== llmVal) {
+          h += ' → Adjusted: <b style="color:#e0c446;">' + analystVal + '</b>';
+        }
+        h += '</span></div>';
+        h += '<input type="range" min="1" max="10" value="' + (analystVal || 5) + '"';
+        h += ' data-cid="' + esc(cid) + '" data-dim="' + esc(dim) + '"';
+        h += ' class="cd-dread-range" style="width:100%;accent-color:var(--accent,#7c6af7);">';
+        h += '</div>';
+      });
+      // Overall DREAD score display
+      var dims = dreadDims.map(function(d) { return dreadOv[d] !== undefined ? dreadOv[d] : _cdParseDREADScore(sections[d] || ''); });
+      var validDims = dims.filter(function(v) { return v !== null && !isNaN(v); });
+      var avgScore = validDims.length ? (validDims.reduce(function(a,b){return a+b;},0) / validDims.length).toFixed(1) : '?';
+      h += '<div style="margin-top:8px;font-size:12px;font-weight:700;color:' + (parseFloat(avgScore) >= 7 ? '#E54848' : parseFloat(avgScore) >= 5 ? '#ffaa55' : '#3FA860') + ';">DREAD Score: ' + avgScore + ' / 10</div>';
+      h += '</div>';
+    } else if (dreadTm && dreadTm.status === 'loading') {
+      h += '<div class="cd-section"><div class="cd-loading"><div class="cd-spinner"></div>Running DREAD…</div></div>';
+    } else {
+      h += '<div class="cd-section"><div class="cd-section__hd">DREAD SCORE</div>';
+      h += '<div style="font-size:10px;color:var(--text-muted);">Run ▶ DREAD Score to get scored dimensions with analyst-adjustable sliders.</div>';
+      h += '</div>';
+    }
+
+    // Compliance map — fast load from endpoint
+    var cm = cs.complianceMap[cid];
+    if (!cm) {
+      h += '<div class="cd-section" style="margin-top:8px;"><div class="cd-section__hd">COMPLIANCE MAP</div>';
+      h += '<button class="cd-expand-trigger" onclick="window._cdLoadComplianceMapTM(\'' + esc(cid) + '\')">▶ Load ISO/GDPR/PCI/NIST Map</button>';
+      h += '</div>';
+    } else {
+      h += '<div class="cd-section" style="margin-top:8px;"><div class="cd-section__hd">ISO 27001 GAPS</div>';
+      var gaps = (cm.iso27001 || []).filter(function(c){ return c.status === 'GAP'; });
+      if (gaps.length) {
+        gaps.forEach(function(c) {
+          h += '<div class="cd-ctrl-row"><span class="cd-ctrl-status--gap">\u26A0</span><span style="font-weight:700;min-width:70px;">' + esc(c.ref) + '</span><span style="color:var(--text-muted);">' + esc(c.name) + '</span></div>';
+        });
+      } else {
+        h += '<div style="font-size:10px;color:var(--text-muted);">No gaps detected from MITRE tags.</div>';
+      }
+      h += '</div>';
+
+      var art33 = (cm.gdpr || []).find(function(g){return g.ref==='Art.33';});
+      if (art33 && art33.status === 'GAP') {
+        h += '<div class="cd-section cd-breach-clock" style="margin-top:8px;">';
+        h += '<div class="cd-section__hd">GDPR ART.33 — BREACH CLOCK</div>';
+        h += '<div style="font-size:10px;color:#E54848;font-weight:700;">TRIGGERED — 72h notification required</div>';
+        h += '<div style="font-size:10px;color:var(--text-muted);margin-top:4px;">' + esc(art33.note || '') + '</div>';
+        h += '</div>';
+      }
+    }
+    h += '</div>'; // col 3
+    h += '</div>'; // tm-tab-layout
+    return h;
+  }
+
+  function _cdParseDREADScore(text) {
+    // Extract a 1-10 number from a DREAD section text
+    var m = text.match(/\b([1-9]|10)\s*\/\s*10\b/) || text.match(/\bscore[:\s]+([1-9]|10)\b/i) || text.match(/\b([1-9]|10)\b/);
+    return m ? parseInt(m[1], 10) : null;
+  }
+
+  function _cdWireDREADSliders(cid) {
+    var cs = _cdState(cid);
+    var pane = document.getElementById('cdPane_' + cid + '_threat_model');
+    if (!pane) return;
+    pane.querySelectorAll('.cd-dread-range').forEach(function(input) {
+      input.addEventListener('input', function() {
+        var dim = input.getAttribute('data-dim');
+        var val = parseInt(input.value, 10);
+        if (!cs.dreadOverrides[cid]) cs.dreadOverrides[cid] = {};
+        cs.dreadOverrides[cid][dim] = val;
+        // Re-render the pane to update display
+        pane.innerHTML = _cdBuildThreatModelPaneHTML(cid, cs);
+        _cdWireDREADSliders(cid);
+      });
+    });
+  }
+
+  window._cdLoadComplianceMapTM = async function (cid) {
+    var cs = _cdState(cid);
+    // Re-use the same compliance map loader
+    await window._cdLoadComplianceMap(cid);
+    // Re-render the ThreatModel pane
+    var pane = document.getElementById('cdPane_' + cid + '_threat_model');
+    if (pane) {
+      pane.innerHTML = _cdBuildThreatModelPaneHTML(cid, cs);
+      _cdWireDREADSliders(cid);
+    }
+  };
+
+  function _cdShowReportPane(cid) {
+    var bodyEl = $('cdBody');
+    if (!bodyEl) return;
+    document.querySelectorAll('#cdBody .cd-pane').forEach(function (p) { p.classList.remove('active'); });
+    var paneId = 'cdPane_' + cid + '_report';
+    var existing = document.getElementById(paneId);
+    if (existing) { existing.classList.add('active'); return; }
+
+    var pane = document.createElement('div');
+    pane.className = 'cd-pane active';
+    pane.id = paneId;
+    pane.innerHTML = _cdBuildReportHTML(cid);
+    bodyEl.appendChild(pane);
+    // Wire save button
+    var saveBtn = pane.querySelector('#cdSaveReport_' + cid);
+    if (saveBtn) saveBtn.addEventListener('click', function () { _cdSaveReport(cid); });
+  }
+
+  function _cdBuildReportHTML(cid) {
+    var cs = _cdState(cid);
+    var confirmed = [], denied = [], open = [];
+
+    PERSONA_TABS.filter(function (t) { return t.key !== 'report'; }).forEach(function (t) {
+      var pd = cs.pdata[t.key];
+      if (!pd || pd.status !== 'loaded' || !pd.data) return;
+      var steps = pd.data.persona_steps || [];
+      steps.forEach(function (s, ti) {
+        var tKey = _cdTaskKey(cid, t.key, ti, null);
+        var done = cs.tasks[tKey];
+        var title = (t.label + ': ' + (s.title || s.action || 'Task ' + (ti+1)));
+        if (done === true)  confirmed.push(title);
+        else if (done === false) denied.push(title);
+        else open.push(title);
+      });
+    });
+
+    var h = '<div class="cd-report-section">';
+    h += '<div class="cd-report-section__hd">CONFIRMED FINDINGS (' + confirmed.length + ')</div>';
+    if (confirmed.length) {
+      confirmed.forEach(function (t) { h += '<div class="cd-report-item confirmed"><span class="cd-report-item__icon">✓</span><span>' + escHtml(t) + '</span></div>'; });
+    } else {
+      h += '<div style="color:var(--text-muted,#7a7f8e);font-size:11px;">None yet — confirm tasks in persona tabs</div>';
+    }
+    h += '</div>';
+
+    h += '<div class="cd-report-section">';
+    h += '<div class="cd-report-section__hd">DENIED / BENIGN (' + denied.length + ')</div>';
+    denied.forEach(function (t) { h += '<div class="cd-report-item denied"><span class="cd-report-item__icon">✗</span><span>' + escHtml(t) + '</span></div>'; });
+    h += '</div>';
+
+    h += '<div class="cd-report-section">';
+    h += '<div class="cd-report-section__hd">OPEN / UNRESOLVED (' + open.length + ')</div>';
+    open.forEach(function (t) { h += '<div class="cd-report-item open"><span class="cd-report-item__icon">?</span><span>' + escHtml(t) + '</span></div>'; });
+    h += '</div>';
+
+    // Threat model inclusions
+    var tmIncluded = [];
+    ['pasta','diamond','maestro','stride','dread'].forEach(function (type) {
+      if ((cs.tmodels[type]||{}).status === 'loaded') tmIncluded.push(type.toUpperCase());
+    });
+    if (tmIncluded.length) {
+      h += '<div class="cd-report-section">';
+      h += '<div class="cd-report-section__hd">THREAT MODELS AVAILABLE</div>';
+      h += '<div style="font-size:11px;">' + tmIncluded.join(', ') + ' — check "Include in report" on each model pane to attach</div>';
+      h += '</div>';
+    }
+
+    h += '<div style="border-top:1px solid var(--border,#2a2d3a);padding-top:12px;margin-top:4px;">';
+    h += '<button id="cdSaveReport_' + escHtml(cid) + '" class="btn-primary" style="font-size:11px;padding:5px 14px;">💾 Save Report Locally</button>';
+    h += '<div class="cd-send-row">';
+    h += '<button class="cd-send-btn cd-send-btn--active" onclick="window._cdSaveReport(\'' + escHtml(cid) + '\')">📁 Save JSON</button>';
+    h += '<button class="cd-send-btn cd-send-btn--disabled" title="Configure SMTP in .env to enable" disabled>📧 Email (unconfigured)</button>';
+    h += '<button class="cd-send-btn cd-send-btn--disabled" title="Configure SLACK_WEBHOOK in .env to enable" disabled>Slack (unconfigured)</button>';
+    h += '<button class="cd-send-btn cd-send-btn--disabled" title="Configure object storage in .env to enable" disabled>☁ Object Store (unconfigured)</button>';
+    h += '</div></div>';
+    return h;
+  }
+
+  window._cdSaveReport = async function (cid) {
+    var cs = _cdState(cid);
+    var confirmed = [], denied = [], openItems = [];
+    PERSONA_TABS.filter(function (t) { return t.key !== 'report'; }).forEach(function (t) {
+      var pd = cs.pdata[t.key];
+      if (!pd || pd.status !== 'loaded' || !pd.data) return;
+      (pd.data.persona_steps || []).forEach(function (s, ti) {
+        var done = cs.tasks[_cdTaskKey(cid, t.key, ti, null)];
+        var item = { persona: t.key, task: s.title || s.action || 'Task ' + (ti+1) };
+        if (done === true) confirmed.push(item);
+        else if (done === false) denied.push(item);
+        else openItems.push(item);
+      });
+    });
+    try {
+      var resp = await fetch(
+        '/api/v1/assessments/' + encodeURIComponent(state.assessmentId) +
+        '/clusters/' + encodeURIComponent(cid) + '/investigation-report',
+        { method: 'POST',
+          headers: Object.assign({'Content-Type':'application/json'}, authHeaders()),
+          body: JSON.stringify({ confirmed: confirmed, denied: denied, open: openItems,
+                                 analyst_notes: '', generated_by: 'soc_analyst' }) }
+      );
+      var data = await resp.json();
+      if (data.saved) toast('Report saved: ' + data.path, 'ok');
+      else toast('Save failed: ' + (data.path || 'unknown'), 'error');
+    } catch (err) {
+      toast('Save failed: ' + err.message, 'error');
+    }
+  };
+
+  // Backward compat shims (old code may still reference these)
+  window._triggerLlmSummary = function (cid, aid, force, persona) {
+    if (cid) { state.activeClusterId = cid; }
+    var activeCid = state.activeClusterId;
+    if (!activeCid) return;
+    var p = persona || state.currentPersona || 'soc_analyst';
+    var cs = _cdState(activeCid);
+    if (force) cs.pdata[p].status = 'idle';
+    _cdSwitchPersona(activeCid, p);
+  };
+  window._triggerClusterEnrich = function (cid) { toast('Use persona tab → CRAG tab coming soon', 'info'); };
+  window._triggerHuntSweep     = function (cid) { toast('Use persona tab → Hunt Sweep coming soon', 'info'); };
+  window._ensureClusterElements = function () {};
+
+
+  window.storeClusters = storeClusters;  window.renderClusterList = renderClusterList;
+
+  // ══════════════════════════════════════════════════════════════════
+  // STREAMING LIVE FEED — polls /snapshot every 2s, incrementally
+  // updates #clusterListPanel without full page re-render.
+  // Call window.startStreamPolling(sessionId) to activate.
+  // ══════════════════════════════════════════════════════════════════
+
+  var _streamPollTimer = null;
+  var _streamLastClusterCount = 0;
+
+  function _streamLog(msg) {
+    var el = document.getElementById('streamFeedLog');
+    if (!el) return;
+    var ts = new Date().toLocaleTimeString();
+    el.innerHTML = '<span style="color:var(--text-muted);">[' + ts + ']</span> ' + escHtml(msg) + '<br>' + el.innerHTML;
+    if (el.children.length > 10) el.removeChild(el.lastChild);
+  }
+
+  function _streamUpdateUI(snap) {
+    var statsEl = document.getElementById('streamFeedStats');
+    if (statsEl) {
+      statsEl.textContent = (snap.total_ingested || 0) + ' rows · ' + (snap.cluster_count || 0) + ' clusters';
+    }
+    if ((snap.cluster_count || 0) > _streamLastClusterCount) {
+      _streamLog((snap.cluster_count - _streamLastClusterCount) + ' new cluster(s) formed');
+      _streamLastClusterCount = snap.cluster_count || 0;
+    }
+    var clusters = snap.clusters || [];
+    if (clusters.length > 0) {
+      // Merge into state.clusterMap without clearing existing entries
+      clusters.forEach(function (c) {
+        var cid = String(c.cluster_id || c.id || '');
+        if (cid) state.clusterMap[cid] = c;
+      });
+      renderClusterList();
+    }
+  }
+
+  function _streamPoll(sessionId) {
+    var base = (state.apiBase || '').replace(/\/$/, '');
+    var url = base + '/api/v1/stream/sessions/' + encodeURIComponent(sessionId) + '/snapshot';
+    var headers = { 'Accept': 'application/json' };
+    var apiKey = localStorage.getItem('apiKey');
+    if (apiKey) headers['X-API-Key'] = apiKey;
+
+    fetch(url, { headers: headers })
+      .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
+      .then(function (snap) {
+        _streamUpdateUI(snap);
+        if (snap.status === 'closed') {
+          _streamLog('Session closed — stopping poll');
+          window.stopStreamPolling();
+        }
+      })
+      .catch(function (err) {
+        _streamLog('Poll error: ' + err);
+      });
+  }
+
+  window.startStreamPolling = function (sessionId) {
+    if (_streamPollTimer) clearInterval(_streamPollTimer);
+    _streamLastClusterCount = 0;
+    var panel = document.getElementById('streamFeedPanel');
+    if (panel) panel.style.display = '';
+    var sidEl = document.getElementById('streamFeedSessionId');
+    if (sidEl) sidEl.textContent = sessionId;
+    window._streamSessionId = sessionId;
+    _streamLog('Streaming started');
+    _streamPoll(sessionId);
+    _streamPollTimer = setInterval(function () { _streamPoll(sessionId); }, 2000);
+  };
+
+  window.stopStreamPolling = function () {
+    if (_streamPollTimer) { clearInterval(_streamPollTimer); _streamPollTimer = null; }
+    var dot = document.getElementById('streamFeedDot');
+    if (dot) { dot.style.animation = 'none'; dot.style.background = '#6b7280'; }
+    _streamLog('Polling stopped');
+  };
 
 })();

@@ -80,9 +80,18 @@ class MimecastConnector(BaseConnector):
             import json
             j = json.loads(body.decode('utf-8'))
             items = j.get('data') or j.get('items') or j
-            return {'events': items}
         except Exception as e:
             raise ConnectorError(str(e))
+
+        if os.environ.get('JANUSEC_STREAMING_MODE', '').lower() in ('1', 'true', 'yes') and isinstance(items, list) and items:
+            try:
+                from src.connectors.stream_emitter import emit_to_stream
+                await emit_to_stream(items, source='mimecast')
+            except Exception as _se:
+                import logging as _log
+                _log.getLogger(__name__).warning('Mimecast stream emit failed: %s', _se)
+
+        return {'events': items}
 
 
 __all__ = ['MimecastConnector']

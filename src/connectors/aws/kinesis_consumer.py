@@ -34,6 +34,13 @@ from typing import Any, Callable, Awaitable
 
 logger = logging.getLogger(__name__)
 
+try:
+    import boto3 as _boto3  # type: ignore
+    _BOTO3_AVAILABLE = True
+except ImportError:
+    _boto3 = None  # type: ignore[assignment]
+    _BOTO3_AVAILABLE = False
+
 _STREAM_NAME = os.getenv('KINESIS_STREAM_NAME', '')
 _REGION = os.getenv('KINESIS_REGION', 'us-east-1')
 _CONSUMER_NAME = os.getenv('KINESIS_CONSUMER_NAME', 'janusec-pipeline')
@@ -154,15 +161,24 @@ class KinesisShardConsumer:
         self._running = False
         self._shard_iterator: str | None = None
 
+    @staticmethod
+    def check_ready() -> tuple[bool, str]:
+        """Return (ok, message) — call at startup to surface missing dependencies."""
+        if not _BOTO3_AVAILABLE:
+            return False, 'boto3 not installed; pip install boto3'
+        if not _STREAM_NAME:
+            return False, 'KINESIS_STREAM_NAME env var not set'
+        return True, 'ok'
+
     async def run(self) -> None:
         """Poll-based shard consumption loop."""
-        try:
-            import boto3  # type: ignore
-        except ImportError:
-            logger.warning('kinesis_consumer: boto3 not installed; shard %s stopped', self.shard_id)
-            return
+        if not _BOTO3_AVAILABLE:
+            raise ImportError(
+                'kinesis_consumer: boto3 is required but not installed. '
+                f'pip install boto3  (KINESIS_STREAM_NAME={_STREAM_NAME!r} is configured)'
+            )
 
-        client = boto3.client('kinesis', region_name=self.region)
+        client = _boto3.client('kinesis', region_name=self.region)
         loop = asyncio.get_event_loop()
 
         # Determine starting iterator

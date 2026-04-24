@@ -13,7 +13,12 @@ class TenantMiddleware(BaseHTTPMiddleware):
     falls back to `default` tenant. Otherwise returns 400.
     """
     async def dispatch(self, request: Request, call_next) -> Response:
-        tenant = request.headers.get('X-Tenant-ID') or request.headers.get('x-tenant-id')
+        tenant = (
+            request.headers.get('X-Tenant-ID')
+            or request.headers.get('x-tenant-id')
+            or request.query_params.get('tenant_id')
+            or request.query_params.get('tenant')
+        )
         path = request.url.path or ''
         exempt_paths = {'/health', '/ready', '/api/v1/llm/health', '/', '/console', '/live', '/docs', '/openapi.json', '/redoc'}
         if path in exempt_paths or path.startswith('/metrics') or path.startswith('/static/'):
