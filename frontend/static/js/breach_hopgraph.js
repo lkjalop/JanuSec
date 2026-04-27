@@ -175,6 +175,8 @@
     travelKey.forEach(function (k) {
       legend.innerHTML += '<span style="border-left:3px solid ' + k.color + ';padding-left:4px;">' + k.label + '</span>';
     });
+    // Exfil destination marker
+    legend.innerHTML += '<span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#ef4444;border:2px solid #fca5a5;margin-right:3px;vertical-align:middle;"></span>exfil destination</span>';
     container.appendChild(legend);
 
     var svg = d3.select(container)
@@ -209,16 +211,35 @@
           d.fx = null; d.fy = null;
         }));
 
+    // Fix 7 — Pin exfil-destination nodes with high-visibility style
+    var _EXFIL_RE = /mega\.nz|backblaze|b2\.backblazeb2|hetzner|AS24940|31\.216\.148|s3:\/\//i;
+    graph.nodes.forEach(function (d) {
+      d._isExfil = _EXFIL_RE.test(d.id) || _EXFIL_RE.test(d.label);
+    });
+
     nodeG.append('circle')
-      .attr('r', function (d) { return Math.min(20, 7 + Math.sqrt(d.count) * 3); })
-      .attr('fill', function (d) { return TYPE_COLOR[d.type] || '#888'; })
-      .attr('fill-opacity', 0.85)
+      .attr('r', function (d) {
+        if (d._isExfil) return 22; // exfil destinations are always prominent
+        return Math.min(20, 7 + Math.sqrt(d.count) * 3);
+      })
+      .attr('fill', function (d) {
+        if (d._isExfil) return '#ef4444'; // red — exfil destination
+        return TYPE_COLOR[d.type] || '#888';
+      })
+      .attr('fill-opacity', function (d) { return d._isExfil ? 0.95 : 0.85; })
       .attr('stroke', function (d) {
+        if (d._isExfil) return '#fca5a5'; // bright red ring
         if (d.type === 'geo' && d._travel) return GEO_TRAVEL_COLOR[d._travel] || '#34d399';
         return '#fff';
       })
-      .attr('stroke-width', function (d) { return d.type === 'geo' && d._travel ? 2 : 0.5; })
-      .attr('stroke-opacity', function (d) { return d.type === 'geo' && d._travel ? 0.9 : 0.3; });
+      .attr('stroke-width', function (d) {
+        if (d._isExfil) return 3;
+        return d.type === 'geo' && d._travel ? 2 : 0.5;
+      })
+      .attr('stroke-opacity', function (d) {
+        if (d._isExfil) return 1;
+        return d.type === 'geo' && d._travel ? 0.9 : 0.3;
+      });
 
     nodeG.append('text')
       .text(function (d) { return d.label; })

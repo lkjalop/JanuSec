@@ -310,6 +310,75 @@
   white-space: nowrap;
 }
 .br-finding__gen:hover { color: var(--text-primary); }
+.br-finding__gen--dread {
+  background: rgba(124,58,237,.1);
+  border-color: rgba(124,58,237,.4);
+  color: #c4b5fd;
+}
+.br-finding__gen--dread:hover { background: rgba(124,58,237,.2); color: #ede9fe; }
+/* ── Reasoning-mode tags shown below the Generate button ─────────── */
+.br-tm__reasoning-tags {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+/* ── Inline regenerate button next to section headings ──────────── */
+.br-regen-btn {
+  background: none;
+  border: 1px solid rgba(124,58,237,.3);
+  color: #a78bfa;
+  padding: 1px 7px;
+  border-radius: 4px;
+  font-size: 10px;
+  cursor: pointer;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+.br-regen-btn:hover { background: rgba(124,58,237,.12); color: #c4b5fd; }
+/* ── Confidence chip with info icon ──────────────────────────── */
+.br-conf-chip {
+  cursor: help;
+  position: relative;
+}
+.br-conf-chip__icon {
+  font-size: 10px;
+  margin-left: 3px;
+  opacity: .5;
+  vertical-align: super;
+}
+
+/* ── Root cause narrative block ──────────────────────────────── */
+.br-root-narrative {
+  background: rgba(255,255,255,.03);
+  border: 1px solid rgba(255,255,255,.08);
+  border-left: 3px solid rgba(99,102,241,.5);
+  border-radius: 6px;
+  padding: 16px 20px;
+  margin-bottom: 16px;
+}
+
+/* ── Analyst detail collapse ─────────────────────────────────── */
+.br-analyst-detail {
+  margin-top: 8px;
+}
+.br-analyst-detail > summary {
+  user-select: none;
+  padding: 8px 0;
+  opacity: .7;
+  transition: opacity .15s;
+}
+.br-analyst-detail > summary:hover { opacity: 1; }
+.br-analyst-detail[open] > summary::after { content: ' ▾'; }
+
+/* ── Compliance chips ────────────────────────────────────────── */
+.br-compliance-chip {
+  display: inline-block;
+  transition: transform .1s, box-shadow .15s;
+}
+.br-compliance-chip:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 6px rgba(0,0,0,.3);
+}
 
 /* ── Benign / Isolated collapsed rows ───────────────────────────────────── */
 .br-collapsed {
@@ -835,6 +904,158 @@
 .br-auto--safe { color: #86efac; border: 1px solid rgba(82,224,127,.45); }
 .br-auto--approval { color: #fde68a; border: 1px solid rgba(250,204,21,.45); }
 .br-auto--manual { color: #93c5fd; border: 1px solid rgba(147,197,253,.45); }
+/* ── Context strip: IDENTITY / SYSTEMS / C2 INFRA / SOURCES ─────── */
+.br-context-strip {
+  margin: 8px 0 6px;
+  padding: 8px 10px;
+  border: 1px solid rgba(99,102,241,.25);
+  border-radius: 6px;
+  background: rgba(99,102,241,.05);
+  font-size: 12px;
+}
+.br-ctx__row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 2px 0;
+  line-height: 1.5;
+}
+.br-ctx__row + .br-ctx__row {
+  border-top: 1px solid rgba(255,255,255,.04);
+}
+.br-ctx__label {
+  min-width: 70px;
+  font-size: 9px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: #818cf8;
+  flex-shrink: 0;
+}
+.br-ctx__val {
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.br-ctx__provider {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 3px;
+  background: rgba(99,102,241,.12);
+  border: 1px solid rgba(99,102,241,.3);
+  color: #a5b4fc;
+  font-size: 10px;
+  font-weight: 600;
+}
+.br-ctx__count {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+/* ── Threat narrative (DREAD · PASTA · Diamond) ──────────────────── */
+.br-threat-model {
+  margin: 10px 0 8px;
+  border: 1px solid rgba(124,58,237,.3);
+  border-radius: 6px;
+  background: rgba(124,58,237,.04);
+  font-size: 12px;
+  overflow: hidden;
+}
+.br-threat-model--empty {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border-style: dashed;
+  background: rgba(124,58,237,.03);
+}
+.br-tm__empty-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 3px;
+}
+.br-tm__heading {
+  padding: 8px 12px 6px;
+  font-size: 10px;
+  font-weight: 800;
+  color: #c4b5fd;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  border-bottom: 1px solid rgba(124,58,237,.2);
+  background: rgba(124,58,237,.07);
+}
+.br-tm__heading span {
+  font-weight: 400;
+  color: var(--text-muted);
+  margin-left: 6px;
+  text-transform: none;
+}
+.br-tm__section {
+  padding: 6px 12px 10px;
+  border-bottom: 1px solid rgba(124,58,237,.14);
+}
+.br-tm__section:last-child { border-bottom: none; }
+.br-tm__section-heading {
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: #a78bfa;
+  margin: 4px 0 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.br-tm__block {
+  margin: 6px 0;
+  padding: 8px 10px;
+  border-radius: 5px;
+  border: 1px solid rgba(167,139,250,.15);
+  background: rgba(167,139,250,.04);
+}
+.br-tm__block-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+.br-tm__block-icon {
+  font-size: 13px;
+  flex-shrink: 0;
+}
+.br-tm__block-label {
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: #c4b5fd;
+  flex-shrink: 0;
+}
+.br-tm__block-sub {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+.br-tm__block-text {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.55;
+  padding-left: 20px;
+}
+.br-tm__tier {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .04em;
+}
+.br-tm__tier--critical { background: rgba(239,68,68,.15);   color: #fca5a5; border: 1px solid rgba(239,68,68,.4); }
+.br-tm__tier--high     { background: rgba(249,115,22,.15);  color: #fdba74; border: 1px solid rgba(249,115,22,.4); }
+.br-tm__tier--medium   { background: rgba(250,204,21,.12);  color: #fde68a; border: 1px solid rgba(250,204,21,.4); }
+.br-tm__tier--low      { background: rgba(82,224,127,.08);  color: #86efac; border: 1px solid rgba(82,224,127,.3); }
+.br-tm__hint           { color: var(--text-muted); font-style: italic; font-size: 11px; line-height: 1.5; }
 .br-known-unknown,
 .bct-known-unknown {
   display: grid;

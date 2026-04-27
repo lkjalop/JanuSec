@@ -163,6 +163,69 @@ def damage_fragment(
     cj_assets = cj.get('assets', {})
     cj_dests = cj.get('destinations', {})
 
+    # ── Helper: resolve a time-range prefix for any scenario ────────────────
+    def _time_prefix(candidate_rows: list[dict]) -> str:
+        """Return 'On YYYY-MM-DD, ' or 'Between X and Y, ' or '' (never 'On , ')."""
+        all_ts = sorted(t for r in candidate_rows or rows for t in [_ts(r)] if t)
+        if all_ts:
+            fd, ld = all_ts[0][:10], all_ts[-1][:10]
+            return f'Between {fd} and {ld}, ' if fd != ld else f'On {fd}, '
+        # Cluster-level fallback
+        clt = str(
+            cluster.get('created_at') or cluster.get('first_seen')
+            or data.get('prefill_generated_at') or ''
+        )[:10]
+        return f'Around {clt}, ' if clt else ''
+
+    # ── 0. Credential theft / LSASS / session-token theft (checked first) ──
+    _CRED_KW = (
+        'lsass', 'comsvcs', 'mimikatz', 'procdump', 'ntds',
+        'secretsdump', 'credential_theft', 'credential theft',
+        'session_theft', 'token theft', 'pass-the-hash', 'pass the hash',
+    )
+    _lead_lower = (
+        cluster.get('lead_description') or cluster.get('cluster_label') or ''
+    ).lower()
+    _phases_lower = ' '.join(
+        str(ph.get('phase_role') or ph.get('type') or ph.get('name') or '')
+        for ph in (cluster.get('phases') or [])
+    ).lower()
+    cred_rows = [r for r in rows if any(kw in _joined_lower([r]) for kw in _CRED_KW)]
+    _is_cred = bool(cred_rows) or any(
+        kw in (_lead_lower + ' ' + _phases_lower)
+        for kw in ('lsass', 'credential', 'mfa fatigue', 'session theft', 'token theft')
+    )
+    if _is_cred:
+        ts_prefix = _time_prefix(cred_rows)
+        idents: list[str] = []
+        seen_ids: set[str] = set()
+        for row in rows:
+            for k in _IDENTITY_KEYS:
+                v = str(row.get(k) or '').strip()
+                if v and v.lower() not in seen_ids and not _PROC_RE.search(v):
+                    seen_ids.add(v.lower())
+                    idents.append(v)
+        accts = ', '.join(idents[:3]) if idents else 'affected accounts'
+        jc = _joined_lower(cred_rows) if cred_rows else _joined_lower(rows[:10])
+        if 'comsvcs' in jc:
+            tool = 'via comsvcs.dll (native LSASS memory dump)'
+        elif 'mimikatz' in jc or 'sekurlsa' in jc:
+            tool = 'via Mimikatz in-memory credential extraction'
+        elif 'procdump' in jc:
+            tool = 'via ProcDump (LSASS dump)'
+        elif 'ntds' in jc or 'secretsdump' in jc:
+            tool = 'via NTDS.dit extraction (domain credential dump)'
+        elif 'mfa' in _lead_lower or 'fatigue' in _lead_lower:
+            tool = 'via MFA fatigue push-notification bypass'
+        else:
+            tool = 'via LSASS memory access'
+        refs = _cite(_refs(cred_rows or rows[:5]))
+        return (
+            f'{ts_prefix}Credential material for {accts} was harvested {tool}. '
+            f'NTLM hashes \u2014 and potentially Kerberos tickets \u2014 are at risk of '
+            f'pass-the-hash relay or offline cracking {refs}.'
+        ).strip()
+
     exfil_rows: list[dict] = []
     for row in rows:
         j = _joined_lower([row])
@@ -180,6 +243,49 @@ def damage_fragment(
                 pass
 
     if not exfil_rows:
+        # ── Endpoint/container compromise (K8s privileged pod, Docker socket, LPE) ──
+        container_rows: list[dict] = []
+        for row in rows:
+            j = _joined_lower([row])
+            if any(t in j for t in (
+                'privileged', 'hostpid', 'hostnetwork', 'hostipc',
+                'docker.sock', 'nsenter', 'chroot /host',
+            )):
+                container_rows.append(row)
+            else:
+                obj = row.get('objectRef') or {}
+                if isinstance(obj, dict):
+                    resource = str(obj.get('resource') or '').lower()
+                    if resource in ('pods', 'deployments', 'daemonsets') and any(
+                        t in j for t in ('privileged', 'hostpid', 'hostnetwork')
+                    ):
+                        container_rows.append(row)
+        if container_rows:
+            timed = sorted(((r, _ts(r)) for r in container_rows), key=lambda x: x[1])
+            first_row, first_ts = timed[0]
+            actor = (
+                first_row.get('user_principal_name') or first_row.get('username')
+                or first_row.get('user') or first_row.get('actor') or 'an actor'
+            )
+            obj = first_row.get('objectRef') or {}
+            ns_raw = (
+                first_row.get('namespace') or
+                (obj.get('namespace') if isinstance(obj, dict) else None)
+            )
+            namespace = ns_raw if (ns_raw and str(ns_raw).lower() not in ('', 'unknown', 'none')) else None
+            pod_name = (
+                first_row.get('pod_name') or
+                (obj.get('name') if isinstance(obj, dict) else None) or
+                'a pod'
+            )
+            refs = _cite(_refs(container_rows))
+            ts_prefix = _time_prefix(container_rows)
+            ns_clause = f' in namespace {namespace}' if namespace else ''
+            return (
+                f"{ts_prefix}{actor} launched a privileged container "
+                f"({pod_name}{ns_clause}), enabling potential node-level "
+                f"compromise via host process or network access {refs}."
+            ).strip()
         return None
 
     timed = sorted(((r, _ts(r)) for r in exfil_rows), key=lambda x: x[1])
@@ -236,11 +342,11 @@ def damage_fragment(
             break
 
     refs = _cite(_refs(exfil_rows))
-    ts_display = first_ts.replace('T', ' ').replace('Z', ' UTC') if 'T' in first_ts else first_ts
+    ts_prefix = _time_prefix(exfil_rows)
     path_part = f' from {source_path}' if source_path else ''
 
     return (
-        f"On {ts_display}, {actor} transferred data{path_part} "
+        f"{ts_prefix}{actor} transferred data{path_part} "
         f"to {dest_label}{cj_note} {refs}."
     ).strip()
 
@@ -326,6 +432,11 @@ _CONTROL_GAP_TABLE: list[tuple[list[str], str]] = [
         'legacy authentication protocols were not blocked; '
         'MFA push notifications were not number-matched to resist fatigue attacks',
     ),
+    (
+        ['privileged', 'hostpid', 'hostnetwork', 'hostipc', 'docker.sock', 'nsenter'],
+        'no PodSecurity admission policy blocked privileged container creation; '
+        'host-process and host-network access was permitted without node isolation controls',
+    ),
 ]
 
 
@@ -355,13 +466,30 @@ def affected_users_fragment(
     cj = _load_crown_jewels_for_tenant(tenant_id) if tenant_id else _load_crown_jewels(crown_jewels_path)
     cj_accounts = cj.get('accounts', {})
 
+    # Build authorized-actor filter so pentest / red-team accounts are excluded
+    # from the DREAD affected_users fragment (mirrors Diamond victim filtering).
+    _auth_actors: set[str] = set()
+    _eng_refs: list[str] = []
+    for _key in ('_assessment_engagement_actors', 'engagement_actors'):
+        for _a in (cluster.get(_key) or []):
+            _auth_actors.add(str(_a).strip().lower())
+    for _key in ('_assessment_engagement_refs', 'engagement_refs'):
+        for _r in (cluster.get(_key) or []):
+            _eng_refs.append(str(_r).strip().lower())
+
+    def _is_auth(actor: str) -> bool:
+        a = actor.strip().lower()
+        if a in _auth_actors:
+            return True
+        return any(ref and ref in a for ref in _eng_refs)
+
     identities: list[str] = []
     seen: set[str] = set()
 
     for row in rows:
         for k in _IDENTITY_KEYS:
             v = str(row.get(k) or '').strip()
-            if v and v.lower() not in seen and not _PROC_RE.search(v):
+            if v and v.lower() not in seen and not _PROC_RE.search(v) and not _is_auth(v):
                 seen.add(v.lower())
                 identities.append(v)
 
@@ -405,10 +533,20 @@ def discoverability_fragment(
 ) -> str | None:
     """MTTD from first event to detection. Returns None if no timestamp data."""
     timestamps = sorted(t for row in rows for t in [_ts(row)] if t)
-    if not timestamps:
-        return None
 
-    first_seen = timestamps[0][:10]
+    if timestamps:
+        first_seen = timestamps[0][:10]
+        last_seen = timestamps[-1][:10]
+    else:
+        # Fall back to cluster-level timing when rows carry no timestamps
+        first_seen = str(
+            cluster.get('first_seen') or cluster.get('created_at')
+            or data.get('prefill_generated_at') or ''
+        )[:10] or None
+        last_seen = None
+
+    if not first_seen:
+        return None
 
     detected_at = str(
         cluster.get('created_at') or cluster.get('detection_time')
@@ -438,7 +576,14 @@ def discoverability_fragment(
         'Single-source monitoring did not trigger; cross-source correlation surfaced it'
     )
 
-    return f"First event: {first_seen}. {detection_note}{mttd_str}."
+    # Show activity window when spans multiple days (temporal context for analyst)
+    if last_seen and last_seen != first_seen:
+        time_clause = f'Activity window: {first_seen} \u2192 {last_seen}'
+    else:
+        time_clause = f'First observed: {first_seen}'
+
+    return f"{time_clause}. {detection_note}{mttd_str}."
+
 
 
 # ── Orchestrator ─────────────────────────────────────────────────────────────
