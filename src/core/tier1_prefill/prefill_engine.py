@@ -61,6 +61,16 @@ def _validate_entity_pins(prefill: dict, allowed: set[str]) -> dict:
         'mitre', 'att&ck', 'high', 'medium', 'low', 'critical', 'confirmed',
         'likely', 'uncertain', 'benign', 'soc', 'analyst', 'hunter', 'forensics',
         'imap4', 'smtp', 'bcc', 'dns', 'kql', 'spl', 'edr', 'siem', 'ngfw',
+        # Generic verdict / security classification terms
+        'breach', 'intrusion', 'incident', 'attack', 'exploit', 'payload',
+        'escalation', 'exfil', 'recon', 'execution', 'discovery', 'collection',
+        'validated', 'breach', 'rbac', 'iam', 'mfa', 'sspr', 'sso', 'saml',
+        'kubernetes', 'k8s', 'container', 'docker', 'pod', 'cluster', 'node',
+        'vpc', 'sg', 'acl', 'nsg', 'waf', 'cdn', 'lb', 'nat', 'vpn',
+        'api', 'sdk', 'cli', 'gui', 'ui', 'rest', 'graphql', 'grpc',
+        'ad', 'ldap', 'kerberos', 'ntlm', 'spn', 'dce', 'rpc', 'smb',
+        'lsa', 'sam', 'gpo', 'ou', 'dc', 'ca', 'pki', 'cert', 'acme',
+        'cve', 'nvd', 'cvss', 'cwe', 'osint', 'ioc', 'ttp', 'apt',
     }
 
     # Scan text fields for suspicious capitalised tokens
@@ -235,8 +245,8 @@ def _compute_cross_cluster_links(
 PREFILL_ENABLED = True
 PREFILL_DEFAULT_MODEL = 'qwen3:14b'
 PREFILL_TOP_N = 3
-PREFILL_MAX_TOKENS = 1500
-PREFILL_TIMEOUT_S = 45
+PREFILL_MAX_TOKENS = 3000
+PREFILL_TIMEOUT_S = 90
 
 
 def _rank_clusters(clusters: list[dict]) -> list[dict]:
@@ -263,7 +273,9 @@ def _get_rows_for_cluster(cluster: dict, assessment: dict) -> list[dict]:
     all_rows = (assessment.get('normalized_rows') or
                 assessment.get('evidence_rows') or
                 assessment.get('rows') or [])
-    refs = set(cluster.get('row_refs') or [])
+    # Cast row_refs to int — they may be stored as strings while row_index is int,
+    # causing silent missed matches and evidence_preview fallback for smaller clusters.
+    refs: set[int] = {int(v) for v in (cluster.get('row_refs') or []) if str(v).lstrip('-').isdigit()}
     if not refs:
         return list(cluster.get('evidence_preview') or [])
     matched = [r for r in all_rows
@@ -283,10 +295,18 @@ def _get_rows_for_cluster(cluster: dict, assessment: dict) -> list[dict]:
                     seen.add(ref)
                 merged.append(row)
             return merged
+        logger.info(
+            'tier1_prefill row_attribution: cluster=%s refs=%d matched=%d',
+            cluster.get('cluster_id'), len(refs), len(matched),
+        )
         return matched
     # normalized_rows/evidence_rows are a sample that may not overlap with
     # this cluster's row_refs — fall back to the pre-sampled evidence_preview
     # which is always indexed against the cluster's actual row_refs.
+    logger.info(
+        'tier1_prefill row_attribution: cluster=%s refs=%d matched=0 preview_fallback=True',
+        cluster.get('cluster_id'), len(refs),
+    )
     return preview
 
 
@@ -329,11 +349,42 @@ def _parse_prefill_json(raw: str, cluster_id: str) -> dict | None:
             l for l in lines
             if not l.strip().startswith('```')
         ).strip()
+
+    def _repair_json(s: str) -> str:
+        """Best-effort repair for common LLM JSON generation errors."""
+        # Remove trailing commas before closing braces/brackets
+        s = _re.sub(r',(\s*[}\]])', r'\1', s)
+        # If the JSON is truncated (no closing brace), trim to last good value and close
+        if s and not s.rstrip().endswith(('}', ']', '"')):
+            last_complete = max(s.rfind('},'), s.rfind('],'), s.rfind('"}}'))
+            if last_complete > len(s) // 2:
+                s = s[:last_complete + 1]
+            s = s.rstrip().rstrip(',')
+            s += ']' * max(0, s.count('[') - s.count(']'))
+            s += '}' * max(0, s.count('{') - s.count('}'))
+        return s
+
+    def _try_parse(s: str) -> dict | None:
+        try:
+            return json.loads(s)
+        except Exception:
+            try:
+                return json.loads(_repair_json(s))
+            except Exception:
+                return None
+
+    required = {'incident_name', 'headline_subtitle', 'short_narrative',
+                'confidence_rationale', 'top_actions', 'mitre_techniques'}
+
+    data = _try_parse(text)
+    if data is None:
+        # Last resort: find the outermost {...} block
+        m = _re.search(r'\{.*\}', text, _re.DOTALL)
+        if m:
+            data = _try_parse(m.group())
+
     try:
-        data = json.loads(text)
-        required = {'incident_name', 'headline_subtitle', 'short_narrative',
-                    'confidence_rationale', 'top_actions', 'mitre_techniques'}
-        if required.issubset(data.keys()):
+        if data is not None and required.issubset(data.keys()):
             # Move CoT scratchpad out of display payload
             cot = data.pop('reasoning', None)
             if cot:
@@ -364,7 +415,10 @@ def _parse_prefill_json(raw: str, cluster_id: str) -> dict | None:
                         field, cluster_id,
                     )
             return data
-        logger.warning('tier1_prefill: missing keys in response for %s', cluster_id)
+        logger.warning('tier1_prefill: missing keys for %s — got=%s need=%s raw_head=%s',
+                       cluster_id, sorted(data.keys()) if data else 'None',
+                       sorted(required - (data.keys() if data else set())),
+                       text[:300])
         return None
     except Exception as exc:
         logger.warning('tier1_prefill: JSON parse failed for %s: %s', cluster_id, exc)
@@ -1471,14 +1525,22 @@ def _ensure_v2_prefill_fields(data: dict, cluster: dict, rows: list[dict], tenan
         try:
             from src.prefill.dread_fragments import build_dread_narrative, fragments_fill_rate
             from src.prefill.sabsa_coda import build_sabsa_coda, derive_breached_attributes
+            from src.prefill.compliance_tags import derive_controls_breached
         except ImportError:
             try:
                 from prefill.dread_fragments import build_dread_narrative, fragments_fill_rate  # type: ignore
                 from prefill.sabsa_coda import build_sabsa_coda, derive_breached_attributes      # type: ignore
+                from prefill.compliance_tags import derive_controls_breached                      # type: ignore
             except ImportError:
                 build_dread_narrative = None  # type: ignore
+                derive_controls_breached = None  # type: ignore
 
-        if build_dread_narrative is not None and not data.get('dread_narrative'):
+        _existing_dn = data.get('dread_narrative') or {}
+        _existing_fill = float(_existing_dn.get('fill_rate') or 0)
+        # Rebuild when absent OR when fill_rate < 0.20 — prevents empty fragments
+        # written by a previous run (e.g. due to row-attribution miss) from being
+        # cached forever by a presence-only check.
+        if build_dread_narrative is not None and (not _existing_dn or _existing_fill < 0.20):
             frags = build_dread_narrative(rows, cluster, data, tenant_id=tenant_id)
             fill  = fragments_fill_rate(frags)
             attrs = derive_breached_attributes(frags)
@@ -1490,8 +1552,748 @@ def _ensure_v2_prefill_fields(data: dict, cluster: dict, rows: list[dict], tenan
                 'sabsa_coda_draft':   coda,
                 # 'rendered' is populated by the LLM render step in run_prefill
             }
+            # Bolt compliance-framework control tags alongside DREAD fragments
+            if derive_controls_breached is not None:
+                data['compliance_controls'] = derive_controls_breached(frags)
+
+    # ── Deterministic intelligence enrichments (Blocks 2 + 3) ─────────────────
+    # These run for ALL clusters (not just breach) so that benign clusters still
+    # carry structured context. The LLM prompt uses them as pre-computed context.
+    try:
+        _enrich_cluster_intelligence(data, cluster, rows)
+    except Exception as _ei:
+        logger.warning('tier1_prefill: cluster intelligence enrichment failed for %s: %s',
+                       cluster.get('cluster_id'), _ei)
 
     return data
+
+
+# ── Phase-role → readable label ───────────────────────────────────────────────
+_PHASE_ROLE_LABELS: dict[str, str] = {
+    'initial_access':           'Initial Access',
+    'session_theft':            'Session Theft',
+    'credential_theft':         'Credential Theft',
+    'credential_access':        'Credential Access',
+    'privilege_escalation':     'Privilege Escalation',
+    'privilege_escalation_k8s': 'K8s Container Escape',
+    'secret_access':            'Secret/Key Abuse',
+    'lateral_movement':         'Lateral Movement',
+    'c2_communication':         'C2 Beaconing',
+    'c2_dns_beacon':            'DNS C2 Beaconing',
+    'data_exfiltration':        'Data Exfiltration',
+    'data_exfiltration_snowflake': 'Snowflake Bulk Exfil',
+    'data_exfiltration_rclone': 'Rclone Cloud Exfil',
+    'persistence':              'Persistence',
+    'collection':               'Collection',
+    'execution':                'Execution',
+}
+
+# Ordered kill-chain position (lower = earlier in chain)
+_PHASE_ORDER: dict[str, int] = {
+    'initial_access': 0, 'session_theft': 1, 'credential_access': 2,
+    'credential_theft': 3, 'secret_access': 4, 'privilege_escalation': 5,
+    'privilege_escalation_k8s': 5, 'lateral_movement': 6, 'c2_communication': 7,
+    'c2_dns_beacon': 7, 'persistence': 8, 'collection': 9, 'execution': 10,
+    'data_exfiltration': 11, 'data_exfiltration_snowflake': 11,
+    'data_exfiltration_rclone': 12,
+}
+
+# RFC1918 private prefixes — used by known/unknown entity split
+_RFC1918 = ('10.', '172.16.', '172.17.', '172.18.', '172.19.', '172.20.',
+            '172.21.', '172.22.', '172.23.', '172.24.', '172.25.', '172.26.',
+            '172.27.', '172.28.', '172.29.', '172.30.', '172.31.', '192.168.')
+
+
+# ── Authorized-engagement gate ────────────────────────────────────────────────
+def _build_authorization_gate(cluster: dict):
+    """
+    Returns (is_authorized_ip, is_authorized_actor) — two callables that return
+    True when an IP or actor belongs to a sanctioned engagement (pentest / red team)
+    and must therefore be excluded from attacker-side Diamond facts.
+
+    Reads from cluster metadata (injected by run_prefill at assessment level):
+      _assessment_engagement_ip_ranges : list[str]  e.g. ["198.51.100.0/24"]
+      _assessment_authorized_ips       : list[str]  exact-match IPs
+      _assessment_engagement_actors    : list[str]  e.g. ["pentest-readonly-feb2026"]
+      _assessment_engagement_refs      : list[str]  e.g. ["RH-ENG-2026-041"]
+
+    Falls back to per-cluster keys when assessment-level keys are absent.
+    """
+    import ipaddress as _ipaddress
+
+    def _get(key: str) -> list:
+        # Assessment-level (injected union) wins; fall back to per-cluster key
+        v = cluster.get('_assessment_' + key) or cluster.get(key) or []
+        return [str(x).strip() for x in v if x]
+
+    auth_ips     = set(_get('authorized_ips'))
+    auth_actors  = {a.lower() for a in _get('engagement_actors')}
+    eng_refs     = [r.lower() for r in _get('engagement_refs')]
+
+    auth_networks: list = []
+    for rng in _get('engagement_ip_ranges'):
+        try:
+            auth_networks.append(_ipaddress.ip_network(rng, strict=False))
+        except (ValueError, TypeError):
+            pass
+
+    def is_authorized_ip(ip: str) -> bool:
+        if not ip or ip in ('-', '0.0.0.0', ''):
+            return False
+        if ip in auth_ips:
+            return True
+        try:
+            addr = _ipaddress.ip_address(ip)
+        except (ValueError, TypeError):
+            return False
+        return any(addr in net for net in auth_networks)
+
+    def is_authorized_actor(actor: str) -> bool:
+        if not actor:
+            return False
+        a = actor.strip().lower()
+        if a in auth_actors:
+            return True
+        # Catch service-account names that embed the engagement ref as a substring
+        return any(ref and ref in a for ref in eng_refs)
+
+    return is_authorized_ip, is_authorized_actor
+
+# Privilege-level keywords — elevate DREAD damage + affected_users scores
+_PRIV_SIGNALS = (
+    'admin', 'root', 'administrator', 'domain admin', 'global admin',
+    'privileged', 'superuser', 'sudo', 'sysadmin', 'service account',
+    'svc_', 'arn:aws:iam', 'sts:assumerole', 'assumerolewithsaml',
+    'globaladministrator', 'owner', 'contributor',
+)
+
+# Sensitive data type signals — escalate DREAD damage
+_SENSITIVE_DATA_SIGNALS = (
+    'password', 'credential', 'secret', 'token', 'key', 'pii', 'ssn',
+    'credit card', 'cardholder', 'phi', 'health', 'salary', 'financial',
+    'customer', 'patient', 'manifest', 'shipping', 'invoice', 'vault',
+    'restricted', 'confidential', 'classified',
+)
+
+
+def _enrich_cluster_intelligence(data: dict, cluster: dict, rows: list[dict]) -> None:
+    """Populate deterministic structured intelligence fields on tier1_prefill.
+
+    Fields added (idempotent — only set when absent or empty):
+      event_chain_summary   — formatted temporal event chain string
+      kill_chain_summary    — "Initial Access → … → Exfil" readable string
+      adversarial_sequence  — bool flag
+      adversarial_sequence_detail — what the sequence was
+      known_technical       — list of internal/expected entities
+      unknown_technical     — list of external/first-seen entities
+      dread_score           — numeric D/R/E/A/D scores + risk_tier
+      diamond_model         — adversary/capability/infrastructure/victim struct
+      pasta_summary         — threat_profile/exploitation_path/business_impact
+    """
+    verdict = str(cluster.get('verdict') or cluster.get('final_verdict') or '').upper()
+    phases = cluster.get('phases') or []
+    is_breach = verdict in ('VALIDATED_BREACH', 'CONFIRMED_BREACH', 'LIKELY_BREACH', 'LIKELY_COMPROMISE')
+
+    # ── 2.1 event_chain_summary ───────────────────────────────────────────────
+    # Each sub-computation is independently guarded so a failure in one field
+    # does NOT prevent the remaining fields from being written.
+    if not data.get('event_chain_summary') and rows:
+        try:
+            data['event_chain_summary'] = _build_event_chain_summary(cluster, rows)
+        except Exception as _e:
+            logger.debug('_enrich_cluster_intelligence: event_chain_summary failed for %s: %s',
+                         cluster.get('cluster_id'), _e)
+
+    # ── 2.2 kill_chain_summary ────────────────────────────────────────────────
+    if not data.get('kill_chain_summary'):
+        try:
+            data['kill_chain_summary'] = _build_kill_chain_summary(phases)
+        except Exception as _e:
+            logger.debug('_enrich_cluster_intelligence: kill_chain_summary failed for %s: %s',
+                         cluster.get('cluster_id'), _e)
+
+    # ── 2.3 adversarial_sequence ──────────────────────────────────────────────
+    if 'adversarial_sequence' not in data:
+        try:
+            flag, detail = _detect_adversarial_sequence(phases, rows)
+            data['adversarial_sequence'] = flag
+            if detail:
+                data['adversarial_sequence_detail'] = detail
+        except Exception as _e:
+            logger.debug('_enrich_cluster_intelligence: adversarial_sequence failed for %s: %s',
+                         cluster.get('cluster_id'), _e)
+
+    # ── 2.4 known/unknown entity split ───────────────────────────────────────
+    if not data.get('known_technical') and not data.get('unknown_technical'):
+        try:
+            known, unknown = _split_entities(cluster, rows)
+            data['known_technical'] = known
+            data['unknown_technical'] = unknown
+        except Exception as _e:
+            logger.debug('_enrich_cluster_intelligence: entity_split failed for %s: %s',
+                         cluster.get('cluster_id'), _e)
+
+    # ── 3.1 DREAD numeric score ───────────────────────────────────────────────
+    if not data.get('dread_score') and rows:
+        try:
+            data['dread_score'] = _compute_dread_score(cluster, rows)
+        except Exception as _e:
+            logger.debug('_enrich_cluster_intelligence: dread_score failed for %s: %s',
+                         cluster.get('cluster_id'), _e)
+
+    # ── 3.2 Diamond model ─────────────────────────────────────────────────────
+    if not data.get('diamond_model') and is_breach:
+        try:
+            data['diamond_model'] = _compute_diamond_model(cluster, rows)
+        except Exception as _e:
+            logger.debug('_enrich_cluster_intelligence: diamond_model failed for %s: %s',
+                         cluster.get('cluster_id'), _e)
+
+    # ── 3.3 PASTA summary ─────────────────────────────────────────────────────
+    if not data.get('pasta_summary') and is_breach:
+        try:
+            data['pasta_summary'] = _compute_pasta_summary(cluster, rows, data)
+        except Exception as _e:
+            logger.debug('_enrich_cluster_intelligence: pasta_summary failed for %s: %s',
+                         cluster.get('cluster_id'), _e)
+
+
+def _build_event_chain_summary(cluster: dict, rows: list[dict]) -> str:
+    """Format a temporal event chain from phase anchor rows sorted by _ts_epoch.
+
+    Output:
+        aaron.blackwood │ T+0     Session token replay (Okta)         45.133.193.118
+                        │ T+6h    GetSecretValue + AssumeRole (CT)     91.240.118.7
+                        │ T+8h    Privileged DaemonSet → kubelet (K8s)
+                        │ T+48h   COPY INTO external_stage 1.4M rows  (Snowflake)
+    """
+    if not rows:
+        return ''
+
+    # Collect phase anchor rows — prefer cluster phases, fall back to all rows
+    phases = cluster.get('phases') or []
+    anchor_refs: set[int] = set()
+    for p in phases:
+        for r in (p.get('row_refs') or [])[:5]:
+            try:
+                anchor_refs.add(int(r))
+            except (TypeError, ValueError):
+                pass
+
+    # Use int(float(...)) to tolerate row_index stored as float or float-string (e.g. "1.0").
+    _row_by_idx: dict[int, dict] = {}
+    for _r in rows:
+        _ri = _r.get('row_index')
+        if _ri is not None:
+            try:
+                _row_by_idx[int(float(_ri))] = _r
+            except (TypeError, ValueError):
+                pass
+    row_by_idx = _row_by_idx
+
+    # Use phase anchor rows if we have them, otherwise top severity rows
+    if anchor_refs:
+        chain_rows = [row_by_idx[i] for i in sorted(anchor_refs) if i in row_by_idx]
+    else:
+        chain_rows = sorted(rows, key=lambda r: float(r.get('triage_score') or 0), reverse=True)[:12]
+
+    # Sort by epoch
+    def _ep(r: dict) -> float:
+        ep = r.get('_ts_epoch')
+        if ep:
+            return float(ep)
+        ts = r.get('timestamp') or ''
+        if ts:
+            try:
+                from datetime import datetime as _dt
+                return _dt.fromisoformat(str(ts).replace('Z', '+00:00')).timestamp()
+            except Exception:
+                pass
+        return 0.0
+
+    chain_rows = sorted(chain_rows, key=_ep)
+    if not chain_rows:
+        return ''
+
+    t0 = _ep(chain_rows[0])
+    # Determine primary actor for left-column label
+    users = [str(r.get('user_canonical') or r.get('user') or '').strip() for r in chain_rows if r.get('user_canonical') or r.get('user')]
+    actor = users[0] if users else 'unknown'
+    actor_label = actor[:24].ljust(24)
+
+    lines: list[str] = []
+    for i, r in enumerate(chain_rows[:10]):
+        ep = _ep(r)
+        delta_s = ep - t0 if ep and t0 else 0
+        if delta_s < 0:
+            delta_s = 0
+        if delta_s < 60:
+            rel = 'T+0'
+        elif delta_s < 3600:
+            rel = f'T+{int(delta_s // 60)}m'
+        elif delta_s < 86400:
+            rel = f'T+{int(delta_s // 3600)}h'
+        else:
+            rel = f'T+{int(delta_s // 86400)}d'
+
+        event = _row_action_text(r)[:60]
+        src_ip = str(r.get('src_ip') or r.get('dst_ip') or '').strip()
+        ip_col = f'  {src_ip}' if src_ip else ''
+
+        prefix = actor_label if i == 0 else ' ' * len(actor_label)
+        lines.append(f'{prefix} │ {rel:<7} {event}{ip_col}')
+
+    return '\n'.join(lines)
+
+
+def _build_kill_chain_summary(phases: list[dict]) -> str:
+    """Render phase list as 'Initial Access → Credential Theft → … → Exfil' string."""
+    if not phases:
+        return ''
+    ordered = sorted(phases, key=lambda p: _PHASE_ORDER.get(p.get('phase_id') or p.get('case_role') or '', 99))
+    labels: list[str] = []
+    seen: set[str] = set()
+    for p in ordered:
+        role = p.get('phase_id') or p.get('case_role') or ''
+        label = _PHASE_ROLE_LABELS.get(role, role.replace('_', ' ').title())
+        if label and label not in seen:
+            labels.append(label)
+            seen.add(label)
+    return ' → '.join(labels) if labels else ''
+
+
+def _detect_adversarial_sequence(phases: list[dict], rows: list[dict]) -> tuple[bool, str]:
+    """Return (flag, detail) when a known-adversarial phase sequence is present.
+
+    Adversarial sequence criteria (any one sufficient):
+    - secret_access + data_exfiltration in cluster phases (key abuse → exfil)
+    - session_theft + privilege_escalation (token replay → priv esc)
+    - credential_theft + lateral_movement (cred dump → spread)
+    """
+    phase_ids = {p.get('phase_id') or p.get('case_role') or '' for p in phases}
+
+    if ('secret_access' in phase_ids and
+            any(p in phase_ids for p in ('data_exfiltration_snowflake', 'data_exfiltration_rclone', 'data_exfiltration'))):
+        return True, 'Secret/key access followed by bulk data exfiltration in same campaign window'
+
+    if 'session_theft' in phase_ids and 'privilege_escalation_k8s' in phase_ids:
+        return True, 'Stolen session token used to escalate into privileged container context'
+
+    if 'credential_theft' in phase_ids and 'lateral_movement' in phase_ids:
+        return True, 'Credential dump followed by lateral movement — classic pass-the-hash pattern'
+
+    if 'session_theft' in phase_ids and 'secret_access' in phase_ids:
+        return True, 'Stolen session used to access secrets — token replay into key vault'
+
+    return False, ''
+
+
+def _split_entities(cluster: dict, rows: list[dict]) -> tuple[list[str], list[str]]:
+    """Split entity set into known (internal/expected) and unknown (external/first-seen).
+
+    Rules (no enrichment context needed):
+    - Internal IPs (RFC1918) → known
+    - External IPs → unknown
+    - svc_ / system / machine accounts → known
+    - Human accounts with email format → known (legitimate employees)
+    - External-looking IPs in cloud trail (attacker origin) → unknown
+    """
+    known: list[str] = []
+    unknown: list[str] = []
+    seen: set[str] = set()
+
+    engagement_refs = cluster.get('engagement_refs') or []
+    change_refs = cluster.get('change_refs') or []
+
+    for r in rows:
+        for fld in ('src_ip', 'dst_ip'):
+            ip = str(r.get(fld) or '').strip()
+            if ip and ip not in seen and ip not in ('-', '0.0.0.0', ''):
+                seen.add(ip)
+                if any(ip.startswith(p) for p in _RFC1918):
+                    known.append(f'IP {ip} (internal)')
+                else:
+                    unknown.append(f'IP {ip} (external — first-seen)')
+
+        user = str(r.get('user_canonical') or r.get('user') or '').strip().lower()
+        if user and user not in seen and user not in ('-', 'n/a', 'system', 'root', ''):
+            seen.add(user)
+            if any(user.startswith(p) for p in ('svc_', 'sa-', 'service-', 'msol', 'aadconnect')):
+                known.append(f'Account {user} (service account)')
+            elif engagement_refs and any(er.lower() in user for er in engagement_refs):
+                known.append(f'Account {user} (pentest operator)')
+            elif change_refs:
+                known.append(f'Account {user} (change-managed)')
+            elif '.' in user or '@' in user:
+                known.append(f'Account {user} (named employee)')
+            else:
+                unknown.append(f'Account {user} (unrecognised principal)')
+
+        host = str(r.get('hostname') or r.get('host') or '').strip().lower()
+        if host and host not in seen:
+            seen.add(host)
+            if host.startswith(('sfl-', 'corp-', 'wks-', 'srv-', 'dc-', 'ws-')):
+                known.append(f'Host {host} (corporate asset)')
+            else:
+                unknown.append(f'Host {host} (unrecognised asset)')
+
+    # Cap to keep prompt concise
+    return known[:12], unknown[:12]
+
+
+def _compute_dread_score(cluster: dict, rows: list[dict]) -> dict:
+    """Compute numeric DREAD scores (0-10 per dimension).
+
+    D — Damage: phase count × source count, boosted by privilege level and sensitive data type
+    R — Reproducibility: public tooling used? higher = easier to repeat
+    E — Exploitability: how easy was initial access?
+    A — Affected Users: count of distinct users, boosted by privilege level
+    D — Discoverability: was a detection event present (silent = low, blocked = high)?
+    """
+    phases = cluster.get('phases') or []
+    sources = cluster.get('sources') or []
+    phase_ids = {p.get('phase_id') or p.get('case_role') or '' for p in phases}
+    row_text_all = ' '.join(
+        ' '.join(str(v) for v in r.values() if isinstance(v, str))
+        for r in rows
+    ).lower()
+
+    # Privilege level scan
+    has_privilege = any(sig in row_text_all for sig in _PRIV_SIGNALS)
+
+    # Sensitive data type scan
+    has_sensitive_data = any(sig in row_text_all for sig in _SENSITIVE_DATA_SIGNALS)
+
+    # D — Damage (0-10)
+    base_damage = min(10, len(phases) * 2 + len(set(sources)))
+    if has_privilege:
+        base_damage = min(10, base_damage + 2)
+    if has_sensitive_data:
+        base_damage = min(10, base_damage + 1)
+    # Exfil phase = max damage
+    if any(p in phase_ids for p in ('data_exfiltration', 'data_exfiltration_snowflake', 'data_exfiltration_rclone')):
+        base_damage = max(base_damage, 8)
+
+    # Identify damage type for CEO description
+    damage_types: list[str] = []
+    if has_sensitive_data:
+        for sig, label in [('customer', 'customer data'), ('credential', 'credentials'),
+                            ('financial', 'financial records'), ('health', 'health records'),
+                            ('vault', 'secrets vault'), ('manifest', 'shipping manifests')]:
+            if sig in row_text_all:
+                damage_types.append(label)
+    if not damage_types:
+        damage_types = ['corporate data']
+
+    # R — Reproducibility (0-10): public commodity tools = high
+    repro = 3  # baseline
+    repro_tools: list[str] = []
+    for tool, score, label in [
+        ('rclone', 3, 'Rclone'), ('certutil', 2, 'certutil'), ('mimikatz', 3, 'Mimikatz'),
+        ('psexec', 2, 'PsExec'), ('cobalt', 3, 'Cobalt Strike'), ('mshta', 2, 'mshta'),
+        ('nuclei', 2, 'Nuclei'), ('nmap', 1, 'nmap'), ('sqlmap', 2, 'SQLMap'),
+    ]:
+        if tool in row_text_all:
+            repro = min(10, repro + score)
+            repro_tools.append(label)
+    # Standard cloud API abuse (no special tooling needed)
+    if any(p in phase_ids for p in ('secret_access', 'data_exfiltration_snowflake')):
+        repro = min(10, repro + 2)
+        repro_tools.append('standard cloud CLI')
+
+    # E — Exploitability (0-10): how easy was initial access?
+    exploit = 5  # baseline
+    exploit_vector = 'unknown initial access vector'
+    if 'session_theft' in phase_ids:
+        exploit = 7
+        exploit_vector = 'stolen session token (phishing or token replay)'
+    elif 'initial_access' in phase_ids:
+        exploit = 6
+        exploit_vector = 'phishing or credential spray'
+    if 'credential_theft' in phase_ids:
+        exploit = min(10, exploit + 1)
+    if 'privilege_escalation_k8s' in phase_ids:
+        exploit = min(10, exploit + 2)
+        exploit_vector += ' → container escape'
+
+    # A — Affected Users (0-10): distinct user count + privilege multiplier
+    distinct_users = len({
+        str(r.get('user_canonical') or r.get('user') or '').strip().lower()
+        for r in rows
+        if r.get('user_canonical') or r.get('user')
+    } - {'', '-', 'n/a', 'system', 'root'})
+    affected = min(8, distinct_users + 1)
+    privilege_note = ''
+    if has_privilege:
+        affected = min(10, affected + 3)
+        privilege_note = 'privileged/admin accounts involved — blast radius significantly larger'
+    elif distinct_users == 0:
+        affected = 1
+
+    # D — Discoverability (0-10): detection events present?
+    discov = 3  # baseline: not trivially discoverable
+    discov_note = 'no active detection event'
+    if any(str(r.get('disposition') or r.get('action') or '').lower() in
+           ('blocked', 'quarantined', 'prevented', 'alert') for r in rows):
+        discov = 7
+        discov_note = 'endpoint/network detection event present'
+    if any('crowdstrike' in str(r.get('_source') or '').lower() and
+           str(r.get('severity') or '').lower() in ('critical', 'high') for r in rows):
+        discov = max(discov, 8)
+        discov_note = 'CrowdStrike high/critical detection fired'
+    # Silent for >7 days before IR = low discoverability
+    ts_vals = [float(r['_ts_epoch']) for r in rows if r.get('_ts_epoch')]
+    if len(ts_vals) >= 2:
+        span_days = (max(ts_vals) - min(ts_vals)) / 86400
+        if span_days > 7 and discov < 5:
+            discov = max(2, discov - 1)
+            discov_note = f'activity ran {span_days:.0f} days undetected'
+
+    total = base_damage + repro + exploit + affected + discov
+    if total >= 40:
+        risk_tier = 'CRITICAL'
+    elif total >= 30:
+        risk_tier = 'HIGH'
+    elif total >= 20:
+        risk_tier = 'MEDIUM'
+    else:
+        risk_tier = 'LOW'
+
+    return {
+        'damage':         base_damage,
+        'damage_detail':  f"Affected: {', '.join(damage_types[:3])}. {'Privileged access involved.' if has_privilege else ''}".strip(),
+        'reproducibility': repro,
+        'reproducibility_detail': f"Tools used: {', '.join(repro_tools) or 'standard TTPs'}. Widely available.",
+        'exploitability': exploit,
+        'exploitability_detail': exploit_vector.capitalize() + '.',
+        'affected_users': affected,
+        'affected_users_detail': privilege_note or f'{distinct_users} distinct account(s) involved.',
+        'discoverability': discov,
+        'discoverability_detail': discov_note.capitalize() + '.',
+        'total': total,
+        'max': 50,
+        'risk_tier': risk_tier,
+    }
+
+
+def _compute_diamond_model(cluster: dict, rows: list[dict]) -> dict:
+    """Build the Diamond Threat Model struct for a breach cluster.
+
+    Four corners:
+      adversary    — who (inferred from: off-hours, external IP, no engagement_ref)
+      capability   — how (tools/techniques from phase detectors + row content)
+      infrastructure — where (external IPs, C2 domains, cloud buckets)
+      victim       — what/who was targeted (users, hosts, data assets)
+    """
+    phases = cluster.get('phases') or []
+    phase_ids = {p.get('phase_id') or '' for p in phases}
+    row_text_all = ' '.join(
+        ' '.join(str(v) for v in r.values() if isinstance(v, str))
+        for r in rows
+    ).lower()
+
+    # Adversary
+    engagement_refs = cluster.get('engagement_refs') or []
+    change_refs = cluster.get('change_refs') or []
+    if engagement_refs:
+        adversary_type = f'Authorized penetration tester ({", ".join(engagement_refs)})'
+    elif change_refs:
+        adversary_type = f'Authorized change activity ({", ".join(change_refs)})'
+    else:
+        # Infer from signals
+        signals: list[str] = []
+        ts_vals = [float(r['_ts_epoch']) for r in rows if r.get('_ts_epoch')]
+        if ts_vals:
+            # Check for off-hours (02:00–06:00 UTC common for attacker ops)
+            from datetime import datetime as _dt2
+            off_hours = sum(1 for t in ts_vals if _dt2.utcfromtimestamp(t).hour in range(0, 7))
+            if off_hours > len(ts_vals) * 0.4:
+                signals.append('off-hours activity pattern')
+        if any('getsecretvalue' in row_text_all or 'assumerole' in row_text_all for _ in [1]):
+            signals.append('cloud API abuse without MFA/bastion')
+        if 'rclone' in row_text_all or 'mega.nz' in row_text_all:
+            signals.append('commodity exfil tooling')
+        adversary_type = 'Unknown external threat actor' + (
+            f' — signals: {"; ".join(signals)}' if signals else ''
+        )
+
+    # Capability (tools + techniques from phases + row content)
+    capabilities: list[str] = []
+    tool_map = [
+        ('rclone', 'Rclone (cloud sync exfil)'),
+        ('certutil', 'certutil (LOLBin payload delivery)'),
+        ('mimikatz', 'Mimikatz (credential dumping)'),
+        ('lsass', 'LSASS memory access (credential harvest)'),
+        ('daemonset', 'K8s privileged DaemonSet (container escape)'),
+        ('copy into', 'Snowflake COPY INTO (bulk data unload)'),
+        ('getsecretvalue', 'AWS GetSecretValue (secrets theft)'),
+        ('assumerole', 'AWS AssumeRole (privilege escalation)'),
+        ('dns beacon', 'DNS beaconing (C2 channel)'),
+        ('low reputation', 'NRD domain C2 infrastructure'),
+        ('scheduled task', 'Scheduled task persistence'),
+        ('mshta', 'mshta.exe (HTA payload execution)'),
+    ]
+    for term, label in tool_map:
+        if term in row_text_all:
+            capabilities.append(label)
+
+    # ── Authorized-engagement gate (Fixes 1 + 2) ─────────────────────────────
+    _is_auth_ip, _is_auth_actor = _build_authorization_gate(cluster)
+
+    # Infrastructure (external IPs + domains) — exclude authorized engagement ranges
+    external_ips = sorted({
+        str(r.get('src_ip') or '').strip()
+        for r in rows
+        if r.get('src_ip')
+        and not any(str(r.get('src_ip', '')).startswith(p) for p in _RFC1918)
+        and str(r.get('src_ip', '')).strip() not in ('', '-', '0.0.0.0')
+        and not _is_auth_ip(str(r.get('src_ip', '')).strip())
+    } | {
+        str(r.get('dst_ip') or '').strip()
+        for r in rows
+        if r.get('dst_ip')
+        and not any(str(r.get('dst_ip', '')).startswith(p) for p in _RFC1918)
+        and str(r.get('dst_ip', '')).strip() not in ('', '-', '0.0.0.0')
+        and not _is_auth_ip(str(r.get('dst_ip', '')).strip())
+    })
+    # Add cloud stage destinations if present
+    infra: list[str] = list(external_ips[:6])
+    for term, label in [('mega.nz', 'mega.nz (exfil staging)'), ('backblaze', 'Backblaze B2'),
+                         ('s3://', 'Attacker-controlled S3 bucket'), ('hetzner', 'Hetzner VPS (AS24940)')]:
+        if term in row_text_all:
+            infra.append(label)
+
+    # Victim (users + hosts + data) — split into typed buckets, exclude engagement actors
+    _MACHINE_ID_RE = re.compile(
+        r'(botocore|assumed-role|svc[-_]|service-account|'
+        r'session-\d+|runner$|^i-[0-9a-f]{8,}|sts:|^arn:|'
+        r'eks-integration|snowflake.*role|federation.*role)',
+        re.IGNORECASE,
+    )
+    _SYSTEM_ACTORS = {'', '-', 'n/a', 'system', 'root', 'system:anonymous',
+                      'system:unauthenticated', 'nt authority\\system'}
+
+    raw_users = {
+        str(r.get('user_canonical') or r.get('user') or '').strip()
+        for r in rows
+        if (r.get('user_canonical') or r.get('user'))
+    }
+    filtered_users = {
+        u for u in raw_users
+        if u.lower() not in _SYSTEM_ACTORS
+        and not _is_auth_actor(u)
+    }
+    victim_humans   = sorted({u for u in filtered_users if not _MACHINE_ID_RE.search(u)})
+    victim_machines = sorted({u for u in filtered_users if     _MACHINE_ID_RE.search(u)})
+    victim_users    = victim_humans + victim_machines  # legacy union for existing consumers
+    victim_hosts = sorted({
+        str(r.get('hostname') or r.get('host') or '').strip().lower()
+        for r in rows if r.get('hostname') or r.get('host')
+    } - {'', '-'})
+    victim_data: list[str] = []
+    for sig, label in [('manifest', 'port scheduling manifests'), ('customer', 'customer records'),
+                        ('vault', 'secrets vault'), ('kubelet', 'kubelet token'),
+                        ('lsass', 'LSASS credential material'), ('snowflake', 'Snowflake data warehouse')]:
+        if sig in row_text_all:
+            victim_data.append(label)
+
+    return {
+        'adversary':       adversary_type,
+        'capability':      capabilities[:8] or ['Unknown TTPs'],
+        'infrastructure':  infra[:8] or ['No external infrastructure identified'],
+        'victim_users':    victim_users[:8],    # legacy — union of humans + machines
+        'victim_humans':   victim_humans[:6],   # new — named human accounts only
+        'victim_machines': victim_machines[:6], # new — service/machine identities
+        'victim_hosts':    victim_hosts[:6],
+        'victim_data':     victim_data[:6] or ['Unknown — insufficient data type metadata'],
+    }
+
+
+def _compute_pasta_summary(cluster: dict, rows: list[dict], data: dict) -> dict:
+    """Build PASTA stages 4-7 deterministic summary (LLM writes prose from this).
+
+    Stage 4: Threat Analysis — who / what type of actor
+    Stage 5: Vulnerability — what was exploited + what data type was at risk
+    Stage 6: Attack Model — reference to event_chain_summary (already computed)
+    Stage 7: Risk & Impact — what business consequence
+    """
+    diamond = data.get('diamond_model') or {}
+    dread = data.get('dread_score') or {}
+    phases = cluster.get('phases') or []
+    phase_ids = {p.get('phase_id') or '' for p in phases}
+    row_text_all = ' '.join(
+        ' '.join(str(v) for v in r.values() if isinstance(v, str))
+        for r in rows
+    ).lower()
+
+    # Stage 4: Threat profile
+    adversary = diamond.get('adversary') or 'Unknown external actor'
+    # Map TTPs to actor archetypes
+    if any(t in row_text_all for t in ('nation', 'apt', 'state-sponsored')):
+        actor_archetype = 'Nation-state / APT actor'
+    elif any(t in row_text_all for t in ('ransomware', 'ransom', 'extortion')):
+        actor_archetype = 'Ransomware operator / criminal group'
+    elif any(t in row_text_all for t in ('insider', 'employee', 'disgruntled')):
+        actor_archetype = 'Malicious insider'
+    elif any(p in phase_ids for p in ('data_exfiltration_snowflake', 'secret_access')):
+        actor_archetype = 'Financially motivated cybercriminal (cloud-targeting)'
+    else:
+        actor_archetype = 'Opportunistic external attacker'
+
+    threat_profile = f'{actor_archetype}. {adversary}.'
+
+    # Stage 5: Vulnerability + data type
+    # All matching initial-access vectors are added — multi-vector breaches need all paths.
+    vuln_parts: list[str] = []
+    if 'session_theft' in phase_ids:
+        vuln_parts.append('stolen authentication token (no hardware MFA or session binding)')
+    if 'credential_theft' in phase_ids:
+        vuln_parts.append('harvested credentials from LSASS memory dump')
+    if 'initial_access' in phase_ids and 'session_theft' not in phase_ids and 'credential_theft' not in phase_ids:
+        vuln_parts.append('phishing / social engineering (user-delivered payload)')
+    if 'privilege_escalation_k8s' in phase_ids:
+        vuln_parts.append('misconfigured Kubernetes RBAC (privileged DaemonSet allowed)')
+    if 'secret_access' in phase_ids:
+        vuln_parts.append('AWS IAM over-permissioned role (AssumeRole + GetSecretValue without MFA)')
+
+    # Data type at risk
+    data_types: list[str] = []
+    for sig, label in [('manifest', 'logistics/shipping manifests (PII)'), ('customer', 'customer PII'),
+                        ('vault', 'cryptographic secrets and API keys'), ('lsass', 'Windows credential hashes'),
+                        ('snowflake', 'cloud data warehouse contents'), ('health', 'health records (PHI)')]:
+        if sig in row_text_all:
+            data_types.append(label)
+    if not data_types:
+        data_types = ['corporate operational data']
+
+    exploitation_path = ('. '.join(vuln_parts) + '. ') if vuln_parts else 'Exploitation path unclear — insufficient telemetry.'
+    exploitation_path += f'Data at risk: {", ".join(data_types[:3])}.'
+
+    # Stage 7: Business impact
+    risk_tier = dread.get('risk_tier') or 'HIGH'
+    sabsa_attrs = (data.get('dread_narrative') or {}).get('sabsa_attributes') or []
+
+    impact_parts: list[str] = []
+    if 'data_exfiltration_snowflake' in phase_ids or 'data_exfiltration_rclone' in phase_ids:
+        impact_parts.append('confirmed data exfiltration — regulatory notification obligation likely')
+    if 'Confidential' in sabsa_attrs:
+        impact_parts.append('confidentiality breach — data may already be in adversary hands')
+    if 'Authenticated' in sabsa_attrs:
+        impact_parts.append('credential compromise — all affected accounts must be rotated')
+    if 'privilege_escalation_k8s' in phase_ids:
+        impact_parts.append('full cluster node compromise — container workloads must be treated as untrusted')
+    if not impact_parts:
+        impact_parts = [f'{risk_tier} risk rating — business impact requires analyst investigation']
+
+    business_impact = '. '.join(impact_parts[:3]) + '.'
+
+    return {
+        'threat_profile': threat_profile,
+        'exploitation_path': exploitation_path,
+        'attack_model_ref': 'event_chain_summary',  # points to already-computed field
+        'business_impact': business_impact,
+        'risk_tier': risk_tier,
+    }
 
 
 _CONFIDENCE_FLOOR_CONFIRMED = 0.75
@@ -1610,13 +2412,13 @@ def _render_dread_narrative(
     filled = filled.replace('{fragment_block}', fragment_block)
 
     # Call LLM — allow generous timeout for large models (qwen3.6:27b needs ~120s)
-    # Prefix /no_think to suppress CoT tokens from qwen3/deepseek-r1 models
-    filled_with_hint = '/no_think\n' + filled
+    # Thinking mode is intentionally ENABLED here: prose narrative benefits from CoT.
+    # (JSON prefill at run_prefill still uses /no_think for structured-output speed.)
     rendered_text = ''
     try:
         result = llm.generate(
-            filled_with_hint,
-            max_tokens=320,
+            filled,
+            max_tokens=512,
             overrides={'timeout': 180},
             model=model,
         )
@@ -1714,6 +2516,7 @@ def run_prefill(
     top_n: int = PREFILL_TOP_N,
     model: str = PREFILL_DEFAULT_MODEL,
     tenant_id: str = 'default',
+    force: bool = False,
 ) -> dict[str, Any]:
     """Run Tier-1 prefill on the top_n clusters of the given assessment.
 
@@ -1737,6 +2540,50 @@ def run_prefill(
     ranked = _rank_clusters(clusters)
     selected = ranked[:top_n]
 
+    # ── Build assessment-wide engagement allowlist and inject into every cluster ──
+    # engagement_refs / engagement_ip_ranges are per-cluster on the PENTEST cluster.
+    # The breach cluster does NOT carry them — but it may contain pentest-range IPs
+    # in its rows if the pipeline correctly promoted phase-tagged rows into the campaign.
+    # We collect the union across ALL clusters so every cluster benefits from the full
+    # engagement scope. This matches how a real SOC reasons: if pentest RH-ENG-2026-041
+    # covers 198.51.100.0/24 this week, NOTHING in the assessment attributes to that range.
+    _all_eng_refs: set[str] = set()
+    _all_eng_ip_ranges: set[str] = set()
+    _all_eng_actors: set[str] = set()
+    _all_auth_ips: set[str] = set()
+    for _c in clusters:
+        for _ref in (_c.get('engagement_refs') or []):
+            _all_eng_refs.add(str(_ref).strip())
+        for _rng in (_c.get('engagement_ip_ranges') or []):
+            _all_eng_ip_ranges.add(str(_rng).strip())
+        for _actor in (_c.get('engagement_actors') or []):
+            _all_eng_actors.add(str(_actor).strip())
+        for _ip in (_c.get('authorized_ips') or []):
+            _all_auth_ips.add(str(_ip).strip())
+        # Also infer engagement actors from rows carrying engagement_refs
+        for _row in (_c.get('rows') or []):
+            _row_refs = _row.get('_engagement_refs') or _row.get('engagement_refs') or []
+            if _row_refs:
+                _u = str(_row.get('user_canonical') or _row.get('user') or '').strip()
+                if _u and _u not in ('-', ''):
+                    _all_eng_actors.add(_u)
+
+    _eng_meta = {
+        '_assessment_engagement_refs':      sorted(_all_eng_refs),
+        '_assessment_engagement_ip_ranges': sorted(_all_eng_ip_ranges),
+        '_assessment_engagement_actors':    sorted(_all_eng_actors),
+        '_assessment_authorized_ips':       sorted(_all_auth_ips),
+    }
+    for _c in clusters:
+        _c.update(_eng_meta)
+    if _all_eng_refs:
+        logger.info(
+            'tier1_prefill: injected assessment-wide engagement allowlist — '
+            'refs=%s ip_ranges=%s actors=%d',
+            sorted(_all_eng_refs), sorted(_all_eng_ip_ranges), len(_all_eng_actors),
+        )
+    # ─────────────────────────────────────────────────────────────────────────────
+
     prompts: list[str] = []
     selected_clusters: list[dict] = []
     # Cached clusters that have DREAD fragments but no rendered narrative yet
@@ -1748,13 +2595,59 @@ def run_prefill(
     )
 
     for cluster in selected:
+        # Skip ANALYSIS_INCOMPLETE and untyped legacy clusters — they have no
+        # evidence-bound phases to prefill against and must not be upgraded to
+        # confirmed breach by the verdict engine.
+        _cv = str(cluster.get('verdict') or cluster.get('final_verdict') or '').upper()
+        if _cv == 'ANALYSIS_INCOMPLETE':
+            logger.debug('tier1_prefill: skipping ANALYSIS_INCOMPLETE cluster %s', cluster.get('cluster_id'))
+            continue
+        if not cluster.get('cluster_kind') and _cv not in _BREACH_VERDICTS:
+            logger.debug('tier1_prefill: skipping untyped cluster %s (no cluster_kind)', cluster.get('cluster_id'))
+            continue
+
         # Skip if already prefilled and not stale
         existing = cluster.get('tier1_prefill')
-        if existing and isinstance(existing, dict) and existing.get('incident_name'):
+        if not force and existing and isinstance(existing, dict) and existing.get('incident_name'):
             rows = _get_rows_for_cluster(cluster, assessment)
             _ensure_v2_prefill_fields(existing, cluster, rows, tenant_id=tenant_id)
-            # Collect for deferred render if fragments present but not yet rendered
+            # Rebuild DREAD fragments when stale (fill_rate < 0.20) — covers clusters
+            # that were prefilled before the type-mismatch row-attribution fix, where
+            # all fragments came back None and got cached as an empty dict.
             _dn = existing.get('dread_narrative') or {}
+            _fill = float(_dn.get('fill_rate') or 0)
+            _verdict = str(cluster.get('verdict') or '').upper()
+            if _fill < 0.20 and _verdict not in ('BENIGN_EXPECTED', 'NO_VALIDATED_BREACH'):
+                try:
+                    from src.prefill.dread_fragments import (
+                        build_dread_narrative as _bdn,
+                        fragments_fill_rate as _ffr,
+                    )
+                    from src.prefill.sabsa_coda import (
+                        build_sabsa_coda as _bsc,
+                        derive_breached_attributes as _dba,
+                    )
+                    _frags = _bdn(rows, cluster, existing, tenant_id=tenant_id)
+                    _new_fill = _ffr(_frags)
+                    _attrs = _dba(_frags)
+                    _coda = _bsc(_frags, _attrs)
+                    existing['dread_narrative'] = {
+                        'fragments':        _frags,
+                        'fill_rate':        round(_new_fill, 2),
+                        'sabsa_attributes': _attrs,
+                        'sabsa_coda_draft': _coda,
+                    }
+                    _dn = existing['dread_narrative']
+                    logger.info(
+                        'tier1_prefill: rebuilt stale dread for already-prefilled cluster %s fill=%.2f',
+                        cluster.get('cluster_id'), _new_fill,
+                    )
+                except Exception as _dread_err:
+                    logger.warning(
+                        'tier1_prefill: dread rebuild failed for %s: %s',
+                        cluster.get('cluster_id'), _dread_err,
+                    )
+            # Collect for deferred LLM render if fragments present but not yet rendered
             _v  = cluster.get('verdict', '')
             if _dn.get('fragments') and not _dn.get('rendered') and _v in _BREACH_VERDICTS:
                 render_pending.append((cluster, existing, rows))
@@ -1763,11 +2656,41 @@ def run_prefill(
             continue
         rows = _get_rows_for_cluster(cluster, assessment)
         all_rows = assessment.get('rows') or []
+
+        # Skip clusters with no usable evidence — the LLM can't produce
+        # meaningful structured output from an empty evidence block and will
+        # always fail the required-keys check. These are typically noise
+        # fragments from pre-fix clustering runs.
+        if not rows and len(cluster.get('row_refs') or []) < 10:
+            logger.info(
+                'tier1_prefill: skipping cluster %s — no matched rows and only %d row_refs '
+                '(likely a noise fragment; re-ingest to consolidate)',
+                cluster.get('cluster_id'), len(cluster.get('row_refs') or []),
+            )
+            continue
+
         attack_seq = _detect_attack_sequence(rows)
+
+        # Pre-compute deterministic intelligence so the LLM prompt is grounded
+        # in structured facts rather than raw rows alone (Block 3.4).
+        _intel: dict[str, Any] = {}
+        try:
+            _enrich_cluster_intelligence(_intel, cluster, rows)
+        except Exception as _ie:
+            logger.debug('tier1_prefill: pre-prompt intel failed for %s: %s',
+                         cluster.get('cluster_id'), _ie)
+
         prompt = build_cluster_prefill_prompt(
             cluster, rows,
             all_assessment_rows=all_rows,
             attack_sequence=attack_seq,
+            event_chain_summary=str(_intel.get('event_chain_summary') or ''),
+            kill_chain_summary=str(_intel.get('kill_chain_summary') or ''),
+            adversarial_sequence=bool(_intel.get('adversarial_sequence')),
+            adversarial_sequence_detail=str(_intel.get('adversarial_sequence_detail') or ''),
+            dread_score=_intel.get('dread_score'),
+            diamond_model=_intel.get('diamond_model'),
+            pasta_summary=_intel.get('pasta_summary'),
         )
         # Disable qwen3/deepseek-r1 thinking mode — structured JSON needs speed, not CoT
         prompts.append('/no_think\n' + prompt)
@@ -1853,7 +2776,8 @@ def run_prefill(
                 'confidence_meter': confidence_meter,
             }
             _ensure_v2_prefill_fields(fallback_data, cluster, rows, tenant_id=tenant_id)
-            cluster['tier1_prefill'] = fallback_data
+            _old_t1_fb = cluster.get('tier1_prefill') or {}
+            cluster['tier1_prefill'] = {**_old_t1_fb, **fallback_data}
             continue
 
         raw_text = ''
@@ -1886,7 +2810,13 @@ def run_prefill(
             parsed['cross_cluster_links'] = cross_links
             _ensure_v2_prefill_fields(parsed, cluster, rows, tenant_id=tenant_id)
 
-            cluster['tier1_prefill'] = parsed
+            _old_t1 = cluster.get('tier1_prefill') or {}
+            # Clear stale _error so a successful parse doesn't carry forward a
+            # previous failure flag — the success fields in parsed take precedence
+            # but _error is not in parsed so it would survive the merge otherwise.
+            _old_t1.pop('_error', None)
+            _old_t1.pop('_raw', None)
+            cluster['tier1_prefill'] = {**_old_t1, **parsed}
             # Derive and attach verdict immediately so the cluster object is complete
             try:
                 from src.core.verdict_engine.verdict_rules import compute_cluster_verdict
@@ -1897,8 +2827,11 @@ def run_prefill(
             except Exception as _ve:
                 logger.debug('tier1_prefill: verdict derivation failed for %s: %s', cid, _ve)
 
-            # Apply three-valued confidence-floor gating to breach verdicts
+            # Apply three-valued confidence-floor gating to breach verdicts.
+            # Never override ANALYSIS_INCOMPLETE — it must persist to signal reingest.
             raw_v  = cluster.get('verdict') or ''
+            if raw_v == 'ANALYSIS_INCOMPLETE':
+                continue
             conf   = float(cluster.get('verdict_confidence') or 0)
             dn     = parsed.get('dread_narrative') or {}
             fill   = float(dn.get('fill_rate') or 0)
@@ -1937,7 +2870,9 @@ def run_prefill(
                     )
                     _dn.update(_render_result)
                     parsed['dread_narrative'] = _dn
-                    cluster['tier1_prefill'] = parsed
+                    _old_t1.pop('_error', None)
+                    _old_t1.pop('_raw', None)
+                    cluster['tier1_prefill'] = {**_old_t1, **parsed}
                     logger.info(
                         'tier1_prefill: dread narrative rendered for cluster %s (fallback=%s)',
                         cid, _render_result.get('render_fallback'),
@@ -1950,7 +2885,16 @@ def run_prefill(
                         cid, assessment_id, 'ok' if quality['passed'] else 'flagged',
                         cluster.get('verdict', '?'))
         else:
+            # Merge into existing tier1_prefill so deterministic Stage-5c enrichments
+            # (kill_chain_summary, dread_score, diamond_model, etc.) written before the
+            # LLM call are not silently discarded when the LLM returns unparseable JSON.
+            _old_t1_pf = cluster.get('tier1_prefill') or {}
+            # Clear stale incident_name so the cache-skip guard fires on the next retry.
+            # Without this, a previous successful prefill's incident_name survives the
+            # merge and permanently masks the failure — the cluster never retries.
+            _old_t1_pf.pop('incident_name', None)
             cluster['tier1_prefill'] = {
+                **_old_t1_pf,
                 '_error': 'parse_failed',
                 '_raw': raw_text[:200],
                 'generated_at': int(time.time()),
@@ -2009,7 +2953,40 @@ def run_single_cluster_prefill(
 
     existing = cluster.get('tier1_prefill')
     if not force and existing and isinstance(existing, dict) and existing.get('incident_name'):
-        _ensure_v2_prefill_fields(existing, cluster, _get_rows_for_cluster(cluster, assessment))
+        rows = _get_rows_for_cluster(cluster, assessment)
+        _ensure_v2_prefill_fields(existing, cluster, rows)
+        # Rebuild DREAD fragments if stale (fill_rate < 0.20) — same logic as run_prefill loop.
+        # This is the primary path for top-card clusters; without this check they permanently
+        # cache empty fragments and show "Legacy fallback" in the UI.
+        _dn = existing.get('dread_narrative') or {}
+        _fill = float(_dn.get('fill_rate') or 0)
+        _verdict = str(cluster.get('verdict') or '').upper()
+        if _fill < 0.20 and _verdict not in ('BENIGN_EXPECTED', 'NO_VALIDATED_BREACH'):
+            try:
+                from src.prefill.dread_fragments import (
+                    build_dread_narrative as _bdn,
+                    fragments_fill_rate as _ffr,
+                )
+                from src.prefill.sabsa_coda import (
+                    build_sabsa_coda as _bsc,
+                    derive_breached_attributes as _dba,
+                )
+                _frags = _bdn(rows, cluster, existing, tenant_id=tenant_id)
+                _new_fill = _ffr(_frags)
+                _attrs = _dba(_frags)
+                _coda = _bsc(_frags, _attrs)
+                existing['dread_narrative'] = {
+                    'fragments':        _frags,
+                    'fill_rate':        round(_new_fill, 2),
+                    'sabsa_attributes': _attrs,
+                    'sabsa_coda_draft': _coda,
+                }
+                logger.info(
+                    'run_single_cluster_prefill: rebuilt stale dread cluster=%s fill=%.2f',
+                    cluster_id, _new_fill,
+                )
+            except Exception as _de:
+                logger.warning('run_single_cluster_prefill: dread rebuild failed %s: %s', cluster_id, _de)
         return {'status': 'already_cached', 'cluster_id': cluster_id,
                 'tier1_prefill': existing,
                 'verdict': cluster.get('verdict'),

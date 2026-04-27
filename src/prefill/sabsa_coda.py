@@ -23,6 +23,8 @@ _SABSA_IMPACT_MAP: list[tuple[list[str], str]] = [
      'Reputable'),
     (['unconstrained', 'no dlp', 'no pam', 'no gate', 'without baseline'],
      'Authorised'),
+    (['privileged', 'hostpid', 'hostnetwork', 'container escape', 'node compromise', 'docker.sock'],
+     'Authorised'),
 ]
 
 

@@ -72,6 +72,9 @@
     execSummary: null,
   };
 
+  var _asyncRedirecting = {};
+  var _asyncPollTimers = {};
+
   // ── Toast ───────────────────────────────────────────────────────────────────
 
   function toast(msg, durationMs) {
@@ -134,6 +137,7 @@
     'CONFIRMED': 'confirmed', 'LIKELY REAL': 'likely', 'LIKELY': 'likely',
     'UNCERTAIN': 'uncertain', 'BENIGN': 'benign',
     'INVESTIGATION_REQUIRED': 'uncertain',
+    'ANALYSIS_INCOMPLETE': 'incomplete',
   };
 
   function verdictClass(v) {
@@ -175,12 +179,35 @@
     order.forEach(function (key) {
       if (frags[key]) parts.push({ key: key, label: key.replace(/_/g, ' ').toUpperCase(), text: String(frags[key]) });
     });
+    var hasPasta = !!(p.pasta_summary && (p.pasta_summary.threat_profile || p.pasta_summary.exploitation_path || p.pasta_summary.business_impact));
+    var hasDiamond = !!(p.diamond_model && (p.diamond_model.adversary || (p.diamond_model.capability && p.diamond_model.capability.length)));
+    var provenance;
+    if (dn.rendered) {
+      provenance = 'LLM-rendered DREAD';
+    } else if (parts.length) {
+      provenance = 'Deterministic DREAD fragments';
+    } else if (hasPasta) {
+      provenance = 'PASTA threat model';
+    } else if (hasDiamond) {
+      provenance = 'DIAMOND threat model';
+    } else if (p.what_happened || p.incident_name) {
+      provenance = 'T1 LLM analysis';
+    } else {
+      provenance = 'Legacy fallback';
+    }
     return {
       dn: dn,
       frags: frags,
       parts: parts,
-      has: !!(dn.rendered || parts.length),
-      provenance: dn.rendered ? 'LLM-rendered DREAD' : (parts.length ? 'Deterministic DREAD fragments' : 'Legacy fallback')
+      // hasStructured = true only when actual DREAD/PASTA/Diamond content exists.
+      // Does NOT count raw T1 text (what_happened / incident_name) since those can
+      // be deterministic fallback strings that carry no structured threat model.
+      hasStructured: !!(dn.rendered || parts.length || hasPasta || hasDiamond),
+      has: !!(dn.rendered || parts.length || p.what_happened || p.incident_name),
+      hasPasta: hasPasta,
+      hasDiamond: hasDiamond,
+      hasT1: !!(p.what_happened || p.incident_name || p.evidence_chain),
+      provenance: provenance
     };
   }
 
@@ -201,14 +228,29 @@
 
   function _renderWhyConfirmed(cluster) {
     var d = _dreadInfo(cluster);
-    var full = d.parts.map(function (p) { return p.text; }).join(' ').toLowerCase() + ' ' + JSON.stringify(((cluster || {}).tier1_prefill || {}).observed_impact || {}).toLowerCase();
+    var _t1r = (cluster || {}).tier1_prefill || {};
+    // Filter raw correlation text from what_happened before using it for pattern matching
+    var _t1wh = _rawCorrelationText(_t1r.what_happened || '') ? '' : (_t1r.what_happened || '');
+    var full = d.parts.map(function (p) { return p.text; }).join(' ').toLowerCase()
+      + ' ' + JSON.stringify(_t1r.observed_impact || {}).toLowerCase()
+      + ' ' + _t1wh.toLowerCase()
+      + ' ' + JSON.stringify(_t1r.evidence_chain || []).toLowerCase()
+      + ' ' + (_t1r.root_cause || '').toLowerCase()
+      + ' ' + (_t1r.headline_subtitle || '').toLowerCase()
+      // Cluster-level fields — always populated by the detection pipeline
+      + ' ' + (cluster.lead_description || '').toLowerCase()
+      + ' ' + (cluster.business_significance || '').toLowerCase()
+      + ' ' + JSON.stringify(cluster.phases || []).toLowerCase()
+      + ' ' + (cluster.shared_accounts || cluster.affected_accounts || []).join(' ').toLowerCase()
+      + ' ' + (cluster.affected_assets || cluster.shared_hosts || []).join(' ').toLowerCase();
     var gates = [
-      ['Data exfil', /exfil|copy into|unload|rclone|cloud sync|transferred data|cloud storage/.test(full)],
-      ['Repeated activity', /recurred|distinct days|same command|reproduc/.test(full)],
-      ['Affected users', /account|user|service_account|privileged|affected users/.test(full)],
-      ['Control gap', /no dlp|no pam|control gap|unconstrained|no inspection|no gate/.test(full)],
-      ['Crown jewel', /crown jewel|regulated data|critical data|protected data|ndb|cps234/.test(full)],
-      ['Multi-source correlation', /cross-source|source types|multiple sources|correlation/.test(full)]
+      ['Data exfil', /exfil|copy into|unload|rclone|cloud sync|transferred data|cloud storage|s3.*get|putobject|download|data_exfil/.test(full)],
+      ['Repeated activity', /recurred|distinct days|same command|reproduc|recurring|repeated|multiple.*event|persistent|multi.*phase|attack phase|8 phase/.test(full)],
+      ['Affected users', /account|user|service_account|privileged|affected users|identity|credential|principal|pentest|svc_/.test(full)],
+      ['Control gap', /no dlp|no pam|control gap|unconstrained|no inspection|no gate|unmonitored|bypass|privileged.*workload|daemonset|k8s.*privilege/.test(full)],
+      ['Crown jewel', /crown jewel|regulated data|critical data|protected data|ndb|cps234|secret|encryption key|k8s|kubernetes|finance_wh|sfl_data|privileged workload|daemonset/.test(full)],
+      ['Multi-source correlation', /cross-source|source types|multiple sources|correlation|multi.*source|okta|cloudtrail|azure/.test(full)
+        || (cluster.confidence_meter && (cluster.confidence_meter.source_types_present || []).length > 1)]
     ];
     return '<div class="br-why-ladder">' + gates.map(function (g) {
       return '<span class="br-why-chip ' + (g[1] ? 'br-why-chip--ok' : 'br-why-chip--miss') + '">' + (g[1] ? '✓ ' : '? ') + escHtml(g[0]) + '</span>';
@@ -223,9 +265,13 @@
 
   function _firstEvidenceSentence(cluster, fallback) {
     var d = _dreadInfo(cluster);
+    var p = (cluster || {}).tier1_prefill || {};
     var damage = (d.frags && d.frags.damage) || '';
     var repro = (d.frags && d.frags.reproducibility) || '';
-    var s1 = _sentenceList(damage)[0] || fallback || '';
+    // Use T1 what_happened only when it's not raw correlation text
+    var t1wh = (p.what_happened || '');
+    var t1Sentence = (!_rawCorrelationText(t1wh)) ? (_sentenceList(t1wh)[0] || '') : '';
+    var s1 = _sentenceList(damage)[0] || t1Sentence || fallback || '';
     var s2 = _sentenceList(repro)[0] || '';
     return [s1, s2].filter(Boolean).join(' ');
   }
@@ -235,15 +281,43 @@
     var p = (cluster || {}).tier1_prefill || {};
     var bits = [];
     if (d.dn && d.dn.sabsa_coda_draft) bits.push(d.dn.sabsa_coda_draft);
-    if (d.frags && d.frags.exploitability) bits.push(d.frags.exploitability);
+    // Only include exploitability fragment when its core text is NOT already
+    // embedded in the sabsa_coda_draft (which always includes the control-gap hint)
+    if (d.frags && d.frags.exploitability) {
+      var explo = d.frags.exploitability;
+      var exploCore = explo.replace(/^control gaps exploited:\s*/i, '').replace(/\.$/, '').toLowerCase();
+      var alreadyCovered = bits.some(function(b) {
+        return exploCore.length > 20 && b.toLowerCase().indexOf(exploCore.substring(0, 50)) !== -1;
+      });
+      if (!alreadyCovered) bits.push(explo);
+    }
     if (!bits.length && p.observed_impact && p.observed_impact.data) bits.push('Data impact: ' + p.observed_impact.data);
-    return bits.join(' ');
+    if (!bits.length && p.observed_impact && p.observed_impact.ops) bits.push('Operational impact: ' + p.observed_impact.ops);
+    if (!bits.length && p.observed_impact && p.observed_impact.access) bits.push('Access impact: ' + p.observed_impact.access);
+    if (!bits.length && p.pasta_summary && p.pasta_summary.business_impact) bits.push(p.pasta_summary.business_impact);
+    // Use T1 what_happened only when it's not raw correlation text
+    if (!bits.length && p.what_happened && !_rawCorrelationText(p.what_happened)) {
+      bits.push(_sentenceList(p.what_happened)[0] || '');
+    }
+    // Cluster-level fallback: business_significance > lead_description
+    if (!bits.length) {
+      var biz = (cluster.business_significance || cluster.lead_description || '').trim();
+      if (biz && !_rawCorrelationText(biz) && biz.length > 10) bits.push(biz);
+    }
+    return bits.filter(Boolean).join(' ');
   }
 
   function _knownUnknownBox(cluster) {
     var d = _dreadInfo(cluster);
     var p = (cluster || {}).tier1_prefill || {};
-    var text = (d.parts.map(function (x) { return x.text; }).join(' ') + ' ' + JSON.stringify(p.observed_impact || {})).toLowerCase();
+    // Filter raw correlation text from what_happened before building text
+    var _t1wh = _rawCorrelationText(p.what_happened || '') ? '' : (p.what_happened || '');
+    var text = (d.parts.map(function (x) { return x.text; }).join(' ')
+      + ' ' + JSON.stringify(p.observed_impact || {})
+      + ' ' + _t1wh
+      + ' ' + JSON.stringify(p.evidence_chain || [])
+      + ' ' + (p.root_cause || '')
+    ).toLowerCase();
     var known = [];
     var unknown = [];
     if (/rclone/.test(text)) known.push('Tool: rclone file-sync activity');
@@ -251,12 +325,47 @@
     if (/crown jewel|regulated data|critical data|protected data/.test(text)) known.push('Crown-jewel or protected data indicator present in evidence');
     if (/no dlp/.test(text) || /no pam/.test(text)) known.push('Control gaps: DLP/PAM coverage missing in evidence');
     if (/service account|privileged|finance|standard user/.test(text)) known.push('Affected roles: service account, privileged/IT, finance, standard users');
-    if (!/pii|customer|payroll|secret|source code|credential dump/.test(text)) unknown.push('Exact data contents are unknown from current evidence');
-    if (!/attacker-owned|external owner|malicious owner/.test(text)) unknown.push('External destination ownership is unknown from current evidence');
+    // T1 prefill enrichments — populate known list from structured T1 data
+    if (!known.length && p.root_cause) known.push('Root cause: ' + p.root_cause);
+    var _scope = p.affected_scope || {};
+    var _scopeUsers = (_scope.users || _scope.accounts || []).filter(Boolean);
+    if (!known.length && _scopeUsers.length) known.push('Compromised accounts: ' + _scopeUsers.slice(0, 3).join(', '));
+    var _scopeHosts = (_scope.hosts || _scope.systems || []).filter(Boolean);
+    if (_scopeHosts.length) known.push('Affected systems: ' + _scopeHosts.slice(0, 3).join(', '));
+    // Evidence chain steps as confirmed facts — use first 2 meaningful steps
+    if (!known.length && p.evidence_chain && p.evidence_chain.length) {
+      p.evidence_chain.slice(0, 3).forEach(function(step) {
+        var what = (step.what || step.event || step.description || step.action || '').trim();
+        if (what && known.length < 3) known.push(what.length > 90 ? what.slice(0, 87) + '\u2026' : what);
+      });
+    }
+    // Immediate actions as evidence of what was confirmed
+    if (!known.length && p.immediate_actions && p.immediate_actions.length) {
+      var ia = p.immediate_actions[0];
+      var iaText = (typeof ia === 'string' ? ia : (ia.action || ia.step || '')).trim();
+      if (iaText) known.push('Recommended: ' + (iaText.length > 80 ? iaText.slice(0, 77) + '\u2026' : iaText));
+    }
+    // Cluster-level data — always populated by the detection pipeline
+    var clAccts = (cluster.shared_accounts || cluster.affected_accounts || []).filter(Boolean).slice(0, 3);
+    if (clAccts.length && !known.some(function(k){ return /account|credential/i.test(k); })) {
+      known.push('Compromised accounts: ' + clAccts.join(', '));
+    }
+    var clAssets = (cluster.affected_assets || cluster.shared_hosts || []).filter(Boolean).slice(0, 3);
+    if (clAssets.length && !known.some(function(k){ return /system|host/i.test(k); })) {
+      known.push('Affected systems: ' + clAssets.join(', '));
+    }
+    var clIps = (cluster.shared_external_ips || []).slice(0, 3);
+    if (clIps.length) known.push('External infrastructure: ' + clIps.join(', '));
+    var phases = (cluster.phases || []).map(function(ph) {
+      return (ph.phase_role || ph.type || ph.name || '').replace(/_/g, ' ');
+    }).filter(Boolean).slice(0, 5);
+    if (phases.length) known.push('Attack phases confirmed: ' + phases.join(' \u2192 '));
+    if (!/pii|customer|payroll|secret|source code|credential dump/.test(text)) unknown.push('Exact data contents and volume are unknown from current evidence');
+    if (!/attacker-owned|external owner|malicious owner/.test(text)) unknown.push('External destination attribution and ownership is unconfirmed');
     if (!known.length) known.push('Evidence-confirmed facts are limited to the cited rows');
     return [
       '<div class="br-known-unknown">',
-      '  <div><strong>Known</strong><ul>' + known.slice(0, 5).map(function (x) { return '<li>' + escHtml(x) + '</li>'; }).join('') + '</ul></div>',
+      '  <div><strong>Known</strong><ul>' + known.slice(0, 6).map(function (x) { return '<li>' + escHtml(x) + '</li>'; }).join('') + '</ul></div>',
       '  <div><strong>Unknown / not proven</strong><ul>' + unknown.slice(0, 4).map(function (x) { return '<li>' + escHtml(x) + '</li>'; }).join('') + '</ul></div>',
       '</div>'
     ].join('');
@@ -264,10 +373,52 @@
 
   function _boundedActionsHtml(cluster) {
     var d = _dreadInfo(cluster);
-    var text = d.parts.map(function (x) { return x.text; }).join(' ').toLowerCase();
-    var safe = 'Preserve endpoint, data-platform, and network evidence';
-    var approval = /external storage|object storage|cloud/.test(text) ? 'Block or restrict exfil destinations after approval' : 'Contain affected destinations after approval';
-    var manual = 'CISO/Legal/Privacy sign-off on reporting posture';
+    var _t1ba = (cluster || {}).tier1_prefill || {};
+    // Filter raw correlation text before building the keyword-match text
+    var _t1wh = _rawCorrelationText(_t1ba.what_happened || '') ? '' : (_t1ba.what_happened || '');
+    var text = (d.parts.map(function (x) { return x.text; }).join(' ')
+      + ' ' + _t1wh
+      + ' ' + JSON.stringify(_t1ba.observed_impact || {})
+      + ' ' + JSON.stringify(_t1ba.evidence_chain || [])
+      // Cluster-level data for context branching
+      + ' ' + JSON.stringify(cluster.phases || []).toLowerCase()
+      + ' ' + (cluster.lead_description || '').toLowerCase()
+      + ' ' + (cluster.business_significance || '').toLowerCase()
+    ).toLowerCase();
+    var safe, approval, manual;
+    var isK8s = /kubernetes|k8s|daemonset|privileged.*workload|kubelet|container.*priv/.test(text);
+    var isC2 = /c2[^a-z]|c2_comm|beacon|command.*control/.test(text);
+    var isMultiPhase = /multi.*phase|multiphase|\d+\s+phase|attack phase/.test(text);
+    var isExfil = /external storage|object storage|cloud|s3|exfil|transferred|data_exfil/.test(text);
+    var isCred = /credential.*theft|lsass|mimikatz|token.*theft|mfa.*fatigue|session.*theft|password.*spray|credential_theft|session_theft/.test(text)
+      || (cluster.phases || []).some(function(ph) { return /credential|session.*theft|mfa/.test((ph.phase_role || ph.type || ph.name || '').toLowerCase()); });
+    var clAccts = (cluster.shared_accounts || cluster.affected_accounts || []).slice(0, 2);
+    var acctList = clAccts.length ? clAccts.join(' and ') : 'affected accounts';
+    var clIps = (cluster.shared_external_ips || []).slice(0, 3);
+    var ipList = clIps.length ? clIps.join(', ') : 'identified C2 IPs';
+    if (isCred) {
+      safe = 'Revoke all active sessions and tokens for ' + acctList + ' immediately; collect endpoint memory dumps and auth logs before any changes';
+      approval = 'Force password reset and MFA re-enrollment for ' + acctList + '; review and prune all delegated access after CISO sign-off';
+      manual = 'CISO/Legal: assess whether credential access constitutes an NDB-reportable breach; confirm blast radius includes any downstream service accounts or API keys';
+    } else if (isK8s) {
+      safe = 'Isolate affected K8s namespaces; collect pod logs, kubelet audit events, and service account audit trails before any changes';
+      approval = 'Revoke credentials for ' + acctList + '; rotate K8s service account tokens and RBAC bindings after sign-off';
+      manual = isMultiPhase
+        ? 'CISO/Legal: assess APRA CPS 234 72h notification window across all ' + ((cluster.phases || []).length || 'identified') + ' attack phases; confirm regulated-data exposure scope'
+        : 'CISO/Legal: confirm whether regulated data was exposed via privileged K8s workload; assess NDB obligations';
+    } else if (isC2) {
+      safe = 'Preserve endpoint, DNS, and full-packet capture logs for identified C2 channels before firewall changes';
+      approval = 'Block C2 destination IPs (' + ipList + ') at perimeter and DNS sinkholes after CISO approval';
+      manual = 'CISO/Legal/Privacy: determine external attribution and reporting posture; assess NDB if data was staged';
+    } else if (isExfil) {
+      safe = 'Preserve endpoint, data-platform, and network egress logs before any remediation';
+      approval = 'Block or restrict exfil destinations and revoke ' + acctList + ' credentials after approval';
+      manual = 'CISO/Legal/Privacy: sign-off on breach notification posture and data-volume assessment';
+    } else {
+      safe = 'Preserve endpoint, data-platform, and network evidence before any remediation steps';
+      approval = 'Contain affected destinations and revoke ' + acctList + ' credentials after sign-off';
+      manual = 'CISO/Legal/Privacy: sign-off on reporting posture and scope confirmation';
+    }
     return [
       '<div class="br-bounded-actions">',
       '  <div><span class="br-auto br-auto--safe">SAFE</span> ' + escHtml(safe) + '</div>',
@@ -295,12 +446,34 @@
 
   function _dreadNarrativeText(cluster, fallback) {
     var d = _dreadInfo(cluster);
+    var p = (cluster || {}).tier1_prefill || {};
     if (d.dn.rendered) return d.dn.rendered;
     if (d.parts.length) {
       var body = d.parts.map(function (x) { return x.label + ': ' + x.text; }).join('\n');
       if (d.dn.sabsa_coda_draft) body += '\nSABSA: ' + d.dn.sabsa_coda_draft;
       return body;
     }
+    // PASTA fallback: stages 4 (threat profile), 5 (exploitation path), 7 (business impact)
+    if (d.hasPasta) {
+      var pasta = p.pasta_summary || {};
+      var pastaParts = [];
+      if (pasta.threat_profile) pastaParts.push('THREAT ACTOR: ' + pasta.threat_profile);
+      if (pasta.exploitation_path) pastaParts.push('EXPLOITATION: ' + pasta.exploitation_path);
+      if (pasta.business_impact) pastaParts.push('BUSINESS IMPACT: ' + pasta.business_impact);
+      if (pastaParts.length) return pastaParts.join('\n');
+    }
+    // Diamond fallback: adversary, capability, victim
+    if (d.hasDiamond) {
+      var dm = p.diamond_model || {};
+      var dmParts = [];
+      if (dm.adversary) dmParts.push('ADVERSARY: ' + dm.adversary);
+      if (dm.capability && dm.capability.length) dmParts.push('CAPABILITIES: ' + dm.capability.slice(0, 5).join(', '));
+      var victims = (dm.victim_users || []).concat(dm.victim_data || []);
+      if (victims.length) dmParts.push('VICTIM SCOPE: ' + victims.slice(0, 4).join(', '));
+      if (dmParts.length) return dmParts.join('\n');
+    }
+    // T1 LLM prefill content — use only when it's not a raw correlation string
+    if (p.what_happened && !_rawCorrelationText(p.what_happened)) return p.what_happened;
     return fallback || '';
   }
 
@@ -526,12 +699,13 @@
   }
 
   function _pollAsyncProgress(aid) {
-    // Prefer SSE; fall back to polling if EventSource unavailable
+    // Prefer SSE for responsive updates, but always run JSON polling as the
+    // authoritative watchdog. EventSource cannot send auth headers and some
+    // proxies close streams early; polling must still complete the redirect.
     if (typeof EventSource !== 'undefined') {
       _connectSSE(aid);
-    } else {
-      _pollJson(aid);
     }
+    _schedulePollJson(aid, 1200);
   }
 
   // Critical addition #5 — SSE progress
@@ -556,32 +730,45 @@
     });
     es.onerror = function () {
       es.close();
-      // Fall back to polling on SSE error
-      setTimeout(function () { _pollJson(aid); }, 2000);
+      // Fall back to polling on SSE error. Polling may already be running;
+      // the scheduler deduplicates timers for this assessment id.
+      _schedulePollJson(aid, 1000);
     };
   }
 
+  function _schedulePollJson(aid, delayMs) {
+    if (!aid || _asyncRedirecting[aid]) return;
+    if (_asyncPollTimers[aid]) return;
+    _asyncPollTimers[aid] = setTimeout(function () {
+      delete _asyncPollTimers[aid];
+      _pollJson(aid);
+    }, delayMs || 0);
+  }
+
   function _pollJson(aid) {
+    if (!aid || _asyncRedirecting[aid]) return;
     var url = apiBase() + '/api/v1/assessments/' + encodeURIComponent(aid) + '/progress/poll';
     fetch(url, { headers: authHeaders() })
       .then(function (r) { return r.json(); })
       .then(function (d) {
         _applyProgressEvent(d, aid, null);
-        if (!d.terminal && d.status !== 'ready' && d.status !== 'failed') {
-          setTimeout(function () { _pollJson(aid); }, 2000);
+        if (!_asyncRedirecting[aid] && d.status !== 'ready' && d.status !== 'failed' && d.status !== 'cancelled') {
+          _schedulePollJson(aid, 2000);
         }
       })
       .catch(function () {
-        setTimeout(function () { _pollJson(aid); }, 3000);
+        _schedulePollJson(aid, 3000);
       });
   }
 
   function _applyProgressEvent(d, aid, es) {
+    if (!d || _asyncRedirecting[aid]) return;
     var pct = d.percent || 0;
     var label = d.label || d.stage || '';
     var status = d.status || '';
     var rows = d.row_count || 0;
     var clusters = d.cluster_count || 0;
+    if (!label && status) label = status;
 
     updateAsyncStatus(label + (rows ? ' — ' + rows.toLocaleString() + ' rows' : ''), pct);
     if (clusters > 0) {
@@ -590,10 +777,7 @@
 
     if (status === 'ready') {
       if (es) es.close();
-      updateAsyncStatus('Assessment ready — redirecting…', 100);
-      setTimeout(function () {
-        window.location.href = '/static/breach.html?assessment=' + encodeURIComponent(aid);
-      }, 800);
+      _redirectToAssessment(aid);
     } else if (status === 'failed') {
       if (es) es.close();
       var errMsg = d.error || 'Assessment pipeline failed';
@@ -601,10 +785,52 @@
       document.getElementById('br-content').innerHTML =
         '<div class="br-processing"><div class="br-processing__title" style="color:#e74c3c">Failed: ' + _esc(errMsg) + '</div>' +
         '<p style="color:#888;font-size:0.85em;margin-top:8px">You can try uploading a smaller dataset or check server logs.</p></div>';
+    } else if (status === 'cancelled') {
+      if (es) es.close();
+      toast(d.error || 'Assessment was cancelled');
+      document.getElementById('br-content').innerHTML =
+        '<div class="br-processing"><div class="br-processing__title" style="color:#e5c542">Cancelled</div></div>';
     } else if (d.terminal) {
       if (es) es.close();
-      toast(d.error || 'Progress stream ended before assessment was ready');
+      // A stream can terminate because of timeout/proxy behaviour while the job
+      // is still running. Do not strand the page on "Queued 0%"; verify whether
+      // the assessment exists, then continue polling if it is not ready yet.
+      _verifyAssessmentReady(aid);
     }
+  }
+
+  function _redirectToAssessment(aid) {
+    if (!aid || _asyncRedirecting[aid]) return;
+    _asyncRedirecting[aid] = true;
+    if (_asyncPollTimers[aid]) {
+      clearTimeout(_asyncPollTimers[aid]);
+      delete _asyncPollTimers[aid];
+    }
+    updateAsyncStatus('Assessment ready - redirecting...', 100);
+    setTimeout(function () {
+      window.location.href = '/static/breach.html?assessment=' + encodeURIComponent(aid);
+    }, 500);
+  }
+
+  function _verifyAssessmentReady(aid) {
+    if (!aid || _asyncRedirecting[aid]) return;
+    apiFetch('/api/v1/assessments/' + encodeURIComponent(aid))
+      .then(function (r) {
+        if (r.ok) return r.json();
+        throw new Error('not ready');
+      })
+      .then(function (data) {
+        if (data && (data.assessment_id === aid || data.id === aid || data.status === 'ready')) {
+          _redirectToAssessment(aid);
+          return;
+        }
+        updateAsyncStatus('Still processing on server...', 90);
+        _schedulePollJson(aid, 2000);
+      })
+      .catch(function () {
+        updateAsyncStatus('Still processing on server...', 90);
+        _schedulePollJson(aid, 2000);
+      });
   }
 
   function _getAuthToken() {
@@ -796,26 +1022,46 @@
 
   // ── Home view ─────────────────────────────────────────────────────────────────
 
+  function _renderReingestBanner(a) {
+    if (!a.requires_reingest && !a.fallback_used) return '';
+    var diag = a.cluster_diagnostics || {};
+    var staleRows = diag.stale_rows || 0;
+    var msg = 'Telemetry was stored with an older normalizer — canonical pivot fields were missing, so typed clustering could not run.';
+    if (staleRows) msg += ' ' + staleRows + ' stale rows detected.';
+    return '<div class="reingest-banner" style="background:#7c2d2d;color:#fcd4d4;border-left:4px solid #ef4444;padding:10px 16px;margin-bottom:12px;border-radius:4px;font-size:13px;">'
+      + '<strong>Re-ingest required:</strong> ' + escHtml(msg)
+      + ' <a href="#" onclick="document.getElementById(\'upload-panel\').scrollIntoView({behavior:\'smooth\'});return false;" style="color:#fca5a5;text-decoration:underline;">Re-upload source files</a>'
+      + '</div>';
+  }
+
   function renderHome() {
     updateTabBar('breach');
     var a = state.assessment || {};
 
     // Prefer presentation-layer threat_cases for top cards when available.
-    // Fall back to analysis_clusters (which fall back to correlation_clusters).
-    var topSource = (state.threatCases && state.threatCases.length > 0)
+    // Exclude ANALYSIS_INCOMPLETE cases from the ranked top pool — they are
+    // shown as a banner/warning, not as evidence cards.
+    var rawSource = (state.threatCases && state.threatCases.length > 0)
       ? state.threatCases
       : state.clusters;
+    var topSource = rawSource.filter(function(c) {
+      return (c.verdict || c.final_verdict || '').toUpperCase() !== 'ANALYSIS_INCOMPLETE';
+    });
     var sorted = _rankClusters(topSource);
     // Always keep full cluster inventory available for context/audit sections.
     var allClusters = _rankClusters(state.clusters);
 
-    var html = _renderMetaLine(a, allClusters);
+    var html = _renderReingestBanner(a);
+    html += _renderMetaLine(a, allClusters);
     html += _renderBreachAnswerHero(sorted, a);
+    html += _renderRootCauseNarrative(sorted[0], sorted);
     html += _renderExecSummaryShell(sorted, a);
+    html += '<details class="br-analyst-detail" data-testid="br-analyst-detail"><summary class="br-section-head" style="cursor:pointer;">THREAT CASES — Analyst Detail ▸</summary>';
     html += _renderTopFindings(sorted);
     // Narrative context and additional findings use full cluster inventory.
     html += _renderNarrativeContext(allClusters);
     html += _renderAdditionalFindings(allClusters);
+    html += '</details>';
     // Only count benign clusters not already shown in narrative context section
     var _shownBenignIds = new Set(allClusters.filter(function(c){
       return _vClass(c)==='benign' && ((c.row_refs||[]).length>0||c.case_type==='enrichment_guided');
@@ -838,6 +1084,28 @@
     // Build the CEO summary from the current deterministic verdict/wording.
     _loadExecSummary(true);
 
+    // Fix 6 — Auto-generate DREAD threat summary for CRITICAL secondary clusters
+    // so the most dangerous cases (esp. data exfiltration) aren't lazy-loaded.
+    var _AUTO_GEN_THRESHOLD = 50;
+    sorted.forEach(function (c, idx) {
+      if (idx === 0) return; // lead case handled by _hydrateTopThreatCases
+      var di = _dreadInfo(c);
+      if (di.hasStructured) return; // already has content
+      var isCritical = (c.severity || '').toLowerCase() === 'critical'
+        || (c.row_refs || []).length >= _AUTO_GEN_THRESHOLD;
+      var isBreachVerdict = /CONFIRMED|VALIDATED/.test((c.verdict || c.final_verdict || '').toUpperCase());
+      if (isCritical || isBreachVerdict) {
+        window.setTimeout(function () {
+          _fireDreadGenerate(c.cluster_id, function () {
+            var resorted = _rankClusters(
+              (state.threatCases && state.threatCases.length > 0) ? state.threatCases : state.clusters
+            );
+            _rerenderCard(c.cluster_id, resorted);
+          });
+        }, (idx + sorted.length) * 400); // stagger after primary prefill
+      }
+    });
+
     // A4: mount D3 visualisations now that containers exist in DOM
     _mountSwimlane(allClusters);
     _mountHopGraphMini(sorted[0] || null);
@@ -846,10 +1114,21 @@
   function _hydrateTopThreatCases(sorted, assessment) {
     var top = _selectTopThreatCases(sorted);
     top.forEach(function (c, idx) {
+      // Never auto-fire LLM for ANALYSIS_INCOMPLETE — no typed evidence exists.
+      var verdict = (c.verdict || c.final_verdict || '').toUpperCase();
+      if (verdict === 'ANALYSIS_INCOMPLETE') return;
+      var isConfirmed = _vClass(c) === 'confirmed';
       if (_prefillDone(c)) {
         _safeRenderCard(c, sorted, idx);
         return;
       }
+      if (!isConfirmed) {
+        // LIKELY_BREACH / LIKELY_COMPROMISE — render deterministic card immediately
+        // with human-gate banner. Do NOT auto-fire LLM; analyst clicks Generate.
+        _safeRenderCard(c, sorted, idx);
+        return;
+      }
+      // CONFIRMED_BREACH / CONFIRMED_INTRUSION — auto-fire LLM prefill
       _renderCardLoading(c, idx);
       window.setTimeout(function () {
         _fireSinglePrefill(c.cluster_id, function () {
@@ -1033,10 +1312,118 @@
     html += '</div>';
 
     if (narrative) html += '<div style="margin-top:10px;font-size:13px;line-height:1.6;opacity:.9;">' + escHtml(narrative) + '</div>';
+
+    // Compliance controls — framework chips inline in hero
+    html += _renderComplianceChips(lead);
+
     if (rootCause)  html += '<div style="margin-top:6px;font-size:12px;opacity:.65;"><strong>Root cause:</strong> ' + escHtml(rootCause) + '</div>';
+
+    // Block 4.3: PASTA business impact — 1-sentence business consequence from pasta_summary
+    var pastaImpact = (p.pasta_summary && p.pasta_summary.business_impact)
+      ? String(p.pasta_summary.business_impact).trim()
+      : '';
+    if (pastaImpact && _vClass(lead) === 'confirmed') {
+      html += '<div style="margin-top:8px;font-size:12px;padding:8px 12px;border-radius:4px;background:rgba(239,68,68,.07);border-left:3px solid rgba(239,68,68,.4);color:rgba(255,180,180,.85);">'
+        + '<strong style="font-size:10px;letter-spacing:.05em;opacity:.7;">BUSINESS IMPACT</strong><br>'
+        + escHtml(pastaImpact)
+        + '</div>';
+    }
 
     html += '</div>';
     return html;
+  }
+
+  // ── Root Cause Narrative: CEO-readable single paragraph ────────────────────
+  function _renderRootCauseNarrative(lead, sorted) {
+    if (!lead) return '';
+    var p = lead.tier1_prefill || {};
+    var dn = p.dread_narrative || {};
+    var frags = dn.fragments || {};
+    var whathappened = (p.what_happened || '').trim();
+    var shortNarr = (p.short_narrative || '').trim();
+    var rootCause = _deriveRootCause(lead, p, _displayIncidentName(lead), p.headline_subtitle || '');
+    var evChain = p.evidence_chain || [];
+    var impact = p.observed_impact || {};
+    var actors = impact.identity || '';
+
+    // Assemble timeline summary from evidence chain
+    var chainSteps = [];
+    (evChain || []).forEach(function (step) {
+      var tactic = step.tactic || step.phase || '';
+      var desc = step.description || step.detail || '';
+      if (tactic && desc) chainSteps.push(tactic + ': ' + desc);
+      else if (desc) chainSteps.push(desc);
+    });
+    var timelineStr = chainSteps.length > 0 ? chainSteps.slice(0, 6).join(' → ') : '';
+
+    // Build the narrative
+    var parts = [];
+
+    // 1. What happened (prefer LLM-generated, then DREAD damage fragment, then fallback)
+    var storySource = whathappened || (dn.rendered || '').split('\n')[0] || shortNarr || '';
+    if (storySource && !_rawCorrelationText(storySource)) parts.push(storySource);
+
+    // 2. Root cause
+    if (rootCause) parts.push('Root cause: ' + rootCause);
+
+    // 3. Timeline (condensed)
+    if (timelineStr) parts.push('Attack progression: ' + timelineStr + '.');
+
+    // 4. Affected actors
+    if (actors && !/no named/i.test(actors)) parts.push('Affected accounts: ' + actors + '.');
+
+    // 5. FP explanation
+    var explained = 0;
+    (sorted || []).forEach(function (c) {
+      if (_vClass(c) === 'benign' && (c.row_refs || []).length > 0) explained += (c.row_refs || []).length;
+    });
+    if (explained > 0) {
+      parts.push(explained.toLocaleString() + ' additional rows analysed and ruled out — not part of the breach.');
+    }
+
+    var fullText = parts.join(' ');
+    if (!fullText) return '';
+
+    return [
+      '<div class="br-root-narrative" data-testid="br-root-narrative">',
+      '  <div class="br-section-head" style="margin-bottom:8px;">ROOT CAUSE NARRATIVE</div>',
+      '  <div style="font-size:14px;line-height:1.7;color:rgba(255,255,255,.88);">' + escHtml(fullText) + '</div>',
+      '</div>',
+    ].join('');
+  }
+
+  // ── Compliance Controls: framework chips ──────────────────────────────────
+  function _renderComplianceChips(lead) {
+    if (!lead) return '';
+    var p = lead.tier1_prefill || {};
+    var controls = p.compliance_controls || [];
+    if (!controls.length) return '';
+
+    var FRAMEWORK_COLORS = {
+      'ISO 27001:2022': { bg: 'rgba(99,102,241,.15)', border: '#6366f1', text: '#a5b4fc' },
+      'Essential Eight': { bg: 'rgba(34,197,94,.12)', border: '#22c55e', text: '#86efac' },
+      'NIST CSF 2.0':   { bg: 'rgba(59,130,246,.12)', border: '#3b82f6', text: '#93c5fd' },
+      'NDB Scheme':     { bg: 'rgba(239,68,68,.12)', border: '#ef4444', text: '#fca5a5' },
+      'APRA CPS 234':   { bg: 'rgba(251,146,60,.12)', border: '#fb923c', text: '#fed7aa' },
+    };
+
+    var chips = controls.map(function (c) {
+      var fc = FRAMEWORK_COLORS[c.framework] || { bg: 'rgba(148,163,184,.1)', border: '#64748b', text: '#94a3b8' };
+      return '<span class="br-compliance-chip" style="'
+        + 'background:' + fc.bg + ';border:1px solid ' + fc.border + ';color:' + fc.text + ';'
+        + 'padding:3px 8px;border-radius:3px;font-size:11px;font-weight:600;white-space:nowrap;'
+        + '" title="' + escHtml(c.framework + ' — ' + c.control_name) + '">'
+        + escHtml(c.framework.replace('ISO 27001:2022', 'ISO').replace('Essential Eight', 'E8').replace('NIST CSF 2.0', 'NIST').replace('APRA CPS 234', 'APRA'))
+        + ' ' + escHtml(c.control_id)
+        + '</span>';
+    });
+
+    return [
+      '<div class="br-compliance" data-testid="br-compliance-controls" style="margin-top:10px;">',
+      '  <div style="font-size:10px;letter-spacing:.5px;opacity:.5;margin-bottom:4px;">CONTROLS BREACHED</div>',
+      '  <div style="display:flex;flex-wrap:wrap;gap:4px;">' + chips.join('') + '</div>',
+      '</div>',
+    ].join('');
   }
 
   function _clientExecSummary(sorted, a) {
@@ -1103,13 +1490,46 @@
         if (dn.sabsa_coda_draft) bodyParts.push('\n\n' + dn.sabsa_coda_draft);
         provenance = 'Deterministic DREAD fragments';
       } else {
-        // Flat paragraph fallback
-        bodyParts.push(
-          'JanuSec confirmed a breach in the supplied telemetry. ' +
-          (rootCause || 'Attacker activity was observed across multiple data sources.')
-        );
-        if (actors && actors.indexOf('No named') === -1) {
-          bodyParts.push('Affected accounts: ' + actors + '.');
+        // Try PASTA threat model before falling back to flat paragraph
+        var dInfo = _dreadInfo(lead);
+        if (dInfo.hasPasta) {
+          var pasta = p.pasta_summary || {};
+          if (pasta.threat_profile) bodyParts.push('Threat actor: ' + pasta.threat_profile);
+          if (pasta.exploitation_path) bodyParts.push('Exploitation: ' + pasta.exploitation_path);
+          if (pasta.business_impact) bodyParts.push('Business impact: ' + pasta.business_impact);
+          provenance = 'PASTA threat model';
+        } else if (dInfo.hasDiamond) {
+          var dm = p.diamond_model || {};
+          if (dm.adversary) bodyParts.push('Adversary: ' + dm.adversary);
+          if (dm.capability && dm.capability.length) bodyParts.push('Capabilities: ' + dm.capability.slice(0, 5).join(', ') + '.');
+          var dvictims = (dm.victim_users || []).concat(dm.victim_data || []);
+          if (dvictims.length) bodyParts.push('Victim scope: ' + dvictims.slice(0, 4).join(', ') + '.');
+          provenance = 'DIAMOND threat model';
+        } else if (p.what_happened || p.root_cause) {
+          // T1 LLM prefill has content — guard against raw correlation fallback strings
+          var _wh = (p.what_happened || '');
+          if (_wh && !_rawCorrelationText(_wh)) bodyParts.push(_wh);
+          if (p.root_cause) bodyParts.push('Root cause: ' + p.root_cause);
+          if (actors && actors.indexOf('No named') === -1) bodyParts.push('Affected accounts: ' + actors + '.');
+          // If all T1 content was raw correlation text, fall through to deterministic
+          if (!bodyParts.length) {
+            bodyParts.push(
+              'JanuSec confirmed a breach in the supplied telemetry. ' +
+              (p.root_cause || lead.lead_description || 'Attacker activity was observed across multiple data sources.')
+            );
+            if (actors && actors.indexOf('No named') === -1) bodyParts.push('Affected accounts: ' + actors + '.');
+          }
+          provenance = 'T1 LLM analysis';
+        } else {
+          // Genuinely no threat model data of any kind
+          bodyParts.push(
+            'JanuSec confirmed a breach in the supplied telemetry. ' +
+            (rootCause || 'Attacker activity was observed across multiple data sources.')
+          );
+          if (actors && actors.indexOf('No named') === -1) {
+            bodyParts.push('Affected accounts: ' + actors + '.');
+          }
+          provenance = 'Deterministic';
         }
       }
 
@@ -1145,11 +1565,12 @@
     if (totalExplained > 0) {
       nonBreachBody += ' Additionally, ' + totalExplained.toLocaleString() + ' rows were reviewed and ruled out — no further investigation of those cases is required.';
     }
+    var _nbDreadInfo = lead ? _dreadInfo(lead) : { provenance: 'Legacy fallback' };
     return {
       headline: 'Highest finding: ' + verdict.replace(/_/g, ' ') + (title ? ' — ' + title : ''),
       subline: breachRows + ' evidence rows require analyst review before breach validation.',
       body: nonBreachBody,
-      provenance: 'Legacy fallback'
+      provenance: _nbDreadInfo.provenance
     };
   }
 
@@ -1176,16 +1597,23 @@
   }
 
   function _selectTopThreatCases(sorted) {
-    // Only surface clusters with enough evidence as top cards; micro-clusters
-    // stay in additional/context rows. Hydration must use this exact set.
+    // Verdict-tier policy:
+    //   confirmed (CONFIRMED_BREACH, CONFIRMED_INTRUSION) — all get top-card treatment
+    //   likely    (LIKELY_BREACH, LIKELY_COMPROMISE)      — up to 3, shown with human gate
+    //   uncertain / lower                                 — additional findings drawer
     var MIN_TOP_ROWS = 5;
-    var candidates = (sorted || []).filter(function (c) {
-      return _vClass(c) !== 'benign' && (c.row_refs || []).length >= MIN_TOP_ROWS;
+    var confirmed = (sorted || []).filter(function (c) {
+      return _vClass(c) === 'confirmed' && (c.row_refs || []).length >= MIN_TOP_ROWS;
+    });
+    var likely = (sorted || []).filter(function (c) {
+      return _vClass(c) === 'likely' && (c.row_refs || []).length >= MIN_TOP_ROWS;
     }).slice(0, 3);
+    var candidates = confirmed.concat(likely);
     if (!candidates.length) {
+      // fallback: show any non-benign with evidence
       candidates = (sorted || []).filter(function (c) {
         return _vClass(c) !== 'benign' && (c.row_refs || []).length > 0;
-      }).slice(0, 3);
+      }).slice(0, 4);
     }
     return candidates;
   }
@@ -1200,19 +1628,32 @@
   }
 
   function _renderAdditionalFindings(sorted) {
-    // Exclude benign and zero-row clusters — analysts should not investigate ghosts
+    // Additional findings = uncertain-class only. Confirmed and likely go to top cards.
     var rest = sorted.filter(function (c) {
-      return _vClass(c) !== 'benign' && (c.row_refs || []).length > 0;
-    }).slice(3);
+      return _vClass(c) !== 'benign'
+          && _vClass(c) !== 'confirmed'
+          && _vClass(c) !== 'likely'
+          && (c.row_refs || []).length > 0;
+    });
     if (!rest.length) return '';
-    var html = '<div class="br-section-head">ADDITIONAL FINDINGS (' + rest.length + ' THREAT CASES)</div>';
+
+    // Group by severity descending: critical > high > medium > low
+    var _SEV_ORDER = ['critical', 'high', 'medium', 'low'];
+    var groups = {};
+    _SEV_ORDER.forEach(function (s) { groups[s] = []; });
     rest.forEach(function (c) {
+      var s = (c.severity || 'low').toLowerCase();
+      if (!groups[s]) groups[s] = [];
+      groups[s].push(c);
+    });
+
+    function _findingRow(c) {
       var p = c.tier1_prefill || {};
       var title = _displayIncidentName(c);
       var heuristic = p.headline_subtitle || c.summary || c.cluster_label || _buildFallbackSummary(c);
       if (_rawCorrelationText(title)) title = _deriveIncidentName(c) || 'Threat Case';
       if (_rawCorrelationText(heuristic)) heuristic = _friendlyThreatCaseSummary(c, title);
-      html += [
+      return [
         '<div class="br-finding" id="br-finding-' + escHtml(c.cluster_id) + '">',
         '  <div class="br-finding__main">',
         '    <div class="br-finding__verdict br-card__verdict--' + _vClass(c) + '">',
@@ -1236,16 +1677,55 @@
         '  </div>',
         '</div>',
       ].join('');
+    }
+
+    var bodyHtml = '';
+    _SEV_ORDER.forEach(function (sev) {
+      var group = groups[sev] || [];
+      if (!group.length) return;
+      var sevLabel = sev.toUpperCase();
+      bodyHtml += '<div style="font-size:11px;font-weight:700;color:var(--text-muted);'
+        + 'letter-spacing:.8px;padding:8px 0 4px;border-top:1px solid rgba(255,255,255,.06);">'
+        + sevLabel + ' (' + group.length + ')</div>';
+      group.forEach(function (c) { bodyHtml += _findingRow(c); });
     });
-    return html;
+
+    // Collapsed by default — analysts open only when needed
+    return [
+      '<details class="br-additional-findings" style="margin-top:12px;">',
+      '  <summary class="br-section-head" style="cursor:pointer;user-select:none;list-style:none;">',
+      '    ADDITIONAL FINDINGS (' + rest.length + ' THREAT CASES)',
+      '    <span style="font-size:11px;font-weight:400;color:var(--text-muted);margin-left:8px;">',
+      '      ▶ expand by severity',
+      '    </span>',
+      '  </summary>',
+      '  <div style="margin-top:8px;">' + bodyHtml + '</div>',
+      '</details>',
+    ].join('');
+  }
+
+  function _isSecurityTestCluster(c) {
+    // Catch AUTHORIZED_SECURITY_TEST / pentest clusters that may have row_refs:[]
+    // because the row count is tracked at assessment level, not cluster.row_refs.
+    var name = ((c.tier1_prefill && c.tier1_prefill.incident_name) || c.incident_name || c.lead_description || c.cluster_label || '').toUpperCase();
+    var verd = ((c.verdict || c.final_verdict) || '').toUpperCase();
+    return verd === 'AUTHORIZED_SECURITY_TEST'
+      || name.indexOf('AUTHORIZED') !== -1
+      || name.indexOf('SECURITY TEST') !== -1
+      || name.indexOf('PENTEST') !== -1
+      || name.indexOf('RED TEAM') !== -1;
   }
 
   function _renderNarrativeContext(sorted) {
-    // Include: enrichment_guided benign cases AND any benign cluster with actual evidence rows
+    // Include: enrichment_guided benign cases, benign clusters with evidence rows,
+    // and authorized-security-test clusters (which may have empty row_refs but still
+    // represent explained rows tracked at assessment level).
     var contextCases = sorted.filter(function (c) {
       if (!c) return false;
       if (_vClass(c) !== 'benign') return false;
-      return c.case_type === 'enrichment_guided' || (c.row_refs || []).length > 0;
+      return c.case_type === 'enrichment_guided'
+          || (c.row_refs || []).length > 0
+          || _isSecurityTestCluster(c);
     });
     if (!contextCases.length) return '';
     var html = '<div class="br-section-head">SECURITY CONTEXT &amp; RULED-OUT CASES</div>';
@@ -1259,9 +1739,17 @@
       var _BAD_RE = /command.and.control|c2 beacon|needs containment|attacker maintain/i;
       if (_BAD_RE.test(narrative)) narrative = sub;
       if (!narrative && _vClass(c) === 'benign') {
-        narrative = 'This activity cluster was reviewed and determined to be benign. ' +
-          'No indicators of malicious intent, data loss, or unauthorised access were confirmed. ' +
-          'The events are consistent with ' + (sub || 'expected operational activity') + '.';
+        var _ck = c.cluster_kind || '';
+        if (_ck === 'unclassified' || _ck === '') {
+          narrative = 'No confirmed threat phase matched this component. ' +
+            'The events remain unclassified — no malicious indicators were confirmed, ' +
+            'but insufficient telemetry is available to fully characterise this activity. ' +
+            'Additional log sources or investigation may be required.';
+        } else {
+          narrative = 'This activity cluster was reviewed and determined to be benign. ' +
+            'No indicators of malicious intent, data loss, or unauthorised access were confirmed. ' +
+            'The events are consistent with ' + (sub || 'expected operational activity') + '.';
+        }
       }
       var rowCount = (c.row_refs || []).length;
       var isAuthorized = /authorized security test|pentest|penetration test|red team/i.test(title + ' ' + sub + ' ' + narrative);
@@ -1483,7 +1971,7 @@
   }
 
   function _rawCorrelationText(s) {
-    return /shared attacker|shared identity|same network|same host sequence|same ATT&CK|identity compromise or shared actor|external infrastructure appears/i.test(String(s || ''));
+    return /shared attacker|shared identity|same network|same host sequence|same ATT&CK|identity compromise or shared actor|external infrastructure appears|\d+\s+phase\(s\)\s+·|\d+\s+telemetry source\(s\)|^multi-phase intrusion\s+·/i.test(String(s || ''));
   }
 
   function _friendlyThreatCaseSummary(cluster, title) {
@@ -1509,6 +1997,205 @@
       return rows + ' evidence rows show identity compromise indicators requiring session and MFA review.';
     }
     return rows + ' correlated evidence rows require analyst review before closure.';
+  }
+
+  // ── Context strip: IDENTITY / SYSTEMS / C2 INFRA / SOURCES ─────────────
+  function _renderContextStrip(cluster, p) {
+    var accts    = (cluster.shared_accounts || cluster.affected_accounts || []).filter(Boolean).slice(0, 4);
+    var assets   = (cluster.affected_assets || cluster.shared_hosts || []).filter(Boolean).slice(0, 4);
+    var ips      = (cluster.shared_external_ips || []).slice(0, 4);
+    var cm       = cluster.confidence_meter || p.confidence_meter || {};
+    var srcs     = (cm.source_types_present || []).slice(0, 6);
+    var srcCount = typeof cluster.source_count === 'number' ? cluster.source_count : srcs.length;
+    if (!accts.length && !assets.length && !ips.length && !srcs.length) return '';
+
+    // Detect identity providers from account names, source list, and observed_impact
+    var probeText = accts.concat(srcs).join(' ').toLowerCase()
+      + ' ' + (cluster.lead_description || '').toLowerCase()
+      + ' ' + ((p.observed_impact && p.observed_impact.identity) ? p.observed_impact.identity : '').toLowerCase();
+    var providers = [];
+    if (/\bokta\b/.test(probeText)) providers.push('Okta');
+    if (/entra|azure.?ad|azuread|\.onmicrosoft\.com/.test(probeText)) providers.push('Entra ID');
+    if (/sailpoint/.test(probeText)) providers.push('SailPoint');
+    if (/\bping\b/.test(probeText)) providers.push('PingIdentity');
+    if (/jumpcloud/.test(probeText)) providers.push('JumpCloud');
+
+    var rows = [];
+    if (accts.length) {
+      var providerTag = providers.length
+        ? ' <span class="br-ctx__provider">via ' + escHtml(providers.slice(0, 2).join(' · ')) + '</span>'
+        : '';
+      rows.push(
+        '<div class="br-ctx__row">'
+        + '<span class="br-ctx__label">IDENTITY</span>'
+        + '<span class="br-ctx__val">' + escHtml(accts.join(' · ')) + providerTag + '</span>'
+        + '</div>'
+      );
+    }
+    if (assets.length) {
+      rows.push(
+        '<div class="br-ctx__row">'
+        + '<span class="br-ctx__label">SYSTEMS</span>'
+        + '<span class="br-ctx__val">' + escHtml(assets.join(' · ')) + '</span>'
+        + '</div>'
+      );
+    }
+    if (ips.length) {
+      rows.push(
+        '<div class="br-ctx__row">'
+        + '<span class="br-ctx__label">C2 INFRA</span>'
+        + '<span class="br-ctx__val">' + escHtml(ips.join(' · ')) + '</span>'
+        + '</div>'
+      );
+    }
+    if (srcs.length) {
+      var cntSuffix = srcCount > 0
+        ? ' <span class="br-ctx__count">(' + srcCount + ' stream' + (srcCount !== 1 ? 's' : '') + ')</span>'
+        : '';
+      rows.push(
+        '<div class="br-ctx__row">'
+        + '<span class="br-ctx__label">SOURCES</span>'
+        + '<span class="br-ctx__val">' + escHtml(srcs.join(' · ')) + cntSuffix + '</span>'
+        + '</div>'
+      );
+    }
+    return rows.length ? '<div class="br-context-strip">' + rows.join('') + '</div>' : '';
+  }
+
+  // ── Threat narrative (DREAD · PASTA · Diamond) ───────────────────────────
+  function _renderThreatModelSummary(cluster, p, dreadInfo) {
+    var frags    = dreadInfo.frags || {};
+    var ds       = p.dread_score  || {};
+    var riskTier = (ds.risk_tier  || '').toLowerCase();
+
+    function _block(icon, label, sub, text) {
+      return '<div class="br-tm__block">'
+        + '<div class="br-tm__block-head">'
+        + '<span class="br-tm__block-icon">' + icon + '</span>'
+        + '<span class="br-tm__block-label">' + escHtml(label) + '</span>'
+        + '<span class="br-tm__block-sub">' + escHtml(sub) + '</span>'
+        + '</div>'
+        + '<div class="br-tm__block-text">' + escHtml(String(text)) + '</div>'
+        + '</div>';
+    }
+
+    // ── DREAD ── evidence narrative fragments first; numeric detail strings as fallback
+    var DREAD_DIMS = [
+      { fk: 'damage',          dk: 'damage_detail',          icon: '\uD83D\uDCA5', label: 'DAMAGE',          sub: 'What broke, what\u2019s at risk, and how far it spread (blast radius)' },
+      { fk: 'reproducibility', dk: 'reproducibility_detail', icon: '\uD83D\uDD01', label: 'REPRODUCIBILITY', sub: 'Why this can happen again right now and what\u2019s still exposed' },
+      { fk: 'exploitability',  dk: 'exploitability_detail',  icon: '\u26A1',        label: 'EXPLOITABILITY',  sub: 'The attack vector, control gap exploited, and why people should care' },
+      { fk: 'affected_users',  dk: 'affected_users_detail',  icon: '\uD83D\uDC64', label: 'AFFECTED USERS',  sub: 'Who was hit, their access level, and any privilege abuse or lateral movement' },
+      { fk: 'discoverability', dk: 'discoverability_detail', icon: '\uD83D\uDD0D', label: 'DISCOVERABILITY', sub: 'What was visible, what was misconfigured, and mean time to detect' }
+    ];
+    var dreadBlocks = DREAD_DIMS
+      .map(function(dim) { return { dim: dim, text: frags[dim.fk] || ds[dim.dk] || '' }; })
+      .filter(function(d) { return d.text; })
+      .map(function(d) { return _block(d.dim.icon, d.dim.label, d.dim.sub, d.text); });
+
+    // ── PASTA ── plain-language attack narrative
+    var pasta = p.pasta_summary || {};
+    var PASTA_DIMS = [
+      { key: 'objective',         icon: '\uD83C\uDFAF', label: 'OBJECTIVE',       sub: 'What the attacker was trying to achieve' },
+      { key: 'threat_profile',    icon: '\uD83D\uDD75\uFE0F', label: 'THREAT ACTOR',    sub: 'Who or what was behind this and their motivation' },
+      { key: 'exploitation_path', icon: '\uD83D\uDD13', label: 'HOW THEY GOT IN', sub: 'The exploitation path and control gaps used' },
+      { key: 'business_impact',   icon: '\uD83D\uDCCB', label: 'BUSINESS IMPACT', sub: 'What this means for operations and compliance' }
+    ];
+    var pastaBlocks = PASTA_DIMS
+      .filter(function(dim) { return pasta[dim.key]; })
+      .map(function(dim)  { return _block(dim.icon, dim.label, dim.sub, pasta[dim.key]); });
+
+    // ── Diamond ── adversary / capability / infrastructure / victim
+    var dm = p.diamond_model || {};
+    var diamondItems = [];
+    if (dm.adversary) {
+      diamondItems.push(_block('\uD83C\uDFAF', 'WHO ATTACKED',         'Threat actor attribution and any proxy identity used', dm.adversary));
+    }
+    if (dm.capability && dm.capability.length) {
+      diamondItems.push(_block('\u2699\uFE0F',  'WHAT THEY USED',       'Attack capability, tooling, and technique chain', dm.capability.join(' \u2192 ')));
+    }
+    var infra = dm.infrastructure || dm.c2_infrastructure || [];
+    if (infra.length) {
+      var infraText = Array.isArray(infra) ? infra.join(', ') : String(infra);
+      diamondItems.push(_block('\uD83C\uDFD7\uFE0F', 'THEIR INFRASTRUCTURE', 'External C2, staging, or exfil infrastructure identified', infraText));
+    }
+    var victims = (dm.victim_users || []).concat(dm.victim_data || []).filter(Boolean);
+    if (victims.length) {
+      // Use typed sub-buckets when the backend has separated humans / machines / data
+      var hasTyped = (dm.victim_humans && dm.victim_humans.length)
+                  || (dm.victim_machines && dm.victim_machines.length);
+      if (hasTyped) {
+        var typedLines = [];
+        if (dm.victim_humans && dm.victim_humans.length) {
+          typedLines.push('\uD83D\uDC64 Human accounts: ' + dm.victim_humans.join(', '));
+        }
+        if (dm.victim_machines && dm.victim_machines.length) {
+          typedLines.push('\uD83E\uDD16 Machine/service identities: ' + dm.victim_machines.join(', '));
+        }
+        if (dm.victim_data && dm.victim_data.length) {
+          typedLines.push('\uD83D\uDCBE Data assets: ' + dm.victim_data.join(', '));
+        }
+        diamondItems.push(_block('\uD83C\uDFAF', 'WHO WAS HIT', 'Victim accounts, service identities, and data assets impacted', typedLines.join(' \u00b7 ')));
+      } else {
+        // Legacy flat render (older assessments without typed buckets)
+        diamondItems.push(_block('\uD83C\uDFAF', 'WHO WAS HIT', 'Victim accounts, systems, and data impacted', victims.join(', ')));
+      }
+    }
+
+    var hasContent = dreadBlocks.length || pastaBlocks.length || diamondItems.length;
+    if (!hasContent) {
+      // Embed the generate button directly — don't tell users to look "below" for a
+      // button that may be hidden by the dreadInfo.has guard.
+      var _cid = escHtml(cluster.cluster_id || '');
+      return '<div class="br-threat-model br-threat-model--empty">'
+        + '<span class="br-tm__block-icon">\uD83E\uDDE0</span>'
+        + '<div style="flex:1">'
+        + '<div class="br-tm__empty-title">Threat narrative not yet generated</div>'
+        + '<div class="br-tm__hint">Structured DREAD \u00b7 PASTA \u00b7 Diamond analysis will be built from evidence rows by the multi-agent reasoning engine.</div>'
+        + '<div style="margin-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">'
+        + '<button class="br-finding__gen br-finding__gen--dread" data-gen-dread="' + _cid + '"'
+        + ' title="Runs: Sequence-aware \u00b7 Adversarial reasoning \u00b7 CorrectiveRAG \u00b7 TemporalRAG">'
+        + '\uD83E\uDDE0 Generate Threat Summary'
+        + '</button>'
+        + '<span class="br-tm__reasoning-tags">Sequence-aware \u00b7 Adversarial \u00b7 CorrectiveRAG \u00b7 TemporalRAG</span>'
+        + '</div>'
+        + '</div>'
+        + '</div>';
+    }
+
+    var tierBadge = riskTier
+      ? ' <span class="br-tm__tier br-tm__tier--' + escHtml(riskTier) + '">' + escHtml(riskTier.toUpperCase()) + ' RISK</span>'
+      : '';
+
+    var sections = [];
+    if (dreadBlocks.length) {
+      sections.push(
+        '<div class="br-tm__section">'
+        + '<div class="br-tm__section-heading">DREAD \u2014 Evidence-grounded assessment' + tierBadge + '</div>'
+        + dreadBlocks.join('')
+        + '</div>'
+      );
+    }
+    if (pastaBlocks.length) {
+      sections.push(
+        '<div class="br-tm__section">'
+        + '<div class="br-tm__section-heading">PASTA \u2014 How the attack unfolded (plain language)</div>'
+        + pastaBlocks.join('')
+        + '</div>'
+      );
+    }
+    if (diamondItems.length) {
+      sections.push(
+        '<div class="br-tm__section">'
+        + '<div class="br-tm__section-heading">\u25CA Diamond \u2014 Who did what, to whom, and how</div>'
+        + diamondItems.join('')
+        + '</div>'
+      );
+    }
+
+    return '<div class="br-threat-model">'
+      + '<div class="br-tm__heading">Threat narrative <span>DREAD \u00b7 PASTA \u00b7 DIAMOND</span></div>'
+      + sections.join('')
+      + '</div>';
   }
 
   function _friendlyThreatCaseNarrative(cluster, p, title, subtitle) {
@@ -1538,7 +2225,8 @@
     var vc = verdictClass(verdict);
     var meter = p.confidence_meter || cluster.confidence_meter;
     var xlinks = (p.cross_cluster_links || []).slice(0, 3);
-    var rankLabel = idx === 0 ? 'LEAD ' + (idx + 1) + '/3' : (idx + 1) + '/3';
+    var _topTotal = _selectTopThreatCases(allSorted).length;
+    var rankLabel = idx === 0 ? 'LEAD 1/' + _topTotal : (idx + 1) + '/' + _topTotal;
     // Deterministic fallback values when LLM hasn't run
     var cardTitle = _displayIncidentName(cluster);
     var cardSubtitle = p.headline_subtitle || cluster.business_significance || _buildFallbackSummary(cluster);
@@ -1562,31 +2250,62 @@
       meter ? _renderMeter(meter) : '',
       '  <div class="br-card__evidence-title">What happened <span>source: ' + escHtml(dreadInfo.provenance) + '</span></div>',
       '  <div class="br-card__narrative">' + escHtml(narrative) + '</div>',
+      _renderContextStrip(cluster, p),
       _renderWhyConfirmed(cluster),
-      '<div class="br-card__evidence-title">Business consequence</div>',
-      '<div class="br-card__sabsa">' + escHtml(_businessImpactSentence(cluster) || 'Business impact is unknown from current evidence.') + '</div>',
-      '<div class="br-card__evidence-title">Bounded next actions</div>',
+      _renderThreatModelSummary(cluster, p, dreadInfo),
+      '<div class="br-card__evidence-title">Business consequence'
+      + ' <button class="br-regen-btn" data-gen-dread="' + escHtml(cluster.cluster_id) + '"'
+      + ' title="Re-run multi-agent reasoning to generate SABSA business consequence">\u21BB Regenerate</button>'
+      + '</div>',
+      '<div class="br-card__sabsa">' + escHtml(_businessImpactSentence(cluster) || 'Business impact not yet assessed — click Regenerate to build from evidence.') + '</div>',
+      '<div class="br-card__evidence-title">Bounded next actions'
+      + ' <button class="br-regen-btn" data-gen-dread="' + escHtml(cluster.cluster_id) + '"'
+      + ' title="Re-run multi-agent reasoning to generate scenario-specific actions">\u21BB Regenerate</button>'
+      + '</div>',
       _boundedActionsHtml(cluster),
       '  <div class="br-card__meta">',
       '    <span>' + (cluster.row_refs || []).length + ' rows</span>',
       '    <span>' + escHtml((cluster.severity || 'low').toUpperCase()) + '</span>',
-      '    <span title="Confidence score">' + (meter ? Math.round(meter.total) + '% confidence' : '') + '</span>',
+      // Fix 4 — split confidence chip with explainer tooltip
+      (meter
+        ? '    <span class="br-conf-chip" title="Severity is based on evidence volume '
+          + 'and attack-phase count. Narrative confidence reflects chain completeness '
+          + 'and cross-source corroboration. Lower confidence = evidence gap, not false positive.">'
+          + Math.round(meter.total) + '% confidence'
+          + '<span class="br-conf-chip__icon">ⓘ</span>'
+          + '</span>'
+        : ''),
       p.model_used ? '    <span title="Model used">model: ' + escHtml(p.model_used) + '</span>' : '',
       '  </div>',
       _renderQualityWarning(p._quality),
       _renderJargonWarning(p._quality_flags),
+      // Fix 5 — attack timeline is always visible; detail section collapses separately
+      _renderEvidenceChain(p.evidence_chain),
       '<details class="br-drilldown br-card__technical"><summary>Expand technical detail</summary>',
       rootCause,
       _knownUnknownBox(cluster),
       p.verdict_reasoning ? '<div class="br-card__verdict-reasoning"><span style="color:var(--text-muted);font-size:13px;">WHY:</span> ' + escHtml(p.verdict_reasoning) + '</div>' : '',
       _rowChipsFromText(fullNarrative, 12),
-      _renderEvidenceChain(p.evidence_chain),
       _renderEvidenceGaps(p.evidence_gaps),
       '</details>',
       '  <div class="br-card__actions">',
-      '    <button class="br-card__open" onclick="window.location.href=\'/static/breach.html?assessment=' + encodeURIComponent(AID) + '&tab=evidence\'">',
-      '      Show evidence rows',
-      '    </button>',
+      // LIKELY_BREACH / LIKELY_COMPROMISE without prefill — show Generate button prominently
+      (vc === 'likely' && !_prefillDone(cluster))
+        ? '    <button class="br-finding__gen" style="font-weight:700;" data-gen-cluster="' + escHtml(cluster.cluster_id) + '">'
+          + '      ⚑ Generate narrative — human review required'
+          + '    </button>'
+        : '    <button class="br-card__open" onclick="window.location.href=\'/static/breach.html?assessment=' + encodeURIComponent(AID) + '&tab=evidence\'">'
+          + '      Show evidence rows'
+          + '    </button>',
+      // DREAD generate — only show in actions bar when structured content IS present
+      // (so analyst can re-generate/improve it). When absent, the button is embedded
+      // inline in the _renderThreatModelSummary empty state above.
+      dreadInfo.hasStructured
+        ? '    <button class="br-finding__gen br-finding__gen--dread" data-gen-dread="' + escHtml(cluster.cluster_id) + '"'
+          + ' title="Re-run: Sequence-aware \u00b7 Adversarial \u00b7 CorrectiveRAG \u00b7 TemporalRAG">'
+          + '      \uD83E\uDDE0 Regenerate Threat Summary'
+          + '    </button>'
+        : '',
       '    <button class="br-card__open" onclick="window.open(\'/static/breach.html?cluster=' + encodeURIComponent(cluster.cluster_id) + '&assessment=' + encodeURIComponent(AID) + '\', \'_blank\')">',
       '      Open threat case ↗',
       '    </button>',
@@ -1786,8 +2505,9 @@
   // ── Event wiring ─────────────────────────────────────────────────────────────
 
   function _wireHomeEvents() {
-    // Per-threat-case generate buttons
+    // Per-threat-case generate buttons (T1 narrative)
     document.getElementById('br-content').addEventListener('click', function (e) {
+      // T1 narrative generate
       var btn2 = e.target.closest('[data-gen-cluster]');
       if (btn2) {
         var cid = btn2.getAttribute('data-gen-cluster');
@@ -1803,6 +2523,21 @@
               : fol.textContent;
           }
           btn2.textContent = 'Done ✓';
+        });
+      }
+      // DREAD + PASTA + Diamond structured analysis generate / regenerate
+      var btnDread = e.target.closest('[data-gen-dread]');
+      if (btnDread) {
+        var dcid = btnDread.getAttribute('data-gen-dread');
+        btnDread.disabled = true;
+        var _isRegen = btnDread.classList.contains('br-regen-btn');
+        btnDread.textContent = _isRegen ? '↻ …' : '\uD83E\uDDE0 Generating…';
+        _fireDreadGenerate(dcid, function () {
+          var resorted = _rankClusters(
+            (state.threatCases && state.threatCases.length > 0) ? state.threatCases : state.clusters
+          );
+          _rerenderCard(dcid, resorted);
+          _loadExecSummary(true);
         });
       }
     });
@@ -1968,6 +2703,13 @@
         if (det) det.innerHTML = '<span style="color:var(--text-muted);font-size:11px">Executive summary unavailable — server loading.</span>';
         if (done) done();
       });
+  }
+
+  function _fireDreadGenerate(cid, cb) {
+    // Force re-run T1 prefill to regenerate what_happened, evidence_chain, root_cause,
+    // and any DREAD/PASTA/Diamond fragments that can be deterministically built.
+    // The card will re-render using the updated T1 content once complete.
+    _fireSinglePrefill(cid, cb, true);
   }
 
   function _fireSinglePrefill(cid, cb, force) {
