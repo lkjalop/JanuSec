@@ -4499,6 +4499,10 @@ async def get_assessment_by_id(assessment_id: str, request: Request):
         'stage_results': assessment.get('stage_results') or [],
         'verdict': assessment.get('verdict'),
         'confidence': assessment.get('confidence'),
+        # Agent loop results (wired to breach.html CEO view)
+        'proposed_actions': assessment.get('proposed_actions') or [],
+        'kill_chain': assessment.get('kill_chain') or [],
+        'gaps': assessment.get('gaps') or [],
     }
 
 

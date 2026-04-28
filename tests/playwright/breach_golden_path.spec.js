@@ -148,7 +148,16 @@ test('4. Lead card has a title and subtitle (fallback or LLM)', async ({ page })
   await mockLlmRoutes(page);
   await page.goto(BREACH_URL + '?assessment=' + assessmentId);
   await expect(page.locator('[data-testid="br-meta"]')).toBeVisible({ timeout: 15000 });
-
+  // Cards are inside the drill-down (collapsed by default) — open it
+  const toggleBtn = page.locator('[data-testid="br-toggle-drilldown"]');
+  if (await toggleBtn.count() > 0) {
+    await toggleBtn.click();
+  }
+  // Cards are inside nested "Analyst Detail" details — open it too
+  const analystDetail = page.locator('[data-testid="br-analyst-detail"] > summary');
+  if (await analystDetail.count() > 0) {
+    await analystDetail.click();
+  }
   // Find the first card with data-testid="br-card-*"
   const card = page.locator('[data-testid^="br-card-"]').first();
   await expect(card).toBeVisible({ timeout: 10000 });
@@ -161,10 +170,18 @@ test('4. Lead card has a title and subtitle (fallback or LLM)', async ({ page })
   expect(subtitle.trim().length).toBeGreaterThan(0);
 });
 
-// ── Test 5: Exec summary container renders ────────────────────────────────────
+// ── Test 5: Exec summary container renders (inside drill-down) ────────────────
 test('5. Executive summary container is visible', async ({ page }) => {
   await mockLlmRoutes(page);
   await page.goto(BREACH_URL + '?assessment=' + assessmentId);
+  await expect(page.locator('[data-testid="br-meta"]')).toBeVisible({ timeout: 15000 });
+
+  // Exec summary is inside the drill-down — open it
+  const toggleBtn = page.locator('[data-testid="br-toggle-drilldown"]');
+  if (await toggleBtn.count() > 0) {
+    await toggleBtn.click();
+  }
+
   await expect(page.locator('[data-testid="br-exec-block"]')).toBeVisible({ timeout: 15000 });
   // After mock resolves, text should be non-empty
   await expect(page.locator('#br-exec-det')).not.toBeEmpty({ timeout: 10000 });
@@ -176,8 +193,14 @@ test('6. Clicking "Open in tab" navigates to cluster detail', async ({ page }) =
   await page.goto(BREACH_URL + '?assessment=' + assessmentId);
   await expect(page.locator('[data-testid="br-meta"]')).toBeVisible({ timeout: 15000 });
 
-  // Find and click the first "Open in tab" button
-  const openBtn = page.locator('.br-card__open').first();
+  // Cards are inside the drill-down + analyst detail — open both
+  const toggleBtn = page.locator('[data-testid="br-toggle-drilldown"]');
+  if (await toggleBtn.count() > 0) await toggleBtn.click();
+  const analystDetail = page.locator('[data-testid="br-analyst-detail"] > summary');
+  if (await analystDetail.count() > 0) await analystDetail.click();
+
+  // Find and click the first "Open threat case" button (opens new tab)
+  const openBtn = page.locator('.br-card__open', { hasText: /Open|threat case|↗/ }).first();
   await expect(openBtn).toBeVisible({ timeout: 10000 });
 
   const [newPage] = await Promise.all([

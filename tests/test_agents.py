@@ -824,3 +824,7 @@ class TestRouter:
         for g in result.get("gaps", []):
             if isinstance(g, dict):
                 assert "type" in g or "description" in g
+
+        # kill_chain must be present in return dict (wired to breach.html)
+        assert "kill_chain" in result, "kill_chain missing from router return dict"
+        assert isinstance(result["kill_chain"], list)
