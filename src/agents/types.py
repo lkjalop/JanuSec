@@ -52,12 +52,23 @@ class PlanStep:
 
 
 @dataclass
+class Gap:
+    """Typed data gap — drives four distinct UI states."""
+    description: str
+    type: str = "unknown_source"  # auto_fetchable | connector_disabled | unknown_source | cross_domain
+    source_type: str = ""         # zeek | okta | cloudtrail | s3_access | ...
+    confidence_cap: float = 1.0   # if unresolved, max confidence this gap allows
+    suggested_fields: List[str] = field(default_factory=list)  # for unknown_source uploads
+    impact: str = ""              # human-readable: "cannot determine credential origin"
+
+
+@dataclass
 class InvestigationPlan:
     """Structured output of the Planner agent."""
     cycle: int
     hypothesis: str
     steps: List[PlanStep] = field(default_factory=list)
-    gaps: List[str] = field(default_factory=list)
+    gaps: List[Gap] = field(default_factory=list)
 
 
 @dataclass
@@ -72,14 +83,25 @@ class RawFinding:
 
 
 @dataclass
+class RejectionReason:
+    """Structured rejection — prevents substring-match suppression of real findings."""
+    type: str = ""          # engagement_scope | known_fp | single_source | canary_failure | no_corroboration | contradiction
+    actor: str = ""
+    ip: str = ""
+    phase: str = ""         # scanning | escalation | lateral | exfil | ...
+    detail: str = ""
+
+
+@dataclass
 class VerifiedFinding:
     """Finding that passed the Verifier's checks."""
     raw: RawFinding
     confidence: float = 0.0
     dread_score: float = 0.0
     compliance_controls: List[Dict[str, str]] = field(default_factory=list)
-    rejection_reason: Optional[str] = None   # None = accepted
+    rejection_reason: Optional[RejectionReason] = None   # None = accepted
     weak: bool = False                        # True = single-source
+    reverification: Dict[str, Any] = field(default_factory=dict)  # independent re-derivation metadata
 
 
 # ── Cycle result ─────────────────────────────────────────────────────────────
@@ -116,6 +138,11 @@ class ProposedAction:
     status: str = "pending"        # pending | approved | rejected | expired
     created_ts: float = field(default_factory=time.time)
     approval_token: Optional[str] = None
+    # Stakeholder routing (Fix 1)
+    recipient: str = ""            # iam_team | platform_sre | legal_privacy | ciso | soc_team | exec | engagement_lead | hr
+    recipient_evidence: str = ""   # human-readable prose for the UI row
+    deadline_hours: int = 0        # 0 = no deadline
+    citation: str = ""             # framework reference for the deadline
 
 
 # ── Audit record ─────────────────────────────────────────────────────────────

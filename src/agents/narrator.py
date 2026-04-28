@@ -17,6 +17,7 @@ import os
 from typing import Any, Dict, List, Optional
 
 from src.agents.types import (
+    Gap,
     InvestigationContext,
     InvestigationPlan,
     VerifiedFinding,
@@ -26,16 +27,19 @@ LOGGER = logging.getLogger(__name__)
 
 _NARRATOR_SYSTEM = """\
 You are a security investigation narrator writing for a CEO audience.
-Given verified findings from an investigation cycle, update the narrative.
+Given a kill chain timeline of verified findings, write a single causal
+paragraph following the kill chain order.
 
 RULES:
-1. Write in plain business English. No jargon without explanation.
-2. Lead with WHAT HAPPENED, then HOW, then IMPACT.
-3. Mention specific evidence (IPs, usernames, timestamps) concisely.
-4. Note any data gaps that limit confidence.
-5. End with a single-sentence risk summary.
-6. Maximum 200 words.
-7. Do NOT invent findings. Only report what is in the verified evidence.
+1. Write as one causal paragraph: A enabled B which led to C.
+2. Cite specific timestamps, actors, and IPs.
+3. Include row references in [brackets] when available.
+4. Do NOT use bullet points or numbered lists.
+5. Note any data gaps that limit confidence.
+6. End with one-sentence risk summary.
+7. Maximum 200 words.
+8. Do NOT invent findings. Only report what is in the verified evidence.
+9. Use plain business English. No jargon without explanation.
 """
 
 
@@ -43,7 +47,8 @@ def build_narrator_prompt(
     context: InvestigationContext,
     verified: List[VerifiedFinding],
     previous_narrative: str = "",
-    gaps: List[str] | None = None,
+    gaps: List[Gap] | None = None,
+    kill_chain: list | None = None,
     cycle: int = 1,
 ) -> str:
     """Build the Narrator's LLM prompt."""
@@ -54,21 +59,44 @@ def build_narrator_prompt(
         sections.append(previous_narrative[:1000])
         sections.append("")
 
-    sections.append(f"## Cycle {cycle} Verified Findings")
-    for vf in verified[:15]:
-        sections.append(
-            f"- [{vf.confidence:.2f}] {vf.raw.summary[:200]} "
-            f"(sources: {vf.raw.source_count}, DREAD: {vf.dread_score:.1f})"
-        )
-        if vf.compliance_controls:
-            tags = ", ".join(f"{c['control_id']}" for c in vf.compliance_controls[:5])
-            sections.append(f"  Controls: {tags}")
+    # Kill chain timeline (Fix 4: causal order instead of bullets)
+    if kill_chain:
+        sections.append(f"## Kill Chain (causal order, Cycle {cycle})")
+        for p in kill_chain:
+            ts_str = p.timestamp.strftime("%Y-%m-%d %H:%M") if hasattr(p, 'timestamp') else "unknown"
+            rows_str = str(p.evidence_row_ids[:3]) if p.evidence_row_ids else "[]"
+            mitre_str = ", ".join(p.mitre_techniques[:3]) if p.mitre_techniques else "N/A"
+            sections.append(
+                f"{ts_str} | {p.phase} | {p.actor} | "
+                f"{p.action[:150]} | rows {rows_str} | MITRE {mitre_str}"
+            )
+            if p.enables_phase_id:
+                sections.append(f"  → enables next phase ({p.enables_phase_id})")
+        sections.append("")
+        sections.append("Write as one causal paragraph: A enabled B which led to C. "
+                       "Cite specific timestamps, actors, and IPs. Include row references "
+                       "in [brackets]. Do NOT use bullet points. End with one-sentence "
+                       "risk summary.")
+    else:
+        # Fallback: bullet list if no kill chain
+        sections.append(f"## Cycle {cycle} Verified Findings")
+        for vf in verified[:15]:
+            sections.append(
+                f"- [{vf.confidence:.2f}] {vf.raw.summary[:200]} "
+                f"(sources: {vf.raw.source_count}, DREAD: {vf.dread_score:.1f})"
+            )
+            if vf.compliance_controls:
+                tags = ", ".join(f"{c['control_id']}" for c in vf.compliance_controls[:5])
+                sections.append(f"  Controls: {tags}")
     sections.append("")
 
     if gaps:
         sections.append("## Data Gaps")
         for g in gaps[:5]:
-            sections.append(f"- {g}")
+            if isinstance(g, str):
+                sections.append(f"- {g}")
+            else:
+                sections.append(f"- [{g.type}] {g.description} (cap={g.confidence_cap}, impact={g.impact})")
         sections.append("")
 
     sections.append("Write the updated narrative now (max 200 words).")
@@ -77,7 +105,7 @@ def build_narrator_prompt(
 
 def compute_aggregate_confidence(
     verified: List[VerifiedFinding],
-    gaps: List[str] | None = None,
+    gaps: List[Gap] | None = None,
 ) -> float:
     """Algorithmic aggregate confidence — NOT LLM-generated.
 
@@ -123,7 +151,8 @@ async def narrate(
     verified: List[VerifiedFinding],
     *,
     previous_narrative: str = "",
-    gaps: List[str] | None = None,
+    gaps: List[Gap] | None = None,
+    kill_chain: list | None = None,
     cycle: int = 1,
     llm_client: Any = None,
 ) -> Dict[str, Any]:
@@ -140,6 +169,7 @@ async def narrate(
         context, verified,
         previous_narrative=previous_narrative,
         gaps=gaps,
+        kill_chain=kill_chain,
         cycle=cycle,
     )
 
@@ -167,6 +197,7 @@ async def narrate(
         "narrative": narrative,
         "confidence": compute_aggregate_confidence(verified, gaps),
         "compliance_controls": collect_compliance_controls(verified),
-        "gaps": gaps or [],
+        "gaps": [{"type": g.type, "description": g.description, "confidence_cap": g.confidence_cap}
+                 if hasattr(g, 'type') else g for g in (gaps or [])],
         "findings_count": len(verified),
     }

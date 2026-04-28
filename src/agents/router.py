@@ -20,8 +20,10 @@ from src.agents.narrator import narrate
 from src.agents.planner import plan
 from src.agents.types import (
     AgentCycle,
+    Gap,
     InvestigationContext,
     ProposedAction,
+    RejectionReason,
     VerifiedFinding,
 )
 from src.agents.verifier import verify
@@ -62,9 +64,9 @@ async def run_investigation(
     all_cycles: List[AgentCycle] = []
     all_verified: List[VerifiedFinding] = []
     all_proposed: List[ProposedAction] = []
-    all_gaps: List[str] = []
+    all_gaps: List[Gap] = []
     narrative = ""
-    corrective_feedback: List[str] = []
+    corrective_feedback: List[RejectionReason] = []
     total_tokens = 0
     total_queries = 0
     close_reason = "max_cycles"
@@ -102,25 +104,32 @@ async def run_investigation(
             engagement_actors=engagement_actors,
             engagement_ips=engagement_ips,
             fp_patterns=corrective_feedback,
+            gaps=investigation_plan.gaps,
         )
         all_verified.extend(verified)
 
-        # Feed rejected reasons back into corrective feedback
+        # Feed rejected reasons back into corrective feedback (structured)
         for rej in rejected:
             if rej.rejection_reason:
                 corrective_feedback.append(rej.rejection_reason)
 
+        # ── 3b. KILL CHAIN ──────────────────────────────────────────────
+        from src.agents.kill_chain import extract_kill_chain
+        kill_chain = extract_kill_chain(verified)
+
         # ── 4. NARRATE ──────────────────────────────────────────────────
-        combined_gaps = list(set(all_gaps + investigation_plan.gaps))
+        combined_gaps = list({g.description: g for g in all_gaps + investigation_plan.gaps}.values())
         narration = await narrate(
             context, verified,
             previous_narrative=narrative,
             gaps=combined_gaps,
+            kill_chain=kill_chain,
             cycle=cycle_num,
             llm_client=llm_client,
         )
         narrative = narration.get("narrative", narrative)
-        all_gaps = narration.get("gaps", combined_gaps)
+        # Keep all_gaps as Gap objects (don't overwrite with serialized dicts)
+        all_gaps = combined_gaps
 
         # ── 5. BUILD CYCLE RECORD ────────────────────────────────────────
         cycle_result = AgentCycle(
@@ -139,12 +148,12 @@ async def run_investigation(
 
         # ── 6. LOOP DECISION ────────────────────────────────────────────
         has_new_findings = len(verified) > 0
-        has_fetchable_gaps = any(
-            g for g in investigation_plan.gaps
-            if not g.lower().startswith("no ")
-        )
+        fetchable_gaps = [g for g in investigation_plan.gaps if g.type == "auto_fetchable"]
+        human_prompt_gaps = [g for g in investigation_plan.gaps if g.type == "connector_disabled"]
+        unknown_gaps = [g for g in investigation_plan.gaps if g.type == "unknown_source"]
+        cross_domain_gaps = [g for g in investigation_plan.gaps if g.type == "cross_domain"]
 
-        if not has_new_findings and not has_fetchable_gaps:
+        if not has_new_findings and not fetchable_gaps:
             close_reason = "investigation_complete"
             LOGGER.info("No new findings and no fetchable gaps — investigation complete")
             break
@@ -193,10 +202,16 @@ async def run_investigation(
                 "status": a.status,
                 "approval_token": a.approval_token,
                 "compliance_controls": a.compliance_controls,
+                "recipient": a.recipient,
+                "recipient_evidence": a.recipient_evidence,
+                "deadline_hours": a.deadline_hours,
+                "citation": a.citation,
             }
             for a in all_proposed
         ],
-        "gaps": all_gaps,
+        "gaps": [{"description": g.description, "type": g.type, "source_type": g.source_type,
+                   "confidence_cap": g.confidence_cap, "impact": g.impact}
+                  for g in all_gaps] if all_gaps else [],
         "close_reason": close_reason,
         "total_cycles": len(all_cycles),
         "total_findings_verified": len(all_verified),
