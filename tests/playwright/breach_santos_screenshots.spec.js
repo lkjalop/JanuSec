@@ -13,6 +13,9 @@ test('capture Santos breach DREAD pages', async ({ page }) => {
   });
 
   await page.goto(`/static/breach.html?assessment=${AID}`, { waitUntil: 'domcontentloaded' });
+  // Exec block is inside the drill-down — open it first
+  const toggleBtn = page.locator('[data-testid="br-toggle-drilldown"]');
+  if (await toggleBtn.count() > 0) await toggleBtn.click();
   await expect(page.locator('[data-testid="br-exec-block"]')).toBeVisible({ timeout: 30000 });
   await expect(page.locator('body')).toContainText(/DREAD|SABSA|SFL_DATA|FINANCE_WH/i, { timeout: 30000 });
   await page.screenshot({ path: path.join(OUT, '01-home-dread-summary.png'), fullPage: true });

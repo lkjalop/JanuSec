@@ -212,6 +212,19 @@ async def run_investigation(
         "gaps": [{"description": g.description, "type": g.type, "source_type": g.source_type,
                    "confidence_cap": g.confidence_cap, "impact": g.impact}
                   for g in all_gaps] if all_gaps else [],
+        "kill_chain": [
+            {
+                "phase": kc.phase,
+                "timestamp": kc.timestamp,
+                "actor": kc.actor,
+                "action": kc.action,
+                "evidence_row_ids": kc.evidence_row_ids,
+                "mitre_techniques": kc.mitre_techniques,
+                "enables_phase_id": kc.enables_phase_id,
+                "phase_id": kc.phase_id,
+            }
+            for kc in (kill_chain if 'kill_chain' in dir() else [])
+        ],
         "close_reason": close_reason,
         "total_cycles": len(all_cycles),
         "total_findings_verified": len(all_verified),

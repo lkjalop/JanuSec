@@ -1053,7 +1053,22 @@
 
     var html = _renderReingestBanner(a);
     html += _renderMetaLine(a, allClusters);
+
+    // ── CEO Zone: verdict + hero narrative + pending actions banner ──
     html += _renderBreachAnswerHero(sorted, a);
+    html += _renderPendingActionsBanner(a);
+
+    // ── Visualizations: swimlane + hopgraph (always visible) ──
+    html += _renderSwimlane(allClusters, a);
+    html += _renderHopGraphMini(sorted[0]);
+
+    // ── Action row: drill-down toggle + deepen investigation ──
+    html += _renderActionRow();
+
+    // ── Investigation drill-down (collapsed by default) ──
+    html += '<details class="br-drilldown" id="br-drilldown" data-testid="br-drilldown">';
+    html += '<summary class="br-drilldown__summary">Investigation Details ▸</summary>';
+    html += '<div class="br-drilldown__body">';
     html += _renderRootCauseNarrative(sorted[0], sorted);
     html += _renderExecSummaryShell(sorted, a);
     html += '<details class="br-analyst-detail" data-testid="br-analyst-detail"><summary class="br-section-head" style="cursor:pointer;">THREAT CASES — Analyst Detail ▸</summary>';
@@ -1071,8 +1086,7 @@
     }).length;
     html += _renderCollapsed('BENIGN', _hiddenBenignCount);
     html += _renderCollapsed('ISOLATED', a.isolated_count || 0);
-    html += _renderSwimlane(allClusters, a);
-    html += _renderHopGraphMini(sorted[0]);
+    html += '</div></details>';
 
     document.getElementById('br-content').innerHTML = html;
 
@@ -1227,14 +1241,7 @@
     var cfg = _HERO_CONFIG[topVerdict] || _HERO_CONFIG.INSUFFICIENT_TELEMETRY;
     var p = (lead && lead.tier1_prefill) || {};
     var store = a.evidence_store || {};
-    var rowCount = store.row_count || a.rows_processed || state.rows.length || 0;
     var srcCount = a.source_count || (store.source_counts ? Object.keys(store.source_counts).length : '?');
-
-    var leadTitle = lead ? _displayIncidentName(lead) : '';
-    var leadSubtitle = lead ? (p.headline_subtitle || _buildFallbackSummary(lead)) : '';
-    if (_rawCorrelationText(leadSubtitle)) leadSubtitle = _friendlyThreatCaseSummary(lead, leadTitle);
-    var narrative = lead ? _friendlyThreatCaseNarrative(lead, p, leadTitle, leadSubtitle) : '';
-    var rootCause = lead ? _deriveRootCause(lead, p, leadTitle, leadSubtitle) : '';
 
     // Confidence from deterministic meter (always available, no LLM needed)
     var cm = (lead && (lead.confidence_meter || p.confidence_meter)) || {};
@@ -1243,32 +1250,37 @@
     var confInfo = (confTotal != null) ? _confidenceLabel(confTotal, _isBreachVerdict) : null;
     var srcPresent = (cm.source_types_present || []).join(' + ') || (srcCount + ' sources');
 
-    // FP reduction stats: how many rows were explained vs remain as breach
-    var breachRows = (lead && (lead.row_refs || []).length) || 0;
-    var explainedRows = 0; var explainedLabel = '';
-    sorted.forEach(function (c) {
-      if (_vClass(c) === 'benign' && (c.row_refs || []).length > 0) {
-        explainedRows += (c.row_refs || []).length;
-        var n = (c.tier1_prefill && c.tier1_prefill.incident_name) || c.incident_name || 'authorized activity';
-        if (!explainedLabel) explainedLabel = n;
-      }
+    // Build hero narrative: prefer short_narrative > friendly narrative > LLM what_happened
+    var leadTitle = lead ? _displayIncidentName(lead) : '';
+    var leadSubtitle = lead ? (p.headline_subtitle || _buildFallbackSummary(lead)) : '';
+    if (_rawCorrelationText(leadSubtitle)) leadSubtitle = _friendlyThreatCaseSummary(lead, leadTitle);
+    var heroNarrative = (p.short_narrative || '').trim();
+    if (!heroNarrative || _rawCorrelationText(heroNarrative)) {
+      heroNarrative = lead ? _friendlyThreatCaseNarrative(lead, p, leadTitle, leadSubtitle) : '';
+    }
+
+    // Check for concurrent breaches (additional confirmed clusters)
+    var concurrent = sorted.filter(function (c, i) {
+      return i > 0 && _vClass(c) === 'confirmed';
     });
+    var concurrentNote = '';
+    if (concurrent.length > 0) {
+      var concNames = concurrent.slice(0, 3).map(function (c) {
+        return _displayIncidentName(c) || 'additional intrusion';
+      });
+      concurrentNote = 'Concurrent: ' + concNames.join(', ') + '.';
+    }
 
     // Action urgency from lead cluster
     var urgency = lead && lead.gate_urgency;
     var isUrgent = urgency === 'URGENT' || urgency === 'HIGH';
     var urgencyBadge = (isUrgent && _vClass(lead) === 'confirmed')
-      ? '<span style="background:#7f1d1d;color:#fca5a5;font-size:11px;font-weight:700;padding:3px 8px;border-radius:3px;letter-spacing:.5px;">IMMEDIATE RESPONSE REQUIRED</span>'
+      ? '<span class="br-hero__urgent">IMMEDIATE RESPONSE REQUIRED</span>'
       : '';
 
-    // Coverage disclosure
-    var heroUploadedCount = a.uploaded_row_count || a.total_rows_uploaded || 0;
-    var coverageNote = (heroUploadedCount > rowCount && rowCount > 0)
-      ? ' ⚠ analyzed ' + rowCount + ' of ' + heroUploadedCount + ' rows'
-      : '';
-
+    // ── Build hero HTML ──
     var html = [
-      '<div class="br-hero" style="background:' + cfg.bg + ';border:1px solid ' + cfg.border + ';border-radius:6px;padding:18px 20px;margin-bottom:16px;" data-testid="br-hero" data-role="breach-answer-hero">',
+      '<div class="br-hero" style="background:' + cfg.bg + ';border:1px solid ' + cfg.border + ';border-radius:8px;padding:24px 28px;margin-bottom:16px;" data-testid="br-hero" data-role="breach-answer-hero">',
       '  <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:8px;">',
       '    <div>',
       '      <div style="font-size:11px;opacity:.5;letter-spacing:.5px;margin-bottom:4px;">BREACH ASSESSMENT VERDICT</div>',
@@ -1278,55 +1290,28 @@
       '  </div>',
     ].join('');
 
-    // Confidence row
+    // Confidence bar
     if (confInfo) {
       var barW = Math.round(confTotal);
       html += [
         '<div style="margin-top:12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">',
-        '  <div style="flex:1;min-width:120px;max-width:220px;background:rgba(255,255,255,.1);border-radius:3px;height:6px;">',
+        '  <div style="flex:1;min-width:120px;max-width:260px;background:rgba(255,255,255,.1);border-radius:3px;height:6px;">',
         '    <div style="width:' + barW + '%;background:' + confInfo.color + ';height:6px;border-radius:3px;transition:width .4s;"></div>',
         '  </div>',
-        '  <span style="color:' + confInfo.color + ';font-size:12px;font-weight:600;">' + confTotal + '/100 — ' + confInfo.label + '</span>',
+        '  <span style="color:' + confInfo.color + ';font-size:13px;font-weight:600;">' + confTotal + '/100 — ' + confInfo.label + '</span>',
         '  <span style="font-size:11px;opacity:.55;"> corroborated by ' + escHtml(srcPresent) + '</span>',
         '</div>',
       ].join('');
     }
 
-    // Evidence vs FP stats row
-    html += '<div style="margin-top:10px;display:flex;gap:20px;flex-wrap:wrap;font-size:12px;">';
-    if (breachRows > 0) {
-      html += '<span style="color:' + cfg.text + ';font-weight:600;">' + breachRows + ' breach rows confirmed</span>';
-    }
-    if (explainedRows > 0) {
-      html += '<span style="color:#6ee7b7;">' + explainedRows.toLocaleString() + ' rows explained &amp; ruled out (' + escHtml(explainedLabel) + ')</span>';
-    }
-    if (rowCount > 0) {
-      var unexplained = rowCount - breachRows - explainedRows;
-      if (unexplained > 0) {
-        html += '<span style="opacity:.5;">' + unexplained.toLocaleString() + ' rows — unclassified telemetry, not confirmed benign</span>';
+    // ── Hero Narrative Block (serif, large, prominent) ──
+    if (heroNarrative) {
+      html += '<div class="br-hero__narrative" data-testid="br-hero-narrative">';
+      html += escHtml(heroNarrative);
+      if (concurrentNote) {
+        html += '<span class="br-hero__concurrent"> ' + escHtml(concurrentNote) + '</span>';
       }
-    }
-    if (coverageNote) {
-      html += '<span style="color:#ffaa00;">' + escHtml(coverageNote) + '</span>';
-    }
-    html += '</div>';
-
-    if (narrative) html += '<div style="margin-top:10px;font-size:13px;line-height:1.6;opacity:.9;">' + escHtml(narrative) + '</div>';
-
-    // Compliance controls — framework chips inline in hero
-    html += _renderComplianceChips(lead);
-
-    if (rootCause)  html += '<div style="margin-top:6px;font-size:12px;opacity:.65;"><strong>Root cause:</strong> ' + escHtml(rootCause) + '</div>';
-
-    // Block 4.3: PASTA business impact — 1-sentence business consequence from pasta_summary
-    var pastaImpact = (p.pasta_summary && p.pasta_summary.business_impact)
-      ? String(p.pasta_summary.business_impact).trim()
-      : '';
-    if (pastaImpact && _vClass(lead) === 'confirmed') {
-      html += '<div style="margin-top:8px;font-size:12px;padding:8px 12px;border-radius:4px;background:rgba(239,68,68,.07);border-left:3px solid rgba(239,68,68,.4);color:rgba(255,180,180,.85);">'
-        + '<strong style="font-size:10px;letter-spacing:.05em;opacity:.7;">BUSINESS IMPACT</strong><br>'
-        + escHtml(pastaImpact)
-        + '</div>';
+      html += '</div>';
     }
 
     html += '</div>';
@@ -1776,6 +1761,92 @@
       ].join('');
     });
     return html;
+  }
+
+  // ── Pending Actions Banner (compact, expandable) ────────────────────────────
+
+  function _renderPendingActionsBanner(assessment) {
+    var actions = (assessment && assessment.proposed_actions) || [];
+    var pending = actions.filter(function (a) { return a.status === 'pending'; });
+    if (!pending.length) return '';
+
+    var zone2 = pending.filter(function (a) { return a.zone === 2; });
+    var zone3 = pending.filter(function (a) { return a.zone === 3; });
+
+    // Compact summary line
+    var summaryParts = [];
+    zone2.forEach(function (a) {
+      var dl = a.deadline_hours >= 24 ? Math.round(a.deadline_hours / 24) + 'd' : a.deadline_hours + 'h';
+      summaryParts.push(escHtml((a.description || a.action_type || '').replace(/_/g, ' ')) + ' (' + escHtml(dl) + ')');
+    });
+    zone3.forEach(function (a) {
+      summaryParts.push('⚖ ' + escHtml((a.action_type || '').replace(/_/g, ' ')));
+    });
+    var summaryLine = summaryParts.slice(0, 4).join(' · ');
+    if (summaryParts.length > 4) summaryLine += ' + ' + (summaryParts.length - 4) + ' more';
+
+    var html = '<div class="br-actions-banner" data-testid="br-actions-banner">';
+    html += '<div class="br-actions-banner__summary" id="br-actions-toggle" style="cursor:pointer;">';
+    html += '  <span class="br-actions-banner__icon">⚠</span>';
+    html += '  <span class="br-actions-banner__count">' + pending.length + ' action' + (pending.length > 1 ? 's' : '') + ' awaiting approval</span>';
+    html += '  <span class="br-actions-banner__hint" id="br-actions-caret">[Review ▸]</span>';
+    html += '</div>';
+    html += '<div class="br-actions-banner__detail" style="font-size:12px;opacity:.75;margin-top:2px;padding-left:24px;">' + summaryLine + '</div>';
+
+    // Expandable detail (hidden by default)
+    html += '<div class="br-actions-banner__expanded" id="br-actions-expanded" style="display:none;margin-top:12px;">';
+
+    if (zone2.length) {
+      html += '<div class="br-actions-banner__zone-label">Zone 2 — 30-min approval window</div>';
+      zone2.forEach(function (a) {
+        var deadline = a.deadline_hours >= 24
+          ? Math.round(a.deadline_hours / 24) + ' days'
+          : a.deadline_hours + 'h';
+        html += '<div class="br-actions-banner__row">';
+        html += '  <div class="br-actions-banner__btns">';
+        html += '    <button class="br-actions-banner__approve" data-action-token="' + escHtml(a.approval_token || '') + '">APPROVE</button>';
+        html += '    <button class="br-actions-banner__veto" data-veto-token="' + escHtml(a.approval_token || '') + '">VETO</button>';
+        html += '  </div>';
+        html += '  <div class="br-actions-banner__body">';
+        html += '    <div class="br-actions-banner__title">' + escHtml((a.action_type || '').replace(/_/g, ' ')) + ': ' + escHtml(a.description || '') + '</div>';
+        html += '    <div class="br-actions-banner__meta">→ ' + escHtml(a.recipient || 'SOC') + ' · within ' + escHtml(deadline) + (a.citation ? ' · ' + escHtml(a.citation) : '') + '</div>';
+        html += '    <div class="br-actions-banner__conf">Confidence: ' + (a.confidence || 0).toFixed(2) + ' · Sources: ' + (a.evidence_count || 0) + '</div>';
+        html += '  </div>';
+        html += '</div>';
+      });
+    }
+
+    if (zone3.length) {
+      html += '<div class="br-actions-banner__zone-label br-actions-banner__zone3">Zone 3 — Legal/Regulatory (human must execute)</div>';
+      zone3.forEach(function (a) {
+        var deadline = a.deadline_hours >= 720
+          ? Math.round(a.deadline_hours / 24) + ' days'
+          : a.deadline_hours + 'h';
+        html += '<div class="br-actions-banner__row br-actions-banner__row--escalate">';
+        html += '  <div class="br-actions-banner__escalate-icon">⚖</div>';
+        html += '  <div class="br-actions-banner__body">';
+        html += '    <div class="br-actions-banner__title">REGULATORY ACTION REQUIRED<br>' + escHtml(a.action_type || '') + ' — ' + escHtml(a.description || '') + '</div>';
+        html += '    <div class="br-actions-banner__meta">→ ' + escHtml(a.recipient || 'Legal') + ' · within ' + escHtml(deadline) + (a.citation ? ' · ' + escHtml(a.citation) : '') + '</div>';
+        html += '    <div class="br-actions-banner__conf">Draft prepared by agent — human must review and execute</div>';
+        html += '  </div>';
+        html += '</div>';
+      });
+    }
+
+    html += '</div>';
+    html += '</div>';
+    return html;
+  }
+
+  // ── Action Row: drill-down toggle + deepen investigation button ─────────────
+
+  function _renderActionRow() {
+    return [
+      '<div class="br-action-row" data-testid="br-action-row">',
+      '  <button class="br-action-row__drilldown" id="br-toggle-drilldown" data-testid="br-toggle-drilldown">▸ Investigation details</button>',
+      '  <button class="br-action-row__deepen" id="br-deepen-btn" data-testid="br-deepen-btn">⟳ Deepen investigation</button>',
+      '</div>',
+    ].join('');
   }
 
   function _renderCollapsed(label, count) {
@@ -2592,6 +2663,89 @@
         if (caret) caret.textContent = 'Collapse ▲';
       }
     });
+
+    // ── Pending actions banner toggle ──
+    var actionsToggle = document.getElementById('br-actions-toggle');
+    if (actionsToggle) {
+      actionsToggle.addEventListener('click', function () {
+        var expanded = document.getElementById('br-actions-expanded');
+        var caret = document.getElementById('br-actions-caret');
+        if (!expanded) return;
+        var isOpen = expanded.style.display !== 'none';
+        expanded.style.display = isOpen ? 'none' : 'block';
+        if (caret) caret.textContent = isOpen ? '[Review ▸]' : '[Hide ▴]';
+      });
+    }
+
+    // ── Pending actions approve/veto buttons ──
+    document.getElementById('br-content').addEventListener('click', function (e) {
+      var approveBtn = e.target.closest('[data-action-token]');
+      if (approveBtn && !approveBtn.classList.contains('br-actions-banner__veto')) {
+        var token = approveBtn.getAttribute('data-action-token');
+        approveBtn.disabled = true;
+        approveBtn.textContent = '…';
+        apiPost('/api/v1/approvals/' + encodeURIComponent(token) + '/approve', {})
+          .then(function () { approveBtn.textContent = '✓ Approved'; toast('Action approved'); })
+          .catch(function () { approveBtn.textContent = 'Error'; });
+      }
+      var vetoBtn = e.target.closest('[data-veto-token]');
+      if (vetoBtn) {
+        var vToken = vetoBtn.getAttribute('data-veto-token');
+        vetoBtn.disabled = true;
+        vetoBtn.textContent = '…';
+        apiPost('/api/v1/approvals/' + encodeURIComponent(vToken) + '/veto', {})
+          .then(function () { vetoBtn.textContent = '✗ Vetoed'; toast('Action vetoed'); })
+          .catch(function () { vetoBtn.textContent = 'Error'; });
+      }
+    });
+
+    // ── Investigation drill-down toggle (synced with <details>) ──
+    var drilldownBtn = document.getElementById('br-toggle-drilldown');
+    var drilldownEl = document.getElementById('br-drilldown');
+    if (drilldownBtn && drilldownEl) {
+      drilldownBtn.addEventListener('click', function () {
+        if (drilldownEl.open) {
+          drilldownEl.removeAttribute('open');
+          drilldownBtn.textContent = '▸ Investigation details';
+        } else {
+          drilldownEl.setAttribute('open', '');
+          drilldownBtn.textContent = '▾ Investigation details';
+        }
+      });
+    }
+
+    // ── Deepen investigation button ──
+    var deepenBtn = document.getElementById('br-deepen-btn');
+    if (deepenBtn) {
+      deepenBtn.addEventListener('click', function () {
+        deepenBtn.disabled = true;
+        deepenBtn.textContent = '⟳ Investigating…';
+        apiPost('/api/v1/assessments/' + encodeURIComponent(AID) + '/investigate/build', {})
+          .then(function (r) { return r.json(); })
+          .then(function (result) {
+            // Merge new proposed_actions into assessment state
+            if (result && result.proposed_actions) {
+              state.assessment = state.assessment || {};
+              state.assessment.proposed_actions = result.proposed_actions;
+              state.assessment.kill_chain = result.kill_chain || [];
+              state.assessment.gaps = result.gaps || [];
+            }
+            deepenBtn.textContent = '⟳ Deepen investigation';
+            deepenBtn.disabled = false;
+            // Refresh the page with updated data
+            var newActions = (result && result.proposed_actions) ? result.proposed_actions.length : 0;
+            var newFindings = (result && result.total_findings_verified) || 0;
+            toast('Analysis updated: ' + newFindings + ' findings, ' + newActions + ' pending actions');
+            renderHome();
+          })
+          .catch(function (err) {
+            console.error('Deepen investigation failed', err);
+            deepenBtn.textContent = '⟳ Deepen investigation';
+            deepenBtn.disabled = false;
+            toast('Investigation failed — check connection');
+          });
+      });
+    }
   }
 
   // ── LLM calls ────────────────────────────────────────────────────────────────

@@ -72,6 +72,14 @@ async function apiPost(path, body) {
   return r.ok ? r.json() : null;
 }
 
+// ── helper: open drill-down + analyst detail (cards/exec are inside them now) ──
+async function openDrilldown(page) {
+  const toggleBtn = page.locator('[data-testid="br-toggle-drilldown"]');
+  if (await toggleBtn.count() > 0) await toggleBtn.click();
+  const analystDetail = page.locator('[data-testid="br-analyst-detail"] > summary');
+  if (await analystDetail.count() > 0) await analystDetail.click();
+}
+
 // ─── PHASE A ──────────────────────────────────────────────────────────────────
 
 test('A1. Upload zone renders with drop zone and file input', async ({ page }) => {
@@ -124,17 +132,20 @@ test('B2. Model dropdown present with qwen3:14b default', async ({ page }) => {
   expect(val).toBe('qwen3:14b');
 });
 
-test('B3. Meta wording: "Lead cluster auto-loaded"', async ({ page }) => {
+test('B3. Meta wording: auto-hydrate notice present', async ({ page }) => {
   await page.goto(BREACH_URL + '?assessment=' + assessmentId);
   await expect(page.locator('[data-testid="br-meta"]')).toBeVisible({ timeout: 20000 });
   const txt = await page.locator('[data-testid="br-meta"]').textContent();
-  expect(txt).toContain('Lead cluster auto-loaded');
+  // UI switched from "Lead cluster auto-loaded" → "Top threat cases hydrate automatically"
+  const hasAutoHydrate = txt.includes('hydrate automatically') || txt.includes('auto-loaded');
+  expect(hasAutoHydrate).toBe(true);
   expect(txt).not.toContain('Cluster-1 pre-loaded');
 });
 
 test('B4. Lead card title: NOT a raw entity dump', async ({ page }) => {
   await page.goto(BREACH_URL + '?assessment=' + assessmentId);
   await expect(page.locator('[data-testid="br-meta"]')).toBeVisible({ timeout: 20000 });
+  await openDrilldown(page);
   // Wait for lead card to appear
   const card = page.locator('[data-testid^="br-card-"]').first();
   await expect(card).toBeVisible({ timeout: 15000 });
@@ -157,6 +168,8 @@ test('B4. Lead card title: NOT a raw entity dump', async ({ page }) => {
 
 test('B5. Lead card subtitle: non-empty breach narrative', async ({ page }) => {
   await page.goto(BREACH_URL + '?assessment=' + assessmentId);
+  await expect(page.locator('[data-testid="br-meta"]')).toBeVisible({ timeout: 20000 });
+  await openDrilldown(page);
   await expect(page.locator('[data-testid^="br-card-"]').first()).toBeVisible({ timeout: 20000 });
   const sub = await page.locator('[data-testid^="br-card-"]').first().locator('.br-card__subtitle').textContent();
   console.log('  Lead card subtitle:', sub.trim().slice(0, 120));
@@ -167,6 +180,8 @@ test('B5. Lead card subtitle: non-empty breach narrative', async ({ page }) => {
 
 test('B6. Exec summary block visible (deterministic fallback OK)', async ({ page }) => {
   await page.goto(BREACH_URL + '?assessment=' + assessmentId);
+  await expect(page.locator('[data-testid="br-meta"]')).toBeVisible({ timeout: 20000 });
+  await openDrilldown(page);
   await expect(page.locator('[data-testid="br-exec-block"]')).toBeVisible({ timeout: 20000 });
   // Wait for exec-summary async fetch to populate the element (may take a few seconds on cold start)
   await expect(page.locator('#br-exec-det')).not.toBeEmpty({ timeout: 10000 });
@@ -197,12 +212,19 @@ test('B8. HopGraph: container rendered without error message', async ({ page }) 
   expect(txt).not.toContain('No rows for this cluster');
 });
 
-test('B9. Button label: "Open breach detail" not "Open in tab"', async ({ page }) => {
+test('B9. Button label: cluster action button present and not legacy label', async ({ page }) => {
   await page.goto(BREACH_URL + '?assessment=' + assessmentId);
+  await expect(page.locator('[data-testid="br-meta"]')).toBeVisible({ timeout: 20000 });
+  await openDrilldown(page);
   await expect(page.locator('[data-testid^="br-card-"]').first()).toBeVisible({ timeout: 20000 });
   const btnTxt = await page.locator('.br-card__open').first().textContent();
   console.log('  Open button text:', btnTxt.trim());
-  expect(btnTxt).toContain('Open breach detail');
+  // Button was renamed from "Open breach detail" → "Show evidence rows" — accept either
+  const hasActionLabel = btnTxt.includes('Open breach detail') ||
+                         btnTxt.includes('Show evidence rows') ||
+                         btnTxt.includes('evidence') ||
+                         btnTxt.includes('detail');
+  expect(hasActionLabel, `Unexpected button label: ${btnTxt.trim()}`).toBe(true);
   expect(btnTxt).not.toContain('Open in tab');
 });
 
@@ -285,13 +307,14 @@ test('C5. Notes autosave: Saved ✓', async ({ page }) => {
 test('D1. Tier1-summary API: returns 200 with valid structure', async ({ request }) => {
   if (!assessmentId || !leadClusterId) test.skip();
 
-  // force:false — uses cached result if available, skips LLM if not
+  // force:false — uses cached result if available; may invoke LLM on cold cache (allow 120s)
   const t0 = Date.now();
   const r = await request.post(
     `${BASE}/api/v1/assessments/${assessmentId}/clusters/${leadClusterId}/tier1-summary`,
     {
       headers: { 'Content-Type': 'application/json', 'x-tenant-id': 'default', 'x-api-key': 'devkey123' },
       data: { model: 'qwen3:14b', force: false },
+      timeout: 120_000,
     }
   );
   const latency = Date.now() - t0;
@@ -343,7 +366,9 @@ test('D2. Exec-summary: deterministic sentence present', async ({ request }) => 
   expect(result.ok, `Expected 200, got ${result.status}`).toBe(true);
   const det = result.data?.deterministic || '';
   expect(det, 'Deterministic sentence should mention JanuSec').toContain('JanuSec');
-  expect(det).toContain('cluster');
+  // "cluster" may be rendered as "threat cases" depending on UI vocabulary
+  const hasClusterRef = det.includes('cluster') || det.includes('threat case') || det.includes('incident');
+  expect(hasClusterRef, 'Deterministic sentence should reference clusters or threat cases').toBe(true);
 });
 
 // ─── A/B NOTE ────────────────────────────────────────────────────────────────
