@@ -101,6 +101,8 @@
         renderHopGraphTab();
       } else if (TAB === 'compliance') {
         renderComplianceTab();
+      } else if (TAB === 'intel') {
+        renderIntelTab();
       } else {
         renderHome();
       }
@@ -1054,9 +1056,11 @@
     var html = _renderReingestBanner(a);
     html += _renderMetaLine(a, allClusters);
 
-    // ── CEO Zone: verdict + hero narrative + pending actions banner ──
+    // ── CEO Zone: verdict + hero narrative + exec summary (always visible) ──
     html += _renderBreachAnswerHero(sorted, a);
+    html += _renderExecSummaryShell(sorted, a);
     html += _renderPendingActionsBanner(a);
+    html += _renderStakeholderDispatch(a);
 
     // ── Visualizations: swimlane + hopgraph (always visible) ──
     html += _renderSwimlane(allClusters, a);
@@ -1072,7 +1076,6 @@
     html += _renderVerdictSummaryRow(sorted, allClusters, a);
     html += _renderPathOfIntrusion(a);
     html += _renderRootCauseNarrative(sorted[0], sorted);
-    html += _renderExecSummaryShell(sorted, a);
     html += _renderAgentPanel(a);
     html += '<details class="br-analyst-detail" data-testid="br-analyst-detail"><summary class="br-section-head" style="cursor:pointer;">THREAT CASES — Analyst Detail ▸</summary>';
     html += _renderTopFindings(sorted);
@@ -2004,6 +2007,50 @@
     ].join('');
   }
 
+  // ── Stakeholder Dispatch Bar ───────────────────────────────────────────────
+  // Maps each dispatch role to the existing 8-persona report system.
+  // Each button opens a preview of what the stakeholder will receive,
+  // requires confirmation before sending, and logs an audit entry.
+
+  var _STAKEHOLDER_ROLES = [
+    { key: 'soc_analyst',    icon: '🛡',  label: 'SOC Analyst',     persona: 'soc_analyst',    desc: 'Triage focus, containment options, IOCs, decision tree, priority',
+      actions: 'Confirm/deny/escalate triage. Execute containment playbook. Validate IOC scope.' },
+    { key: 'ciso',           icon: '⚖',  label: 'CISO / Legal',    persona: 'ciso',           desc: 'Regulatory exposure, ISMS risk treatment, NDB obligations',
+      actions: 'Assess NDB notification requirement. Evaluate GDPR Art.33 / SEC 8-K triggers. Approve regulatory disclosure.' },
+    { key: 'executive',      icon: '📊', label: 'Executive',        persona: 'executive',      desc: 'Business impact, plain-English narrative, operational next steps',
+      actions: 'Approve containment spend. Communicate to board if material. Authorise forensic engagement.' },
+    { key: 'threat_hunter',  icon: '🎯', label: 'Threat Hunter',    persona: 'threat_hunter',  desc: 'Kill chain stages, Sigma rules, hunt hypotheses, pivot leads',
+      actions: 'Validate hypotheses. Run Sigma queries. Expand scope via pivot leads. Confirm kill chain completeness.' },
+    { key: 'forensics',      icon: '🔬', label: 'Forensics',        persona: 'forensics',      desc: 'Artifact collection order, proof-of-execution, chain of custody',
+      actions: 'Collect volatile artifacts (memory → disk → network). Preserve chain of custody. Document proof-of-execution.' },
+    { key: 'compliance',     icon: '📋', label: 'Compliance',       persona: 'compliance',     desc: 'Framework mappings (NIST/SOC2/ISO), audit trail, notification obligations',
+      actions: 'Map control failures to frameworks. Verify notification timeline. Update risk register.' },
+    { key: 'export',         icon: '📄', label: 'Full Report',      persona: null,             desc: 'Complete multi-persona HTML report',
+      actions: null },
+  ];
+
+  function _renderStakeholderDispatch(assessment) {
+    var html = '<div class="br-dispatch" data-testid="br-dispatch">';
+    html += '<div class="br-dispatch__head">STAKEHOLDER DISPATCH</div>';
+    html += '<div class="br-dispatch__sub">Each button generates a persona-specific report from the existing assessment. Review before sending — dispatch is logged and auditable.</div>';
+    html += '<div class="br-dispatch__bar">';
+    _STAKEHOLDER_ROLES.forEach(function (r) {
+      var isExport = r.key === 'export';
+      html += '<button class="br-dispatch__btn' + (isExport ? ' br-dispatch__btn--export' : '') + '"'
+        + ' data-dispatch-role="' + r.key + '"'
+        + ' data-testid="br-dispatch-' + r.key + '"'
+        + ' title="' + escHtml(r.desc) + '">'
+        + '<span class="br-dispatch__icon">' + r.icon + '</span>'
+        + '<span class="br-dispatch__label">' + escHtml(r.label) + '</span>'
+        + '</button>';
+    });
+    html += '</div>';
+    // Preview/confirmation panel (hidden until a dispatch button is clicked)
+    html += '<div id="br-dispatch-preview" class="br-dispatch__preview" style="display:none;" data-testid="br-dispatch-preview"></div>';
+    html += '</div>';
+    return html;
+  }
+
   function _renderCollapsed(label, count) {
     if (!count) return '';
     var key = label.toLowerCase();
@@ -2901,6 +2948,116 @@
           });
       });
     }
+
+    // ── Stakeholder dispatch buttons ──
+    // Step 1: Click role → show preview with persona-specific content
+    // Step 2: Analyst reviews what will be sent + required actions
+    // Step 3: Confirm dispatch (or preview report link)
+    // All dispatches are logged server-side as audit entries.
+    document.getElementById('br-content').addEventListener('click', function (e) {
+      var dispBtn = e.target.closest('[data-dispatch-role]');
+      if (!dispBtn) return;
+      // Don't handle confirm/cancel clicks here
+      if (e.target.closest('#br-dispatch-confirm') || e.target.closest('#br-dispatch-cancel')
+          || e.target.closest('#br-dispatch-preview-link') || e.target.closest('#br-dispatch-change-mgmt')) return;
+      var role = dispBtn.getAttribute('data-dispatch-role');
+      var roleDef = _STAKEHOLDER_ROLES.filter(function (r) { return r.key === role; })[0];
+      if (!roleDef) return;
+
+      // Export: open full multi-persona report
+      if (role === 'export') {
+        window.open('/api/v1/report/ingestion?format=html&include_model=true&include_scenarios=true', '_blank');
+        return;
+      }
+
+      // Show preview panel with persona-specific content
+      var preview = document.getElementById('br-dispatch-preview');
+      if (!preview) return;
+      var personaUrl = '/api/v1/report/ingestion?format=html&persona=' + encodeURIComponent(roleDef.persona)
+        + '&include_model=true&include_scenarios=true';
+
+      preview.style.display = 'block';
+      preview.innerHTML = [
+        '<div class="br-dispatch__preview-head">',
+        '  <span>' + roleDef.icon + '</span>',
+        '  <strong>DISPATCH PREVIEW — ' + escHtml(roleDef.label).toUpperCase() + '</strong>',
+        '</div>',
+        '<div class="br-dispatch__preview-body">',
+        '  <div class="br-dispatch__preview-section">',
+        '    <div class="br-dispatch__preview-label">What they receive</div>',
+        '    <div>' + escHtml(roleDef.desc) + '</div>',
+        '  </div>',
+        '  <div class="br-dispatch__preview-section">',
+        '    <div class="br-dispatch__preview-label">Required actions</div>',
+        '    <div>' + escHtml(roleDef.actions) + '</div>',
+        '  </div>',
+        '  <div class="br-dispatch__preview-section">',
+        '    <div class="br-dispatch__preview-label">Approval requirements</div>',
+        '    <div class="br-dispatch__preview-gate">',
+        '      <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">',
+        '        <input type="checkbox" id="br-dispatch-change-mgmt"> Requires change management / CAB review',
+        '      </label>',
+        '    </div>',
+        '  </div>',
+        '  <div class="br-dispatch__preview-section" style="font-size:11px;color:var(--text-muted);">',
+        '    ⚠ Dispatch is logged and auditable. The persona report contains assessment-derived IOCs, verdicts, and recommended actions. Verify the recipient channel is secure before confirming.',
+        '  </div>',
+        '  <div class="br-dispatch__preview-actions">',
+        '    <a class="br-dispatch__btn br-dispatch__btn--export" id="br-dispatch-preview-link"',
+        '       href="' + personaUrl + '" target="_blank" style="text-decoration:none;">',
+        '      📄 Preview ' + escHtml(roleDef.label) + ' Report',
+        '    </a>',
+        '    <button class="br-dispatch__btn" style="border-color:rgba(45,212,191,.3);color:#2dd4bf;"',
+        '            id="br-dispatch-confirm" data-confirm-role="' + role + '">',
+        '      ✓ Confirm & Send to ' + escHtml(roleDef.label),
+        '    </button>',
+        '    <button class="br-dispatch__btn" id="br-dispatch-cancel" style="color:var(--text-muted);">',
+        '      ✗ Cancel',
+        '    </button>',
+        '  </div>',
+        '</div>',
+      ].join('');
+    });
+
+    // Step 3: Confirm dispatch — send the notification
+    document.getElementById('br-content').addEventListener('click', function (e) {
+      var confirmBtn = e.target.closest('#br-dispatch-confirm');
+      if (confirmBtn) {
+        var role = confirmBtn.getAttribute('data-confirm-role');
+        var requiresCab = document.getElementById('br-dispatch-change-mgmt');
+        var cabRequired = requiresCab && requiresCab.checked;
+        confirmBtn.disabled = true;
+        confirmBtn.textContent = 'Dispatching…';
+        apiPost('/api/v1/dispatch/notify', {
+          assessment_id: AID,
+          role: role,
+          channel: 'auto',
+          requires_change_management: cabRequired,
+        })
+        .then(function (r) { return r.json(); })
+        .then(function (result) {
+          confirmBtn.textContent = '✓ Dispatched';
+          toast((result && result.message) || 'Persona report dispatched to ' + role.toUpperCase());
+          setTimeout(function () {
+            var preview = document.getElementById('br-dispatch-preview');
+            if (preview) preview.style.display = 'none';
+          }, 2000);
+        })
+        .catch(function () {
+          confirmBtn.disabled = false;
+          confirmBtn.textContent = '✓ Confirm & Send';
+          toast('Dispatch failed — check integrations');
+        });
+        return;
+      }
+
+      // Cancel
+      var cancelBtn = e.target.closest('#br-dispatch-cancel');
+      if (cancelBtn) {
+        var preview = document.getElementById('br-dispatch-preview');
+        if (preview) preview.style.display = 'none';
+      }
+    });
   }
 
   // ── LLM calls ────────────────────────────────────────────────────────────────
@@ -3410,6 +3567,204 @@
     }
   }
 
+  // ── Threat Intel Tab ─────────────────────────────────────────────────────────
+
+  function renderIntelTab() {
+    updateTabBar('intel');
+    var a = state.assessment || {};
+    var kc = a.kill_chain || [];
+    var techniques = [];
+    var phases = [];
+    kc.forEach(function (step) {
+      var tid = (step.technique_id || step.technique || '').trim();
+      if (tid && techniques.indexOf(tid) === -1) techniques.push(tid);
+      // Also collect MITRE techniques from the array field
+      (step.mitre_techniques || []).forEach(function (t) {
+        var tt = (typeof t === 'string' ? t : (t.technique_id || '')).trim();
+        if (tt && techniques.indexOf(tt) === -1) techniques.push(tt);
+      });
+      var ph = (step.phase || '').trim();
+      if (ph && phases.indexOf(ph) === -1) phases.push(ph);
+    });
+
+    var html = [
+      '<div style="max-width:960px;margin:24px auto;">',
+      '<div class="br-section-head" style="margin-bottom:6px;">THREAT INTELLIGENCE — Deep Research Lite</div>',
+      '<div style="font-size:13px;color:var(--text-muted);margin-bottom:24px;line-height:1.7;">',
+      '  Structured threat intel enrichment for this assessment. IOCs and technique IDs cross the wire — <strong>never</strong> log content, hostnames, or PII.',
+      '</div>',
+
+      // ── Zone classification ──
+      '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;margin-bottom:24px;">',
+      _intelZoneCard('✓', 'ZONE 1 — AUTO', 'IOC Enrichment', 'File hashes → VirusTotal. External IPs → AbuseIPDB + GreyNoise. Domains → urlscan.io. CVE IDs → NVD.', 'grn'),
+      _intelZoneCard('✓', 'ZONE 1 — AUTO', 'MITRE ATT&CK', 'Technique IDs → STIX/TAXII API. Procedures, actor groups, mitigations, detection rules.', 'grn'),
+      _intelZoneCard('⚠', 'ZONE 2 — HUMAN-GATED', 'Actor Attribution', 'Technique cluster fingerprint → VT Threat Actor Graph / MISP. Reveals attack signature to third party.', 'amb'),
+      _intelZoneCard('✗', 'BLOCKED', 'Open Web Search', 'Sending log content or investigation context to search APIs. Breaks data sovereignty — blocked for APRA/SOCI compliance.', 'red'),
+      '</div>',
+
+      // ── Extracted techniques ──
+      '<div class="br-section-head" style="margin-bottom:8px;">EXTRACTED TECHNIQUES (' + techniques.length + ') · KILL CHAIN PHASES (' + phases.length + ')</div>',
+      '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:20px;">',
+    ];
+    if (techniques.length) {
+      techniques.forEach(function (tid) {
+        html.push('<span style="font-size:11px;font-weight:600;padding:3px 10px;border-radius:3px;background:rgba(99,102,241,.12);color:#a5b4fc;border:1px solid rgba(99,102,241,.25);cursor:pointer;" data-enrich-technique="' + escHtml(tid) + '" title="Click to enrich via MITRE ATT&CK">' + escHtml(tid) + '</span>');
+      });
+    }
+    if (phases.length) {
+      phases.forEach(function (ph) {
+        html.push('<span style="font-size:11px;font-weight:600;padding:3px 10px;border-radius:3px;background:rgba(245,158,11,.1);color:#f59e0b;border:1px solid rgba(245,158,11,.2);">' + escHtml(ph) + '</span>');
+      });
+    }
+    if (!techniques.length && !phases.length) {
+      html.push('<span style="font-size:12px;color:var(--text-muted);">No techniques extracted yet. Run "Deepen investigation" to extract kill chain techniques.</span>');
+    }
+    html.push('</div>');
+
+    // ── IOC Enrichment panel ──
+    html.push(
+      '<div class="br-section-head" style="margin-bottom:8px;">IOC ENRICHMENT</div>',
+      '<div id="br-intel-ioc-results" style="min-height:60px;padding:12px 16px;border:1px solid var(--border);border-radius:6px;background:rgba(255,255,255,.02);margin-bottom:20px;">',
+      '<div style="display:flex;align-items:center;gap:12px;">',
+      '<button class="br-dispatch__btn" id="br-intel-enrich-iocs" data-testid="br-intel-enrich-iocs" style="border-color:rgba(45,212,191,.3);color:#2dd4bf;">🔍 Run IOC Enrichment</button>',
+      '<span style="font-size:12px;color:var(--text-muted);">Query VirusTotal, AbuseIPDB, GreyNoise for IPs and file hashes from evidence rows.</span>',
+      '</div>',
+      '</div>'
+    );
+
+    // ── MITRE ATT&CK Enrichment panel ──
+    html.push(
+      '<div class="br-section-head" style="margin-bottom:8px;">MITRE ATT&CK CONTEXT</div>',
+      '<div id="br-intel-mitre-results" style="min-height:60px;padding:12px 16px;border:1px solid var(--border);border-radius:6px;background:rgba(255,255,255,.02);margin-bottom:20px;">',
+      '<div style="display:flex;align-items:center;gap:12px;">',
+      '<button class="br-dispatch__btn" id="br-intel-enrich-mitre" data-testid="br-intel-enrich-mitre" style="border-color:rgba(99,102,241,.3);color:#818cf8;">🗂 Query MITRE STIX</button>',
+      '<span style="font-size:12px;color:var(--text-muted);">Retrieve procedure examples, actor groups, and mitigations for extracted techniques.</span>',
+      '</div>',
+      '</div>'
+    );
+
+    // ── Actor Attribution (Zone 2) ──
+    html.push(
+      '<div class="br-section-head" style="margin-bottom:8px;">ACTOR ATTRIBUTION <span style="font-size:9px;padding:2px 6px;border-radius:3px;background:rgba(245,158,11,.1);color:#f59e0b;border:1px solid rgba(245,158,11,.25);margin-left:8px;">ZONE 2 — REQUIRES APPROVAL</span></div>',
+      '<div id="br-intel-actor-results" style="min-height:60px;padding:12px 16px;border:1px solid rgba(245,158,11,.15);border-radius:6px;background:rgba(245,158,11,.03);margin-bottom:20px;">',
+      '<div style="display:flex;align-items:center;gap:12px;">',
+      '<button class="br-dispatch__btn" id="br-intel-actor-query" data-testid="br-intel-actor-query" style="border-color:rgba(245,158,11,.3);color:#f59e0b;" disabled>⚠ Request Actor Attribution</button>',
+      '<span style="font-size:12px;color:var(--text-muted);">Sends technique fingerprint to threat intel platform. Analyst approval required — this reveals attack characteristics to a third party.</span>',
+      '</div>',
+      '</div>'
+    );
+
+    // ── Threat Intelligence Card preview ──
+    html.push(
+      '<div class="br-section-head" style="margin-bottom:8px;">SYNTHESIS — Threat Intelligence Card</div>',
+      '<div id="br-intel-synthesis" style="padding:16px;border:1px solid rgba(192,132,252,.2);border-radius:6px;background:rgba(192,132,252,.04);margin-bottom:20px;">',
+      '<div style="font-size:12px;color:var(--text-muted);line-height:1.7;">',
+      'After enrichment runs, a structured Threat Intelligence Card will be synthesised here — combining IOC reputation, MITRE context, and (if approved) actor attribution into a concise analyst brief.',
+      '<br><br>',
+      '<strong style="color:rgba(192,132,252,.9);">Key design principle:</strong> The Threat Intelligence Card is stored separately from finding confidence scores. It is <em>context</em>, not <em>evidence</em>. It cannot raise or lower the deterministic verdict.',
+      '</div>',
+      '</div>'
+    );
+
+    html.push('</div>');
+
+    document.getElementById('br-content').innerHTML = html.join('');
+    _wireIntelTab();
+  }
+
+  function _intelZoneCard(icon, zone, title, desc, color) {
+    var borderColor = {grn: 'rgba(45,212,191,.25)', amb: 'rgba(245,158,11,.25)', red: 'rgba(248,113,113,.2)'}[color] || 'var(--border)';
+    var bgColor = {grn: 'rgba(45,212,191,.04)', amb: 'rgba(245,158,11,.04)', red: 'rgba(248,113,113,.04)'}[color] || 'transparent';
+    var iconColor = {grn: '#2dd4bf', amb: '#f59e0b', red: '#f87171'}[color] || 'var(--text-muted)';
+    return [
+      '<div style="border:1px solid ' + borderColor + ';border-radius:6px;background:' + bgColor + ';padding:12px 14px;">',
+      '<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">',
+      '<span style="font-size:16px;color:' + iconColor + ';">' + icon + '</span>',
+      '<span style="font-size:9px;font-weight:700;letter-spacing:.08em;color:' + iconColor + ';">' + zone + '</span>',
+      '</div>',
+      '<div style="font-size:13px;font-weight:600;color:var(--text-primary);margin-bottom:4px;">' + title + '</div>',
+      '<div style="font-size:11px;color:var(--text-muted);line-height:1.6;">' + desc + '</div>',
+      '</div>',
+    ].join('');
+  }
+
+  function _wireIntelTab() {
+    // IOC enrichment button
+    var iocBtn = document.getElementById('br-intel-enrich-iocs');
+    if (iocBtn) {
+      iocBtn.addEventListener('click', function () {
+        iocBtn.disabled = true;
+        iocBtn.textContent = '🔍 Enriching…';
+        apiPost('/api/v1/assessments/' + encodeURIComponent(AID) + '/enrich/iocs', {})
+          .then(function (r) { return r.json(); })
+          .then(function (data) {
+            var panel = document.getElementById('br-intel-ioc-results');
+            if (panel) {
+              var count = (data.enriched || []).length;
+              panel.innerHTML = '<div style="font-size:12px;color:#2dd4bf;margin-bottom:8px;">✓ ' + count + ' IOCs enriched</div>'
+                + (data.enriched || []).slice(0, 20).map(function (e) {
+                    return '<div style="font-size:11px;padding:4px 0;border-bottom:1px solid rgba(255,255,255,.04);">'
+                      + '<strong>' + escHtml(e.indicator || e.ioc || '—') + '</strong>'
+                      + ' <span style="color:var(--text-muted);">→</span> '
+                      + escHtml(e.verdict || e.reputation || e.result || 'no data')
+                      + (e.source ? ' <span style="color:var(--text-muted);font-size:10px;">(' + escHtml(e.source) + ')</span>' : '')
+                      + '</div>';
+                  }).join('')
+                + (count > 20 ? '<div style="font-size:11px;color:var(--text-muted);margin-top:6px;">…and ' + (count - 20) + ' more</div>' : '');
+            }
+            iocBtn.textContent = '🔍 Run IOC Enrichment';
+            iocBtn.disabled = false;
+          })
+          .catch(function () {
+            iocBtn.textContent = '🔍 Run IOC Enrichment';
+            iocBtn.disabled = false;
+            toast('IOC enrichment not available — endpoint pending implementation');
+          });
+      });
+    }
+
+    // MITRE enrichment button
+    var mitreBtn = document.getElementById('br-intel-enrich-mitre');
+    if (mitreBtn) {
+      mitreBtn.addEventListener('click', function () {
+        mitreBtn.disabled = true;
+        mitreBtn.textContent = '🗂 Querying…';
+        apiPost('/api/v1/assessments/' + encodeURIComponent(AID) + '/enrich/mitre', {})
+          .then(function (r) { return r.json(); })
+          .then(function (data) {
+            var panel = document.getElementById('br-intel-mitre-results');
+            if (panel) {
+              var techs = data.techniques || [];
+              panel.innerHTML = '<div style="font-size:12px;color:#818cf8;margin-bottom:8px;">✓ ' + techs.length + ' techniques enriched</div>'
+                + techs.slice(0, 15).map(function (t) {
+                    return '<div style="font-size:11px;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.04);">'
+                      + '<strong>' + escHtml(t.technique_id || '—') + '</strong> · ' + escHtml(t.name || '')
+                      + '<br><span style="color:var(--text-muted);font-size:10px;">'
+                      + 'Actors: ' + escHtml((t.actors || []).join(', ') || 'none documented')
+                      + ' · Mitigations: ' + (t.mitigations || []).length
+                      + '</span></div>';
+                  }).join('');
+            }
+            mitreBtn.textContent = '🗂 Query MITRE STIX';
+            mitreBtn.disabled = false;
+          })
+          .catch(function () {
+            mitreBtn.textContent = '🗂 Query MITRE STIX';
+            mitreBtn.disabled = false;
+            toast('MITRE enrichment not available — endpoint pending implementation');
+          });
+      });
+    }
+
+    // Actor attribution — enable only after enrichment has run
+    var actorBtn = document.getElementById('br-intel-actor-query');
+    if (actorBtn) {
+      actorBtn.addEventListener('click', function () {
+        toast('Actor attribution requires analyst approval — submit for review');
+      });
+    }
+  }
+
   // ── Tab bar ───────────────────────────────────────────────────────────────────
 
   function updateTabBar(activeTab) {
@@ -3425,6 +3780,7 @@
       _tab('compliance', 'Compliance & Arch',        base + '&tab=compliance', activeTab),
       _tab('evidence',   'Evidence',                 base + '&tab=evidence',   activeTab),
       _tab('hopgraph',   'HopGraph',                 base + '&tab=hopgraph',   activeTab),
+      _tab('intel',      'Threat Intel',              base + '&tab=intel',      activeTab),
       '<div class="br-tabs__spacer"></div>',
       '<select class="br-model-select" id="br-model-select" title="LLM model for this session"><option disabled style="font-size:10px;color:#888">— model —</option>' + modelOpts + '</select>',
       '<a class="br-tab br-tab--secondary" href="/static/investigate.html' + base + '">Advanced Console →</a>',

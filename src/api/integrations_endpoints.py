@@ -997,6 +997,239 @@ async def webhook_test(request: Request, auth = Depends(require_scopes('admin'))
         entry['error'] = err
     return {'service': service, 'delivered': ok, 'error': err}
 
+# ── Stakeholder Dispatch (Persona-Aware) ─────────────────────────────────────
+# Maps dispatch roles to the existing 8-persona report system.
+# Each dispatch: (1) generates persona-specific summary, (2) logs audit entry,
+# (3) sends via configured webhook with structured content.
+
+import logging as _logging
+_dispatch_log = _logging.getLogger('dispatch.audit')
+
+_DISPATCH_ROLE_PERSONA: dict[str, str] = {
+    'soc_analyst':    'soc_analyst',
+    'ciso':           'ciso',
+    'executive':      'executive',
+    'threat_hunter':  'threat_hunter',
+    'forensics':      'forensics',
+    'compliance':     'compliance',
+}
+
+_DISPATCH_ROLE_CHANNEL: dict[str, str] = {
+    'soc_analyst':    'slack',
+    'ciso':           'slack',
+    'executive':      'slack',
+    'threat_hunter':  'slack',
+    'forensics':      'slack',
+    'compliance':     'slack',
+}
+
+_DISPATCH_SUMMARIES: dict[str, str] = {
+    'soc_analyst':   '🛡 *SOC Analyst Dispatch* — Assessment `{aid}` ({verdict})\n'
+                     '• *Triage focus:* {triage_focus}\n'
+                     '• *Priority:* {priority}\n'
+                     '• *Evidence:* {rows} rows across {sources} sources\n'
+                     '• *Containment options:* {containment}\n'
+                     '• *Actions required:* Confirm/deny/escalate triage. Execute containment playbook. Validate IOC scope.\n'
+                     '• *Report:* {report_url}',
+    'ciso':          '⚖ *CISO / Legal Dispatch* — Assessment `{aid}` ({verdict})\n'
+                     '• *Regulatory exposure:* {regulatory}\n'
+                     '• *Business impact:* {impact}\n'
+                     '• *Evidence:* {rows} rows across {sources} sources\n'
+                     '• *Actions required:* Assess NDB notification requirement. Evaluate GDPR Art.33 / SEC 8-K triggers.\n'
+                     '• *Report:* {report_url}',
+    'executive':     '📊 *Executive Dispatch* — Assessment `{aid}` ({verdict})\n'
+                     '• *Business impact:* {impact}\n'
+                     '• *Operational next step:* {next_step}\n'
+                     '• *Evidence:* {rows} rows across {sources} sources\n'
+                     '• *Actions required:* Approve containment spend. Authorise forensic engagement.\n'
+                     '• *Report:* {report_url}',
+    'threat_hunter': '🎯 *Threat Hunter Dispatch* — Assessment `{aid}` ({verdict})\n'
+                     '• *Kill chain:* {kill_chain_count} stages identified\n'
+                     '• *Hunt hypotheses:* {hypothesis_count}\n'
+                     '• *Evidence:* {rows} rows across {sources} sources\n'
+                     '• *Actions required:* Validate hypotheses. Run Sigma queries. Expand via pivot leads.\n'
+                     '• *Report:* {report_url}',
+    'forensics':     '🔬 *Forensics Dispatch* — Assessment `{aid}` ({verdict})\n'
+                     '• *Artifacts to collect:* {artifact_count}\n'
+                     '• *Evidence:* {rows} rows across {sources} sources\n'
+                     '• *Actions required:* Collect volatile artifacts (memory→disk→network). Preserve chain of custody.\n'
+                     '• *Report:* {report_url}',
+    'compliance':    '📋 *Compliance Dispatch* — Assessment `{aid}` ({verdict})\n'
+                     '• *Frameworks triggered:* {frameworks}\n'
+                     '• *Notification obligations:* {notifications}\n'
+                     '• *Evidence:* {rows} rows across {sources} sources\n'
+                     '• *Actions required:* Map control failures. Verify notification timeline. Update risk register.\n'
+                     '• *Report:* {report_url}',
+}
+
+# In-memory audit log (production would persist to DB)
+_dispatch_audit: list[dict[str, Any]] = []
+
+def _build_persona_summary(role: str, assessment_id: str, base_url: str) -> dict[str, Any]:
+    """Build persona-specific summary using the existing reporting system."""
+    persona = _DISPATCH_ROLE_PERSONA.get(role, 'soc_analyst')
+    report_url = f'{base_url}/api/v1/report/ingestion?format=html&persona={persona}&include_model=true&include_scenarios=true'
+
+    # Extract assessment data
+    verdict = 'CONFIRMED BREACH'
+    rows = '—'
+    sources = '—'
+    try:
+        from src.core.ingest import assessment_store  # type: ignore
+        rec = assessment_store.get(assessment_id)
+        if rec:
+            verdict = rec.get('verdict') or rec.get('overall_verdict') or verdict
+            rows = str(rec.get('total_rows') or rec.get('row_count') or '—')
+            sources = str(rec.get('source_count') or '—')
+    except Exception:
+        pass
+
+    # Base template data
+    data: dict[str, Any] = {
+        'aid': assessment_id,
+        'verdict': verdict,
+        'rows': rows,
+        'sources': sources,
+        'report_url': report_url,
+        'persona': persona,
+        # Defaults for persona-specific fields
+        'triage_focus': 'Review assessment findings',
+        'priority': 'HIGH',
+        'containment': 'Isolate affected endpoints',
+        'regulatory': 'Evaluation required',
+        'impact': 'Assessment pending review',
+        'next_step': 'Review executive summary',
+        'kill_chain_count': '0',
+        'hypothesis_count': '0',
+        'artifact_count': '0',
+        'frameworks': 'Evaluation required',
+        'notifications': 'Pending assessment',
+    }
+
+    # Try to generate real persona view data
+    try:
+        from src.reporting.persona_views import generate_persona_view
+        rec = None
+        try:
+            from src.core.ingest import assessment_store
+            rec = assessment_store.get(assessment_id)
+        except Exception:
+            pass
+        if rec:
+            view = generate_persona_view(rec, persona=persona, disclosure_level=2, top_n=5)
+            if persona == 'soc_analyst':
+                data['triage_focus'] = str(view.get('triage_focus', data['triage_focus']))[:200]
+                data['priority'] = str(view.get('priority', data['priority']))
+                co = view.get('containment_options') or []
+                data['containment'] = ', '.join(co[:3]) if co else data['containment']
+            elif persona == 'ciso':
+                re = view.get('regulatory_exposure') or {}
+                triggered = re.get('frameworks_triggered') or []
+                data['regulatory'] = ', '.join(triggered) if triggered else 'No frameworks triggered'
+                data['impact'] = str(view.get('business_impact') or data['impact'])[:200]
+            elif persona == 'executive':
+                data['impact'] = str(view.get('business_impact') or data['impact'])[:200]
+                data['next_step'] = str(view.get('operational_next_step') or data['next_step'])[:200]
+            elif persona == 'threat_hunter':
+                kcs = view.get('kill_chain_stages') or []
+                data['kill_chain_count'] = str(len(kcs))
+                hh = view.get('hunt_hypotheses') or []
+                data['hypothesis_count'] = str(len(hh))
+            elif persona == 'forensics':
+                arts = view.get('artifacts_to_collect') or []
+                data['artifact_count'] = str(len(arts))
+            elif persona == 'compliance':
+                fm = view.get('framework_mappings') or {}
+                data['frameworks'] = ', '.join(fm.keys()) if fm else data['frameworks']
+                no = view.get('notification_obligations') or []
+                data['notifications'] = ', '.join(str(n) for n in no[:3]) if no else data['notifications']
+    except Exception as exc:
+        _dispatch_log.warning('dispatch: persona view generation failed for %s: %s', role, exc)
+
+    tmpl = _DISPATCH_SUMMARIES.get(role, 'JanuSec notification for assessment `{aid}` — {report_url}')
+    text = tmpl.format(**data)
+    return {'text': text, 'data': data, 'report_url': report_url}
+
+
+@router.post('/api/v1/dispatch/notify')  # type: ignore[misc]
+async def dispatch_notify(request: Request, auth = Depends(require_scopes('admin'))) -> dict[str, Any]:
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail='bad_json')
+    role = (body or {}).get('role', '')
+    assessment_id = (body or {}).get('assessment_id', '')
+    requires_cab = bool((body or {}).get('requires_change_management', False))
+    if role not in _DISPATCH_ROLE_PERSONA:
+        raise HTTPException(status_code=400, detail='unknown_role')
+    if not assessment_id:
+        raise HTTPException(status_code=400, detail='missing_assessment_id')
+
+    # Determine base URL for report links
+    host = request.headers.get('host', 'localhost:8080')
+    scheme = request.headers.get('x-forwarded-proto', 'http')
+    base_url = f'{scheme}://{host}'
+
+    # Build persona-specific message
+    summary = _build_persona_summary(role, assessment_id, base_url)
+    text = summary['text']
+
+    # Add CAB/change management notice if flagged
+    if requires_cab:
+        text += '\n\n⚠ *Change Management Required* — Actions from this assessment require CAB review before execution.'
+
+    # Audit log entry
+    audit_entry = {
+        'ts': time.time(),
+        'role': role,
+        'persona': _DISPATCH_ROLE_PERSONA[role],
+        'assessment_id': assessment_id,
+        'requires_change_management': requires_cab,
+        'report_url': summary['report_url'],
+    }
+    _dispatch_audit.append(audit_entry)
+    _dispatch_log.info('dispatch: role=%s assessment=%s cab=%s', role, assessment_id, requires_cab)
+
+    # Route to configured channel
+    channel = _DISPATCH_ROLE_CHANNEL.get(role, 'slack')
+    entry = _STATE.get(channel, {})
+    env_key = {'slack': 'SLACK_WEBHOOK_URL', 'teams': 'TEAMS_WEBHOOK_URL'}.get(channel, '')
+    url = entry.get('webhook_url') or os.getenv(env_key, '')
+    if not url:
+        # Demo mode — return the full summary for UI preview
+        audit_entry['delivered'] = False
+        audit_entry['demo'] = True
+        return {
+            'role': role,
+            'persona': _DISPATCH_ROLE_PERSONA[role],
+            'channel': channel,
+            'delivered': False,
+            'demo': True,
+            'message': f'[DEMO] Persona report ready for {role.upper()}',
+            'text': text,
+            'report_url': summary['report_url'],
+            'requires_change_management': requires_cab,
+        }
+    ok, err = await _post_json(url, {'text': text})
+    audit_entry['delivered'] = ok
+    audit_entry['error'] = err
+    return {
+        'role': role,
+        'persona': _DISPATCH_ROLE_PERSONA[role],
+        'channel': channel,
+        'delivered': ok,
+        'error': err,
+        'message': f'Dispatched {role.upper()} persona report via {channel}' if ok else f'Failed: {err}',
+        'report_url': summary['report_url'],
+        'requires_change_management': requires_cab,
+    }
+
+
+@router.get('/api/v1/dispatch/audit')  # type: ignore[misc]
+async def dispatch_audit_log(request: Request, auth = Depends(require_scopes('admin'))) -> dict[str, Any]:
+    """Return dispatch audit trail for review."""
+    return {'entries': _dispatch_audit[-100:], 'total': len(_dispatch_audit)}
+
 # ---------------- Tenable / Qualys (specific endpoints declared before generic config route) ----------------
 
 @router.post('/api/v1/integrations/tenable/config')  # type: ignore[misc]
