@@ -165,6 +165,52 @@
       .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
 
+  // ── SVG icon library (Lucide-compatible inline SVGs) ──────────────────────
+  // All icons use stroke="currentColor" so they inherit text color from CSS.
+  var _ICONS = {
+    shield:       '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>',
+    scale:        '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 16l3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1z"/><path d="M2 16l3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1z"/><path d="M7 21h10"/><path d="M12 3v18"/><path d="M3 7h2c2 0 5-1 7-2 2 1 5 2 7 2h2"/></svg>',
+    'bar-chart':  '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/><line x1="2" y1="20" x2="22" y2="20"/></svg>',
+    crosshair:    '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="22" y1="12" x2="18" y2="12"/><line x1="6" y1="12" x2="2" y2="12"/><line x1="12" y1="6" x2="12" y2="2"/><line x1="12" y1="22" x2="12" y2="18"/></svg>',
+    microscope:   '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 18h8"/><path d="M3 22h18"/><path d="M14 22a7 7 0 1 0 0-14h-1"/><path d="M9 14h2"/><path d="M9 12a2 2 0 0 1-2-2V6h6v4a2 2 0 0 1-2 2z"/><path d="M12 6V3a1 1 0 0 0-1-1H9a1 1 0 0 0-1 1v3"/></svg>',
+    clipboard:    '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="m9 14 2 2 4-4"/></svg>',
+    'file-text':  '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>',
+    warning:      '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
+    check:        '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>',
+    x:            '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
+    upload:       '<svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/></svg>',
+    'refresh-cw': '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>',
+    'rotate-cw':  '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>',
+    cpu:          '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><line x1="9" y1="1" x2="9" y2="4"/><line x1="15" y1="1" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="23"/><line x1="15" y1="20" x2="15" y2="23"/><line x1="20" y1="9" x2="23" y2="9"/><line x1="20" y1="14" x2="23" y2="14"/><line x1="1" y1="9" x2="4" y2="9"/><line x1="1" y1="14" x2="4" y2="14"/></svg>',
+    // MITRE phase icons
+    'door-open':  '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 4h3a2 2 0 0 1 2 2v14"/><path d="M2 20h3"/><path d="M13 20h9"/><path d="M10 12v.01"/><path d="M13 4.562v16.157a1 1 0 0 1-1.242.97L5 20V5.562a2 2 0 0 1 1.515-1.94l4-1A2 2 0 0 1 13 4.561z"/></svg>',
+    zap:          '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>',
+    pin:          '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V17z"/></svg>',
+    unlock:       '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></svg>',
+    'arrows-lr':  '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3 4 7l4 4"/><path d="M4 7h16"/><path d="m16 21 4-4-4-4"/><path d="M20 17H4"/></svg>',
+    package:      '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="16.5" y1="9.4" x2="7.5" y2="4.21"/><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>',
+    'upload-c2':  '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/></svg>',
+    radio:        '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.9 19.1C1 15.2 1 8.8 4.9 4.9"/><path d="M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.5"/><circle cx="12" cy="12" r="2"/><path d="M16.2 7.8c2.3 2.3 2.3 6.1 0 8.5"/><path d="M19.1 4.9C23 8.8 23 15.1 19.1 19"/></svg>',
+    // DREAD icons
+    flame:        '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></svg>',
+    repeat:       '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>',
+    user:         '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>',
+    search:       '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>',
+    // PASTA icons
+    target:       '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>',
+    eye:          '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>',
+    activity:     '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>',
+    'send':       '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>',
+    'sparkles':   '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3z"/><path d="M5 3v4"/><path d="M19 17v4"/><path d="M3 5h4"/><path d="M17 19h4"/></svg>',
+  };
+
+  function _icon(name, cls) {
+    var svg = _ICONS[name] || '';
+    if (!svg) return '';
+    var c = cls ? ' class="br-icon ' + cls + '"' : ' class="br-icon"';
+    return '<span' + c + '>' + svg + '</span>';
+  }
+
   function _displayVerdict(v) {
     var raw = String(v || '').toUpperCase();
     if (raw === 'VALIDATED_BREACH' || raw === 'CONFIRMED_INTRUSION' || raw === 'CONFIRMED_BREACH') return 'CONFIRMED BREACH';
@@ -486,7 +532,7 @@
     document.getElementById('br-content').innerHTML = [
       '<div class="br-upload" data-testid="br-upload">',
       '  <div class="br-upload__zone" id="br-drop-zone" data-testid="br-drop-zone">',
-      '    <div class="br-upload__icon">⬆</div>',
+      '    <div class="br-upload__icon">' + _icon('upload') + '</div>',
       '    <div class="br-upload__title">Drop files to analyse</div>',
       '    <div class="br-upload__sub">.csv &nbsp;·&nbsp; .xlsx &nbsp;·&nbsp; .json &nbsp;·&nbsp; .log<br>Up to 3 files · 50 MB each</div>',
       '    <input type="file" id="br-file-input" data-testid="br-file-input" multiple accept=".csv,.xlsx,.json,.log" style="display:none">',
@@ -1221,15 +1267,15 @@
   }
 
   var _HERO_CONFIG = {
-    VALIDATED_BREACH:      { label: 'CONFIRMED BREACH',       bg: '#3d0a0a', border: '#e05252', text: '#ff9090', icon: '🔴' },
-    CONFIRMED_BREACH:      { label: 'CONFIRMED BREACH',       bg: '#3d0a0a', border: '#e05252', text: '#ff9090', icon: '🔴' },
-    CONFIRMED_INTRUSION:   { label: 'CONFIRMED INTRUSION',    bg: '#3d1a00', border: '#ff7c3c', text: '#ffb090', icon: '🟠' },
-    LIKELY_BREACH:         { label: 'LIKELY BREACH — REVIEW', bg: '#2a1500', border: '#ff8c00', text: '#ffb060', icon: '🟠' },
-    LIKELY_COMPROMISE:     { label: 'LIKELY COMPROMISE',      bg: '#2a2000', border: '#e0c446', text: '#ffe090', icon: '🟡' },
-    SUSPICIOUS_ACTIVITY:   { label: 'SUSPICIOUS ACTIVITY',    bg: '#1a2000', border: '#90ba55', text: '#c8e090', icon: '🟢' },
-    INVESTIGATION_REQUIRED:{ label: 'INVESTIGATION REQUIRED', bg: '#1a1a2a', border: '#6090d0', text: '#90b0f0', icon: '🔵' },
-    INSUFFICIENT_TELEMETRY:{ label: 'INSUFFICIENT TELEMETRY', bg: '#1a1a2a', border: '#6090d0', text: '#90b0f0', icon: '🔵' },
-    BENIGN_EXPECTED:       { label: 'NO VALIDATED BREACH',    bg: '#0d1a0d', border: '#52e07f', text: '#90f0b0', icon: '✅' },
+    VALIDATED_BREACH:      { label: 'CONFIRMED BREACH',       bg: '#3d0a0a', border: '#e05252', text: '#ff9090', icon: '<span class="br-vdot br-vdot--red" aria-label="Confirmed Breach"></span>' },
+    CONFIRMED_BREACH:      { label: 'CONFIRMED BREACH',       bg: '#3d0a0a', border: '#e05252', text: '#ff9090', icon: '<span class="br-vdot br-vdot--red" aria-label="Confirmed Breach"></span>' },
+    CONFIRMED_INTRUSION:   { label: 'CONFIRMED INTRUSION',    bg: '#3d1a00', border: '#ff7c3c', text: '#ffb090', icon: '<span class="br-vdot br-vdot--orange" aria-label="Confirmed Intrusion"></span>' },
+    LIKELY_BREACH:         { label: 'LIKELY BREACH — REVIEW', bg: '#2a1500', border: '#ff8c00', text: '#ffb060', icon: '<span class="br-vdot br-vdot--orange" aria-label="Likely Breach"></span>' },
+    LIKELY_COMPROMISE:     { label: 'LIKELY COMPROMISE',      bg: '#2a2000', border: '#e0c446', text: '#ffe090', icon: '<span class="br-vdot br-vdot--yellow" aria-label="Likely Compromise"></span>' },
+    SUSPICIOUS_ACTIVITY:   { label: 'SUSPICIOUS ACTIVITY',    bg: '#1a2000', border: '#90ba55', text: '#c8e090', icon: '<span class="br-vdot br-vdot--green" aria-label="Suspicious Activity"></span>' },
+    INVESTIGATION_REQUIRED:{ label: 'INVESTIGATION REQUIRED', bg: '#1a1a2a', border: '#6090d0', text: '#90b0f0', icon: '<span class="br-vdot br-vdot--blue" aria-label="Investigation Required"></span>' },
+    INSUFFICIENT_TELEMETRY:{ label: 'INSUFFICIENT TELEMETRY', bg: '#1a1a2a', border: '#6090d0', text: '#90b0f0', icon: '<span class="br-vdot br-vdot--blue" aria-label="Insufficient Telemetry"></span>' },
+    BENIGN_EXPECTED:       { label: 'NO VALIDATED BREACH',    bg: '#0d1a0d', border: '#52e07f', text: '#90f0b0', icon: '<span class="br-vdot br-vdot--teal" aria-label="No Breach"></span>' },
   };
 
   function _confidenceLabel(total, isBreachVerdict) {
@@ -1388,14 +1434,14 @@
     });
 
     var _PHASE_LABELS = {
-      initial_access: { icon: '🚪', label: 'Initial Access' },
-      execution: { icon: '⚡', label: 'Execution' },
-      persistence: { icon: '📌', label: 'Persistence' },
-      privilege_escalation: { icon: '🔓', label: 'Privilege Escalation' },
-      lateral_movement: { icon: '↔', label: 'Lateral Movement' },
-      collection: { icon: '📦', label: 'Collection' },
-      exfiltration: { icon: '📤', label: 'Exfiltration' },
-      command_and_control: { icon: '📡', label: 'Command & Control' },
+      initial_access: { icon: _icon('door-open'), label: 'Initial Access' },
+      execution: { icon: _icon('zap'), label: 'Execution' },
+      persistence: { icon: _icon('pin'), label: 'Persistence' },
+      privilege_escalation: { icon: _icon('unlock'), label: 'Privilege Escalation' },
+      lateral_movement: { icon: _icon('arrows-lr'), label: 'Lateral Movement' },
+      collection: { icon: _icon('package'), label: 'Collection' },
+      exfiltration: { icon: _icon('upload-c2'), label: 'Exfiltration' },
+      command_and_control: { icon: _icon('radio'), label: 'Command & Control' },
     };
 
     var rows = phases.map(function (step, idx) {
@@ -1733,7 +1779,7 @@
       '  <div class="br-exec__color" id="br-exec-color"></div>',
       '  <div class="br-exec__footer">',
       '    <span class="br-exec__model" id="br-exec-model"></span>',
-      '    <span class="br-exec__regen" id="br-exec-regen">[regenerate ↻]</span>',
+      '    <span class="br-exec__regen" id="br-exec-regen">' + _icon('refresh-cw') + ' regenerate</span>',
       '  </div>',
       '</div>',
     ].join('');
@@ -1945,7 +1991,7 @@
 
     var html = '<div class="br-actions-banner" data-testid="br-actions-banner">';
     html += '<div class="br-actions-banner__summary" id="br-actions-toggle" style="cursor:pointer;">';
-    html += '  <span class="br-actions-banner__icon">⚠</span>';
+    html += '  <span class="br-actions-banner__icon">' + _icon('warning') + '</span>';
     html += '  <span class="br-actions-banner__count">' + pending.length + ' action' + (pending.length > 1 ? 's' : '') + ' awaiting approval</span>';
     html += '  <span class="br-actions-banner__hint" id="br-actions-caret">[Review ▸]</span>';
     html += '</div>';
@@ -1981,7 +2027,7 @@
           ? Math.round(a.deadline_hours / 24) + ' days'
           : a.deadline_hours + 'h';
         html += '<div class="br-actions-banner__row br-actions-banner__row--escalate">';
-        html += '  <div class="br-actions-banner__escalate-icon">⚖</div>';
+        html += '  <div class="br-actions-banner__escalate-icon">' + _icon('scale') + '</div>';
         html += '  <div class="br-actions-banner__body">';
         html += '    <div class="br-actions-banner__title">REGULATORY ACTION REQUIRED<br>' + escHtml(a.action_type || '') + ' — ' + escHtml(a.description || '') + '</div>';
         html += '    <div class="br-actions-banner__meta">→ ' + escHtml(a.recipient || 'Legal') + ' · within ' + escHtml(deadline) + (a.citation ? ' · ' + escHtml(a.citation) : '') + '</div>';
@@ -2001,8 +2047,8 @@
   function _renderActionRow() {
     return [
       '<div class="br-action-row" data-testid="br-action-row">',
-      '  <button class="br-action-row__drilldown" id="br-toggle-drilldown" data-testid="br-toggle-drilldown">▸ Investigation details</button>',
-      '  <button class="br-action-row__deepen" id="br-deepen-btn" data-testid="br-deepen-btn">⟳ Deepen investigation</button>',
+      '  <button class="br-action-row__drilldown" id="br-toggle-drilldown" data-testid="br-toggle-drilldown">' + _icon('search') + ' Investigation details</button>',
+      '  <button class="br-action-row__deepen" id="br-deepen-btn" data-testid="br-deepen-btn">' + _icon('rotate-cw') + ' Deepen investigation</button>',
       '</div>',
     ].join('');
   }
@@ -2013,20 +2059,26 @@
   // requires confirmation before sending, and logs an audit entry.
 
   var _STAKEHOLDER_ROLES = [
-    { key: 'soc_analyst',    icon: '🛡',  label: 'SOC Analyst',     persona: 'soc_analyst',    desc: 'Triage focus, containment options, IOCs, decision tree, priority',
+    { key: 'soc_analyst',    icon: _icon('shield'),    label: 'SOC Analyst',  persona: 'soc_analyst',
+      desc: 'Triage focus, containment options, IOCs, decision tree, priority',
       actions: 'Confirm/deny/escalate triage. Execute containment playbook. Validate IOC scope.' },
-    { key: 'ciso',           icon: '⚖',  label: 'CISO / Legal',    persona: 'ciso',           desc: 'Regulatory exposure, ISMS risk treatment, NDB obligations',
+    { key: 'ciso',           icon: _icon('scale'),     label: 'CISO / Legal', persona: 'ciso',
+      desc: 'Regulatory exposure, compliance control gaps, NDB/GDPR obligations',
       actions: 'Assess NDB notification requirement. Evaluate GDPR Art.33 / SEC 8-K triggers. Approve regulatory disclosure.' },
-    { key: 'executive',      icon: '📊', label: 'Executive',        persona: 'executive',      desc: 'Business impact, plain-English narrative, operational next steps',
+    { key: 'executive',      icon: _icon('bar-chart'), label: 'Executive',    persona: 'executive',
+      desc: 'Business impact, plain-English narrative, operational next steps',
       actions: 'Approve containment spend. Communicate to board if material. Authorise forensic engagement.' },
-    { key: 'threat_hunter',  icon: '🎯', label: 'Threat Hunter',    persona: 'threat_hunter',  desc: 'Kill chain stages, Sigma rules, hunt hypotheses, pivot leads',
+    { key: 'threat_hunter',  icon: _icon('crosshair'), label: 'Threat Hunter', persona: 'threat_hunter',
+      desc: 'Kill chain stages, Sigma rules, hunt hypotheses, pivot leads',
       actions: 'Validate hypotheses. Run Sigma queries. Expand scope via pivot leads. Confirm kill chain completeness.' },
-    { key: 'forensics',      icon: '🔬', label: 'Forensics',        persona: 'forensics',      desc: 'Artifact collection order, proof-of-execution, chain of custody',
-      actions: 'Collect volatile artifacts (memory → disk → network). Preserve chain of custody. Document proof-of-execution.' },
-    { key: 'compliance',     icon: '📋', label: 'Compliance',       persona: 'compliance',     desc: 'Framework mappings (NIST/SOC2/ISO), audit trail, notification obligations',
-      actions: 'Map control failures to frameworks. Verify notification timeline. Update risk register.' },
-    { key: 'export',         icon: '📄', label: 'Full Report',      persona: null,             desc: 'Complete multi-persona HTML report',
-      actions: null },
+    { key: 'forensics',      icon: _icon('microscope'), label: 'Forensics',   persona: 'forensics',
+      desc: 'Artifact collection order, proof-of-execution, chain of custody',
+      actions: 'Collect volatile artifacts (memory \u2192 disk \u2192 network). Preserve chain of custody. Document proof-of-execution.' },
+    { key: 'compliance',     icon: _icon('clipboard'), label: 'Compliance',   persona: 'compliance',
+      desc: 'Framework control gaps (NIST/SOC2/ISO/Privacy Act), audit trail, GRC evidence',
+      actions: 'Map control failures to frameworks. Verify notification timeline. Update risk register. Prepare GRC audit evidence.' },
+    { key: 'export',         icon: _icon('file-text'), label: 'Full Report',  persona: null,
+      desc: 'Complete multi-persona HTML report', actions: null },
   ];
 
   function _renderStakeholderDispatch(assessment) {
@@ -2354,11 +2406,11 @@
 
     // ── DREAD ── evidence narrative fragments first; numeric detail strings as fallback
     var DREAD_DIMS = [
-      { fk: 'damage',          dk: 'damage_detail',          icon: '\uD83D\uDCA5', label: 'DAMAGE',          sub: 'What broke, what\u2019s at risk, and how far it spread (blast radius)' },
-      { fk: 'reproducibility', dk: 'reproducibility_detail', icon: '\uD83D\uDD01', label: 'REPRODUCIBILITY', sub: 'Why this can happen again right now and what\u2019s still exposed' },
-      { fk: 'exploitability',  dk: 'exploitability_detail',  icon: '\u26A1',        label: 'EXPLOITABILITY',  sub: 'The attack vector, control gap exploited, and why people should care' },
-      { fk: 'affected_users',  dk: 'affected_users_detail',  icon: '\uD83D\uDC64', label: 'AFFECTED USERS',  sub: 'Who was hit, their access level, and any privilege abuse or lateral movement' },
-      { fk: 'discoverability', dk: 'discoverability_detail', icon: '\uD83D\uDD0D', label: 'DISCOVERABILITY', sub: 'What was visible, what was misconfigured, and mean time to detect' }
+      { fk: 'damage',          dk: 'damage_detail',          icon: _icon('flame'),   label: 'DAMAGE',          sub: 'What broke, what\u2019s at risk, and how far it spread (blast radius)' },
+      { fk: 'reproducibility', dk: 'reproducibility_detail', icon: _icon('repeat'),  label: 'REPRODUCIBILITY', sub: 'Why this can happen again right now and what\u2019s still exposed' },
+      { fk: 'exploitability',  dk: 'exploitability_detail',  icon: _icon('zap'),     label: 'EXPLOITABILITY',  sub: 'The attack vector, control gap exploited, and why people should care' },
+      { fk: 'affected_users',  dk: 'affected_users_detail',  icon: _icon('user'),    label: 'AFFECTED USERS',  sub: 'Who was hit, their access level, and any privilege abuse or lateral movement' },
+      { fk: 'discoverability', dk: 'discoverability_detail', icon: _icon('search'),  label: 'DISCOVERABILITY', sub: 'What was visible, what was misconfigured, and mean time to detect' }
     ];
     var dreadBlocks = DREAD_DIMS
       .map(function(dim) { return { dim: dim, text: frags[dim.fk] || ds[dim.dk] || '' }; })
@@ -2368,10 +2420,10 @@
     // ── PASTA ── plain-language attack narrative
     var pasta = p.pasta_summary || {};
     var PASTA_DIMS = [
-      { key: 'objective',         icon: '\uD83C\uDFAF', label: 'OBJECTIVE',       sub: 'What the attacker was trying to achieve' },
-      { key: 'threat_profile',    icon: '\uD83D\uDD75\uFE0F', label: 'THREAT ACTOR',    sub: 'Who or what was behind this and their motivation' },
-      { key: 'exploitation_path', icon: '\uD83D\uDD13', label: 'HOW THEY GOT IN', sub: 'The exploitation path and control gaps used' },
-      { key: 'business_impact',   icon: '\uD83D\uDCCB', label: 'BUSINESS IMPACT', sub: 'What this means for operations and compliance' }
+      { key: 'objective',         icon: _icon('target'),    label: 'OBJECTIVE',       sub: 'What the attacker was trying to achieve' },
+      { key: 'threat_profile',    icon: _icon('eye'),       label: 'THREAT ACTOR',    sub: 'Who or what was behind this and their motivation' },
+      { key: 'exploitation_path', icon: _icon('unlock'),    label: 'HOW THEY GOT IN', sub: 'The exploitation path and control gaps used' },
+      { key: 'business_impact',   icon: _icon('activity'),  label: 'BUSINESS IMPACT', sub: 'What this means for operations and compliance' }
     ];
     var pastaBlocks = PASTA_DIMS
       .filter(function(dim) { return pasta[dim.key]; })
@@ -2420,7 +2472,7 @@
       // button that may be hidden by the dreadInfo.has guard.
       var _cid = escHtml(cluster.cluster_id || '');
       return '<div class="br-threat-model br-threat-model--empty">'
-        + '<span class="br-tm__block-icon">\uD83E\uDDE0</span>'
+        + '<span class="br-tm__block-icon">' + _icon('cpu') + '</span>'
         + '<div style="flex:1">'
         + '<div class="br-tm__empty-title">Threat narrative not yet generated</div>'
         + '<div class="br-tm__hint">Structured DREAD \u00b7 PASTA \u00b7 Diamond analysis will be built from evidence rows by the multi-agent reasoning engine.</div>'
@@ -2576,7 +2628,7 @@
       dreadInfo.hasStructured
         ? '    <button class="br-finding__gen br-finding__gen--dread" data-gen-dread="' + escHtml(cluster.cluster_id) + '"'
           + ' title="Re-run: Sequence-aware \u00b7 Adversarial \u00b7 CorrectiveRAG \u00b7 TemporalRAG">'
-          + '      \uD83E\uDDE0 Regenerate Threat Summary'
+          + '      ' + _icon('cpu') + ' Regenerate Threat Summary'
           + '    </button>'
         : '',
       '    <button class="br-card__open" onclick="window.open(\'/static/breach.html?cluster=' + encodeURIComponent(cluster.cluster_id) + '&assessment=' + encodeURIComponent(AID) + '\', \'_blank\')">',
@@ -2804,7 +2856,7 @@
         var dcid = btnDread.getAttribute('data-gen-dread');
         btnDread.disabled = true;
         var _isRegen = btnDread.classList.contains('br-regen-btn');
-        btnDread.textContent = _isRegen ? '↻ …' : '\uD83E\uDDE0 Generating…';
+        btnDread.innerHTML = _isRegen ? _icon('refresh-cw') + ' Regenerating&hellip;' : _icon('cpu') + ' Generating&hellip;';
         _fireDreadGenerate(dcid, function () {
           var resorted = _rankClusters(
             (state.threatCases && state.threatCases.length > 0) ? state.threatCases : state.clusters
@@ -2818,11 +2870,11 @@
     // Exec summary regenerate
     var regen = document.getElementById('br-exec-regen');
     if (regen) regen.addEventListener('click', function () {
-      regen.textContent = '[regenerating…]';
+      regen.innerHTML = _icon('refresh-cw') + ' regenerating…';
       regen.style.opacity = '0.5';
       regen.style.pointerEvents = 'none';
       _loadExecSummary(true, function () {
-        regen.textContent = '[regenerate ↻]';
+        regen.innerHTML = _icon('refresh-cw') + ' regenerate';
         regen.style.opacity = '';
         regen.style.pointerEvents = '';
       });
@@ -2921,7 +2973,7 @@
     if (deepenBtn) {
       deepenBtn.addEventListener('click', function () {
         deepenBtn.disabled = true;
-        deepenBtn.textContent = '⟳ Investigating…';
+        deepenBtn.innerHTML = _icon('rotate-cw') + ' Investigating…';
         apiPost('/api/v1/assessments/' + encodeURIComponent(AID) + '/investigate/build', {})
           .then(function (r) { return r.json(); })
           .then(function (result) {
@@ -2932,9 +2984,8 @@
               state.assessment.kill_chain = result.kill_chain || [];
               state.assessment.gaps = result.gaps || [];
             }
-            deepenBtn.textContent = '⟳ Deepen investigation';
+            deepenBtn.innerHTML = _icon('rotate-cw') + ' Deepen investigation';
             deepenBtn.disabled = false;
-            // Refresh the page with updated data
             var newActions = (result && result.proposed_actions) ? result.proposed_actions.length : 0;
             var newFindings = (result && result.total_findings_verified) || 0;
             toast('Analysis updated: ' + newFindings + ' findings, ' + newActions + ' pending actions');
@@ -2942,7 +2993,7 @@
           })
           .catch(function (err) {
             console.error('Deepen investigation failed', err);
-            deepenBtn.textContent = '⟳ Deepen investigation';
+            deepenBtn.innerHTML = _icon('rotate-cw') + ' Deepen investigation';
             deepenBtn.disabled = false;
             toast('Investigation failed — check connection');
           });
@@ -2966,7 +3017,8 @@
 
       // Export: open full multi-persona report
       if (role === 'export') {
-        window.open('/api/v1/report/ingestion?format=html&include_model=true&include_scenarios=true', '_blank');
+        window.open('/api/v1/report/ingestion?format=html&include_model=true&include_scenarios=true'
+          + (AID ? '&assessment_id=' + encodeURIComponent(AID) : ''), '_blank');
         return;
       }
 
@@ -2974,22 +3026,42 @@
       var preview = document.getElementById('br-dispatch-preview');
       if (!preview) return;
       var personaUrl = '/api/v1/report/ingestion?format=html&persona=' + encodeURIComponent(roleDef.persona)
-        + '&include_model=true&include_scenarios=true';
+        + '&include_model=true&include_scenarios=true'
+        + (AID ? '&assessment_id=' + encodeURIComponent(AID) : '');
+
+      // Build delivery channel options (populated from integration config if available)
+      var channelOpts = [
+        '<option value="auto">Auto (configured channel)</option>',
+        '<option value="slack">Slack</option>',
+        '<option value="teams">Microsoft Teams</option>',
+        '<option value="email">Email</option>',
+        '<option value="copy">Copy to clipboard</option>',
+      ].join('');
 
       preview.style.display = 'block';
       preview.innerHTML = [
         '<div class="br-dispatch__preview-head">',
-        '  <span>' + roleDef.icon + '</span>',
-        '  <strong>DISPATCH PREVIEW — ' + escHtml(roleDef.label).toUpperCase() + '</strong>',
+        '  <span class="br-dispatch__preview-persona-icon">' + roleDef.icon + '</span>',
+        '  <strong>DISPATCH PREVIEW \u2014 ' + escHtml(roleDef.label).toUpperCase() + '</strong>',
         '</div>',
         '<div class="br-dispatch__preview-body">',
         '  <div class="br-dispatch__preview-section">',
         '    <div class="br-dispatch__preview-label">What they receive</div>',
-        '    <div>' + escHtml(roleDef.desc) + '</div>',
+        '    <div class="br-dispatch__preview-desc">' + escHtml(roleDef.desc) + '</div>',
         '  </div>',
         '  <div class="br-dispatch__preview-section">',
         '    <div class="br-dispatch__preview-label">Required actions</div>',
-        '    <div>' + escHtml(roleDef.actions) + '</div>',
+        '    <div class="br-dispatch__preview-desc">' + escHtml(roleDef.actions) + '</div>',
+        '  </div>',
+        '  <div class="br-dispatch__preview-section">',
+        '    <div class="br-dispatch__preview-label">Delivery channel</div>',
+        '    <div class="br-dispatch__channel-row">',
+        '      <select id="br-dispatch-channel" class="br-dispatch__channel-select">',
+        channelOpts,
+        '      </select>',
+        '      <input type="email" id="br-dispatch-email" class="br-dispatch__email-input"',
+        '             placeholder="or enter email address\u2026" autocomplete="email">',
+        '    </div>',
         '  </div>',
         '  <div class="br-dispatch__preview-section">',
         '    <div class="br-dispatch__preview-label">Approval requirements</div>',
@@ -2999,53 +3071,88 @@
         '      </label>',
         '    </div>',
         '  </div>',
-        '  <div class="br-dispatch__preview-section" style="font-size:11px;color:var(--text-muted);">',
-        '    ⚠ Dispatch is logged and auditable. The persona report contains assessment-derived IOCs, verdicts, and recommended actions. Verify the recipient channel is secure before confirming.',
+        '  <div class="br-dispatch__preview-section br-dispatch__preview-notice">',
+        '    ' + _icon('warning') + ' Dispatch is logged and auditable. Verify the recipient channel is secure before confirming.',
         '  </div>',
         '  <div class="br-dispatch__preview-actions">',
         '    <a class="br-dispatch__btn br-dispatch__btn--export" id="br-dispatch-preview-link"',
         '       href="' + personaUrl + '" target="_blank" style="text-decoration:none;">',
-        '      📄 Preview ' + escHtml(roleDef.label) + ' Report',
+        '      ' + _icon('file-text') + ' Preview ' + escHtml(roleDef.label) + ' Report',
         '    </a>',
-        '    <button class="br-dispatch__btn" style="border-color:rgba(45,212,191,.3);color:#2dd4bf;"',
-        '            id="br-dispatch-confirm" data-confirm-role="' + role + '">',
-        '      ✓ Confirm & Send to ' + escHtml(roleDef.label),
+        '    <button class="br-dispatch__btn br-dispatch__btn--deep" id="br-dispatch-deep"',
+        '            data-deep-role="' + role + '" title="Generate a comprehensive evidence-backed report using LLM reasoning">',
+        '      ' + _icon('sparkles') + ' Generate Deep Report',
         '    </button>',
-        '    <button class="br-dispatch__btn" id="br-dispatch-cancel" style="color:var(--text-muted);">',
-        '      ✗ Cancel',
+        '    <button class="br-dispatch__btn br-dispatch__btn--confirm" style="border-color:rgba(45,212,191,.3);color:#2dd4bf;"',
+        '            id="br-dispatch-confirm" data-confirm-role="' + role + '">',
+        '      ' + _icon('send') + ' Confirm &amp; Send to ' + escHtml(roleDef.label),
+        '    </button>',
+        '    <button class="br-dispatch__btn br-dispatch__btn--cancel" id="br-dispatch-cancel" style="color:var(--text-muted);">',
+        '      ' + _icon('x') + ' Cancel',
         '    </button>',
         '  </div>',
         '</div>',
       ].join('');
     });
 
-    // Step 3: Confirm dispatch — send the notification
+    // Step 3a: Generate Deep Report (opens evidence-backed assessment report)
+    document.getElementById('br-content').addEventListener('click', function (e) {
+      var deepBtn = e.target.closest('#br-dispatch-deep');
+      if (!deepBtn) return;
+      var role = deepBtn.getAttribute('data-deep-role');
+      var roleDef = _STAKEHOLDER_ROLES.filter(function (r) { return r.key === role; })[0];
+      if (!roleDef || !roleDef.persona) return;
+      var deepUrl = '/api/v1/report/ingestion?format=html&persona=' + encodeURIComponent(roleDef.persona)
+        + '&include_model=true&include_scenarios=true&deep=true'
+        + (AID ? '&assessment_id=' + encodeURIComponent(AID) : '');
+      deepBtn.disabled = true;
+      deepBtn.innerHTML = _icon('rotate-cw') + ' Generating&hellip;';
+      // Open immediately; backend generates async
+      window.open(deepUrl, '_blank');
+      setTimeout(function () {
+        deepBtn.disabled = false;
+        deepBtn.innerHTML = _icon('sparkles') + ' Generate Deep Report';
+      }, 2000);
+    });
+
+    // Step 3b: Confirm dispatch — send the notification
     document.getElementById('br-content').addEventListener('click', function (e) {
       var confirmBtn = e.target.closest('#br-dispatch-confirm');
       if (confirmBtn) {
         var role = confirmBtn.getAttribute('data-confirm-role');
         var requiresCab = document.getElementById('br-dispatch-change-mgmt');
         var cabRequired = requiresCab && requiresCab.checked;
+        var channelEl = document.getElementById('br-dispatch-channel');
+        var emailEl = document.getElementById('br-dispatch-email');
+        var channel = (channelEl && channelEl.value) || 'auto';
+        var recipientEmail = (emailEl && emailEl.value.trim()) || '';
         confirmBtn.disabled = true;
-        confirmBtn.textContent = 'Dispatching…';
+        confirmBtn.innerHTML = _icon('rotate-cw') + ' Dispatching&hellip;';
         apiPost('/api/v1/dispatch/notify', {
           assessment_id: AID,
           role: role,
-          channel: 'auto',
+          channel: channel,
+          recipient_email: recipientEmail || undefined,
           requires_change_management: cabRequired,
         })
         .then(function (r) { return r.json(); })
         .then(function (result) {
-          confirmBtn.textContent = '✓ Dispatched';
+          var isDemo = result && result.demo;
+          confirmBtn.innerHTML = _icon('check') + ' Dispatched' + (isDemo ? ' (demo)' : '');
           toast((result && result.message) || 'Persona report dispatched to ' + role.toUpperCase());
+          // Show report URL if returned
+          if (result && result.report_url) {
+            var link = document.getElementById('br-dispatch-preview-link');
+            if (link) link.href = result.report_url;
+          }
           setTimeout(function () {
             var preview = document.getElementById('br-dispatch-preview');
             if (preview) preview.style.display = 'none';
-          }, 2000);
+          }, 2500);
         })
         .catch(function () {
           confirmBtn.disabled = false;
-          confirmBtn.textContent = '✓ Confirm & Send';
+          confirmBtn.innerHTML = _icon('send') + ' Confirm &amp; Send';
           toast('Dispatch failed — check integrations');
         });
         return;

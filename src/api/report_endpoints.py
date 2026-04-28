@@ -79,6 +79,104 @@ _STREAM_THRESHOLD = int(__import__('os').environ.get('REPORT_STREAM_THRESHOLD_BY
 
 router = APIRouter()
 
+# ── GRC compliance pre-fill: maps MITRE techniques → control frameworks ──────
+
+_MITRE_CONTROL_MAP: dict[str, list[dict]] = {
+    'T1110': [
+        {'framework': 'ISO 27001', 'control': 'A.9.4.3', 'title': 'Password management system'},
+        {'framework': 'NIST CSF',  'control': 'PR.AC-7', 'title': 'Users/devices authenticated commensurate with risk'},
+        {'framework': 'SOC 2',     'control': 'CC6.1',   'title': 'Logical access security measures'},
+        {'framework': 'Privacy Act 1988', 'control': 'Part IIIC NDB Scheme', 'title': '72h mandatory notification if credentials exfiltrated'},
+    ],
+    'T1621': [
+        {'framework': 'ISO 27001', 'control': 'A.9.4.2', 'title': 'Secure log-on procedures — MFA required'},
+        {'framework': 'NIST CSF',  'control': 'PR.AC-7', 'title': 'Adaptive MFA policy absent'},
+        {'framework': 'SOC 2',     'control': 'CC6.1',   'title': 'MFA bypass not blocked by policy'},
+    ],
+    'T1114': [
+        {'framework': 'ISO 27001', 'control': 'A.13.2.1', 'title': 'Information transfer policies'},
+        {'framework': 'SOC 2',     'control': 'CC6.7',    'title': 'Transmission/disposal controls'},
+        {'framework': 'GDPR',      'control': 'Art. 33',  'title': '72h supervisory authority notification'},
+        {'framework': 'Privacy Act 1988', 'control': 'Part IIIC NDB Scheme', 'title': 'Notification if PI exfiltrated'},
+    ],
+    'T1567': [
+        {'framework': 'ISO 27001', 'control': 'A.13.2.3', 'title': 'Electronic messaging controls'},
+        {'framework': 'NIST CSF',  'control': 'DE.CM-1',  'title': 'Network communications monitored'},
+        {'framework': 'SOC 2',     'control': 'CC7.2',    'title': 'System monitoring — data exfil detection'},
+    ],
+    'T1071': [
+        {'framework': 'NIST CSF',  'control': 'DE.CM-1',  'title': 'Network monitored for C2'},
+        {'framework': 'ISO 27001', 'control': 'A.13.1.1', 'title': 'Network controls — anomalous traffic'},
+    ],
+    'T1078': [
+        {'framework': 'ISO 27001', 'control': 'A.9.2.3', 'title': 'Privileged access management'},
+        {'framework': 'NIST CSF',  'control': 'PR.AC-4', 'title': 'Access permissions managed'},
+        {'framework': 'SOC 2',     'control': 'CC6.3',   'title': 'Role-based access controls'},
+    ],
+    'T1059': [
+        {'framework': 'CIS',       'control': 'CIS 4',   'title': 'Secure configuration of assets'},
+        {'framework': 'NIST CSF',  'control': 'PR.PT-3', 'title': 'Principle of least functionality'},
+    ],
+}
+
+_SABSA_LAYERS = [
+    ('Contextual (Why)', 'Business drivers and risk appetite — what are the fiduciary duties and breach notification obligations?'),
+    ('Conceptual (What)', 'Security policy intent — risk appetite for credential exposure and data exfiltration'),
+    ('Logical (How)', 'Security services design — MFA policy, DLP rules, mail flow controls, alert thresholds'),
+    ('Physical (With What)', 'Specific technology controls — Okta MFA, Exchange transport rules, SIEM correlation rules, NSG flow logs'),
+    ('Component (Implementation)', 'Artefacts to evidence — BCC rule JSON, MFA event logs, DNS query logs, Defender telemetry'),
+]
+
+
+def _build_grc_prefill(assessment: dict) -> dict:
+    """Build a GRC compliance pre-fill block from assessment data.
+
+    Extracts MITRE techniques from all clusters, maps them to control frameworks,
+    identifies gaps, and structures SABSA architectural evidence requirements.
+    """
+    techniques: set[str] = set()
+    for cluster in (assessment.get('clusters') or []):
+        p = cluster.get('tier1_prefill') or {}
+        for t in (p.get('mitre_techniques') or []):
+            tid = str(t).upper()[:7].replace(' ', '').split('-')[0]
+            if tid.startswith('T'):
+                techniques.add(tid)
+        for t in (cluster.get('top_mitre') or []):
+            tid = str(t).upper()[:7].replace(' ', '').split('-')[0]
+            if tid.startswith('T'):
+                techniques.add(tid)
+
+    control_gaps: list[dict] = []
+    seen_ctrl: set[str] = set()
+    for tid in sorted(techniques):
+        for t_prefix, controls in _MITRE_CONTROL_MAP.items():
+            if tid.startswith(t_prefix):
+                for ctrl in controls:
+                    key = ctrl['framework'] + '|' + ctrl['control']
+                    if key not in seen_ctrl:
+                        seen_ctrl.add(key)
+                        control_gaps.append({
+                            'technique': tid,
+                            **ctrl,
+                        })
+
+    # Identify notification obligations
+    notification_triggers: list[str] = []
+    verdict = str(assessment.get('verdict') or '').upper()
+    if 'BREACH' in verdict or 'INTRUSION' in verdict or 'COMPROMISE' in verdict:
+        notification_triggers.append('Privacy Act 1988 (Cth) Part IIIC — NDB Scheme: notify OAIC + affected individuals within 72 hours')
+        notification_triggers.append('GDPR Art. 33 — Notify supervisory authority within 72 hours if EU personal data affected')
+        notification_triggers.append('ASX Listing Rules 3.1 — Continuous disclosure if financially material')
+        notification_triggers.append('SEC Rule 10b-5 / Form 8-K — Disclose if material to investors')
+
+    return {
+        'techniques': sorted(techniques),
+        'control_gaps': control_gaps,
+        'notification_triggers': notification_triggers,
+        'sabsa_layers': _SABSA_LAYERS,
+        'frameworks_triggered': sorted({c['framework'] for c in control_gaps}),
+    }
+
 
 def _parse_sessions_param(raw: str | None) -> list[str]:
     if not raw:
@@ -278,12 +376,30 @@ async def report_ingestion(
     recipients: str | None = Query(None),
     tenant: str | None = Query(None),
     persist: bool = Query(True),
+    assessment_id: str | None = Query(None),
+    deep: bool = Query(False),
 ) -> Any:
     fmt = (format or 'html').strip().lower()
     session_ids = _parse_sessions_param(sessions)
     persona_selected = _persona_from_variant(variant, persona)
     tenant_id = resolve_tenant_id(request, tenant or request.headers.get('X-Tenant-ID') or request.headers.get('x-tenant-id'))
     state = get_platform_state()
+
+    # When assessment_id is provided, enrich the report with assessment-specific data
+    assessment_data: dict = {}
+    if assessment_id:
+        try:
+            from src.api.breach_endpoints import REPORT_STORE  # type: ignore
+            assessment_data = REPORT_STORE.get(assessment_id) or {}
+        except Exception:
+            pass
+        if not assessment_data:
+            try:
+                from src.core.ingest import assessment_store  # type: ignore
+                assessment_data = assessment_store.get(assessment_id) or {}
+            except Exception:
+                pass
+
     report = build_ingestion_report(
         session_ids,
         include_alerts,
@@ -297,6 +413,27 @@ async def report_ingestion(
         persona=persona_selected,
         variant=variant,
     )
+
+    # Merge assessment-specific evidence when available (fixes "0 events" from dispatch preview)
+    if assessment_data:
+        rows = (assessment_data.get('normalized_rows')
+                or assessment_data.get('evidence_rows')
+                or assessment_data.get('rows') or [])
+        if rows and not report.get('flagged_events'):
+            report['flagged_events'] = rows[:500]
+        # Carry verdict and cluster metadata
+        if assessment_data.get('verdict') and not report.get('verdict'):
+            report['verdict'] = assessment_data['verdict']
+        if assessment_data.get('clusters') and not report.get('clusters'):
+            report['clusters'] = assessment_data['clusters']
+        meta_a = report.setdefault('meta', {})
+        meta_a['assessment_id'] = assessment_id
+        meta_a['source_count'] = assessment_data.get('source_count', 1)
+        meta_a['total_rows'] = assessment_data.get('total_rows') or len(rows)
+        # Build GRC compliance pre-fill for compliance persona
+        if persona_selected in ('compliance', 'ciso') and assessment_data.get('clusters'):
+            report['_grc_prefill'] = _build_grc_prefill(assessment_data)
+
     recipients_list = _parse_recipients(recipients)
     meta = report.setdefault('meta', {})
     if tenant_id:
@@ -324,6 +461,9 @@ async def report_ingestion(
         return PlainTextResponse(content=csv_text, media_type='text/csv')
     if fmt == 'html':
         payload = _build_html_payload(report, session_ids, recipients_list)
+        # Inject GRC pre-fill into payload for compliance/ciso personas
+        if report.get('_grc_prefill'):
+            payload['_grc_prefill'] = report['_grc_prefill']
         html = build_report_html(payload)
         # Optionally include model summary into HTML (sanitized)
         if include_model:
@@ -340,16 +480,65 @@ async def report_ingestion(
                 llm_resp = generate_summary(prompt, max_tokens=512)
                 if hasattr(llm_resp, '__await__'):
                     llm_resp = await llm_resp
-                model_text = llm_resp.get('text') if isinstance(llm_resp, dict) else str(llm_resp)
+                # Extract clean text from LLM response — avoid showing raw dict/JSON to users
+                if isinstance(llm_resp, dict):
+                    model_text = (llm_resp.get('text') or llm_resp.get('content')
+                                  or llm_resp.get('summary') or llm_resp.get('response') or '')
+                    # If we still have a dict-like string, try to extract just the text
+                    if isinstance(model_text, dict):
+                        model_text = str(model_text.get('text') or model_text.get('content') or '')
+                else:
+                    model_text = str(llm_resp or '')
+                # Strip any remaining JSON artifacts at start of string
+                model_text = re.sub(r'^\s*\{.*?\}\s*', '', str(model_text or ''), flags=re.DOTALL).strip()
                 try:
                     prompt_hash = hashlib.sha256(prompt.encode('utf-8')).hexdigest()
                 except Exception:
                     prompt_hash = None
                 _persona_label = persona_selected.replace('_', ' ').title()
-                model_html = '<div style="padding:12px;background:#071021;color:#e6eef8;border-radius:6px"><h3>' + escape(_persona_label) + ' Model Summary</h3><div>' + escape(str(model_text or '')) + '</div></div>'
+                # Build styled HTML with GRC pre-fill block if available
+                grc_html = ''
+                grc = report.get('_grc_prefill')
+                if grc and persona_selected in ('compliance', 'ciso'):
+                    gaps_rows = ''.join(
+                        f'<tr><td style="padding:4px 8px;color:#94a3b8">{escape(g.get("technique",""))}</td>'
+                        f'<td style="padding:4px 8px;color:#e2e8f0">{escape(g.get("framework",""))}</td>'
+                        f'<td style="padding:4px 8px;color:#94a3b8">{escape(g.get("control",""))}</td>'
+                        f'<td style="padding:4px 8px">{escape(g.get("title",""))}</td></tr>'
+                        for g in (grc.get('control_gaps') or [])[:20]
+                    )
+                    notifs = ''.join(f'<li style="margin:4px 0">{escape(n)}</li>' for n in (grc.get('notification_triggers') or []))
+                    sabsa_rows = ''.join(
+                        f'<tr><td style="padding:4px 8px;font-weight:600;color:#a78bfa">{escape(l[0])}</td>'
+                        f'<td style="padding:4px 8px;color:#94a3b8">{escape(l[1])}</td></tr>'
+                        for l in (grc.get('sabsa_layers') or [])
+                    )
+                    grc_html = (
+                        '<div style="margin-top:16px;padding:16px;background:#0a0f1e;border:1px solid rgba(167,139,250,.3);border-radius:6px">'
+                        '<h4 style="color:#a78bfa;margin:0 0 12px">Compliance Control Gaps (GRC Pre-fill)</h4>'
+                        + (f'<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr>'
+                           '<th style="text-align:left;padding:4px 8px;color:#64748b">Technique</th>'
+                           '<th style="text-align:left;padding:4px 8px;color:#64748b">Framework</th>'
+                           '<th style="text-align:left;padding:4px 8px;color:#64748b">Control</th>'
+                           '<th style="text-align:left;padding:4px 8px;color:#64748b">Gap</th></tr></thead>'
+                           f'<tbody>{gaps_rows}</tbody></table>' if gaps_rows else '')
+                        + (f'<h4 style="color:#f87171;margin:12px 0 8px">Notification Obligations</h4><ul style="margin:0;padding-left:16px;font-size:12px;color:#fca5a5">{notifs}</ul>' if notifs else '')
+                        + (f'<h4 style="color:#60a5fa;margin:12px 0 8px">SABSA Architectural Evidence Required</h4>'
+                           f'<table style="width:100%;border-collapse:collapse;font-size:12px"><tbody>{sabsa_rows}</tbody></table>' if sabsa_rows else '')
+                        + '</div>'
+                    )
+                model_html = (
+                    '<div style="padding:16px;background:#071021;color:#e6eef8;border-radius:6px;'
+                    'border:1px solid rgba(99,102,241,.2);margin-bottom:16px">'
+                    f'<h3 style="color:#818cf8;margin:0 0 10px;font-size:14px;text-transform:uppercase;letter-spacing:.05em">'
+                    f'{escape(_persona_label)} Analysis</h3>'
+                    f'<div style="font-size:13px;line-height:1.7;white-space:pre-wrap">{escape(model_text)}</div>'
+                    + grc_html
+                    + '</div>'
+                )
                 try:
                     if _HAS_BLEACH:
-                        model_html = bleach.clean(model_html, tags=bleach.sanitizer.ALLOWED_TAGS + ['div','h3','pre','code','span'], attributes=bleach.sanitizer.ALLOWED_ATTRIBUTES, strip=True)
+                        model_html = bleach.clean(model_html, tags=bleach.sanitizer.ALLOWED_TAGS + ['div','h3','h4','pre','code','span','table','thead','tbody','tr','th','td','ul','li'], attributes=bleach.sanitizer.ALLOWED_ATTRIBUTES, strip=True)
                     else:
                         model_html = _simple_sanitize(model_html)
                 except Exception:
@@ -1414,3 +1603,51 @@ async def ask_for_logs(report_id: str, payload: dict, request: Request):
         pass
     resp = {'ok': True, 'audit_id': aid, 'message': message}
     return JSONResponse(content=jsonable_encoder(resp))
+
+
+# ── Regulatory Draft Endpoint ─────────────────────────────────────────────────
+
+@router.post('/api/v1/dispatch/regulatory-draft/{action_type}')
+async def regulatory_draft(
+    request: Request,
+    action_type: str,
+    payload: dict = {},
+    assessment_id: str | None = Query(None),
+) -> Any:
+    """Generate a regulatory notification draft document.
+
+    Supported action_type values: ndb, gdpr, forensic, sec_8k, asx
+
+    Query params:
+        assessment_id — links to a stored breach assessment for context enrichment
+
+    Body params (all optional):
+        organisation, assessor, dpo, supervisory_authority
+    """
+    from src.reporting.regulatory_draft import build_regulatory_draft  # type: ignore
+
+    # Look up assessment data
+    assessment: dict = {}
+    if assessment_id:
+        try:
+            from src.api.breach_endpoints import REPORT_STORE  # type: ignore
+            assessment = REPORT_STORE.get(assessment_id) or {}
+        except Exception:
+            pass
+        if not assessment:
+            try:
+                from src.core.ingest import assessment_store  # type: ignore
+                assessment = assessment_store.get(assessment_id) or {}
+            except Exception:
+                pass
+        if assessment:
+            assessment['assessment_id'] = assessment_id
+
+    meta = {k: v for k, v in (payload or {}).items()
+            if k in ('organisation', 'assessor', 'dpo', 'supervisory_authority')}
+
+    draft = build_regulatory_draft(action_type, assessment, meta)
+    if draft.get('error'):
+        raise HTTPException(status_code=400, detail=draft['error'])
+    return JSONResponse(draft)
+

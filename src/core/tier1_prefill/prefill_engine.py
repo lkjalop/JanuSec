@@ -2787,10 +2787,35 @@ def run_prefill(
         elif isinstance(result, str):
             raw_text = result
 
+        # Extract <think>...</think> reasoning chain (qwen3 / deepseek-r1 thinking mode)
+        # before parsing — use it to populate investigate_next leads rather than discard
+        _think_text = ''
+        _think_match = re.search(r'(?is)<think>(.*?)</think>', raw_text)
+        if _think_match:
+            _think_text = _think_match.group(1).strip()
+
         parsed = _parse_prefill_json(raw_text, cid)
         if parsed:
             parsed['model_used'] = model
             parsed['generated_at'] = int(time.time())
+
+            # Store <think> reasoning chain for downstream use
+            if _think_text:
+                parsed['_cot'] = _think_text
+                # Derive investigate_next leads from the thinking chain
+                # Look for lines containing "investigate", "check", "look for", "trace" etc.
+                _inv_lines = [
+                    ln.strip(' -•*') for ln in _think_text.splitlines()
+                    if any(kw in ln.lower() for kw in ('investigate', 'check', 'look for', 'trace', 'confirm', 'verify', 'hunt', 'pivot'))
+                    and 10 < len(ln.strip()) < 200
+                ]
+                if _inv_lines and not parsed.get('investigate_next'):
+                    parsed['investigate_next'] = _inv_lines[:6]
+                elif _inv_lines:
+                    # Merge without duplicates
+                    existing = list(parsed.get('investigate_next') or [])
+                    merged = existing + [l for l in _inv_lines if l not in existing]
+                    parsed['investigate_next'] = merged[:8]
 
             # Enhancement 1: entity pin quality gate
             allowed_entities = _extract_entity_set(cluster, rows)

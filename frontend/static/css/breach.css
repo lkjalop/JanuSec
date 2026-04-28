@@ -1638,6 +1638,74 @@
 }
 @media (max-width: 600px) {
   .br-dispatch__bar { flex-direction: column; }
+
+/* ── SVG icon wrapper ────────────────────────────────────────────────────── */
+.br-icon { display: inline-flex; align-items: center; vertical-align: middle; line-height: 1; }
+.br-icon svg { flex-shrink: 0; }
+
+/* ── Verdict status dots (replaces colored emoji) ─────────────────────────── */
+.br-vdot {
+  display: inline-block;
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  vertical-align: middle;
+  margin-right: 4px;
+  flex-shrink: 0;
+}
+.br-vdot--red    { background: #e05252; box-shadow: 0 0 6px #e0525266; }
+.br-vdot--orange { background: #ff7c3c; box-shadow: 0 0 6px #ff7c3c66; }
+.br-vdot--yellow { background: #e0c446; box-shadow: 0 0 6px #e0c44666; }
+.br-vdot--green  { background: #90ba55; box-shadow: 0 0 6px #90ba5566; }
+.br-vdot--blue   { background: #6090d0; box-shadow: 0 0 6px #6090d066; }
+.br-vdot--teal   { background: #52e07f; box-shadow: 0 0 6px #52e07f66; }
+
+/* ── Dispatch channel selector ────────────────────────────────────────────── */
+.br-dispatch__channel-row {
+  display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 4px;
+}
+.br-dispatch__channel-select {
+  background: rgba(255,255,255,.04);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 12px;
+  padding: 5px 8px;
+  cursor: pointer;
+  min-width: 180px;
+}
+.br-dispatch__email-input {
+  background: rgba(255,255,255,.04);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 12px;
+  padding: 5px 8px;
+  flex: 1; min-width: 160px;
+}
+.br-dispatch__email-input::placeholder { color: var(--text-muted); }
+.br-dispatch__preview-notice {
+  font-size: 11px; color: var(--text-muted);
+  display: flex; align-items: flex-start; gap: 6px;
+}
+.br-dispatch__preview-desc { line-height: 1.5; }
+.br-dispatch__btn--deep {
+  border-color: rgba(167,139,250,.35);
+  color: #a78bfa;
+}
+.br-dispatch__btn--deep:hover {
+  background: rgba(167,139,250,.10);
+  border-color: rgba(167,139,250,.55);
+}
+.br-dispatch__btn--confirm {
+  border-color: rgba(45,212,191,.3);
+  color: #2dd4bf;
+}
+.br-dispatch__btn--cancel { color: var(--text-muted); }
+.br-dispatch__preview-persona-icon { display: inline-flex; align-items: center; }
+.br-exec__regen { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+
   .br-dispatch__btn { width: 100%; justify-content: center; }
 }
 .br-dispatch__sub {
