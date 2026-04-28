@@ -80,15 +80,55 @@ _HIGH_SIGNAL_TERMS = (
     "lsass", "comsvcs", "mimikatz", "procdump", "ntds",
     # Lateral movement / execution
     "psexec", "wmiexec", "invoke-expression", "encoded command",
-    # Cloud data exfil
-    "snowflake", "copy into", "external stage", "rclone", "mega.nz",
+    # Cloud data exfil (source tool names excluded — match verb/service, not vendor)
+    "copy into", "external stage", "rclone", "mega.nz",
     # Network / C2
-    "impossible travel", "beacon", "c2", "command-and-control",
+    "impossible travel", "command-and-control", "c2 beacon",
+    # C2 implant frameworks and network threat indicators
+    "sliver", "havoc", "mythic", "brute ratel", "anomalous ja3",
+    # Zone-based attacker classification labels
+    "attacker_c2", "attacker_infra",
     # Identity / access
-    "mfa", "credential", "password spray", "privilege escalation",
+    "password spray", "privilege escalation",
     # Malware / tools
     "cobalt strike", "daemonset", "pentest",
+    # Cloud privilege / secret abuse (CloudTrail phase detector terms)
+    "getsecretvalue", "secretsmanager", "assumerole", "assumerolewithsaml",
+    "getfederationtoken", "putbucketpolicy", "putrolepolicy",
+    # CloudTrail tampering / defense evasion
+    "deletetrail", "stoprecording", "disablekey", "deletebucketpolicy",
+    "stopinstances", "terminateinstances",
+    # Okta / Entra risk indicators (broad terms removed: "mfa", "credential" match BAU auth)
+    "newcountry", "newdevice", "mfafailure", "suspicious", "atypical",
+    # K8s escape signals
+    "hostpid", "hostnetwork", "hostipc", "docker.sock",
 )
+
+# Security-relevant cloud/IAM event names that should survive triage even without
+# a severity field. BAU events (SELECT, LIST, DESCRIBE, routine file access) are
+# intentionally excluded — they form single-source noise clusters at scale.
+_CLOUD_SECURITY_EVENT_NAMES = frozenset({
+    # CloudTrail privilege/secret abuse
+    "assumerole", "assumerolewithsaml", "getsecretvalue", "getfederationtoken",
+    "putbucketpolicy", "putrolepolicy", "deletebucketpolicy",
+    # CloudTrail defense evasion
+    "deletetrail", "stoprecording", "disablekey",
+    "stopinstances", "terminateinstances", "deleteinstances",
+    # Snowflake exfil verbs only (not BAU SELECT/DESCRIBE)
+    "copy", "unload", "create stage", "copy into",
+    # CloudTrail data-plane ops from external IPs (PutObject exfil staging)
+    "putobject",
+    # IAM recon that precedes credential abuse
+    "getcalleridentity", "gettoken",
+    # Okta / Entra risk signals (BAU auth events excluded: via_mfa, policy.evaluate_sign_on)
+    "user.session.access_admin_app", "user.account.lock",
+    "user.mfa.factor.deactivate", "user.account.update_password",
+    # M365 risk signals (mailboxlogin/filedownloaded excluded — fire on every BAU access)
+    "filesharinginfected",
+    "searchqueryinitiatedshareddocument",
+})
+
+_LOW_NOISE_SOURCE_TYPES = frozenset({"cloud", "iam", "email", "remote"})
 
 
 def _score_async_ingest_row(raw: dict, normalized: dict) -> float:
@@ -101,6 +141,19 @@ def _score_async_ingest_row(raw: dict, normalized: dict) -> float:
         "info": 0.03,
         "informational": 0.03,
     }.get(sev, 0.05)
+
+    # Elevate security-relevant cloud/IAM events above the triage threshold.
+    # BAU events (SELECT queries, ListBuckets, routine file access) are NOT
+    # elevated — they form single-source noise clusters at scale.
+    source_type = str(normalized.get("_source_type") or "").lower()
+    if source_type in _LOW_NOISE_SOURCE_TYPES:
+        event_name_lower = str(
+            normalized.get("event_name") or raw.get("eventName") or
+            raw.get("event_type") or raw.get("query_type") or ""
+        ).lower()
+        if any(k in event_name_lower for k in _CLOUD_SECURITY_EVENT_NAMES):
+            score = max(score, 0.20)
+
     try:
         text = json.dumps(raw, default=str).lower()
     except Exception:
@@ -109,16 +162,29 @@ def _score_async_ingest_row(raw: dict, normalized: dict) -> float:
         if term in text:
             score = max(score, 0.65)
             break
+
+    # Elevate cloud events originating from external (non-RFC1918) IPs.
+    # BAU cloud ops come from internal IPs; external-origin data-plane ops
+    # (e.g. PutObject from attacker IP) are anomalous and breach-relevant.
+    if source_type in _LOW_NOISE_SOURCE_TYPES and score < 0.20:
+        _src_ip = str(normalized.get("src_ip") or "").strip()
+        if _src_ip and not _src_ip.startswith(("10.", "172.", "192.168.", "127.", "0.")):
+            try:
+                import ipaddress as _ipa
+                if not _ipa.ip_address(_src_ip).is_private:
+                    score = max(score, 0.20)
+            except (ValueError, TypeError):
+                pass
     event_name = str(raw.get("event_simpleName") or raw.get("event_name") or raw.get("eventName") or "").lower()
     if raw.get("alert_signature") or raw.get("detect_id") or any(t in event_name for t in ("detect", "rtrexecuted", "alert")):
         score = max(score, 0.25)
     try:
+        # Only count bytes actually moved over the wire — not read-side scan metrics.
+        # bytes_scanned / rows_produced are Snowflake query-plan stats, not exfil volume.
         bytes_moved = float(
             raw.get("bytes_sent")
             or raw.get("orig_bytes")
             or raw.get("bytes")
-            or raw.get("rows_produced")
-            or raw.get("bytes_scanned")
             or 0
         )
         if bytes_moved > 100_000_000:
@@ -268,7 +334,24 @@ async def run_assessment_pipeline(
                 "context_inputs": [f["filename"] for f in context_files],
                 "quarantined_inputs": quarantined_files,
             },
+            # Version stamps — used by consumers to detect stale cached outputs.
+            "normalizer_version": None,  # stamped below after lazy import
+            "cluster_merge_version": None,
+            "clustering_mode": None,     # typed_cluster_merge | failed
+            "fallback_used": False,
+            "requires_reingest": False,
+            "cluster_diagnostics": {},
         }
+        try:
+            from src.pipeline.streaming_ingest import _NORMALIZER_VERSION
+            assessment["normalizer_version"] = _NORMALIZER_VERSION
+        except Exception:
+            pass
+        try:
+            from src.core.ingest.cluster_merge import _CLUSTER_MERGE_VERSION
+            assessment["cluster_merge_version"] = _CLUSTER_MERGE_VERSION
+        except Exception:
+            pass
 
         raw_clusters: list[dict[str, Any]] = []
         if os.getenv("JANUSEC_ASYNC_LEGACY_HYDRATE", "0").lower() in {"1", "true", "yes"}:
@@ -281,16 +364,70 @@ async def run_assessment_pipeline(
         else:
             _progress("clustering", 55, "Building SQL pivot groups")
             pivot_groups = await asyncio.to_thread(_store.entity_pivot_groups, assessment_id, TRIAGE_MIN_FOR_CLUSTER)
-            for n, (pivot, refs) in enumerate(list(pivot_groups.items())[:200], start=1):
-                raw_clusters.append({
+
+            # Keep raw pivot groups as audit inventory (one entry per shared entity).
+            raw_pivot_clusters = [
+                {
                     "cluster_id": f"pivot-{n}",
                     "lead_description": f"Shared pivot {pivot}",
                     "reason_summary": f"{len(refs)} rows share {pivot}",
                     "row_refs": refs,
                     "row_count": len(refs),
                     "confidence": min(0.95, 0.35 + (len(refs) / 200.0)),
-                })
+                }
+                for n, (pivot, refs) in enumerate(list(pivot_groups.items())[:200], start=1)
+            ]
             assessment["sql_pivot_group_count"] = len(pivot_groups)
+            assessment["raw_correlation_clusters"] = raw_pivot_clusters
+
+            # Transitive campaign merge: evidence-bound, time-windowed union-find.
+            # Produces analysis_clusters with cluster_kind / phases instead of
+            # 200 disconnected pivot-per-row fragments.
+            # Fail-closed: if cluster_merge raises, set requires_reingest instead of
+            # silently promoting raw pivot fragments to production clusters.
+            try:
+                from src.core.ingest.cluster_merge import transitive_merge_clusters
+                _progress("clustering", 60, "Transitive campaign merge")
+                _diag: dict[str, Any] = {}
+                analysis_clusters = await asyncio.to_thread(
+                    transitive_merge_clusters,
+                    None,          # let cluster_merge build scope-qualified pivots from rows
+                    filtered_rows,
+                    diagnostics_out=_diag,
+                )
+                # Split isolated (single-source unclassified) from actionable clusters.
+                actionable = [c for c in analysis_clusters if not c.get("_isolated")]
+                isolated_noise = [c for c in analysis_clusters if c.get("_isolated")]
+                raw_clusters = actionable
+                assessment["clustering_mode"] = "typed_cluster_merge"
+                assessment["cluster_diagnostics"] = _diag
+                assessment["isolated_count"] = len(isolated_noise)
+                assessment["isolated_clusters"] = isolated_noise  # kept for audit
+                logger.info(
+                    "assessment %s: cluster_merge → %d actionable + %d isolated from %d raw pivots "
+                    "(stale_rows=%d singleton_drops=%d)",
+                    assessment_id, len(actionable), len(isolated_noise), len(pivot_groups),
+                    _diag.get("stale_rows", 0), _diag.get("singleton_drop_count", 0),
+                )
+                if _diag.get("stale_rows", 0) > 0:
+                    stale_pct = round(_diag["stale_rows"] / max(len(filtered_rows), 1) * 100, 1)
+                    if stale_pct >= 50:
+                        # Majority of clustered rows are stale — mark for reingest
+                        assessment["requires_reingest"] = True
+                        logger.warning(
+                            "assessment %s: %.1f%% of clustering rows are stale (no canonical fields) — requires_reingest=True",
+                            assessment_id, stale_pct,
+                        )
+            except Exception as exc:
+                logger.error(
+                    "cluster_merge failed for %s — setting requires_reingest=True: %s",
+                    assessment_id, exc,
+                )
+                assessment["clustering_mode"] = "failed"
+                assessment["fallback_used"] = True
+                assessment["requires_reingest"] = True
+                raw_clusters = []  # fail-closed: no production clusters from broken merge
+
             assessment["correlation_clusters"] = raw_clusters
 
         clusters = raw_clusters
@@ -335,6 +472,105 @@ async def run_assessment_pipeline(
             logger.warning("threat case layering failed for %s: %s", assessment_id, exc)
             clusters = assessment.get("correlation_clusters") or clusters
 
+        # ── Stage 5b: deterministic DREAD/SABSA enrichment ───────────────────
+        # Stores into tier1_prefill['dread_narrative'] — the exact structure the
+        # frontend reads: {fragments, fill_rate, sabsa_attributes, sabsa_coda_draft}.
+        # Also writes flat aliases (dread_fragments, sabsa_coda_draft) for the
+        # compact exec-summary path in breach.js._compactExecSummary.
+        # Result: cards show real evidence text immediately, before LLM fires.
+        # "source: Legacy fallback" only appears if NO fragments at all are present.
+        _breach_verdicts = {'VALIDATED_BREACH', 'CONFIRMED_BREACH', 'LIKELY_BREACH', 'LIKELY_COMPROMISE'}
+        try:
+            from src.prefill.dread_fragments import build_dread_narrative, fragments_fill_rate
+            from src.prefill.sabsa_coda import build_sabsa_coda, derive_breached_attributes
+            _row_lookup: dict[int, dict] = {}
+            for _r5b in filtered_rows:
+                _ri5b = _r5b.get('row_index')
+                if _ri5b is not None:
+                    try:
+                        _row_lookup[int(float(_ri5b))] = _r5b
+                    except (TypeError, ValueError):
+                        pass
+            _dread_ok = 0
+            for _cl in clusters:
+                _verdict = str(_cl.get('verdict') or _cl.get('final_verdict') or '').upper()
+                if _verdict not in _breach_verdicts:
+                    continue
+                _cl_rows = []
+                for _ref5b in (_cl.get('row_refs') or []):
+                    try:
+                        _k5b = int(float(_ref5b))
+                        if _k5b in _row_lookup:
+                            _cl_rows.append(_row_lookup[_k5b])
+                    except (TypeError, ValueError):
+                        pass
+                if not _cl_rows:
+                    continue
+                _t1 = _cl.setdefault('tier1_prefill', {})
+                # Skip if LLM has already produced a higher-quality render
+                if _t1.get('dread_narrative', {}).get('fill_rate', 0) >= 0.60:
+                    continue
+                try:
+                    _frags = build_dread_narrative(_cl_rows, _cl, _t1)
+                    _fill = round(fragments_fill_rate(_frags), 2)
+                    _attrs = derive_breached_attributes(_frags)
+                    _coda = build_sabsa_coda(_frags, _attrs)
+                    # Primary path: what the frontend _dreadInfo() reads
+                    _t1['dread_narrative'] = {
+                        'fragments':        _frags,
+                        'fill_rate':        _fill,
+                        'sabsa_attributes': _attrs,
+                        'sabsa_coda_draft': _coda,
+                    }
+                    # Flat aliases for _compactExecSummary / exec-summary panel
+                    _t1['dread_fragments'] = _frags
+                    if _coda:
+                        _t1['sabsa_coda_draft'] = _coda
+                    _dread_ok += 1
+                except Exception as _dread_err:
+                    logger.debug("dread enrichment failed for cluster %s: %s", _cl.get('cluster_id'), _dread_err)
+            _progress("reasoning", 70, f"DREAD/SABSA enrichment complete ({_dread_ok} clusters)")
+        except Exception as exc:
+            logger.warning("dread/sabsa enrichment stage failed for %s: %s", assessment_id, exc)
+
+        # ── Stage 5c: deterministic cluster intelligence enrichments (Blocks 2+3) ─
+        # event_chain_summary, kill_chain_summary, adversarial_sequence, DREAD numeric,
+        # Diamond model, PASTA summary, known/unknown entity split.
+        # Runs synchronously for ALL breach clusters — no LLM required.
+        try:
+            from src.core.tier1_prefill.prefill_engine import _enrich_cluster_intelligence
+            _row_lookup_ei: dict[int, dict] = {}
+            for _r5c in filtered_rows:
+                _ri5c = _r5c.get('row_index')
+                if _ri5c is not None:
+                    try:
+                        _row_lookup_ei[int(float(_ri5c))] = _r5c
+                    except (TypeError, ValueError):
+                        pass
+            _ei_ok = 0
+            for _cl in clusters:
+                _verdict_ei = str(_cl.get('verdict') or _cl.get('final_verdict') or '').upper()
+                if _verdict_ei not in _breach_verdicts:
+                    continue
+                _cl_rows_ei = []
+                for _ref5c in (_cl.get('row_refs') or []):
+                    try:
+                        _k5c = int(float(_ref5c))
+                        if _k5c in _row_lookup_ei:
+                            _cl_rows_ei.append(_row_lookup_ei[_k5c])
+                    except (TypeError, ValueError):
+                        pass
+                _t1_ei = _cl.setdefault('tier1_prefill', {})
+                try:
+                    _enrich_cluster_intelligence(_t1_ei, _cl, _cl_rows_ei)
+                    _ei_ok += 1
+                except Exception as _ei_err:
+                    logger.warning('cluster intelligence enrichment failed for %s: %s', _cl.get('cluster_id'), _ei_err, exc_info=True)
+            logger.info('Stage 5c: enriched %d/%d clusters, lookup_size=%d', _ei_ok, len(clusters), len(_row_lookup_ei))
+            _progress('reasoning', 73, f'Cluster intelligence enrichments complete ({_ei_ok} clusters)')
+        except Exception as exc:
+            logger.warning('cluster intelligence enrichment stage failed for %s: %s', assessment_id, exc, exc_info=True)
+
         if clusters:
             _progress("reasoning", 72, "Generating LLM narratives for top clusters")
             try:
@@ -355,6 +591,18 @@ async def run_assessment_pipeline(
             _schedule_prefill_generation(assessment, assessment_id)
         except Exception as exc:
             logger.debug("tier1 prefill scheduling skipped for %s: %s", assessment_id, exc)
+
+        # ── Stage 6b: seed proposed_actions + kill_chain for breach clusters ───
+        # Deterministic — gives the CEO banner + path-of-intrusion table content
+        # without requiring the full agent investigation loop.
+        try:
+            _seed_proposed_actions_and_kill_chain(assessment, clusters, filtered_rows)
+            logger.info("Stage 6b: seeded proposed_actions=%d, kill_chain=%d for %s",
+                        len(assessment.get('proposed_actions', [])),
+                        len(assessment.get('kill_chain', [])),
+                        assessment_id)
+        except Exception as exc:
+            logger.debug("proposed_actions/kill_chain seeding skipped for %s: %s", assessment_id, exc)
 
         # ── Stage 7: persist final assessment JSON ─────────────────────────────
         _progress("persisting", 92, "Saving assessment")
@@ -387,6 +635,198 @@ async def run_assessment_pipeline(
             pass
 
     return assessment_id
+
+
+# ── Deterministic proposed_actions + kill_chain seeding ────────────────────────
+
+# Action templates keyed by MITRE tactic or evidence pattern.
+# Each template produces a Zone 2 (auto-approvable) or Zone 3 (human-only) action.
+_ACTION_TEMPLATES: list[dict] = [
+    {
+        "match": lambda c, rows: any(
+            "credential" in (r.get("description") or "").lower()
+            or "password" in (r.get("description") or "").lower()
+            or "brute" in (r.get("description") or "").lower()
+            for r in rows
+        ),
+        "zone": 2,
+        "action_type": "credential_reset",
+        "description": "Force credential rotation for compromised accounts",
+        "recipient": "Identity Team",
+        "deadline_hours": 4,
+        "citation": "NIST SP 800-63B §5.1.1",
+    },
+    {
+        "match": lambda c, rows: any(
+            "exfil" in (r.get("description") or "").lower()
+            or "backblaze" in (r.get("description") or "").lower()
+            or "rclone" in (r.get("description") or "").lower()
+            or "copy into" in (r.get("description") or "").lower()
+            for r in rows
+        ),
+        "zone": 2,
+        "action_type": "block_egress",
+        "description": "Block outbound data transfer to unapproved cloud destinations",
+        "recipient": "SOC",
+        "deadline_hours": 1,
+        "citation": "ISO 27001:2022 A.8.12",
+    },
+    {
+        "match": lambda c, rows: any(
+            "c2" in (r.get("description") or "").lower()
+            or "beacon" in (r.get("description") or "").lower()
+            or "command" in (r.get("description") or "").lower()
+            for r in rows
+        ),
+        "zone": 2,
+        "action_type": "isolate_host",
+        "description": "Network-isolate compromised endpoints exhibiting C2 activity",
+        "recipient": "SOC",
+        "deadline_hours": 0.5,
+        "citation": "Essential Eight — Application Control",
+    },
+    {
+        "match": lambda c, rows: (c.get("severity") or "").lower() == "critical",
+        "zone": 3,
+        "action_type": "regulatory_notification",
+        "description": "Prepare mandatory breach notification under NDB Scheme (72h deadline)",
+        "recipient": "Legal / Privacy Officer",
+        "deadline_hours": 72,
+        "citation": "Privacy Act 1988 Part IIIC — NDB Scheme",
+    },
+    {
+        "match": lambda c, rows: len(rows) >= 20,
+        "zone": 3,
+        "action_type": "forensic_preservation",
+        "description": "Preserve forensic evidence — disk images, memory dumps, log archives",
+        "recipient": "DFIR Lead",
+        "deadline_hours": 24,
+        "citation": "ISO 27037:2012 §7",
+    },
+]
+
+# Kill chain phase mapping from evidence keywords to canonical phase names.
+_KC_KEYWORD_MAP: list[tuple[str, list[str]]] = [
+    ("initial_access", ["phish", "spearphish", "credential", "brute", "login", "mfa"]),
+    ("execution", ["powershell", "cmd.exe", "wscript", "script", "invoke", "exec"]),
+    ("persistence", ["scheduled task", "registry", "autorun", "cron", "startup"]),
+    ("privilege_escalation", ["admin", "root", "elevation", "uac", "sudo", "lsass"]),
+    ("lateral_movement", ["rdp", "smb", "psexec", "wmi", "lateral", "pivot"]),
+    ("collection", ["compress", "archive", "staging", "copy into", "select"]),
+    ("exfiltration", ["exfil", "upload", "rclone", "backblaze", "outbound", "egress"]),
+    ("command_and_control", ["c2", "beacon", "callback", "dns tunnel", "covert"]),
+]
+
+
+def _seed_proposed_actions_and_kill_chain(
+    assessment: dict,
+    clusters: list[dict],
+    rows: list[dict],
+) -> None:
+    """Seed deterministic proposed_actions and kill_chain from breach clusters.
+
+    Runs after LLM enrichment so prefill data is available. Only triggers for
+    confirmed/validated breach clusters to avoid noise.
+    """
+    breach_verdicts = {"VALIDATED_BREACH", "CONFIRMED_BREACH", "CONFIRMED_INTRUSION"}
+    breach_clusters = [
+        c for c in clusters
+        if (c.get("verdict") or c.get("final_verdict") or "").upper() in breach_verdicts
+    ]
+    if not breach_clusters:
+        return
+
+    # Build row lookup
+    row_map: dict[int, dict] = {}
+    for r in rows:
+        ri = r.get("row_index")
+        if ri is not None:
+            try:
+                row_map[int(float(ri))] = r
+            except (TypeError, ValueError):
+                pass
+
+    # ── Proposed actions ──────────────────────────────────────────────────────
+    proposed: list[dict] = []
+    seen_types: set[str] = set()
+    for cl in breach_clusters:
+        cl_rows = []
+        for ref in cl.get("row_refs") or []:
+            try:
+                k = int(float(ref))
+                if k in row_map:
+                    cl_rows.append(row_map[k])
+            except (TypeError, ValueError):
+                pass
+        for tmpl in _ACTION_TEMPLATES:
+            if tmpl["action_type"] in seen_types:
+                continue
+            try:
+                if tmpl["match"](cl, cl_rows):
+                    token = f"appr-{uuid.uuid4().hex[:12]}"
+                    proposed.append({
+                        "action_id": f"act-{uuid.uuid4().hex[:8]}",
+                        "zone": tmpl["zone"],
+                        "action_type": tmpl["action_type"],
+                        "description": tmpl["description"],
+                        "recipient": tmpl["recipient"],
+                        "deadline_hours": tmpl["deadline_hours"],
+                        "citation": tmpl["citation"],
+                        "confidence": round(min(0.95, 0.6 + len(cl_rows) * 0.01), 2),
+                        "evidence_count": len(cl_rows),
+                        "status": "pending",
+                        "approval_token": token,
+                        "created_ts": time.time(),
+                    })
+                    seen_types.add(tmpl["action_type"])
+            except Exception:
+                pass
+    assessment["proposed_actions"] = proposed
+
+    # ── Kill chain ────────────────────────────────────────────────────────────
+    kill_chain: list[dict] = []
+    for cl in breach_clusters:
+        cl_rows = []
+        for ref in cl.get("row_refs") or []:
+            try:
+                k = int(float(ref))
+                if k in row_map:
+                    cl_rows.append(row_map[k])
+            except (TypeError, ValueError):
+                pass
+
+        # Sort by timestamp if available
+        def _ts_key(r: dict) -> str:
+            return r.get("timestamp") or r.get("event_time") or r.get("date") or ""
+        cl_rows.sort(key=_ts_key)
+
+        for r in cl_rows[:20]:  # cap per cluster
+            desc = (r.get("description") or r.get("event_name") or "").lower()
+            phase = "execution"  # default
+            for ph, keywords in _KC_KEYWORD_MAP:
+                if any(kw in desc for kw in keywords):
+                    phase = ph
+                    break
+            actor = (
+                r.get("user") or r.get("actor") or r.get("src_ip")
+                or r.get("principal") or ""
+            )
+            kill_chain.append({
+                "phase": phase,
+                "timestamp": r.get("timestamp") or r.get("event_time") or "",
+                "actor": actor,
+                "action": r.get("description") or r.get("event_name") or "",
+                "evidence_row_ids": [r.get("row_index", 0)],
+                "mitre_techniques": [],
+                "phase_id": f"kc-{uuid.uuid4().hex[:6]}",
+                "enables_phase_id": None,
+            })
+
+    # Link causal pairs
+    for i in range(len(kill_chain) - 1):
+        kill_chain[i]["enables_phase_id"] = kill_chain[i + 1]["phase_id"]
+
+    assessment["kill_chain"] = kill_chain
 
 
 def _persist_assessment_json(assessment_id: str, org: str, data: dict) -> str | None:

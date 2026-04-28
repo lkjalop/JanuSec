@@ -1069,8 +1069,11 @@
     html += '<details class="br-drilldown" id="br-drilldown" data-testid="br-drilldown">';
     html += '<summary class="br-drilldown__summary">Investigation Details ▸</summary>';
     html += '<div class="br-drilldown__body">';
+    html += _renderVerdictSummaryRow(sorted, allClusters, a);
+    html += _renderPathOfIntrusion(a);
     html += _renderRootCauseNarrative(sorted[0], sorted);
     html += _renderExecSummaryShell(sorted, a);
+    html += _renderAgentPanel(a);
     html += '<details class="br-analyst-detail" data-testid="br-analyst-detail"><summary class="br-section-head" style="cursor:pointer;">THREAT CASES — Analyst Detail ▸</summary>';
     html += _renderTopFindings(sorted);
     // Narrative context and additional findings use full cluster inventory.
@@ -1316,6 +1319,158 @@
 
     html += '</div>';
     return html;
+  }
+
+  // ── Verdict Summary Row ────────────────────────────────────────────────────
+  function _renderVerdictSummaryRow(sorted, allClusters, assessment) {
+    var counts = { confirmed: 0, likely: 0, uncertain: 0, benign: 0, isolated: 0 };
+    allClusters.forEach(function (c) {
+      var vc = _vClass(c);
+      if (counts.hasOwnProperty(vc)) counts[vc]++;
+      else counts.uncertain++;
+    });
+    counts.isolated = assessment.isolated_count || 0;
+
+    var totalRows = (assessment.evidence_store && assessment.evidence_store.row_count)
+      || assessment.rows_processed || state.rows.length || 0;
+    var sourceCount = 0;
+    var store = assessment.evidence_store || {};
+    if (store.source_counts) sourceCount = Object.keys(store.source_counts).length;
+    else {
+      var s = new Set();
+      state.rows.forEach(function (r) { var src = r._source || r.source || ''; if (src) s.add(src); });
+      sourceCount = s.size;
+    }
+
+    function _pill(label, count, cls) {
+      if (!count) return '';
+      return '<span class="br-verdict-pill br-verdict-pill--' + cls + '">'
+        + count + ' ' + label + '</span>';
+    }
+
+    return [
+      '<div class="br-verdict-row" data-testid="br-verdict-row">',
+      '  <div class="br-verdict-row__scope">' + totalRows.toLocaleString() + ' rows · ' + sourceCount + ' sources</div>',
+      '  <div class="br-verdict-row__pills">',
+           _pill('confirmed', counts.confirmed, 'confirmed'),
+           _pill('likely', counts.likely, 'likely'),
+           _pill('uncertain', counts.uncertain, 'uncertain'),
+           _pill('benign', counts.benign, 'benign'),
+           _pill('isolated', counts.isolated, 'isolated'),
+      '  </div>',
+      '</div>',
+    ].join('');
+  }
+
+  // ── Path of Intrusion (kill chain table) ───────────────────────────────────
+  function _renderPathOfIntrusion(assessment) {
+    var kc = (assessment && assessment.kill_chain) || [];
+    if (!kc.length) return '';
+
+    // De-duplicate by phase — show one row per distinct phase
+    var seen = {};
+    var phases = [];
+    kc.forEach(function (step) {
+      var ph = step.phase || 'unknown';
+      if (!seen[ph]) {
+        seen[ph] = true;
+        phases.push(JSON.parse(JSON.stringify(step)));
+      } else {
+        // Merge evidence into existing entry
+        var existing = phases.find(function (p) { return p.phase === ph; });
+        if (existing && step.evidence_row_ids) {
+          existing.evidence_row_ids = (existing.evidence_row_ids || []).concat(step.evidence_row_ids);
+        }
+      }
+    });
+
+    var _PHASE_LABELS = {
+      initial_access: { icon: '🚪', label: 'Initial Access' },
+      execution: { icon: '⚡', label: 'Execution' },
+      persistence: { icon: '📌', label: 'Persistence' },
+      privilege_escalation: { icon: '🔓', label: 'Privilege Escalation' },
+      lateral_movement: { icon: '↔', label: 'Lateral Movement' },
+      collection: { icon: '📦', label: 'Collection' },
+      exfiltration: { icon: '📤', label: 'Exfiltration' },
+      command_and_control: { icon: '📡', label: 'Command & Control' },
+    };
+
+    var rows = phases.map(function (step, idx) {
+      var meta = _PHASE_LABELS[step.phase] || { icon: '•', label: step.phase };
+      var rowIds = (step.evidence_row_ids || []).slice(0, 5);
+      var rowChips = rowIds.map(function (id) {
+        return '<span class="br-poi__row-chip">r' + id + '</span>';
+      }).join('');
+      if ((step.evidence_row_ids || []).length > 5) rowChips += '<span class="br-poi__row-chip">+' + ((step.evidence_row_ids || []).length - 5) + '</span>';
+      var connector = idx < phases.length - 1 ? '<span class="br-poi__arrow">→</span>' : '';
+      return [
+        '<tr class="br-poi__row">',
+        '  <td class="br-poi__phase-icon">' + meta.icon + '</td>',
+        '  <td class="br-poi__phase-name">' + escHtml(meta.label) + '</td>',
+        '  <td class="br-poi__actor">' + escHtml(step.actor || '') + '</td>',
+        '  <td class="br-poi__action">' + escHtml((step.action || '').substring(0, 120)) + '</td>',
+        '  <td class="br-poi__refs">' + rowChips + '</td>',
+        '  <td class="br-poi__link">' + connector + '</td>',
+        '</tr>',
+      ].join('');
+    });
+
+    return [
+      '<div class="br-poi" data-testid="br-path-of-intrusion">',
+      '  <div class="br-section-head">PATH OF INTRUSION</div>',
+      '  <table class="br-poi__table">',
+      '    <thead><tr>',
+      '      <th></th><th>Phase</th><th>Actor</th><th>Action</th><th>Evidence</th><th></th>',
+      '    </tr></thead>',
+      '    <tbody>' + rows.join('') + '</tbody>',
+      '  </table>',
+      '</div>',
+    ].join('');
+  }
+
+  // ── Agent Panel ────────────────────────────────────────────────────────────
+  function _renderAgentPanel(assessment) {
+    var actions = (assessment && assessment.proposed_actions) || [];
+    var kc = (assessment && assessment.kill_chain) || [];
+    var gaps = (assessment && assessment.gaps) || [];
+
+    // Compute coverage
+    var phasesFound = {};
+    kc.forEach(function (step) { phasesFound[step.phase] = true; });
+    var totalPhases = 8; // MITRE ATT&CK major phases
+    var coverage = Math.round(Object.keys(phasesFound).length / totalPhases * 100);
+
+    var gapList = gaps.length ? gaps.slice(0, 5).map(function (g) {
+      return '<li class="br-agent__gap">' + escHtml(typeof g === 'string' ? g : (g.description || g.gap || '')) + '</li>';
+    }).join('') : '<li class="br-agent__gap br-agent__gap--none">No critical gaps detected</li>';
+
+    return [
+      '<div class="br-agent-panel" data-testid="br-agent-panel">',
+      '  <div class="br-section-head">INVESTIGATION AGENT</div>',
+      '  <div class="br-agent__grid">',
+      '    <div class="br-agent__stat">',
+      '      <div class="br-agent__stat-value">' + coverage + '%</div>',
+      '      <div class="br-agent__stat-label">Kill Chain Coverage</div>',
+      '    </div>',
+      '    <div class="br-agent__stat">',
+      '      <div class="br-agent__stat-value">' + actions.length + '</div>',
+      '      <div class="br-agent__stat-label">Proposed Actions</div>',
+      '    </div>',
+      '    <div class="br-agent__stat">',
+      '      <div class="br-agent__stat-value">' + kc.length + '</div>',
+      '      <div class="br-agent__stat-label">Kill Chain Steps</div>',
+      '    </div>',
+      '    <div class="br-agent__stat">',
+      '      <div class="br-agent__stat-value">' + gaps.length + '</div>',
+      '      <div class="br-agent__stat-label">Evidence Gaps</div>',
+      '    </div>',
+      '  </div>',
+      '  <div class="br-agent__gaps">',
+      '    <div class="br-agent__gaps-title">COVERAGE GAPS</div>',
+      '    <ul class="br-agent__gaps-list">' + gapList + '</ul>',
+      '  </div>',
+      '</div>',
+    ].join('');
   }
 
   // ── Root Cause Narrative: CEO-readable single paragraph ────────────────────
