@@ -25,6 +25,7 @@ from src.agents.types import (
     InvestigationContext,
     ProposedAction,
 )
+from src.agents.stakeholder_router import route as _route_stakeholder
 from src.audit.logger import audit
 from src.core.approval_store import create_request as _create_approval
 from src.privacy.redaction import redact_for_llm
@@ -266,6 +267,14 @@ def enforce(
         evidence_count=source_count,
         compliance_controls=controls,
     )
+
+    # Stakeholder routing — derive recipient, deadline, citation
+    evidence_sig = f"{reason} {' '.join(c.get('control_id', '') for c in controls)}"
+    routing = _route_stakeholder(action_type, evidence_sig, dread_score)
+    proposed.recipient = routing["recipient"]
+    proposed.recipient_evidence = routing["recipient_evidence"]
+    proposed.deadline_hours = routing["deadline_hours"]
+    proposed.citation = routing["citation"]
 
     # Persist approval request via existing store
     token = f"agt-{proposed.action_id}"

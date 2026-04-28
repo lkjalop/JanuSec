@@ -20,9 +20,11 @@ from typing import Any, Dict, List, Optional
 
 from src.agents.types import (
     ActionZone,
+    Gap,
     InvestigationContext,
     InvestigationPlan,
     PlanStep,
+    RejectionReason,
     VerifiedFinding,
 )
 
@@ -43,8 +45,22 @@ You MUST output valid JSON matching this schema:
       "reason": "<why this step is needed>"
     }
   ],
-  "gaps": ["<data source or information that is missing>"]
+  "gaps": [
+    {
+      "description": "<what is missing>",
+      "type": "auto_fetchable|connector_disabled|unknown_source|cross_domain",
+      "source_type": "<zeek|okta|cloudtrail|s3_access|...>",
+      "confidence_cap": 0.6,
+      "impact": "<what we cannot determine without this data>"
+    }
+  ]
 }
+
+Gap types:
+- auto_fetchable: source connector is configured and we can pull it
+- connector_disabled: platform has a connector but it is not enabled
+- unknown_source: platform has no connector for this source type
+- cross_domain: data belongs to another team/tenant/org
 
 AVAILABLE_TOOLS: temporal_rag, hopgraph_query, nlp_search, duckdb_query,
                  dread_score, fetch_source, compliance_tag, action_propose
@@ -53,10 +69,11 @@ RULES:
 1. Maximum 5 steps per plan.
 2. Each step must have a clear reason.
 3. Prefer multi-source cross-correlation.
-4. Flag gaps — what data is missing that would increase confidence.
+4. Flag gaps with structured type, source, confidence cap, and impact.
 5. DO NOT propose Zone 2/3 actions (block/disable/notify) unless previous
    cycle found verified high-confidence findings.
 6. If corrective feedback says a pattern is FP, do NOT re-investigate it.
+   But a DIFFERENT phase by the same actor IS a different finding.
 """
 
 
@@ -64,8 +81,8 @@ def build_planner_prompt(
     context: InvestigationContext,
     assessment_summary: Dict[str, Any],
     previous_findings: List[VerifiedFinding] | None = None,
-    corrective_feedback: List[str] | None = None,
-    gaps: List[str] | None = None,
+    corrective_feedback: List[RejectionReason] | None = None,
+    gaps: List[Gap] | None = None,
     cycle: int = 1,
 ) -> str:
     """Build the full prompt for the Planner LLM call."""
@@ -90,16 +107,17 @@ def build_planner_prompt(
 
     # Corrective feedback
     if corrective_feedback:
-        sections.append("## Known False Positives (DO NOT re-investigate)")
+        sections.append("## Known False Positives (DO NOT re-investigate SAME phase)")
         for fb in corrective_feedback[:10]:
-            sections.append(f"- {fb[:200]}")
+            sections.append(f"- type={fb.type} actor={fb.actor} phase={fb.phase} detail={fb.detail[:120]}")
+        sections.append("NOTE: A different phase by the same actor IS a different finding.")
         sections.append("")
 
     # Gaps
     if gaps:
         sections.append("## Known Data Gaps")
         for g in gaps[:10]:
-            sections.append(f"- {g}")
+            sections.append(f"- [{g.type}] {g.description} (source={g.source_type}, cap={g.confidence_cap}, impact={g.impact})")
         sections.append("")
 
     sections.append("Produce the investigation plan JSON now.")
@@ -144,15 +162,37 @@ def parse_plan_response(raw_text: str, cycle: int) -> InvestigationPlan:
             reason=s.get("reason", ""),
         ))
 
-    gaps = data.get("gaps", [])
-    if isinstance(gaps, str):
-        gaps = [gaps]
+    gaps_raw = data.get("gaps", [])
+    if isinstance(gaps_raw, str):
+        gaps_raw = [gaps_raw]
+
+    gaps: list[Gap] = []
+    for g in gaps_raw[:10]:
+        if isinstance(g, dict):
+            gaps.append(Gap(
+                description=g.get("description", ""),
+                type=g.get("type", "unknown_source"),
+                source_type=g.get("source_type", ""),
+                confidence_cap=float(g.get("confidence_cap", 1.0)),
+                suggested_fields=g.get("suggested_fields", []),
+                impact=g.get("impact", ""),
+            ))
+        elif isinstance(g, str):
+            # Legacy string gap — classify heuristically
+            gap_type = "unknown_source"
+            if any(kw in g.lower() for kw in ["fetch", "pull", "ingest"]):
+                gap_type = "auto_fetchable"
+            elif any(kw in g.lower() for kw in ["not configured", "disabled", "connector"]):
+                gap_type = "connector_disabled"
+            elif any(kw in g.lower() for kw in ["other team", "cross", "different org"]):
+                gap_type = "cross_domain"
+            gaps.append(Gap(description=g, type=gap_type))
 
     return InvestigationPlan(
         cycle=cycle,
         hypothesis=hypothesis,
         steps=steps,
-        gaps=gaps[:10],
+        gaps=gaps,
     )
 
 
@@ -161,8 +201,8 @@ async def plan(
     assessment_summary: Dict[str, Any],
     *,
     previous_findings: List[VerifiedFinding] | None = None,
-    corrective_feedback: List[str] | None = None,
-    gaps: List[str] | None = None,
+    corrective_feedback: List[RejectionReason] | None = None,
+    gaps: List[Gap] | None = None,
     cycle: int = 1,
     llm_client: Any = None,
 ) -> InvestigationPlan:
