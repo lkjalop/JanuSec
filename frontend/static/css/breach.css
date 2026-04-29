@@ -1769,3 +1769,216 @@
   padding-top: 12px;
   border-top: 1px solid rgba(255,255,255,.06);
 }
+
+.br-start-here {
+  margin: 8px 0 10px;
+  padding: 8px 10px;
+  border-left: 3px solid #2dd4bf;
+  border-radius: 0 4px 4px 0;
+  background: rgba(45,212,191,.07);
+  color: rgba(255,255,255,.86);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.br-dispatch-status-grid,
+.br-check-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.br-workbench-rail {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.br-workbench-rail__row {
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 6px;
+  background: rgba(13,13,26,.55);
+  padding: 8px;
+}
+
+.br-workbench-rail__row span,
+.br-dispatch-minihead {
+  display: block;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+
+.br-workbench-rail__row p {
+  margin: 0;
+  color: rgba(255,255,255,.82);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.br-dispatch-mini-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+.br-dispatch-mini-table td {
+  padding: 4px 6px;
+  border-bottom: 1px solid rgba(255,255,255,.06);
+  vertical-align: top;
+}
+
+.br-dispatch-status-card {
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 6px;
+  background: rgba(13,13,26,.55);
+  padding: 8px;
+  min-height: 54px;
+}
+
+.br-dispatch-status-card strong {
+  display: block;
+  color: #e5e7eb;
+  font-size: 11px;
+  margin-bottom: 3px;
+}
+
+.br-status-chip {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 999px;
+  padding: 1px 7px;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.br-status-chip--critical {
+  color: #fecaca;
+  border-color: rgba(239,68,68,.45);
+  background: rgba(239,68,68,.14);
+}
+
+.br-status-chip--pending {
+  color: #fde68a;
+  border-color: rgba(245,158,11,.42);
+  background: rgba(245,158,11,.10);
+}
+
+.br-status-chip--ok {
+  color: #99f6e4;
+  border-color: rgba(45,212,191,.38);
+  background: rgba(45,212,191,.10);
+}
+
+.br-status-chip--approved {
+  color: #bfdbfe;
+  border-color: rgba(96,165,250,.38);
+  background: rgba(96,165,250,.10);
+}
+
+.br-muted-mini {
+  margin-top: 2px;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 400;
+}
+
+.br-dispatch-work-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+  margin: 6px 0 10px;
+}
+
+.br-dispatch-work-table th,
+.br-dispatch-work-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid rgba(255,255,255,.06);
+  vertical-align: top;
+  text-align: left;
+}
+
+.br-dispatch-work-table th {
+  color: var(--text-muted);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
+.br-dispatch-work-table code,
+.br-pivot-tree {
+  color: #c4b5fd;
+  background: rgba(13,13,26,.7);
+  border: 1px solid rgba(255,255,255,.06);
+  border-radius: 5px;
+}
+
+.br-dispatch-work-table code {
+  display: inline-block;
+  max-width: 420px;
+  padding: 2px 5px;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.br-pivot-tree {
+  padding: 9px 10px;
+  margin: 8px 0 10px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.br-dispatch-more {
+  position: relative;
+}
+
+.br-dispatch-more summary {
+  list-style: none;
+}
+
+.br-dispatch-more summary::-webkit-details-marker {
+  display: none;
+}
+
+.br-dispatch-more__summary {
+  cursor: pointer;
+}
+
+.br-dispatch-more__menu {
+  position: absolute;
+  z-index: 20;
+  right: 0;
+  top: calc(100% + 6px);
+  min-width: 230px;
+  padding: 8px;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 6px;
+  background: #111522;
+  box-shadow: 0 14px 34px rgba(0,0,0,.38);
+  display: grid;
+  gap: 6px;
+}
+
+.br-dispatch-more__menu .br-dispatch__btn {
+  width: 100%;
+  justify-content: flex-start;
+}
+
+@media (max-width: 720px) {
+  .br-dispatch-more,
+  .br-dispatch-more__menu {
+    width: 100%;
+  }
+
+  .br-dispatch-more__menu {
+    position: static;
+    margin-top: 6px;
+  }
+}
