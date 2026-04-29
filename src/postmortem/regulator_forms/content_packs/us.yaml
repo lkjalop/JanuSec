@@ -1,0 +1,87 @@
+# US Regulator Content Pack — SCAFFOLD ONLY
+# ==========================================
+#
+# v1 status: NOT IMPLEMENTED. This file is a placeholder for v2 international
+# expansion. The shape mirrors au.yaml so when US-specific form modules
+# are added (us_sec_8k.py, us_hipaa.py, us_state_breach.py, etc.) they
+# read from this pack the same way AU modules will.
+#
+# WHEN TO IMPLEMENT
+# -----------------
+# When the first US customer signs. Until then, leaving this as a documented
+# scaffold is preferable to half-built form modules that risk being wrong.
+
+regulators:
+
+  sec_8k_cyber:
+    name: "SEC Form 8-K Item 1.05 — Material Cybersecurity Incident"
+    regulator: "U.S. Securities and Exchange Commission"
+    jurisdiction: "US"
+    form_module: null                # to be implemented: us_sec_8k.py
+    form_version: "sec_8k_item_1_05_2024"
+    clock:
+      material_incident:
+        seconds: 345600              # 4 business days
+        human:   "4 business days"
+        rule:    "from determination of materiality"
+    submission:
+      method: "manual_8k_filing_via_edgar"
+      auto_submit_allowed: false
+    trigger_when:
+      entity_context_flag: "sec_registrant"
+      condition: "true"
+    notes: |
+      Materiality determination is the customer's, not the platform's.
+      8-K filing requires legal counsel and Disclosure Committee review.
+      JanuSec produces inputs only — never auto-files.
+
+  hipaa_breach:
+    name: "HIPAA Breach Notification Rule — 45 CFR §§ 164.400–414"
+    regulator: "HHS Office for Civil Rights"
+    jurisdiction: "US"
+    form_module: null
+    form_version: "hipaa_ocr_breach_portal_2024"
+    clock:
+      individual_notification:
+        seconds: 5184000              # 60 days
+        human:   "60 days"
+      hhs_notification_large:
+        seconds: 5184000              # 60 days if >=500 individuals
+        human:   "60 days (>=500 affected)"
+      hhs_notification_small:
+        seconds: 31536000             # annual log if <500 individuals
+        human:   "annual (per 60d after year-end)"
+    submission:
+      endpoint: "https://ocrportal.hhs.gov/ocr/breach/breach_form.jsf"
+      method: "manual_portal_submission"
+      auto_submit_allowed: false
+    trigger_when:
+      data_classes_any:
+        - phi
+        - health_records
+
+  ftc_safeguards:
+    name: "FTC Safeguards Rule — Standards for Safeguarding Customer Information"
+    regulator: "Federal Trade Commission"
+    jurisdiction: "US"
+    form_module: null
+    form_version: "ftc_safeguards_notification_2024"
+    clock:
+      breach_notification:
+        seconds: 2592000              # 30 days
+        human:   "30 days"
+        threshold: ">=500 consumers"
+    trigger_when:
+      data_classes_any: [customer_pii, financial]
+      record_count_estimate_min: 500
+
+  # State-level breach notification statutes (50 states + territories)
+  # implemented per-state when a customer asks. Common shapes:
+  state_breach_default:
+    note: "Most states require notification 'without unreasonable delay'. Specific clocks (CA: 'in the most expedient time possible', TX: 60d, FL: 30d, etc.) per state."
+    form_module: null
+    auto_submit_allowed: false
+
+binding_constraints:
+  human_review_required_always: true
+  auto_submit_allowed_anywhere: false

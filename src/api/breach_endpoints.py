@@ -10,6 +10,9 @@ Routes:
   POST /api/v1/assessments/{aid}/executive-summary
       Hybrid deterministic + LLM colour sentence for the home page.
 
+  POST /api/v1/assessments/{aid}/clusters/{cid}/persona-dispatch
+      Regenerate one persona's dispatch payload on demand (Regenerate button).
+
   POST /api/v1/assessments/{aid}/clusters/{cid}/sign-off
       Analyst sign-off with notes + timeline confirmation.
 
@@ -68,7 +71,7 @@ def _persist(assessment_id: str, assessment: dict) -> None:
         pass
 
 
-def _get_llm(model: str = 'qwen2.5:14b'):
+def _get_llm(model: str = 'qwen3:14b'):
     try:
         from src.integrations.llm_client import DEFAULT_CLIENT
         return DEFAULT_CLIENT
@@ -134,9 +137,217 @@ def _lead_dread(cluster: dict) -> tuple[dict, dict, bool]:
     return dn, frags, has_dread
 
 
+def _resolve_full_cluster(cluster: dict, assessment: dict) -> dict:
+    """
+    Return the full correlation_cluster entry that corresponds to *cluster*.
+    threat_cases are shallow copies without tier1_prefill; cross-reference using cluster_id so
+    we always build the exec summary from the version that was fully enriched during ingest.
+    """
+    cid = cluster.get('cluster_id') or cluster.get('id')
+    if not cid:
+        return cluster
+    for c in (assessment.get('correlation_clusters') or []):
+        if (c.get('cluster_id') or c.get('id')) == cid:
+            # Prefer the correlation_cluster if it has richer prefill data
+            if c.get('tier1_prefill') and not cluster.get('tier1_prefill'):
+                return c
+            if c.get('tier1_prefill') and c.get('tier1_prefill') != cluster.get('tier1_prefill'):
+                # Use whichever has the dread_narrative fragments
+                dn_c = (c.get('tier1_prefill') or {}).get('dread_narrative') or {}
+                dn_cl = (cluster.get('tier1_prefill') or {}).get('dread_narrative') or {}
+                if dn_c.get('fragments') and not dn_cl.get('fragments'):
+                    return c
+            return cluster
+    return cluster
+
+
+# Keys that indicate the exec summary was generated with the legacy generic template.
+_LEGACY_EXEC_PATTERNS = (
+    'janusec found observed attacker action',
+    'janusec grouped',
+    'janusec identified',
+    'observed attacker action against a protected business process',
+    'highest finding:',
+)
+
+# Verbs used in the Diamond capability chain to mark tool-pivot boundaries.
+_CHAIN_ARROW = ' → '
+
+
+def _build_attack_chain_exec_summary(cluster: dict, assessment: dict) -> tuple[str, str]:
+    """
+    Build a concise, evidence-specific executive summary from the attack chain.
+    Prioritises enriched llm_narrative (Stage 5d) for infra/geo/cloud detail;
+    falls back to DREAD/PASTA/Diamond from tier1_prefill.
+    Returns (summary_text, provenance_label).
+    """
+    full = _resolve_full_cluster(cluster, assessment)
+    prefill = full.get('tier1_prefill') or {}
+    dn = prefill.get('dread_narrative') or {}
+    frags = dn.get('fragments') or {}
+    pasta = prefill.get('pasta_summary') or {}
+    diamond = prefill.get('diamond_model') or {}
+
+    # Pull enriched narrative (populated by assessment_worker Stage 5d)
+    enriched = full.get('llm_narrative') or {}
+    e_infra = enriched.get('attacker_infrastructure') or {}
+    e_data = enriched.get('affected_data') or {}
+    e_principals = enriched.get('affected_principals') or {}
+    e_discovery = enriched.get('discovery') or {}
+
+    # ── Sentence 1: Initial compromise — who, how, when
+    damage = _safe_text(frags.get('damage')).strip()
+    intro_sentence = ''
+    if damage:
+        clip = damage[:500]
+        last_dot = clip.rfind('.')
+        if last_dot > 50:
+            intro_sentence = clip[:last_dot + 1]
+        else:
+            intro_sentence = clip[:400].rsplit(' ', 1)[0] + ('…' if len(damage) > 400 else '')
+
+    # Supplement intro with specific attacker IPs + geo attribution from enriched narrative
+    attacker_ips = e_infra.get('external_ips') or []
+    attacker_countries = e_infra.get('countries') or []
+    attacker_asns = e_infra.get('asns') or []
+    if attacker_ips and intro_sentence:
+        geo_parts = []
+        if attacker_ips[:2]:
+            geo_parts.append(f"attacker IPs: {', '.join(attacker_ips[:2])}")
+        if attacker_countries:
+            geo_parts.append(f"origin: {', '.join(attacker_countries[:2])}")
+        if attacker_asns:
+            geo_parts.append(f"ASN: {attacker_asns[0]}")
+        if geo_parts:
+            intro_sentence = intro_sentence.rstrip('.') + f' ({"; ".join(geo_parts)}).'
+    elif attacker_ips and not intro_sentence:
+        geo_parts = [f"attacker IPs {', '.join(attacker_ips[:3])}"]
+        if attacker_countries:
+            geo_parts.append(f"origin {', '.join(attacker_countries[:2])}")
+        intro_sentence = f"Attacker infrastructure observed: {'; '.join(geo_parts)}."
+
+    # ── Sentence 2: Pivot chain — prefer enriched cloud services if present
+    capability = diamond.get('capability') or []
+    pivot_sentence = ''
+    # Build cloud-service pivot from enriched principals / infra if richer than Diamond
+    cloud_roles = e_principals.get('cloud_roles') or []
+    cloud_keys = e_principals.get('cloud_access_keys') or []
+    svc_accts = e_principals.get('service_accounts') or []
+    staging = e_infra.get('staging_resources') or []
+    cloud_pivot_parts = []
+    if cloud_roles:
+        cloud_pivot_parts.append(f"assumed role: {cloud_roles[0].split('assumed-role/')[-1] if 'assumed-role/' in cloud_roles[0] else cloud_roles[0]}")
+    if cloud_keys:
+        cloud_pivot_parts.append(f"AWS key: {cloud_keys[0]}")
+    if svc_accts:
+        cloud_pivot_parts.append(f"service account: {svc_accts[0]}")
+    if e_data.get('tables'):
+        cloud_pivot_parts.append(f"accessed tables: {', '.join(e_data['tables'][:2])}")
+
+    if isinstance(capability, list) and capability:
+        chain_steps = [str(c).strip() for c in capability[:8] if c]
+        if chain_steps:
+            pivot_sentence = 'Attack chain: ' + _CHAIN_ARROW.join(chain_steps) + '.'
+    elif isinstance(capability, str) and capability.strip():
+        pivot_sentence = 'Attack chain: ' + capability.strip()[:350] + '.'
+    if not pivot_sentence:
+        exploit = _safe_text(pasta.get('exploitation_path')).strip()
+        if exploit:
+            pivot_sentence = 'Exploitation path: ' + exploit[:300] + '.'
+    if not pivot_sentence and cloud_pivot_parts:
+        pivot_sentence = 'Cloud pivot: ' + '; '.join(cloud_pivot_parts) + '.'
+    elif pivot_sentence and cloud_pivot_parts:
+        # Append cloud detail if Diamond/PASTA didn't already capture it
+        pivot_sentence = pivot_sentence.rstrip('.') + f' Cloud services: {"; ".join(cloud_pivot_parts[:2])}.'
+
+    # ── Sentence 3: Data impact + exfil
+    victim_data = diamond.get('victim_data') or []
+    infra_raw = diamond.get('infrastructure') or []
+    _EXFIL_KW = ('mega.nz', 's3://', 'backblaze', 'dropbox', 'gdrive', '.b2.', 'exfil',
+                 'onedrive', 'pastebin', 'transfer.sh', 'wetransfer', 'rclone', 'hetzner')
+    exfil_infra = [str(x) for x in infra_raw if any(kw in str(x).lower() for kw in _EXFIL_KW)][:3]
+    # Prefer enriched exfil destinations
+    enriched_exfil = e_infra.get('exfil_destinations') or []
+    all_exfil = list(dict.fromkeys(enriched_exfil[:3] + exfil_infra))[:3]
+
+    data_sentence = ''
+    e_tables = e_data.get('tables') or []
+    e_classes = e_data.get('classes') or []
+    e_records = e_data.get('record_count_estimate')
+    crown_jewel = e_data.get('crown_jewel_touched', False)
+
+    if e_tables or victim_data:
+        data_parts = []
+        if crown_jewel and e_tables:
+            data_parts.append(f"Crown-jewel data accessed: {', '.join(e_tables[:2])}")
+        elif e_tables:
+            data_parts.append(f"Tables accessed: {', '.join(e_tables[:2])}")
+        elif victim_data:
+            data_parts.append(f"Data at risk: {', '.join(str(d) for d in victim_data[:4])}")
+        if e_records:
+            data_parts.append(f"~{e_records:,} records")
+        if e_classes:
+            data_parts.append(f"classes: {', '.join(e_classes[:3])}")
+        if all_exfil:
+            data_parts.append(f"exfiltrated to {', '.join(all_exfil[:2])}")
+        data_sentence = '. '.join(data_parts) + '.'
+    elif pasta.get('business_impact'):
+        data_sentence = _safe_text(pasta.get('business_impact'))[:200] + '.'
+
+    # ── Sentence 4: Discovery + regulatory
+    disc_source = e_discovery.get('source') or ''
+    disc_who = e_discovery.get('who') or ''
+    disc_lag = e_discovery.get('lag_seconds_from_first_evidence')
+    disc_sentence = ''
+
+    if disc_source and disc_source != 'unknown':
+        _disc_labels = {
+            'external_pentest': 'external penetration test',
+            'edr_detection': 'EDR detection',
+            'analyst': 'SOC analyst',
+            'deterministic_pipeline': 'automated detection pipeline',
+        }
+        disc_label = _disc_labels.get(disc_source, disc_source)
+        disc_sentence = f'Discovered by {disc_label}'
+        if disc_who and disc_who != 'unknown':
+            disc_sentence += f' ({disc_who})'
+        if disc_lag and disc_lag > 0:
+            dwell_days = round(disc_lag / 86400, 1)
+            disc_sentence += f'; {dwell_days}d dwell time'
+        disc_sentence += '.'
+    else:
+        # Fall back to DREAD discoverability fragment
+        disc_text = _safe_text(frags.get('discoverability')).strip()
+        if disc_text:
+            m_window = re.search(r'[Aa]ctivity window[:\s]+([^\.\n]+)', disc_text)
+            m_who = re.search(
+                r'(external[^\.\n]+|red.?team[^\.\n]+|pentest[^\.\n]+|siem[^\.\n]+|'
+                r'hunt[^\.\n]+|cross-source correlation[^\.\n]+)',
+                disc_text, re.IGNORECASE,
+            )
+            if m_window and m_who:
+                disc_sentence = f'Active {m_window.group(1).strip()}; {m_who.group(1).strip()}.'
+            elif m_window:
+                disc_sentence = f'Activity window: {m_window.group(1).strip()}.'
+
+    parts = [p for p in [intro_sentence, pivot_sentence, data_sentence, disc_sentence] if p]
+    if not parts:
+        return '', 'attack_chain_fallback'
+
+    provenance = 'attack_chain_narrative+enriched' if (e_infra or e_data) else 'attack_chain_narrative'
+    return ' '.join(parts), provenance
+
+
 def _dread_summary_for_cluster(cluster: dict, assessment: dict, *, total_rows: int, total_sources: int, ruled_out_rows: int = 0) -> Optional[dict]:
     dn, frags, has_dread = _lead_dread(cluster)
-    if not has_dread:
+    prefill = cluster.get('tier1_prefill') or {}
+    pasta = prefill.get('pasta_summary') or {}
+    diamond = prefill.get('diamond_model') or {}
+    has_pasta = bool(pasta.get('threat_profile') or pasta.get('exploitation_path') or pasta.get('business_impact'))
+    has_diamond = bool(diamond.get('adversary') or diamond.get('capability'))
+
+    # Return None only when there is truly no threat-model data of any kind.
+    if not has_dread and not has_pasta and not has_diamond:
         return None
 
     verdict = str(cluster.get('verdict') or cluster.get('final_verdict') or '').upper()
@@ -145,19 +356,42 @@ def _dread_summary_for_cluster(cluster: dict, assessment: dict, *, total_rows: i
     rendered = _safe_text(dn.get('rendered')).strip()
     sabsa = _safe_text(dn.get('sabsa_coda_draft')).strip()
     body_parts: list[str] = []
-    provenance = 'dread_llm_rendered' if rendered else 'dread_deterministic_fragments'
     render_warning = ''
 
-    if rendered:
-        body_parts.append(rendered)
+    if has_dread:
+        provenance = 'dread_llm_rendered' if rendered else 'dread_deterministic_fragments'
+        if rendered:
+            body_parts.append(rendered)
+        else:
+            for key in _DREAD_ORDER:
+                txt = _safe_text(frags.get(key)).strip()
+                if txt:
+                    body_parts.append(txt)
+            if sabsa:
+                body_parts.append(sabsa)
+            render_warning = 'LLM render unavailable; deterministic evidence summary shown.'
+    elif has_pasta:
+        # PASTA fallback: stages 4 (threat profile), 5 (exploitation path), 7 (business impact)
+        provenance = 'pasta_deterministic'
+        if pasta.get('threat_profile'):
+            body_parts.append(f"Threat actor: {pasta['threat_profile']}")
+        if pasta.get('exploitation_path'):
+            body_parts.append(f"Exploitation: {pasta['exploitation_path']}")
+        if pasta.get('business_impact'):
+            body_parts.append(f"Business impact: {pasta['business_impact']}")
+        render_warning = 'DREAD narrative unavailable; PASTA threat model shown.'
     else:
-        for key in _DREAD_ORDER:
-            txt = _safe_text(frags.get(key)).strip()
-            if txt:
-                body_parts.append(txt)
-        if sabsa:
-            body_parts.append(sabsa)
-        render_warning = 'LLM render unavailable; deterministic evidence summary shown.'
+        # Diamond fallback: adversary, capability, victim
+        provenance = 'diamond_deterministic'
+        if diamond.get('adversary'):
+            body_parts.append(f"Adversary: {diamond['adversary']}")
+        caps = diamond.get('capability') or []
+        if caps:
+            body_parts.append(f"Capabilities observed: {', '.join(caps[:5])}.")
+        victims = (diamond.get('victim_users') or []) + (diamond.get('victim_data') or [])
+        if victims:
+            body_parts.append(f"Victim scope: {', '.join(victims[:4])}.")
+        render_warning = 'DREAD/PASTA unavailable; Diamond threat model shown.'
 
     if ruled_out_rows:
         body_parts.append(
@@ -168,13 +402,23 @@ def _dread_summary_for_cluster(cluster: dict, assessment: dict, *, total_rows: i
     refs = _extract_row_refs_from_text(joined)
     why = _why_confirmed_for_cluster(cluster)
     headline_prefix = 'Likely breach - human review required' if verdict == 'LIKELY_BREACH' else 'Confirmed breach'
+    _model_label = (
+        'DREAD+SABSA' if has_dread else
+        'PASTA threat model' if has_pasta else
+        'Diamond threat model'
+    )
+    _subline_suffix = (
+        'DREAD/SABSA evidence narrative' if has_dread else
+        'PASTA threat model narrative' if has_pasta else
+        'Diamond threat model narrative'
+    )
     return {
         'headline': f'{headline_prefix}: {title}',
-        'subline': f'{rows} evidence rows across {total_sources or 1} source{"s" if (total_sources or 1) != 1 else ""} - DREAD/SABSA evidence narrative',
+        'subline': f'{rows} evidence rows across {total_sources or 1} source{"s" if (total_sources or 1) != 1 else ""} — {_subline_suffix}',
         'executive_summary': joined,
         'deterministic': '\n'.join([f'{headline_prefix}: {title}', joined]),
         'narrative_provenance': provenance,
-        'narrative_source': 'DREAD+SABSA',
+        'narrative_source': _model_label,
         'render_warning': render_warning,
         'evidence_refs': refs,
         'dread_fragments': frags,
@@ -209,14 +453,19 @@ def _why_confirmed_for_cluster(cluster: dict) -> list[dict]:
 def _cached_summary_is_stale(cached: dict, lead: dict) -> bool:
     if not cached:
         return False
-    _, _, has_dread = _lead_dread(lead)
-    if not has_dread:
+    provenance = _safe_text(cached.get('narrative_provenance') or cached.get('narrative_source')).lower()
+    # Already generated with the new attack chain format — not stale
+    if 'attack_chain_narrative' in provenance:
         return False
-    source = _safe_text(cached.get('narrative_provenance') or cached.get('narrative_source')).lower()
-    if source.startswith('dread') or 'dread' in source:
-        return False
-    summary_text = _safe_text(cached.get('executive_summary') or cached.get('headline')).lower()
-    return bool(summary_text) and ('validated breach:' in summary_text or 'observed attacker action' in summary_text or 'highest finding:' in summary_text)
+    # Legacy generic template text is always stale regardless of provenance
+    summary_text = _safe_text(cached.get('executive_summary') or '').lower()
+    if any(p in summary_text for p in _LEGACY_EXEC_PATTERNS):
+        return True
+    # Old DREAD-fragment concatenation (provenance contains 'deterministic' or 'dread_deterministic')
+    # is stale if cluster now has richer data to build an attack chain narrative
+    if any(kw in provenance for kw in ('deterministic', 'legacy', 'fallback', 'pasta_deterministic', 'diamond_deterministic')):
+        return True
+    return False
 
 
 def _row_geo_asn(row: dict) -> dict:
@@ -240,12 +489,14 @@ def _row_geo_asn(row: dict) -> dict:
 
 
 _VERDICT_RANK = {
-    'VALIDATED_BREACH': 60,
-    'CONFIRMED_INTRUSION': 50,
-    'LIKELY_COMPROMISE': 40,
-    'SUSPICIOUS_ACTIVITY': 30,
+    'VALIDATED_BREACH':     60,
+    'CONFIRMED_BREACH':     58,  # gated output of VALIDATED_BREACH — must outrank everything
+    'CONFIRMED_INTRUSION':  55,
+    'LIKELY_BREACH':        45,
+    'LIKELY_COMPROMISE':    40,
+    'SUSPICIOUS_ACTIVITY':  30,
     'INSUFFICIENT_TELEMETRY': 20,
-    'BENIGN_EXPECTED': 10,
+    'BENIGN_EXPECTED':      10,
 }
 
 
@@ -1118,6 +1369,7 @@ async def trigger_tier1_prefill(
         body.top_n,
         body.model,
         tenant_id,
+        body.force,
     )
     _persist(assessment_id, assessment)
 
@@ -1173,7 +1425,13 @@ async def get_executive_summary(
 
     cached = assessment.get('exec_summary_llm')
 
+    # Prefer presentation-layer threat_cases for lead selection (they have real verdicts).
+    # Fall back to correlation_clusters for full inventory stats.
+    threat_cases = assessment.get('threat_cases') or []
     clusters = assessment.get('correlation_clusters') or []
+    # Use threat_cases for lead ranking when available; they carry pre-assigned verdicts.
+    lead_pool = threat_cases if threat_cases else clusters
+
     # Prefer the DuckDB-backed row count (Phase 2 ingest) over the sampled in-memory rows
     evidence_store = assessment.get('evidence_store') or {}
     total_rows = (
@@ -1192,13 +1450,21 @@ async def get_executive_summary(
 
     # Deterministic backbone. This must be correct without the LLM: the CEO
     # view should answer "was there a breach?" before giving extra color.
+    # Count from threat_cases only when available — they are derived from clusters,
+    # so iterating both causes double-counting of the same incidents.
+    verdict_pool = threat_cases if threat_cases else clusters
     verdict_counts: dict[str, int] = {}
-    for c in clusters:
+    for c in verdict_pool:
         v = str(c.get('verdict') or c.get('final_verdict') or 'UNCERTAIN').upper()
         label = _verdict_bucket(v)
         verdict_counts[label] = verdict_counts.get(label, 0) + 1
 
-    sorted_clusters = sorted(clusters, key=_cluster_rank, reverse=True)
+    # Surface clustering diagnostics so the frontend can show reingest prompts.
+    clustering_diagnostics = assessment.get('cluster_diagnostics') or {}
+    requires_reingest = bool(assessment.get('requires_reingest'))
+    fallback_used = bool(assessment.get('fallback_used'))
+
+    sorted_clusters = sorted(lead_pool, key=_cluster_rank, reverse=True)
     lead = sorted_clusters[0] if sorted_clusters else {}
     if cached and not body.regenerate and not _cached_summary_is_stale(cached, lead):
         return JSONResponse({
@@ -1239,6 +1505,10 @@ async def get_executive_summary(
         for row in lead_cluster_rows
         for k in ('source_ip', 'src_ip', 'client_ip', 'ClientIP', 'remote_address', 'sourceIPAddress', 'dst_ip', 'destination_ip')
     ], 5)
+    # RFC 5737 documentation/test-net ranges (192.0.2.x, 198.51.100.x, 203.0.113.x) are used
+    # for synthetic or pentest data and must never appear in breach entity context.
+    _TESTNET_PREFIXES = ('192.0.2.', '198.51.100.', '203.0.113.')
+    row_ips = [ip for ip in row_ips if not any(ip.startswith(p) for p in _TESTNET_PREFIXES)]
     row_assets = _uniq([
         row.get(k)
         for row in lead_cluster_rows
@@ -1322,60 +1592,83 @@ async def get_executive_summary(
         )
 
     dread_summary = _dread_summary_for_cluster(
-        lead,
+        _resolve_full_cluster(lead, assessment),
         assessment,
         total_rows=int(total_rows or 0),
         total_sources=int(total_sources or 0),
         ruled_out_rows=ruled_out_rows,
     ) if lead else None
 
-    if dread_summary:
-        headline = dread_summary['headline']
-        subline = dread_summary['subline']
-        executive_summary = dread_summary['executive_summary']
-    elif lead and lead_verdict in {'VALIDATED_BREACH', 'CONFIRMED_INTRUSION', 'CONFIRMED_BREACH'}:
+    # Build the attack chain narrative (deterministic, evidence-specific, no LLM needed).
+    # This replaces the old DREAD-fragment concatenation that produced verbose walls of text.
+    attack_chain_exec, attack_chain_provenance = _build_attack_chain_exec_summary(lead, assessment) if lead else ('', 'fallback')
+
+    if lead and lead_verdict in {'VALIDATED_BREACH', 'CONFIRMED_INTRUSION', 'CONFIRMED_BREACH', 'LIKELY_BREACH'}:
+        # Use lead_name for headline — comes from the threat_case which carries incident_name.
+        # dread_summary['headline'] is derived from the correlation_cluster which often lacks it.
         headline = f"Confirmed breach: {lead_name}"
         subline = (
             f"{lead_rows} evidence rows"
             + (f" across {total_sources} sources" if total_sources else '')
-            + (f" link {', '.join(lead_cues)}" if lead_cues else ' support the lead incident')
+            + (f" link {', '.join(lead_cues)}" if lead_cues else ' — attack chain reconstructed')
         )
-        executive_summary = (
-            f"JanuSec found observed attacker action against a protected business process. "
-            f"The lead threat case is {lead_name}. "
-            + (f"Evidence names {entity_context}. " if entity_context else '')
-            + (f"Evidence links {', '.join(lead_cues)}. " if lead_cues else '')
-            + f"Overall, {len(clusters)} threat cases were grouped from {total_rows} rows: {counts_text}."
-            + geo_addendum
-        )
+        if attack_chain_exec:
+            executive_summary = attack_chain_exec + (geo_addendum if geo_addendum else '')
+        elif dread_summary:
+            executive_summary = dread_summary['executive_summary']
+        else:
+            executive_summary = (
+                f"Confirmed multi-phase intrusion. Lead incident: {lead_name}. "
+                + (f"Evidence involves {entity_context}. " if entity_context else '')
+                + (f"Indicators: {', '.join(lead_cues)}. " if lead_cues else '')
+                + geo_addendum
+            )
     elif lead:
-        headline = f"Highest finding: {lead_verdict} for {lead_name}"
+        headline = f"Highest finding: {lead_verdict} — {lead_name}"
         subline = (
             f"{lead_rows} evidence rows"
             + (f" across {total_sources} sources" if total_sources else '')
             + " require investigation before breach validation."
         )
-        executive_summary = (
-            f"JanuSec grouped {len(clusters)} threat cases from {total_rows} rows"
-            + (f" across {total_sources} sources" if total_sources else '')
-            + f": {counts_text}. "
-            + (f"The lead finding is {lead_name} ({lead_subtitle})." if lead_subtitle else f"The lead finding is {lead_name}.")
-            + geo_addendum
+        if attack_chain_exec:
+            executive_summary = attack_chain_exec
+        elif dread_summary:
+            executive_summary = dread_summary['executive_summary']
+        else:
+            executive_summary = (
+                f"{len(clusters)} threat cases from {total_rows} rows"
+                + (f" across {total_sources} sources" if total_sources else '')
+                + f": {counts_text}. Lead finding: {lead_name}."
+                + geo_addendum
+            )
+    elif requires_reingest or lead_verdict == 'ANALYSIS_INCOMPLETE':
+        headline = 'Analysis incomplete — re-ingest required'
+        stale_pct = clustering_diagnostics.get('stale_rows', 0)
+        subline = (
+            'Telemetry was stored with an outdated normalizer and could not be clustered. '
+            'Re-upload the source files to generate a typed assessment.'
         )
+        executive_summary = subline
+        if stale_pct:
+            executive_summary += f' ({stale_pct} stale rows detected.)'
+        attack_chain_provenance = 'analysis_incomplete'
     else:
         headline = 'No confirmed breach found'
         subline = f'No correlated incident clusters were found in {total_rows} rows.'
         executive_summary = subline
+        attack_chain_provenance = 'no_breach'
     deterministic = '\n'.join([headline, subline, executive_summary])
 
-    # Attempt LLM narrative for the executive_summary body (non-blocking; falls back to deterministic)
+    # Attempt LLM narrative for the executive_summary body.
+    # Always runs on regenerate — attack chain narrative is fed as structured context.
     llm_color: Optional[str] = None
-    if lead and body.regenerate and not dread_summary:
+    _llm_ran = False
+    if lead and body.regenerate:
         try:
             llm = _get_llm(body.model)
             lead_prefill = lead.get('tier1_prefill') or {}
             mitre_tags = lead_prefill.get('mitre_techniques') or lead.get('mitre_tags') or []
-            mitre_str = ', '.join(mitre_tags[:4]) if mitre_tags else ''
+            mitre_str = ', '.join(mitre_tags[:6]) if mitre_tags else ''
 
             # Gather entity context — accounts, IPs, assets, time range, attack chain
             raw_accounts = (
@@ -1384,7 +1677,7 @@ async def get_executive_summary(
                 or lead.get('affected_accounts')
                 or row_accounts
             )
-            accounts_str = ', '.join([str(a) for a in raw_accounts[:4] if a]) or ''
+            accounts_str = ', '.join([str(a) for a in raw_accounts[:6] if a]) or ''
 
             raw_ips = (
                 lead.get('shared_external_ips')
@@ -1392,7 +1685,7 @@ async def get_executive_summary(
                 or lead_prefill.get('source_ips')
                 or row_ips
             )
-            ips_str = ', '.join([str(ip) for ip in raw_ips[:4] if ip]) or ''
+            ips_str = ', '.join([str(ip) for ip in raw_ips[:5] if ip]) or ''
 
             raw_assets = (
                 lead.get('shared_hosts')
@@ -1400,7 +1693,7 @@ async def get_executive_summary(
                 or lead_prefill.get('affected_assets')
                 or row_assets
             )
-            assets_str = ', '.join([str(a) for a in raw_assets[:3] if a]) or ''
+            assets_str = ', '.join([str(a) for a in raw_assets[:4] if a]) or ''
 
             # Time range from evidence chain or cluster timestamps
             chain_steps = lead_prefill.get('evidence_chain') or []
@@ -1415,7 +1708,7 @@ async def get_executive_summary(
             if chain_steps:
                 chain_summary = ' → '.join(
                     str(s.get('what') or s.get('event') or s.get('description') or '')
-                    for s in chain_steps[:5] if s.get('what') or s.get('event') or s.get('description')
+                    for s in chain_steps[:7] if s.get('what') or s.get('event') or s.get('description')
                 )
 
             business_context = (
@@ -1423,6 +1716,58 @@ async def get_executive_summary(
                 or lead.get('business_significance')
                 or ''
             )
+
+            # ── Pull rich threat model evidence ────────────────────────────────
+            # DREAD fragments (most specific — built from actual evidence rows)
+            dn = lead_prefill.get('dread_narrative') or {}
+            frags = dn.get('fragments') or {}
+            dread_damage = _safe_text(frags.get('damage')).strip()
+            dread_affected = _safe_text(frags.get('affected_users')).strip()
+            dread_exploit = _safe_text(frags.get('exploitability')).strip()
+            dread_discover = _safe_text(frags.get('discoverability')).strip()
+            dread_rendered = _safe_text(dn.get('rendered')).strip()
+
+            # PASTA exploitation path (stage 5 is the richest for exec context)
+            pasta = lead_prefill.get('pasta_summary') or {}
+            pasta_exploitation = _safe_text(pasta.get('exploitation_path')).strip()
+            pasta_impact = _safe_text(pasta.get('business_impact')).strip()
+            pasta_threat = _safe_text(pasta.get('threat_profile')).strip()
+
+            # Diamond model (adversary capability + victim data)
+            diamond = lead_prefill.get('diamond_model') or {}
+            diamond_caps = diamond.get('capability') or []
+            diamond_victim_data = diamond.get('victim_data') or []
+            diamond_infra = diamond.get('infrastructure') or []
+            diamond_caps_str = ', '.join(str(c) for c in diamond_caps[:6]) if diamond_caps else ''
+            diamond_data_str = ', '.join(str(d) for d in diamond_victim_data[:4]) if diamond_victim_data else ''
+
+            # Exfil destinations and staging from attacker_infrastructure
+            enriched = lead.get('llm_narrative') or {}
+            infra = enriched.get('attacker_infrastructure') or {}
+            exfil_dests = infra.get('exfil_destinations') or lead.get('exfil_destinations') or []
+            staging_res = infra.get('staging_resources') or []
+            exfil_str = ', '.join(str(x) for x in exfil_dests[:4]) if exfil_dests else ''
+            staging_str = ', '.join(str(s) for s in staging_res[:3]) if staging_res else ''
+
+            # Crown jewel and sensitive data
+            affected_data = enriched.get('affected_data') or {}
+            crown_jewel = affected_data.get('crown_jewel_touched', False)
+            sensitive_tables = affected_data.get('tables') or []
+            data_classes = affected_data.get('classes') or []
+            record_est = affected_data.get('record_count_estimate')
+            crown_jewel_str = ', '.join(str(t) for t in sensitive_tables[:3]) if sensitive_tables else ''
+
+            # Discovery story
+            discovery = enriched.get('discovery') or {}
+            disc_source = discovery.get('source') or ''
+            disc_who = discovery.get('who') or ''
+            disc_lag_secs = discovery.get('lag_seconds_from_first_evidence')
+            dwell_days = round(disc_lag_secs / 86400, 1) if disc_lag_secs else None
+
+            # Cloud access keys specifically revoked
+            principals = enriched.get('affected_principals') or {}
+            cloud_keys = principals.get('cloud_access_keys') or []
+            cloud_keys_str = ', '.join(str(k) for k in cloud_keys[:2]) if cloud_keys else ''
 
             # Build context block — only include populated fields
             context_parts = [f"Assessment verdict: {lead_verdict}. Incident: {lead_name}."]
@@ -1432,17 +1777,56 @@ async def get_executive_summary(
             if ips_str:
                 context_parts.append(f"Attacker IPs: {ips_str}.")
             if assets_str:
-                context_parts.append(f"Affected assets: {assets_str}.")
+                context_parts.append(f"Affected systems: {assets_str}.")
             if time_range_str:
-                context_parts.append(f"Time range: {time_range_str}.")
+                context_parts.append(f"Breach window: {time_range_str}.")
+            if dwell_days:
+                context_parts.append(f"Dwell time before detection: {dwell_days} days.")
+            if disc_source and disc_who:
+                context_parts.append(f"Discovery method: {disc_source} by {disc_who}.")
             if chain_summary:
                 context_parts.append(f"Attack chain: {chain_summary}.")
             if mitre_str:
                 context_parts.append(f"MITRE techniques: {mitre_str}.")
             if business_context:
-                context_parts.append(f"Business impact context: {business_context}.")
+                context_parts.append(f"Business significance: {business_context}.")
             if lead_cues:
-                context_parts.append(f"Key indicators: {', '.join(lead_cues)}.")
+                context_parts.append(f"Key indicators: {', '.join(lead_cues[:6])}.")
+            # Threat model detail
+            if dread_damage:
+                context_parts.append(f"DAMAGE: {dread_damage}")
+            if dread_affected:
+                context_parts.append(f"AFFECTED: {dread_affected}")
+            if dread_exploit:
+                context_parts.append(f"EXPLOITATION: {dread_exploit}")
+            if dread_discover:
+                context_parts.append(f"DISCOVERY: {dread_discover}")
+            if dread_rendered and not dread_damage:
+                context_parts.append(f"Threat narrative: {dread_rendered[:500]}")
+            if pasta_threat and not dread_damage:
+                context_parts.append(f"Threat actor: {pasta_threat}")
+            if pasta_exploitation and not dread_exploit:
+                context_parts.append(f"Exploitation path: {pasta_exploitation}")
+            if pasta_impact and not business_context:
+                context_parts.append(f"Business impact: {pasta_impact}")
+            if diamond_caps_str and not chain_summary:
+                context_parts.append(f"Attacker capabilities: {diamond_caps_str}.")
+            if diamond_data_str and not crown_jewel_str:
+                context_parts.append(f"Data assets compromised: {diamond_data_str}.")
+            if exfil_str:
+                context_parts.append(f"Exfiltration destinations: {exfil_str}.")
+            if staging_str:
+                context_parts.append(f"Staging resources: {staging_str}.")
+            if crown_jewel:
+                context_parts.append(f"CROWN JEWEL DATA ACCESSED: {crown_jewel_str or 'sensitive restricted tables'}.")
+            elif crown_jewel_str:
+                context_parts.append(f"Sensitive tables accessed: {crown_jewel_str}.")
+            if data_classes:
+                context_parts.append(f"Data classes: {', '.join(data_classes[:4])}.")
+            if record_est:
+                context_parts.append(f"Estimated records exfiltrated: {record_est:,}.")
+            if cloud_keys_str:
+                context_parts.append(f"Cloud access keys compromised: {cloud_keys_str}.")
 
             # Geo context for LLM — use formatted human-readable labels
             if geo_impossible:
@@ -1488,17 +1872,28 @@ async def get_executive_summary(
                     f"Logins observed from {len(geo_countries)} countries: {', '.join(formatted_countries)}."
                 )
 
+            # Attack chain narrative already built deterministically — give LLM the composed chain
+            # as a starting point so it can add nuance without inventing new facts.
+            if attack_chain_exec:
+                context_parts.insert(0, f"ATTACK CHAIN NARRATIVE (use as basis, improve prose):\n{attack_chain_exec}")
+
             prompt = (
-                "You are a security analyst writing a concise executive briefing for a non-technical audience.\n"
+                "You are a senior security analyst writing an executive briefing for a CISO and board.\n"
+                "Use ONLY the evidence provided below. Do not invent facts not present in the evidence.\n"
+                "Format: 3-4 sentences of clear, factual English — no bullet points, no headers.\n"
+                "Sentence 1: Who was compromised, how (name accounts, tools, IPs from evidence).\n"
+                "Sentence 2: The pivot chain — how the attacker moved laterally and what data was accessed or exfiltrated.\n"
+                "Sentence 3: How the breach was discovered and dwell time.\n"
+                "Sentence 4 (if applicable): Regulatory exposure and most urgent containment action.\n"
+                "Do not start with 'The'. Do not repeat the incident name or assessment metadata.\n"
+                "Be specific — use the exact account names, IPs, tools, table names from the evidence.\n\n"
+                "EVIDENCE:\n"
                 + "\n".join(context_parts)
-                + "\n\nWrite 2-3 sentences in plain English describing: (1) what the attacker did, naming specific "
-                "accounts or IPs if provided, (2) the business impact. "
-                "No bullet points, no jargon, no repeated incident name, do not start with 'The'."
             )
             resp = await asyncio.to_thread(
                 llm.generate,
                 prompt,
-                220,
+                400,
                 None,
                 {'ollama_model': body.model},
                 body.model,
@@ -1506,6 +1901,7 @@ async def get_executive_summary(
             llm_text = (resp.get('text') or '').strip()
             if llm_text and len(llm_text) > 30 and not llm_text.startswith('{'):
                 executive_summary = llm_text
+                _llm_ran = True
         except Exception:
             pass  # keep deterministic fallback
 
@@ -1527,8 +1923,8 @@ async def get_executive_summary(
         'model_used': body.model,
         'generated_at': int(time.time()),
         'from_cache': False,
-        'narrative_provenance': (dread_summary or {}).get('narrative_provenance') or 'legacy_deterministic_fallback',
-        'narrative_source': (dread_summary or {}).get('narrative_source') or 'legacy',
+        'narrative_provenance': attack_chain_provenance if not _llm_ran else f'llm_{body.model}',
+        'narrative_source': (body.model if _llm_ran else attack_chain_provenance),
         'render_warning': (dread_summary or {}).get('render_warning') or '',
         'evidence_refs': (dread_summary or {}).get('evidence_refs') or [],
         'dread_fragments': (dread_summary or {}).get('dread_fragments') or {},
@@ -1543,11 +1939,130 @@ async def get_executive_summary(
         'geo_suspicious_travel': lead_geo.get('suspicious_travel', []),
         'geo_plausible_travel': lead_geo.get('plausible_travel', []),
         'iam_playbook': lead_geo.get('iam_playbook', []),
+        # Clustering provenance — used by the UI to show stale/reingest warnings.
+        'requires_reingest': requires_reingest,
+        'fallback_used': fallback_used,
+        'clustering_diagnostics': clustering_diagnostics,
+        'normalizer_version': assessment.get('normalizer_version'),
+        'cluster_merge_version': assessment.get('cluster_merge_version'),
+        'clustering_mode': assessment.get('clustering_mode'),
     }
     assessment['exec_summary_llm'] = result
     _persist(assessment_id, assessment)
 
     return JSONResponse({'assessment_id': assessment_id, **result})
+
+
+class PersonaDispatchRequest(BaseModel):
+    persona: str = Field('compliance', description='Persona key to regenerate')
+    regenerate: bool = False
+
+
+@router.post('/{assessment_id}/clusters/{cluster_id}/persona-dispatch')
+async def regenerate_persona_dispatch(
+    assessment_id: str,
+    cluster_id: str,
+    body: PersonaDispatchRequest,
+    request: Request,
+) -> JSONResponse:
+    """Rebuild one persona's dispatch payload on demand.
+
+    Used by the per-persona Regenerate button in the dispatch preview.
+    Re-runs enrich_narrative + build_control_failure_register +
+    build_persona_dispatch for the given persona key.
+    """
+    assessment = _get_assessment(assessment_id)
+    if not assessment:
+        raise HTTPException(status_code=404, detail='assessment_not_found')
+
+    tenant_id = _get_tenant(request)
+    clusters = assessment.get('correlation_clusters') or []
+    cluster = next(
+        (c for c in clusters if (c.get('cluster_id') or c.get('id')) == cluster_id),
+        None,
+    )
+    if not cluster:
+        raise HTTPException(status_code=404, detail='cluster_not_found')
+
+    try:
+        from src.analysis.framework_mapper import build_control_failure_register
+        from src.analysis.persona_dispatch import build_persona_dispatch
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f'dispatch_modules_unavailable: {exc}')
+
+    # Enrich narrative if not already done
+    narrative = cluster.get('llm_narrative') or cluster.get('tier1_prefill') or {}
+    if not isinstance(narrative, dict):
+        narrative = {}
+
+    try:
+        from src.llm.cluster_narrator_v2_schema import enrich_narrative
+        tenant_class = None
+        try:
+            from src.config.tenant_data_classification import load_for_tenant
+            tenant_class = load_for_tenant(tenant_id)
+        except Exception:
+            pass
+
+        # Collect rows for this cluster
+        all_rows = (assessment.get('normalized_rows') or
+                    assessment.get('evidence_rows') or
+                    assessment.get('rows') or [])
+        row_lookup: dict[int, dict] = {}
+        for r in all_rows:
+            ri = r.get('row_index') or r.get('row_number') or r.get('id')
+            if ri is not None:
+                try:
+                    row_lookup[int(float(ri))] = r
+                except (TypeError, ValueError):
+                    pass
+        cl_rows = []
+        for ref in (cluster.get('row_refs') or []):
+            try:
+                k = int(float(ref))
+                if k in row_lookup:
+                    cl_rows.append(row_lookup[k])
+            except (TypeError, ValueError):
+                pass
+
+        narrative = enrich_narrative(
+            narrative, cluster, cl_rows,
+            tenant_classification=tenant_class,
+        )
+        if not narrative.get('mitre_techniques'):
+            explicit = cluster.get('mitre_techniques') or cluster.get('mitre_tags') or []
+            narrative['mitre_techniques'] = explicit
+        cluster['llm_narrative'] = narrative
+    except Exception as enrich_err:
+        logger.warning('enrich_narrative failed in persona dispatch regen: %s', enrich_err)
+        cl_rows = []
+
+    entity_context = assessment.get('entity_context') or {}
+    register = build_control_failure_register(
+        narrative, evidence_rows=cl_rows, entity_context=entity_context,
+        cluster=cluster,
+    )
+
+    payload = build_persona_dispatch(
+        body.persona,
+        narrative,
+        register=register,
+        evidence_rows=cl_rows,
+        cluster_id=cluster_id,
+    )
+
+    # Persist updated dispatch
+    if 'persona_dispatch' not in cluster:
+        cluster['persona_dispatch'] = {}
+    cluster['persona_dispatch'][body.persona] = payload
+    _persist(assessment_id, assessment)
+
+    return JSONResponse({
+        'assessment_id': assessment_id,
+        'cluster_id': cluster_id,
+        'persona': body.persona,
+        'payload': payload,
+    })
 
 
 @router.post('/{assessment_id}/clusters/{cluster_id}/sign-off')

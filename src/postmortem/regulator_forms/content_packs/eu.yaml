@@ -1,0 +1,83 @@
+# EU Regulator Content Pack — SCAFFOLD ONLY
+# ==========================================
+#
+# v1 status: NOT IMPLEMENTED. Placeholder for v2 international expansion.
+
+regulators:
+
+  gdpr_supervisory_authority:
+    name: "GDPR Article 33 — Notification of personal data breach to supervisory authority"
+    regulator: "Lead Supervisory Authority (per Article 56)"
+    jurisdiction: "EU"
+    form_module: null                # to be implemented: eu_gdpr.py
+    form_version: "gdpr_art33_notification_2024"
+    clock:
+      sa_notification:
+        seconds: 259200              # 72h
+        human:   "72h"
+        rule:    "without undue delay and, where feasible, not later than 72h"
+        delay_justification_required: true
+    trigger_when:
+      data_classes_any: [personal_data, customer_pii]
+      affected_subjects_in: [eu, eea]
+
+  gdpr_data_subject:
+    name: "GDPR Article 34 — Communication of personal data breach to data subject"
+    regulator: "(direct to data subject)"
+    jurisdiction: "EU"
+    form_module: null
+    clock:
+      data_subject_notification:
+        rule: "without undue delay when high risk to rights and freedoms"
+        seconds: null                # rule-based, not fixed clock
+    trigger_when:
+      conditions_all:
+        - "high_risk_to_individual_rights"
+        - "art_34_exemptions_not_applicable"
+
+  nis2_csirt:
+    name: "NIS2 Directive — Article 23 incident notification"
+    regulator: "Member State CSIRT or competent authority"
+    jurisdiction: "EU"
+    form_module: null                # to be implemented: eu_nis2.py
+    form_version: "nis2_art23_notification_2024"
+    clock:
+      early_warning:
+        seconds: 86400               # 24h
+        human:   "24h"
+        rule:    "early warning of significant incident"
+      incident_notification:
+        seconds: 259200              # 72h
+        human:   "72h"
+        rule:    "incident notification with initial assessment"
+      final_report:
+        seconds: 2592000             # 1 month
+        human:   "1 month"
+        rule:    "final report after incident handled"
+    trigger_when:
+      entity_context_flag: "nis2_essential_entity OR nis2_important_entity"
+
+  dora_ict:
+    name: "DORA — Digital Operational Resilience Act, Article 19"
+    regulator: "Competent authority for financial entities"
+    jurisdiction: "EU"
+    form_module: null                # to be implemented: eu_dora.py
+    clock:
+      initial_notification:
+        seconds: 14400               # 4h after classification as 'major'
+        human:   "4h after major-incident classification"
+      intermediate_report:
+        seconds: 259200              # 72h
+        human:   "72h"
+      final_report:
+        seconds: 2592000             # 1 month
+        human:   "1 month"
+    trigger_when:
+      entity_context_flag: "dora_in_scope_financial_entity"
+
+binding_constraints:
+  human_review_required_always: true
+  auto_submit_allowed_anywhere: false
+  multi_member_state_coordination_note: |
+    GDPR one-stop-shop applies — identify the lead supervisory authority
+    via the entity's main establishment in the EU.

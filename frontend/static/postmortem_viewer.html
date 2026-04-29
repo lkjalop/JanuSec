@@ -1,0 +1,766 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>JanuSec — Full Compliance & ISMS Report</title>
+<style>
+  :root { --bg: #0d0d17; --bg2: #13131f; --bg3: #1a1a2e; --border: #2a2a3e; --text: #e0e0e0; --muted: #888; --dim: #555; --accent: #a78bfa; --blue: #60a5fa; --green: #34d399; --yellow: #fbbf24; --red: #e05a5a; --orange: #e09a5a; }
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); font-family: 'Inter', 'Segoe UI', system-ui, sans-serif; font-size: 13px; line-height: 1.55; }
+  /* ── Layout ── */
+  #pm-wrap { display: flex; height: 100vh; overflow: hidden; }
+  #pm-nav { width: 220px; min-width: 220px; background: var(--bg2); border-right: 1px solid var(--border); overflow-y: auto; padding: 16px 0; flex-shrink: 0; }
+  #pm-body { flex: 1; overflow-y: auto; padding: 24px 32px; max-width: 900px; }
+  /* ── Nav ── */
+  .pm-nav-brand { padding: 8px 16px 16px; font-weight: 700; font-size: 14px; color: var(--accent); border-bottom: 1px solid var(--border); margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
+  .pm-nav-brand svg { width:18px;height:18px;stroke:var(--accent);fill:none;stroke-width:2; }
+  .pm-nav-item { display: flex; align-items: center; gap: 8px; padding: 8px 16px; cursor: pointer; color: var(--muted); font-size: 12px; border-left: 3px solid transparent; transition: all .15s; }
+  .pm-nav-item:hover { background: var(--bg3); color: var(--text); }
+  .pm-nav-item.active { background: var(--bg3); color: var(--accent); border-left-color: var(--accent); }
+  .pm-nav-item svg { width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:2;flex-shrink:0; }
+  .pm-nav-section { padding: 12px 16px 4px; font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--dim); }
+  /* ── Header ── */
+  #pm-header { border-bottom: 1px solid var(--border); padding-bottom: 16px; margin-bottom: 24px; }
+  .pm-title { font-size: 20px; font-weight: 700; color: var(--text); }
+  .pm-subtitle { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  .pm-meta { display: flex; gap: 16px; margin-top: 10px; flex-wrap: wrap; }
+  .pm-meta-chip { font-size: 11px; background: var(--bg3); border: 1px solid var(--border); border-radius: 4px; padding: 3px 10px; color: var(--muted); }
+  .pm-meta-chip.verdict-breach { border-color: rgba(224,90,90,.5); color: var(--red); background: rgba(224,90,90,.08); font-weight: 700; }
+  .pm-meta-chip.verdict-ok { border-color: rgba(52,211,153,.5); color: var(--green); background: rgba(52,211,153,.08); }
+  /* ── Sections ── */
+  .pm-section { display: none; }
+  .pm-section.active { display: block; }
+  .pm-section-title { font-size: 16px; font-weight: 700; margin-bottom: 16px; color: var(--text); display: flex; align-items: center; gap: 8px; }
+  .pm-section-title svg { width:18px;height:18px;stroke:var(--accent);fill:none;stroke-width:2; }
+  /* ── Cards ── */
+  .pm-card { background: var(--bg2); border: 1px solid var(--border); border-radius: 6px; padding: 14px 16px; margin-bottom: 14px; }
+  .pm-card-title { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin-bottom: 8px; }
+  /* ── Table ── */
+  .pm-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+  .pm-table th { padding: 5px 8px; text-align: left; color: var(--dim); font-weight: 600; border-bottom: 1px solid var(--border); }
+  .pm-table td { padding: 5px 8px; border-bottom: 1px solid rgba(42,42,62,.5); vertical-align: top; }
+  .pm-table tr:hover td { background: rgba(255,255,255,.02); }
+  /* ── Severity chips ── */
+  .chip { display: inline-block; border-radius: 3px; padding: 1px 6px; font-size: 10px; font-weight: 700; }
+  .chip-critical { background: rgba(224,90,90,.15); color: var(--red); }
+  .chip-high { background: rgba(224,154,90,.15); color: var(--orange); }
+  .chip-moderate { background: rgba(224,208,90,.12); color: #e0d05a; }
+  .chip-low { background: rgba(52,211,153,.1); color: var(--green); }
+  .chip-p1 { background: rgba(224,90,90,.15); color: var(--red); }
+  .chip-p2 { background: rgba(224,154,90,.15); color: var(--orange); }
+  .chip-p3 { background: rgba(52,211,153,.1); color: var(--green); }
+  /* ── Lifecycle strip ── */
+  .lc-strip { display: flex; gap: 0; margin: 12px 0; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+  .lc-phase { flex: 1; padding: 10px 8px; text-align: center; background: var(--bg3); border-right: 1px solid var(--border); font-size: 11px; }
+  .lc-phase:last-child { border-right: none; }
+  .lc-phase.done { background: rgba(52,211,153,.07); }
+  .lc-phase.pending { opacity: .55; }
+  .lc-phase .lc-ico { font-size: 16px; margin-bottom: 3px; }
+  .lc-phase .lc-name { font-weight: 700; font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  /* ── SABSA ── */
+  .sabsa-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  @media (max-width: 650px) { .sabsa-grid { grid-template-columns: 1fr; } }
+  .sabsa-card { background: var(--bg3); border: 1px solid var(--border); border-radius: 5px; padding: 10px 12px; }
+  .sabsa-card .s-layer { font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--accent); margin-bottom: 4px; }
+  .sabsa-card .s-name { font-weight: 700; color: var(--text); margin-bottom: 4px; }
+  .sabsa-card .s-desc { font-size: 11px; color: var(--muted); }
+  /* ── Control drill ── */
+  .cf-row { border-bottom: 1px solid rgba(42,42,62,.6); }
+  .cf-header { padding: 7px 8px; cursor: pointer; display: flex; align-items: flex-start; gap: 8px; }
+  .cf-header:hover { background: rgba(255,255,255,.02); }
+  .cf-body { display: none; padding: 8px 12px 10px 28px; background: rgba(13,13,26,.5); font-size: 11px; }
+  .cf-body.open { display: block; }
+  .cf-action-row { display: grid; grid-template-columns: 130px 1fr; gap: 4px; padding: 3px 0; border-bottom: 1px solid rgba(42,42,62,.3); }
+  .cf-action-row:last-child { border-bottom: none; }
+  .cf-action-lbl { color: var(--blue); font-weight: 600; }
+  /* ── Loading / Error ── */
+  #pm-loading { text-align: center; padding: 60px 20px; color: var(--muted); }
+  #pm-error { display: none; background: rgba(224,90,90,.1); border: 1px solid rgba(224,90,90,.3); border-radius: 6px; padding: 14px; color: var(--red); margin-bottom: 16px; }
+  /* ── Print ── */
+  @media print { #pm-nav { display: none !important; } #pm-body { padding: 0; max-width: 100%; } .pm-section { display: block !important; margin-bottom: 40px; } }
+  /* ── Export bar ── */
+  #pm-export-bar { border-bottom: 1px solid var(--border); background: var(--bg2); padding: 8px 32px; display: flex; gap: 8px; align-items: center; font-size: 11px; color: var(--muted); }
+  #pm-export-bar button { font-size: 11px; background: transparent; border: 1px solid var(--border); color: var(--muted); border-radius: 4px; padding: 4px 10px; cursor: pointer; }
+  #pm-export-bar button:hover { border-color: var(--accent); color: var(--accent); }
+  .mitre-tag { display: inline-block; background: #1e1e2e; border: 1px solid var(--accent); border-radius: 3px; padding: 0 5px; font-size: 9px; color: var(--accent); margin: 0 2px; text-decoration: none; }
+  .auditor-ask { background: rgba(251,191,36,.08); border-left: 3px solid var(--yellow); padding: 6px 10px; border-radius: 0 4px 4px 0; margin: 4px 0; font-size: 11px; color: var(--text); }
+  .roadmap-row { display: grid; grid-template-columns: 110px 1fr; gap: 0; border-bottom: 1px solid rgba(42,42,62,.5); }
+  .roadmap-label { padding: 6px 8px; font-weight: 700; font-size: 11px; }
+  .roadmap-content { padding: 6px 8px; font-size: 11px; color: var(--muted); }
+</style>
+</head>
+<body>
+<div id="pm-wrap">
+  <!-- ── Sidebar nav ── -->
+  <nav id="pm-nav">
+    <div class="pm-nav-brand">
+      <svg viewBox="0 0 24 24"><path d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z"/></svg>
+      JanuSec Report
+    </div>
+    <div class="pm-nav-section">Incident</div>
+    <div class="pm-nav-item active" onclick="showSection('verdict')" data-sec="verdict">
+      <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+      Verdict &amp; Summary
+    </div>
+    <div class="pm-nav-item" onclick="showSection('lifecycle')" data-sec="lifecycle">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+      ISO 27035 Lifecycle
+    </div>
+    <div class="pm-nav-item" onclick="showSection('threat')" data-sec="threat">
+      <svg viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+      Threat Reconstruction
+    </div>
+    <div class="pm-nav-section">Controls</div>
+    <div class="pm-nav-item" onclick="showSection('controls')" data-sec="controls">
+      <svg viewBox="0 0 24 24"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
+      Control Failures
+    </div>
+    <div class="pm-nav-item" onclick="showSection('sabsa')" data-sec="sabsa">
+      <svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+      SABSA Architecture
+    </div>
+    <div class="pm-nav-item" onclick="showSection('risk')" data-sec="risk">
+      <svg viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+      Risk Register Delta
+    </div>
+    <div class="pm-nav-section">Obligations</div>
+    <div class="pm-nav-item" onclick="showSection('regs')" data-sec="regs">
+      <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+      Regulatory Clocks
+    </div>
+    <div class="pm-nav-item" onclick="showSection('actions')" data-sec="actions">
+      <svg viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+      Corrective Actions
+    </div>
+    <div class="pm-nav-section">Export</div>
+    <div class="pm-nav-item" onclick="window.print()">
+      <svg viewBox="0 0 24 24"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+      Print / PDF
+    </div>
+  </nav>
+
+  <!-- ── Main content ── -->
+  <div style="flex:1;display:flex;flex-direction:column;overflow:hidden">
+    <div id="pm-export-bar">
+      <span id="pm-export-label">Loading postmortem…</span>
+      <button onclick="window.print()">&#128438; Print / PDF</button>
+      <button id="pm-json-export" style="display:none">&#128196; Export JSON</button>
+    </div>
+    <div id="pm-body">
+      <div id="pm-loading">
+        <svg style="width:32px;height:32px;stroke:var(--muted);fill:none;stroke-width:2;animation:spin 1.2s linear infinite" viewBox="0 0 24 24"><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
+        <div style="margin-top:10px">Loading postmortem report…</div>
+      </div>
+      <div id="pm-error"></div>
+      <div id="pm-content" style="display:none">
+        <div id="pm-header">
+          <div class="pm-title" id="pm-report-title">Compliance &amp; ISMS Postmortem Report</div>
+          <div class="pm-subtitle" id="pm-report-subtitle"></div>
+          <div class="pm-meta" id="pm-report-meta"></div>
+        </div>
+
+        <!-- S0: Verdict -->
+        <div class="pm-section active" id="sec-verdict">
+          <div class="pm-section-title">
+            <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            Verdict &amp; Executive Summary
+          </div>
+          <div id="sec-verdict-body"></div>
+        </div>
+
+        <!-- S1: Lifecycle -->
+        <div class="pm-section" id="sec-lifecycle">
+          <div class="pm-section-title">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            ISO 27035 Incident Lifecycle
+          </div>
+          <div id="sec-lifecycle-body"></div>
+        </div>
+
+        <!-- S2: Threat -->
+        <div class="pm-section" id="sec-threat">
+          <div class="pm-section-title">
+            <svg viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>
+            Threat Reconstruction
+          </div>
+          <div id="sec-threat-body"></div>
+        </div>
+
+        <!-- S3: Controls -->
+        <div class="pm-section" id="sec-controls">
+          <div class="pm-section-title">
+            <svg viewBox="0 0 24 24"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
+            Control Failures (<span id="cf-count">0</span> total — <span id="cf-crit-count">0</span> critical)
+          </div>
+          <div id="cf-filter-bar" style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">
+            <button onclick="cfFilter('all')" id="cfbtn-all" class="cf-filter-btn cf-filter-active">All</button>
+            <button onclick="cfFilter('critical')" id="cfbtn-critical" class="cf-filter-btn">Critical</button>
+            <button onclick="cfFilter('high')" id="cfbtn-high" class="cf-filter-btn">High</button>
+            <button onclick="cfFilter('P1')" id="cfbtn-P1" class="cf-filter-btn">P1</button>
+            <select id="cf-fw-filter" onchange="cfFilterFw(this.value)" style="font-size:11px;background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:3px 8px;border-radius:4px">
+              <option value="">All Frameworks</option>
+            </select>
+          </div>
+          <div id="sec-controls-body"></div>
+        </div>
+
+        <!-- S4: SABSA -->
+        <div class="pm-section" id="sec-sabsa">
+          <div class="pm-section-title">
+            <svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/></svg>
+            SABSA Security Architecture Assessment
+          </div>
+          <div id="sec-sabsa-body"></div>
+        </div>
+
+        <!-- S5: Risk Register -->
+        <div class="pm-section" id="sec-risk">
+          <div class="pm-section-title">
+            <svg viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+            Risk Register Delta
+          </div>
+          <div id="sec-risk-body"></div>
+        </div>
+
+        <!-- S6: Regulatory -->
+        <div class="pm-section" id="sec-regs">
+          <div class="pm-section-title">
+            <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            Regulatory Clocks &amp; Obligations
+          </div>
+          <div id="sec-regs-body"></div>
+        </div>
+
+        <!-- S7: Actions -->
+        <div class="pm-section" id="sec-actions">
+          <div class="pm-section-title">
+            <svg viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+            Corrective Action Plan
+          </div>
+          <div id="sec-actions-body"></div>
+        </div>
+
+      </div><!-- /pm-content -->
+    </div><!-- /pm-body -->
+  </div>
+</div>
+
+<style>
+@keyframes spin { to { transform: rotate(360deg); } }
+.cf-filter-btn { font-size:11px;background:transparent;border:1px solid var(--border);color:var(--muted);padding:3px 10px;border-radius:4px;cursor:pointer; }
+.cf-filter-btn:hover,.cf-filter-active { border-color:var(--accent);color:var(--accent);background:rgba(167,139,250,.08); }
+</style>
+
+<script>
+(function() {
+'use strict';
+
+/* ── Utility ── */
+function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function $ (id) { return document.getElementById(id); }
+function chip(sev) { return '<span class="chip chip-'+esc((sev||'').toLowerCase())+'">'+esc((sev||'').toUpperCase())+'</span>'; }
+function mitreTags(arr) { return (arr||[]).slice(0,5).map(function(t){ return '<a class="mitre-tag" href="https://attack.mitre.org/techniques/'+encodeURIComponent((t||'').split('.')[0])+'/" target="_blank">'+esc(t)+'</a>'; }).join(''); }
+
+/* ── Control action lookup (mirrors breach.js) ── */
+var CF_ACTIONS = {
+  'A.8.22': { document: 'Audit K8s NetworkPolicy coverage — verify all namespaces have ingress/egress restrictions; run "kubectl get netpol --all-namespaces"', notify: 'Apply default-deny NetworkPolicy to all workload namespaces immediately; isolate affected pods', remediate: 'Implement Kubernetes network segmentation: namespace-scoped NetworkPolicy + Calico/Cilium tiers; block lateral movement paths used by T1611', certify: 'Validate east-west traffic flows with Hubble or Calico observability; re-admit workloads with explicit allow rules only', pir: 'Update ISMS Annex A.8.22 SOA from Partially Implemented to Implemented; schedule quarterly network seg review' },
+  'A.5.23': { document: 'Review cloud service inventory — identify all SaaS/IaaS with no data-at-rest and data-in-transit controls documented; check AWS/Azure/GCP org policy violations', notify: 'Suspend or restrict cloud service accounts used in incident; revoke cross-account roles linked to T1611/T1537 activity', remediate: 'Enforce Service Control Policies (SCP) in AWS Orgs or Azure Policy denying unapproved cloud egress; apply data classification to all cloud assets', certify: 'Certify cloud services against ISO 27001 A.5.23 via updated SSPA/CSP assessment; enable Cloud CIEM/CSPM continuous monitoring', pir: 'Update Cloud Service Register; map each service to A.5.23 requirements; feed findings to ISO 27001 Statement of Applicability' },
+  'A.5.17': { document: 'Scan all EC2/ECS task metadata API calls — identify any calls from container PIDs; check CloudTrail for IMDSv1 token-less requests', notify: 'Enforce IMDSv2 (hop-limit 1) on all EC2 instances and ECS tasks immediately via AWS CLI: "aws ec2 modify-instance-metadata-options --http-tokens required"', remediate: 'Block IMDS access from container workloads via iptables or network policy; rotate all IAM role credentials linked to affected instance profiles', certify: 'Validate no IMDSv1 calls in CloudTrail for 7 days post-fix; restore impacted service accounts with new credentials', pir: 'Document IMDSv2 enforcement as mandatory baseline; add to AWS Org SCP; update A.5.17 SOA control implementation evidence' },
+  'A.8.12': { document: 'Run CASB / DLP gap assessment across all cloud storage buckets and SaaS egress paths; review CloudTrail for GetObject + CopyObject events to external accounts', notify: 'Block all S3 cross-account replication and STS AssumeRole to external accounts; enable S3 Block Public Access org-wide', remediate: 'Implement Macie or equivalent DLP for S3; deploy CASB for SaaS egress; configure DLP policy for T1537/T1567.002 exfil techniques', certify: 'Certify DLP coverage with data-flow mapping exercise; verify all data stores have classification and egress monitoring', pir: 'Update ISMS risk register — A.8.12 was CONTROL_ABSENT; create project to implement DLP by next ISO 27001 surveillance audit' },
+  'A.8.7':  { document: 'Review EDR/AV telemetry for T1003.001 (LSASS access via comsvcs.dll) — check for MiniDump API calls, WerFault-based extraction, or ProcDump invocations', notify: 'Isolate affected hosts; terminate suspicious LSASS-touching processes; reset credentials for all accounts that were logged on at compromise time', remediate: 'Deploy Credential Guard (UEFI) and Windows Defender Credential Guard; enable LSA Protection (RunAsPPL); block comsvcs.dll-based LSASS access via WDAC', certify: 'Force domain-wide password reset; validate EDR coverage gap on affected OUs; restore hosts from verified clean image', pir: 'Review EDR exclusions that allowed LSASS access; update A.8.7 malware protection control evidence; tune EDR for credential access techniques' },
+  'A.8.16': { document: 'Audit SIEM/SOAR rule coverage for T1003.001 (LSASS dump) and T1053.005 (scheduled task); calculate detection lag from event timestamp to alert', notify: 'Create high-fidelity SIEM alerts: LSASS accessed by non-system process, new scheduled task creation by non-admin, comsvcs.dll execution', remediate: 'Deploy behavioural analytics (UEBA) for credential access patterns; implement detection-as-code with peer review process', certify: 'Validate alert firing with purple team exercise; SLA: detect LSASS dump within 5 min; confirm coverage across all endpoints', pir: 'Add A.8.16 monitoring gaps to continuous monitoring roadmap; publish detection coverage KPIs in next CISO board report' },
+  'A.5.15': { document: 'Run access review for all accounts using T1078 (Valid Accounts) vectors — export IAM report, identify accounts with no MFA and last-used >30d', notify: 'Disable all dormant accounts (last-used >90d); force MFA re-registration for all affected users; revoke sessions for T1078-implicated accounts', remediate: 'Enforce Conditional Access / Azure AD MFA for all interactive logins; implement RBAC with least-privilege review cycle', certify: 'Re-issue credentials with MFA; validate no orphan accounts; attest access rights via IGA tool', pir: 'Update A.5.15 control maturity to Managed; schedule quarterly access certification campaign; feed into ISO 27001 access control procedure' },
+  'A.5.16': { document: 'Audit identity lifecycle: stale accounts, shared credentials, service accounts with interactive logon rights; check for T1078-linked account anomalies', notify: 'Disable shared/generic service accounts used in incident; require unique service accounts with no interactive logon; force password reset for affected identities', remediate: 'Deploy PAM (CyberArk/BeyondTrust) for privileged accounts; federate SSO for all interactive logins; eliminate password-based shared secrets', certify: 'Complete access recertification for all privileged accounts; validate identity lifecycle policies are enforced in IdP', pir: 'A.5.16 SOA from Partially Implemented to In Progress; set roadmap milestone for PAM deployment within 90d; document in ISMS corrective action register' },
+  'A.8.5':  { document: 'Audit authentication logs for T1078 patterns: successful login from new geo, impossible travel, off-hours access; check MFA exemption list', notify: 'Remove all MFA exemptions; enforce phishing-resistant MFA (FIDO2) for admin accounts; block legacy auth protocols (Basic Auth, NTLM)', remediate: 'Deploy FIDO2 / Passkeys for all staff; retire password-only paths; enforce Conditional Access policies with risk-based MFA step-up', certify: 'Validate 100% MFA coverage in Azure AD / Okta reports; attest to removal of legacy auth; restore service with MFA enforced', pir: 'A.8.5 control updated to Implemented; include MFA coverage metric in CISO quarterly dashboard; reference in ISO 27001 A.9 access control procedure' },
+  'A.5.18': { document: 'Export AWS IAM Access Analyzer report; identify all roles/policies violating least-privilege; check for T1078.004 (Cloud Account) exploitation paths', notify: 'Revoke over-privileged IAM roles linked to incident; apply SCPs to prevent privilege escalation; disable static IAM user keys', remediate: 'Implement Just-In-Time access (AWS IAM Identity Center); remove wildcard (*) policies; enforce permission boundaries on all IAM entities', certify: 'Certify all IAM roles against least-privilege policy; validate no static long-term keys remain; attest to quarterly access review', pir: 'A.5.18 SOA updated; establish 90-day IAM access review cadence; report on privilege sprawl reduction in next ISO audit' },
+  'A.8.2':  { document: 'Audit sudoers and privileged group memberships; identify T1078.004 cloud admin accounts with no break-glass controls; review Azure PIM / AWS SSO assignments', notify: 'Revoke standing privileged access; implement time-limited privileged sessions via PAM; disable direct console access for cloud admins', remediate: 'Deploy PAM (Privileged Access Workstations + vault); enforce JIT/JEA for all server admin; remove local admin from all standard workstations', certify: 'Certify privileged account inventory; validate PAM vault coverage; confirm no shared admin credentials', pir: 'A.8.2 from Partially Implemented to Managed; privileged access policy updated; next internal audit to test PAM coverage' },
+  'A.8.20': { document: 'Review egress firewall rules for T1105 (Ingress Tool Transfer) indicators; check for unexpected outbound connections to CDN/GitHub/tool-hosting domains', notify: 'Block outbound connections to known staging domains; restrict egress to approved destinations whitelist; enable TLS inspection for categorised traffic', remediate: 'Implement zero-trust network access; NGFW outbound policy with application-level control; proxy all outbound web traffic via CASB', certify: 'Validate egress rule set with penetration test; certify all outbound flows are documented and risk-accepted', pir: 'A.8.20 control updated; network egress policy formalised; next ISO 27001 audit to test egress controls' },
+  'A.8.23': { document: 'Review web filtering logs for T1105 (tool download) and T1567.002 (cloud upload) egress; identify unfiltered user/container traffic paths', notify: 'Block access to GitHub raw content, transfer.sh, pastebin, and other staging sites via proxy policy; apply SSL inspection', remediate: 'Deploy URL categorisation and reputation filtering for all traffic including container workloads; implement CASB for SaaS uploads', certify: 'Validate filtering coverage with controlled test; certify no blind spots for K8s workload egress', pir: 'A.8.23 control updated to Implemented; proxy policy reviewed and approved; report coverage improvement at next security committee' },
+  'A.8.24': { document: 'Audit token usage in IMDS API calls (T1552.005); check for cleartext credential transmission between services; inspect secrets in environment variables', notify: 'Immediately rotate all IAM/STS credentials obtained via IMDS; enforce secrets management (Vault/Secrets Manager) for all service credentials', remediate: 'Enforce token binding for all API calls; implement mTLS for service-to-service; migrate all secrets to secrets manager; block env-var credential pattern', certify: 'Certify no cleartext secrets in code, containers, or env vars; validate token rotation policy', pir: 'A.8.24 CONTROL_ABSENT → remediated; cryptographic token binding standard documented; add to ISMS cryptography procedure' },
+  'PR.AA-05': { document: 'Run cloud entitlement review: identify all roles with T1078.004/T1552.005 exploitation paths; map to IAM analyzer findings', notify: 'Revoke access for all accounts linked to incident; enforce MFA for all cloud console access; apply SCPs to restrict privilege escalation', remediate: 'Implement CIEM (Cloud Infrastructure Entitlement Management); enforce least-privilege via permission boundaries; JIT for sensitive operations', certify: 'Attest all access permissions against least-privilege policy; re-certify cloud accounts', pir: 'PR.AA-05 updated to Tier 2; CIEM roadmap documented; incorporate finding into NIST CSF PR.AA function review' },
+  'PR.PS-01': { document: 'Audit K8s admission controllers: check for absence of PodSecurityPolicy/OPA Gatekeeper/Kyverno policies that allow privileged containers (T1611 vector)', notify: 'Immediately apply restrictive PodSecurity admission policy; block privileged, hostPID, hostNetwork workloads', remediate: 'Deploy OPA Gatekeeper or Kyverno with deny-all-privileged policy; enforce Pod Security Standards (restricted profile) across all namespaces', certify: 'Validate no privileged pods running; certify admission policy coverage in all clusters', pir: 'PR.PS-01 configuration management procedure updated; K8s hardening baseline published; feed into NIST CSF PR.PS function maturity roadmap' },
+  'PR.AA-01': { document: 'Run identity governance review: check for accounts with T1078 vectors — no MFA, stale, shared, or over-privileged; export IdP anomaly report', notify: 'Disable suspicious accounts; force MFA re-enrolment; revoke long-lived tokens and API keys', remediate: 'Implement IGA platform (SailPoint/Saviynt) for automated access certification; enforce SCIM provisioning from HR system', certify: 'Complete access certification for all privileged accounts; validate lifecycle management policies enforced', pir: 'PR.AA-01 maturity improved; IGA implementation project initiated; NIST CSF PR.AA function gap addressed in next CSF profile update' },
+  'DE.CM-01': { document: 'Check NDR/NTA coverage for T1003.001 LSASS traffic and T1567.002 cloud upload patterns; verify all network segments have flow data ingested to SIEM', notify: 'Enable VPC Flow Logs and DNS query logging for all cloud environments; deploy network sensors on gaps identified', remediate: 'Deploy full-packet capture or NDR (Darktrace/ExtraHop) for east-west and north-south traffic; tune for T1003/T1537/T1567 detection', certify: 'Validate network monitoring coverage with threat scenario test; certify all critical segments are monitored', pir: 'DE.CM-01 function updated; network monitoring gap remediated; report detection coverage improvement in next CSF profile review' },
+  'DE.CM-09': { document: 'Audit SIEM coverage for T1053.005 (Scheduled Task/Job): check for Windows EventID 4698/4702 and Sysmon EventID 1 with scheduled task names', notify: 'Alert and quarantine hosts with unexpected scheduled task creation; review all scheduled tasks on affected systems', remediate: 'Create SIEM rule: new scheduled task created by non-admin or in user-writable path; integrate with Sysmon and Windows Security event log', certify: 'Purple team test to validate scheduled task detection fires within SLA; certify rule coverage on all endpoints', pir: 'DE.CM-09 detection gap documented; detection-as-code merged to SIEM repository; reviewed in next detection engineering sprint' },
+  'PR.DS-01': { document: 'Check S3/Azure Blob encryption-at-rest status; audit CloudTrail for GetObject calls that resulted in data leaving the account (T1537 exfil vector)', notify: 'Enable SSE-KMS on all S3 buckets; enforce deny-unencrypted-object-upload bucket policies; block cross-account copy operations', remediate: 'Deploy CSPM to continuously monitor encryption posture; enable Macie to classify and alert on sensitive data access', certify: 'Certify 100% encryption-at-rest coverage; validate KMS key policies restrict external access', pir: 'PR.DS-01 data protection updated; encryption posture documented in data protection register; included in next ISO 27001 A.8.24 review' },
+  'DE.AE-02': { document: 'Review SIEM/SOAR for T1537 (Transfer Data to Cloud Account) correlation rules; check if S3 replication to external accounts generated alerts', notify: 'Enable GuardDuty S3Protection and AWS Macie; create SIEM correlation rule for large S3 transfers + external account access in same time window', remediate: 'Build multi-signal correlation: S3 GetObject volume spike + new cross-account IAM assume + network anomaly = high-fidelity alert', certify: 'Validate correlation rule with controlled simulation; tune false-positive threshold; confirm alert routes to SOC within 15 min', pir: 'DE.AE-02 adverse event analysis gap documented; correlation rule library updated; reviewed in SIEM detection sprint' },
+  'PR.DS-02': { document: 'Audit TLS inspection coverage for T1105 (tool download) traffic paths; check if container-to-internet traffic bypasses proxy/TLS termination', notify: 'Force all outbound traffic through TLS-inspecting proxy; deny direct internet access from container workloads', remediate: 'Deploy mTLS for all service-to-service communication; implement CASB to inspect HTTPS uploads; certificate pinning for critical services', certify: 'Validate TLS inspection coverage with synthetic test; certify no cleartext egress paths exist', pir: 'PR.DS-02 data-in-transit control gap closed; TLS policy updated; included in next CSF profile review' },
+  'E6':  { document: 'Review EDR/AV application hardening coverage for T1003.001 — check for unprotected LSASS access, unrestricted PowerShell execution, and unmanaged browser extensions', notify: 'Block PowerShell -EncodedCommand execution; enable ScriptBlock logging; restrict browser extensions to approved list', remediate: 'Achieve Essential Eight E6 Level 2: disable browser password saving, block advertisements, enable automatic updates; implement AppLocker/WDAC for scripting engines', certify: 'Validate application hardening baseline with CIS benchmark scan; certify E6 compliance against ASD maturity model', pir: 'E6 maturity advanced to Level 2; hardening baseline reviewed by security committee; included in next ASD E8 assessment submission' },
+  'E2':  { document: 'Audit privileged account usage for T1078/T1552.005/T1053.005 — run ASD E2 compliance check: count admin accounts, check for shared admin, verify just-enough-admin', notify: 'Revoke admin rights from accounts not requiring them; disable default local admin accounts; enforce admin-only workstations (PAWs)', remediate: 'Achieve E2 Level 3: privileged accounts are dedicated (no email/web), time-limited via PAM, with MFA enforced and audit logging enabled', certify: 'Certify admin account inventory; validate PAM coverage; attest to E2 Level 3 compliance', pir: 'E2 maturity advanced; privileged access policy updated; submit updated Essential Eight self-assessment to CISO' },
+  'E5':  { document: 'Audit Office macro execution logs for T1105 vector — check for macro-enabled documents downloaded from internet; review AppLocker/WDAC macro rules', notify: 'Block all macros from internet-origin Office documents; allow only digitally signed macros from internal PKI', remediate: 'Achieve E5 Level 2: block all macros not digitally signed; disable VBA for internet-zone documents; deploy macro scanning in email gateway', certify: 'Validate macro policy coverage with test file; certify compliance with E5 control', pir: 'E5 maturity updated; macro policy reviewed; included in next ASD Essential Eight assessment' },
+  'E8':  { document: 'Audit backup coverage for T1567.002 (exfiltration vector) — verify backups are immutable, off-site, and tested; check for backup of exfiltrated data sources', notify: 'Ensure backup targets are isolated from production networks; verify backup credentials are not reachable from compromised accounts', remediate: 'Implement immutable backups (WORM) for critical data; enforce 3-2-1 backup rule; enable S3 Object Lock for cloud backups', certify: 'Restore from verified clean backup; validate backup integrity with hash verification; test recovery time against RTOs', pir: 'E8 CONTROL_ABSENT remediated; backup policy updated with immutability requirement; included in next E8 maturity assessment' },
+  'ISM-1543': { document: 'Audit K8s admission webhook status — verify OPA Gatekeeper or Kyverno deployed; check for privileged containers (T1611 path) in current workloads', notify: 'Apply K8s Pod Security Standards (Restricted) to all non-system namespaces immediately; block privileged/hostPID/hostPath workloads', remediate: 'Deploy Kyverno or OPA Gatekeeper with deny-privileged policies; enforce read-only root filesystem, drop all capabilities, no privilege escalation', certify: 'Scan all running pods for policy violations; certify ISM-1543 compliance in all clusters', pir: 'ISM-1543 CONTROL_ABSENT → Implemented; container hardening baseline published; include in next ASD ISM compliance review' },
+  'ISM-1417': { document: 'Check Windows Credential Guard status on affected hosts: "Get-ComputerInfo | Select-Object DeviceGuardVirtualizationBasedSecurityStatus"; check LSA Protection registry key', notify: 'Enable LSA Protection (RunAsPPL): HKLM\\SYSTEM\\CurrentControlSet\\Control\\Lsa\\RunAsPPL=1; restrict WerFault and comsvcs access', remediate: 'Deploy Credential Guard via Group Policy on all domain-joined systems; enable VBS (Virtualization-Based Security); test LSASS protection with Mimikatz in isolated lab', certify: 'Verify Credential Guard active on 100% of in-scope systems; validate T1003.001 attack is blocked', pir: 'ISM-1417 CONTROL_ABSENT → Implemented; Credential Guard deployment documented; included in ASD ISM compliance report' },
+  'ISM-0263': { document: 'Audit application control policy for T1105 vectors — check for tool downloads (curl, wget, certutil) that bypassed AppLocker/WDAC; review LOLBIN execution events', notify: 'Block certutil, bitsadmin, mshta from executing in user-writable paths; enforce signed-publisher rules for all executable content', remediate: 'Deploy WDAC with ASD-recommended baseline; include LOLBIN restrictions (certutil, regsvr32, rundll32 execution rules); test coverage with ASD ACSC assessment guide', certify: 'Validate application control coverage with purple team simulation of T1105; certify WDAC policy in all environments', pir: 'ISM-0263 CONTROL_ABSENT → Implemented; application control baseline updated; feed into ASD ISM annual assessment' },
+  'ISM-1815': { document: 'Audit all AWS/Azure/GCP outbound NAT and routing rules; identify T1537 exfiltration paths — check if cloud workloads can reach external storage endpoints directly', notify: 'Apply VPC/VNET egress rules to block direct internet access from compute workloads; force all traffic via NAT GW with logging', remediate: 'Implement cloud-native NGFW (AWS Network Firewall / Azure Firewall) with FQDN filtering; block cloud storage endpoints (S3, Azure Blob) in external accounts', certify: 'Validate no direct cloud-to-cloud exfil path exists; certify egress policy coverage', pir: 'ISM-1815 CONTROL_ABSENT → Implemented; cloud egress policy documented; included in next ASD ISM cloud controls review' },
+  'ISM-1228': { document: 'Search SIEM for Windows EventID 4698 (scheduled task created) and EventID 4702 (modified) not correlated with known change management; check for T1053.005 technique', notify: 'Alert and investigate any new scheduled task created by non-system accounts; remove unauthorized scheduled tasks from affected systems', remediate: 'Create SIEM detection rule: scheduled task creation by standard user accounts or from user-writable paths; integrate Sysmon EventID 1 correlation', certify: 'Validate detection rule fires within 2 minutes of scheduled task creation; certify coverage across all Windows endpoints', pir: 'ISM-1228 detection gap remediated; SIEM rule validated in purple team exercise; included in ASD ISM monitoring controls review' },
+  'SC-39': { document: 'Audit container runtime security: check for T1611 (Container Escape) vectors — hostPID, hostNetwork, privileged containers, or volume mounts to host paths', notify: 'Immediately restrict runtime: apply Seccomp Restricted profile; drop all capabilities; enforce no-new-privileges on all containers', remediate: 'Deploy Seccomp/AppArmor mandatory profiles; enforce Linux user namespace isolation; implement gVisor or Kata for high-risk workloads', certify: 'Validate process isolation with container escape simulation; certify runtime security policy compliance', pir: 'SC-39 updated to Implemented; container runtime security baseline published; included in next NIST 800-53 control assessment' },
+  'SI-3':  { document: 'Audit AV/EDR signatures for T1003.001 (LSASS dump): verify comsvcs.dll, MiniDump API, and Sysinternals ProcDump are detected; check update frequency', notify: 'Force signature update on all endpoints; isolate any host where LSASS dump was not detected; run full scan on affected scope', remediate: 'Tune EDR behavioural rules to detect LSASS access patterns; supplement signatures with EDR behavioural analytics; enable memory-based scanning', certify: 'Certify AV/EDR coverage across 100% of in-scope endpoints; validate LSASS protection policy is enforced', pir: 'SI-3 detection gap remediated; malware protection baselines updated; included in NIST 800-53 SI control family review' },
+  'AC-2':  { document: 'Run quarterly access recertification: identify T1078-linked accounts — stale, shared, no MFA, excessive privileges; export from IdP for review', notify: 'Disable accounts not requiring access; revoke sessions for all accounts involved in incident; force password reset for affected OU', remediate: 'Implement automated account lifecycle (joiner-mover-leaver) via IGA; enforce recertification policy (90-day cycle)', certify: 'Certify all account provisioning and deprovisioning workflows are automated; validate no orphan accounts', pir: 'AC-2 updated; account management procedure revised; include in NIST 800-53 CA assessment record' },
+  'CPS234.36': { document: 'Audit information asset register: identify all assets with T1078.004 (cloud account) exposure; review cloud access logs for unauthorised access to classified information assets', notify: 'Revoke cloud access for accounts implicated in T1078.004 exploitation; enforce MFA and IP restriction on all information assets', remediate: 'Implement access controls meeting CPS 234 Para 36: least-privilege, MFA, audit logging, and regular access certification for all information assets', certify: 'Certify access controls on all information assets against CPS 234 requirements; submit evidence package for prudential review', pir: 'CPS234.36 gap remediated; access control evidence documented for next APRA tripartite review; include in APRA CPS 234 self-assessment' },
+  '11.5.1': { document: 'Audit T1567.002 (Exfiltration to Code Repository) monitoring: check if DLP/CASB detects uploads to GitHub, GitLab, or cloud storage from CDE-adjacent systems', notify: 'Block access to code repositories and cloud storage from CDE; alert on bulk file uploads exceeding baseline', remediate: 'Deploy DLP solution with PCI-DSS Req 11.5.1 coverage: detect and alert on CHD exfiltration attempts via web and cloud; implement CASB for SaaS controls', certify: 'Certify DLP coverage across all CDE egress paths; validate PCI-DSS Req 11.5.1 compliance with QSA evidence', pir: '11.5.1 gap documented in SAQ/ROC; DLP project scoped; include in next QSA engagement for evidence collection' },
+};
+var CF_FAILURE_DEFAULTS = {
+  'PREVENTIVE_FAILED': { document: 'Review preventive control configuration and verify gap aligns with MITRE technique; check policy enforcement logs', notify: 'Apply emergency policy enforcement to block the technique vector; restrict affected accounts/systems', remediate: 'Remediate the preventive control to block the specific technique; test effectiveness with simulation', certify: 'Re-certify control effectiveness; validate no residual exposure remains', pir: 'Update ISMS control maturity from Partially Implemented to Implemented; document evidence for next audit' },
+  'DETECTIVE_FAILED': { document: 'Enable logging and alerting for the specific technique; ingest telemetry into SIEM with correlation rule', notify: 'Create interim manual monitoring procedure until SIEM rule is deployed', remediate: 'Deploy detection rule with purple-team-validated accuracy; tune to <5% FP rate', certify: 'Certify detection coverage fires within SLA; validate via tabletop or simulation', pir: 'Add detection gap to continuous monitoring roadmap; publish detection coverage delta at next security review' },
+  'CONTROL_ABSENT': { document: 'Assess risk exposure from absent control — quantify blast radius with threat modelling against triggered techniques', notify: 'Apply compensating control immediately to reduce exposure while permanent control is implemented', remediate: 'Implement the control following vendor/framework implementation guidance; include testing phase', certify: 'Certify control in place and functional; document as ISMS corrective action completed', pir: 'Record CONTROL_ABSENT finding in risk register; create formal project to implement with timeline and owner' },
+};
+function cfActionsFor(cf) {
+  return CF_ACTIONS[cf.control_id] || CF_FAILURE_DEFAULTS[cf.failure] || CF_FAILURE_DEFAULTS['PREVENTIVE_FAILED'];
+}
+
+/* ── URL params ── */
+function getParam(name) {
+  var params = new URLSearchParams(window.location.search);
+  return params.get(name) || '';
+}
+
+/* ── Global state ── */
+var pmData = null;
+var clusterData = null;
+var allCFs = [];
+var currentFilter = 'all';
+var currentFwFilter = '';
+
+/* ── Nav ── */
+function showSection(name) {
+  document.querySelectorAll('.pm-section').forEach(function(s){ s.classList.remove('active'); });
+  document.querySelectorAll('.pm-nav-item').forEach(function(n){ n.classList.remove('active'); });
+  var sec = document.getElementById('sec-'+name);
+  if (sec) sec.classList.add('active');
+  var navItem = document.querySelector('[data-sec="'+name+'"]');
+  if (navItem) navItem.classList.add('active');
+}
+
+/* ── Control filter ── */
+function cfFilter(f) {
+  currentFilter = f;
+  document.querySelectorAll('.cf-filter-btn').forEach(function(b){ b.classList.remove('cf-filter-active'); });
+  var btn = document.getElementById('cfbtn-'+f);
+  if (btn) btn.classList.add('cf-filter-active');
+  renderCFs();
+}
+function cfFilterFw(fw) { currentFwFilter = fw; renderCFs(); }
+
+function renderCFs() {
+  var filtered = allCFs.filter(function(cf) {
+    if (currentFwFilter && cf.framework !== currentFwFilter) return false;
+    if (currentFilter === 'all') return true;
+    if (currentFilter === 'critical' || currentFilter === 'high' || currentFilter === 'moderate') return (cf.severity||'').toLowerCase() === currentFilter;
+    if (currentFilter === 'P1' || currentFilter === 'P2' || currentFilter === 'P3') return cf.remediation_priority === currentFilter;
+    return true;
+  });
+  var body = $('sec-controls-body');
+  if (!body) return;
+  if (!filtered.length) { body.innerHTML = '<div style="color:var(--muted);padding:16px">No control failures match current filter.</div>'; return; }
+
+  var html = '<div class="pm-card" style="padding:0;overflow:hidden">';
+  filtered.forEach(function(cf, i) {
+    var a = cfActionsFor(cf);
+    var sevColors = {critical:'var(--red)',high:'var(--orange)',moderate:'#e0d05a',low:'var(--green)'};
+    var sevC = sevColors[(cf.severity||'').toLowerCase()] || 'var(--muted)';
+    var bodyId = 'cfb-' + i;
+    html += '<div class="cf-row">'
+      + '<div class="cf-header" onclick="var el=document.getElementById(\''+bodyId+'\');el.classList.toggle(\'open\')">'
+      + '<span style="min-width:22px;color:'+sevC+';font-size:14px">'+(cf.severity==='critical'?'●':'○')+'</span>'
+      + '<div style="flex:1">'
+      + '<span style="font-weight:700;color:var(--text)">'+esc(cf.control_id)+'</span>'
+      + ' <span class="chip chip-'+(cf.severity||'').toLowerCase()+'">'+esc((cf.severity||'').toUpperCase())+'</span>'
+      + ' <span class="chip chip-'+(cf.remediation_priority||'P3').toLowerCase()+'">'+esc(cf.remediation_priority||'P3')+'</span>'
+      + ' <span style="color:var(--muted);font-size:11px;margin-left:4px">('+esc(cf.framework)+')</span>'
+      + '<br><span style="font-size:12px;color:var(--text)">'+esc(cf.control_name||cf.failure)+'</span>'
+      + (cf.triggered_by && cf.triggered_by.length ? '<br><span style="font-size:10px;color:var(--muted)">Triggered by: </span>' + mitreTags(cf.triggered_by) : '')
+      + '</div>'
+      + '<span style="color:var(--dim);font-size:12px">&#9658;</span>'
+      + '</div>'
+      + '<div id="'+bodyId+'" class="cf-body">'
+      + '<div style="font-size:10px;color:var(--muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.06em">Compliance Actions (ISO 27035 phases)</div>'
+      + '<div class="cf-action-row"><div class="cf-action-lbl" style="color:var(--blue)">Document</div><div style="color:var(--text)">'+esc(a.document)+'</div></div>'
+      + '<div class="cf-action-row"><div class="cf-action-lbl" style="color:var(--yellow)">Notify</div><div style="color:var(--text)">'+esc(a.notify)+'</div></div>'
+      + '<div class="cf-action-row"><div class="cf-action-lbl" style="color:var(--red)">Remediate</div><div style="color:var(--text)">'+esc(a.remediate)+'</div></div>'
+      + '<div class="cf-action-row"><div class="cf-action-lbl" style="color:var(--green)">Certify</div><div style="color:var(--text)">'+esc(a.certify)+'</div></div>'
+      + '<div class="cf-action-row"><div class="cf-action-lbl" style="color:var(--accent)">PIR/Audit</div><div style="color:var(--text)">'+esc(a.pir)+'</div></div>'
+      + '</div>'
+      + '</div>';
+  });
+  html += '</div>';
+  body.innerHTML = html;
+}
+
+/* ── Section renderers ── */
+function renderVerdict(pm, cluster) {
+  var v = pm.verdict || {};
+  var lv = (cluster.verdict||cluster.final_verdict||'').toUpperCase();
+  var platV = v.platform_verdict || lv || 'UNKNOWN';
+  if (platV === 'UNCERTAIN' && lv) platV = lv;
+  var conf = v.confidence || cluster.confidence || cluster.confidence_score || 0;
+  var confPct = Math.round(conf * 100) + '%';
+  var kc = v.kill_chain_stage || 'unknown';
+  if (kc === 'unknown' && cluster.phases && cluster.phases.length) {
+    var pn = cluster.phases.map(function(p){return p.name||p.phase_id||'';}).filter(Boolean);
+    kc = pn.length <= 5 ? pn.join(' → ') : pn.slice(0,3).join(' → ') + ' → … → ' + pn[pn.length-1];
+  }
+  var isBreached = ['VALIDATED_BREACH','CONFIRMED_BREACH','CONFIRMED_INTRUSION'].includes(platV);
+  var vcColor = isBreached ? 'var(--red)' : platV.includes('LIKELY') ? 'var(--orange)' : 'var(--muted)';
+  var s1 = ((pm.sections||[]).find(function(s){return s.section_id==='s1_incident_lifecycle';}) || {}).auto_output || {};
+  var narrative = (s1.narrative_summary||'').substring(0,800);
+
+  var h = '';
+  // Verdict banner
+  h += '<div style="background:linear-gradient(135deg,rgba(224,90,90,.08),rgba(167,139,250,.05));border:1px solid rgba(224,90,90,.3);border-radius:8px;padding:16px;margin-bottom:16px">'
+    + '<div style="font-size:22px;font-weight:800;color:'+vcColor+';letter-spacing:.04em">'+esc(platV)+'</div>'
+    + '<div style="font-size:13px;color:var(--muted);margin-top:4px">Confidence: <strong style="color:var(--accent)">'+confPct+'</strong> &nbsp;|&nbsp; Severity: <strong style="color:var(--orange)">'+esc((cluster.severity||'').toUpperCase())+'</strong></div>'
+    + '<div style="font-size:12px;color:var(--muted);margin-top:6px;border-top:1px solid rgba(255,255,255,.06);padding-top:8px">Kill chain: '+esc(kc)+'</div>'
+    + '</div>';
+  // Table
+  h += '<div class="pm-card">'
+    + '<div class="pm-card-title">Verdict Details</div>'
+    + '<table class="pm-table">'
+    + '<tr><td style="color:var(--muted);width:180px">Materiality</td><td style="font-weight:600;color:'+(v.materiality_assessment==='MEETS_NOTIFICATION_CRITERIA'?'var(--red)':'var(--orange)')+'">'+esc(v.materiality_assessment||'—')+'</td></tr>'
+    + '<tr><td style="color:var(--muted)">Rationale</td><td>'+esc(v.materiality_rationale||'—')+'</td></tr>'
+    + '<tr><td style="color:var(--muted)">Notification Status</td><td>'+esc(v.notification_status||'—')+'</td></tr>'
+    + '</table></div>';
+  if (narrative) {
+    h += '<div class="pm-card"><div class="pm-card-title">Executive Narrative</div>'
+      + '<div style="font-size:12px;color:var(--text);line-height:1.65;border-left:3px solid var(--accent);padding-left:12px">'+esc(narrative)+'</div></div>';
+  }
+  // Tenant
+  var tc = pm.tenant_config || {};
+  if (tc.entity_name) {
+    h += '<div class="pm-card"><div class="pm-card-title">Reporting Entity</div>'
+      + '<div style="font-size:12px;color:var(--text)"><strong>'+esc(tc.entity_name)+'</strong>'+(tc.abn?' (ABN '+esc(tc.abn)+')':'')+'</div>'
+      + ((tc.ciso||{}).name ? '<div style="font-size:11px;color:var(--muted);margin-top:4px">CISO: '+esc(tc.ciso.name)+((tc.ciso.email)?' &bull; '+esc(tc.ciso.email):'')+'</div>' : '')
+      + '</div>';
+  }
+  $('sec-verdict-body').innerHTML = h;
+}
+
+function renderLifecycle(pm, cluster) {
+  var s1 = ((pm.sections||[]).find(function(s){return s.section_id==='s1_incident_lifecycle';}) || {}).auto_output || {};
+  var phases = ['detect','contain','eradicate','recover','post_incident_review'];
+  var lbls = {detect:'Detect',contain:'Contain',eradicate:'Eradicate',recover:'Recover',post_incident_review:'PIR'};
+  var ico = {done:'✓', pending:'⚠'};
+
+  // Strip
+  var strip = '<div class="lc-strip">';
+  phases.forEach(function(ph) {
+    var phD = s1[ph] || {};
+    var done = ph==='detect' ? !!(phD.method && phD.method!=='unknown') : ph==='post_incident_review' ? !!(phD.root_cause) : !!(Object.keys(phD).length);
+    strip += '<div class="lc-phase '+(done?'done':'pending')+'">'
+      + '<div class="lc-ico">'+(done?'✓':'⚠')+'</div>'
+      + '<div class="lc-name">'+lbls[ph]+'</div></div>';
+  });
+  strip += '</div>';
+
+  var h = strip;
+  // Phase detail cards
+  phases.forEach(function(ph) {
+    var phD = s1[ph] || {};
+    var done = ph==='detect' ? !!(phD.method && phD.method!=='unknown') : !!(Object.keys(phD).length);
+    h += '<div class="pm-card">'
+      + '<div class="pm-card-title">'+(done?'<span style="color:var(--green)">✓</span>':'<span style="color:var(--yellow)">⚠</span>')+' '+lbls[ph]+'</div>';
+    if (!done) {
+      h += '<div style="color:var(--dim);font-size:11px;font-style:italic">Pending — analyst entry required. Use "Rebuild Postmortem" after completing this phase.</div>';
+    } else if (ph === 'detect') {
+      h += '<table class="pm-table">'
+        + (phD.method ? '<tr><td style="color:var(--muted);width:160px">Detection Method</td><td><strong>'+esc(phD.method)+'</strong></td></tr>' : '')
+        + (phD.reference ? '<tr><td style="color:var(--muted)">Engagement Ref</td><td>'+esc(phD.reference)+'</td></tr>' : '')
+        + (phD.detection_lag_human ? '<tr><td style="color:var(--muted)">Detection Lag</td><td style="color:var(--yellow)"><strong>'+esc(phD.detection_lag_human)+'</strong></td></tr>' : '')
+        + '</table>';
+    } else {
+      var entries = Object.entries(phD).filter(function(kv){return kv[1] && typeof kv[1]==='string';});
+      if (entries.length) {
+        h += '<table class="pm-table">';
+        entries.forEach(function(kv){ h += '<tr><td style="color:var(--muted);width:160px">'+esc(kv[0].replace(/_/g,' '))+'</td><td>'+esc(kv[1])+'</td></tr>'; });
+        h += '</table>';
+      }
+    }
+    h += '</div>';
+  });
+
+  // Attack timeline from phases
+  var clPhases = cluster.phases || [];
+  if (clPhases.length) {
+    h += '<div class="pm-card"><div class="pm-card-title">Attack Timeline ('+clPhases.length+' phases from cluster)</div>'
+      + '<table class="pm-table"><thead><tr><th>Time</th><th>Phase</th><th>Case Role</th><th>Evidence Rows</th></tr></thead><tbody>';
+    clPhases.forEach(function(p) {
+      var roleColor = {credential_theft:'var(--red)',data_exfiltration:'var(--red)',c2_communication:'var(--orange)',privilege_escalation:'var(--yellow)',initial_access:'var(--blue)'}[p.case_role||''] || 'var(--muted)';
+      h += '<tr><td style="white-space:nowrap;color:var(--muted)">'+(p.first_seen||'—').substring(0,16)+'</td>'
+        + '<td style="font-weight:600">'+esc(p.name||p.phase_id||'')+'</td>'
+        + '<td style="color:'+roleColor+'">'+esc((p.case_role||'').replace(/_/g,' '))+'</td>'
+        + '<td>'+((p.row_refs||[]).length||0)+'</td></tr>';
+    });
+    h += '</tbody></table></div>';
+  }
+  $('sec-lifecycle-body').innerHTML = h;
+}
+
+function renderThreat(pm, cluster) {
+  var s2 = ((pm.sections||[]).find(function(s){return s.section_id==='s2_threat_reconstruction';}) || {}).auto_output || {};
+  var t1 = cluster.tier1_prefill || {};
+  var h = '';
+
+  // Attacker Infrastructure
+  var infra = t1.attacker_infrastructure || {};
+  var ips = infra.c2_ips || infra.ips || [];
+  var domains = infra.c2_domains || infra.domains || [];
+  if (ips.length || domains.length) {
+    h += '<div class="pm-card"><div class="pm-card-title">Attacker Infrastructure</div><table class="pm-table">'
+      + (ips.length ? '<tr><td style="color:var(--muted);width:130px">C2 IPs</td><td>'+ips.slice(0,10).map(function(ip){return '<code style="background:var(--bg3);border-radius:3px;padding:1px 5px;font-size:11px">'+esc(ip)+'</code>';}).join(' ')+'</td></tr>' : '')
+      + (domains.length ? '<tr><td style="color:var(--muted)">C2 Domains</td><td>'+domains.slice(0,8).map(function(d){return '<code style="background:var(--bg3);border-radius:3px;padding:1px 5px;font-size:11px">'+esc(d)+'</code>';}).join(' ')+'</td></tr>' : '')
+      + '</table></div>';
+  }
+
+  // MITRE techniques
+  var mitTechs = t1.mitre_techniques || [];
+  if (mitTechs.length) {
+    h += '<div class="pm-card"><div class="pm-card-title">MITRE ATT&amp;CK Techniques ('+mitTechs.length+')</div>'
+      + '<table class="pm-table"><thead><tr><th>Technique</th><th>Name</th><th>Tactic</th><th>Hunt Query</th></tr></thead><tbody>';
+    mitTechs.forEach(function(m) {
+      var tid = m.technique_id||m.id||'';
+      h += '<tr><td><a class="mitre-tag" href="https://attack.mitre.org/techniques/'+encodeURIComponent(tid.split('.')[0])+'/" target="_blank">'+esc(tid)+'</a></td>'
+        + '<td>'+esc(m.name||m.technique_name||'')+'</td>'
+        + '<td style="color:var(--muted)">'+esc(m.tactic||m.phase||'')+'</td>'
+        + '<td style="font-size:10px;color:var(--dim)">'+esc((m.hunt_query||m.splunk_query||'').substring(0,60))+'</td></tr>';
+    });
+    h += '</tbody></table></div>';
+  }
+
+  // LLM narrative from s2
+  var narr = s2.narrative || (cluster.llm_narrative||{}).attack_chain_narrative || t1.attack_chain_narrative || '';
+  if (narr) {
+    h += '<div class="pm-card"><div class="pm-card-title">Threat Narrative</div>'
+      + '<div style="font-size:12px;color:var(--text);line-height:1.65;border-left:3px solid var(--orange);padding-left:12px">'+esc(narr.substring(0,1500))+'</div></div>';
+  }
+  $('sec-threat-body').innerHTML = h || '<div style="color:var(--muted);padding:16px">Threat reconstruction data not yet available — run Rebuild Postmortem to generate.</div>';
+}
+
+function renderSABSA(pm) {
+  var s4 = ((pm.sections||[]).find(function(s){return s.section_id==='s4_sabsa_architecture';}) || {}).auto_output || {};
+  var layers = s4.layers || s4.layer_assessments || [];
+  var h = '';
+
+  if (!layers.length) {
+    h = '<div class="pm-card">'
+      + '<div class="pm-card-title">SABSA Architecture Layers</div>'
+      + '<div style="color:var(--muted);font-size:12px">SABSA analysis not yet generated. Use <strong>Rebuild Postmortem</strong> with full LLM pipeline to populate this section.</div>'
+      + '<div style="margin-top:12px;font-size:11px;color:var(--dim)">'
+      + '<strong>What SABSA covers in this report:</strong><br>'
+      + '• <strong>Contextual (Business)</strong> — Business risk drivers, regulatory context, crown jewel exposure<br>'
+      + '• <strong>Conceptual (Architecture)</strong> — Security domain breaches, trust boundary violations<br>'
+      + '• <strong>Logical (Design)</strong> — Control failures mapped to SABSA logical security services<br>'
+      + '• <strong>Physical (Build)</strong> — Technical mechanisms that failed (LSASS protection, network segmentation, IAM)<br>'
+      + '• <strong>Component (Operations)</strong> — Specific product/config gaps (Credential Guard, OPA, CASB)<br>'
+      + '• <strong>Operational (Governance)</strong> — Policy, process, and compliance gaps'
+      + '</div></div>';
+  } else {
+    h += '<div class="sabsa-grid">';
+    layers.forEach(function(l) {
+      h += '<div class="sabsa-card">'
+        + '<div class="s-layer">'+esc(l.layer||l.level||'')+'</div>'
+        + '<div class="s-name">'+esc(l.name||l.domain||'')+'</div>'
+        + '<div class="s-desc">'+esc((l.assessment||l.finding||l.description||'').substring(0,300))+'</div>'
+        + (l.control_gaps && l.control_gaps.length ? '<div style="margin-top:6px;font-size:10px;color:var(--red)">Gaps: '+esc(l.control_gaps.join(', '))+'</div>' : '')
+        + '</div>';
+    });
+    h += '</div>';
+  }
+  // Cross-framework reuse
+  var cfw = ((pm.sections||[]).find(function(s){return s.section_id==='s3_control_failures';}) || {}).auto_output || {};
+  var crosswalk = (cfw.crosswalk || cfw.cross_framework || null);
+  if (!crosswalk) {
+    // Build from cluster persona_dispatch
+    h += '<div class="pm-card" style="margin-top:12px"><div class="pm-card-title">Cross-Framework Control Mapping (from pipeline data)</div>'
+      + '<div style="color:var(--muted);font-size:11px">Full crosswalk available after postmortem rebuild with LLM stage.</div></div>';
+  }
+  $('sec-sabsa-body').innerHTML = h;
+}
+
+function renderRisk(pm) {
+  var s5 = ((pm.sections||[]).find(function(s){return s.section_id==='s5_risk_register_delta';}) || {}).auto_output || {};
+  var items = s5.risks || s5.risk_items || s5.delta || [];
+  var h = '';
+  if (!items.length) {
+    h = '<div class="pm-card"><div class="pm-card-title">Risk Register Delta</div>'
+      + '<div style="color:var(--muted);font-size:12px">No risk register delta generated yet. Rebuild postmortem to populate this section with risks derived from control failures and SABSA architecture assessment.</div></div>';
+  } else {
+    h = '<div class="pm-card" style="padding:0;overflow:hidden"><table class="pm-table">'
+      + '<thead><tr><th>Risk ID</th><th>Title</th><th>Severity</th><th>Control Refs</th><th>Action</th></tr></thead><tbody>';
+    items.forEach(function(r) {
+      h += '<tr><td style="color:var(--muted)">'+esc(r.risk_id||'')+'</td><td style="font-weight:600">'+esc(r.title||r.name||'')+'</td>'
+        + '<td>'+chip(r.severity||r.risk_level||'')+'</td>'
+        + '<td style="font-size:10px;color:var(--muted)">'+esc((r.control_refs||[]).join(', '))+'</td>'
+        + '<td style="font-size:11px">'+esc(r.recommended_action||r.action||'')+'</td></tr>';
+    });
+    h += '</tbody></table></div>';
+  }
+  $('sec-risk-body').innerHTML = h;
+}
+
+function renderRegs(pm) {
+  var s6 = ((pm.sections||[]).find(function(s){return s.section_id==='s6_regulatory_clocks';}) || {}).auto_output || {};
+  var trigs = s6.triggers || [];
+  var h = '';
+  h += '<div style="font-size:11px;color:var(--yellow);background:rgba(251,191,36,.08);border-left:3px solid var(--yellow);padding:8px 12px;border-radius:0 4px 4px 0;margin-bottom:14px">⚠ JanuSec NEVER auto-submits regulatory notifications. All filings require human review and legal sign-off.</div>';
+  if (!trigs.length) {
+    h += '<div class="pm-card"><div class="pm-card-title">Regulatory Clocks</div>'
+      + '<div style="color:var(--muted);font-size:12px">No regulatory triggers fired for this incident. Materiality assessment: BELOW_NOTIFICATION_THRESHOLD.<br>'
+      + 'Regulators in scope: OAIC (NDB), APRA CPS 234, ASX, ASIC.</div></div>';
+  } else {
+    h += '<table class="pm-table" style="margin-bottom:14px"><thead><tr><th>Regulator</th><th>Obligation</th><th>Clock</th><th>Deadline</th><th>Status</th></tr></thead><tbody>';
+    trigs.forEach(function(t) {
+      var hrs = t.hours_remaining != null ? t.hours_remaining : (t.clock_seconds ? Math.round(t.clock_seconds/3600) : null);
+      var urgC = hrs!=null&&hrs<=72 ? 'var(--red)' : 'var(--orange)';
+      h += '<tr><td style="font-weight:600;color:var(--text)">'+esc(t.regulator_name||t.name||t.trigger_id||'')+'</td>'
+        + '<td style="font-size:11px">'+esc(t.rationale||t.obligation||'')+'</td>'
+        + '<td style="color:'+urgC+';font-weight:700">'+(hrs!=null?hrs+'h':'—')+'</td>'
+        + '<td style="color:var(--muted);white-space:nowrap">'+esc((t.deadline_iso||'').substring(0,16))+'</td>'
+        + '<td>'+esc(t.status||'PENDING')+'</td></tr>';
+    });
+    h += '</tbody></table>';
+  }
+  $('sec-regs-body').innerHTML = h;
+}
+
+function renderActions(pm) {
+  var s7 = ((pm.sections||[]).find(function(s){return s.section_id==='s7_corrective_actions';}) || {}).auto_output || {};
+  var acts = s7.actions || [];
+  var h = '';
+  if (!acts.length) {
+    h = '<div class="pm-card"><div class="pm-card-title">Corrective Action Plan</div>'
+      + '<div style="color:var(--muted);font-size:12px">No corrective actions generated yet. Rebuild postmortem to populate.</div></div>';
+  } else {
+    var buckets = {P1:[],P2:[],P3:[]};
+    acts.forEach(function(a){var p=a.priority||'P3';if(buckets[p])buckets[p].push(a);});
+    var colors={P1:'var(--red)',P2:'var(--orange)',P3:'var(--green)'};
+    ['P1','P2','P3'].forEach(function(p) {
+      if (!buckets[p].length) return;
+      h += '<div class="pm-card">'
+        + '<div class="pm-card-title"><span style="color:'+colors[p]+';font-weight:700">'+p+'</span> Actions ('+buckets[p].length+')</div>'
+        + '<table class="pm-table"><thead><tr><th>Action</th><th>Framework Refs</th><th>Owner</th><th>Timeline</th></tr></thead><tbody>';
+      buckets[p].forEach(function(a) {
+        h += '<tr><td style="font-weight:600;max-width:350px">'+esc(a.title||a.action||a.description||'')
+          +(a.description&&a.title ? '<br><span style="font-size:10px;color:var(--muted)">'+esc(a.description)+'</span>' : '')+'</td>'
+          + '<td style="font-size:10px;color:var(--accent)">'+esc((a.framework_refs||[]).join(', '))+'</td>'
+          + '<td style="font-size:11px;color:var(--muted)">'+esc(a.owner_role||a.owner||'—')+'</td>'
+          + '<td style="white-space:nowrap;font-size:11px">'+(a.timeline_days?a.timeline_days+'d':'—')+'</td></tr>';
+      });
+      h += '</tbody></table></div>';
+    });
+  }
+  // Also add auditor asks from s3
+  var s3 = ((pm.sections||[]).find(function(s){return s.section_id==='s3_control_failures';}) || {}).auto_output || {};
+  var asks = s3.auditor_asks || [];
+  if (asks.length) {
+    h += '<div class="pm-card"><div class="pm-card-title">Auditor Asks</div>';
+    asks.forEach(function(q) { h += '<div class="auditor-ask">'+esc(q)+'</div>'; });
+    h += '</div>';
+  }
+  $('sec-actions-body').innerHTML = h || '<div style="color:var(--muted);padding:16px">No corrective actions yet.</div>';
+}
+
+/* ── Main loader ── */
+function load() {
+  var aid = getParam('assessment');
+  var cid = getParam('cluster');
+  if (!aid || !cid) {
+    $('pm-loading').innerHTML = '<div style="color:var(--red)">Missing assessment or cluster parameter in URL.</div>';
+    return;
+  }
+
+  var apiKey = (function(){ try{return localStorage.getItem('apiKey')||'devkey123';}catch(_){return 'devkey123';} })();
+  var tenantId = (function(){ try{return localStorage.getItem('tenantId')||'default';}catch(_){return 'default';} })();
+  var headers = {'x-api-key': apiKey, 'x-tenant-id': tenantId};
+
+  // Parallel: fetch postmortem + assessment
+  Promise.all([
+    fetch('/api/v1/postmortem/'+encodeURIComponent(aid)+'/clusters/'+encodeURIComponent(cid), {headers: headers})
+      .then(function(r){ return r.ok ? r.json() : null; }).catch(function(){ return null; }),
+    fetch('/api/v1/assessments/'+encodeURIComponent(aid), {headers: headers})
+      .then(function(r){ return r.ok ? r.json() : null; }).catch(function(){ return null; })
+  ]).then(function(results) {
+    var pmResp = results[0];
+    var asmResp = results[1];
+    var pm = (pmResp && pmResp.postmortem) ? pmResp.postmortem : pmResp || {};
+    var clusters = asmResp ? (asmResp.analysis_clusters || asmResp.correlation_clusters || []) : [];
+    var cluster = clusters.find(function(c){return (c.cluster_id||c.id)===cid;}) || clusters[0] || {};
+
+    // Patch verdict from cluster if postmortem has UNCERTAIN
+    var v = pm.verdict || {};
+    var lv = (cluster.verdict||cluster.final_verdict||'').toUpperCase();
+    if ((!v.platform_verdict || v.platform_verdict==='UNCERTAIN') && lv) v.platform_verdict = lv;
+    if ((!v.confidence||v.confidence===0) && (cluster.confidence||cluster.confidence_score)) v.confidence = cluster.confidence||cluster.confidence_score;
+    pm.verdict = v;
+
+    // Get control failures from persona_dispatch.compliance
+    var pd = cluster.persona_dispatch || {};
+    var compPD = pd.compliance || {};
+    allCFs = compPD.control_failures || [];
+
+    // Update header
+    var platV = v.platform_verdict || lv || 'UNKNOWN';
+    var isBreached = ['VALIDATED_BREACH','CONFIRMED_BREACH','CONFIRMED_INTRUSION'].includes(platV);
+    var tc = pm.tenant_config || {};
+    $('pm-report-title').textContent = (tc.entity_name ? tc.entity_name + ' — ' : '') + 'Compliance & ISMS Postmortem Report';
+    $('pm-report-subtitle').textContent = 'Assessment: ' + aid + ' | Cluster: ' + cid + ' | Generated: ' + new Date().toISOString().substring(0,10);
+    var metaEl = $('pm-report-meta');
+    metaEl.innerHTML = '<span class="pm-meta-chip '+(isBreached?'verdict-breach':'verdict-ok')+'">'+esc(platV)+'</span>'
+      + '<span class="pm-meta-chip">'+Math.round((v.confidence||0)*100)+'% confidence</span>'
+      + '<span class="pm-meta-chip">'+(cluster.severity||'unknown').toUpperCase()+' severity</span>'
+      + '<span class="pm-meta-chip">'+allCFs.length+' control failures</span>'
+      + '<span class="pm-meta-chip">'+(cluster.phase_count||0)+' phases</span>';
+    $('pm-export-label').textContent = 'Postmortem: ' + (tc.entity_name||aid);
+
+    // Build framework filter
+    var fwSet = {};
+    allCFs.forEach(function(cf){ if(cf.framework) fwSet[cf.framework]=true; });
+    var sel = $('cf-fw-filter');
+    Object.keys(fwSet).sort().forEach(function(fw){
+      var o = document.createElement('option'); o.value=fw; o.textContent=fw; sel.appendChild(o);
+    });
+
+    // Update control count
+    var critCt = allCFs.filter(function(cf){return (cf.severity||'').toLowerCase()==='critical';}).length;
+    $('cf-count').textContent = allCFs.length;
+    $('cf-crit-count').textContent = critCt;
+
+    // Render all sections
+    renderVerdict(pm, cluster);
+    renderLifecycle(pm, cluster);
+    renderThreat(pm, cluster);
+    renderCFs();
+    renderSABSA(pm);
+    renderRisk(pm);
+    renderRegs(pm);
+    renderActions(pm);
+
+    // Show
+    $('pm-loading').style.display = 'none';
+    $('pm-content').style.display = 'block';
+    $('pm-json-export').style.display = 'block';
+    $('pm-json-export').onclick = function() {
+      var blob = new Blob([JSON.stringify({postmortem: pm, cluster_id: cid, assessment_id: aid, control_failures: allCFs}, null, 2)], {type:'application/json'});
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a'); a.href=url; a.download='postmortem-'+cid+'.json'; a.click(); URL.revokeObjectURL(url);
+    };
+
+    // Store pm data for potential re-export
+    pmData = pm; clusterData = cluster;
+  }).catch(function(err) {
+    $('pm-loading').style.display = 'none';
+    $('pm-error').style.display = 'block';
+    $('pm-error').textContent = 'Failed to load postmortem: ' + err.message;
+    $('pm-content').style.display = 'block';
+  });
+}
+
+// Expose nav and filter to global
+window.showSection = showSection;
+window.cfFilter = cfFilter;
+window.cfFilterFw = cfFilterFw;
+
+load();
+})();
+</script>
+</body>
+</html>

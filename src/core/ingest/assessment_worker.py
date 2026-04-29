@@ -221,6 +221,11 @@ async def run_assessment_pipeline(
         progress_fn(assessment_id, stage, pct, label)
 
     try:
+        # Guard: if the job was cancelled before we got here, bail out.
+        _pre_status = (_store.get_job(assessment_id) or {}).get("status", "")
+        if _pre_status == "cancelled":
+            logger.info("assessment pipeline skipped (cancelled): %s", assessment_id)
+            return assessment_id
         _store.update_job(assessment_id, status="running", stage="parsing", percent=0, stage_label="Parsing files")
 
         # ── Stage 1: parse and store all rows ────────────────────────────────
@@ -573,16 +578,39 @@ async def run_assessment_pipeline(
 
         if clusters:
             _progress("reasoning", 72, "Generating LLM narratives for top clusters")
+            # Cap narration at 90s for background ingest — avoids blocking the queue
+            # for many minutes when Ollama is under load. Deterministic enrichments
+            # (DREAD, SABSA, cluster intelligence) already ran above and are preserved.
+            _narrate_timeout = float(os.getenv("JANUSEC_INGEST_NARRATE_TIMEOUT_S", "90"))
             try:
                 from src.core.ingest.cluster_narrator import narrate_top_clusters
-                await asyncio.to_thread(
-                    narrate_top_clusters,
-                    clusters,
-                    filtered_rows,
-                    assessment_id=assessment_id,
+                await asyncio.wait_for(
+                    asyncio.to_thread(
+                        narrate_top_clusters,
+                        clusters,
+                        filtered_rows,
+                        assessment_id=assessment_id,
+                    ),
+                    timeout=_narrate_timeout,
+                )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "cluster narration timed out (>%.0fs) for %s — using fallback narratives",
+                    _narrate_timeout, assessment_id,
                 )
             except Exception as exc:
                 logger.warning("cluster narration failed for %s: %s", assessment_id, exc)
+
+        # ── Stage 5d: persona dispatch + framework mapping + bitemporal trace ──
+        # Enriches each breach cluster's narrative with structured data (affected
+        # principals, data sensitivity, attacker infra), builds the control
+        # failure register, generates per-persona dispatch payloads, and wraps
+        # each in a bitemporal decision trace for audit replay.
+        _progress("reasoning", 78, "Building persona dispatch payloads")
+        try:
+            _enrich_and_dispatch_personas(assessment, clusters, filtered_rows, org)
+        except Exception as exc:
+            logger.warning("persona dispatch stage failed for %s: %s", assessment_id, exc, exc_info=True)
 
         # ── Stage 6: tier-1 prefill (top-10 cluster cards) ────────────────────
         _progress("reasoning", 85, "Tier-1 prefill for cluster cards")
@@ -716,6 +744,201 @@ _KC_KEYWORD_MAP: list[tuple[str, list[str]]] = [
     ("exfiltration", ["exfil", "upload", "rclone", "backblaze", "outbound", "egress"]),
     ("command_and_control", ["c2", "beacon", "callback", "dns tunnel", "covert"]),
 ]
+
+
+# ── Pipeline version stamp for bitemporal trace provenance ───────────────────
+_PIPELINE_VERSION = "deep_analyze_pipeline.v3.2"
+
+# Lazy-initialised singletons for bitemporal trace + TemporalRAG indexing.
+# These are module-level so they survive across assessment runs within the
+# same server process.  For production, swap with persistent backends.
+_TRACE_STORE = None
+_INCIDENT_INDEX = None
+
+
+def _get_trace_store():
+    global _TRACE_STORE
+    if _TRACE_STORE is None:
+        from src.analysis.bitemporal_dispatch_trace import InMemoryDecisionTraceStore
+        _TRACE_STORE = InMemoryDecisionTraceStore()
+    return _TRACE_STORE
+
+
+def _get_incident_index():
+    global _INCIDENT_INDEX
+    if _INCIDENT_INDEX is None:
+        import os
+        db_path = os.path.join(
+            os.getenv('SESSION_PERSIST_DIR', 'data/sessions'),
+            'incident_index.db',
+        )
+        os.makedirs(os.path.dirname(db_path), exist_ok=True)
+        from src.analysis.temporal_rag_dispatch import SQLiteIncidentIndexStore
+        _INCIDENT_INDEX = SQLiteIncidentIndexStore(db_path)
+    return _INCIDENT_INDEX
+
+
+def _enrich_and_dispatch_personas(
+    assessment: dict,
+    clusters: list[dict],
+    rows: list[dict],
+    tenant_id: str,
+) -> None:
+    """Stage 5d: enrich narratives, build framework register, generate
+    per-persona dispatch payloads, and wrap in bitemporal trace."""
+    _breach_verdicts = {'VALIDATED_BREACH', 'CONFIRMED_BREACH', 'LIKELY_BREACH', 'LIKELY_COMPROMISE'}
+
+    # Build row lookup for cluster evidence
+    row_lookup: dict[int, dict] = {}
+    for r in rows:
+        ri = r.get('row_index')
+        if ri is not None:
+            try:
+                row_lookup[int(float(ri))] = r
+            except (TypeError, ValueError):
+                pass
+
+    # Load tenant classification config (optional)
+    tenant_class = None
+    try:
+        from src.config.tenant_data_classification import load_for_tenant
+        tenant_class = load_for_tenant(tenant_id)
+    except Exception:
+        pass
+
+    # Import the new modules (lazy to avoid import errors if deps are missing)
+    try:
+        from src.llm.cluster_narrator_v2_schema import enrich_narrative
+        from src.analysis.framework_mapper import build_control_failure_register
+        from src.analysis.persona_dispatch import build_all_personas
+        from src.analysis.bitemporal_dispatch_trace import (
+            trace_persona_dispatch, find_superseded_decisions,
+        )
+        from src.analysis.temporal_rag_dispatch import (
+            TemporalRAGProvider, _signature_from_narrative,
+        )
+    except Exception as exc:
+        logger.warning("persona dispatch imports failed: %s", exc)
+        return
+
+    trace_store = _get_trace_store()
+    incident_index = _get_incident_index()
+
+    # Entity context for regulatory trigger evaluation
+    entity_context = assessment.get('entity_context') or {}
+
+    dispatch_ok = 0
+    for cl in clusters:
+        verdict = str(cl.get('verdict') or cl.get('final_verdict') or '').upper()
+        if verdict not in _breach_verdicts:
+            continue
+
+        # Gather cluster rows
+        cl_rows = []
+        for ref in (cl.get('row_refs') or []):
+            try:
+                k = int(float(ref))
+                if k in row_lookup:
+                    cl_rows.append(row_lookup[k])
+            except (TypeError, ValueError):
+                pass
+
+        narrative = cl.get('llm_narrative') or cl.get('tier1_prefill') or {}
+        if not isinstance(narrative, dict):
+            narrative = {}
+
+        # Step 1: Enrich the narrative with structured data
+        narrative = enrich_narrative(
+            narrative, cl, cl_rows,
+            tenant_classification=tenant_class,
+        )
+        # Carry forward MITRE techniques from cluster if not in narrative,
+        # then fall back to inference from Diamond/kill-chain/DREAD fragments.
+        if not narrative.get('mitre_techniques'):
+            explicit = cl.get('mitre_techniques') or cl.get('mitre_tags') or []
+            narrative['mitre_techniques'] = explicit
+
+        # Step 3: Build control failure register — pass cluster for MITRE inference
+        register = build_control_failure_register(
+            narrative, evidence_rows=cl_rows, entity_context=entity_context,
+            cluster=cl,
+        )
+        cl['control_failure_register'] = register
+
+        # Step 2+5: Build per-persona dispatch payloads with optional RAG
+        rag = None
+        try:
+            rag = TemporalRAGProvider(
+                incident_store=incident_index,
+                decision_store=trace_store,
+                tenant_id=tenant_id,
+            )
+        except Exception:
+            pass
+
+        cluster_id = cl.get('cluster_id') or '?'
+        payloads = build_all_personas(
+            narrative,
+            register=register,
+            evidence_rows=cl_rows,
+            cluster_id=cluster_id,
+            rag_provider=rag,
+        )
+
+        # Step 4: Wrap each persona dispatch in bitemporal trace
+        cl['persona_dispatch'] = {}
+        for persona_key, payload in payloads.items():
+            try:
+                prior = find_superseded_decisions(
+                    store=trace_store,
+                    cluster_id=cluster_id,
+                    persona=persona_key,
+                    tenant_id=tenant_id,
+                )
+                decision = trace_persona_dispatch(
+                    payload=payload,
+                    narrative=narrative,
+                    rows=cl_rows,
+                    cluster_id=cluster_id,
+                    tenant_id=tenant_id,
+                    framework_version=_PIPELINE_VERSION,
+                    supersedes=[d.decision_id for d in prior],
+                )
+                trace_store.put(decision)
+                cl['persona_dispatch'][persona_key] = {
+                    'decision_id': decision.decision_id,
+                    'transaction_time': decision.transaction_time,
+                    'supersedes': decision.supersedes,
+                    **payload,
+                }
+            except Exception as trace_err:
+                logger.debug("bitemporal trace failed for %s/%s: %s",
+                             cluster_id, persona_key, trace_err)
+                cl['persona_dispatch'][persona_key] = payload
+
+        # Step 5: Index for TemporalRAG retrieval
+        try:
+            sig = _signature_from_narrative(narrative)
+            summary = (narrative.get('attack_narrative') or
+                       narrative.get('ioc_summary') or '')[:300]
+            incident_index.index_incident(
+                tenant_id=tenant_id,
+                cluster_id=cluster_id,
+                signature=sig,
+                valid_time_start=(narrative.get('discovery') or {}).get('first_evidence_at') or '',
+                valid_time_end=(narrative.get('discovery') or {}).get('when') or '',
+                transaction_time=datetime.datetime.utcnow().isoformat(),
+                narrative_summary=summary,
+                outcome_summary=cl.get('final_verdict'),
+            )
+        except Exception as idx_err:
+            logger.debug("TemporalRAG indexing failed for %s: %s", cluster_id, idx_err)
+
+        # Store enriched narrative back to cluster
+        cl['llm_narrative'] = narrative
+        dispatch_ok += 1
+
+    logger.info("Stage 5d: persona dispatch completed for %d breach clusters", dispatch_ok)
 
 
 def _seed_proposed_actions_and_kill_chain(
@@ -875,6 +1098,15 @@ async def _worker_loop() -> None:
             file_paths = job.get("file_paths", [])
             progress_fn = job.get("progress_fn", _noop_progress)
 
+            # Skip if the job was cancelled while waiting in the queue.
+            try:
+                from src.core.ingest import store as _store_chk
+                _job_status = (_store_chk.get_job(assessment_id) or {}).get("status", "")
+                if _job_status == "cancelled":
+                    logger.info("ingest_worker: skipping cancelled job %s", assessment_id)
+                    continue
+            except Exception:
+                pass
             logger.info("ingest_worker: starting job %s (%d files)", assessment_id, len(file_paths))
             await run_assessment_pipeline(
                 assessment_id,

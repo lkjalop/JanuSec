@@ -522,6 +522,10 @@ try:
 except Exception:
     breach_router = None
 try:
+    from .postmortem_endpoints import router as postmortem_router
+except Exception:
+    postmortem_router = None
+try:
     from .cluster_enrich_endpoints import router as cluster_enrich_router
 except Exception:
     cluster_enrich_router = None
@@ -1007,10 +1011,6 @@ async def lifespan(app: FastAPI):
                         _llm_c.health()
                 except Exception:
                     pass
-        try:
-            await asyncio.to_thread(_deferred_sync)
-        except Exception:
-            pass
         # Start SSE micro-batch flush worker so Splunk/Sentinel ingest routes
         # drain queued events through the full STAGE_REGISTRY pipeline.
         try:
@@ -1038,13 +1038,20 @@ async def lifespan(app: FastAPI):
             logger.info('lifespan: investigate worker started')
         except Exception:
             pass
-        # Start async ingest worker (processes async file upload jobs)
+        # Start async ingest worker BEFORE the slow _deferred_sync thread so
+        # queued jobs begin processing regardless of how long warmup takes.
         try:
             from src.core.ingest.assessment_worker import start_worker as _start_ingest_worker
             _start_ingest_worker(app)
             logger.info('lifespan: ingest worker started')
         except Exception:
             logger.debug('lifespan: ingest worker start failed', exc_info=True)
+        # Run slow sync initialisation (scheduler registration, csv rehydration,
+        # LLM prewarm) in a background thread — worker is already running above.
+        try:
+            await asyncio.to_thread(_deferred_sync)
+        except Exception:
+            pass
         # Recover streaming sessions that were open before last shutdown
         try:
             from src.pipeline.streaming_ingest import recover_open_sessions as _recover_sessions
@@ -4807,6 +4814,12 @@ def register_core_routers(full: bool = True):
     except Exception:
         logger.debug('breach_router include failed (lite)')
     try:
+        if postmortem_router:
+            app.include_router(postmortem_router)
+            logger.info('Included postmortem_router into app (lite)')
+    except Exception:
+        logger.debug('postmortem_router include failed (lite)')
+    try:
         if cluster_enrich_router:
             app.include_router(cluster_enrich_router)
             logger.info('Included cluster_enrich_router into app (lite)')
@@ -7839,12 +7852,17 @@ async def incident_add_comment(iid: str, payload: dict, request: Request):
         raise HTTPException(status_code=404, detail='incident_not_found')
     return record
 
-DEFAULT_FRONTEND = os.getenv('DEFAULT_FRONTEND', 'react').lower()  # 'react', 'console', or 'investigate'
+DEFAULT_FRONTEND = os.getenv('DEFAULT_FRONTEND', 'react').lower()  # 'react', 'console', 'investigate', or 'breach'
 
 # Serve frontend at root based on DEFAULT_FRONTEND toggle
 @app.get("/", include_in_schema=False)
 async def serve_root():
     # Prefer explicitly requested frontend
+    if DEFAULT_FRONTEND == 'breach':
+        breach_path = os.path.join(static_path, 'breach.html')
+        if os.path.exists(breach_path):
+            logger.info("Serving Breach Assessment frontend at root")
+            return FileResponse(breach_path)
     if DEFAULT_FRONTEND == 'investigate':
         investigate_path = os.path.join(static_path, 'investigate.html')
         if os.path.exists(investigate_path):

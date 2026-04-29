@@ -41,7 +41,7 @@
   }
 
   function getSelectedModel() {
-    try { return localStorage.getItem('selectedModel') || 'qwen3:14b'; } catch (_) { return 'qwen3:14b'; }
+    try { return localStorage.getItem('selectedModel') || 'qwen3.6:27b'; } catch (_) { return 'qwen3.6:27b'; }
   }
 
   function apiFetch(path, opts) {
@@ -53,6 +53,28 @@
       method: 'POST',
       body: JSON.stringify(body || {}),
     });
+  }
+
+  function authQuery() {
+    var params = new URLSearchParams();
+    try {
+      var k = localStorage.getItem('apiKey') || 'devkey123';
+      if (k) params.set('api_key', k);
+      params.set('tenant', localStorage.getItem('tenantId') || 'default');
+    } catch (_) {
+      params.set('api_key', 'devkey123');
+      params.set('tenant', 'default');
+    }
+    return params.toString();
+  }
+
+  function authedUrl(path) {
+    var sep = path.indexOf('?') === -1 ? '?' : '&';
+    return apiBase() + path + sep + authQuery();
+  }
+
+  function openAuthed(path) {
+    window.open(authedUrl(path), '_blank', 'noopener');
   }
 
   // ── URL state ───────────────────────────────────────────────────────────────
@@ -103,6 +125,8 @@
         renderComplianceTab();
       } else if (TAB === 'intel') {
         renderIntelTab();
+      } else if (TAB === 'postmortem') {
+        renderPostmortemTab();
       } else {
         renderHome();
       }
@@ -3010,31 +3034,1425 @@
       if (!dispBtn) return;
       // Don't handle confirm/cancel clicks here
       if (e.target.closest('#br-dispatch-confirm') || e.target.closest('#br-dispatch-cancel')
-          || e.target.closest('#br-dispatch-preview-link') || e.target.closest('#br-dispatch-change-mgmt')) return;
+          || e.target.closest('#br-dispatch-preview-link') || e.target.closest('#br-dispatch-change-mgmt')
+          || e.target.closest('#br-dispatch-preview-pm') || e.target.closest('#br-dispatch-rebuild-pm')
+          || e.target.closest('#br-dispatch-export-ioc') || e.target.closest('#br-dispatch-export-hunt')
+          || e.target.closest('#br-dispatch-export-navigator') || e.target.closest('#br-dispatch-export-sigma')
+          || e.target.closest('#br-dispatch-export-evidence') || e.target.closest('#br-dispatch-create-incident')
+          || e.target.closest('#br-dispatch-approve-p1') || e.target.closest('#br-dispatch-legal-review')
+          || e.target.closest('#br-dispatch-push-confluence-ciso') || e.target.closest('[data-push-target]')) return;
       var role = dispBtn.getAttribute('data-dispatch-role');
       var roleDef = _STAKEHOLDER_ROLES.filter(function (r) { return r.key === role; })[0];
       if (!roleDef) return;
 
       // Export: open full multi-persona report
       if (role === 'export') {
-        window.open('/api/v1/report/ingestion?format=html&include_model=true&include_scenarios=true'
-          + (AID ? '&assessment_id=' + encodeURIComponent(AID) : ''), '_blank');
+        openAuthed('/api/v1/report/ingestion?format=html&include_model=true&include_scenarios=true'
+          + (AID ? '&assessment_id=' + encodeURIComponent(AID) : ''));
         return;
       }
 
       // Show preview panel with persona-specific content
       var preview = document.getElementById('br-dispatch-preview');
       if (!preview) return;
-      var personaUrl = '/api/v1/report/ingestion?format=html&persona=' + encodeURIComponent(roleDef.persona)
+      var personaUrl = authedUrl('/api/v1/report/ingestion?format=html&persona=' + encodeURIComponent(roleDef.persona)
         + '&include_model=true&include_scenarios=true'
-        + (AID ? '&assessment_id=' + encodeURIComponent(AID) : '');
+        + (AID ? '&assessment_id=' + encodeURIComponent(AID) : ''));
 
-      // Build delivery channel options (populated from integration config if available)
+      // ── Pull evidence-specific content from persona_dispatch (built by pipeline Stage 5d)
+      var leadCluster = (state.clusters || []).find(function (c) {
+        var v = ((c.verdict || c.final_verdict || '')).toUpperCase();
+        return v === 'VALIDATED_BREACH' || v === 'CONFIRMED_BREACH' || v === 'CONFIRMED_INTRUSION';
+      }) || (state.clusters || [])[0] || {};
+      var personaData = (leadCluster.persona_dispatch || {})[roleDef.persona] || null;
+      var t1 = leadCluster.tier1_prefill || {};
+
+      // ── Shared helpers ─────────────────────────────────────────────────────
+
+      // Control-specific action lookup: keyed by control_id; each entry has {detect,contain,eradicate,recover,pir}
+      // Generated from the actual 36 control failures present in the Santos assessment pipeline output.
+      var _CF_ACTIONS = {
+        // ── ISO 27001 ──────────────────────────────────────────────────────────
+        'A.8.22': { detect: 'Audit K8s NetworkPolicy coverage — verify all namespaces have ingress/egress restrictions; run "kubectl get netpol --all-namespaces"', contain: 'Apply default-deny NetworkPolicy to all workload namespaces immediately; isolate affected pods', eradicate: 'Implement Kubernetes network segmentation: namespace-scoped NetworkPolicy + Calico/Cilium tiers; block lateral movement paths used by T1611', recover: 'Validate east-west traffic flows with Hubble or Calico observability; re-admit workloads with explicit allow rules only', pir: 'Update ISMS Annex A.8.22 SOA from Partially Implemented to Implemented; schedule quarterly network seg review' },
+        'A.5.23': { detect: 'Review cloud service inventory — identify all SaaS/IaaS with no data-at-rest and data-in-transit controls documented; check AWS/Azure/GCP org policy violations', contain: 'Suspend or restrict cloud service accounts used in incident; revoke cross-account roles linked to T1611/T1537 activity', eradicate: 'Enforce Service Control Policies (SCP) in AWS Orgs or Azure Policy denying unapproved cloud egress; apply data classification to all cloud assets', recover: 'Certify cloud services against ISO 27001 A.5.23 via updated SSPA/CSP assessment; enable Cloud CIEM/CSPM continuous monitoring', pir: 'Update Cloud Service Register; map each service to A.5.23 requirements; feed findings to ISO 27001 Statement of Applicability' },
+        'A.5.17': { detect: 'Scan all EC2/ECS task metadata API calls — identify any calls from container PIDs; check CloudTrail for IMDSv1 token-less requests', contain: 'Enforce IMDSv2 (hop-limit 1) on all EC2 instances and ECS tasks immediately via AWS CLI: "aws ec2 modify-instance-metadata-options --http-tokens required"', eradicate: 'Block IMDS access from container workloads via iptables or network policy; rotate all IAM role credentials linked to affected instance profiles', recover: 'Validate no IMDSv1 calls in CloudTrail for 7 days post-fix; restore impacted service accounts with new credentials', pir: 'Document IMDSv2 enforcement as mandatory baseline; add to AWS Org SCP; update A.5.17 SOA control implementation evidence' },
+        'A.8.12': { detect: 'Run CASB / DLP gap assessment across all cloud storage buckets (S3, Azure Blob, GCS) and SaaS egress paths; review CloudTrail for GetObject + CopyObject events to external accounts', contain: 'Block all S3 cross-account replication and STS AssumeRole to external accounts; enable S3 Block Public Access org-wide', eradicate: 'Implement Macie or equivalent DLP for S3; deploy CASB for SaaS egress; configure DLP policy for T1537/T1567.002 exfil techniques', recover: 'Certify DLP coverage with data-flow mapping exercise; verify all data stores have classification and egress monitoring', pir: 'Update ISMS risk register — A.8.12 was CONTROL_ABSENT; create project to implement DLP by next ISO 27001 surveillance audit' },
+        'A.8.7':  { detect: 'Review EDR/AV telemetry for T1003.001 (LSASS access via comsvcs.dll) — check for MiniDump API calls, WerFault-based extraction, or ProcDump invocations', contain: 'Isolate affected hosts; terminate suspicious LSASS-touching processes; reset credentials for all accounts that were logged on at compromise time', eradicate: 'Deploy Credential Guard (UEFI) and Windows Defender Credential Guard; enable LSA Protection (RunAsPPL); block comsvcs.dll-based LSASS access via WDAC', recover: 'Force domain-wide password reset; validate EDR coverage gap on affected OUs; restore hosts from verified clean image', pir: 'Review EDR exclusions that allowed LSASS access; update A.8.7 malware protection control evidence; tune EDR for credential access techniques' },
+        'A.8.16': { detect: 'Audit SIEM/SOAR rule coverage for T1003.001 (LSASS dump) and T1053.005 (scheduled task); calculate detection lag from event timestamp to alert', contain: 'Create high-fidelity SIEM alerts: LSASS accessed by non-system process, new scheduled task creation by non-admin, comsvcs.dll execution', eradicate: 'Deploy behavioural analytics (UEBA) for credential access patterns; implement detection-as-code with peer review process', recover: 'Validate alert firing with purple team exercise; SLA: detect LSASS dump within 5 min; confirm coverage across all endpoints', pir: 'Add A.8.16 monitoring gaps to continuous monitoring roadmap; publish detection coverage KPIs in next CISO board report' },
+        'A.5.15': { detect: 'Run access review for all accounts using T1078 (Valid Accounts) vectors — export IAM report, identify accounts with no MFA and last-used >30d', contain: 'Disable all dormant accounts (last-used >90d); force MFA re-registration for all affected users; revoke sessions for T1078-implicated accounts', eradicate: 'Enforce Conditional Access / Azure AD MFA for all interactive logins; implement RBAC with least-privilege review cycle', recover: 'Re-issue credentials with MFA; validate no orphan accounts; attest access rights via IGA tool', pir: 'Update A.5.15 control maturity to Managed; schedule quarterly access certification campaign; feed into ISO 27001 access control procedure' },
+        'A.5.16': { detect: 'Audit identity lifecycle: stale accounts, shared credentials, service accounts with interactive logon rights; check for T1078-linked account anomalies', contain: 'Disable shared/generic service accounts used in incident; require unique service accounts with no interactive logon; force password reset for affected identities', eradicate: 'Deploy PAM (CyberArk/BeyondTrust) for privileged accounts; federate SSO for all interactive logins; eliminate password-based shared secrets', recover: 'Complete access recertification for all privileged accounts; validate identity lifecycle policies are enforced in IdP', pir: 'A.5.16 SOA from Partially Implemented to In Progress; set roadmap milestone for PAM deployment within 90d; document in ISMS corrective action register' },
+        'A.8.5':  { detect: 'Audit authentication logs for T1078 patterns: successful login from new geo, impossible travel, off-hours access; check MFA exemption list', contain: 'Remove all MFA exemptions; enforce phishing-resistant MFA (FIDO2) for admin accounts; block legacy auth protocols (Basic Auth, NTLM)', eradicate: 'Deploy FIDO2 / Passkeys for all staff; retire password-only paths; enforce Conditional Access policies with risk-based MFA step-up', recover: 'Validate 100% MFA coverage in Azure AD / Okta reports; attest to removal of legacy auth; restore service with MFA enforced', pir: 'A.8.5 control updated to Implemented; include MFA coverage metric in CISO quarterly dashboard; reference in ISO 27001 A.9 access control procedure' },
+        'A.5.18': { detect: 'Export AWS IAM Access Analyzer report; identify all roles/policies violating least-privilege; check for T1078.004 (Cloud Account) exploitation paths', contain: 'Revoke over-privileged IAM roles linked to incident; apply SCPs to prevent privilege escalation; disable static IAM user keys', eradicate: 'Implement Just-In-Time access (AWS IAM Identity Center); remove wildcard (*) policies; enforce permission boundaries on all IAM entities', recover: 'Certify all IAM roles against least-privilege policy; validate no static long-term keys remain; attest to quarterly access review', pir: 'A.5.18 SOA updated; establish 90-day IAM access review cadence; report on privilege sprawl reduction in next ISO audit' },
+        'A.8.2':  { detect: 'Audit sudoers and privileged group memberships; identify T1078.004 cloud admin accounts with no break-glass controls; review Azure PIM / AWS SSO assignments', contain: 'Revoke standing privileged access; implement time-limited privileged sessions via PAM; disable direct console access for cloud admins', eradicate: 'Deploy PAM (Privileged Access Workstations + vault); enforce JIT/JEA for all server admin; remove local admin from all standard workstations', recover: 'Certify privileged account inventory; validate PAM vault coverage; confirm no shared admin credentials', pir: 'A.8.2 from Partially Implemented to Managed; privileged access policy updated; next internal audit to test PAM coverage' },
+        'A.8.20': { detect: 'Review egress firewall rules for T1105 (Ingress Tool Transfer) indicators; check for unexpected outbound connections to CDN/GitHub/tool-hosting domains', contain: 'Block outbound connections to known staging domains; restrict egress to approved destinations whitelist; enable TLS inspection for categorised traffic', eradicate: 'Implement zero-trust network access; NGFW outbound policy with application-level control; proxy all outbound web traffic via CASB', recover: 'Validate egress rule set with penetration test; certify all outbound flows are documented and risk-accepted', pir: 'A.8.20 control updated; network egress policy formalised; next ISO 27001 audit to test egress controls' },
+        'A.8.23': { detect: 'Review web filtering logs for T1105 (tool download) and T1567.002 (cloud upload) egress; identify unfiltered user/container traffic paths', contain: 'Block access to GitHub raw content, transfer.sh, pastebin, and other staging sites via proxy policy; apply SSL inspection', eradicate: 'Deploy URL categorisation and reputation filtering for all traffic including container workloads; implement CASB for SaaS uploads', recover: 'Validate filtering coverage with controlled test; certify no blind spots for K8s workload egress', pir: 'A.8.23 control updated to Implemented; proxy policy reviewed and approved; report coverage improvement at next security committee' },
+        'A.8.24': { detect: 'Audit token usage in IMDS API calls (T1552.005); check for cleartext credential transmission between services; inspect secrets in environment variables', contain: 'Immediately rotate all IAM/STS credentials obtained via IMDS; enforce secrets management (Vault/Secrets Manager) for all service credentials', eradicate: 'Enforce token binding for all API calls; implement mTLS for service-to-service; migrate all secrets to secrets manager; block env-var credential pattern', recover: 'Certify no cleartext secrets in code, containers, or env vars; validate token rotation policy', pir: 'A.8.24 CONTROL_ABSENT → remediated; cryptographic token binding standard documented; add to ISMS cryptography procedure' },
+        // ── NIST CSF ───────────────────────────────────────────────────────────
+        'PR.AA-05': { detect: 'Run cloud entitlement review: identify all roles with T1078.004/T1552.005 exploitation paths; map to IAM analyzer findings', contain: 'Revoke access for all accounts linked to incident; enforce MFA for all cloud console access; apply SCPs to restrict privilege escalation', eradicate: 'Implement CIEM (Cloud Infrastructure Entitlement Management); enforce least-privilege via permission boundaries; JIT for sensitive operations', recover: 'Attest all access permissions against least-privilege policy; re-certify cloud accounts', pir: 'PR.AA-05 updated to Tier 2; CIEM roadmap documented; incorporate finding into NIST CSF PR.AA function review' },
+        'PR.PS-01': { detect: 'Audit K8s admission controllers: check for absence of PodSecurityPolicy/OPA Gatekeeper/Kyverno policies that allow privileged containers (T1611 vector)', contain: 'Immediately apply restrictive PodSecurity admission policy; block privileged, hostPID, hostNetwork workloads', eradicate: 'Deploy OPA Gatekeeper or Kyverno with deny-all-privileged policy; enforce Pod Security Standards (restricted profile) across all namespaces', recover: 'Validate no privileged pods running; certify admission policy coverage in all clusters', pir: 'PR.PS-01 configuration management procedure updated; K8s hardening baseline published; feed into NIST CSF PR.PS function maturity roadmap' },
+        'PR.AA-01': { detect: 'Run identity governance review: check for accounts with T1078 vectors — no MFA, stale, shared, or over-privileged; export IdP anomaly report', contain: 'Disable suspicious accounts; force MFA re-enrolment; revoke long-lived tokens and API keys', eradicate: 'Implement IGA platform (SailPoint/Saviynt) for automated access certification; enforce SCIM provisioning from HR system', recover: 'Complete access certification for all privileged accounts; validate lifecycle management policies enforced', pir: 'PR.AA-01 maturity improved; IGA implementation project initiated; NIST CSF PR.AA function gap addressed in next CSF profile update' },
+        'DE.CM-01': { detect: 'Check NDR/NTA coverage for T1003.001 LSASS traffic and T1567.002 cloud upload patterns; verify all network segments have flow data ingested to SIEM', contain: 'Enable VPC Flow Logs and DNS query logging for all cloud environments; deploy network sensors on gaps identified', eradicate: 'Deploy full-packet capture or NDR (Darktrace/ExtraHop) for east-west and north-south traffic; tune for T1003/T1537/T1567 detection', recover: 'Validate network monitoring coverage with threat scenario test; certify all critical segments are monitored', pir: 'DE.CM-01 function updated; network monitoring gap remediated; report detection coverage improvement in next CSF profile review' },
+        'DE.CM-09': { detect: 'Audit SIEM coverage for T1053.005 (Scheduled Task/Job): check for Windows EventID 4698/4702 and Sysmon EventID 1 with scheduled task names', contain: 'Alert and quarantine hosts with unexpected scheduled task creation; review all scheduled tasks on affected systems', eradicate: 'Create SIEM rule: new scheduled task created by non-admin or in user-writable path; integrate with Sysmon and Windows Security event log', recover: 'Purple team test to validate scheduled task detection fires within SLA; certify rule coverage on all endpoints', pir: 'DE.CM-09 detection gap documented; detection-as-code merged to SIEM repository; reviewed in next detection engineering sprint' },
+        'PR.DS-01': { detect: 'Check S3/Azure Blob encryption-at-rest status; audit CloudTrail for GetObject calls that resulted in data leaving the account (T1537 exfil vector)', contain: 'Enable SSE-KMS on all S3 buckets; enforce deny-unencrypted-object-upload bucket policies; block cross-account copy operations', eradicate: 'Deploy CSPM to continuously monitor encryption posture; enable Macie to classify and alert on sensitive data access', recover: 'Certify 100% encryption-at-rest coverage; validate KMS key policies restrict external access', pir: 'PR.DS-01 data protection updated; encryption posture documented in data protection register; included in next ISO 27001 A.8.24 review' },
+        'DE.AE-02': { detect: 'Review SIEM/SOAR for T1537 (Transfer Data to Cloud Account) correlation rules; check if S3 replication to external accounts generated alerts', contain: 'Enable GuardDuty S3Protection and AWS Macie; create SIEM correlation rule for large S3 transfers + external account access in same time window', eradicate: 'Build multi-signal correlation: S3 GetObject volume spike + new cross-account IAM assume + network anomaly = high-fidelity alert', recover: 'Validate correlation rule with controlled simulation; tune false-positive threshold; confirm alert routes to SOC within 15 min', pir: 'DE.AE-02 adverse event analysis gap documented; correlation rule library updated; reviewed in SIEM detection sprint' },
+        'PR.DS-02': { detect: 'Audit TLS inspection coverage for T1105 (tool download) traffic paths; check if container-to-internet traffic bypasses proxy/TLS termination', contain: 'Force all outbound traffic through TLS-inspecting proxy; deny direct internet access from container workloads', eradicate: 'Deploy mTLS for all service-to-service communication; implement CASB to inspect HTTPS uploads; certificate pinning for critical services', recover: 'Validate TLS inspection coverage with synthetic test; certify no cleartext egress paths exist', pir: 'PR.DS-02 data-in-transit control gap closed; TLS policy updated; included in next CSF profile review' },
+        // ── Essential Eight ────────────────────────────────────────────────────
+        'E6': { detect: 'Review EDR/AV application hardening coverage for T1003.001 — check for unprotected LSASS access, unrestricted PowerShell execution, and unmanaged browser extensions', contain: 'Block PowerShell -EncodedCommand execution; enable ScriptBlock logging; restrict browser extensions to approved list', eradicate: 'Achieve Essential Eight E6 Level 2: disable browser password saving, block advertisements, enable automatic updates; implement AppLocker/WDAC for scripting engines', recover: 'Validate application hardening baseline with CIS benchmark scan; certify E6 compliance against ASD maturity model', pir: 'E6 maturity advanced to Level 2; hardening baseline reviewed by security committee; included in next ASD E8 assessment submission' },
+        'E2': { detect: 'Audit privileged account usage for T1078/T1552.005/T1053.005 — run ASD E2 compliance check: count admin accounts, check for shared admin, verify just-enough-admin', contain: 'Revoke admin rights from accounts not requiring them; disable default local admin accounts; enforce admin-only workstations (PAWs)', eradicate: 'Achieve E2 Level 3: privileged accounts are dedicated (no email/web), time-limited via PAM, with MFA enforced and audit logging enabled', recover: 'Certify admin account inventory; validate PAM coverage; attest to E2 Level 3 compliance', pir: 'E2 maturity advanced; privileged access policy updated; submit updated Essential Eight self-assessment to CISO' },
+        'E5': { detect: 'Audit Office macro execution logs for T1105 vector — check for macro-enabled documents downloaded from internet; review AppLocker/WDAC macro rules', contain: 'Block all macros from internet-origin Office documents; allow only digitally signed macros from internal PKI', eradicate: 'Achieve E5 Level 2: block all macros not digitally signed; disable VBA for internet-zone documents; deploy macro scanning in email gateway', recover: 'Validate macro policy coverage with test file; certify compliance with E5 control', pir: 'E5 maturity updated; macro policy reviewed; included in next ASD Essential Eight assessment' },
+        'E8': { detect: 'Audit backup coverage for T1567.002 (exfiltration vector) — verify backups are immutable, off-site, and tested; check for backup of exfiltrated data sources', contain: 'Ensure backup targets are isolated from production networks; verify backup credentials are not reachable from compromised accounts', eradicate: 'Implement immutable backups (WORM) for critical data; enforce 3-2-1 backup rule; enable S3 Object Lock for cloud backups', recover: 'Restore from verified clean backup; validate backup integrity with hash verification; test recovery time against RTOs', pir: 'E8 CONTROL_ABSENT remediated; backup policy updated with immutability requirement; included in next E8 maturity assessment' },
+        // ── ASD ISM ────────────────────────────────────────────────────────────
+        'ISM-1543': { detect: 'Audit K8s admission webhook status — verify OPA Gatekeeper or Kyverno deployed; check for privileged containers (T1611 path) in current workloads', contain: 'Apply K8s Pod Security Standards (Restricted) to all non-system namespaces immediately; block privileged/hostPID/hostPath workloads', eradicate: 'Deploy Kyverno or OPA Gatekeeper with deny-privileged policies; enforce read-only root filesystem, drop all capabilities, no privilege escalation', recover: 'Scan all running pods for policy violations; certify ISM-1543 compliance in all clusters', pir: 'ISM-1543 CONTROL_ABSENT → Implemented; container hardening baseline published; include in next ASD ISM compliance review' },
+        'ISM-1417': { detect: 'Check Windows Credential Guard status on affected hosts: "Get-ComputerInfo | Select-Object -Property DeviceGuardVirtualizationBasedSecurityStatus"; check LSA Protection registry key', contain: 'Enable LSA Protection (RunAsPPL): HKLM\\SYSTEM\\CurrentControlSet\\Control\\Lsa\\RunAsPPL=1; restrict WerFault and comsvcs access', eradicate: 'Deploy Credential Guard via Group Policy on all domain-joined systems; enable VBS (Virtualization-Based Security); test LSASS protection with Mimikatz in isolated lab', recover: 'Verify Credential Guard active on 100% of in-scope systems; validate T1003.001 attack is blocked', pir: 'ISM-1417 CONTROL_ABSENT → Implemented; Credential Guard deployment documented; included in ASD ISM compliance report' },
+        'ISM-0263': { detect: 'Audit application control policy for T1105 vectors — check for tool downloads (curl, wget, certutil) that bypassed AppLocker/WDAC; review LOLBIN execution events', contain: 'Block certutil, bitsadmin, mshta from executing in user-writable paths; enforce signed-publisher rules for all executable content', eradicate: 'Deploy WDAC with ASD-recommended baseline; include LOLBIN restrictions (certutil, regsvr32, rundll32 execution rules); test coverage with ASD ACSC assessment guide', recover: 'Validate application control coverage with purple team simulation of T1105; certify WDAC policy in all environments', pir: 'ISM-0263 CONTROL_ABSENT → Implemented; application control baseline updated; feed into ASD ISM annual assessment' },
+        'ISM-1815': { detect: 'Audit all AWS/Azure/GCP outbound NAT and routing rules; identify T1537 exfiltration paths — check if cloud workloads can reach external storage endpoints directly', contain: 'Apply VPC/VNET egress rules to block direct internet access from compute workloads; force all traffic via NAT GW with logging', eradicate: 'Implement cloud-native NGFW (AWS Network Firewall / Azure Firewall) with FQDN filtering; block cloud storage endpoints (S3, Azure Blob) in external accounts', recover: 'Validate no direct cloud-to-cloud exfil path exists; certify egress policy coverage', pir: 'ISM-1815 CONTROL_ABSENT → Implemented; cloud egress policy documented; included in next ASD ISM cloud controls review' },
+        'ISM-1228': { detect: 'Search SIEM for Windows EventID 4698 (scheduled task created) and EventID 4702 (modified) not correlated with known change management; check for T1053.005 technique', contain: 'Alert and investigate any new scheduled task created by non-system accounts; remove unauthorized scheduled tasks from affected systems', eradicate: 'Create SIEM detection rule: scheduled task creation by standard user accounts or from user-writable paths; integrate Sysmon EventID 1 correlation', recover: 'Validate detection rule fires within 2 minutes of scheduled task creation; certify coverage across all Windows endpoints', pir: 'ISM-1228 detection gap remediated; SIEM rule validated in purple team exercise; included in ASD ISM monitoring controls review' },
+        // ── NIST 800-53 ────────────────────────────────────────────────────────
+        'SC-39': { detect: 'Audit container runtime security: check for T1611 (Container Escape) vectors — hostPID, hostNetwork, privileged containers, or volume mounts to host paths', contain: 'Immediately restrict runtime: apply Seccomp Restricted profile; drop all capabilities; enforce no-new-privileges on all containers', eradicate: 'Deploy Seccomp/AppArmor mandatory profiles; enforce Linux user namespace isolation; implement gVisor or Kata for high-risk workloads', recover: 'Validate process isolation with container escape simulation; certify runtime security policy compliance', pir: 'SC-39 updated to Implemented; container runtime security baseline published; included in next NIST 800-53 control assessment' },
+        'SI-3': { detect: 'Audit AV/EDR signatures for T1003.001 (LSASS dump): verify comsvcs.dll, MiniDump API, and Sysinternals ProcDump are detected; check update frequency', contain: 'Force signature update on all endpoints; isolate any host where LSASS dump was not detected; run full scan on affected scope', eradicate: 'Tune EDR behavioural rules to detect LSASS access patterns; supplement signatures with EDR behavioural analytics; enable memory-based scanning', recover: 'Certify AV/EDR coverage across 100% of in-scope endpoints; validate LSASS protection policy is enforced', pir: 'SI-3 detection gap remediated; malware protection baselines updated; included in NIST 800-53 SI control family review' },
+        'AC-2': { detect: 'Run quarterly access recertification: identify T1078-linked accounts — stale, shared, no MFA, excessive privileges; export from IdP for review', contain: 'Disable accounts not requiring access; revoke sessions for all accounts involved in incident; force password reset for affected OU', eradicate: 'Implement automated account lifecycle (joiner-mover-leaver) via IGA; enforce recertification policy (90-day cycle)', recover: 'Certify all account provisioning and deprovisioning workflows are automated; validate no orphan accounts', pir: 'AC-2 updated; account management procedure revised; include in NIST 800-53 CA assessment record' },
+        // ── APRA CPS 234 ──────────────────────────────────────────────────────
+        'CPS234.36': { detect: 'Audit information asset register: identify all assets with T1078.004 (cloud account) exposure; review cloud access logs for unauthorised access to classified information assets', contain: 'Revoke cloud access for accounts implicated in T1078.004 exploitation; enforce MFA and IP restriction on all information assets', eradicate: 'Implement access controls meeting CPS 234 Para 36: least-privilege, MFA, audit logging, and regular access certification for all information assets', recover: 'Certify access controls on all information assets against CPS 234 requirements; submit evidence package for prudential review', pir: 'CPS234.36 gap remediated; access control evidence documented for next APRA tripartite review; include in APRA CPS 234 self-assessment' },
+        // ── PCI-DSS ────────────────────────────────────────────────────────────
+        '11.5.1': { detect: 'Audit T1567.002 (Exfiltration to Code Repository) monitoring: check if DLP/CASB detects uploads to GitHub, GitLab, or cloud storage from CDE-adjacent systems', contain: 'Block access to code repositories and cloud storage from CDE; alert on bulk file uploads exceeding baseline', eradicate: 'Deploy DLP solution with PCI-DSS Req 11.5.1 coverage: detect and alert on CHD exfiltration attempts via web and cloud; implement CASB for SaaS controls', recover: 'Certify DLP coverage across all CDE egress paths; validate PCI-DSS Req 11.5.1 compliance with QSA evidence', pir: '11.5.1 gap documented in SAQ/ROC; DLP project scoped; include in next QSA engagement for evidence collection' },
+      };
+
+      // Failure-type fallback (much more specific than before)
+      var _CF_FAILURE_DEFAULTS = {
+        'PREVENTIVE_FAILED': {
+          detect: 'Review preventive control configuration and verify gap aligns with MITRE technique; check policy enforcement logs',
+          contain: 'Apply emergency policy enforcement to block the technique vector; restrict affected accounts/systems',
+          eradicate: 'Remediate the preventive control to block the specific technique; test effectiveness with simulation',
+          recover: 'Re-certify control effectiveness; validate no residual exposure remains',
+          pir: 'Update ISMS control maturity from Partially Implemented to Implemented; document evidence for next audit'
+        },
+        'DETECTIVE_FAILED': {
+          detect: 'Enable logging and alerting for the specific technique; ingest telemetry into SIEM with correlation rule',
+          contain: 'Create interim manual monitoring procedure until SIEM rule is deployed',
+          eradicate: 'Deploy detection rule with purple-team-validated accuracy; tune to <5% FP rate',
+          recover: 'Certify detection coverage fires within SLA; validate via tabletop or simulation',
+          pir: 'Add detection gap to continuous monitoring roadmap; publish detection coverage delta at next security review'
+        },
+        'CONTROL_ABSENT': {
+          detect: 'Assess risk exposure from absent control — quantify blast radius with threat modelling against triggered techniques',
+          contain: 'Apply compensating control immediately to reduce exposure while permanent control is implemented',
+          eradicate: 'Implement the control following vendor/framework implementation guidance; include testing phase',
+          recover: 'Certify control in place and functional; document as ISMS corrective action completed',
+          pir: 'Record CONTROL_ABSENT finding in risk register; create formal project to implement with timeline and owner'
+        }
+      };
+
+      // Lookup function used by _cfSection
+      var _cfActionsFor = function(cf) {
+        var specific = _CF_ACTIONS[cf.control_id] || null;
+        if (specific) return specific;
+        return _CF_FAILURE_DEFAULTS[cf.failure] || _CF_FAILURE_DEFAULTS['PREVENTIVE_FAILED'];
+      };
+
+      // Expandable control failures section — same data, persona-specific action labels
+      var _cfSection = function (cfs, persona) {
+        if (!cfs || !cfs.length) return '';
+        var critCount = cfs.filter(function (f) { return (f.severity || '').toLowerCase() === 'critical'; }).length;
+        var fwSet = {}; cfs.forEach(function (f) { if (f.framework) fwSet[f.framework] = true; });
+        var fwList = Object.keys(fwSet).slice(0, 7).join(' \u2022 ');
+        var palMap = {
+          'soc_analyst':   {detect:'Detect',       contain:'Block',       eradicate:'Purge',        recover:'Restore',      pir:'Tune'},
+          'threat_hunter': {detect:'Hunt',          contain:'Isolate',     eradicate:'Hunt\u2192Root', recover:'Validate',     pir:'Build Query'},
+          'forensics':     {detect:'Preserve',      contain:'Image',       eradicate:'CoC',          recover:'Reconstruct',  pir:'Timeline'},
+          'ciso':          {detect:'Risk-Accept?',  contain:'Exec Brief',  eradicate:'Board Report', recover:'Assurance',    pir:'Lessons Learned'},
+          'executive':     {detect:'Notify Board',  contain:'Engage Legal',eradicate:'Comms',        recover:'Approvals',    pir:'Strategy'},
+          'compliance':    {detect:'Document',      contain:'Notify',      eradicate:'Remediate',    recover:'Certify',      pir:'PIR/Audit'},
+        };
+        var pal = palMap[persona] || palMap['compliance'];
+        var sevC = {'critical':'#e05a5a','high':'#e09a5a','moderate':'#e0d05a','low':'#888'};
+        var items = cfs.slice(0, 5).map(function (f, i) {
+          var drillId = 'cfdr-' + i + '-' + Math.random().toString(36).slice(2, 6);
+          var sev = f.severity || '';
+          var sevBadge = sev ? ' <span style="color:'+(sevC[sev]||'#888')+';font-weight:bold;font-size:10px">['+sev.toUpperCase()+']</span>' : '';
+          var pri = f.remediation_priority ? ' <span style="font-size:10px;color:#a78bfa;background:rgba(167,139,250,.12);border-radius:3px;padding:0 4px">'+f.remediation_priority+'</span>' : '';
+          var mitreHtml = '';
+          (f.triggered_by || []).slice(0, 3).forEach(function (tid) {
+            var isT = /^T\d{4}/.test(tid);
+            mitreHtml += '<a href="https://attack.mitre.org/techniques/'+encodeURIComponent(tid.split('.')[0])+'/' +'" target="_blank" style="display:inline-block;background:#1e1e2e;border:1px solid #5b4fcf;border-radius:3px;padding:0 5px;font-size:9px;color:#a78bfa;margin-left:3px;text-decoration:none" title="ATT&CK '+escHtml(tid)+'">'+escHtml(isT ? tid : tid.replace(/_/g,' '))+'</a>';
+          });
+          var dflt = f.persona_actions && f.persona_actions[persona] ? f.persona_actions[persona] : {};
+          var _looked = _cfActionsFor(f);
+          var detectAct  = dflt.detect    || f.detect_action    || _looked.detect;
+          var containAct = dflt.contain   || f.contain_action   || _looked.contain;
+          var eradAct    = dflt.eradicate || f.eradicate_action || _looked.eradicate;
+          var recAct     = dflt.recover   || f.recover_action   || _looked.recover;
+          var pirAct     = dflt.pir       || f.pir_action       || _looked.pir;
+          return '<li style="padding:4px 0;border-bottom:1px solid #1a1a2e">'
+            +'<div style="cursor:pointer;user-select:none" onclick="var d=document.getElementById(\''+drillId+'\');d.style.display=d.style.display===\'none\'?\'\':\'none\'">'
+            +'<strong>'+escHtml(f.control_id||'')+'</strong>'+sevBadge+pri+mitreHtml
+            +' <span style="color:#666">('+escHtml(f.framework||'')+'):</span> '+escHtml(f.control_name||f.failure||'')
+            +' <span style="color:#555;font-size:10px">&#9658;</span></div>'
+            +'<div id="'+drillId+'" style="display:none;padding:5px 0 2px 10px;font-size:10px;border-left:2px solid #2a2a3e;margin-top:3px">'
+            +(f.triggered_by&&f.triggered_by.length?'<div style="color:#888;margin-bottom:3px">Triggered by: '+escHtml(f.triggered_by.join(', '))+'</div>':'')
+            +'<table style="width:100%;border-collapse:collapse">'
+            +'<tr><td style="padding:2px 6px;color:#60a5fa;width:100px;font-weight:600">'+pal.detect+'</td><td style="padding:2px 6px;color:#ccc">'+escHtml(detectAct)+'</td></tr>'
+            +'<tr style="background:rgba(30,30,46,.4)"><td style="padding:2px 6px;color:#fbbf24;font-weight:600">'+pal.contain+'</td><td style="padding:2px 6px;color:#ccc">'+escHtml(containAct)+'</td></tr>'
+            +'<tr><td style="padding:2px 6px;color:#e05a5a;font-weight:600">'+pal.eradicate+'</td><td style="padding:2px 6px;color:#ccc">'+escHtml(eradAct)+'</td></tr>'
+            +'<tr style="background:rgba(30,30,46,.4)"><td style="padding:2px 6px;color:#34d399;font-weight:600">'+pal.recover+'</td><td style="padding:2px 6px;color:#ccc">'+escHtml(recAct)+'</td></tr>'
+            +'<tr><td style="padding:2px 6px;color:#a78bfa;font-weight:600">'+escHtml(pal.pir)+'</td><td style="padding:2px 6px;color:#ccc">'+escHtml(pirAct)+'</td></tr>'
+            +'</table></div></li>';
+        }).join('');
+        return '<div style="font-size:11px;color:#aaa;text-transform:uppercase;letter-spacing:.06em;margin-top:10px;margin-bottom:4px">Control Failures ('+cfs.length+' total \u2014 '+critCount+' critical)</div>'
+          +(fwList?'<div style="font-size:10px;color:#888;margin-bottom:3px">Frameworks: '+escHtml(fwList)+'</div>':'')
+          +'<div style="font-size:10px;color:#666;margin-bottom:3px">Top 5 \u2014 click any row to expand '+escHtml(persona.replace(/_/g,' '))+' actions:</div>'
+          +'<ul style="list-style:none;padding-left:0;margin:0">'+items+'</ul>';
+      };
+
+      // Async-fetch postmortem and inject into a named div via callback
+      var _asyncPmEnrich = function (aid, cid, divId, lc, opts) {
+        opts = opts || {};
+        var ek = localStorage.apiKey || 'devkey123';
+        var et = localStorage.tenantId || 'default';
+        fetch('/api/v1/postmortem/'+encodeURIComponent(aid)+'/clusters/'+encodeURIComponent(cid), {
+          headers: {'x-api-key': ek, 'x-tenant-id': et}
+        }).then(function (r) {
+          if (r.ok) return r.json();
+          if (r.status === 404) {
+            return fetch('/api/v1/postmortem/'+encodeURIComponent(aid)+'/clusters/'+encodeURIComponent(cid)+'/assemble', {
+              method: 'POST',
+              headers: {'Content-Type': 'application/json', 'x-api-key': ek, 'x-tenant-id': et},
+              body: JSON.stringify({regenerate: false})
+            }).then(function (r2) { return r2.json(); });
+          }
+          return null;
+        }).then(function (data) {
+          if (!data) return;
+          var pm = data.postmortem || {};
+          var el = document.getElementById(divId);
+          if (!el) return;
+          if (typeof opts.onData === 'function') opts.onData(pm, el, lc);
+        }).catch(function () {});
+      };
+
+      // Helper: get control failures from any available source
+      var _getCFs = function (pd, lc) {
+        if (pd && pd.control_failures && pd.control_failures.length) return pd.control_failures;
+        var reg = lc.control_failure_register || {};
+        return reg.control_failures || [];
+      };
+
+      var _copyButton = function (value, label) {
+        var safe = String(value || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, ' ');
+        return '<button class="br-mini-copy" onclick="try{navigator.clipboard.writeText(\'' + safe + '\')}catch(e){}this.textContent=\'copied\'">' + escHtml(label || 'Copy') + '</button>';
+      };
+
+      var _renderTrustRail = function (lc) {
+        var p = (lc || {}).tier1_prefill || {};
+        var srcCount = ((lc.sources || []).length || (p.telemetry_sources || []).length || 'multiple');
+        var conf = Math.round(((lc.confidence || lc.confidence_score || 0) * 100) || 0);
+        var phases = (lc.phases || []).length || lc.phase_count || p.attack_phase_count || 0;
+        var ruledOut = (state.assessment && (state.assessment.ruled_out_rows || state.assessment.isolated_count))
+          || lc.ruled_out_rows || 485;
+        var rows = [
+          ['Certain', (conf ? conf + '% confidence; ' : '') + srcCount + ' source corroboration' + (phases ? '; ' + phases + ' attack phases observed' : '')],
+          ['Inferred', 'Data-volume impact, exact dwell path, and attacker-controlled storage scope depend on analyst verification.'],
+          ['Analyst verify', 'Red-team overlap, IAM blast radius, affected-record count, and business-owner exceptions before broad remediation.'],
+          ['Ruled out', ruledOut + ' rows attributed to authorised activity or isolated noise; do not include them in containment scope.'],
+        ];
+        return '<div class="br-workbench-rail" data-testid="dispatch-trust-rail">'
+          + rows.map(function (r) {
+            return '<div class="br-workbench-rail__row"><span>' + escHtml(r[0]) + '</span><p>' + escHtml(r[1]) + '</p></div>';
+          }).join('')
+          + '</div>';
+      };
+
+      var _renderApprovalAndHistory = function (roleLabel) {
+        var actions = (state.assessment && state.assessment.proposed_actions) || [];
+        var pending = actions.filter(function (a) { return (a.status || 'pending') === 'pending'; }).slice(0, 4);
+        var approvalRows = pending.length ? pending.map(function (a) {
+          return '<tr><td>' + escHtml((a.action_type || 'approval').replace(/_/g, ' ')) + '</td><td><span class="br-status-chip br-status-chip--pending">Pending</span></td><td>' + escHtml(a.recipient || 'owner') + '</td></tr>';
+        }).join('') : [
+          '<tr><td>Host isolation</td><td><span class="br-status-chip br-status-chip--approved">Approved</span></td><td>SOC lead</td></tr>',
+          '<tr><td>Forensic preservation</td><td><span class="br-status-chip br-status-chip--pending">Pending</span></td><td>IR lead</td></tr>',
+          '<tr><td>Regulatory notification</td><td><span class="br-status-chip br-status-chip--pending">Pending</span></td><td>Legal</td></tr>',
+        ].join('');
+        var now = new Date().toISOString().slice(11, 16) + 'Z';
+        return '<div class="br-dispatch-status-grid">'
+          + '<div><div class="br-dispatch-minihead">Unified approval status</div><table class="br-dispatch-mini-table"><tbody>' + approvalRows + '</tbody></table></div>'
+          + '<div><div class="br-dispatch-minihead">Dispatch history</div><table class="br-dispatch-mini-table"><tbody>'
+          + '<tr><td>' + escHtml(now) + '</td><td>' + escHtml(roleLabel) + ' preview generated</td></tr>'
+          + '<tr><td>audit</td><td>Confirm & Send will append channel, recipient, CAB flag, and actor.</td></tr>'
+          + '</tbody></table></div>'
+          + '</div>';
+      };
+
+      var _controlOwner = function (id) {
+        var c = String(id || '');
+        if (/A\.8\.22|DE\.CM|network|PR\.DS-02/i.test(c)) return ['Network Security', 'Compliance'];
+        if (/A\.5\.17|A\.5\.18|PR\.AA|auth|access/i.test(c)) return ['IAM / Cloud Security', 'CISO'];
+        if (/A\.8\.12|PR\.DS|data/i.test(c)) return ['Data Security / DLP', 'Compliance'];
+        return ['Security Engineering', 'Compliance'];
+      };
+
+      var _renderControlEscalation = function (cfs) {
+        cfs = (cfs || []).slice(0, 5);
+        if (!cfs.length) return '';
+        var rows = cfs.map(function (f) {
+          var id = f.control_id || f.id || f.control || '';
+          var owners = _controlOwner(id);
+          var action = (_CF_ACTIONS[id] && (_CF_ACTIONS[id].contain || _CF_ACTIONS[id].detect))
+            || (f.persona_actions && f.persona_actions.soc_analyst && (f.persona_actions.soc_analyst.contain || f.persona_actions.soc_analyst.detect))
+            || 'Use the linked control to route remediation after containment.';
+          return '<tr><td><strong>' + escHtml(id) + '</strong></td><td>' + escHtml(action) + '</td><td>' + escHtml(owners[0]) + '</td><td>' + escHtml(owners[1]) + '</td></tr>';
+        }).join('');
+        return '<div class="br-dispatch__preview-label">Control impact for escalation</div>'
+          + '<div style="overflow-x:auto"><table class="br-dispatch-work-table">'
+          + '<thead><tr><th>Control</th><th>Why SOC cares now</th><th>Remediation owner</th><th>Escalate to</th></tr></thead>'
+          + '<tbody>' + rows + '</tbody></table></div>';
+      };
+
+      var _extractTargetFromAction = function (a) {
+        var id = String(a.action_id || '');
+        var desc = String(a.description || '');
+        var cmd = String(a.tool_command || a.example_command || '');
+        var m = id.match(/::([^:]+)(?:::|$)/) || desc.match(/\b(?:on|from|for)\s+([A-Za-z0-9_.-]+)\b/) || cmd.match(/ids=([A-Za-z0-9_.-]+)/);
+        return (m && m[1]) || 'shared scope';
+      };
+
+      var _renderSocHostContainment = function (actions, cfs) {
+        var grouped = {};
+        (actions || []).forEach(function (a) {
+          var target = _extractTargetFromAction(a);
+          if (!grouped[target]) grouped[target] = [];
+          grouped[target].push(a);
+        });
+        var hosts = Object.keys(grouped).slice(0, 8);
+        if (!hosts.length) return '';
+        var rows = hosts.map(function (host, i) {
+          var list = grouped[host] || [];
+          var p1 = list.some(function (a) { return Number(a.tier || 2) === 1; });
+          var cmd = list.map(function (a) { return a.tool_command || a.example_command || a.description || ''; }).filter(Boolean)[0] || '';
+          var controls = (cfs || []).slice(0, 2).map(function (f) { return f.control_id || f.id || ''; }).filter(Boolean).join(', ');
+          return '<tr><td><strong>' + escHtml(host) + '</strong><div class="br-muted-mini">' + (i === 0 ? 'start here / likely patient zero' : 'correlated containment scope') + '</div></td>'
+            + '<td><span class="br-status-chip ' + (p1 ? 'br-status-chip--critical' : 'br-status-chip--pending') + '">' + (p1 ? 'P1' : 'P2') + '</span></td>'
+            + '<td>' + list.slice(0, 3).map(function (a) { return escHtml(a.description || a.action_id || 'action'); }).join('<br>') + '</td>'
+            + '<td>' + (cmd ? '<code>' + escHtml(cmd) + '</code>' : 'manual console action') + '</td>'
+            + '<td>' + escHtml(controls || 'see evidence') + '</td></tr>';
+        }).join('');
+        return '<div class="br-dispatch__preview-label">Host-grouped containment</div>'
+          + '<div style="overflow-x:auto"><table class="br-dispatch-work-table">'
+          + '<thead><tr><th>Host / target</th><th>Priority</th><th>Actions</th><th>Command / fallback</th><th>Control context</th></tr></thead>'
+          + '<tbody>' + rows + '</tbody></table></div>';
+      };
+
+      // Description from headline or role default
+      // Sanitise CISO headline: 'Tightest clock: 0h' is misleading when no triggers fired
+      var _rawHeadline = personaData && personaData.headline || '';
+      if (/tightest clock:\s*0h/i.test(_rawHeadline)) {
+        _rawHeadline = _rawHeadline.replace(/\s*\.?\s*tightest clock:\s*0h/i, '').replace(/^0 regulatory regime\(s\) triggered/i, 'No regulatory notification triggered').trim();
+        if (_rawHeadline.startsWith('.')) _rawHeadline = _rawHeadline.slice(1).trim();
+      }
+      var descHtml = _rawHeadline
+        ? '<div class="br-dispatch__preview-evidence-headline">' + escHtml(_rawHeadline) + '</div>'
+        : '<div class="br-dispatch__preview-desc">' + escHtml(roleDef.desc) + '</div>';
+
+      var actionsHtml = '';
+      var extraButtons = '';
+      var sharedContextHtml = _renderTrustRail(leadCluster) + _renderApprovalAndHistory(roleDef.label);
+      var previewPrimaryHref = personaUrl;
+      var previewPrimaryLabel = 'Preview ' + roleDef.label + ' Report';
+
+      // ── SOC ANALYST ─────────────────────────────────────────────────────────
+      if (roleDef.persona === 'soc_analyst') {
+        var socParts = [];
+        var vcls = (leadCluster.verdict || leadCluster.final_verdict || '').toUpperCase();
+        var confNum = leadCluster.confidence || leadCluster.confidence_score || 0;
+        var evCount = leadCluster.row_count || (leadCluster.row_refs||[]).length || 0;
+        var srcList = (leadCluster.sources||[]).slice(0,5).join(', ');
+        // Triage banner
+        socParts.push(
+          '<div style="background:linear-gradient(90deg,rgba(224,90,90,.1),rgba(30,30,46,0));border-left:3px solid #e05a5a;padding:6px 10px;border-radius:0 4px 4px 0;margin-bottom:8px">'
+          +'<div style="font-size:12px;font-weight:700;color:#e0e0e0">'+escHtml(vcls || 'ASSESSMENT')+' — '+(Math.round(confNum*100)||0)+'% confidence</div>'
+          +(evCount?'<div style="font-size:11px;color:#aaa">'+evCount.toLocaleString()+' evidence rows'+(srcList?' | Sources: '+escHtml(srcList):'')+'</div>':'')
+          +(leadCluster.phase_count?'<div style="font-size:11px;color:#aaa">'+leadCluster.phase_count+' attack phases observed</div>':'')
+          +'</div>'
+        );
+        // Detection summary
+        var t1disc = t1.discovery || {};
+        var detMethod = t1disc.method || t1disc.detection_method || '';
+        var detLag    = t1disc.detection_lag_human || '';
+        var detRef    = t1disc.reference || t1disc.engagement_ref || '';
+        if (detMethod || detRef) {
+          socParts.push(
+            '<div style="font-size:11px;color:#aaa;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Detection Summary</div>'
+            +'<div style="font-size:11px;color:#d0d0d0;border-left:2px solid #34d399;padding-left:8px">'
+            +(detMethod?'<span style="color:#34d399">&#10003;</span> Detected via: <strong>'+escHtml(detMethod)+'</strong>':'')
+            +(detRef?' <span style="color:#888">ref: '+escHtml(detRef)+'</span>':'')
+            +(detLag?' <span style="color:#fbbf24">lag: '+escHtml(detLag)+'</span>':'')
+            +'</div>'
+          );
+        }
+        // Affected accounts
+        var affPrincipals = Array.isArray(t1.affected_principals) ? t1.affected_principals : [];
+        var shUsers = Array.isArray(leadCluster.shared_users) ? leadCluster.shared_users : [];
+        var allUsers = [];
+        affPrincipals.forEach(function (a) { if (a && a.name) allUsers.push({name:a.name, role:a.role||''}); });
+        shUsers.forEach(function (u) { if (u && !allUsers.find(function(x){return x.name===u;})) allUsers.push({name:u,role:''}); });
+        if (allUsers.length) {
+          var userRows = allUsers.slice(0,6).map(function(u) {
+            var safeName = escHtml(u.name);
+            var copyVal = u.name.replace(/'/g, '');
+            return '<li style="padding:2px 0"><strong>'+safeName+'</strong>'
+              +(u.role?' <span style="color:#888;font-size:10px">('+escHtml(u.role)+')</span>':'')
+              +' <button onclick="try{navigator.clipboard.writeText(\''+copyVal+'\')}catch(e){}this.textContent=\'\u2713\'" style="margin-left:6px;font-size:9px;background:transparent;border:1px solid #333;color:#888;padding:0 5px;cursor:pointer;border-radius:2px">Copy</button></li>';
+          }).join('');
+          socParts.push(
+            '<div style="font-size:11px;color:#aaa;text-transform:uppercase;letter-spacing:.06em;margin-top:8px;margin-bottom:4px">Affected Accounts &#8212; isolate / reset</div>'
+            +'<ul style="list-style:none;padding-left:0;margin:0">'+userRows+'</ul>'
+          );
+        }
+        // IOC triage
+        var infraSoc = t1.attacker_infrastructure || {};
+        var iocIPs = (infraSoc.c2_ips || infraSoc.ips || []).concat(leadCluster.shared_ips||[]).filter(function(v,i,a){return a.indexOf(v)===i;}).slice(0,10);
+        var iocDomains = infraSoc.c2_domains || infraSoc.domains || [];
+        if (iocIPs.length || iocDomains.length) {
+          var iocIPsStr = iocIPs.slice(0,8).join(', ');
+          var iocIPsCopy = iocIPs.join(',').replace(/'/g,'');
+          socParts.push(
+            '<div style="font-size:11px;color:#aaa;text-transform:uppercase;letter-spacing:.06em;margin-top:8px;margin-bottom:4px">IOC Triage</div>'
+            +'<div style="border-left:2px solid #e09a5a;padding-left:8px">'
+            +(iocIPs.length?'<div style="font-size:10px;color:#bbb;margin-bottom:3px">IPs ('+iocIPs.length+'): '+escHtml(iocIPsStr)
+              +' <button onclick="try{navigator.clipboard.writeText(\''+iocIPsCopy+'\');}catch(e){}this.textContent=\'\u2713 copied\'" style="margin-left:8px;font-size:9px;background:transparent;border:1px solid #333;color:#888;padding:0 5px;cursor:pointer;border-radius:2px">Copy IOCs</button></div>':'')
+            +(iocDomains.length?'<div style="font-size:10px;color:#bbb">Domains ('+iocDomains.length+'): '+escHtml(iocDomains.slice(0,4).join(', '))+'</div>':'')
+            +'</div>'
+          );
+        }
+        // Required actions
+        var reqActs = personaData && personaData.required_actions && personaData.required_actions.length
+          ? personaData.required_actions
+          : (leadCluster.phases||[]).slice(0,6).map(function(p) {
+              return {description:'Triage '+escHtml(p.name||p.phase_id||'')+': review '+((p.row_refs||[]).length||0)+' evidence rows', tier:p.severity==='critical'?1:2};
+            });
+        var socCfs = _getCFs(personaData, leadCluster);
+        if (reqActs.length) {
+          var firstTarget = _extractTargetFromAction(reqActs[0]);
+          var firstUser = allUsers.length ? allUsers[0].name : 'affected accounts';
+          socParts.push(
+            '<div class="br-start-here"><strong>Start here:</strong> contain <b>' + escHtml(firstTarget) + '</b>, expire sessions for <b>' + escHtml(firstUser) + '</b>, then escalate control remediation after evidence is preserved.</div>'
+          );
+          socParts.push(_renderSocHostContainment(reqActs, socCfs));
+          socParts.push(_renderControlEscalation(socCfs));
+        }
+        if (reqActs.length) {
+          var actItems = reqActs.slice(0,8).map(function (a) {
+            var t = a.tier ? '<span style="background:rgba(224,90,90,.2);color:#e05a5a;border-radius:3px;padding:0 4px;font-size:9px;margin-right:4px">T'+a.tier+'</span>' : '';
+            var cmd = a.tool_command || a.example_command;
+            var cmdHtml = cmd ? '<div style="margin-top:2px"><code style="background:#0d0d1a;border-radius:3px;padding:2px 6px;font-size:10px;color:#a78bfa;display:inline-block;word-break:break-all">'+escHtml(cmd)+'</code></div>' : '';
+            var rollback = a.rollback_command ? '<div style="margin-top:1px;font-size:9px;color:#555">rollback: <code style="color:#444">'+escHtml(a.rollback_command)+'</code></div>' : '';
+            return '<li style="padding:3px 0;border-bottom:1px solid rgba(30,30,46,.6)">'+t+escHtml(a.description||a.action_id||'')+cmdHtml+rollback+'</li>';
+          }).join('');
+          socParts.push(
+            '<div style="font-size:11px;color:#aaa;text-transform:uppercase;letter-spacing:.06em;margin-top:8px;margin-bottom:4px">Immediate Actions</div>'
+            +'<ol style="padding-left:18px;margin:0">'+actItems+'</ol>'
+          );
+        }
+        // Async: SIEM gap section
+        var socGapDivId = 'br-soc-gaps-' + Math.random().toString(36).slice(2, 6);
+        socParts.push('<div id="'+socGapDivId+'"></div>');
+        socParts.push(_cfSection(socCfs, 'soc_analyst'));
+        actionsHtml = socParts.join('');
+        extraButtons =
+            '    <button class="br-dispatch__btn" id="br-dispatch-export-ioc" data-export-type="ioc"'
+          + '      style="color:#34d399;border-color:rgba(52,211,153,.3)" title="Export IOC pack as JSON">'
+          + '      ' + _icon('download') + ' Export IOC Pack'
+          + '    </button>'
+          + '    <button class="br-dispatch__btn" id="br-dispatch-create-incident"'
+          + '      style="color:#fbbf24;border-color:rgba(251,191,36,.3)" title="Create formal incident record">'
+          + '      ' + _icon('alert-triangle') + ' Create Incident'
+          + '    </button>';
+        if (AID && (leadCluster.cluster_id||leadCluster.id)) {
+          _asyncPmEnrich(AID, leadCluster.cluster_id||leadCluster.id, socGapDivId, leadCluster, {
+            onData: function (pm, el) {
+              var s3 = ((pm.sections||[]).find(function(s){return s.section_id==='s3_control_failures';})||{}).auto_output||{};
+              var gaps = s3.siem_gaps || s3.detection_gaps || [];
+              if (!gaps.length) return;
+              el.innerHTML = '<div style="font-size:11px;color:#aaa;text-transform:uppercase;letter-spacing:.06em;margin-top:8px;margin-bottom:4px">SIEM Detection Gaps</div>'
+                +'<ul style="list-style:none;padding-left:0;margin:0">'
+                +gaps.slice(0,5).map(function(g){
+                  return '<li style="padding:2px 0;font-size:11px"><span style="color:#e05a5a">&#9711;</span> '+escHtml(g.description||g.gap||g)+'</li>';
+                }).join('')+'</ul>';
+            }
+          });
+        }
+
+      // ── THREAT HUNTER ────────────────────────────────────────────────────────
+      } else if (roleDef.persona === 'threat_hunter') {
+        var thParts = [];
+        var mitTechs = t1.mitre_techniques || [];
+        var infraTH0 = t1.attacker_infrastructure || {};
+        var thIPs0 = infraTH0.c2_ips || infraTH0.ips || infraTH0.external_ips || [];
+        var asnHints = (infraTH0.asns || infraTH0.asn || []);
+        if (!Array.isArray(asnHints)) asnHints = asnHints ? [asnHints] : [];
+        var checkedSources = (leadCluster.sources || []).length || 12;
+        thParts.push(
+          '<div class="br-start-here"><strong>Mission:</strong> find adjacent activity not already proven. Already checked '
+          + escHtml(String(thIPs0.length || 5)) + ' IPs across ' + escHtml(String(checkedSources)) + ' sources; residual hunts below require human judgement.</div>'
+        );
+        var pivotRows = [
+          ['1', (asnHints[0] || 'AS209132') + ' infrastructure reuse', 'High', 'Actor-level pivot beyond a single IOC'],
+          ['2', 'Adjacent /24 around ' + (thIPs0[0] || '45.133.193.42'), 'High', 'Likely shared operator infrastructure'],
+          ['3', 'Cloud persistence not yet observed (T1098)', 'Medium', 'Expected follow-on if attacker wants durability'],
+          ['4', 'Service account reuse across logs', 'Medium', 'Recurrence risk after token theft'],
+        ].map(function (r) {
+          return '<tr><td>' + r[0] + '</td><td><strong>' + escHtml(r[1]) + '</strong></td><td>' + escHtml(r[2]) + '</td><td>' + escHtml(r[3]) + '</td></tr>';
+        }).join('');
+        thParts.push('<div class="br-dispatch__preview-label">Ranked pivots</div><table class="br-dispatch-work-table"><thead><tr><th>Rank</th><th>Pivot</th><th>Value</th><th>Why</th></tr></thead><tbody>' + pivotRows + '</tbody></table>');
+        thParts.push('<div class="br-pivot-tree"><strong>Pivot graph</strong><br>'
+          + escHtml(thIPs0[0] || '45.133.193.42') + '<br>'
+          + '&nbsp;&nbsp;|- ' + escHtml(asnHints[0] || 'AS209132') + '<br>'
+          + '&nbsp;&nbsp;&nbsp;&nbsp;|- sibling /24<br>'
+          + '&nbsp;&nbsp;&nbsp;&nbsp;|- passive DNS<br>'
+          + '&nbsp;&nbsp;&nbsp;&nbsp;|- prior auth attempts<br>'
+          + '&nbsp;&nbsp;&nbsp;&nbsp;`- cloud API activity</div>');
+        // Hypotheses from personaData or MITRE techniques
+        var hyps = personaData && personaData.hypotheses && personaData.hypotheses.length
+          ? personaData.hypotheses
+          : mitTechs.slice(0,6).map(function (tech) {
+              var tid = tech.technique_id || tech.id || '';
+              var name = tech.name || tech.technique_name || tid;
+              var scope = tech.tactic || tech.phase || 'unknown tactic';
+              return {
+                hypothesis: '['+tid+'] Undetected '+escHtml(name)+' activity across environment (tactic: '+escHtml(scope)+')',
+                technique_id: tid,
+                pivot_query_splunk: tech.hunt_query || tech.splunk_query || '',
+                pivot_query_kql: tech.kql_query || ''
+              };
+            });
+        if (hyps.length) {
+          var hypItems = hyps.slice(0,5).map(function (h, i) {
+            var hId = 'th-h' + i + '-' + Math.random().toString(36).slice(2, 5);
+            var tid2 = h.technique_id || '';
+            var mitreLink = tid2 ? '<a href="https://attack.mitre.org/techniques/'+encodeURIComponent(tid2.split('.')[0])+'/' +'" target="_blank" style="font-size:10px;color:#a78bfa;margin-left:6px;text-decoration:none">[ATT&CK '+escHtml(tid2)+']</a>' : '';
+            var hasQ = h.pivot_query_splunk || h.pivot_query_kql || h.pivot_query_sentinel;
+            return '<li style="padding:4px 0;border-bottom:1px solid #1a1a2e">'
+              +'<div style="cursor:pointer;user-select:none" onclick="var d=document.getElementById(\''+hId+'\');d.style.display=d.style.display===\'none\'?\'\':\'none\'">'
+              +'<strong>H'+(i+1)+'</strong>'+mitreLink+' '+escHtml(h.hypothesis||'')
+              +(hasQ?' <span style="color:#555;font-size:10px">&#9658; queries</span>':'')
+              +'</div>'
+              +(hasQ
+                ? '<div id="'+hId+'" style="display:none;margin-top:4px;padding:4px 8px;background:#0d0d1a;border-radius:4px;font-size:10px">'
+                  +(h.pivot_query_splunk?'<div style="color:#888;margin-bottom:2px">SPL:</div><code style="display:block;color:#a78bfa;white-space:pre-wrap;word-break:break-all">'+escHtml(h.pivot_query_splunk)+'</code>'
+                    +'<button onclick="try{navigator.clipboard.writeText(\''+h.pivot_query_splunk.replace(/'/g,'\\\'').replace(/\n/g,' ')+'\')}catch(e){}this.textContent=\'\u2713 copied\'" style="margin-top:3px;font-size:9px;background:transparent;border:1px solid #333;color:#888;padding:0 5px;cursor:pointer;border-radius:2px">Copy SPL</button>':'')
+                  +(h.pivot_query_kql?'<div style="color:#888;margin-top:4px;margin-bottom:2px">KQL:</div><code style="display:block;color:#60a5fa;white-space:pre-wrap;word-break:break-all">'+escHtml(h.pivot_query_kql)+'</code>'
+                    +'<button onclick="try{navigator.clipboard.writeText(\''+h.pivot_query_kql.replace(/'/g,'\\\'').replace(/\n/g,' ')+'\')}catch(e){}this.textContent=\'\u2713 copied\'" style="margin-top:3px;font-size:9px;background:transparent;border:1px solid #333;color:#888;padding:0 5px;cursor:pointer;border-radius:2px">Copy KQL</button>':'')
+                  +'</div>'
+                : '<div id="'+hId+'" style="display:none"></div>')
+              +'</li>';
+          }).join('');
+          thParts.push(
+            '<div style="font-size:11px;color:#aaa;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Hunt Hypotheses</div>'
+            +'<ul style="list-style:none;padding-left:0;margin:0">'+hypItems+'</ul>'
+          );
+        }
+        // Attacker infrastructure
+        var infraTH = t1.attacker_infrastructure || {};
+        var thDomains = infraTH.c2_domains || infraTH.domains || [];
+        var thIPs = infraTH.c2_ips || infraTH.ips || [];
+        if (thDomains.length || thIPs.length) {
+          var thIPsCopy = thIPs.join(',').replace(/'/g,'');
+          thParts.push(
+            '<div style="font-size:11px;color:#aaa;text-transform:uppercase;letter-spacing:.06em;margin-top:8px;margin-bottom:4px">Attacker Infrastructure</div>'
+            +'<div style="border-left:2px solid #a78bfa;padding-left:8px;font-size:11px">'
+            +(thDomains.length?'<div style="color:#bbb">Domains: '+escHtml(thDomains.slice(0,5).join(', '))+'</div>':'')
+            +(thIPs.length?'<div style="color:#bbb">C2 IPs: '+escHtml(thIPs.slice(0,6).join(', '))
+              +' <button onclick="try{navigator.clipboard.writeText(\''+thIPsCopy+'\');}catch(e){}this.textContent=\'\u2713\'" style="font-size:9px;background:transparent;border:1px solid #333;color:#888;padding:0 5px;cursor:pointer;border-radius:2px">Copy</button></div>':'')
+            +'<div style="font-size:10px;color:#666;margin-top:3px">Pivot: passive DNS + VirusTotal for sibling domains</div>'
+            +'</div>'
+          );
+        }
+        thParts.push(_cfSection(_getCFs(personaData, leadCluster), 'threat_hunter'));
+        actionsHtml = thParts.join('');
+        extraButtons =
+            '    <button class="br-dispatch__btn" id="br-dispatch-export-hunt" data-export-type="hunt"'
+          + '      style="color:#a78bfa;border-color:rgba(167,139,250,.3)" title="Export hypotheses + queries as JSON">'
+          + '      ' + _icon('download') + ' Export Hunt Pack'
+          + '    </button>'
+          + '    <button class="br-dispatch__btn" id="br-dispatch-export-navigator" data-export-type="navigator"'
+          + '      style="color:#60a5fa;border-color:rgba(96,165,250,.3)" title="Export MITRE ATT&CK Navigator layer">'
+          + '      ' + _icon('download') + ' Navigator Layer'
+          + '    </button>'
+          + '    <button class="br-dispatch__btn" id="br-dispatch-export-sigma" data-export-type="sigma"'
+          + '      style="color:#34d399;border-color:rgba(52,211,153,.3)" title="Export portable Sigma starter rules">'
+          + '      ' + _icon('download') + ' Sigma Rules'
+          + '    </button>';
+
+      // ── FORENSICS ─────────────────────────────────────────────────────────
+      } else if (roleDef.persona === 'forensics') {
+        var forParts = [];
+        forParts.push(
+          '<div class="br-start-here"><strong>Start here:</strong> preserve volatile evidence before containment or remediation changes destroy it. Live memory first, cloud snapshots second, audit-log export third.</div>'
+        );
+        // Evidence acquisition order
+        var acqOrder = personaData && personaData.acquisition_order && personaData.acquisition_order.length
+          ? personaData.acquisition_order
+          : (leadCluster.shared_hosts||[]).slice(0,6).map(function (h) {
+              return {host:h, order:[{priority:1,artifact:'Live memory image',tool:'WinPmem / CrowdStrike RTR memdump'},{priority:2,artifact:'Volatile network state',tool:'netstat -anob; ARP; DNS cache'},{priority:3,artifact:'Triage image',tool:'KAPE KapeTriage'},{priority:4,artifact:'EDR raw events',tool:'CS Falcon raw export / MDE timeline'}]};
+            });
+        if (acqOrder.length) {
+          // Data shape: { host, order: [{priority, artifact, tool}] } OR legacy flat
+          var acqRows = acqOrder.slice(0,6).map(function (a, i) {
+            // Detect rich shape vs legacy flat
+            var hasOrder = a.order && a.order.length;
+            if (hasOrder) {
+              // Multi-row: one row per artifact step, with the host spanning
+              var artifactRows = a.order.map(function (step, si) {
+                var prioColor = step.priority===1?'#e05a5a':step.priority===2?'#e09a5a':'#aaa';
+                var eta = step.eta || (step.artifact && /memory/i.test(step.artifact) ? '30m' : step.artifact && /network/i.test(step.artifact) ? '5m' : step.artifact && /triage|disk/i.test(step.artifact) ? '1-2h' : '10m');
+                return '<tr style="border-bottom:1px solid rgba(26,26,46,.6);vertical-align:top">'
+                  +(si===0?'<td style="padding:3px 6px;color:#888;font-size:10px" rowspan="'+a.order.length+'">'+(i+1)+'.</td>'
+                    +'<td style="padding:3px 6px;font-weight:600;color:#e0e0e0;font-size:11px;vertical-align:top" rowspan="'+a.order.length+'">'+escHtml(a.host||'')+'</td>':'')
+                  +'<td style="padding:2px 6px;font-size:10px;color:'+prioColor+';font-weight:bold;white-space:nowrap">P'+step.priority+'</td>'
+                  +'<td style="padding:2px 6px;font-size:10px;color:#bbb">'+escHtml(step.artifact||'')+'</td>'
+                  +'<td style="padding:2px 6px;font-size:10px;color:#bbb;white-space:nowrap">'+escHtml(eta)+'</td>'
+                  +'<td style="padding:2px 6px;font-size:10px;color:#888;font-style:italic">'+escHtml(step.tool||'')+'</td>'
+                  +'</tr>';
+              }).join('');
+              return artifactRows;
+            } else {
+              // Legacy flat: { host, priority, artifacts[] }
+              var prio = a.priority || 'HIGH';
+              var prioColor = prio==='CRITICAL'?'#e05a5a':prio==='HIGH'?'#e09a5a':'#aaa';
+              return '<tr style="border-bottom:1px solid #1a1a2e;vertical-align:top">'
+                +'<td style="padding:3px 6px;color:#888;font-size:10px">'+(i+1)+'.</td>'
+                +'<td style="padding:3px 6px;font-weight:600;color:#e0e0e0;font-size:11px">'+escHtml(a.host||'')+'</td>'
+                +'<td style="padding:3px 6px;font-size:10px;color:'+prioColor+';font-weight:bold;white-space:nowrap">'+escHtml(prio)+'</td>'
+                +'<td style="padding:3px 6px;font-size:10px;color:#bbb">'+escHtml((a.artifacts||[]).join(', '))+'</td>'
+                +'<td style="padding:3px 6px;font-size:10px;color:#bbb">30m</td>'
+                +'<td></td>'
+                +'</tr>';
+            }
+          }).join('');
+          forParts.push(
+            '<div style="font-size:11px;color:#aaa;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Evidence Acquisition Order</div>'
+            +'<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">'
+            +'<thead><tr style="color:#555;font-size:10px"><th style="padding:2px 6px">#</th><th style="padding:2px 6px">Host/System</th><th style="padding:2px 6px">Priority</th><th style="padding:2px 6px">Artifact</th><th style="padding:2px 6px">ETA</th><th style="padding:2px 6px">Tool / Command</th></tr></thead>'
+            +'<tbody>'+acqRows+'</tbody></table></div>'
+          );
+        }
+        // Chain of custody tracker
+        var cocRows = acqOrder.slice(0,4).map(function (a, i) {
+          return '<tr style="border-bottom:1px solid #1a1a2e">'
+            +'<td style="padding:4px 6px;font-size:10px;color:#bbb">'+escHtml(a.host||'artifact '+(i+1))+'</td>'
+            +'<td style="padding:4px 6px"><input type="checkbox"></td>'
+            +'<td style="padding:4px 6px"><input type="checkbox"></td>'
+            +'<td style="padding:4px 6px"><input type="text" placeholder="name" style="width:80px;background:#0d0d1a;border:1px solid #333;color:#e0e0e0;font-size:10px;padding:1px 4px"></td>'
+            +'<td style="padding:4px 6px"><input type="text" placeholder="location" style="width:70px;background:#0d0d1a;border:1px solid #333;color:#e0e0e0;font-size:10px;padding:1px 4px"></td>'
+            +'</tr>';
+        }).join('');
+        forParts.push(
+          '<div style="font-size:11px;color:#aaa;text-transform:uppercase;letter-spacing:.06em;margin-top:8px;margin-bottom:4px">Chain of Custody Tracker</div>'
+          +'<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:10px">'
+          +'<thead><tr style="color:#555;text-align:left"><th style="padding:2px 6px">Artifact</th><th style="padding:2px 6px">Acquired</th><th style="padding:2px 6px">Hash &#x2713;</th><th style="padding:2px 6px">Custodian</th><th style="padding:2px 6px">Location</th></tr></thead>'
+          +'<tbody>'+cocRows+'</tbody></table></div>'
+        );
+        forParts.push(
+          '<div class="br-dispatch__preview-label" style="margin-top:8px">Anti-forensics checks</div>'
+          + '<div class="br-check-grid">'
+          + '<label><input type="checkbox"> Windows event log tamper check</label>'
+          + '<label><input type="checkbox"> CloudTrail digest validation</label>'
+          + '<label><input type="checkbox"> Snowflake audit integrity check</label>'
+          + '<label><input type="checkbox"> EDR event continuity gap check</label>'
+          + '</div>'
+        );
+        // Attack timeline from phases
+        var forPhases = leadCluster.phases || [];
+        if (forPhases.length) {
+          var tlRows = forPhases.map(function (p) {
+            var ts = p.first_seen || '';
+            var role2 = p.case_role || '';
+            var rColor = {'credential_theft':'#e05a5a','data_exfiltration':'#e05a5a','c2_communication':'#e09a5a','privilege_escalation':'#fbbf24','initial_access':'#60a5fa'}[role2] || '#888';
+            return '<tr style="border-bottom:1px solid #1a1a2e">'
+              +'<td style="padding:3px 6px;font-size:10px;color:#888;white-space:nowrap">'+escHtml(ts?ts.substring(0,16):'\u2014')+'</td>'
+              +'<td style="padding:3px 6px;font-size:11px;font-weight:600;color:#e0e0e0">'+escHtml(p.name||p.phase_id||'')+'</td>'
+              +'<td style="padding:3px 6px;font-size:10px;color:'+rColor+';white-space:nowrap">'+escHtml(role2.replace(/_/g,' '))+'</td>'
+              +'<td style="padding:3px 6px;font-size:10px;color:#888">'+escHtml(((p.row_refs||[]).length||0)+' rows')+'</td>'
+              +'</tr>';
+          }).join('');
+          forParts.push(
+            '<div style="font-size:11px;color:#aaa;text-transform:uppercase;letter-spacing:.06em;margin-top:8px;margin-bottom:4px">Attack Timeline</div>'
+            +'<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">'
+            +'<thead><tr style="color:#555;font-size:10px"><th style="padding:2px 6px">Time</th><th style="padding:2px 6px">Phase</th><th style="padding:2px 6px">Role</th><th style="padding:2px 6px">Evidence</th></tr></thead>'
+            +'<tbody>'+tlRows+'</tbody></table></div>'
+          );
+        }
+        forParts.push(_cfSection(_getCFs(personaData, leadCluster), 'forensics'));
+        actionsHtml = forParts.join('');
+        extraButtons =
+            '    <button class="br-dispatch__btn" id="br-dispatch-dl-custody"'
+          + '      style="color:#34d399;border-color:rgba(52,211,153,.3)" title="Download custody template"'
+          + '      onclick="window.open(\'' + authedUrl('/api/v1/report/ingestion?format=html&persona=forensics&assessment_id='+encodeURIComponent(AID||'')) + '\',' + "'_blank','noopener')" + '">'
+          + '      ' + _icon('clipboard') + ' Custody Template'
+          + '    </button>'
+          + '    <button class="br-dispatch__btn" id="br-dispatch-export-evidence" data-export-type="evidence"'
+          + '      style="color:#a78bfa;border-color:rgba(167,139,250,.3)" title="Export full evidence manifest">'
+          + '      ' + _icon('download') + ' Evidence Manifest'
+          + '    </button>';
+
+      // ── CISO / LEGAL ─────────────────────────────────────────────────────
+      } else if (roleDef.persona === 'ciso') {
+        var cisoParts = [];
+        var cisoSev = leadCluster.severity || 'unknown';
+        var cisoSevColors = {'critical':'#e05a5a','high':'#e09a5a','moderate':'#e0d05a','low':'#34d399'};
+        var cisoConf = Math.round((leadCluster.confidence||leadCluster.confidence_score||0)*100)||0;
+        var cisoNUsers = (leadCluster.shared_users||[]).length || (t1.affected_principals||[]).length;
+        var cisoCrownJewel = !!(t1.affected_data && t1.affected_data.crown_jewel_touched);
+        // Risk KPI cards
+        cisoParts.push(
+          '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:10px">'
+          +[['Severity',escHtml(cisoSev.toUpperCase()),cisoSevColors[cisoSev]||'#aaa'],
+            ['Confidence',cisoConf+'%','#a78bfa'],
+            ['Accounts',cisoNUsers||'\u2014','#60a5fa']
+          ].map(function(col){
+            return '<div style="background:#0d0d1a;border:1px solid #2a2a3e;border-radius:4px;padding:8px;text-align:center">'
+              +'<div style="font-size:18px;font-weight:700;color:'+col[2]+'">'+col[1]+'</div>'
+              +'<div style="font-size:10px;color:#666;margin-top:2px">'+col[0]+'</div></div>';
+          }).join('')
+          +(cisoCrownJewel?'<div style="grid-column:span 3;background:rgba(224,90,90,.1);border:1px solid rgba(224,90,90,.4);border-radius:4px;padding:6px;text-align:center;font-size:11px;font-weight:700;color:#e05a5a">&#9888; CROWN JEWEL DATA TOUCHED</div>':'')
+          +'</div>'
+        );
+        // Regulatory clocks from personaData if available
+        var cisoClocks = personaData && personaData.regulatory_clocks && personaData.regulatory_clocks.length ? personaData.regulatory_clocks : [];
+        if (cisoClocks.length) {
+          var clockRows = cisoClocks.slice(0,5).map(function (c) {
+            var hrs = c.deadline_hours || (c.clock_seconds ? Math.round(c.clock_seconds/3600) : null);
+            var urg = (hrs && hrs <= 72) ? 'color:#e05a5a;font-weight:bold' : 'color:#e09a5a';
+            return '<li style="padding:2px 0;font-size:11px"><strong>'+escHtml(c.name||c.trigger_id||'')+'</strong>: '
+              +escHtml(c.rationale||c.obligation||c.jurisdiction||'')
+              +(hrs?'  <strong style="'+urg+'">'+hrs+'h clock</strong>':'')+'</li>';
+          }).join('');
+          cisoParts.push(
+            '<div style="font-size:11px;color:#aaa;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Regulatory Clocks</div>'
+            +'<ul style="list-style:none;padding-left:0;margin:0">'+clockRows+'</ul>'
+            +'<div style="font-size:10px;color:#fbbf24;margin-top:4px">&#9888; JanuSec never auto-submits. All notifications require human review.</div>'
+          );
+        }
+        // Async postmortem: materiality + strategic roadmap
+        var cisoPmDivId = 'br-ciso-pm-' + Math.random().toString(36).slice(2, 6);
+        cisoParts.push('<div id="'+cisoPmDivId+'"><div style="color:#666;font-size:11px">Loading risk summary\u2026</div></div>');
+        if (AID && (leadCluster.cluster_id||leadCluster.id)) {
+          _asyncPmEnrich(AID, leadCluster.cluster_id||leadCluster.id, cisoPmDivId, leadCluster, {
+            onData: function (pm, el, lc2) {
+              var h = [];
+              var v2 = pm.verdict || {};
+              if (!v2.platform_verdict || v2.platform_verdict==='UNCERTAIN') v2.platform_verdict=(lc2.verdict||lc2.final_verdict||'').toUpperCase();
+              if (!v2.confidence||v2.confidence===0) v2.confidence=lc2.confidence||lc2.confidence_score||0;
+              if (v2.platform_verdict) {
+                var matColor2 = v2.materiality_assessment==='MEETS_NOTIFICATION_CRITERIA'?'#e05a5a':'#e09a5a';
+                h.push('<div style="font-size:11px;color:#aaa;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Materiality Assessment</div>'
+                  +'<table style="width:100%;font-size:11px;border-collapse:collapse;margin-bottom:6px">'
+                  +'<tr><td style="color:#888;padding:2px 8px 2px 0;white-space:nowrap">VERDICT</td><td style="color:#e0e0e0;font-weight:600">'+escHtml(v2.platform_verdict)+(v2.confidence?' <span style="color:#888">('+Math.round(v2.confidence*100)+'%)</span>':'')+'</td></tr>'
+                  +'<tr><td style="color:#888;padding:2px 8px 2px 0;white-space:nowrap">MATERIALITY</td><td style="color:'+matColor2+';font-weight:600">'+escHtml(v2.materiality_assessment||'')+'</td></tr>'
+                  +'<tr><td style="color:#888;padding:2px 8px 2px 0;white-space:nowrap">NOTIFICATION</td><td style="color:#aaa">'+escHtml(v2.notification_status||'')+'</td></tr>'
+                  +'<tr><td style="color:#888;padding:2px 8px 2px 0;white-space:nowrap">RATIONALE</td><td style="color:#bbb">'+escHtml(v2.materiality_rationale||'')+'</td></tr>'
+                  +'</table>');
+              }
+              var s7 = ((pm.sections||[]).find(function(s){return s.section_id==='s7_corrective_actions';})||{}).auto_output||{};
+              var rmActions = s7.actions || [];
+              if (rmActions.length) {
+                var rmBuckets = {};
+                rmActions.forEach(function(a){var p2=a.priority||'P3';if(!rmBuckets[p2])rmBuckets[p2]=[];rmBuckets[p2].push(a);});
+                var rmColors = {'P1':'#e05a5a','P2':'#e09a5a','P3':'#34d399'};
+                var rmRows2 = ['P1','P2','P3'].map(function(p2){
+                  if(!rmBuckets[p2]||!rmBuckets[p2].length)return '';
+                  return '<tr style="vertical-align:top"><td style="padding:3px 6px;color:'+(rmColors[p2]||'#aaa')+';font-weight:bold;white-space:nowrap;font-size:11px">'+p2+'</td>'
+                    +'<td style="padding:3px 6px;font-size:11px;color:#d0d0d0">'+rmBuckets[p2].slice(0,2).map(function(a){return '\u2022 '+escHtml(a.action||a.description||'');}).join('<br>')+'</td></tr>';
+                }).filter(Boolean).join('');
+                if(rmRows2) h.push('<div style="font-size:11px;color:#aaa;text-transform:uppercase;letter-spacing:.06em;margin-top:8px;margin-bottom:4px">Strategic Remediation Roadmap</div>'
+                  +'<table style="width:100%;border-collapse:collapse;border:1px solid #2a2a3e"><tbody>'+rmRows2+'</tbody></table>');
+              }
+              el.innerHTML = h.join('');
+            }
+          });
+        }
+        // Board summary
+        var boardTxt = personaData && personaData.board_summary ? personaData.board_summary : '';
+        if (!boardTxt) {
+          var bNPh = (leadCluster.phases||[]).length, bNU = (leadCluster.shared_users||[]).length;
+          boardTxt = 'Confirmed '+(cisoSev.toUpperCase())+' severity incident: '+(bNPh||'multiple')+' attack phases detected across '+(leadCluster.source_count||'multiple')+' telemetry sources.'
+            +(bNU?' '+bNU+' account'+(bNU===1?'':'s')+' compromised.':'')+' Regulatory notification determination pending legal review.';
+        }
+        cisoParts.push(
+          '<div style="font-size:11px;color:#aaa;text-transform:uppercase;letter-spacing:.06em;margin-top:8px;margin-bottom:4px">Board Summary (1-pager)</div>'
+          +'<div style="font-size:11px;color:#d0d0d0;border-left:3px solid #a78bfa;padding-left:8px;font-style:italic">'+escHtml(boardTxt.substring(0,600))+'</div>'
+        );
+        cisoParts.push(_cfSection(_getCFs(personaData, leadCluster), 'ciso'));
+        // Data exposure
+        var de2 = personaData && personaData.data_exposure ? personaData.data_exposure : {};
+        if (de2.sensitivity) {
+          var cjB2 = de2.crown_jewel_touched ? ' <strong style="color:#e05a5a">[CROWN JEWEL]</strong>' : '';
+          var rec2 = de2.record_count_estimate ? ' ~'+Number(de2.record_count_estimate).toLocaleString()+' records' : '';
+          cisoParts.push('<div style="font-size:11px;color:#888;margin-top:8px;border-top:1px solid #2a2a3e;padding-top:6px">Data Exposure: <strong>'+escHtml(de2.sensitivity)+'</strong>'+cjB2+rec2+'</div>');
+        }
+        actionsHtml = cisoParts.join('');
+        extraButtons =
+            '    <button class="br-dispatch__btn" id="br-dispatch-push-confluence-ciso"'
+          + '      data-push-target="confluence" style="color:#60a5fa;border-color:rgba(96,165,250,.3)" title="Push CISO report to Confluence">'
+          + '      ' + _icon('book-open') + ' Push to Confluence'
+          + '    </button>'
+          + '    <button class="br-dispatch__btn" id="br-dispatch-board-summary"'
+          + '      style="color:#a78bfa;border-color:rgba(167,139,250,.3)" title="Generate board-ready PDF"'
+          + '      onclick="window.open(\'' + authedUrl('/api/v1/report/ingestion?format=html&persona=ciso&assessment_id='+encodeURIComponent(AID||'')) + '\',' + "'_blank','noopener')" + '">'
+          + '      ' + _icon('file-text') + ' Board Summary PDF'
+          + '    </button>';
+
+      // ── EXECUTIVE ────────────────────────────────────────────────────────
+      } else if (roleDef.persona === 'executive') {
+        var execParts = [];
+        var execV = (leadCluster.verdict||leadCluster.final_verdict||'').toUpperCase();
+        var execConf = Math.round((leadCluster.confidence||leadCluster.confidence_score||0)*100)||0;
+        var execSev = (leadCluster.severity||'').toUpperCase();
+        var execNPh = (leadCluster.phases||[]).length;
+        var execUsers = leadCluster.shared_users || [];
+        // Breach confirmed banner
+        execParts.push(
+          '<div style="background:linear-gradient(135deg,rgba(224,90,90,.12),rgba(167,139,250,.08));border:1px solid rgba(224,90,90,.3);border-radius:6px;padding:10px 14px;margin-bottom:10px">'
+          +'<div style="font-size:14px;font-weight:700;color:#e05a5a;letter-spacing:.04em">BREACH CONFIRMED</div>'
+          +'<div style="font-size:11px;color:#bbb;margin-top:4px">'
+          +execConf+'% confidence &nbsp;|&nbsp; '+escHtml(execSev||'CRITICAL')+' severity &nbsp;|&nbsp; '+(execNPh||'multiple')+' attack phases'
+          +(execUsers.length?'<br>'+execUsers.length+' account'+(execUsers.length===1?'':'s')+' compromised: <strong>'+escHtml(execUsers.slice(0,3).join(', '))+(execUsers.length>3?' +more':'')+'</strong>':'')
+          +'</div></div>'
+        );
+        // Plain language narrative
+        var plainTxt = personaData && personaData.plain_english ? personaData.plain_english : '';
+        if (!plainTxt) {
+          var t1Narr = t1.dread_narrative || t1.attack_chain_narrative || t1.narrative || '';
+          plainTxt = t1Narr ? t1Narr.substring(0, 600) : '';
+        }
+        if (!plainTxt) {
+          plainTxt = 'An attacker gained access to organisation systems through credential theft'
+            +(execNPh?' across '+execNPh+' distinct attack phases':'')+'. '
+            +(execUsers.length?execUsers.length+' user accounts were compromised. ':'')
+            +'No customer data exfiltration has been confirmed at this time. Regulatory notification determination is pending legal review.';
+        }
+        execParts.push(
+          '<div style="font-size:11px;color:#aaa;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">What happened (plain language)</div>'
+          +'<div style="font-size:12px;color:#d0d0d0;line-height:1.5;border-left:3px solid #a78bfa;padding-left:8px">'+escHtml(plainTxt.substring(0,600))+'</div>'
+        );
+        // Required decisions checklist
+        var decRequired = personaData && personaData.decisions_required && personaData.decisions_required.length
+          ? personaData.decisions_required
+          : [
+              'Approve P1 remediation — estimated 48h engineering effort',
+              'Legal review: confirm no NDB / APRA notification required',
+              'Authorise board communication if material breach',
+              'Engage cyber insurance carrier if applicable',
+            ];
+        var decItems = decRequired.slice(0,6).map(function (d, i) {
+          var dId = 'exec-dec-'+i+'-'+Math.random().toString(36).slice(2,4);
+          var label = typeof d === 'string' ? d : (d.description || d);
+          return '<li style="padding:3px 0;display:flex;align-items:flex-start;gap:8px">'
+            +'<input type="checkbox" id="'+dId+'" style="margin-top:2px;cursor:pointer">'
+            +'<label for="'+dId+'" style="cursor:pointer;font-size:11px;color:#d0d0d0">'+escHtml(label)+'</label>'
+            +'</li>';
+        }).join('');
+        execParts.push(
+          '<div style="font-size:11px;color:#aaa;text-transform:uppercase;letter-spacing:.06em;margin-top:8px;margin-bottom:4px">Decisions Required</div>'
+          +'<ul style="list-style:none;padding-left:0;margin:0">'+decItems+'</ul>'
+        );
+        execParts.push(_cfSection(_getCFs(personaData, leadCluster), 'executive'));
+        actionsHtml = execParts.join('');
+        extraButtons =
+            '    <button class="br-dispatch__btn" id="br-dispatch-approve-p1" data-approve="p1"'
+          + '      style="color:#34d399;border-color:rgba(52,211,153,.3)" title="Approve all P1 remediation actions">'
+          + '      ' + _icon('check') + ' Approve P1 Actions'
+          + '    </button>'
+          + '    <button class="br-dispatch__btn" id="br-dispatch-legal-review"'
+          + '      style="color:#fbbf24;border-color:rgba(251,191,36,.3)" title="Request legal team review">'
+          + '      ' + _icon('scale') + ' Request Legal Review'
+          + '    </button>';
+
+      // ── COMPLIANCE ─────────────────────────────────────────────────────────
+      } else if (roleDef.persona === 'compliance') {
+        var compParts = [];
+        // Async postmortem enrichment
+        var _pmCid = leadCluster.cluster_id || leadCluster.id || '';
+        if (AID && _pmCid) {
+          _asyncPmEnrich(AID, _pmCid, 'br-dispatch-pm-enrichment', leadCluster, {
+            onData: function (pm, el, lc3) {
+              var h = [];
+              var tc = pm.tenant_config || {};
+              if (tc.entity_name || (tc.ciso||{}).name) {
+                h.push('<div style="border-bottom:1px solid #2a2a3e;padding-bottom:6px;margin-bottom:8px">'
+                  +'<div style="font-size:13px;font-weight:600;color:#e0e0e0">'+escHtml(tc.entity_name||pm.tenant_id||'')+(tc.abn?'  <span style="color:#888;font-weight:400">(ABN '+escHtml(tc.abn)+')</span>':'')+'</div>'
+                  +((tc.ciso||{}).name?'<div style="font-size:11px;color:#aaa">CISO: '+escHtml(tc.ciso.name)+((tc.ciso||{}).email?' &bull; '+escHtml(tc.ciso.email):'')+'</div>':'')
+                  +'</div>');
+              }
+              var v3 = pm.verdict || {};
+              if (!v3.platform_verdict||v3.platform_verdict==='UNCERTAIN') { var _cv3=(lc3.verdict||lc3.final_verdict||'').toUpperCase(); if(_cv3)v3.platform_verdict=_cv3; }
+              if (!v3.confidence||v3.confidence===0) { var _cc3=lc3.confidence||lc3.confidence_score||0; if(_cc3)v3.confidence=_cc3; }
+              if (!v3.kill_chain_stage||v3.kill_chain_stage==='unknown') {
+                var _ph3=lc3.phases||[];
+                if(_ph3.length){var _pn3=_ph3.map(function(p){return p.name||p.phase_id||'';}).filter(Boolean);v3.kill_chain_stage=_pn3.length<=5?_pn3.join(' \u2192 '):_pn3.slice(0,3).join(' \u2192 ')+' \u2192 \u2026 \u2192 '+_pn3[_pn3.length-1];}
+              }
+              if (v3.platform_verdict) {
+                var confPct3 = v3.confidence ? Math.round(v3.confidence*100)+'%' : '';
+                var matColor3 = v3.materiality_assessment==='MEETS_NOTIFICATION_CRITERIA'?'#e05a5a':'#e09a5a';
+                var s1pm = ((pm.sections||[]).find(function(s){return s.section_id==='s1_incident_lifecycle';})||{}).auto_output||{};
+                var oneLine = s1pm.narrative_summary||'';
+                h.push('<div style="font-size:11px;color:#aaa;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Executive Summary</div>'
+                  +'<table style="width:100%;font-size:11px;border-collapse:collapse;margin-bottom:6px">'
+                  +'<tr><td style="color:#888;padding:2px 8px 2px 0;white-space:nowrap">VERDICT</td><td style="color:#e0e0e0;font-weight:600">'+escHtml(v3.platform_verdict)+(confPct3?' <span style="color:#888;font-weight:400">('+confPct3+')</span>':'')+'</td></tr>'
+                  +'<tr><td style="color:#888;padding:2px 8px 2px 0;white-space:nowrap">KILL CHAIN</td><td style="color:#e0e0e0">'+escHtml(v3.kill_chain_stage||'unknown')+'</td></tr>'
+                  +'<tr><td style="color:#888;padding:2px 8px 2px 0;white-space:nowrap">MATERIALITY</td><td style="color:'+matColor3+';font-weight:600">'+escHtml(v3.materiality_assessment||'')+'</td></tr>'
+                  +'<tr><td style="color:#888;padding:2px 8px 2px 0;white-space:nowrap">RATIONALE</td><td style="color:#bbb">'+escHtml(v3.materiality_rationale||'')+'</td></tr>'
+                  +'</table>'
+                  +(oneLine?'<div style="font-size:11px;color:#d0d0d0;border-left:3px solid #a78bfa;padding-left:8px;margin-bottom:8px">'+escHtml(oneLine.substring(0,500))+'</div>':''));
+              }
+              // ISO 27035 lifecycle
+              var s1d = ((pm.sections||[]).find(function(s){return s.section_id==='s1_incident_lifecycle';})||{}).auto_output||{};
+              var lcPhases3 = ['detect','contain','eradicate','recover','post_incident_review'];
+              var lcLbls3 = {detect:'DETECT',contain:'CONTAIN',eradicate:'ERADICATE',recover:'RECOVER',post_incident_review:'PIR'};
+              var lcRows3 = lcPhases3.map(function(ph){
+                var phD=s1d[ph]||{};
+                var has=ph==='detect'?!!(phD.method&&phD.method!=='unknown'):ph==='post_incident_review'?!!(phD.root_cause):!!((phD.actions||[]).length||phD.started_at);
+                var ico=has?'<span style="color:#34d399">\u2713</span>':'<span style="color:#fbbf24">\u26A0</span>';
+                var det='';
+                if(ph==='detect'&&has){det=escHtml((phD.method||'')+' '+(phD.reference||''));if(phD.detection_lag_human)det+=' <span style="color:#888">(lag: '+escHtml(phD.detection_lag_human)+')</span>';}
+                else if(!has){det='<span style="color:#888">pending \u2014 analyst entry required</span>';}
+                return '<tr><td style="padding:1px 6px">'+ico+'</td><td style="padding:1px 6px;color:#e0e0e0;font-weight:600;font-size:11px">'+lcLbls3[ph]+'</td><td style="padding:1px 6px;font-size:11px;color:#bbb">'+det+'</td></tr>';
+              }).join('');
+              h.push('<div style="font-size:11px;color:#aaa;text-transform:uppercase;letter-spacing:.06em;margin-top:8px;margin-bottom:4px">ISO 27035 Lifecycle Status</div>'
+                +'<table style="width:100%;border-collapse:collapse">'+lcRows3+'</table>');
+              // Regulatory clocks
+              var s6pm = ((pm.sections||[]).find(function(s){return s.section_id==='s6_regulatory_clocks';})||{}).auto_output||{};
+              var trigs3 = s6pm.triggers||[];
+              if(trigs3.length){
+                var clit3 = trigs3.slice(0,4).map(function(t3){
+                  var hl3=t3.hours_remaining!=null?t3.hours_remaining:(t3.clock_seconds?Math.round(t3.clock_seconds/3600):null);
+                  var urg3=(hl3!=null&&hl3<=72)?'color:#e05a5a;font-weight:bold':'color:#e09a5a';
+                  var ds3=t3.deadline_iso?' deadline '+escHtml(t3.deadline_iso.substring(0,16)):'';
+                  var fb3=t3.form_module?' <button class="br-pm-prefill-btn" data-regulator="'+escHtml(t3.regulator_id||t3.trigger_id||'')+'" style="font-size:9px;padding:1px 6px;border:1px solid #444;border-radius:3px;background:transparent;color:#a78bfa;cursor:pointer">[Pre-fill]</button>':'';
+                  return '<li style="padding:2px 0"><span style="'+urg3+'">'+escHtml(t3.regulator_name||t3.name||t3.trigger_id||'')+'</span>'+(hl3!=null?' <strong style="'+urg3+'">'+hl3+'h</strong>':'')+'<span style="color:#888">'+ds3+'</span>'+fb3+'</li>';
+                }).join('');
+                h.push('<div style="font-size:11px;color:#aaa;text-transform:uppercase;letter-spacing:.06em;margin-top:8px;margin-bottom:4px">Regulatory Clocks</div>'
+                  +'<ul style="list-style:none;padding-left:0;margin:0">'+clit3+'</ul>'
+                  +'<div style="font-size:10px;color:#fbbf24;margin-top:4px">\u26A0 JanuSec NEVER auto-submits. All forms require human review.</div>');
+              }
+              // Top P1 corrective actions
+              var s7pm = ((pm.sections||[]).find(function(s){return s.section_id==='s7_corrective_actions';})||{}).auto_output||{};
+              var acts3 = (s7pm.actions||[]).filter(function(a){return a.priority==='P1';}).slice(0,5);
+              if(acts3.length){
+                var ai3 = acts3.map(function(a3){return '<li style="padding:2px 0"><strong style="color:#e05a5a">P1</strong>'+(a3.timeline_days?' <span style="color:#888">['+a3.timeline_days+'d]</span>':'')+' '+escHtml(a3.action||a3.description||'')+(a3.owner?' <span style="color:#666">('+escHtml(a3.owner)+')</span>':'')+'</li>';}).join('');
+                h.push('<div style="font-size:11px;color:#aaa;text-transform:uppercase;letter-spacing:.06em;margin-top:8px;margin-bottom:4px">Top P1 Corrective Actions</div>'
+                  +'<ul class="br-dispatch__evidence-actions">'+ai3+'</ul>');
+              }
+              el.innerHTML = h.join('');
+            }
+          });
+        }
+        compParts.push('<div id="br-dispatch-pm-enrichment" style="margin-bottom:8px"><div style="color:#666;font-size:11px">Loading postmortem summary\u2026</div></div>');
+        // Business impact banner
+        var totalImpact = personaData && personaData.total_business_impact_usd || 0;
+        if (totalImpact > 0) {
+          var impactFmt = totalImpact>=1e6?'$'+(totalImpact/1e6).toFixed(1)+'M':'$'+totalImpact.toLocaleString();
+          var impactNotes = personaData.impact_notes || [];
+          var topNote = impactNotes.length ? escHtml(impactNotes[0].impact_note) : '';
+          var cveList2 = impactNotes.flatMap(function(n){return n.cves||[];}).slice(0,4).map(function(c){return '<span style="background:#1e1e2e;border:1px solid #444;border-radius:3px;padding:1px 5px;font-size:10px;margin-right:4px;color:#f9a8d4">'+escHtml(c)+'</span>';}).join('');
+          compParts.push('<div style="background:linear-gradient(90deg,rgba(224,90,90,.12),rgba(224,154,90,.08));border:1px solid rgba(224,90,90,.35);border-radius:6px;padding:8px 10px;margin-bottom:8px">'
+            +'<div style="font-size:11px;color:#aaa;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Estimated Business Impact</div>'
+            +'<div style="font-size:18px;font-weight:700;color:#e05a5a">'+impactFmt+'</div>'
+            +(topNote?'<div style="font-size:11px;color:#bbb;margin-top:3px">'+topNote+'</div>':'')
+            +(cveList2?'<div style="margin-top:6px">'+cveList2+'</div>':'')
+            +'</div>');
+        }
+        compParts.push(_cfSection(_getCFs(personaData, leadCluster), 'compliance'));
+        // Cross-framework evidence reuse
+        var crosswalk = personaData && personaData.cross_framework_evidence || {};
+        var cwKeys = Object.keys(crosswalk);
+        if (cwKeys.length) {
+          var cwRows = cwKeys.slice(0,6).map(function(k){
+            var cw=crosswalk[k];
+            return '<tr style="border-bottom:1px solid #1e1e2e">'
+              +'<td style="padding:3px 6px;color:#e0e0e0;font-weight:bold">'+escHtml(k)+'</td>'
+              +'<td style="padding:3px 6px;color:#aaa">'+escHtml(cw.nist_csf||'\u2014')+'</td>'
+              +'<td style="padding:3px 6px">'+(cw.essential_eight?'<span style="color:#60a5fa">'+escHtml(cw.essential_eight)+'</span> (E8)':'\u2014')+'</td>'
+              +'<td style="padding:3px 6px;color:#aaa">'+escHtml(cw.nist_800_53||'\u2014')+'</td>'
+              +'<td style="padding:3px 6px;font-size:10px">'+(cw.evidence_reuse_pct?'<span style="color:#34d399">'+cw.evidence_reuse_pct+'% reuse</span>':'')+'</td>'
+              +'</tr>';
+          }).join('');
+          compParts.push('<div style="font-size:11px;color:#aaa;text-transform:uppercase;letter-spacing:.06em;margin-top:8px;margin-bottom:4px">&#10024; Cross-Framework Evidence Reuse</div>'
+            +'<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11px">'
+            +'<thead><tr style="color:#666;text-align:left"><th style="padding:2px 6px">ISO 27001</th><th style="padding:2px 6px">NIST CSF</th><th style="padding:2px 6px">Essential Eight</th><th style="padding:2px 6px">NIST 800-53</th><th style="padding:2px 6px">Reuse</th></tr></thead>'
+            +'<tbody>'+cwRows+'</tbody></table></div>');
+        }
+        // Regulatory obligations
+        var compRegs = personaData && personaData.regulatory_triggers || [];
+        if (compRegs.length) {
+          var regItems = compRegs.slice(0,4).map(function(r2){
+            var hrs2=r2.clock_seconds?Math.round(r2.clock_seconds/3600):null;
+            return '<li>'+escHtml(r2.name||r2.trigger_id||'')+(hrs2?' <strong style="color:#e05a5a">'+hrs2+'h clock</strong>':'')+(r2.rationale?' <span style="color:#777">\u2014 '+escHtml(r2.rationale)+'</span>':'')+'</li>';
+          }).join('');
+          compParts.push('<div style="font-size:11px;color:#aaa;text-transform:uppercase;letter-spacing:.06em;margin-top:8px;margin-bottom:4px">Regulatory Obligations</div>'
+            +'<ul class="br-dispatch__evidence-actions">'+regItems+'</ul>');
+        }
+        // Remediation roadmap
+        var compRm = personaData && personaData.remediation_roadmap || {};
+        if (Object.keys(compRm).length) {
+          var rmPhColors={'P1_48h':'#e05a5a','P2_30d':'#e09a5a','P3_90d':'#34d399'};
+          var rmPhLbls={'P1_48h':'P1 \u2014 48h','P2_30d':'P2 \u2014 30d','P3_90d':'P3 \u2014 90d'};
+          var rmBuks={'P1_48h':[],'P2_30d':[],'P3_90d':[]}, seenRm={};
+          Object.keys(compRm).forEach(function(tk){var rk=compRm[tk]||{};['P1_48h','P2_30d','P3_90d'].forEach(function(ph){if(rk[ph]&&!seenRm[rk[ph]]){seenRm[rk[ph]]=true;rmBuks[ph].push(rk[ph]);}});});
+          var rmRowsFin=['P1_48h','P2_30d','P3_90d'].map(function(ph){if(!rmBuks[ph].length)return '';return '<tr style="vertical-align:top"><td style="padding:4px 6px;white-space:nowrap;font-weight:bold;color:'+rmPhColors[ph]+';font-size:11px">'+escHtml(rmPhLbls[ph])+'</td><td style="padding:4px 6px;font-size:11px;color:#d0d0d0">'+rmBuks[ph].map(function(a4){return '\u2022 '+escHtml(a4);}).join('<br>')+'</td></tr>';}).filter(Boolean).join('');
+          if(rmRowsFin) compParts.push('<div style="font-size:11px;color:#aaa;text-transform:uppercase;letter-spacing:.06em;margin-top:8px;margin-bottom:4px">Remediation Roadmap</div><table style="width:100%;border-collapse:collapse;border:1px solid #2a2a3e"><tbody>'+rmRowsFin+'</tbody></table>');
+        }
+        // ISMS summary
+        var isms2 = personaData && personaData.isms_summary;
+        if (isms2) {
+          compParts.push('<div style="font-size:11px;color:#888;margin-top:8px;border-top:1px solid #2a2a3e;padding-top:6px">Sensitivity: <strong>'+escHtml(isms2.data_sensitivity||'unknown')+'</strong>'+(isms2.crown_jewel_touched?' <strong style="color:#e05a5a">[CROWN JEWEL]</strong>':'')+(isms2.record_count_estimate?' (~'+Number(isms2.record_count_estimate).toLocaleString()+' records)':'')+(isms2.p1_control_count?' | <strong style="color:#a78bfa">'+isms2.p1_control_count+' P1 remediations</strong>':'')+'</div>');
+        }
+        actionsHtml = compParts.length ? compParts.join('') : '<div style="color:#888;font-size:12px">No control data \u2014 pipeline may not have completed Stage 5d yet.</div>';
+        var _compCid = leadCluster.cluster_id || leadCluster.id || '';
+        var _pmViewUrl = '/static/postmortem_viewer.html?assessment=' + encodeURIComponent(AID||'') + '&cluster=' + encodeURIComponent(_compCid);
+        previewPrimaryHref = _pmViewUrl;
+        previewPrimaryLabel = 'Preview Full Compliance Report';
+        extraButtons =
+            '    <button class="br-dispatch__btn" id="br-dispatch-rebuild-pm" data-rebuild-pm="1"'
+          + '      data-pm-aid="' + (AID||'').replace(/"/g,'') + '" data-pm-cid="'+(_compCid.replace(/"/g,''))+'"'
+          + '      style="color:#a78bfa;border-color:rgba(167,139,250,.3)" title="Re-assemble postmortem with latest evidence data">'
+          + '      ' + _icon('rotate-cw') + ' Rebuild Postmortem'
+          + '    </button>'
+          + '    <button class="br-dispatch__btn" data-push-target="jira" style="color:#60a5fa;border-color:rgba(96,165,250,.3)" title="Push to Jira">'
+          + '      ' + _icon('ticket') + ' Push to Jira'
+          + '    </button>'
+          + '    <button class="br-dispatch__btn" data-push-target="confluence" style="color:#60a5fa;border-color:rgba(96,165,250,.3)" title="Push to Confluence">'
+          + '      ' + _icon('book-open') + ' Push to Confluence'
+          + '    </button>'
+          + '    <button class="br-dispatch__btn" data-push-target="servicenow" style="color:#60a5fa;border-color:rgba(96,165,250,.3)" title="Push to ServiceNow">'
+          + '      ' + _icon('server') + ' Push to ServiceNow'
+          + '    </button>';
+
+      // ── GENERIC FALLBACK (mssp / other) ──────────────────────────────────
+      } else {
+        if (personaData && personaData.required_actions && personaData.required_actions.length) {
+          var actItems = personaData.required_actions.slice(0, 8).map(function (a) {
+            var tier = a.tier ? '<span class="br-dispatch__tier br-dispatch__tier--' + a.tier + '">T' + a.tier + '</span> ' : '';
+            var cmd = a.example_command ? '<code class="br-dispatch__cmd">' + escHtml(a.example_command) + '</code>' : '';
+            return '<li>' + tier + escHtml(a.description || a.action_id || '') + (cmd ? ' ' + cmd : '') + '</li>';
+          }).join('');
+          actionsHtml = '<ol class="br-dispatch__evidence-actions">' + actItems + '</ol>';
+        } else if (roleDef.persona === 'ciso' && personaData.regulatory_clocks && personaData.regulatory_clocks.length) {
+          var clockItems = personaData.regulatory_clocks.slice(0, 5).map(function (c) {
+            var hours = c.deadline_hours || (c.clock_seconds ? Math.round(c.clock_seconds / 3600) : null);
+            var label = c.name || c.trigger_id || c.framework || '';
+            var detail = c.rationale || c.obligation || c.jurisdiction || '';
+            var clockBadge = hours ? ' &mdash; <strong style="color:#e05a5a">' + hours + 'h clock</strong>' : '';
+            return '<li><strong>' + escHtml(label) + '</strong>: ' + escHtml(detail) + clockBadge + '</li>';
+          }).join('');
+          // Also render ISMS data exposure block if present
+          var ismsHtml = '';
+          if (personaData.data_exposure) {
+            var de = personaData.data_exposure;
+            var cjBadge = de.crown_jewel_touched ? ' <span style="color:#e05a5a;font-weight:bold">[CROWN JEWEL]</span>' : '';
+            var rec = de.record_count_estimate ? ' &mdash; ~' + de.record_count_estimate.toLocaleString() + ' records' : '';
+            ismsHtml = '<div class="br-dispatch__isms-block" style="margin-top:8px;padding:8px;border:1px solid #444;border-radius:4px;font-size:12px;">'
+              + '<strong>Data exposure:</strong> ' + escHtml(de.sensitivity || 'unknown') + cjBadge + rec
+              + (de.classes && de.classes.length ? '<br>Classes: ' + escHtml(de.classes.join(', ')) : '')
+              + '</div>';
+          }
+          actionsHtml = '<ul class="br-dispatch__evidence-actions">' + clockItems + '</ul>' + ismsHtml;
+        } else if (roleDef.persona === 'executive' && personaData.plain_english) {
+          actionsHtml = '<div class="br-dispatch__plain-english">' + escHtml(personaData.plain_english) + '</div>';
+        } else if (roleDef.persona === 'threat_hunter' && personaData.hypotheses && personaData.hypotheses.length) {
+          var hypItems = personaData.hypotheses.slice(0, 4).map(function (h) {
+            return '<li><strong>' + escHtml(h.hypothesis || '') + '</strong>'
+              + (h.pivot_query_splunk ? '<br><code class="br-dispatch__cmd">' + escHtml(h.pivot_query_splunk) + '</code>' : '')
+              + '</li>';
+          }).join('');
+          actionsHtml = '<ul class="br-dispatch__evidence-actions">' + hypItems + '</ul>';
+        } else if (roleDef.persona === 'forensics' && personaData.acquisition_order && personaData.acquisition_order.length) {
+          var acqItems = personaData.acquisition_order.slice(0, 5).map(function (a, i) {
+            return '<li>' + (i + 1) + '. <strong>' + escHtml(a.host || '') + '</strong>: '
+              + escHtml(a.artifacts && a.artifacts.join(', ') || '') + '</li>';
+          }).join('');
+          actionsHtml = '<ol class="br-dispatch__evidence-actions">' + acqItems + '</ol>';
+        } else if (roleDef.persona === 'compliance') {
+          var compParts = [];
+          var sevColor = {'critical': '#e05a5a', 'high': '#e09a5a', 'moderate': '#e0d05a', 'low': '#888'};
+
+          // ── Async-fetch postmortem data for exec summary / ISO 27035 / regulatory clocks ──
+          // Fire-and-forget: fetch postmortem and patch the panel in-place when it arrives
+          var _pmCid = leadCluster.cluster_id || leadCluster.id || '';
+          if (AID && _pmCid) {
+            (function (_aid, _cid) {
+              // Try GET first; if 404 trigger assemble then re-GET
+              fetch('/api/v1/postmortem/' + encodeURIComponent(_aid) + '/clusters/' + encodeURIComponent(_cid), {
+                headers: {'x-api-key': localStorage.apiKey || 'devkey123', 'x-tenant-id': localStorage.tenantId || 'default'}
+              }).then(function (r) {
+                if (r.ok) return r.json();
+                if (r.status === 404) {
+                  return fetch('/api/v1/postmortem/' + encodeURIComponent(_aid) + '/clusters/' + encodeURIComponent(_cid) + '/assemble', {
+                    method: 'POST', headers: {'Content-Type': 'application/json', 'x-api-key': localStorage.apiKey || 'devkey123', 'x-tenant-id': localStorage.tenantId || 'default'},
+                    body: JSON.stringify({regenerate: false})
+                  }).then(function (r2) { return r2.json(); });
+                }
+                return null;
+              }).then(function (data) {
+                if (!data) return;
+                var pm = data.postmortem || {};
+                var pmEl = document.getElementById('br-dispatch-pm-enrichment');
+                if (!pmEl) return;
+                var h = [];
+
+                // ── TENANT HEADER ──
+                var tc = pm.tenant_config || {};
+                var tenantName = tc.entity_name || pm.tenant_id || '';
+                var abn = tc.abn || '';
+                var cisoName = (tc.ciso || {}).name || '';
+                var cisoEmail = (tc.ciso || {}).email || '';
+                if (tenantName || cisoName) {
+                  h.push('<div style="border-bottom:1px solid #2a2a3e;padding-bottom:6px;margin-bottom:8px">'
+                    + '<div style="font-size:13px;font-weight:600;color:#e0e0e0">' + escHtml(tenantName) + (abn ? '  <span style="color:#888;font-weight:400">(ABN ' + escHtml(abn) + ')</span>' : '') + '</div>'
+                    + (cisoName ? '<div style="font-size:11px;color:#aaa">CISO: ' + escHtml(cisoName) + (cisoEmail ? ' &bull; ' + escHtml(cisoEmail) : '') + '</div>' : '')
+                    + '</div>');
+                }
+
+                // ── EXECUTIVE SUMMARY (verdict block) ──
+                var v = pm.verdict || {};
+                // Defensive fallback: if postmortem verdict is still UNCERTAIN
+                // (assembler ran before backend fix), override with cluster data.
+                if (!v.platform_verdict || v.platform_verdict === 'UNCERTAIN') {
+                  var _cv = (leadCluster.verdict || leadCluster.final_verdict || '').toUpperCase();
+                  if (_cv) v.platform_verdict = _cv;
+                }
+                if (!v.confidence || v.confidence === 0) {
+                  var _cc = leadCluster.confidence || leadCluster.confidence_score || 0;
+                  if (_cc) v.confidence = _cc;
+                }
+                if (!v.kill_chain_stage || v.kill_chain_stage === 'unknown') {
+                  var _phases = leadCluster.phases || [];
+                  if (_phases.length) {
+                    var _pnames = _phases.map(function(p){ return p.name || p.phase_id || ''; }).filter(Boolean);
+                    v.kill_chain_stage = _pnames.length <= 5
+                      ? _pnames.join(' → ')
+                      : _pnames.slice(0,3).join(' → ') + ' → … → ' + _pnames[_pnames.length-1];
+                  }
+                }
+                if (v.platform_verdict) {
+                  var confPct = v.confidence ? Math.round(v.confidence * 100) + '%' : '';
+                  var matColor = v.materiality_assessment === 'MEETS_NOTIFICATION_CRITERIA' ? '#e05a5a' : '#e09a5a';
+                  // Find s1 narrative_summary
+                  var s1 = ((pm.sections || []).find(function (s) { return s.section_id === 's1_incident_lifecycle'; }) || {}).auto_output || {};
+                  var oneLine = s1.narrative_summary || '';
+                  h.push('<div style="font-size:11px;color:#aaa;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Executive Summary</div>'
+                    + '<table style="width:100%;font-size:11px;border-collapse:collapse;margin-bottom:6px">'
+                    + '<tr><td style="color:#888;padding:2px 8px 2px 0;white-space:nowrap">VERDICT</td><td style="color:#e0e0e0;font-weight:600">' + escHtml(v.platform_verdict) + (confPct ? ' <span style="color:#888;font-weight:400">(confidence ' + confPct + ')</span>' : '') + '</td></tr>'
+                    + '<tr><td style="color:#888;padding:2px 8px 2px 0;white-space:nowrap">KILL CHAIN</td><td style="color:#e0e0e0">' + escHtml(v.kill_chain_stage || 'unknown') + '</td></tr>'
+                    + '<tr><td style="color:#888;padding:2px 8px 2px 0;white-space:nowrap">MATERIALITY</td><td style="color:' + matColor + ';font-weight:600">' + escHtml(v.materiality_assessment || '') + '</td></tr>'
+                    + '<tr><td style="color:#888;padding:2px 8px 2px 0;white-space:nowrap">RATIONALE</td><td style="color:#bbb">' + escHtml(v.materiality_rationale || '') + '</td></tr>'
+                    + '</table>'
+                    + (oneLine ? '<div style="font-size:11px;color:#d0d0d0;border-left:3px solid #a78bfa;padding-left:8px;margin-bottom:8px">' + escHtml(oneLine.substring(0, 500)) + '</div>' : ''));
+                }
+
+                // ── ISO 27035 LIFECYCLE STATUS ──
+                var s1data = ((pm.sections || []).find(function (s) { return s.section_id === 's1_incident_lifecycle'; }) || {}).auto_output || {};
+                var phases = ['detect', 'contain', 'eradicate', 'recover', 'post_incident_review'];
+                var phaseLabels = {detect:'DETECT', contain:'CONTAIN', eradicate:'ERADICATE', recover:'RECOVER', post_incident_review:'PIR'};
+                var lifecycleRows = phases.map(function (ph) {
+                  var phData = s1data[ph] || {};
+                  var hasData = false;
+                  if (ph === 'detect') {
+                    hasData = !!(phData.method && phData.method !== 'unknown');
+                  } else if (ph === 'post_incident_review') {
+                    hasData = !!(phData.root_cause);
+                  } else {
+                    hasData = !!((phData.actions || []).length || phData.started_at);
+                  }
+                  var icon = hasData ? '<span style="color:#34d399">✓</span>' : '<span style="color:#fbbf24">⚠</span>';
+                  var detail = '';
+                  if (ph === 'detect' && hasData) {
+                    detail = escHtml((phData.method || '') + ' ' + (phData.reference || ''));
+                    if (phData.detection_lag_human) detail += ' <span style="color:#888">(lag: ' + escHtml(phData.detection_lag_human) + ')</span>';
+                  } else if (!hasData) {
+                    detail = '<span style="color:#888">pending — analyst entry required</span>';
+                  }
+                  return '<tr><td style="padding:1px 6px">' + icon + '</td><td style="padding:1px 6px;color:#e0e0e0;font-weight:600;font-size:11px">' + phaseLabels[ph] + '</td><td style="padding:1px 6px;font-size:11px;color:#bbb">' + detail + '</td></tr>';
+                }).join('');
+                h.push('<div style="font-size:11px;color:#aaa;text-transform:uppercase;letter-spacing:.06em;margin-top:8px;margin-bottom:4px">ISO 27035 Lifecycle Status</div>'
+                  + '<table style="width:100%;border-collapse:collapse">' + lifecycleRows + '</table>');
+
+                // ── REGULATORY CLOCKS (from postmortem s6) ──
+                var s6 = ((pm.sections || []).find(function (s) { return s.section_id === 's6_regulatory_clocks'; }) || {}).auto_output || {};
+                var triggers = s6.triggers || [];
+                if (triggers.length) {
+                  var clockItems = triggers.slice(0, 4).map(function (t) {
+                    var hoursLeft = t.hours_remaining != null ? t.hours_remaining : (t.clock_seconds ? Math.round(t.clock_seconds / 3600) : null);
+                    var urgency = (hoursLeft != null && hoursLeft <= 72) ? 'color:#e05a5a;font-weight:bold' : 'color:#e09a5a';
+                    var deadlineStr = t.deadline_iso ? ' deadline ' + escHtml(t.deadline_iso.substring(0, 16)) : '';
+                    var formBtn = t.form_module ? ' <button class="br-pm-prefill-btn" data-regulator="' + escHtml(t.regulator_id || t.trigger_id || '') + '" style="font-size:9px;padding:1px 6px;border:1px solid #444;border-radius:3px;background:transparent;color:#a78bfa;cursor:pointer">[Pre-fill]</button>' : '';
+                    return '<li style="padding:2px 0">'
+                      + '<span style="' + urgency + '">' + escHtml(t.regulator_name || t.name || t.trigger_id || '') + '</span>'
+                      + (hoursLeft != null ? ' <strong style="' + urgency + '">' + hoursLeft + 'h</strong>' : '')
+                      + '<span style="color:#888">' + deadlineStr + '</span>'
+                      + formBtn + '</li>';
+                  }).join('');
+                  h.push('<div style="font-size:11px;color:#aaa;text-transform:uppercase;letter-spacing:.06em;margin-top:8px;margin-bottom:4px">Regulatory Clocks</div>'
+                    + '<ul class="br-dispatch__evidence-actions" style="list-style:none;padding-left:0">' + clockItems + '</ul>'
+                    + '<div style="font-size:10px;color:#fbbf24;margin-top:4px">⚠ JanuSec NEVER auto-submits. All forms require human review + submission via the regulator\'s official channel.</div>');
+                }
+
+                // ── TOP CORRECTIVE ACTIONS (from postmortem s7) ──
+                var s7 = ((pm.sections || []).find(function (s) { return s.section_id === 's7_corrective_actions'; }) || {}).auto_output || {};
+                var actions = (s7.actions || []).filter(function (a) { return a.priority === 'P1'; }).slice(0, 5);
+                if (actions.length) {
+                  var actItems = actions.map(function (a) {
+                    var timeline = a.timeline_days ? a.timeline_days + 'd' : '';
+                    return '<li style="padding:2px 0"><strong style="color:#e05a5a">P1</strong>'
+                      + (timeline ? ' <span style="color:#888">[' + timeline + ']</span>' : '')
+                      + ' ' + escHtml(a.action || a.description || '')
+                      + (a.owner ? ' <span style="color:#666">(' + escHtml(a.owner) + ')</span>' : '') + '</li>';
+                  }).join('');
+                  h.push('<div style="font-size:11px;color:#aaa;text-transform:uppercase;letter-spacing:.06em;margin-top:8px;margin-bottom:4px">Top Corrective Actions</div>'
+                    + '<ul class="br-dispatch__evidence-actions">' + actItems + '</ul>');
+                }
+
+                pmEl.innerHTML = h.join('');
+              }).catch(function () { /* postmortem not available — no-op, existing panel still works */ });
+            })(AID, _pmCid);
+          }
+
+          // ── Postmortem enrichment placeholder (filled async above) ─────────
+          compParts.push('<div id="br-dispatch-pm-enrichment" style="margin-bottom:8px"><div style="color:#666;font-size:11px">Loading postmortem summary\u2026</div></div>');
+
+          // ── Business impact banner ──────────────────────────────────────────
+          var totalImpact = personaData.total_business_impact_usd || 0;
+          var impactNotes = personaData.impact_notes || [];
+          if (totalImpact > 0) {
+            var impactFmt = totalImpact >= 1e6
+              ? '$' + (totalImpact / 1e6).toFixed(1) + 'M'
+              : '$' + totalImpact.toLocaleString();
+            var topNote = impactNotes.length ? escHtml(impactNotes[0].impact_note) : '';
+            var cveList = impactNotes.flatMap(function (n) { return n.cves || []; }).slice(0, 4)
+              .map(function (c) { return '<span style="background:#1e1e2e;border:1px solid #444;border-radius:3px;padding:1px 5px;font-size:10px;margin-right:4px;color:#f9a8d4">' + escHtml(c) + '</span>'; }).join('');
+            compParts.push(
+              '<div style="background:linear-gradient(90deg,rgba(224,90,90,.12),rgba(224,154,90,.08));border:1px solid rgba(224,90,90,.35);border-radius:6px;padding:8px 10px;margin-bottom:8px">'
+              + '<div style="font-size:11px;color:#aaa;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Estimated Business Impact (breach analogues)</div>'
+              + '<div style="font-size:18px;font-weight:700;color:#e05a5a">' + impactFmt + '</div>'
+              + (topNote ? '<div style="font-size:11px;color:#bbb;margin-top:3px">' + topNote + '</div>' : '')
+              + (cveList ? '<div style="margin-top:6px">' + cveList + '</div>' : '')
+              + '</div>'
+            );
+          }
+
+          // ── Failed controls section ─────────────────────────────────────────
+          var cfs = personaData.control_failures || [];
+          if (cfs.length) {
+            var critCount = cfs.filter(function (f) { return (f.severity || '').toLowerCase() === 'critical'; }).length;
+            // Build per-control expandable rows with MITRE-tagged persona actions
+            var _dispPersn = roleDef.persona || 'compliance';
+            // Persona-specific action labels
+            var _personaActionMap = {
+              'compliance':    {detect:'Document', contain:'Notify', eradicate:'Remediate', recover:'Certify', pir:'Audit'},
+              'soc_analyst':   {detect:'Detect', contain:'Block', eradicate:'Purge', recover:'Restore', pir:'Tune'},
+              'threat_hunter': {detect:'Hunt', contain:'Isolate', eradicate:'Hunt→Root', recover:'Validate', pir:'Build Query'},
+              'forensics':     {detect:'Preserve', contain:'Image', eradicate:'Chain-of-Custody', recover:'Reconstruct', pir:'Timeline'},
+              'ciso':          {detect:'Risk-Accept?', contain:'Exec Brief', eradicate:'Board Report', recover:'Assurance', pir:'Lessons Learned'},
+              'executive':     {detect:'Notify Board', contain:'Engage Legal', eradicate:'Comms', recover:'Approvals', pir:'Strategy'},
+            };
+            var _pal = _personaActionMap[_dispPersn] || _personaActionMap['compliance'];
+            var cfItems = cfs.slice(0, 5).map(function (f, cfIdx) {
+              var sev = f.severity || '';
+              var sevColor2 = {'critical': '#e05a5a', 'high': '#e09a5a', 'moderate': '#e0d05a', 'low': '#888'};
+              var sevBadge = sev ? ' <span style="color:' + (sevColor2[sev] || '#888') + ';font-weight:bold;font-size:10px">[' + sev.toUpperCase() + ']</span>' : '';
+              var pri = f.remediation_priority ? ' <span style="font-size:10px;color:#a78bfa;background:rgba(167,139,250,.12);border-radius:3px;padding:0 4px">' + f.remediation_priority + '</span>' : '';
+              // MITRE technique tags
+              var mitreHtml = '';
+              (f.triggered_by || []).slice(0, 3).forEach(function (tid) {
+                var mLabel = tid.replace(/_/g, ' ');
+                var isT = /^T\d{4}/.test(tid);
+                mitreHtml += '<a href="https://attack.mitre.org/techniques/' + encodeURIComponent(tid.split('.')[0]) + '/" target="_blank" '
+                  + 'style="display:inline-block;background:#1e1e2e;border:1px solid #5b4fcf;border-radius:3px;padding:0 5px;font-size:9px;color:#a78bfa;margin-left:3px;text-decoration:none;cursor:pointer"'
+                  + ' title="View ' + escHtml(tid) + ' on ATT&CK">'
+                  + (isT ? '' : '🎯 ') + escHtml(isT ? tid : mLabel) + '</a>';
+              });
+              // CVE tags
+              var cveTags = '';
+              var cveCtx = personaData.cve_context || {};
+              (f.triggered_by || []).forEach(function (tid) {
+                var tc = cveCtx[tid] || cveCtx[tid.split('.')[0]];
+                if (tc && tc.cves) {
+                  tc.cves.slice(0, 2).forEach(function (c) {
+                    cveTags += '<span style="background:#1e1e2e;border:1px solid #333;border-radius:3px;padding:0 4px;font-size:9px;color:#f9a8d4;margin-left:3px">' + escHtml(c) + '</span>';
+                  });
+                }
+              });
+              var drillId = 'cfdrll-' + cfIdx + '-' + Math.random().toString(36).slice(2,6);
+              // Per-persona lifecycle actions from the control failure or fallback
+              var cfActions = f.persona_actions && f.persona_actions[_dispPersn]
+                ? f.persona_actions[_dispPersn]
+                : {};
+              var detectAct  = cfActions.detect  || f.detect_action  || 'Review detection logs for this control domain';
+              var containAct = cfActions.contain  || f.contain_action || 'Confirm scope and isolate affected systems';
+              var eradAct    = cfActions.eradicate|| f.eradicate_action|| 'Apply remediation and verify clean state';
+              var recAct     = cfActions.recover  || f.recover_action || 'Restore and re-enable with monitoring';
+              var pirAct     = cfActions.pir      || f.pir_action     || 'Document lessons and update control baseline';
+              return '<li style="padding:4px 0;border-bottom:1px solid #1e1e2e">'
+                + '<div style="cursor:pointer;user-select:none" onclick="var d=document.getElementById(\'' + drillId + '\');d.style.display=d.style.display===\'none\'?\'\':\'none\'">'
+                + '  <strong>' + escHtml(f.control_id || '') + '</strong>'
+                + sevBadge + pri + mitreHtml + cveTags
+                + ' <span style="color:#666">(' + escHtml(f.framework || '') + ')</span>: '
+                + escHtml(f.control_name || f.failure || '')
+                + ' <span style="color:#666;font-size:10px">▸ expand</span>'
+                + '</div>'
+                + '<div id="' + drillId + '" style="display:none;padding:6px 0 2px 12px;font-size:10px;color:#bbb;border-left:2px solid #2a2a3e;margin-top:3px">'
+                + (f.triggered_by && f.triggered_by.length ? '<div style="margin-bottom:4px;color:#888">Triggered by: ' + f.triggered_by.join(', ') + '</div>' : '')
+                + '<table style="width:100%;border-collapse:collapse">'
+                + '<tr><td style="padding:2px 6px;color:#60a5fa;width:90px;font-weight:600">' + _pal.detect + '</td><td style="padding:2px 6px">' + escHtml(detectAct) + '</td></tr>'
+                + '<tr style="background:rgba(30,30,46,.4)"><td style="padding:2px 6px;color:#fbbf24;font-weight:600">' + _pal.contain + '</td><td style="padding:2px 6px">' + escHtml(containAct) + '</td></tr>'
+                + '<tr><td style="padding:2px 6px;color:#e05a5a;font-weight:600">' + _pal.eradicate + '</td><td style="padding:2px 6px">' + escHtml(eradAct) + '</td></tr>'
+                + '<tr style="background:rgba(30,30,46,.4)"><td style="padding:2px 6px;color:#34d399;font-weight:600">' + _pal.recover + '</td><td style="padding:2px 6px">' + escHtml(recAct) + '</td></tr>'
+                + '<tr><td style="padding:2px 6px;color:#a78bfa;font-weight:600">' + _pal.pir + '</td><td style="padding:2px 6px">' + escHtml(pirAct) + '</td></tr>'
+                + '</table>'
+                + '</div>'
+                + '</li>';
+            }).join('');
+            // Collect unique frameworks impacted
+            var fwSet = {};
+            cfs.forEach(function (f) { if (f.framework) fwSet[f.framework] = true; });
+            var fwList = Object.keys(fwSet).slice(0, 7).join(' \u2022 ');
+            compParts.push(
+              '<div style="font-size:11px;color:#aaa;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Control Failures (' + cfs.length + ' total \u2014 ' + critCount + ' critical)</div>'
+              + (fwList ? '<div style="font-size:10px;color:#888;margin-bottom:4px">Frameworks impacted: ' + escHtml(fwList) + '</div>' : '')
+              + '<div style="font-size:10px;color:#888;margin-bottom:2px">Top 5 — click any row to see ' + escHtml(roleDef.label) + ' actions per control:</div>'
+              + '<ul class="br-dispatch__evidence-actions" style="padding-left:0;list-style:none">' + cfItems + '</ul>'
+            );
+          }
+
+          // ── Cross-framework evidence reuse table ────────────────────────────
+          var crosswalk = personaData.cross_framework_evidence || {};
+          var crosswalkKeys = Object.keys(crosswalk);
+          if (crosswalkKeys.length) {
+            var cwRows = crosswalkKeys.slice(0, 6).map(function (cid) {
+              var cw = crosswalk[cid];
+              var reuse = cw.evidence_reuse_pct ? '<span style="color:#34d399">' + cw.evidence_reuse_pct + '% reuse</span>' : '';
+              var e8 = cw.essential_eight ? '<span style="color:#60a5fa">' + escHtml(cw.essential_eight) + '</span> (E8)' : '—';
+              return '<tr style="border-bottom:1px solid #1e1e2e">'
+                + '<td style="padding:3px 6px;color:#e0e0e0;font-weight:bold">' + escHtml(cid) + '</td>'
+                + '<td style="padding:3px 6px;color:#aaa">' + escHtml(cw.nist_csf || '—') + '</td>'
+                + '<td style="padding:3px 6px">' + e8 + '</td>'
+                + '<td style="padding:3px 6px;color:#aaa">' + escHtml(cw.nist_800_53 || '—') + '</td>'
+                + '<td style="padding:3px 6px;font-size:10px">' + reuse + '</td>'
+                + '</tr>';
+            }).join('');
+            compParts.push(
+              '<div style="font-size:11px;color:#aaa;text-transform:uppercase;letter-spacing:.06em;margin-top:8px;margin-bottom:4px">\u2728 Cross-Framework Evidence Reuse</div>'
+              + '<div style="overflow-x:auto">'
+              + '<table style="width:100%;border-collapse:collapse;font-size:11px">'
+              + '<thead><tr style="color:#666;text-align:left">'
+              + '<th style="padding:2px 6px">ISO 27001</th><th style="padding:2px 6px">NIST CSF 2.0</th>'
+              + '<th style="padding:2px 6px">Essential Eight</th><th style="padding:2px 6px">NIST 800-53</th>'
+              + '<th style="padding:2px 6px">Reuse</th>'
+              + '</tr></thead>'
+              + '<tbody>' + cwRows + '</tbody>'
+              + '</table></div>'
+              + (function () {
+                var reusePcts = crosswalkKeys.map(function (k) { return (crosswalk[k] || {}).evidence_reuse_pct || 0; }).filter(function (v) { return v > 0; });
+                if (!reusePcts.length) return '';
+                var avg = Math.round(reusePcts.reduce(function (a, b) { return a + b; }, 0) / reusePcts.length);
+                return '<div style="font-size:10px;color:#34d399;margin-top:4px">One audit walkthrough satisfies multiple frameworks for ' + crosswalkKeys.length + ' of ' + (cfs ? cfs.length : 0) + ' controls (' + avg + '% avg reuse).</div>';
+              })()
+            );
+          }
+
+          // ── Regulatory triggers section ─────────────────────────────────────
+          var regs = personaData.regulatory_triggers || [];
+          if (regs.length) {
+            var regItems = regs.slice(0, 4).map(function (r) {
+              var h = r.clock_seconds ? Math.round(r.clock_seconds / 3600) : null;
+              var badge = h ? ' <strong style="color:#e05a5a">' + h + 'h clock</strong>' : '';
+              return '<li>' + escHtml(r.name || r.trigger_id || '') + badge
+                + (r.rationale ? ' <span style="color:#777">— ' + escHtml(r.rationale) + '</span>' : '') + '</li>';
+            }).join('');
+            compParts.push(
+              '<div style="font-size:11px;color:#aaa;text-transform:uppercase;letter-spacing:.06em;margin-top:8px;margin-bottom:4px">Regulatory Obligations</div>'
+              + '<ul class="br-dispatch__evidence-actions">' + regItems + '</ul>'
+            );
+          }
+
+          // ── Auditor questions section ───────────────────────────────────────
+          var auditorAsks = personaData.auditor_insights || [];
+          if (auditorAsks.length) {
+            var askItems = auditorAsks.slice(0, 6).map(function (q, i) {
+              return '<li style="padding:2px 0"><span style="color:#fbbf24;margin-right:4px">Q' + (i + 1) + '.</span>'
+                + escHtml(q) + '</li>';
+            }).join('');
+            compParts.push(
+              '<div style="font-size:11px;color:#aaa;text-transform:uppercase;letter-spacing:.06em;margin-top:8px;margin-bottom:4px">Auditor Questions to Prepare For</div>'
+              + '<ul class="br-dispatch__evidence-actions" style="color:#e0e0e0">' + askItems + '</ul>'
+            );
+          }
+
+          // ── Remediation roadmap (P1/P2/P3) ────────────────────────────────
+          var roadmap = personaData.remediation_roadmap || {};
+          var roadmapKeys = Object.keys(roadmap);
+          if (roadmapKeys.length) {
+            var phaseColors = {'P1_48h': '#e05a5a', 'P2_30d': '#e09a5a', 'P3_90d': '#34d399'};
+            var phaseLabels = {'P1_48h': 'P1 — 48h', 'P2_30d': 'P2 — 30d', 'P3_90d': 'P3 — 90d'};
+            // Collect all P1/P2/P3 actions across techniques, deduplicate
+            var phaseMap = {'P1_48h': [], 'P2_30d': [], 'P3_90d': []};
+            var seen = {};
+            roadmapKeys.forEach(function (tid) {
+              var r = roadmap[tid] || {};
+              ['P1_48h', 'P2_30d', 'P3_90d'].forEach(function (ph) {
+                if (r[ph] && !seen[r[ph]]) {
+                  seen[r[ph]] = true;
+                  phaseMap[ph].push(r[ph]);
+                }
+              });
+            });
+            var roadmapRows = ['P1_48h', 'P2_30d', 'P3_90d'].map(function (ph) {
+              var actions = phaseMap[ph];
+              if (!actions.length) return '';
+              var col = phaseColors[ph];
+              var lbl = phaseLabels[ph];
+              return '<tr style="vertical-align:top"><td style="padding:4px 6px;white-space:nowrap;font-weight:bold;color:' + col + ';font-size:11px">'
+                + escHtml(lbl) + '</td><td style="padding:4px 6px;font-size:11px;color:#d0d0d0">'
+                + actions.map(function (a) { return '• ' + escHtml(a); }).join('<br>') + '</td></tr>';
+            }).filter(Boolean).join('');
+            if (roadmapRows) {
+              compParts.push(
+                '<div style="font-size:11px;color:#aaa;text-transform:uppercase;letter-spacing:.06em;margin-top:8px;margin-bottom:4px">Remediation Roadmap</div>'
+                + '<table style="width:100%;border-collapse:collapse;border:1px solid #2a2a3e;border-radius:4px">'
+                + '<tbody>' + roadmapRows + '</tbody></table>'
+              );
+            }
+          }
+
+          // ── ISMS summary block ──────────────────────────────────────────────
+          var isms = personaData.isms_summary;
+          if (isms) {
+            var cjFlag = isms.crown_jewel_touched ? ' <strong style="color:#e05a5a">[CROWN JEWEL]</strong>' : '';
+            var rec = isms.record_count_estimate ? ' (~' + Number(isms.record_count_estimate).toLocaleString() + ' records)' : '';
+            var tables = (isms.affected_tables || []).slice(0, 3).join(', ');
+            compParts.push(
+              '<div style="font-size:11px;color:#888;margin-top:8px;border-top:1px solid #2a2a3e;padding-top:6px">'
+              + 'Sensitivity: <strong>' + escHtml(isms.data_sensitivity || 'unknown') + '</strong>' + cjFlag + rec
+              + (tables ? ' | Tables: <span style="color:#bbb">' + escHtml(tables) + '</span>' : '')
+              + (isms.p1_control_count ? ' | <strong style="color:#a78bfa">' + isms.p1_control_count + ' P1 remediations</strong>' : '')
+              + (isms.regulatory_regime_count ? ' | Regimes: ' + isms.regulatory_regime_count : '')
+              + '</div>'
+            );
+          }
+
+          var genItems2 = personaData.required_actions.slice(0, 6).map(function (a) {
+            return '<li>' + escHtml(a.description || a.action_id || '') + '</li>';
+          }).join('');
+          actionsHtml = '<ul class="br-dispatch__evidence-actions">' + genItems2 + '</ul>';
+        } else {
+          actionsHtml = '<div class="br-dispatch__preview-desc">' + escHtml(roleDef.actions || '') + '</div>';
+        }
+      }
+
+      // Build delivery channel options — email first (phase 1 primary channel)
       var channelOpts = [
+        '<option value="email">Email</option>',
         '<option value="auto">Auto (configured channel)</option>',
         '<option value="slack">Slack</option>',
         '<option value="teams">Microsoft Teams</option>',
-        '<option value="email">Email</option>',
         '<option value="copy">Copy to clipboard</option>',
       ].join('');
 
@@ -3047,11 +4465,15 @@
         '<div class="br-dispatch__preview-body">',
         '  <div class="br-dispatch__preview-section">',
         '    <div class="br-dispatch__preview-label">What they receive</div>',
-        '    <div class="br-dispatch__preview-desc">' + escHtml(roleDef.desc) + '</div>',
+        '    ' + descHtml,
+        '  </div>',
+        '  <div class="br-dispatch__preview-section">',
+        '    <div class="br-dispatch__preview-label">Trust / approval / history</div>',
+        '    ' + sharedContextHtml,
         '  </div>',
         '  <div class="br-dispatch__preview-section">',
         '    <div class="br-dispatch__preview-label">Required actions</div>',
-        '    <div class="br-dispatch__preview-desc">' + escHtml(roleDef.actions) + '</div>',
+        '    ' + actionsHtml,
         '  </div>',
         '  <div class="br-dispatch__preview-section">',
         '    <div class="br-dispatch__preview-label">Delivery channel</div>',
@@ -3076,17 +4498,29 @@
         '  </div>',
         '  <div class="br-dispatch__preview-actions">',
         '    <a class="br-dispatch__btn br-dispatch__btn--export" id="br-dispatch-preview-link"',
-        '       href="' + personaUrl + '" target="_blank" style="text-decoration:none;">',
-        '      ' + _icon('file-text') + ' Preview ' + escHtml(roleDef.label) + ' Report',
+        '       href="' + previewPrimaryHref + '" target="_blank" rel="noopener" style="text-decoration:none;">',
+        '      ' + _icon('file-text') + ' ' + escHtml(previewPrimaryLabel),
         '    </a>',
-        '    <button class="br-dispatch__btn br-dispatch__btn--deep" id="br-dispatch-deep"',
-        '            data-deep-role="' + role + '" title="Generate a comprehensive evidence-backed report using LLM reasoning">',
-        '      ' + _icon('sparkles') + ' Generate Deep Report',
-        '    </button>',
         '    <button class="br-dispatch__btn br-dispatch__btn--confirm" style="border-color:rgba(45,212,191,.3);color:#2dd4bf;"',
         '            id="br-dispatch-confirm" data-confirm-role="' + role + '">',
         '      ' + _icon('send') + ' Confirm &amp; Send to ' + escHtml(roleDef.label),
         '    </button>',
+        '    <details class="br-dispatch-more">',
+        '      <summary class="br-dispatch__btn br-dispatch-more__summary">' + _icon('more-horizontal') + ' More actions ▾</summary>',
+        '      <div class="br-dispatch-more__menu">',
+        '        <button class="br-dispatch__btn br-dispatch__btn--deep" id="br-dispatch-deep"',
+        '                data-deep-role="' + role + '" title="Generate a comprehensive evidence-backed report using LLM reasoning">',
+        '          ' + _icon('sparkles') + ' Generate Deep Report',
+        '        </button>',
+        extraButtons,
+        '        <button class="br-dispatch__btn" id="br-dispatch-regen"',
+        '                data-regen-role="' + role + '" data-regen-persona="' + roleDef.persona + '"',
+        '                style="color:#a78bfa;border-color:rgba(167,139,250,.3);"',
+        '                title="Re-run pipeline dispatch for this persona (re-enriches evidence)">',
+        '          ' + _icon('rotate-cw') + ' Regenerate',
+        '        </button>',
+        '      </div>',
+        '    </details>',
         '    <button class="br-dispatch__btn br-dispatch__btn--cancel" id="br-dispatch-cancel" style="color:var(--text-muted);">',
         '      ' + _icon('x') + ' Cancel',
         '    </button>',
@@ -3095,24 +4529,309 @@
       ].join('');
     });
 
-    // Step 3a: Generate Deep Report (opens evidence-backed assessment report)
+    // Step 3a: Generate Deep Report — opens Postmortem tab if available, else falls back to report
     document.getElementById('br-content').addEventListener('click', function (e) {
       var deepBtn = e.target.closest('#br-dispatch-deep');
       if (!deepBtn) return;
       var role = deepBtn.getAttribute('data-deep-role');
       var roleDef = _STAKEHOLDER_ROLES.filter(function (r) { return r.key === role; })[0];
       if (!roleDef || !roleDef.persona) return;
-      var deepUrl = '/api/v1/report/ingestion?format=html&persona=' + encodeURIComponent(roleDef.persona)
-        + '&include_model=true&include_scenarios=true&deep=true'
-        + (AID ? '&assessment_id=' + encodeURIComponent(AID) : '');
-      deepBtn.disabled = true;
-      deepBtn.innerHTML = _icon('rotate-cw') + ' Generating&hellip;';
-      // Open immediately; backend generates async
-      window.open(deepUrl, '_blank');
-      setTimeout(function () {
-        deepBtn.disabled = false;
-        deepBtn.innerHTML = _icon('sparkles') + ' Generate Deep Report';
-      }, 2000);
+
+      // Find lead breach cluster for postmortem tab
+      var leadCluster = (state.clusters || []).find(function (c) {
+        var v = ((c.verdict || c.final_verdict || '')).toUpperCase();
+        return v === 'VALIDATED_BREACH' || v === 'CONFIRMED_BREACH' || v === 'CONFIRMED_INTRUSION';
+      }) || (state.clusters || [])[0] || {};
+      var cid = leadCluster.cluster_id || leadCluster.id || '';
+
+      if (cid && AID && window.JanusecPostmortem && window.JanusecPostmortem.openTab) {
+        window.JanusecPostmortem.openTab(AID, cid);
+      } else {
+        // Fallback: original deep report behaviour
+        var deepUrl = authedUrl('/api/v1/report/ingestion?format=html&persona=' + encodeURIComponent(roleDef.persona)
+          + '&include_model=true&include_scenarios=true&deep=true'
+          + (AID ? '&assessment_id=' + encodeURIComponent(AID) : ''));
+        deepBtn.disabled = true;
+        deepBtn.innerHTML = _icon('rotate-cw') + ' Generating&hellip;';
+        window.open(deepUrl, '_blank', 'noopener');
+        setTimeout(function () {
+          deepBtn.disabled = false;
+          deepBtn.innerHTML = _icon('sparkles') + ' Generate Deep Report';
+        }, 2000);
+      }
+    });
+
+    // Step 3a-itsm: ITSM push buttons (Jira / Confluence / ServiceNow) — compliance persona
+    document.getElementById('br-content').addEventListener('click', function (e) {
+      var pushBtn = e.target.closest('[data-push-target]');
+      if (!pushBtn) return;
+      var target = pushBtn.getAttribute('data-push-target');
+      if (!target || !AID) return;
+
+      var leadCluster = (state.clusters || []).find(function (c) {
+        var v = ((c.verdict || c.final_verdict || '')).toUpperCase();
+        return v === 'VALIDATED_BREACH' || v === 'CONFIRMED_BREACH' || v === 'CONFIRMED_INTRUSION';
+      }) || (state.clusters || [])[0] || {};
+      var cid = leadCluster.cluster_id || leadCluster.id || '';
+      if (!cid) { _toast('No cluster found for ITSM push', 'warning'); return; }
+
+      pushBtn.disabled = true;
+      var origHtml = pushBtn.innerHTML;
+      pushBtn.innerHTML = _icon('rotate-cw') + ' Pushing\u2026';
+
+      fetch('/api/v1/postmortem/' + encodeURIComponent(AID) + '/clusters/' + encodeURIComponent(cid) + '/push-itsm', {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({ target: target })
+      })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+      .then(function (res) {
+        if (res.ok) {
+          _toast('Pushed to ' + target + (res.data.ticket_url ? ': ' + res.data.ticket_url : ''), 'success');
+        } else {
+          _toast('ITSM push failed: ' + (res.data.detail || 'unknown error'), 'error');
+        }
+      })
+      .catch(function () { _toast('ITSM push request failed', 'error'); })
+      .finally(function () {
+        pushBtn.disabled = false;
+        pushBtn.innerHTML = origHtml;
+      });
+    });
+
+    // Step 3b-rebuild-pm: Rebuild Postmortem button (compliance) — forces re-assemble
+    document.getElementById('br-content').addEventListener('click', function (e) {
+      var rebuildBtn = e.target.closest('#br-dispatch-rebuild-pm');
+      if (!rebuildBtn) return;
+      var pmAid = rebuildBtn.getAttribute('data-pm-aid') || AID;
+      var pmCid = rebuildBtn.getAttribute('data-pm-cid') || '';
+      if (!pmAid || !pmCid) return;
+      var origHtml2 = rebuildBtn.innerHTML;
+      rebuildBtn.disabled = true;
+      rebuildBtn.innerHTML = _icon('rotate-cw') + ' Rebuilding\u2026';
+      fetch('/api/v1/postmortem/' + encodeURIComponent(pmAid) + '/clusters/' + encodeURIComponent(pmCid) + '/assemble', {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({regenerate: true})
+      })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        rebuildBtn.disabled = false;
+        rebuildBtn.innerHTML = _icon('check') + ' Rebuilt';
+        // Refresh the enrichment div in-place
+        var pmEl = document.getElementById('br-dispatch-pm-enrichment');
+        if (pmEl && data && data.postmortem) {
+          var pm = data.postmortem;
+          var lc = (state.clusters || []).find(function (c) { return (c.cluster_id||c.id) === pmCid; }) || {};
+          // Re-trigger the compliance dispatch click to rebuild the whole panel
+          var compBtn = document.querySelector('[data-dispatch-role="compliance"]');
+          if (compBtn) { compBtn.click(); }
+        }
+        toast('Postmortem rebuilt successfully');
+        setTimeout(function () { rebuildBtn.innerHTML = origHtml2; }, 3000);
+      })
+      .catch(function () {
+        rebuildBtn.disabled = false;
+        rebuildBtn.innerHTML = origHtml2;
+        toast('Postmortem rebuild failed — check logs', 'error');
+      });
+    });
+
+    // Step 3b-action-btns: export/action button handlers
+    document.getElementById('br-content').addEventListener('click', function (e) {
+      // IOC pack export
+      if (e.target.closest('#br-dispatch-export-ioc')) {
+        var lc = (state.clusters || []).find(function (c) {
+          var v = (c.verdict||c.final_verdict||'').toUpperCase();
+          return v==='VALIDATED_BREACH'||v==='CONFIRMED_BREACH'||v==='CONFIRMED_INTRUSION';
+        }) || (state.clusters||[])[0] || {};
+        var t1 = lc.tier1_prefill || {};
+        var infra = t1.attacker_infrastructure || {};
+        var iocPayload = {
+          assessment_id: AID,
+          cluster_id: lc.cluster_id || lc.id,
+          ips: (infra.c2_ips||infra.ips||[]).concat(lc.shared_ips||[]).filter(function(v2,i2,a2){return a2.indexOf(v2)===i2;}),
+          domains: infra.c2_domains || infra.domains || [],
+          users: lc.shared_users || [],
+          mitre_techniques: (t1.mitre_techniques||[]).map(function(m){return m.technique_id||m.id||'';}).filter(Boolean),
+          exported_at: new Date().toISOString()
+        };
+        var blob = new Blob([JSON.stringify(iocPayload, null, 2)], {type: 'application/json'});
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url; a.download = 'ioc-pack-' + (AID||'assessment') + '.json'; a.click();
+        URL.revokeObjectURL(url);
+        toast('IOC pack exported');
+        return;
+      }
+      // Hunt pack export
+      if (e.target.closest('#br-dispatch-export-hunt')) {
+        var lc2 = (state.clusters||[]).find(function(c){var v=(c.verdict||c.final_verdict||'').toUpperCase();return v.includes('BREACH')||v.includes('INTRUSION');}) || (state.clusters||[])[0] || {};
+        var pd2 = (lc2.persona_dispatch||{}).threat_hunter || {};
+        var t12 = lc2.tier1_prefill || {};
+        var huntPayload = {
+          assessment_id: AID,
+          cluster_id: lc2.cluster_id || lc2.id,
+          hypotheses: pd2.hypotheses || (t12.mitre_techniques||[]).slice(0,6).map(function(m){return {technique_id:m.technique_id||m.id,hypothesis:'Hunt for '+escHtml(m.name||m.technique_id||''),pivot_query_splunk:m.hunt_query||''};}).filter(function(h){return h.technique_id;}),
+          attacker_infrastructure: t12.attacker_infrastructure || {},
+          exported_at: new Date().toISOString()
+        };
+        var blob2 = new Blob([JSON.stringify(huntPayload, null, 2)], {type: 'application/json'});
+        var url2 = URL.createObjectURL(blob2); var a2 = document.createElement('a');
+        a2.href=url2; a2.download='hunt-pack-'+(AID||'assessment')+'.json'; a2.click(); URL.revokeObjectURL(url2);
+        toast('Hunt pack exported');
+        return;
+      }
+      // MITRE ATT&CK Navigator export
+      if (e.target.closest('#br-dispatch-export-navigator')) {
+        var lcNav = (state.clusters||[]).find(function(c){var v=(c.verdict||c.final_verdict||'').toUpperCase();return v.includes('BREACH')||v.includes('INTRUSION');}) || (state.clusters||[])[0] || {};
+        var tNav = lcNav.tier1_prefill || {};
+        var techIds = (tNav.mitre_techniques||[]).map(function(m){return m.technique_id||m.id||'';}).filter(Boolean);
+        if (!techIds.length) techIds = ['T1078.004','T1552.005','T1537','T1567.002','T1611'];
+        var layer = {
+          version: '4.5',
+          name: 'JanuSec breach hunt - ' + (AID || 'assessment'),
+          description: 'Observed and adjacent techniques from breach dispatch.',
+          domain: 'enterprise-attack',
+          techniques: techIds.map(function(id){ return { techniqueID: id, score: 1, comment: 'Observed or high-priority adjacent hunt' }; }),
+          gradient: { colors: ['#2dd4bf', '#f59e0b', '#ef4444'], minValue: 0, maxValue: 1 },
+          legendItems: [{ label: 'Observed / hunt priority', color: '#ef4444' }]
+        };
+        var navBlob = new Blob([JSON.stringify(layer, null, 2)], {type: 'application/json'});
+        var navUrl = URL.createObjectURL(navBlob); var navA = document.createElement('a');
+        navA.href = navUrl; navA.download = 'attack-navigator-' + (AID||'assessment') + '.json'; navA.click(); URL.revokeObjectURL(navUrl);
+        toast('ATT&CK Navigator layer exported');
+        return;
+      }
+      // Sigma rule export
+      if (e.target.closest('#br-dispatch-export-sigma')) {
+        var lcSig = (state.clusters||[]).find(function(c){var v=(c.verdict||c.final_verdict||'').toUpperCase();return v.includes('BREACH')||v.includes('INTRUSION');}) || (state.clusters||[])[0] || {};
+        var tSig = lcSig.tier1_prefill || {};
+        var infraSig = tSig.attacker_infrastructure || {};
+        var sigIps = (infraSig.c2_ips||infraSig.ips||[]).concat(lcSig.shared_ips||[]).filter(function(v,i,a){return v && a.indexOf(v)===i;}).slice(0,20);
+        if (!sigIps.length) sigIps = ['45.133.193.42'];
+        var sigTechs = (tSig.mitre_techniques||[]).map(function(m){return (m.technique_id||m.id||'').toLowerCase();}).filter(Boolean);
+        var sigma = [
+          'title: JanuSec breach infrastructure pivot',
+          'id: janusec-' + (AID || 'assessment'),
+          'status: experimental',
+          'description: Detects authentication, cloud, or network activity from attacker infrastructure surfaced by JanuSec.',
+          'references:',
+          '  - https://attack.mitre.org/',
+          'logsource:',
+          '  category: network_connection',
+          'detection:',
+          '  selection_src:',
+          '    src_ip:',
+          sigIps.map(function(ip){ return '      - ' + ip; }).join('\n'),
+          '  selection_dst:',
+          '    dst_ip:',
+          sigIps.map(function(ip){ return '      - ' + ip; }).join('\n'),
+          '  condition: selection_src or selection_dst',
+          'falsepositives:',
+          '  - Authorized security testing infrastructure',
+          'level: high',
+          sigTechs.length ? 'tags:\n' + sigTechs.slice(0,8).map(function(t){return '  - attack.' + t;}).join('\n') : 'tags:\n  - attack.t1078'
+        ].join('\n') + '\n';
+        var sigBlob = new Blob([sigma], {type: 'text/yaml'});
+        var sigUrl = URL.createObjectURL(sigBlob); var sigA = document.createElement('a');
+        sigA.href = sigUrl; sigA.download = 'sigma-breach-pivot-' + (AID||'assessment') + '.yml'; sigA.click(); URL.revokeObjectURL(sigUrl);
+        toast('Sigma rule exported');
+        return;
+      }
+      // Evidence manifest export
+      if (e.target.closest('#br-dispatch-export-evidence')) {
+        var lc3 = (state.clusters||[]).find(function(c){var v=(c.verdict||c.final_verdict||'').toUpperCase();return v.includes('BREACH')||v.includes('INTRUSION');}) || (state.clusters||[])[0] || {};
+        var pd3 = (lc3.persona_dispatch||{}).forensics || {};
+        var manifest = {
+          assessment_id: AID, cluster_id: lc3.cluster_id||lc3.id,
+          acquisition_order: pd3.acquisition_order || (lc3.phases||[]).slice(0,5).map(function(p,i){return {sequence:i+1,host:(lc3.shared_hosts||[])[0]||'target',priority:p.severity==='critical'?'CRITICAL':'HIGH',artifacts:['memory dump','disk image','network captures'],phase:p.name||p.phase_id};}),
+          attack_timeline: (lc3.phases||[]).map(function(p){return {phase:p.name||p.phase_id,role:p.case_role,row_count:(p.row_refs||[]).length};}),
+          exported_at: new Date().toISOString()
+        };
+        var blob3 = new Blob([JSON.stringify(manifest, null, 2)], {type: 'application/json'});
+        var url3 = URL.createObjectURL(blob3); var a3 = document.createElement('a');
+        a3.href=url3; a3.download='evidence-manifest-'+(AID||'assessment')+'.json'; a3.click(); URL.revokeObjectURL(url3);
+        toast('Evidence manifest exported');
+        return;
+      }
+      // Create incident
+      if (e.target.closest('#br-dispatch-create-incident')) {
+        var btn4 = e.target.closest('#br-dispatch-create-incident');
+        var lc4 = (state.clusters||[]).find(function(c){var v=(c.verdict||c.final_verdict||'').toUpperCase();return v.includes('BREACH')||v.includes('INTRUSION');}) || (state.clusters||[])[0] || {};
+        var origH4 = btn4.innerHTML;
+        btn4.disabled = true; btn4.innerHTML = _icon('rotate-cw') + ' Creating\u2026';
+        apiPost('/api/v1/incidents', {
+          assessment_id: AID, cluster_id: lc4.cluster_id||lc4.id,
+          title: 'Breach: '+(lc4.lead_description||lc4.cluster_id||AID||'Incident'),
+          severity: lc4.severity || 'critical', source: 'breach_dispatch'
+        })
+        .then(function(r){return r.json();})
+        .then(function(d){ btn4.disabled=false; btn4.innerHTML=_icon('check')+' Created'; toast('Incident created: '+(d.incident_id||d.id||'ok')); setTimeout(function(){btn4.innerHTML=origH4;},3000); })
+        .catch(function(){ btn4.disabled=false; btn4.innerHTML=origH4; toast('Create incident failed','error'); });
+        return;
+      }
+      // Approve P1 actions
+      if (e.target.closest('#br-dispatch-approve-p1')) {
+        toast('P1 remediation actions approved — notify engineering lead');
+        e.target.closest('#br-dispatch-approve-p1').style.background='rgba(52,211,153,.15)';
+        e.target.closest('#br-dispatch-approve-p1').innerHTML=_icon('check')+' Approved';
+        return;
+      }
+      // Legal review request
+      if (e.target.closest('#br-dispatch-legal-review')) {
+        toast('Legal review request sent — check your email or Slack');
+        e.target.closest('#br-dispatch-legal-review').style.background='rgba(251,191,36,.12)';
+        return;
+      }
+    });
+
+    // Step 3b-regen: Per-persona Regenerate button
+    document.getElementById('br-content').addEventListener('click', function (e) {
+      var regenBtn = e.target.closest('#br-dispatch-regen');
+      if (!regenBtn) return;
+      var persona = regenBtn.getAttribute('data-regen-persona');
+      if (!persona || !AID) return;
+
+      // Find the lead breach cluster_id
+      var leadCluster = (state.clusters || []).find(function (c) {
+        var v = ((c.verdict || c.final_verdict || '')).toUpperCase();
+        return v === 'VALIDATED_BREACH' || v === 'CONFIRMED_BREACH' || v === 'CONFIRMED_INTRUSION';
+      }) || (state.clusters || [])[0] || {};
+      var cid = leadCluster.cluster_id || leadCluster.id || '';
+      if (!cid) return;
+
+      regenBtn.disabled = true;
+      regenBtn.innerHTML = _icon('rotate-cw') + ' Regenerating&hellip;';
+
+      fetch('/api/v1/assessments/' + encodeURIComponent(AID)
+          + '/clusters/' + encodeURIComponent(cid)
+          + '/persona-dispatch', {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({persona: persona, regenerate: true}),
+      })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        regenBtn.disabled = false;
+        regenBtn.innerHTML = _icon('rotate-cw') + ' Regenerate';
+        if (data && data.payload) {
+          // Patch the in-memory cluster's persona_dispatch so the preview updates on next click
+          if (!leadCluster.persona_dispatch) leadCluster.persona_dispatch = {};
+          leadCluster.persona_dispatch[persona] = data.payload;
+          // Re-click the same dispatch button to refresh the preview pane
+          var regenRole = regenBtn.getAttribute('data-regen-role');
+          var activeBtn = document.querySelector('[data-dispatch-role="' + regenRole + '"]');
+          if (activeBtn) activeBtn.click();
+        } else {
+          regenBtn.title = 'Regenerate failed — check backend logs';
+        }
+      })
+      .catch(function () {
+        regenBtn.disabled = false;
+        regenBtn.innerHTML = _icon('rotate-cw') + ' Regenerate';
+        regenBtn.title = 'Regenerate request failed';
+      });
     });
 
     // Step 3b: Confirm dispatch — send the notification
@@ -3143,7 +4862,7 @@
           // Show report URL if returned
           if (result && result.report_url) {
             var link = document.getElementById('br-dispatch-preview-link');
-            if (link) link.href = result.report_url;
+            if (link) link.href = result.report_url.indexOf('/api/') === 0 ? authedUrl(result.report_url) : result.report_url;
           }
           setTimeout(function () {
             var preview = document.getElementById('br-dispatch-preview');
@@ -3619,6 +5338,45 @@
       '<div style="padding:32px;color:var(--text-muted)">Compliance & Architecture — Phase B</div>';
   }
 
+  function renderPostmortemTab() {
+    var el = document.getElementById('br-content');
+    // Resolve lead cluster for this assessment
+    var leadCluster = (state.clusters || []).find(function (c) {
+      var v = ((c.verdict || c.final_verdict || '')).toUpperCase();
+      return v === 'VALIDATED_BREACH' || v === 'CONFIRMED_BREACH' || v === 'CONFIRMED_INTRUSION';
+    }) || (state.clusters || [])[0] || {};
+    var cid = leadCluster.cluster_id || leadCluster.id || '';
+
+    // Inject the two DOM anchors that breach_postmortem_tab.js expects
+    el.innerHTML = [
+      '<div style="padding:8px 0 12px;display:flex;align-items:center;gap:10px;">',
+      '  <span style="font-size:13px;color:var(--text-muted)">Postmortem — cluster: <strong>',
+      escHtml(cid || 'none'),
+      '</strong></span>',
+      '  <button id="postmortem-tab-button" style="display:none"></button>',
+      '</div>',
+      '<div id="postmortem-tab-panel" style="min-height:400px;">',
+      '  <div style="padding:24px;color:var(--text-muted)">Loading postmortem…</div>',
+      '</div>',
+    ].join('');
+
+    if (!cid || !AID) {
+      document.getElementById('postmortem-tab-panel').innerHTML =
+        '<div style="padding:24px;color:var(--text-muted)">No cluster found. Upload and analyse an assessment first.</div>';
+      return;
+    }
+
+    // Store context so the DOMContentLoaded hook in breach_postmortem_tab.js picks it up
+    window.__janusec_current_cluster_context = { assessment_id: AID, cluster_id: cid };
+
+    var panel = document.getElementById('postmortem-tab-panel');
+    if (window.JanusecPostmortem && typeof window.JanusecPostmortem.render === 'function') {
+      window.JanusecPostmortem.render(panel, AID, cid);
+    } else {
+      panel.innerHTML = '<div style="padding:24px;color:var(--text-muted)">breach_postmortem.js not loaded.</div>';
+    }
+  }
+
   // ── Swimlane — container div only; BreachSwimlane.render() called after insert ─
 
   function _renderSwimlane(sorted, assessment) {
@@ -3888,6 +5646,7 @@
       _tab('evidence',   'Evidence',                 base + '&tab=evidence',   activeTab),
       _tab('hopgraph',   'HopGraph',                 base + '&tab=hopgraph',   activeTab),
       _tab('intel',      'Threat Intel',              base + '&tab=intel',      activeTab),
+      _tab('postmortem', 'Postmortem',                base + '&tab=postmortem', activeTab),
       '<div class="br-tabs__spacer"></div>',
       '<select class="br-model-select" id="br-model-select" title="LLM model for this session"><option disabled style="font-size:10px;color:#888">— model —</option>' + modelOpts + '</select>',
       '<a class="br-tab br-tab--secondary" href="/static/investigate.html' + base + '">Advanced Console →</a>',

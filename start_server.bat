@@ -15,19 +15,17 @@ if errorlevel 1 (
 REM Install requirements if needed
 echo [1/4] Checking dependencies...
 REM Core API + uploads + webhooks + metrics + PDF reports + Excel/PDF parsing
-pip install -q fastapi uvicorn aiofiles pandas python-multipart httpx prometheus-client reportlab openpyxl pypdf pdfplumber 2>nul
+pip install -q fastapi uvicorn aiofiles pandas python-multipart httpx prometheus-client reportlab openpyxl pypdf pdfplumber duckdb 2>nul
 
 REM Set environment variables
 echo [2/4] Configuring environment...
 set PYTHONPATH=%cd%
 set EVENT_QUEUE_MAX=2000
 set ACCESS_LOG_SAMPLE_RATE=0.5
-REM Generate a unique API key if not provided
-if not defined API_KEYS_JSON (
-    for /f "usebackq delims=" %%A in (`python -c "import secrets; print(secrets.token_urlsafe(32))"`) do set API_KEY=%%A
-    set API_KEYS_JSON=[{"key":"%API_KEY%","scopes":["*"]}]
-    echo INFO: Generated API key for this session: %API_KEY%
-)
+REM Local dev API key. Override any inherited malformed value so strict auth works.
+if not defined API_KEY set API_KEY=devkey123
+set API_KEYS_JSON=[{^"key^":^"%API_KEY%^",^"scopes^":[^"*^"]}]
+echo INFO: Using local dev API key for this session: %API_KEY%
 REM CB-2: Auto-generate secrets if not set — never use hard-coded dev defaults in production
 if not defined AUDIT_CHAIN_SECRET (
     for /f "usebackq delims=" %%A in (`python -c "import secrets; print(secrets.token_urlsafe(32))"`) do set AUDIT_CHAIN_SECRET=%%A

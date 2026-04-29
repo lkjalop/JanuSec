@@ -131,36 +131,86 @@ _SABSA_LAYERS = [
 def _build_grc_prefill(assessment: dict) -> dict:
     """Build a GRC compliance pre-fill block from assessment data.
 
-    Extracts MITRE techniques from all clusters, maps them to control frameworks,
-    identifies gaps, and structures SABSA architectural evidence requirements.
+    First tries to pull the rich persona_dispatch.compliance payload from the
+    lead breach cluster (populated by Stage 5d). Falls back to a simpler
+    MITRE→controls mapping if dispatch data is unavailable.
     """
-    techniques: set[str] = set()
-    for cluster in (assessment.get('clusters') or []):
-        p = cluster.get('tier1_prefill') or {}
-        for t in (p.get('mitre_techniques') or []):
-            tid = str(t).upper()[:7].replace(' ', '').split('-')[0]
-            if tid.startswith('T'):
-                techniques.add(tid)
-        for t in (cluster.get('top_mitre') or []):
-            tid = str(t).upper()[:7].replace(' ', '').split('-')[0]
-            if tid.startswith('T'):
-                techniques.add(tid)
+    # ── Prefer persona_dispatch.compliance from the lead cluster ─────────────
+    for key in ('analysis_clusters', 'clusters', 'correlation_clusters'):
+        for cluster in (assessment.get(key) or []):
+            verdict = str(cluster.get('verdict') or cluster.get('final_verdict') or '').upper()
+            if verdict not in ('VALIDATED_BREACH', 'CONFIRMED_BREACH', 'CONFIRMED_INTRUSION',
+                               'LIKELY_BREACH', 'LIKELY_COMPROMISE'):
+                continue
+            pd = cluster.get('persona_dispatch') or {}
+            comp = pd.get('compliance') or {}
+            if comp.get('control_failures'):
+                control_gaps = [
+                    {
+                        'technique': ', '.join(cf.get('triggered_by') or []),
+                        'framework': cf.get('framework', ''),
+                        'control': cf.get('control_id', ''),
+                        'title': cf.get('control_name', ''),
+                        'severity': cf.get('severity', ''),
+                        'priority': cf.get('remediation_priority', ''),
+                    }
+                    for cf in comp['control_failures']
+                ]
+                reg_triggers = comp.get('regulatory_triggers') or []
+                notification_triggers = [
+                    (f"{t.get('name','')}: {t.get('rationale','')}"
+                     + (f" (deadline: {t.get('clock_seconds', 0) // 3600}h)" if t.get('clock_seconds') else ''))
+                    for t in reg_triggers
+                ]
+                isms = comp.get('isms_summary') or {}
+                return {
+                    'techniques': list({t for cf in comp['control_failures'] for t in (cf.get('triggered_by') or [])}),
+                    'control_gaps': control_gaps,
+                    'notification_triggers': notification_triggers,
+                    'sabsa_layers': _SABSA_LAYERS,
+                    'frameworks_triggered': list({cf.get('framework', '') for cf in comp['control_failures']}),
+                    'total_business_impact_usd': comp.get('total_business_impact_usd', 0),
+                    'impact_notes': comp.get('impact_notes') or [],
+                    'cve_context': comp.get('cve_context') or {},
+                    'cross_framework_evidence': comp.get('cross_framework_evidence') or {},
+                    'auditor_insights': comp.get('auditor_insights') or [],
+                    'remediation_roadmap': comp.get('remediation_roadmap') or {},
+                    'isms_summary': isms,
+                    'headline': comp.get('headline', ''),
+                    'risk_register_entries': comp.get('risk_register_entries') or [],
+                }
 
-    control_gaps: list[dict] = []
+    # ── Fallback: infer MITRE from cluster data ────────────────────────────
+    techniques: set[str] = set()
+    for key in ('analysis_clusters', 'clusters', 'correlation_clusters'):
+        for cluster in (assessment.get(key) or []):
+            p = cluster.get('tier1_prefill') or {}
+            for t in (p.get('mitre_techniques') or []):
+                tid = str(t).upper()[:7].replace(' ', '').split('-')[0]
+                if tid.startswith('T'):
+                    techniques.add(tid)
+            for t in (cluster.get('top_mitre') or []):
+                tid = str(t).upper()[:7].replace(' ', '').split('-')[0]
+                if tid.startswith('T'):
+                    techniques.add(tid)
+            if not techniques:
+                try:
+                    from src.analysis.framework_mapper import _infer_mitre_from_cluster
+                    techniques.update(_infer_mitre_from_cluster(cluster))
+                except Exception:
+                    pass
+
+    control_gaps = []
     seen_ctrl: set[str] = set()
     for tid in sorted(techniques):
         for t_prefix, controls in _MITRE_CONTROL_MAP.items():
             if tid.startswith(t_prefix):
                 for ctrl in controls:
-                    key = ctrl['framework'] + '|' + ctrl['control']
-                    if key not in seen_ctrl:
-                        seen_ctrl.add(key)
-                        control_gaps.append({
-                            'technique': tid,
-                            **ctrl,
-                        })
+                    k2 = ctrl['framework'] + '|' + ctrl['control']
+                    if k2 not in seen_ctrl:
+                        seen_ctrl.add(k2)
+                        control_gaps.append({'technique': tid, **ctrl})
 
-    # Identify notification obligations
     notification_triggers: list[str] = []
     verdict = str(assessment.get('verdict') or '').upper()
     if 'BREACH' in verdict or 'INTRUSION' in verdict or 'COMPROMISE' in verdict:
@@ -500,31 +550,102 @@ async def report_ingestion(
                 grc_html = ''
                 grc = report.get('_grc_prefill')
                 if grc and persona_selected in ('compliance', 'ciso'):
+                    # ── Impact banner ──────────────────────────────────────
+                    impact_usd = grc.get('total_business_impact_usd') or 0
+                    headline = grc.get('headline') or ''
+                    impact_html = ''
+                    if impact_usd or headline:
+                        impact_html = (
+                            '<div style="margin-bottom:12px;padding:10px 14px;background:rgba(239,68,68,.08);'
+                            'border-left:3px solid #ef4444;border-radius:4px">'
+                            + (f'<div style="color:#f87171;font-weight:700;font-size:13px">{escape(headline)}</div>' if headline else '')
+                            + (f'<div style="color:#fca5a5;font-size:12px;margin-top:4px">Estimated business impact: '
+                               f'<strong>${impact_usd:,.0f}</strong></div>' if impact_usd else '')
+                            + ''.join(f'<div style="color:#94a3b8;font-size:12px">{escape(n.get("label","") + ": $" + str(n.get("amount_usd","")) if isinstance(n,dict) else str(n))}</div>'
+                                      for n in (grc.get('impact_notes') or [])[:4])
+                            + '</div>'
+                        )
+
+                    # ── Control failures table ──────────────────────────────
                     gaps_rows = ''.join(
-                        f'<tr><td style="padding:4px 8px;color:#94a3b8">{escape(g.get("technique",""))}</td>'
-                        f'<td style="padding:4px 8px;color:#e2e8f0">{escape(g.get("framework",""))}</td>'
-                        f'<td style="padding:4px 8px;color:#94a3b8">{escape(g.get("control",""))}</td>'
-                        f'<td style="padding:4px 8px">{escape(g.get("title",""))}</td></tr>'
-                        for g in (grc.get('control_gaps') or [])[:20]
+                        f'<tr><td style="padding:4px 8px;color:#94a3b8;font-size:11px">{escape(g.get("technique",""))}</td>'
+                        f'<td style="padding:4px 8px;color:#e2e8f0;font-size:11px">{escape(str(g.get("framework","")).upper())}</td>'
+                        f'<td style="padding:4px 8px;color:#94a3b8;font-size:11px">{escape(g.get("control",""))}</td>'
+                        f'<td style="padding:4px 8px;font-size:11px">{escape(g.get("title") or g.get("control_name",""))}</td>'
+                        f'<td style="padding:4px 8px;text-align:center"><span style="background:{"rgba(239,68,68,.15)" if g.get("severity") in ("critical","high") else "rgba(251,191,36,.1)"};'
+                        f'color:{"#f87171" if g.get("severity") in ("critical","high") else "#fbbf24"};padding:1px 6px;border-radius:3px;font-size:10px">{escape(str(g.get("severity","")).upper())}</span></td>'
+                        f'<td style="padding:4px 8px;color:#818cf8;font-size:11px">{escape(g.get("priority",""))}</td></tr>'
+                        for g in (grc.get('control_gaps') or [])[:30]
                     )
-                    notifs = ''.join(f'<li style="margin:4px 0">{escape(n)}</li>' for n in (grc.get('notification_triggers') or []))
+                    notifs = ''.join(f'<li style="margin:4px 0;font-size:12px">{escape(n)}</li>' for n in (grc.get('notification_triggers') or []))
+
+                    # ── CVE cross-walk / framework evidence ─────────────────
+                    xfw_html = ''
+                    xfw = grc.get('cross_framework_evidence') or {}
+                    if xfw:
+                        xfw_rows = ''.join(
+                            f'<tr><td style="padding:4px 8px;color:#a78bfa;font-size:11px">{escape(k)}</td>'
+                            f'<td style="padding:4px 8px;color:#94a3b8;font-size:11px">{escape(", ".join(v) if isinstance(v,list) else str(v))}</td></tr>'
+                            for k, v in list(xfw.items())[:10]
+                        )
+                        xfw_html = (
+                            '<h4 style="color:#a78bfa;margin:14px 0 8px;font-size:12px">Framework Crosswalk Evidence</h4>'
+                            f'<table style="width:100%;border-collapse:collapse;font-size:11px"><tbody>{xfw_rows}</tbody></table>'
+                        )
+
+                    # ── Auditor questions ───────────────────────────────────
+                    auditor_html = ''
+                    asks = grc.get('auditor_insights') or []
+                    if asks:
+                        asks_items = ''.join(f'<li style="margin:4px 0;font-size:12px;color:#cbd5e1">{escape(str(a))}</li>' for a in asks[:8])
+                        auditor_html = (
+                            '<h4 style="color:#60a5fa;margin:14px 0 8px;font-size:12px">Auditor Questions</h4>'
+                            f'<ul style="margin:0;padding-left:16px">{asks_items}</ul>'
+                        )
+
+                    # ── Remediation roadmap ─────────────────────────────────
+                    roadmap_html = ''
+                    roadmap = grc.get('remediation_roadmap') or {}
+                    if roadmap:
+                        rmap_rows = ''.join(
+                            f'<tr style="border-top:1px solid rgba(99,102,241,.1)">'
+                            f'<td style="padding:6px 8px;color:#818cf8;font-weight:700;font-size:11px">{escape(k.upper())}</td>'
+                            f'<td style="padding:6px 8px"><ul style="margin:0;padding-left:14px">'
+                            + ''.join(f'<li style="font-size:11px;color:#cbd5e1;margin:2px 0">{escape(str(item))}</li>'
+                                      for item in (v if isinstance(v, list) else [v])[:5])
+                            + '</ul></td></tr>'
+                            for k, v in roadmap.items()
+                        )
+                        roadmap_html = (
+                            '<h4 style="color:#34d399;margin:14px 0 8px;font-size:12px">Remediation Roadmap</h4>'
+                            f'<table style="width:100%;border-collapse:collapse">{rmap_rows}</table>'
+                        )
+
+                    # ── SABSA ───────────────────────────────────────────────
                     sabsa_rows = ''.join(
-                        f'<tr><td style="padding:4px 8px;font-weight:600;color:#a78bfa">{escape(l[0])}</td>'
-                        f'<td style="padding:4px 8px;color:#94a3b8">{escape(l[1])}</td></tr>'
+                        f'<tr><td style="padding:4px 8px;font-weight:600;color:#a78bfa;font-size:11px">{escape(l[0])}</td>'
+                        f'<td style="padding:4px 8px;color:#94a3b8;font-size:11px">{escape(l[1])}</td></tr>'
                         for l in (grc.get('sabsa_layers') or [])
                     )
                     grc_html = (
                         '<div style="margin-top:16px;padding:16px;background:#0a0f1e;border:1px solid rgba(167,139,250,.3);border-radius:6px">'
-                        '<h4 style="color:#a78bfa;margin:0 0 12px">Compliance Control Gaps (GRC Pre-fill)</h4>'
+                        '<h4 style="color:#a78bfa;margin:0 0 12px;font-size:13px">Compliance Control Analysis</h4>'
+                        + impact_html
                         + (f'<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr>'
-                           '<th style="text-align:left;padding:4px 8px;color:#64748b">Technique</th>'
-                           '<th style="text-align:left;padding:4px 8px;color:#64748b">Framework</th>'
-                           '<th style="text-align:left;padding:4px 8px;color:#64748b">Control</th>'
-                           '<th style="text-align:left;padding:4px 8px;color:#64748b">Gap</th></tr></thead>'
+                           '<th style="text-align:left;padding:4px 8px;color:#64748b;font-size:10px">TECHNIQUE</th>'
+                           '<th style="text-align:left;padding:4px 8px;color:#64748b;font-size:10px">FRAMEWORK</th>'
+                           '<th style="text-align:left;padding:4px 8px;color:#64748b;font-size:10px">CONTROL</th>'
+                           '<th style="text-align:left;padding:4px 8px;color:#64748b;font-size:10px">GAP</th>'
+                           '<th style="text-align:left;padding:4px 8px;color:#64748b;font-size:10px">SEV</th>'
+                           '<th style="text-align:left;padding:4px 8px;color:#64748b;font-size:10px">PRI</th></tr></thead>'
                            f'<tbody>{gaps_rows}</tbody></table>' if gaps_rows else '')
-                        + (f'<h4 style="color:#f87171;margin:12px 0 8px">Notification Obligations</h4><ul style="margin:0;padding-left:16px;font-size:12px;color:#fca5a5">{notifs}</ul>' if notifs else '')
-                        + (f'<h4 style="color:#60a5fa;margin:12px 0 8px">SABSA Architectural Evidence Required</h4>'
-                           f'<table style="width:100%;border-collapse:collapse;font-size:12px"><tbody>{sabsa_rows}</tbody></table>' if sabsa_rows else '')
+                        + xfw_html
+                        + auditor_html
+                        + roadmap_html
+                        + (f'<h4 style="color:#f87171;margin:12px 0 8px;font-size:12px">Notification Obligations</h4>'
+                           f'<ul style="margin:0;padding-left:16px;color:#fca5a5">{notifs}</ul>' if notifs else '')
+                        + (f'<h4 style="color:#60a5fa;margin:12px 0 8px;font-size:12px">SABSA Architectural Evidence</h4>'
+                           f'<table style="width:100%;border-collapse:collapse;font-size:11px"><tbody>{sabsa_rows}</tbody></table>' if sabsa_rows else '')
                         + '</div>'
                     )
                 model_html = (
