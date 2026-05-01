@@ -504,6 +504,12 @@ FACTOR_TO_OWASP_LLM = {
     'training_data_poisoning': ['LLM09: Training Data Poisoning']
 }
 
+# CASB / DLP factor mappings
+FACTOR_TO_MITRE.update({
+    'dlp:casb_policy_match':   ['T1213', 'T1530'],
+    'dlp:crowdstrike_fp_match': ['T1565', 'T1213'],
+})
+
 def get_all_mappings(factors: list[str]) -> dict[str, list[str]]:
     """Return combined mapping tags: ATT&CK techniques, ATLAS, and OWASP LLM.
 

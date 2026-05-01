@@ -790,4 +790,108 @@ def detect_insider_threats(events: List[Dict[str, Any]] | None) -> List[Dict[str
     return _dedup_highest_score(factors)
 
 
-__all__ = ['detect_advanced_endpoint_threats', 'detect_advanced_threats', 'detect_insider_threats']
+# ---------------------------------------------------------------------------
+# CASB / DLP detector
+# ---------------------------------------------------------------------------
+
+_CASB_DLP_SOURCES = {'netskope', 'zscaler', 'forcepoint', 'mcafee', 'symantec', 'iboss'}
+_CASB_DLP_OPS = {
+    'dlpalert', 'dlpincident', 'ziadlpalert', 'forcepointdlpincident',
+    'dlp_alert', 'dlp_incident', 'casb_dlp',
+}
+_SEVERITY_SCORE = {'critical': 0.95, 'high': 0.85, 'medium': 0.70, 'low': 0.50, 'info': 0.40}
+
+
+def detect_casb_dlp_threats(events: List[Dict[str, Any]] | None) -> List[Dict[str, Any]]:
+    """Detect DLP policy matches from CASB / SSE connector events.
+
+    Fires the ``dlp:casb_policy_match`` factor when a CASB event signals a
+    DLP rule hit.  Handles Netskope, Zscaler, Forcepoint and generic CASB
+    event shapes.
+    """
+    if not events:
+        return []
+    factors: List[Dict[str, Any]] = []
+    for ev in events:
+        if not isinstance(ev, dict):
+            continue
+        source = str(ev.get('source_kind') or ev.get('source') or '').lower()
+        op = str(ev.get('operation') or ev.get('event_type') or ev.get('type') or '').lower()
+        dlp_rule = ev.get('dlp_rule') or ev.get('dlp_profile') or ev.get('policy')
+        severity = str(ev.get('severity') or 'info').lower()
+
+        # Determine if this is a CASB DLP signal
+        from_casb_source = source in _CASB_DLP_SOURCES
+        dlp_op = any(d in op for d in _CASB_DLP_OPS) or 'dlp' in op
+        has_dlp_rule = bool(dlp_rule)
+
+        if not from_casb_source:
+            continue
+        if not (dlp_op or has_dlp_rule):
+            continue
+
+        score = _SEVERITY_SCORE.get(severity, 0.55)
+        factors.append({
+            'factor': 'dlp:casb_policy_match',
+            'score': score,
+            'reason': f'CASB DLP policy match from {source}: rule={dlp_rule or op}',
+            'source': source,
+            'dlp_rule': str(dlp_rule or op),
+            'user': _event_user(ev),
+            'severity': severity,
+            'tags': ['ATTACK:T1213', 'DLP:TRUE', 'STRIDE:information'],
+        })
+    return _dedup_highest_score(factors)
+
+
+# ---------------------------------------------------------------------------
+# CrowdStrike Falcon Data Protection detector
+# ---------------------------------------------------------------------------
+
+_CS_SOURCES = {'crowdstrike', 'falcon', 'cs_falcon'}
+_CS_FDP_OPS = {'sensitivedataevent', 'fdpalert', 'dlpalert', 'data_protection_alert'}
+
+
+def detect_crowdstrike_fdp_threats(events: List[Dict[str, Any]] | None) -> List[Dict[str, Any]]:
+    """Detect CrowdStrike Falcon Data Protection (FDP) file-exfil signals.
+
+    Fires ``dlp:crowdstrike_fp_match`` on CrowdStrike source events that
+    indicate sensitive file access or DLP policy violations.
+    """
+    if not events:
+        return []
+    factors: List[Dict[str, Any]] = []
+    for ev in events:
+        if not isinstance(ev, dict):
+            continue
+        source = str(ev.get('source_kind') or ev.get('source') or '').lower()
+        op = str(ev.get('event_type') or ev.get('operation') or ev.get('type') or '').lower()
+        severity = str(ev.get('severity') or 'high').lower()
+
+        if not any(s in source for s in _CS_SOURCES):
+            continue
+        if not any(o in op for o in _CS_FDP_OPS):
+            continue
+
+        score = min(0.98, _SEVERITY_SCORE.get(severity, 0.75) + 0.05)
+        factors.append({
+            'factor': 'dlp:crowdstrike_fp_match',
+            'score': score,
+            'reason': f'CrowdStrike FDP alert: {op} by {ev.get("UserName") or _event_user(ev) or "unknown"}',
+            'source': source,
+            'user': ev.get('UserName') or _event_user(ev),
+            'device': ev.get('DeviceName') or ev.get('hostname'),
+            'file_path': ev.get('FilePath') or ev.get('file_path'),
+            'severity': severity,
+            'tags': ['ATTACK:T1565', 'DLP:TRUE', 'CROWDSTRIKE:FDP'],
+        })
+    return _dedup_highest_score(factors)
+
+
+__all__ = [
+    'detect_advanced_endpoint_threats',
+    'detect_advanced_threats',
+    'detect_insider_threats',
+    'detect_casb_dlp_threats',
+    'detect_crowdstrike_fdp_threats',
+]

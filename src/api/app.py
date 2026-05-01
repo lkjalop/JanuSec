@@ -6676,6 +6676,12 @@ try:
 except Exception:
     logger.debug('Failed to include capture_router')
 try:
+    from .connectors_sse import router as connectors_sse_router
+    app.include_router(connectors_sse_router)
+    logger.info('Included connectors SSE router')
+except Exception:
+    logger.debug('Failed to include connectors_sse_router')
+try:
     from .ingest_controller_endpoints import router as unified_ingest_router
     app.include_router(unified_ingest_router)
     logger.info('Included unified ingestion controller router')
