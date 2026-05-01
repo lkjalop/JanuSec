@@ -73,11 +73,59 @@ def _build_enrichment_context(all_rows: list[dict[str, Any]]) -> str:
     return '\n\n'.join(parts)
 
 
+def _fmt_dread_block(dread_score: dict[str, Any]) -> str:
+    """Format DREAD score dict as a compact prompt block."""
+    total = dread_score.get('total', 0)
+    tier  = dread_score.get('risk_tier', '?')
+    lines = [f"  Total={total}/50 — {tier} RISK"]
+    for dim, key, detail_key in [
+        ('Damage',          'damage',          'damage_detail'),
+        ('Reproducibility', 'reproducibility', 'reproducibility_detail'),
+        ('Exploitability',  'exploitability',  'exploitability_detail'),
+        ('Affected Users',  'affected_users',  'affected_users_detail'),
+        ('Discoverability', 'discoverability', 'discoverability_detail'),
+    ]:
+        score = dread_score.get(key, '?')
+        detail = str(dread_score.get(detail_key) or '').strip(' .')
+        lines.append(f"  {dim}={score}  ({detail})" if detail else f"  {dim}={score}")
+    return '\n'.join(lines)
+
+
+def _fmt_diamond_block(diamond: dict[str, Any]) -> str:
+    """Format Diamond model dict as a compact prompt block."""
+    lines = []
+    for label, key in [
+        ('Adversary',      'adversary'),
+        ('Capability',     'capability'),
+        ('Infrastructure', 'infrastructure'),
+        ('Victim',         'victim_users'),
+    ]:
+        val = diamond.get(key) or diamond.get('victim_hosts') if key == 'victim_users' else diamond.get(key)
+        if isinstance(val, list):
+            val = ', '.join(str(v) for v in val[:4])
+        if val:
+            lines.append(f"  {label:<14} {val}")
+    victim_data = diamond.get('victim_data')
+    if victim_data:
+        if isinstance(victim_data, list):
+            victim_data = ', '.join(str(v) for v in victim_data[:3])
+        lines.append(f"  {'Victim data':<14} {victim_data}")
+    return '\n'.join(lines) or '  (no diamond data)'
+
+
 def build_cluster_prefill_prompt(
     cluster: dict[str, Any],
     rows: list[dict[str, Any]],
     all_assessment_rows: list[dict[str, Any]] | None = None,
     attack_sequence: str = '',
+    # Block 3.4 — structured pre-computed intelligence
+    event_chain_summary: str = '',
+    kill_chain_summary: str = '',
+    adversarial_sequence: bool = False,
+    adversarial_sequence_detail: str = '',
+    dread_score: dict[str, Any] | None = None,
+    diamond_model: dict[str, Any] | None = None,
+    pasta_summary: dict[str, Any] | None = None,
 ) -> str:
     cid = cluster.get('cluster_id', 'unknown')
     severity = cluster.get('severity') or cluster.get('risk_level') or 'unknown'
@@ -160,6 +208,44 @@ def build_cluster_prefill_prompt(
         if attack_sequence else ''
     )
 
+    # ── Block 3.4: Structured pre-computed intelligence section ───────────────
+    intel_parts: list[str] = []
+    if kill_chain_summary:
+        intel_parts.append(f'KILL CHAIN:   {kill_chain_summary}')
+    if event_chain_summary:
+        indented = event_chain_summary.replace('\n', '\n  ')
+        intel_parts.append(f'EVENT CHAIN:\n  {indented}')
+    if dread_score:
+        intel_parts.append('DREAD SCORE:\n' + _fmt_dread_block(dread_score))
+    if diamond_model:
+        intel_parts.append('DIAMOND MODEL:\n' + _fmt_diamond_block(diamond_model))
+    if pasta_summary:
+        bi = str(pasta_summary.get('business_impact') or '').strip()
+        ep = str(pasta_summary.get('exploitation_path') or '').strip()
+        if bi:
+            intel_parts.append(f'BUSINESS IMPACT:  {bi}')
+        if ep:
+            intel_parts.append(f'EXPLOITATION PATH: {ep}')
+    if adversarial_sequence and adversarial_sequence_detail:
+        intel_parts.append(f'ADVERSARIAL SEQUENCE DETECTED: Yes — {adversarial_sequence_detail}')
+
+    intel_section = (
+        '\nSTRUCTURED INTELLIGENCE (pre-computed from telemetry — treat as ground truth for narrative and evidence chain):\n'
+        + '\n'.join(intel_parts) + '\n'
+        if intel_parts else ''
+    )
+
+    # Instruction addendum when structured intelligence is available
+    intel_guidance = (
+        '\nNARRATIVE GUIDANCE (apply when STRUCTURED INTELLIGENCE is present above):\n'
+        '  • what_happened: anchor to BUSINESS IMPACT + KILL CHAIN above. 2-3 sentences for a non-technical CEO.\n'
+        '  • short_narrative: 1 sentence derived from KILL CHAIN (e.g. "Attacker stole a session token, escalated to admin, and exported customer data").\n'
+        '  • evidence_chain: align steps to KILL CHAIN order. Each step cites the row_refs from EVENT CHAIN.\n'
+        '  • observed_impact.data: use DREAD damage_detail data types.\n'
+        '  • root_cause: use DREAD exploitability_detail as the initial vector.\n'
+        if intel_parts else ''
+    )
+
     return f"""You are a senior security analyst producing a structured incident assessment.
 Your output will be read by both technical analysts (evidence chain, MITRE, actions)
 and non-technical executives (what_happened, root_cause, short_narrative).
@@ -169,7 +255,7 @@ SEVERITY: {severity}
 VERDICT: {verdict}
 ROW COUNT: {row_count}
 SOURCES: {', '.join(sources) or 'unknown'}
-{enrichment_section}{attack_sequence_section}
+{enrichment_section}{intel_section}{intel_guidance}{attack_sequence_section}
 CORRELATION PIVOT REASONS (why these rows were clustered together):
 {pivot_block}
 
@@ -178,33 +264,6 @@ ENTITIES ALLOWED — only reference entities listed below. Do NOT invent any nam
 
 EVIDENCE ROWS (ordered by row_index, highest severity first):
 {rows_block}
-
-━━━ REASONING STEPS (write in "reasoning" field — will NOT be shown to users) ━━━
-
-STEP 1 — EVIDENCE INVENTORY
-  List every unique data point you have: accounts, IPs, hosts, timestamps, actions.
-  Can you build a coherent timeline? If not, what is missing?
-
-STEP 2 — ADVERSARIAL CHECK
-  a) Write the strongest BENIGN explanation (pentest, misconfiguration, user error, approved IT change).
-  b) List every row that contradicts the benign explanation.
-  c) Final verdict: if >60% of rows cannot be explained benignly, verdict is REAL.
-
-STEP 3 — MULTI-HOP INTERROGATION (critical — do not skip)
-  If your hypothesis is correct, what additional evidence WOULD you expect to find?
-  For each expected evidence item: is it present in the rows above?
-  For each ABSENT expected item: does its absence weaken or strengthen your hypothesis?
-  Ask yourself: "Am I missing any evidence that would change my assessment?"
-
-STEP 4 — ROOT CAUSE vs OBSERVED ACTIVITY
-  Root cause: what vulnerability, misconfiguration, or gap ENABLED this attack?
-    (examples: no MFA, weak password policy, unpatched CVE, over-privileged account)
-  Observed activity: what did the attacker actually DO, step by step?
-
-STEP 5 — IMPACT CHAIN
-  Identity: which accounts are compromised or at risk?
-  Data: what data was accessed, exfiltrated, or at risk?
-  Operational: what systems or services are disrupted or at risk?
 
 ━━━ OUTPUT RULES ━━━
 1. Return ONLY valid JSON. No markdown, no text outside the JSON object.
@@ -228,14 +287,25 @@ STEP 5 — IMPACT CHAIN
 14. short_narrative: same as what_happened but 1 sentence — for card headline.
 15. verdict_reasoning: 1-2 sentences WHY this verdict, citing specific row indices.
 16. mitre_evidence_map: map technique_id → [row_index integers] — ONLY if row evidence supports it.
+17. CRITICAL: Do NOT include a "reasoning" key or any chain-of-thought text in the JSON. Output ONLY the keys listed in the schema below.
 
-Return this exact JSON schema (all fields required):
+Return this exact JSON schema. Write fields in this EXACT ORDER. Do NOT add a "reasoning" key or any key not listed below — extra keys corrupt the parse:
 {{
-  "reasoning": "<STEP 1-5 scratchpad — adversarial check + multi-hop interrogation>",
   "incident_name": "EXAMPLE INCIDENT",
   "headline_subtitle": "attacker did X to target Y",
+  "short_narrative": "One-sentence plain English summary.",
+  "verdict_reasoning": "WHY this verdict, citing row_X.",
   "what_happened": "Plain English 2-3 sentence story for executives.",
   "root_cause": "One sentence on what enabled this attack.",
+  "observed_impact": {{
+    "identity": ["affected.account@corp.com"],
+    "data": "What data was accessed or at risk.",
+    "operational": "What system or service is disrupted."
+  }},
+  "confidence_rationale": ["Bullet 1", "Bullet 2", "Bullet 3"],
+  "mitre_techniques": ["T1234"],
+  "mitre_evidence_map": {{"T1234": [0, 3]}},
+  "top_actions": ["Rotate compromised credentials", "Isolate affected host"],
   "evidence_chain": [
     {{
       "step": 1,
@@ -244,11 +314,6 @@ Return this exact JSON schema (all fields required):
       "why_significant": "Why this step matters in the attack chain."
     }}
   ],
-  "observed_impact": {{
-    "identity": ["affected.account@corp.com"],
-    "data": "What data was accessed or at risk.",
-    "operational": "What system or service is disrupted."
-  }},
   "evidence_gaps": [
     {{
       "gap": "What evidence is absent.",
@@ -256,7 +321,6 @@ Return this exact JSON schema (all fields required):
       "significance": "high | medium | low"
     }}
   ],
-  "confidence_rationale": ["Bullet 1", "Bullet 2", "Bullet 3"],
   "immediate_actions": [
     {{
       "priority": "P1",
@@ -271,11 +335,7 @@ Return this exact JSON schema (all fields required):
         }}
       ]
     }}
-  ],
-  "short_narrative": "One-sentence plain English summary.",
-  "verdict_reasoning": "WHY this verdict, citing row_X.",
-  "mitre_techniques": ["T1234"],
-  "mitre_evidence_map": {{"T1234": [0, 3]}}
+  ]
 }}"""
 
 

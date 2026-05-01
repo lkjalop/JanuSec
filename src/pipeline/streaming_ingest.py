@@ -48,11 +48,13 @@ from __future__ import annotations
 import asyncio
 import collections
 import hashlib
+import ipaddress
 import logging
 import re
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any, Deque, Dict, Iterable, List, Optional, Set, Tuple
 
 logger = logging.getLogger(__name__)
@@ -67,6 +69,9 @@ CIRCUIT_BREAKER_COOLDOWN = 30.0  # seconds to throttle a tripped source
 DEDUP_WINDOW_S = 60.0     # rolling dedup window per source
 BUCKET_CAP = 200          # max rows per inverted-index key (super-node protection)
 MAX_CLUSTERS_RENDERED = 50  # cap clusters returned to frontend to avoid serialization explosion
+
+# Bump when field derivation logic changes so assessment_worker can detect stale stored rows.
+_NORMALIZER_VERSION = "1.3"
 
 # ── Source type constants ──────────────────────────────────────────────────────
 
@@ -83,21 +88,26 @@ _SOURCE_ALIASES: Dict[str, str] = {
     'aws': SOURCE_CLOUD, 'azure': SOURCE_CLOUD, 'gcp': SOURCE_CLOUD,
     'cloudtrail': SOURCE_CLOUD, 'azure_activity': SOURCE_CLOUD, 'gcs': SOURCE_CLOUD,
     's3': SOURCE_CLOUD, 'vpcflow': SOURCE_CLOUD, 'guardduty': SOURCE_CLOUD,
+    'snowflake': SOURCE_CLOUD,                          # Snowflake query logs
     # IAM
     'okta': SOURCE_IAM, 'entra': SOURCE_IAM, 'aad': SOURCE_IAM, 'sailpoint': SOURCE_IAM,
     'pingidentity': SOURCE_IAM, 'azure_signin': SOURCE_IAM, 'azure_audit': SOURCE_IAM,
     'active_directory': SOURCE_IAM, 'ldap': SOURCE_IAM,
-    # Email
+    # Email / M365
     'exchange': SOURCE_EMAIL, 'o365': SOURCE_EMAIL, 'gmail': SOURCE_EMAIL,
     'proofpoint': SOURCE_EMAIL, 'mimecast': SOURCE_EMAIL, 'defender_email': SOURCE_EMAIL,
+    'm365': SOURCE_EMAIL, 'unified_audit': SOURCE_EMAIL,  # M365 Unified Audit
     # Network
     'zeek': SOURCE_NETWORK, 'suricata': SOURCE_NETWORK, 'netflow': SOURCE_NETWORK,
+    'network': SOURCE_NETWORK, 'flow': SOURCE_NETWORK,   # whole-word aliases
     'dns': SOURCE_NETWORK, 'proxy': SOURCE_NETWORK, 'paloalto': SOURCE_NETWORK,
     'checkpoint': SOURCE_NETWORK, 'fortinet': SOURCE_NETWORK, 'firewall': SOURCE_NETWORK,
     # Endpoint
     'crowdstrike': SOURCE_ENDPOINT, 'sentinelone': SOURCE_ENDPOINT,
     'defender': SOURCE_ENDPOINT, 'sysmon': SOURCE_ENDPOINT, 'edr': SOURCE_ENDPOINT,
     'wef': SOURCE_ENDPOINT, 'etw': SOURCE_ENDPOINT, 'cbr': SOURCE_ENDPOINT,
+    'falco': SOURCE_ENDPOINT,                           # Falco runtime security
+    'k8s': SOURCE_ENDPOINT, 'kubernetes': SOURCE_ENDPOINT,  # K8s audit logs
     # Remote / VPN / RDP
     'vpn': SOURCE_REMOTE, 'rdp': SOURCE_REMOTE, 'citrix': SOURCE_REMOTE,
     'anyconnect': SOURCE_REMOTE, 'globalprotect': SOURCE_REMOTE,
@@ -105,11 +115,21 @@ _SOURCE_ALIASES: Dict[str, str] = {
 
 
 def classify_source(raw_source: str) -> str:
-    """Map a raw source string to a canonical source type."""
+    """Map a raw source string to a canonical source type.
+
+    Longer aliases are tried first so 'azure_signin' matches before 'azure'.
+    Short aliases (≤ 4 chars) require whole-token match to prevent false
+    positives — e.g. 'etw' must not match the substring inside 'network'.
+    """
     lower = (raw_source or '').lower().strip()
-    for alias, canonical in _SOURCE_ALIASES.items():
-        if alias in lower:
-            return canonical
+    # Split on non-alphanumeric chars to get discrete tokens for short-alias matching.
+    tokens: set[str] = set(re.split(r'[^a-z0-9]+', lower)) if lower else set()
+    for alias in sorted(_SOURCE_ALIASES, key=len, reverse=True):
+        if len(alias) <= 4:
+            if alias in tokens:
+                return _SOURCE_ALIASES[alias]
+        elif alias in lower:
+            return _SOURCE_ALIASES[alias]
     return SOURCE_UNKNOWN
 
 
@@ -120,38 +140,83 @@ def _safe(v: Any) -> str:
 
 
 def _normalize_cloud(row: dict) -> dict:
-    """CloudTrail / Azure Activity / GCP AuditLog → canonical."""
+    """CloudTrail / Azure Activity / GCP AuditLog / Snowflake → canonical."""
     r = dict(row)
-    # CloudTrail: userIdentity.userName, requestParameters.sourceIPAddress
+    # CloudTrail: userIdentity.userName or ARN
     uid = row.get('userIdentity') or {}
     if isinstance(uid, dict):
-        r.setdefault('user', _safe(uid.get('userName') or uid.get('arn') or uid.get('principalId')))
+        cloud_user = _safe(uid.get('userName') or uid.get('arn') or uid.get('principalId'))
+        if cloud_user:
+            r.setdefault('user', cloud_user)
         r.setdefault('user_type', _safe(uid.get('type')))
-    r.setdefault('src_ip', _safe(row.get('sourceIPAddress') or row.get('source_ip') or ''))
-    r.setdefault('event_name', _safe(row.get('eventName') or row.get('operationName') or row.get('protoPayload', {}).get('methodName') if isinstance(row.get('protoPayload'), dict) else ''))
-    r.setdefault('resource', _safe(row.get('requestParameters', {}).get('bucketName') if isinstance(row.get('requestParameters'), dict) else '') or _safe(row.get('resource')))
+    # Snowflake: user_name / USER_NAME fields — only if not already set by CloudTrail path
+    if not r.get('user'):
+        r['user'] = _safe(row.get('user_name') or row.get('USER_NAME') or '')
+    # Azure Activity Log: caller for user, callerIpAddress for IP
+    # Entra sign-in (if it routes here): userPrincipalName
+    if not r.get('user'):
+        r['user'] = _safe(row.get('caller') or row.get('userPrincipalName') or '')
+    r.setdefault('src_ip', _safe(
+        row.get('sourceIPAddress') or row.get('callerIpAddress') or row.get('source_ip') or
+        # Snowflake query_log uses CLIENT_IP / client_ip for the session source.
+        row.get('CLIENT_IP') or row.get('client_ip') or ''
+    ))
+    r.setdefault('event_name', _safe(
+        row.get('eventName') or row.get('operationName') or
+        (row.get('protoPayload', {}).get('methodName') if isinstance(row.get('protoPayload'), dict) else '') or
+        row.get('query_type') or row.get('QUERY_TYPE') or ''
+    ))
+    r.setdefault('resource', _safe(
+        (row.get('requestParameters', {}).get('bucketName') if isinstance(row.get('requestParameters'), dict) else '') or
+        row.get('database_name') or row.get('DATABASE_NAME') or row.get('resource') or ''
+    ))
     r.setdefault('region', _safe(row.get('awsRegion') or row.get('location') or ''))
+    # Snowflake: start_time is the event timestamp
+    r.setdefault('timestamp', _safe(row.get('start_time') or row.get('START_TIME') or ''))
     r['_source_type'] = SOURCE_CLOUD
     return r
 
 
 def _normalize_iam(row: dict) -> dict:
-    """Okta / Entra / SailPoint → canonical."""
+    """Okta / Entra sign-in+audit / SailPoint → canonical."""
     r = dict(row)
-    # Okta: actor.alternateId, client.ipAddress, target[].alternateId
+
+    # Build user from all possible IAM sources, taking first non-empty
+    user = ''
+    # Okta: actor.alternateId
     actor = row.get('actor') or {}
     if isinstance(actor, dict):
-        r.setdefault('user', _safe(actor.get('alternateId') or actor.get('login') or actor.get('displayName')))
+        user = _safe(actor.get('alternateId') or actor.get('login') or actor.get('displayName'))
+    # Entra audit: initiatedBy.user.userPrincipalName
+    if not user:
+        initiated = row.get('initiatedBy') or {}
+        if isinstance(initiated, dict):
+            initiated_user = initiated.get('user') or {}
+            if isinstance(initiated_user, dict):
+                user = _safe(initiated_user.get('userPrincipalName') or initiated_user.get('id'))
+    # Entra sign-in: top-level userPrincipalName
+    if not user:
+        user = _safe(row.get('userPrincipalName') or row.get('userId') or row.get('UserId') or '')
+    # SailPoint: identityName
+    if not user:
+        user = _safe(row.get('identityName') or row.get('identity') or '')
+    r['user'] = user
+
+    # IP address
+    src_ip = ''
     client = row.get('client') or {}
     if isinstance(client, dict):
-        r.setdefault('src_ip', _safe(client.get('ipAddress') or client.get('ip')))
-    # Entra: initiatedBy.user.userPrincipalName
-    initiated = row.get('initiatedBy') or {}
-    if isinstance(initiated, dict):
-        initiated_user = initiated.get('user') or {}
-        if isinstance(initiated_user, dict):
-            r.setdefault('user', _safe(initiated_user.get('userPrincipalName') or initiated_user.get('id')))
-    r.setdefault('event_name', _safe(row.get('eventType') or row.get('activityDisplayName') or row.get('displayName')))
+        src_ip = _safe(client.get('ipAddress') or client.get('ip'))
+    if not src_ip:
+        # Entra sign-in and SailPoint both put IP at top level
+        src_ip = _safe(row.get('ipAddress') or row.get('clientIpAddress') or row.get('callerIpAddress') or '')
+    r['src_ip'] = src_ip
+
+    # Event name
+    r.setdefault('event_name', _safe(
+        row.get('eventType') or row.get('activityDisplayName') or row.get('displayName') or
+        row.get('action') or row.get('Operation') or ''
+    ))
     r['_source_type'] = SOURCE_IAM
     return r
 
@@ -183,12 +248,57 @@ def _normalize_network(row: dict) -> dict:
 def _normalize_endpoint(row: dict) -> dict:
     """CrowdStrike / SentinelOne / Sysmon → canonical."""
     r = dict(row)
-    r.setdefault('hostname', _safe(row.get('ComputerName') or row.get('device_name') or row.get('hostname')))
-    r.setdefault('user', _safe(row.get('UserName') or row.get('user') or row.get('SubjectUserName')))
-    r.setdefault('process', _safe(row.get('Image') or row.get('process_name') or row.get('TargetProcessName')))
+    # hostname: add device_id fallback (CrowdStrike Santos uses device_id)
+    r.setdefault('hostname', _safe(
+        row.get('ComputerName') or row.get('device_name') or row.get('hostname') or row.get('device_id') or ''
+    ))
+    # user: add user_name fallback (CrowdStrike Santos uses user_name, not UserName)
+    r.setdefault('user', _safe(
+        row.get('UserName') or row.get('user_name') or row.get('user') or row.get('SubjectUserName') or ''
+    ))
+    # src_ip: CrowdStrike uses remote_address for outbound connections
+    r.setdefault('src_ip', _safe(row.get('remote_address') or row.get('src_ip') or ''))
+    r.setdefault('process', _safe(row.get('Image') or row.get('process_name') or row.get('image_file_name') or row.get('TargetProcessName') or ''))
     r.setdefault('parent_process', _safe(row.get('ParentImage') or row.get('parent_name') or ''))
-    r.setdefault('event_name', _safe(row.get('EventID') or row.get('event_type') or row.get('technique_name') or ''))
+    # event_name: add event_simpleName fallback (CrowdStrike-specific field)
+    r.setdefault('event_name', _safe(
+        row.get('EventID') or row.get('event_simpleName') or row.get('event_type') or row.get('technique_name') or ''
+    ))
     r.setdefault('file_hash', _safe(row.get('Hashes') or row.get('sha256') or row.get('MD5') or ''))
+    r['_source_type'] = SOURCE_ENDPOINT
+    return r
+
+
+def _normalize_k8s_falco(row: dict) -> dict:
+    """K8s audit logs / Falco runtime alerts → canonical."""
+    r = dict(row)
+    # K8s audit: user is a nested dict {username: ..., groups: [...]}
+    user_obj = row.get('user') or {}
+    if isinstance(user_obj, dict):
+        r['user'] = _safe(user_obj.get('username') or user_obj.get('name') or '')
+    elif not r.get('user'):
+        r['user'] = ''
+    # K8s: sourceIPs is a list
+    source_ips = row.get('sourceIPs') or []
+    if isinstance(source_ips, list) and source_ips:
+        r.setdefault('src_ip', _safe(str(source_ips[0])))
+    # K8s: objectRef for target resource name
+    obj_ref = row.get('objectRef') or {}
+    if isinstance(obj_ref, dict):
+        r.setdefault('hostname', _safe(obj_ref.get('name') or obj_ref.get('namespace') or ''))
+    # Falco: event description in 'output' field, rule name in 'rule'
+    r.setdefault('event_name', _safe(
+        row.get('rule') or row.get('verb') or row.get('requestURI') or
+        str(row.get('output') or '')[:120] or ''
+    ))
+    # Falco: time field for timestamp
+    r.setdefault('timestamp', _safe(row.get('time') or row.get('requestReceivedTimestamp') or ''))
+    # Severity: Falco uses priority field
+    priority_map = {'Emergency': 'critical', 'Alert': 'critical', 'Critical': 'critical',
+                    'Error': 'high', 'Warning': 'high', 'Notice': 'medium',
+                    'Informational': 'low', 'Debug': 'low'}
+    prio = str(row.get('priority') or '').title()
+    r.setdefault('severity', priority_map.get(prio, 'medium'))
     r['_source_type'] = SOURCE_ENDPOINT
     return r
 
@@ -213,20 +323,197 @@ _NORMALIZERS = {
     SOURCE_REMOTE:   _normalize_remote,
 }
 
+# K8s/Falco get the specialised normalizer regardless of source_type bucket.
+# We detect them by _source prefix before the generic normalizer dispatch.
+_K8S_FALCO_PREFIXES = ('k8s.', 'kubernetes.', 'falco.', 'k8s_', 'falco_')
+
+
+# ── Cross-source enrichment helpers ───────────────────────────────────────────
+# These run after source-specific normalisation and populate fields that
+# cluster_merge uses for transitive pivot merging.
+
+_PENTEST_REF_RE = re.compile(
+    r'\b(?:RH-ENG|PT|PENTEST|SECTEAM-ENG|RHK|SOW|REDTEAM)-\d{4}-\d{2,4}\b', re.I
+)
+_CHANGE_REF_RE = re.compile(r'\bCHG-\d{4}-\d{4,5}\b', re.I)
+
+_CANON_USER_SKIP = frozenset({
+    '', '-', 'n/a', 'na', 'unknown', 'system', 'root',
+    'nt authority\\system', 'nt authority/system', 'anonymous',
+})
+
+
+def _canonical_user(row: dict) -> str | None:
+    """Derive a lowercase, domain-stripped canonical user from a normalised row.
+
+    Priority: UPN/email local-part > short username > ARN leaf.
+    Returns None when no usable identity is found.
+    """
+    candidates = (
+        row.get('user'),
+        row.get('user_principal_name'),
+        row.get('email'),
+    )
+    for v in candidates:
+        if not v:
+            continue
+        s = str(v).strip().lower()
+        if not s or s in _CANON_USER_SKIP:
+            continue
+        # AWS ARN: arn:aws:iam::123:user/alice.smith → alice.smith
+        if s.startswith('arn:'):
+            s = s.rsplit('/', 1)[-1]
+        # Email / UPN: alice.smith@corp.com → alice.smith
+        if '@' in s:
+            s = s.split('@', 1)[0]
+        if s and s not in _CANON_USER_SKIP:
+            return s
+    return None
+
+
+def _cidr24(ip: str | None) -> str | None:
+    """Return the /24 network address for an IPv4 address, or None."""
+    if not ip:
+        return None
+    try:
+        return str(ipaddress.ip_network(f'{ip}/24', strict=False).network_address)
+    except (ValueError, TypeError):
+        return None
+
+
+def _extract_refs(*texts: str | None) -> tuple[list[str], list[str]]:
+    """Extract engagement and change ticket refs from free-text fields."""
+    eng: set[str] = set()
+    chg: set[str] = set()
+    for t in texts:
+        if not t:
+            continue
+        s = str(t)
+        for m in _PENTEST_REF_RE.findall(s):
+            eng.add(m.upper())
+        for m in _CHANGE_REF_RE.findall(s):
+            chg.add(m.upper())
+    return sorted(eng), sorted(chg)
+
+
+def _derive_event_signature(row: dict) -> str | None:
+    """Derive a stable event signature for R7 pivot merging in cluster_merge.
+
+    Returns a short category string for alert types that benefit from
+    signature-based grouping (DNS beaconing, exfil tools, etc.).
+    Returns None for rows with no recognisable repeatable signature.
+    """
+    text = ' '.join(
+        str(v).lower() for v in (
+            row.get('event_name'), row.get('alert_signature'), row.get('notes'),
+            row.get('description'), row.get('rule'), row.get('output'),
+        ) if v
+    )
+    if any(t in text for t in ('low reputation', 'low-reputation', 'newly registered', 'nrd ', 'nrd<', 'dns beacon', 'c2 beacon', 'command-and-control', 'periodic dns')):
+        return 'dns:nrd_lowrep'
+    if any(t in text for t in ('rclone', 'mega.nz', 'backblaze', 'b2.backblaze', 'wasabi')):
+        return 'exfil:rclone'
+    if ('copy into' in text or 'unload' in text) and any(s in text for s in ('external stage', 's3://', 'azure://', 'gcs://')):
+        return 'exfil:sf_unload'
+    if any(t in text for t in ('lsass', 'mimikatz', 'procdump', 'ntds.dit', 'credential dump', 'credential dumping')):
+        return 'cred:lsass_dump'
+    if 'hostpath' in text or 'hostpid' in text or ('privileged' in text and ('container' in text or 'pod' in text or 'daemonset' in text)):
+        return 'priv_esc:k8s_escape'
+    if any(t in text for t in ('impossible travel', 'token replay', 'token theft', 'session hijack', 'access_admin_app')):
+        return 'session:theft'
+    if any(t in text for t in ('getsecretvalue', 'secretsmanager:getsecret', 'sts:assumerole', 'assumerolewithsaml')):
+        return 'priv_esc:secret_access'
+    return None
+
 
 def normalize_row(row: dict, source_type: str | None = None) -> dict:
     """Apply source-specific normalization, then fill common fields."""
-    st = source_type or classify_source(_safe(row.get('_source') or row.get('source') or ''))
-    normalizer = _NORMALIZERS.get(st)
-    r = normalizer(row) if normalizer else dict(row)
+    raw_src = _safe(row.get('_source') or row.get('source') or '')
+    st = source_type or classify_source(raw_src)
+
+    # K8s/Falco have their own normalizer; detect before generic dispatch.
+    if any(raw_src.startswith(p) for p in _K8S_FALCO_PREFIXES):
+        r = _normalize_k8s_falco(row)
+        st = SOURCE_ENDPOINT
+    else:
+        # When _source is a filename (no vendor matched), try _section as
+        # a routing hint — set by file_parser when using ijson on multi-
+        # section JSON bundles (e.g. janusec_cloud_identity_v1.json).
+        if st == SOURCE_UNKNOWN:
+            section_st = classify_source(_safe(row.get('_section') or ''))
+            if section_st != SOURCE_UNKNOWN:
+                st = section_st
+        normalizer = _NORMALIZERS.get(st)
+        r = normalizer(row) if normalizer else dict(row)
+
     r['_source_type'] = st
     # Canonical common fields
     r.setdefault('severity', _safe(row.get('severity') or row.get('risk_level') or 'medium').lower())
     r.setdefault('triage_score', _triage_from_severity(r['severity']))
     r.setdefault('timestamp', _safe(
         row.get('timestamp') or row.get('eventTime') or row.get('time') or
-        row.get('@timestamp') or row.get('ActivityDateTime') or ''
+        row.get('@timestamp') or row.get('ActivityDateTime') or
+        row.get('ts') or ''   # Zeek conn.log uses 'ts' as float epoch
     ))
+
+    # ── Cross-source enrichment ───────────────────────────────────────────────
+    # user_canonical: lowercase, domain-stripped, ARN-leaf extracted.
+    # Used by cluster_merge for cross-source pivot stitching.
+    if 'user_canonical' not in r:
+        r['user_canonical'] = _canonical_user(r)
+
+    # /24 CIDR derivatives for subnet-level pivot joining.
+    if 'src_ip_cidr24' not in r:
+        r['src_ip_cidr24'] = _cidr24(r.get('src_ip'))
+    if 'dst_ip_cidr24' not in r:
+        r['dst_ip_cidr24'] = _cidr24(r.get('dst_ip'))
+
+    # Engagement/change refs extracted from free-text fields.
+    if '_engagement_refs' not in r:
+        eng_refs, chg_refs = _extract_refs(
+            r.get('notes'), r.get('description'), r.get('alert_signature'),
+            r.get('change_ref'), r.get('engagement_ref'), r.get('ticket'),
+        )
+        r['_engagement_refs'] = eng_refs
+        r['_change_refs'] = chg_refs
+
+    # Event signature for R7 cluster_merge pivot (DNS beaconing, exfil tools, etc.).
+    if 'event_signature' not in r:
+        sig = _derive_event_signature(r)
+        if sig:
+            r['event_signature'] = sig
+
+    # _ts_epoch: float epoch seconds used by cluster_merge time-window logic.
+    # Derive from the canonical timestamp string so clustering can do real time gating.
+    if '_ts_epoch' not in r:
+        _ts_raw = str(r.get('timestamp') or '').strip()
+        if _ts_raw:
+            try:
+                r['_ts_epoch'] = datetime.fromisoformat(_ts_raw.replace('Z', '+00:00')).timestamp()
+            except (ValueError, OSError):
+                _TS_PARSE_FMTS = (
+                    '%Y-%m-%dT%H:%M:%S.%f', '%Y-%m-%dT%H:%M:%S',
+                    '%Y-%m-%d %H:%M:%S.%f %z', '%Y-%m-%d %H:%M:%S.%f',
+                    '%Y-%m-%d %H:%M:%S', '%Y-%m-%d',
+                )
+                for _fmt in _TS_PARSE_FMTS:
+                    try:
+                        r['_ts_epoch'] = datetime.strptime(_ts_raw, _fmt).timestamp()
+                        break
+                    except (ValueError, TypeError):
+                        continue
+                # Zeek ts field is a bare float Unix epoch (e.g. 1741123456.123)
+                if '_ts_epoch' not in r:
+                    try:
+                        ts_float = float(_ts_raw)
+                        if ts_float > 1_000_000_000.0:  # sanity: after 2001-09-09
+                            r['_ts_epoch'] = ts_float
+                    except (ValueError, TypeError):
+                        pass
+
+    # Normalizer version stamp — lets assessment_worker detect stale stored rows.
+    r['_normalizer_version'] = _NORMALIZER_VERSION
+
     return r
 
 

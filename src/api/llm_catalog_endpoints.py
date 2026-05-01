@@ -89,7 +89,7 @@ async def get_model_catalog(tenant_id: Optional[str] = 'default') -> dict:
 
     # ── Local Ollama models ───────────────────────────────────────────────────
     ollama_live: list[str] = []
-    configured_default    = os.getenv('OLLAMA_MODEL', 'qwen2.5:14b')
+    configured_default    = os.getenv('OLLAMA_MODEL', 'qwen3:14b')
     ollama_host           = os.getenv('OLLAMA_HOST', 'http://localhost:11434')
     ollama_reachable      = False
 

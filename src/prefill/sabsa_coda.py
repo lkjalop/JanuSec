@@ -62,11 +62,21 @@ def build_sabsa_coda(
     attrs_str = ' and '.join(breached_attributes)
     lines: list[str] = [f'Business consequence. {attrs_str} integrity is degraded.']
 
-    # Control gap hint: first clause of exploitability fragment before the period
-    expl = fragments.get('exploitability') or ''
-    if expl:
-        gap_hint = expl.rstrip('.').split('.')[0].replace('Control gaps exploited: ', '')
-        lines.append(f'The evidence exposes a control gap: {gap_hint}.')
+    # Business-outcome translation per degraded attribute — avoid repeating the
+    # exploitability fragment verbatim (it is already shown in the DREAD block).
+    _ATTR_OUTCOME: dict[str, str] = {
+        'Confidential': 'Data confidentiality is compromised — assume exfiltrated data is in adversary hands.',
+        'Authenticated': 'Identity trust is broken — all affected accounts require immediate credential rotation.',
+        'Monitored': 'Detection visibility was insufficient to catch this activity in real time.',
+        'Authorised': 'Least-privilege controls were bypassed — lateral movement scope is not yet bounded.',
+        'Reputable': 'Email channel integrity is at risk — financial instruction authenticity cannot be assumed.',
+    }
+    added_outcomes: set[str] = set()
+    for attr in breached_attributes[:2]:  # cap at two to keep the paragraph tight
+        outcome = _ATTR_OUTCOME.get(attr)
+        if outcome and outcome not in added_outcomes:
+            lines.append(outcome)
+            added_outcomes.add(outcome)
 
     # MTTD note: only if greater than 7 days (worth calling out)
     disc = fragments.get('discoverability') or ''

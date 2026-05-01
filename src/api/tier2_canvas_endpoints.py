@@ -1900,12 +1900,12 @@ async def get_llm_cluster_summary(
     assessment_id: str,
     cluster_id: str,
     request: Request,
-    model: str = 'qwen2.5:14b',
+    model: str = 'qwen3:14b',
     force_refresh: bool = False,
 ) -> dict:
     """Generate or return a cached LLM Tier-1 briefing for a cluster.
 
-    Uses the model specified via ?model= (default: qwen2.5:14b).
+    Uses the model specified via ?model= (default: qwen3:14b).
     Supports extended thinking via the 'thinking' override when the model supports it.
     """
     tenant_id = _get_tenant(request)
@@ -2597,7 +2597,7 @@ class _DeepenRequest(BaseModel):
     entity_name: str                   # e.g. 'azureuser'
     action_summary: str = ''           # The original action line from section 3
     analyst_answers: dict = Field(default_factory=dict)   # {'question': 'answer', ...}
-    model: str = 'qwen2.5:14b'
+    model: str = 'qwen3:14b'
 
 
 def _build_deepen_prompt(
@@ -2790,7 +2790,7 @@ class _RefineRequest(BaseModel):
     answer_key: str              # What was answered: 'siem', 'host_live', 'regulatory_scope', 'sessions_active', etc.
     answer_value: str            # Analyst's answer: e.g. 'Splunk', 'yes', 'PCI', etc.
     current_notes: str = ''      # Existing persona notes to refine (passed by the browser)
-    model: str = 'qwen2.5:14b'
+    model: str = 'qwen3:14b'
 
 
 def _build_refine_prompt(
@@ -3385,7 +3385,7 @@ async def expand_cluster_step(assessment_id: str, cluster_id: str, request: Requ
     step_title    = body.get('step_title', '')
     row_refs      = body.get('row_refs', [])
     persona       = body.get('persona', 'soc_analyst')
-    model         = body.get('model', 'qwen2.5:14b')
+    model         = body.get('model', 'qwen3:14b')
     force_refresh = bool(body.get('force_refresh', False))
     tenant_id     = _get_tenant(request)
 
@@ -3903,7 +3903,7 @@ async def run_threat_model(assessment_id: str, cluster_id: str, request: Request
     """Human-gated PASTA / Diamond / MAESTRO threat modelling. Results saved to disk."""
     body          = await request.json()
     model_type    = body.get('model_type', 'pasta')
-    model         = body.get('model', 'qwen2.5:14b')
+    model         = body.get('model', 'qwen3:14b')
     force_refresh = bool(body.get('force_refresh', False))
     tenant_id     = _get_tenant(request)
 

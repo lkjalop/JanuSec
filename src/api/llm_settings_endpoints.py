@@ -71,10 +71,29 @@ async def update_settings(payload: LLMSettings) -> Dict[str, Any]:
         raise HTTPException(status_code=500, detail=f"llm_settings_save_failed:{exc}")
 
 
+@router.post("/probe")
+async def llm_probe() -> Dict[str, Any]:
+    """Trigger a live re-probe of the Ollama connection on the running singleton."""
+    client = LLM_CLIENT
+    ok = False
+    if hasattr(client, '_probe_ollama'):
+        try:
+            ok = client._probe_ollama()
+        except Exception as exc:
+            return {"probed": False, "error": str(exc)}
+    return {"probed": True, "reachable": ok}
+
+
 @router.get("/health")
 async def llm_health() -> Dict[str, Any]:
     data = load_settings()
     client = LLM_CLIENT
+    # Re-probe on each health check so a startup-race doesn't permanently hide availability
+    if hasattr(client, '_probe_ollama') and getattr(client, 'ollama_enabled', False):
+        try:
+            client._probe_ollama()
+        except Exception:
+            pass
     status = get_client_status(client)
     openai_key = os.getenv("OPENAI_API_KEY") or data.get("openai_api_key")
     anthropic_key = os.getenv("ANTHROPIC_API_KEY") or data.get("anthropic_api_key")

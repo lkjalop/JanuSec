@@ -403,6 +403,45 @@ def source_counts(assessment_id: str) -> dict[str, int]:
     return {str(src or "unknown"): int(count) for src, count in rows}
 
 
+def diagnostic_counts(assessment_id: str, min_triage: float = 0.0) -> dict:
+    """Count rows missing key projected columns — used to detect stale stored rows.
+
+    A row is considered stale when all three canonical pivot fields are empty,
+    which indicates it was stored before the normalizer produced them (e.g.
+    before the device_id→hostname and user_name→user fallbacks were added).
+    """
+    with _lock:
+        conn = _db()
+        total = conn.execute(
+            "SELECT COUNT(*) FROM normalized_rows WHERE assessment_id = ? AND triage_score >= ?",
+            [assessment_id, min_triage],
+        ).fetchone()[0] or 0
+        missing_user = conn.execute(
+            "SELECT COUNT(*) FROM normalized_rows WHERE assessment_id = ? AND triage_score >= ? AND (user_entity IS NULL OR user_entity = '')",
+            [assessment_id, min_triage],
+        ).fetchone()[0] or 0
+        missing_ip = conn.execute(
+            "SELECT COUNT(*) FROM normalized_rows WHERE assessment_id = ? AND triage_score >= ? AND (src_ip IS NULL OR src_ip = '')",
+            [assessment_id, min_triage],
+        ).fetchone()[0] or 0
+        missing_host = conn.execute(
+            "SELECT COUNT(*) FROM normalized_rows WHERE assessment_id = ? AND triage_score >= ? AND (hostname IS NULL OR hostname = '')",
+            [assessment_id, min_triage],
+        ).fetchone()[0] or 0
+        all_missing = conn.execute(
+            "SELECT COUNT(*) FROM normalized_rows WHERE assessment_id = ? AND triage_score >= ? AND (user_entity IS NULL OR user_entity = '') AND (src_ip IS NULL OR src_ip = '') AND (hostname IS NULL OR hostname = '')",
+            [assessment_id, min_triage],
+        ).fetchone()[0] or 0
+    return {
+        "total_rows": int(total),
+        "missing_user_entity": int(missing_user),
+        "missing_src_ip": int(missing_ip),
+        "missing_hostname": int(missing_host),
+        "all_pivot_fields_empty": int(all_missing),
+        "stale_pct": round(int(all_missing) / max(int(total), 1) * 100, 1),
+    }
+
+
 # Critical addition #4: SQL entity-grouping query to pre-build pivot buckets.
 # This groups rows by shared entity (user, IP, host) entirely in DuckDB before
 # Python pair evaluation — the Python loop then only sees pre-formed groups.
