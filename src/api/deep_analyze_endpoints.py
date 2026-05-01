@@ -282,7 +282,8 @@ def _read_json_sync(path: str):
         return json.load(fh)
 
 # Simple in-memory SSE broadcaster per-assessment
-_SSE_BROADCASTERS: dict[str, list] = {}
+# Bounded to prevent stale assessment-id keys accumulating indefinitely.
+_SSE_BROADCASTERS: dict[str, list] = _BoundedDict(maxsize=_store_cap('SSE_BROADCASTERS_MAX', 2000))
 
 def publish_llm_event(assessment_id: str, event: dict):
     """Publish an event dict to any connected SSE listeners for assessment_id.
@@ -304,7 +305,7 @@ def publish_llm_event(assessment_id: str, event: dict):
 
 
 # ── WebSocket pipeline progress ─────────────────────────────────────────────
-_WS_CONNECTIONS: dict[str, list] = {}
+_WS_CONNECTIONS: dict[str, list] = _BoundedDict(maxsize=_store_cap('WS_CONNECTIONS_MAX', 2000))
 
 
 def _extract_row_timestamp_value(row: dict | None) -> float | None:
