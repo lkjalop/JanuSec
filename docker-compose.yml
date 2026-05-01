@@ -27,6 +27,7 @@ services:
 
   app:
     build: .
+    user: root
     volumes:
       - ./data/assessments:/app/data/assessments
       - sessiondata:/app/data/sessions
@@ -36,11 +37,11 @@ services:
       APP_ENV: "${APP_ENV:-staging}"
       APP_DB_DSN: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-janusec}"
       REDIS_URL: "${REDIS_URL:-redis://redis:6379/0}"
-      API_KEYS_JSON: "${API_KEYS_JSON:-[]}"
+      API_KEYS_JSON: "${API_KEYS_JSON:-[{\"key\":\"devkey123\",\"scopes\":[\"*\"]}]}"
       ACCESS_LOG_SAMPLE_RATE: "0.5"
-      DEFAULT_FRONTEND: "console"
+      DEFAULT_FRONTEND: "${DEFAULT_FRONTEND:-breach}"
       DEFAULT_TENANT: "${DEFAULT_TENANT:-default}"
-      API_KEY: "${API_KEY:-janusec-staging-local-20260324}"
+      API_KEY: "${API_KEY:-devkey123}"
       TEST_HELPERS_ENABLED: "0"
       PLATFORM_LITE_INIT: "0"
       FAST_TEST_MODE: "0"
@@ -54,13 +55,13 @@ services:
       EVIDENCE_COVERAGE_TARGET: "0.7"
       EVIDENCE_COVERAGE_WARN: "0.5"
       EVIDENCE_COVERAGE_CRITICAL: "0.3"
-      OLLAMA_HOST: "${OLLAMA_HOST:-http://host.docker.internal:11434}"
-      OLLAMA_MODEL: "${OLLAMA_MODEL:-llama3:8b}"
-      LLM_PROVIDER: "${LLM_PROVIDER:-ollama}"
+      OLLAMA_HOST: "http://host.docker.internal:11434"
+      OLLAMA_MODEL: "qwen3:14b"
+      LLM_PROVIDER: "ollama"
       LLM_STRICT_PROVIDER: "1"
       LLM_ALLOW_LOCAL_DETERMINISTIC: "0"
-      OLLAMA_PREWARM_ON_STARTUP: "0"
-      ENABLE_JOB_WORKER: "${ENABLE_JOB_WORKER:-0}"
+      OLLAMA_PREWARM_ON_STARTUP: "${OLLAMA_PREWARM_ON_STARTUP:-1}"
+      ENABLE_JOB_WORKER: "${ENABLE_JOB_WORKER:-1}"
     depends_on:
       db:
         condition: service_healthy
@@ -78,13 +79,14 @@ services:
 
   worker:
     build: .
+    user: root
     command: ["python", "-m", "src.workers.llm_worker", "--redis", "redis://redis:6379/0"]
     environment:
       ENV: "${ENV:-staging}"
       APP_ENV: "${APP_ENV:-staging}"
       REDIS_URL: "${REDIS_URL:-redis://redis:6379/0}"
       APP_DB_DSN: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-janusec}"
-      API_KEY: "${API_KEY:-janusec-staging-local-20260324}"
+      API_KEY: "${API_KEY:-devkey123}"
       DEFAULT_TENANT: "${DEFAULT_TENANT:-default}"
       LOAD_FULL_ROUTES: "1"
       LLM_PROVIDER: "${LLM_PROVIDER:-ollama}"
@@ -94,8 +96,8 @@ services:
       PLATFORM_LITE_INIT: "0"
       FAST_TEST_MODE: "0"
       DISABLE_DB: "0"
-      OLLAMA_HOST: "${OLLAMA_HOST:-http://host.docker.internal:11434}"
-      OLLAMA_MODEL: "${OLLAMA_MODEL:-llama3:8b}"
+      OLLAMA_HOST: "http://host.docker.internal:11434"
+      OLLAMA_MODEL: "qwen3:14b"
     depends_on:
       db:
         condition: service_healthy

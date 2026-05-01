@@ -71,6 +71,32 @@
     }
     .phase-arrow { color: var(--border); font-size: 10px; padding: 0 2px; }
 
+    /* ── Diamond threat model bar (Block 4.2) ───────────────────────── */
+    #diamondBar {
+      border-bottom: 1px solid var(--border); background: var(--bg-tertiary);
+      flex-shrink: 0; overflow: hidden;
+    }
+    #diamondToggle {
+      width: 100%; text-align: left; background: none; border: none; color: var(--text-muted);
+      font-size: 11px; font-weight: 700; padding: 6px 18px; cursor: pointer; letter-spacing: .04em;
+      display: flex; align-items: center; gap: 6px;
+    }
+    #diamondToggle:hover { color: var(--text-primary); }
+    #diamondGrid {
+      display: grid; grid-template-columns: 1fr 1fr;
+      border-top: 1px solid var(--border);
+    }
+    .diamond-corner {
+      padding: 10px 18px; border-right: 1px solid var(--border);
+    }
+    .diamond-corner:nth-child(2n) { border-right: none; }
+    .diamond-corner:nth-child(1),.diamond-corner:nth-child(2) { border-bottom: 1px solid var(--border); }
+    .diamond-label {
+      font-size: 9px; font-weight: 800; letter-spacing: .08em; color: var(--text-muted);
+      text-transform: uppercase; margin-bottom: 4px;
+    }
+    .diamond-val { font-size: 12px; color: var(--text-primary); line-height: 1.4; }
+
     /* ── Main split pane ────────────────────────────────────────────── */
     #splitPane { display: flex; flex: 1; overflow: hidden; }
 
@@ -257,8 +283,8 @@
     <option value="compliance">Compliance / Legal</option>
   </select>
   <select id="tier2ModelSelect" title="LLM model for Tier 2 deepening and persona briefings" style="font-size:11px;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-muted);border-radius:6px;padding:4px 8px;max-width:210px;">
-    <option value="qwen2.5:14b">Qwen 2.5 14B  ★ (best overall)</option>
-    <option value="qwen3:14b">Qwen 3 14B (deep reasoning)</option>
+    <option value="qwen3:14b">Qwen 3 14B (default)</option>
+    <option value="qwen2.5:14b">Qwen 2.5 14B (legacy fast)</option>
     <option value="qwen3:30b">Qwen 3 30B (highest quality)</option>
     <option value="mistral-small3.2:24b">Mistral Small 3.2 24B (fastest)</option>
   </select>
@@ -274,6 +300,29 @@
     <div style="margin-top:16px;display:flex;gap:8px;">
       <button id="handoffCopy" class="btn-secondary" style="font-size:11px;">Copy to clipboard</button>
       <button id="handoffClose" class="btn-primary" style="font-size:11px;">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Diamond threat model panel (Block 4.2) — shown when tier1_prefill.diamond_model present -->
+<div id="diamondBar" style="display:none;">
+  <button id="diamondToggle">◆ THREAT MODEL <span id="diamondToggleArrow">▶</span></button>
+  <div id="diamondGrid" style="display:none;">
+    <div class="diamond-corner">
+      <div class="diamond-label">Who did this</div>
+      <div class="diamond-val" id="d-adversary">—</div>
+    </div>
+    <div class="diamond-corner">
+      <div class="diamond-label">How they did it</div>
+      <div class="diamond-val" id="d-capability">—</div>
+    </div>
+    <div class="diamond-corner">
+      <div class="diamond-label">Where they came from</div>
+      <div class="diamond-val" id="d-infrastructure">—</div>
+    </div>
+    <div class="diamond-corner">
+      <div class="diamond-label">What they hit</div>
+      <div class="diamond-val" id="d-victim">—</div>
     </div>
   </div>
 </div>
@@ -400,17 +449,17 @@
 
   function selectedTier2Model() {
     var el = $('tier2ModelSelect');
-    return (el && el.value) || params.get('llm_model') || localStorage.getItem('tier2LlmModel') || 'qwen2.5:14b';
+    return (el && el.value) || params.get('llm_model') || localStorage.getItem('tier2LlmModel') || 'qwen3:14b';
   }
 
   function populateTier2ModelSelect(catalog) {
     var sel = $('tier2ModelSelect');
     if (!sel) return;
-    var wanted = params.get('llm_model') || localStorage.getItem('tier2LlmModel') || 'qwen2.5:14b';
+    var wanted = params.get('llm_model') || localStorage.getItem('tier2LlmModel') || 'qwen3:14b';
     var models = (catalog && catalog.models) || [];
     sel.innerHTML = '';
     if (!models.length) {
-      ['qwen2.5:14b', 'qwen3:14b', 'qwen3:30b', 'mistral-small3.2:24b'].forEach(function (mid) {
+      ['qwen3:14b', 'qwen2.5:14b', 'qwen3:30b', 'mistral-small3.2:24b'].forEach(function (mid) {
         var opt = document.createElement('option');
         opt.value = mid;
         opt.textContent = mid;
@@ -1072,6 +1121,37 @@
       : (c.business_significance || c.cluster_id || 'Security Cluster');
     // Feature 2: SLA clock
     _startSlaClock(sev, c.flagged_at || c.created_at || c.first_seen || null);
+    // Block 4.2: Diamond threat model panel
+    _renderDiamondPanel(c);
+  }
+
+  function _renderDiamondPanel(cluster) {
+    var dm = ((cluster || {}).tier1_prefill || {}).diamond_model;
+    var bar = $('diamondBar');
+    if (!dm || (!dm.adversary && !dm.capability)) { bar.style.display = 'none'; return; }
+    bar.style.display = '';
+    $('d-adversary').textContent = dm.adversary || '—';
+    var cap = Array.isArray(dm.capability) ? dm.capability.slice(0,4).join(', ') : (dm.capability || '—');
+    $('d-capability').textContent = cap;
+    var infra = Array.isArray(dm.infrastructure) ? dm.infrastructure.slice(0,4).join(', ') : (dm.infrastructure || '—');
+    $('d-infrastructure').textContent = infra;
+    var victim = [];
+    var vu = Array.isArray(dm.victim_users) ? dm.victim_users : (dm.victim_users ? [String(dm.victim_users)] : []);
+    var vh = Array.isArray(dm.victim_hosts) ? dm.victim_hosts : [];
+    var vd = Array.isArray(dm.victim_data)  ? dm.victim_data  : (dm.victim_data ? [String(dm.victim_data)] : []);
+    if (vu.length) victim.push(vu.slice(0,3).join(', '));
+    if (vh.length) victim.push('hosts: ' + vh.slice(0,2).join(', '));
+    if (vd.length) victim.push('data: ' + vd.slice(0,2).join(', '));
+    $('d-victim').textContent = victim.join(' · ') || '—';
+    // Wire toggle
+    var toggleBtn = $('diamondToggle');
+    var grid = $('diamondGrid');
+    var arrow = $('diamondToggleArrow');
+    toggleBtn.onclick = function () {
+      var open = grid.style.display !== 'none';
+      grid.style.display = open ? 'none' : 'grid';
+      arrow.textContent = open ? '▶' : '▼';
+    };
   }
 
   /* ── Feature 2: SLA clock ───────────────────────────────────────── */

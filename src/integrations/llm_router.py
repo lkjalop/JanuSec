@@ -74,7 +74,7 @@ def _global_fallback_spec(tier: str, thinking_budget: int) -> CallSpec:
     # Use env vars only — do NOT read DEFAULT_CLIENT.ollama_model here because
     # DEFAULT_CLIENT may have been initialised before the .env was loaded, leaving
     # stale values (e.g. llama3:8b) that would override what the operator set.
-    _default_model = 'qwen2.5:14b'
+    _default_model = 'qwen3:14b'
     _default_host  = 'http://127.0.0.1:11434'
 
     ollama_small    = os.getenv('OLLAMA_MODEL_SMALL')    or os.getenv('OLLAMA_MODEL') or _default_model

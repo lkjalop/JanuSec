@@ -267,9 +267,12 @@ class LLMClient(BaseLLMClient):
             else:
                 base_provider = 'openai'
         self.provider = base_provider.lower()
-        raw_ollama_host = stored_settings.get('ollama_base_url') or os.getenv('OLLAMA_HOST') or 'http://127.0.0.1:11434'
+        # Runtime environment must win over persisted UI settings. In Docker,
+        # config/llm_settings.json may contain a host-local 127.0.0.1 URL that
+        # is valid on Windows but invalid inside the container.
+        raw_ollama_host = os.getenv('OLLAMA_HOST') or stored_settings.get('ollama_base_url') or 'http://127.0.0.1:11434'
         self.ollama_host = raw_ollama_host.rstrip('/')
-        self.ollama_model = stored_settings.get('ollama_model') or os.getenv('OLLAMA_MODEL') or os.getenv('LLM_MODEL') or 'llama3'
+        self.ollama_model = os.getenv('OLLAMA_MODEL') or os.getenv('LLM_MODEL') or stored_settings.get('ollama_model') or 'qwen3:14b'
         try:
             # Allow explicit per-provider timeout or fall back to general timeout
             self.ollama_timeout = float(os.getenv('OLLAMA_TIMEOUT_SECONDS') or os.getenv('LLM_TIMEOUT_SECONDS') or self.timeout)
@@ -296,7 +299,7 @@ class LLMClient(BaseLLMClient):
                         self.ollama_timeout = max(self.ollama_timeout, 120.0)
         except Exception:
             pass
-        self.ollama_enabled = (self.provider == 'ollama') or bool(stored_settings.get('ollama_base_url') or os.getenv('OLLAMA_HOST'))
+        self.ollama_enabled = (self.provider == 'ollama') or bool(os.getenv('OLLAMA_HOST') or stored_settings.get('ollama_base_url'))
         self.ollama_reachable = False
         self._ollama_session = None
         if self.ollama_enabled:
@@ -438,6 +441,12 @@ class LLMClient(BaseLLMClient):
         if prompt.lstrip().startswith('/no_think'):
             options['think'] = False
         selected_model = model_override or self.ollama_model
+        # NOTE: format=json is intentionally NOT set here.
+        # Ollama's JSON grammar mode combined with think=False causes qwen3/deepseek-r1
+        # to emit degenerate {} responses instead of the expected structured payload.
+        # _parse_prefill_json already handles robust extraction (think-tag stripping,
+        # markdown fence removal, repair, and {.*} fallback regex), so grammar-mode
+        # is not needed and causes more failures than it prevents.
         payload = {
             'model': selected_model,
             'prompt': prompt,

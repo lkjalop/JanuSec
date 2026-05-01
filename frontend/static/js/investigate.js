@@ -3172,8 +3172,8 @@
   // ── Cluster Map + Drawer ─────────────────────────────────────────────────
 
   var CLUSTER_MODELS = [
-    { value: 'qwen2.5:14b',          label: 'Qwen 2.5 14B  ★ (best overall · fast)' },
-    { value: 'qwen3:14b',            label: 'Qwen 3 14B (deep reasoning · slower)' },
+    { value: 'qwen3:14b',            label: 'Qwen 3 14B  ★ (default · deep reasoning)' },
+    { value: 'qwen2.5:14b',          label: 'Qwen 2.5 14B (legacy fast)' },
     { value: 'qwen3:30b',            label: 'Qwen 3 30B (highest quality · slowest)' },
     { value: 'mistral-small3.2:24b', label: 'Mistral Small 3.2 24B (fastest · latency)' },
   ]; // fallback only — overwritten by loadModelCatalog()
@@ -3282,8 +3282,8 @@
 
   function _cdModelSel() {
     var sel = $('cdModelSel');
-    if (!sel) return 'qwen2.5:14b';
-    return sel.value || 'qwen2.5:14b';
+    if (!sel) return 'qwen3:14b';
+    return sel.value || 'qwen3:14b';
   }
 
   function _cdPopulateModelSel() {
