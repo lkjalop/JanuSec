@@ -171,12 +171,15 @@ def _flatten_json_data(data, source: str) -> Iterator[dict]:
                         yield item
                 return
         # Multi-section object: flatten all top-level arrays
+        # Propagate the top-level key as _section so normalize_row can route
+        # each sub-source correctly (matches what the ijson path does).
         found = False
-        for v in data.values():
+        for section_key, v in data.items():
             if isinstance(v, list):
                 for item in v:
                     if isinstance(item, dict):
                         item.setdefault("_source", source)
+                        item.setdefault("_section", section_key)
                         yield item
                         found = True
         if not found:
