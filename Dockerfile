@@ -58,5 +58,6 @@ USER appuser
 # Optional: healthcheck hitting /health
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 CMD curl -fsS http://localhost:8080/health || exit 1
 
-# Use uvicorn explicitly (enables reload off by default)
-ENTRYPOINT ["uvicorn","api.server:app","--host","0.0.0.0","--port","8080"]
+# Use uvicorn explicitly (enables reload off by default). Keep this as CMD so
+# docker-compose worker commands can override it.
+CMD ["uvicorn","src.api.server:app","--host","0.0.0.0","--port","8080"]

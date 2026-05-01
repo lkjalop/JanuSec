@@ -64,6 +64,9 @@
   <!-- D3 for swimlane + graph (loaded before breach.js) -->
   <script src="/static/js/vendors/d3.min.js" onerror="console.warn('D3 not found — swimlane disabled')"></script>
 
+  <!-- Threat case card rendering module (load BEFORE breach.js) -->
+  <script src="/static/js/breach_threat_cases.js" onerror="console.warn('breach_threat_cases.js not found')"></script>
+
   <!-- Core breach JS -->
   <script src="/static/js/breach.js"></script>
 

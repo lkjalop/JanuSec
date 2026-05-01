@@ -9,13 +9,13 @@ if (Test-Path $venv) {
 # Non-test env
 $env:TEST_HELPERS_ENABLED = '0'
 $env:FAST_TEST_MODE = '0'
-$env:DEFAULT_FRONTEND = $env:DEFAULT_FRONTEND -or 'console'
+if (-not $env:DEFAULT_FRONTEND) { $env:DEFAULT_FRONTEND = 'console' }
 $env:PYTHONPATH = Get-Location
 
 # LLM provider: Ollama
-$env:LLM_PROVIDER = $env:LLM_PROVIDER -or 'ollama'
-$env:OLLAMA_HOST = $env:OLLAMA_HOST -or 'http://127.0.0.1:11434'
-$env:OLLAMA_MODEL = $env:OLLAMA_MODEL -or 'llama3:8b'
+if (-not $env:LLM_PROVIDER) { $env:LLM_PROVIDER = 'ollama' }
+if (-not $env:OLLAMA_HOST)   { $env:OLLAMA_HOST   = 'http://127.0.0.1:11434' }
+if (-not $env:OLLAMA_MODEL)  { $env:OLLAMA_MODEL  = 'qwen3.6:27b' }
 
 # Bind
 $bindHost = "127.0.0.1"
