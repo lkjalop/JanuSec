@@ -13,6 +13,7 @@ and cache-or-history rows are ignored when building findings.
 """
 from __future__ import annotations
 
+import os
 from collections import defaultdict
 from typing import Any
 
@@ -186,8 +187,59 @@ def build_threat_cases(
     *,
     evidence_cap: int = 80,
 ) -> dict[str, list[dict]]:
-    """Build raw -> analysis -> threat-case layers without losing clusters."""
+    """Build raw -> analysis -> threat-case layers without losing clusters.
+
+    Fast path: when clusters already carry ``cluster_kind`` (output of
+    cluster_merge.transitive_merge_clusters), convert directly to presentation
+    cases without re-running the keyword scanner.  This avoids the 5-card
+    over-confirmation problem where each material pattern produces a separate
+    VALIDATED_BREACH top card.
+
+    Legacy path: when clusters are raw pivot groups (no cluster_kind), run the
+    existing keyword scanner.  This preserves backwards compatibility for any
+    caller that bypasses cluster_merge.
+    """
     raw_clusters = [dict(c) for c in clusters]
+
+    # Fast path: cluster_merge already classified and built phases.
+    if clusters and clusters[0].get("cluster_kind"):
+        threat_cases = _build_from_cluster_kind(clusters, evidence_rows)
+        return {
+            "raw_correlation_clusters": raw_clusters,
+            "analysis_clusters": raw_clusters,
+            "threat_cases": threat_cases,
+        }
+
+    # Legacy path: keyword scanner — opt-in only via env flag.
+    # Keep this retired guard in place for rollback context only. The default
+    # path below must preserve the raw cluster inventory one-to-one.
+    if False and os.getenv("JANUSEC_ALLOW_LEGACY_THREAT_CASES", "0").lower() not in {"1", "true", "yes"}:
+        incomplete_case = {
+            "cluster_id": "analysis-incomplete",
+            "case_id": "analysis-incomplete",
+            "cluster_kind": None,
+            "verdict": "ANALYSIS_INCOMPLETE",
+            "final_verdict": "ANALYSIS_INCOMPLETE",
+            "analysis_classification": "analysis_incomplete",
+            "severity": "unknown",
+            "confidence": 0.0,
+            "lead_description": "Analysis incomplete — re-ingest required",
+            "reason_summary": (
+                "Clustering produced no typed clusters. This usually means telemetry was "
+                "stored with an older normalizer that did not populate canonical pivot fields "
+                "(user_canonical, hostname, src_ip). Re-upload the source files to generate "
+                "a fresh typed assessment."
+            ),
+            "phases": [],
+            "row_refs": [],
+            "row_count": len(raw_clusters),
+        }
+        return {
+            "raw_correlation_clusters": raw_clusters,
+            "analysis_clusters": [incomplete_case],
+            "threat_cases": [incomplete_case],
+        }
+
     analysis_clusters = _build_analysis_clusters(raw_clusters, evidence_rows)
     threat_cases = _build_presentation_cases(analysis_clusters, evidence_rows, evidence_cap=evidence_cap)
     return {
@@ -195,6 +247,186 @@ def build_threat_cases(
         "analysis_clusters": analysis_clusters,
         "threat_cases": threat_cases,
     }
+
+
+def _campaign_title_short(phases: list[dict]) -> str:
+    """Derive a compact incident name from the phases present."""
+    role_labels = {
+        "credential_theft":         "Credential Theft",
+        "data_exfiltration":        "Data Exfiltration",
+        "privilege_escalation":     "Privilege Escalation",
+        "c2_communication":         "C2 Beaconing",
+        "initial_access":           "Initial Access",
+    }
+    seen_roles: list[str] = []
+    for p in phases:
+        label = role_labels.get(p.get("case_role", ""), "")
+        if label and label not in seen_roles:
+            seen_roles.append(label)
+    if len(seen_roles) >= 3:
+        return "CONFIRMED MULTI-PHASE INTRUSION"
+    return " + ".join(seen_roles) if seen_roles else "CONFIRMED INTRUSION"
+
+
+def _build_from_cluster_kind(
+    clusters: list[dict],
+    evidence_rows: list[dict],
+) -> list[dict]:
+    """Convert cluster_merge output into presentation threat cases.
+
+    One top card per campaign (with phases inside), one per pentest engagement,
+    one per change-managed ops cluster, and a single unclassified telemetry
+    bucket for anything remaining.
+    """
+    cases: list[dict[str, Any]] = []
+    assigned_row_idxs: set[int] = set()
+
+    for c in clusters:
+        kind = c.get("cluster_kind")
+        row_refs = c.get("row_refs") or []
+        assigned_row_idxs.update(int(i) for i in row_refs)
+
+        if kind == "campaign":
+            phases = c.get("phases") or []
+            n_phases = len(phases)
+            n_sources = len(c.get("sources") or [])
+            incident_name = _campaign_title_short(phases)
+            headline = (
+                f"{n_phases} attack phase{'s' if n_phases != 1 else ''} observed "
+                f"across {n_sources} telemetry source{'s' if n_sources != 1 else ''}."
+            )
+            conf = float(c.get("confidence") or 0.87)
+            cases.append({
+                "cluster_id":           c["cluster_id"],
+                "case_id":              c["cluster_id"],
+                "incident_name":        incident_name,
+                "case_role":            "intrusion_campaign",
+                "verdict":              "VALIDATED_BREACH",
+                "final_verdict":        "VALIDATED_BREACH",
+                "severity":             c.get("severity", "critical"),
+                "confidence":           conf,
+                "confidence_calibration": "uncalibrated",
+                "lead_description":     c.get("lead_description", ""),
+                "headline_subtitle":    headline,
+                "phases":               phases,
+                "phase_count":          n_phases,
+                "row_refs":             row_refs,
+                "row_count":            int(c.get("row_count") or len(row_refs)),
+                "engagement_refs":      c.get("engagement_refs") or [],
+                "change_refs":          c.get("change_refs") or [],
+                "shared_users":         c.get("shared_users") or [],
+                "shared_ips":           c.get("shared_ips") or [],
+                "sources":              c.get("sources") or [],
+                "time_window":          c.get("time_window") or {},
+                "supporting_cluster_ids": [],
+                "evidence_preview":     [],
+                "tier1_prefill": {
+                    "incident_name":    incident_name,
+                    "headline_subtitle": headline,
+                    "short_narrative":  c.get("lead_description", ""),
+                    "what_happened":    c.get("lead_description", ""),
+                    "confidence_meter": {"total": int(conf * 100), "segments": {}},
+                    "top_actions":      [],
+                    "mitre_techniques": [],
+                    "verdict_reasoning": "",
+                    "mitre_evidence_map": {},
+                },
+            })
+
+        elif kind == "pentest":
+            refs = c.get("engagement_refs") or []
+            ref_str = ", ".join(refs) or "authorized engagement"
+            conf = float(c.get("confidence") or 0.92)
+            cases.append({
+                "cluster_id":           c["cluster_id"],
+                "case_id":              c["cluster_id"],
+                "incident_name":        f"AUTHORIZED SECURITY TEST · {ref_str}",
+                "case_role":            "authorized_test",
+                "verdict":              "BENIGN_EXPECTED",
+                "final_verdict":        "BENIGN_EXPECTED",
+                "severity":             "low",
+                "confidence":           conf,
+                "confidence_calibration": "uncalibrated",
+                "lead_description":     c.get("lead_description", ""),
+                "headline_subtitle":    f"Activity is engagement-bound to {ref_str}.",
+                "phases":               [],
+                "row_refs":             row_refs,
+                "row_count":            int(c.get("row_count") or len(row_refs)),
+                "engagement_refs":      refs,
+                "supporting_cluster_ids": [],
+                "evidence_preview":     [],
+                "tier1_prefill": {
+                    "incident_name":    f"AUTHORIZED SECURITY TEST · {ref_str}",
+                    "headline_subtitle": f"Activity bound to engagement {ref_str}.",
+                    "confidence_meter": {"total": int(conf * 100), "segments": {}},
+                },
+            })
+
+        elif kind == "ops":
+            refs = c.get("change_refs") or []
+            ref_str = ", ".join(refs) or "change activity"
+            conf = float(c.get("confidence") or 0.92)
+            cases.append({
+                "cluster_id":           c["cluster_id"],
+                "case_id":              c["cluster_id"],
+                "incident_name":        f"CHANGE-MANAGED ACTIVITY · {ref_str}",
+                "case_role":            "approved_change",
+                "verdict":              "BENIGN_EXPECTED",
+                "final_verdict":        "BENIGN_EXPECTED",
+                "severity":             "low",
+                "confidence":           conf,
+                "confidence_calibration": "uncalibrated",
+                "lead_description":     c.get("lead_description", ""),
+                "headline_subtitle":    f"Activity covered by approved change {ref_str}.",
+                "phases":               [],
+                "row_refs":             row_refs,
+                "row_count":            int(c.get("row_count") or len(row_refs)),
+                "change_refs":          refs,
+                "supporting_cluster_ids": [],
+                "evidence_preview":     [],
+                "tier1_prefill": {
+                    "incident_name":    f"CHANGE-MANAGED ACTIVITY · {ref_str}",
+                    "headline_subtitle": f"Covered by change ticket {ref_str}.",
+                    "confidence_meter": {"total": int(conf * 100), "segments": {}},
+                },
+            })
+        # unclassified clusters are rolled into the telemetry bucket below
+
+    # ── Unclassified telemetry bucket ─────────────────────────────────────────
+    telemetry_rows = [r for r in evidence_rows if _is_evidence_row(r)]
+    noise_by_source: dict[str, int] = defaultdict(int)
+    for row in telemetry_rows:
+        try:
+            idx = int(row.get("row_index"))
+        except (TypeError, ValueError):
+            continue
+        if idx not in assigned_row_idxs:
+            noise_by_source[str(row.get("_source") or row.get("source_file") or "unknown")] += 1
+    remaining = sum(noise_by_source.values())
+    if remaining:
+        cases.append({
+            "cluster_id":    "case-unclassified-telemetry",
+            "case_id":       "case-unclassified-telemetry",
+            "incident_name": "UNCLASSIFIED TELEMETRY",
+            "case_role":     "unclassified",
+            "verdict":       "NO_VALIDATED_BREACH",
+            "final_verdict": "NO_VALIDATED_BREACH",
+            "severity":      "info",
+            "confidence":    0.7,
+            "confidence_calibration": "uncalibrated",
+            "lead_description":  "Remaining telemetry is unclassified — not confirmed benign",
+            "headline_subtitle": "Stored as searchable supporting evidence. Requires further investigation.",
+            "row_refs":      [],
+            "row_count":     remaining,
+            "source_counts": dict(noise_by_source),
+            "evidence_preview": [],
+        })
+
+    severity_order = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
+    return sorted(cases, key=lambda c: (
+        severity_order.get(str(c.get("severity")), 9),
+        -float(c.get("confidence") or 0),
+    ))
 
 
 def _build_analysis_clusters(clusters: list[dict], evidence_rows: list[dict]) -> list[dict]:

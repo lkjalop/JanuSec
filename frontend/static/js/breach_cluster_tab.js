@@ -138,7 +138,8 @@
   }
 
   function _rawCorrelationText(s) {
-    return /shared attacker|shared identity|same network|same host sequence|same ATT&CK|identity compromise or shared actor|external infrastructure appears/i.test(String(s || ''));
+    // Catches old correlation-engine boilerplate AND generic phase-count metadata strings.
+    return /shared attacker|shared identity|same network|same host sequence|same ATT&CK|identity compromise or shared actor|external infrastructure appears|\d+\s+attack\s+phases?\s+observed|\d+\s+telemetry\s+sources?\b/i.test(String(s || ''));
   }
 
   function _caseSubtitle(cluster, p, title) {
@@ -191,6 +192,7 @@
     _wireSignOff(cluster, assessmentId);
     _wireNotes(cluster, assessmentId);
     _wireIocExport(cluster, allRows, assessmentId);
+    _wireThreatModelRefresh(cluster, assessmentId);
 
     // Fetch timeline (E9)
     _loadTimeline(cluster, assessmentId);
@@ -208,7 +210,32 @@
     var raw = String(verdict || '').toUpperCase();
     if (raw === 'VALIDATED_BREACH' || raw === 'CONFIRMED_INTRUSION' || raw === 'CONFIRMED_BREACH') return 'CONFIRMED BREACH';
     if (raw === 'NO_VALIDATED_BREACH') return 'NO CONFIRMED BREACH';
+    if (raw === 'ANALYSIS_INCOMPLETE') return 'ANALYSIS INCOMPLETE';
     return raw.replace(/_/g, ' ') || 'UNCERTAIN';
+  }
+
+  function _staleClusterBadge(cluster) {
+    if (cluster.cluster_kind) return '';
+    return '<span class="bct-stale-badge" style="background:#7c2d2d;color:#fca5a5;font-size:11px;padding:2px 6px;border-radius:3px;margin-left:8px;" title="Cluster was produced without canonical fields — re-ingest required for typed analysis">stale</span>';
+  }
+
+  function _dreadScoreBadge(cluster) {
+    var p = (cluster || {}).tier1_prefill || {};
+    var ds = p.dread_score;
+    if (!ds || typeof ds.total === 'undefined') return '';
+    var total = ds.total || 0;
+    var tier  = ds.risk_tier || '';
+    var color = total > 35 ? '#ef4444' : total > 20 ? '#f97316' : '#eab308';
+    var dims  = ['D', 'R', 'E', 'A', 'D'].map(function (letter, i) {
+      var keys = ['damage', 'reproducibility', 'exploitability', 'affected_users', 'discoverability'];
+      var val  = ds[keys[i]];
+      return letter + ':' + (typeof val === 'number' ? val : '?');
+    }).join(' ');
+    var tip = 'DREAD: ' + dims + ' — ' + tier + ' (' + total + '/50)';
+    return '<span class="bct-dread-badge" title="' + _esc(tip) + '" style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:12px;border:1px solid ' + color + ';color:' + color + ';font-size:11px;font-weight:600;margin-left:8px;cursor:default;">'
+      + '<svg width="11" height="11" viewBox="0 0 20 20"><circle cx="10" cy="10" r="8" fill="none" stroke="' + color + '" stroke-width="3" stroke-dasharray="' + Math.round(total * 50.3 / 50) + ' 503" stroke-linecap="round" transform="rotate(-90 10 10)"/></svg>'
+      + _esc(total + '/50') + ' ' + _esc(tier)
+      + '</span>';
   }
 
   function _dreadInfo(cluster) {
@@ -219,7 +246,21 @@
     var parts = order.filter(function (k) { return !!frags[k]; }).map(function (k) {
       return { key: k, label: k.replace(/_/g, ' ').toUpperCase(), text: String(frags[k]) };
     });
-    return { dn: dn, frags: frags, parts: parts, has: !!(dn.rendered || parts.length), provenance: dn.rendered ? 'LLM-rendered DREAD' : (parts.length ? 'Deterministic DREAD fragments' : 'Legacy fallback') };
+    var hasPasta = !!(p.pasta_summary && (p.pasta_summary.threat_profile || p.pasta_summary.exploitation_path || p.pasta_summary.business_impact));
+    var hasDiamond = !!(p.diamond_model && (p.diamond_model.adversary || (p.diamond_model.capability && p.diamond_model.capability.length)));
+    var provenance;
+    if (dn.rendered) {
+      provenance = 'LLM-rendered DREAD';
+    } else if (parts.length) {
+      provenance = 'Deterministic DREAD fragments';
+    } else if (hasPasta) {
+      provenance = 'PASTA threat model';
+    } else if (hasDiamond) {
+      provenance = 'DIAMOND threat model';
+    } else {
+      provenance = 'Legacy fallback';
+    }
+    return { dn: dn, frags: frags, parts: parts, has: !!(dn.rendered || parts.length), hasPasta: hasPasta, hasDiamond: hasDiamond, provenance: provenance };
   }
 
   function _rowChips(text, limit) {
@@ -271,7 +312,32 @@
       body,
       sabsa,
       '  <div class="bct-framework-lite">',
-      '    <div><strong>DREAD:</strong> ' + _esc(d.parts.map(function (x) { return x.label; }).join(' / ')) + '</div>',
+      (function() {
+        var ds = p.dread_score;
+        if (ds && typeof ds.total === 'number') {
+          var color = ds.total > 35 ? '#ef4444' : ds.total > 20 ? '#f97316' : '#eab308';
+          var dimHtml = [
+            ['Damage', 'damage', 'damage_detail'],
+            ['Reproducibility', 'reproducibility', 'reproducibility_detail'],
+            ['Exploitability', 'exploitability', 'exploitability_detail'],
+            ['Affected Users', 'affected_users', 'affected_users_detail'],
+            ['Discoverability', 'discoverability', 'discoverability_detail'],
+          ].map(function (row) {
+            var score = ds[row[1]];
+            var detail = _esc(String(ds[row[2]] || '').replace(/\.$/, ''));
+            return '<div style="display:flex;gap:8px;align-items:baseline;margin:2px 0;">'
+              + '<span style="font-size:11px;color:var(--text-muted);width:110px;">' + _esc(row[0]) + '</span>'
+              + '<span style="font-weight:700;color:' + color + ';width:18px;">' + (typeof score === 'number' ? score : '?') + '</span>'
+              + (detail ? '<span style="font-size:11px;color:var(--text-muted);">' + detail + '</span>' : '')
+              + '</div>';
+          }).join('');
+          return '<div style="margin:6px 0 8px;">'
+            + '<strong>DREAD score:</strong> <span style="color:' + color + ';font-weight:700;">' + ds.total + '/50 — ' + _esc(ds.risk_tier) + '</span>'
+            + '<div style="margin-top:4px;padding-left:8px;">' + dimHtml + '</div>'
+            + '</div>';
+        }
+        return '<div><strong>DREAD:</strong> ' + _esc(d.parts.map(function (x) { return x.label; }).join(' / ')) + '</div>';
+      })(),
       '    <div><strong>Diamond:</strong> adversary, capability, infrastructure, and victim are derived from cited rows.</div>',
       '    <div><strong>PASTA:</strong> threat action to control gap to business impact is visible in Damage and Exploitability.</div>',
       '    <div><strong>SABSA:</strong> ' + _esc((d.dn.sabsa_attributes || []).join(', ') || 'not mapped') + '</div>',
@@ -279,6 +345,157 @@
       '    <div><strong>Controls:</strong> DLP, PAM, cloud egress, endpoint preservation, and regulatory assessment stay tied to cited rows.</div>',
       '  </div>',
       '</div>'
+    ].join('');
+  }
+
+  function _firstNonEmpty(values, fallback) {
+    for (var i = 0; i < values.length; i++) {
+      var v = values[i];
+      if (Array.isArray(v) && v.length) return v.join(', ');
+      if (v && String(v).trim()) return String(v).trim();
+    }
+    return fallback || '';
+  }
+
+  function _rowsSummary(cluster) {
+    var refs = (cluster.row_refs || []).slice(0, 8);
+    if (!refs.length) return 'No row references attached to this case.';
+    return refs.join(' | ') + ((cluster.row_refs || []).length > refs.length ? ' | +' + ((cluster.row_refs || []).length - refs.length) + ' more' : '');
+  }
+
+  function _modelAnswer(title, question, answer, evidenceText) {
+    return '<div class="bct-model-answer">'
+      + '<div class="bct-model-answer__title">' + _esc(title) + '</div>'
+      + '<div class="bct-model-answer__question">' + _esc(question) + '</div>'
+      + '<div class="bct-model-answer__body">' + _esc(answer || 'Not answered yet from current evidence. Generate or verify with row-level evidence before making a decision.') + '</div>'
+      + _rowChips(evidenceText || answer || '', 8)
+      + '</div>';
+  }
+
+  function _buildDreadWorkbench(cluster) {
+    var p = (cluster || {}).tier1_prefill || {};
+    var d = _dreadInfo(cluster);
+    var ds = p.dread_score || {};
+    var frags = d.frags || {};
+    var impact = p.observed_impact || {};
+    return '<details class="bct-model-section" open data-model-section="dread">'
+      + '<summary>DREAD <span>blast radius, repeatability, exploitation, affected users, discoverability</span></summary>'
+      + _modelAnswer('Damage',
+          'What exact infrastructure, accounts, subnets, cloud resources, data stores, and data classes are affected or plausibly exposed?',
+          frags.damage || ds.damage_detail || _firstNonEmpty([impact.data, impact.operational], 'Blast radius is not fully proven. Verify asset contents, subnet/security group scope, destination ownership, and whether the data is PII, credentials, scripts, or non-sensitive operational data.'),
+          frags.damage || '')
+      + _modelAnswer('Reproducibility',
+          'Can this be repeated with the same credentials, session, command pattern, tool, token, route, or schedule?',
+          frags.reproducibility || ds.reproducibility_detail || 'Check whether the same command, session, account, host, cloud role, or destination recurs over time and whether credentials remain valid.',
+          frags.reproducibility || '')
+      + _modelAnswer('Exploitability',
+          'How hard is the observed or suspected technique to run, and what missing controls made it practical?',
+          frags.exploitability || ds.exploitability_detail || 'Assess whether commodity tooling was enough, whether admin privilege was required, and whether DLP, PAM, egress, MFA, or segmentation should have blocked it.',
+          frags.exploitability || '')
+      + _modelAnswer('Affected Users',
+          'Who was affected, what privileges did they have, and was their access normal for their role and history?',
+          frags.affected_users || ds.affected_users_detail || _firstNonEmpty([impact.identity], 'Verify user privilege level, group membership, MFA state, role changes, lateral movement, and whether this behavior matches the account baseline.'),
+          frags.affected_users || '')
+      + _modelAnswer('Discoverability',
+          'What should have detected this, what actually detected it, and what telemetry missed it?',
+          frags.discoverability || ds.discoverability_detail || 'Map the activity window to alert coverage. Identify missing SIEM rules, DLP alerts, identity analytics, EDR telemetry, cloud audit logs, data warehouse logs, or bitemporal decision trace gaps.',
+          frags.discoverability || '')
+      + '</details>';
+  }
+
+  function _buildPastaWorkbench(cluster) {
+    var p = (cluster || {}).tier1_prefill || {};
+    var pasta = p.pasta_summary || {};
+    var d = _dreadInfo(cluster);
+    var damage = (d.frags || {}).damage || '';
+    var exploit = (d.frags || {}).exploitability || '';
+    return '<details class="bct-model-section" open data-model-section="pasta">'
+      + '<summary>PASTA <span>business objective to attack path to impact</span></summary>'
+      + _modelAnswer('Business objective',
+          'Which business process, asset, data class, or regulatory obligation are we protecting in this case?',
+          pasta.business_objective || pasta.business_impact || 'Protect the affected business process and data until asset classification and ownership are verified.',
+          pasta.business_impact || damage)
+      + _modelAnswer('Technical scope',
+          'Which users, hosts, shares, cloud accounts, buckets, subnets, security groups, and integrations are in scope?',
+          pasta.technical_scope || 'Scope must be built from the affected identity, host/resource, destination, network path, and cited rows.',
+          damage)
+      + _modelAnswer('Architecture / trust boundaries',
+          'Where did activity cross trust boundaries such as user to host, host to subnet, subnet to internet, cloud role to storage, or tenant to third party?',
+          pasta.trust_boundaries || 'Verify VPC/subnet/security group, identity boundary, egress path, cloud account, and third-party storage ownership.',
+          damage + ' ' + exploit)
+      + _modelAnswer('Attack path',
+          'What sequence links initial access, credential/session use, privilege, lateral movement, collection, and exfiltration?',
+          pasta.exploitation_path || pasta.threat_profile || _caseNarrative(cluster, p, _caseTitle(cluster, p), _caseSubtitle(cluster, p, _caseTitle(cluster, p))),
+          pasta.exploitation_path || '')
+      + _modelAnswer('Control failure',
+          'Which preventive, detective, or response controls should have stopped or alerted on this activity?',
+          pasta.control_failure || exploit || 'Control failure is not fully proven. Query DLP, PAM, egress, segmentation, identity analytics, EDR, and cloud audit coverage.',
+          exploit)
+      + _modelAnswer('Business impact',
+          'How does the technical event translate into customer, regulatory, operational, financial, or board-level impact?',
+          pasta.business_impact || damage || 'Impact ranges from operational exposure to regulated-data breach depending on data classification and destination ownership.',
+          damage)
+      + '</details>';
+  }
+
+  function _buildDiamondWorkbench(cluster) {
+    var p = (cluster || {}).tier1_prefill || {};
+    var diamond = p.diamond_model || {};
+    var infra = p.attacker_infrastructure || {};
+    var rows = _rowsForCluster(cluster);
+    var users = Array.from(new Set(rows.map(function (r) { return r.user || r.user_principal_name || r.account || r.actor; }).filter(Boolean))).slice(0, 8);
+    var hosts = Array.from(new Set(rows.map(function (r) { return r.hostname || r.host || r.device_name || r.resource; }).filter(Boolean))).slice(0, 8);
+    var ips = Array.from(new Set(rows.map(function (r) { return r.src_ip || r.source_ip || r.dst_ip || r.destination_ip || r.ip; }).filter(Boolean))).slice(0, 10);
+    var capabilities = Array.isArray(diamond.capability) ? diamond.capability.join(', ') : diamond.capability;
+    var victims = Array.isArray(diamond.victim) ? diamond.victim.join(', ') : diamond.victim;
+    var infraText = _firstNonEmpty([diamond.infrastructure, infra.c2_ips, infra.ips, infra.domains, ips, hosts], 'Infrastructure is not fully classified yet.');
+    return '<details class="bct-model-section" open data-model-section="diamond">'
+      + '<summary>Diamond <span>adversary, capability, infrastructure, victim, pivots</span></summary>'
+      + _modelAnswer('Adversary',
+          'Who or what appears to be operating the activity, and what does the evidence prove versus infer?',
+          diamond.adversary || 'Unknown actor or compromised account. Current evidence should not over-claim attribution without identity, infrastructure ownership, or campaign correlation.',
+          diamond.adversary || '')
+      + _modelAnswer('Capability',
+          'What capabilities were shown, how mature are they, and what does that signify for repeatability or scale?',
+          capabilities || 'Capability must be inferred from tools, commands, techniques, access level, data movement, and persistence indicators.',
+          capabilities || '')
+      + _modelAnswer('Infrastructure',
+          'Which internal and external infrastructure was used or affected, and why does it matter?',
+          infraText,
+          infraText)
+      + _modelAnswer('Victim',
+          'Who is confirmed affected and who could be adjacent based on account groups, peer hosts, subnets, shares, or cloud roles?',
+          victims || _firstNonEmpty([users, hosts], 'Victim scope requires user, host, group, subnet, and cloud-account expansion.'),
+          victims || users.join(' ') + ' ' + hosts.join(' '))
+      + _modelAnswer('Next hunts',
+          'What should hunters pivot on next?',
+          'Pivot same user/session across identity and cloud logs; same destination across proxy/DNS/cloud logs; same command/tool across hosts; same subnet/security group with unusual egress; adjacent shares and cloud roles for related access.',
+          _rowsSummary(cluster))
+      + '</details>';
+  }
+
+  function _buildThreatModelWorkbench(cluster) {
+    var p = (cluster || {}).tier1_prefill || {};
+    var d = _dreadInfo(cluster);
+    return [
+      '<div class="br-threat-model bct-threat-model-workbench" data-testid="bct-threat-model-workbench">',
+      '<div class="bct-model-head">',
+      '<div><div class="bct-section-head">EVIDENCE-BACKED THREAT MODEL</div>',
+      '<div class="bct-model-sub">Per-cluster DREAD, PASTA, and Diamond reasoning. Answers should cite rows and stay explicit about unknowns.</div></div>',
+      '<button class="bct-btn bct-btn--primary" id="bct-threat-model-refresh" data-testid="bct-threat-model-refresh">Generate / refresh threat model</button>',
+      '</div>',
+      '<div class="bct-model-rail">',
+      '<div><strong>Source</strong><span>' + _esc(d.provenance) + '</span></div>',
+      '<div><strong>Evidence rows</strong><span>' + (cluster.row_refs || []).length + '</span></div>',
+      '<div><strong>Last known</strong><span>' + _esc(p.generated_at || p.updated_at || 'current assessment state') + '</span></div>',
+      '<div><strong>Decision trace</strong><span>Use cited rows and bitemporal state before broad remediation.</span></div>',
+      '</div>',
+      '<div class="bct-model-grid">',
+      _buildDreadWorkbench(cluster),
+      _buildPastaWorkbench(cluster),
+      _buildDiamondWorkbench(cluster),
+      '</div>',
+      '</div>',
     ].join('');
   }
 
@@ -353,10 +570,11 @@
       '<div class="bct-header">',
       _renderGateBanner(cluster),
       '  <div class="bct-header__verdict" style="border-left-color:' + vc + '">',
-      '    <span class="bct-header__verdict-pill" style="background:' + vc + '22;color:' + vc + '">' + _esc(_displayVerdict(verdict)) + '</span>',
+      '    <span class="bct-header__verdict-pill" style="background:' + vc + '22;color:' + vc + '">' + _esc(_displayVerdict(verdict)) + '</span>' + _staleClusterBadge(cluster),
       '    <span class="bct-header__sev" style="color:' + sc + '">' + _esc(sev.toUpperCase()) + '</span>',
       '    <span class="bct-header__rows">' + (cluster.row_refs || []).length + ' rows</span>',
       meter ? '<span class="bct-header__conf">' + Math.round(meter.total) + '% confidence</span>' : '',
+      _dreadScoreBadge(cluster),
       '  </div>',
       '  <div class="bct-header__title">' + _esc(caseTitle) + '</div>',
       caseSubtitle ? '<div class="bct-header__sub">' + _esc(caseSubtitle) + '</div>' : '',
@@ -399,7 +617,7 @@
       '</div>',
       '</details>',
 
-      _buildEvidenceNarrative(cluster),
+      _buildThreatModelWorkbench(cluster),
 
       (function() {
         var chain = p.evidence_chain;
@@ -1312,6 +1530,37 @@
   }
 
   // ── Analyst notes (E10) — auto-save on blur ──────────────────────────────────
+
+  function _wireThreatModelRefresh(cluster, assessmentId) {
+    var btn = document.getElementById('bct-threat-model-refresh');
+    if (!btn) return;
+    btn.addEventListener('click', function () {
+      btn.disabled = true;
+      btn.textContent = 'Generating...';
+      _post('/api/v1/assessments/' + encodeURIComponent(assessmentId)
+        + '/clusters/' + encodeURIComponent(cluster.cluster_id) + '/tier1-summary', {
+          model: _selectedModel(),
+          force: true,
+        })
+        .then(function (r) {
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          return r.json();
+        })
+        .then(function (data) {
+          if (data && data.tier1_prefill) {
+            cluster.tier1_prefill = data.tier1_prefill;
+            if (data.verdict) cluster.verdict = data.verdict;
+            if (data.verdict_confidence != null) cluster.verdict_confidence = data.verdict_confidence;
+          }
+          BreachClusterTab.mount(_ctx.containerId, cluster, _ctx.allRows, assessmentId, _ctx.allClusters);
+        })
+        .catch(function () {
+          btn.disabled = false;
+          btn.textContent = 'Generate / refresh threat model';
+          btn.title = 'Threat model generation failed. Check server logs and API key.';
+        });
+    });
+  }
 
   function _wireNotes(cluster, assessmentId) {
     var textarea = document.getElementById('bct-notes-input');
