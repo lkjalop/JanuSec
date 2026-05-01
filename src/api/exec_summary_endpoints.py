@@ -46,15 +46,16 @@ def _get_assessment(assessment_id: str) -> Optional[dict]:
         if result:
             _repair_assessment_runtime_fields(result)
             return result
-    except Exception:
-        pass
+    except Exception as _e:
+        logger.debug('_get_assessment via cache failed: %s', _e)
     try:
         from src.api.deep_analyze_endpoints import REPORT_STORE
         result = REPORT_STORE.get(assessment_id)
         if result:
             _repair_assessment_runtime_fields(result)
         return result
-    except Exception:
+    except Exception as _e:
+        logger.warning('_get_assessment fallback failed: %s', _e)
         return None
 
 
@@ -62,8 +63,8 @@ def _persist(assessment_id: str, assessment: dict) -> None:
     try:
         from src.api.deep_analyze_endpoints import _persist_assessment_state
         _persist_assessment_state(assessment_id, assessment)
-    except Exception:
-        pass
+    except Exception as _e:
+        logger.warning('exec_summary _persist failed for %s: %s', assessment_id, _e)
 
 
 def _get_llm(model: str = 'qwen3:14b'):
@@ -1745,20 +1746,26 @@ async def get_executive_summary(
                 "EVIDENCE:\n"
                 + "\n".join(context_parts)
             )
-            resp = await asyncio.to_thread(
-                llm.generate,
-                prompt,
-                400,
-                None,
-                {'ollama_model': body.model},
-                body.model,
+            _LLM_TIMEOUT = int(os.getenv('EXEC_SUMMARY_LLM_TIMEOUT', '120'))
+            resp = await asyncio.wait_for(
+                asyncio.to_thread(
+                    llm.generate,
+                    prompt,
+                    400,
+                    None,
+                    {'ollama_model': body.model},
+                    body.model,
+                ),
+                timeout=_LLM_TIMEOUT,
             )
             llm_text = (resp.get('text') or '').strip()
             if llm_text and len(llm_text) > 30 and not llm_text.startswith('{'):
                 executive_summary = llm_text
                 _llm_ran = True
-        except Exception:
-            pass  # keep deterministic fallback
+        except asyncio.TimeoutError:
+            logger.warning('exec_summary LLM timed out after %ss — using deterministic fallback', _LLM_TIMEOUT)
+        except Exception as _llm_err:
+            logger.warning('exec_summary LLM failed: %s — using deterministic fallback', _llm_err)
 
     cluster_headlines = []
     for c in sorted_clusters[:3]:

@@ -175,14 +175,23 @@ class TemporalRAGEngine:
         client = self._get_ollama_client()
         if client is None:
             return None
+        # Periodic retry: re-attempt after 60s of degraded BM25 mode
+        if self._ollama_ok is False:
+            now = time.time()
+            if now - getattr(self, '_ollama_fail_ts', 0) < 60:
+                return None
+            self._ollama_fail_ts = now
         try:
             vec = client.embed(_EMBED_MODEL, text)
+            if self._ollama_ok is False:
+                logger.info("TemporalRAG: Ollama recovered — embedding mode restored")
             self._ollama_ok = True
             return vec
         except Exception as exc:
             if self._ollama_ok is not False:
-                logger.debug("TemporalRAG: Ollama embed failed (%s) — using BM25 fallback", exc)
+                logger.warning("TemporalRAG: Ollama embed failed (%s) — degrading to BM25 fallback", exc)
             self._ollama_ok = False
+            self._ollama_fail_ts = time.time()
             return None
 
     # -- Index ---------------------------------------------------------------
