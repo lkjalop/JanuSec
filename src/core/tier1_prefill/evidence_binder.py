@@ -383,12 +383,12 @@ def _extract_entity_set(cluster: dict, rows: list[dict]) -> set[str]:
             v = str(r.get(f) or '').strip().lower()
             if v and v not in ('-', 'n/a', ''):
                 entities.add(v)
-    for f in ('mitre_technique', 'mitre', 'technique_id'):
-        v = r.get(f)
-        if isinstance(v, list):
-            entities.update(str(x).lower() for x in v if x)
-        elif v:
-            entities.add(str(v).lower())
+        for f in ('mitre_technique', 'mitre', 'technique_id'):
+            v = r.get(f)
+            if isinstance(v, list):
+                entities.update(str(x).lower() for x in v if x)
+            elif v:
+                entities.add(str(v).lower())
     # Add cluster ID itself
     entities.add(str(cluster.get('cluster_id') or '').lower())
     return entities
