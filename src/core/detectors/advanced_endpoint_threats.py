@@ -43,6 +43,7 @@ import math
 import os
 import re
 import struct
+import time
 from collections import Counter
 from typing import Any, Dict, List, Optional
 
@@ -626,4 +627,167 @@ def detect_advanced_threats(runtime, tenant_id: str = 'default', event_id: Optio
     return detect_advanced_endpoint_threats(events, tenant_id=tenant_id, event_id=event_id)
 
 
-__all__ = ['detect_advanced_endpoint_threats', 'detect_advanced_threats']
+_DOWNLOAD_OPS = {
+    'filedownloaded',
+    'filesyncdownloadedfull',
+    'filesyncdownloadedpartial',
+    'downloadfile',
+}
+_PURVIEW_OPS = {
+    'dlppolicymatched',
+    'dlprulematch',
+    'dlppolicytip',
+    'dlpendpointmatch',
+    'sensitivitylabelchanged',
+}
+_PERSONAL_SYNC_PROCESSES = {
+    'box.exe',
+    'boxsync.exe',
+    'dropbox.exe',
+    'googledrivesync.exe',
+    'google drive.exe',
+    'megasync.exe',
+    'onedriveconsumer.exe',
+}
+_BULK_DOWNLOAD_COUNT = 200
+_BULK_DOWNLOAD_BYTES = 500 * 1024 * 1024
+
+
+def _event_user(ev: Dict[str, Any]) -> str:
+    return str(
+        ev.get('user')
+        or ev.get('username')
+        or ev.get('user_name')
+        or ev.get('UserName')
+        or ''
+    ).strip().lower()
+
+
+def _event_epoch(value: Any) -> Optional[float]:
+    if value in (None, '', [], {}):
+        return None
+    try:
+        return float(value)
+    except Exception:
+        pass
+    try:
+        from datetime import datetime as _dt
+        text = str(value).strip()
+        if text.endswith('Z'):
+            text = text[:-1] + '+00:00'
+        return _dt.fromisoformat(text).timestamp()
+    except Exception:
+        return None
+
+
+def _operation(ev: Dict[str, Any]) -> str:
+    return str(
+        ev.get('operation')
+        or ev.get('Operation')
+        or ev.get('event_name')
+        or ev.get('eventName')
+        or ''
+    ).strip().lower()
+
+
+def detect_insider_threats(events: List[Dict[str, Any]] | None) -> List[Dict[str, Any]]:
+    """Detect stale-account, bulk-download, Purview DLP, and personal-sync signals."""
+    if not events:
+        return []
+
+    factors: List[Dict[str, Any]] = []
+    by_user: Dict[str, List[Dict[str, Any]]] = {}
+    for ev in events:
+        if not isinstance(ev, dict):
+            continue
+        user = _event_user(ev)
+        if user:
+            by_user.setdefault(user, []).append(ev)
+
+    for ev in events:
+        if not isinstance(ev, dict):
+            continue
+        user = _event_user(ev)
+        term_ts = _event_epoch(ev.get('termination_date') or ev.get('terminated_at'))
+        login_ts = _event_epoch(ev.get('last_login_epoch') or ev.get('timestamp_epoch') or ev.get('timestamp'))
+        status = str(ev.get('account_status') or ev.get('status') or '').strip().lower()
+        if term_ts and (status in {'active', 'enabled'} or (login_ts and login_ts > term_ts)):
+            days_stale = max(0.0, (time.time() - term_ts) / 86400.0)
+            score = min(0.95, 0.55 + min(days_stale, 30.0) / 100.0)
+            factors.append({
+                'factor': 'identity:stale_account_active',
+                'score': round(score, 3),
+                'reason': f'Account {user or "unknown"} remained active or logged in after termination',
+                'user': user,
+                'days_stale': round(days_stale, 1),
+                'tags': ['ATTACK:T1078', 'INSIDER:TRUE', 'STRIDE:elevation'],
+            })
+
+    for user, user_events in by_user.items():
+        download_events = [ev for ev in user_events if _operation(ev) in _DOWNLOAD_OPS]
+        total_bytes = 0
+        for ev in download_events:
+            try:
+                total_bytes += int(ev.get('byte_count') or ev.get('bytes') or ev.get('size') or 0)
+            except Exception:
+                continue
+        if len(download_events) >= _BULK_DOWNLOAD_COUNT or total_bytes >= _BULK_DOWNLOAD_BYTES:
+            has_dlp = any(_operation(ev) in _PURVIEW_OPS for ev in user_events)
+            has_departure = any(_event_epoch(ev.get('termination_date') or ev.get('terminated_at')) for ev in user_events)
+            score = 0.68
+            if len(download_events) >= _BULK_DOWNLOAD_COUNT:
+                score += 0.08
+            if total_bytes >= _BULK_DOWNLOAD_BYTES:
+                score += 0.08
+            if has_dlp:
+                score += 0.08
+            if has_departure:
+                score += 0.06
+            factors.append({
+                'factor': 'insider:bulk_cloud_download',
+                'score': round(min(score, 0.96), 3),
+                'reason': f'Bulk cloud download activity for {user}: {len(download_events)} files, {total_bytes} bytes',
+                'user': user,
+                'file_count': len(download_events),
+                'byte_count': total_bytes,
+                'purview_correlated': has_dlp,
+                'departure_window': has_departure,
+                'tags': ['ATTACK:T1213', 'ATTACK:T1530', 'INSIDER:TRUE', 'STRIDE:information'],
+            })
+
+        dlp_hits = [ev for ev in user_events if _operation(ev) in _PURVIEW_OPS]
+        if dlp_hits:
+            factors.append({
+                'factor': 'dlp:purview_policy_match',
+                'score': round(min(0.55 + (len(dlp_hits) * 0.05), 0.9), 3),
+                'reason': f'Purview or endpoint DLP policy matched for {user}',
+                'user': user,
+                'dlp_hit_count': len(dlp_hits),
+                'tags': ['ATTACK:T1213', 'INSIDER:TRUE', 'DLP:PURVIEW', 'STRIDE:information'],
+            })
+
+    for ev in events:
+        if not isinstance(ev, dict):
+            continue
+        proc = str(ev.get('process') or ev.get('process_name') or ev.get('FileName') or '').strip()
+        proc_l = proc.lower()
+        if proc_l not in _PERSONAL_SYNC_PROCESSES:
+            continue
+        hostname = str(ev.get('hostname') or ev.get('host') or ev.get('ComputerName') or '').strip()
+        source = str(ev.get('source') or ev.get('source_platform') or ev.get('_source') or '').strip()
+        if not hostname and not source:
+            continue
+        factors.append({
+            'factor': 'insider:personal_cloud_sync_process',
+            'score': 0.72,
+            'reason': f'Personal cloud sync process {proc} observed on corporate endpoint',
+            'process': proc,
+            'hostname': hostname,
+            'user': _event_user(ev),
+            'tags': ['ATTACK:T1567', 'INSIDER:TRUE', 'STRIDE:information'],
+        })
+
+    return _dedup_highest_score(factors)
+
+
+__all__ = ['detect_advanced_endpoint_threats', 'detect_advanced_threats', 'detect_insider_threats']

@@ -1326,8 +1326,9 @@ async def dlq_detail_page(dlq_id: int, request: Request) -> Any:
     '''
     return html
 
-# For tests: capture persisted decisions here when persistence is attempted
-_PERSISTED_DECISIONS: list[dict] = []
+# For tests: capture persisted decisions here when persistence is attempted.
+# Bounded to prevent unbounded memory growth in long-running processes.
+_PERSISTED_DECISIONS: deque = deque(maxlen=int(os.getenv('PERSISTED_DECISIONS_MAX', '5000') or 5000))
 
 # Provide a lightweight decisions_repo adapter by default so server can call .persist()
 try:
@@ -1409,11 +1410,11 @@ async def calibration_export_html(limit: int = 1000):
 @app.get('/api/v1/models/registry')
 async def list_models():
     reg = _pathlib.Path('models/registry')
-    idx = {}
+    idx: dict = {}
     try:
         p = reg / 'index.json'
         if p.exists():
-            idx = _json.loads(p.read_text(encoding='utf-8'))
+            idx = await asyncio.to_thread(lambda: _json.loads(p.read_text(encoding='utf-8')))
     except Exception:
         idx = {}
     return {'registry': idx}
@@ -1432,17 +1433,26 @@ async def set_alias(payload: AliasPayload, request: Request):
     await check_admin_token_async(request)
     reg = _pathlib.Path('models/registry')
     p = reg / 'index.json'
-    idx = {}
+
+    def _read_write_alias() -> None:
+        nonlocal idx
+        try:
+            if p.exists():
+                idx = _json.loads(p.read_text(encoding='utf-8'))
+        except Exception:
+            pass
+        aliases = idx.get('aliases', {})
+        aliases[payload.alias] = payload.model_name
+        idx['aliases'] = aliases
+        tmp = str(p) + '.tmp'
+        import tempfile, os as _os
+        with open(tmp, 'w', encoding='utf-8') as fh:
+            fh.write(_json.dumps(idx, indent=2))
+        _os.replace(tmp, str(p))
+
+    idx: dict = {}
     try:
-        if p.exists():
-            idx = _json.loads(p.read_text(encoding='utf-8'))
-    except Exception:
-        idx = {}
-    aliases = idx.get('aliases', {})
-    aliases[payload.alias] = payload.model_name
-    idx['aliases'] = aliases
-    try:
-        p.write_text(_json.dumps(idx, indent=2), encoding='utf-8')
+        await asyncio.to_thread(_read_write_alias)
     except Exception:
         raise HTTPException(status_code=500, detail='write_failed')
     try:
@@ -1462,7 +1472,7 @@ async def promote_model_api(request: Request, name: str | None = None, alias: st
     except Exception:
         pass
     registry = _pathlib.Path('models/registry')
-    registry.mkdir(parents=True, exist_ok=True)
+    await asyncio.to_thread(registry.mkdir, True, True)  # parents=True, exist_ok=True
     # Tolerant input handling: prefer multipart form 'file' but fall back to JSON or raw body.
     content: bytes | None = None
     # Try form first (multipart). This may raise if form parsing fails; handle gracefully.
@@ -1499,12 +1509,12 @@ async def promote_model_api(request: Request, name: str | None = None, alias: st
     if not content:
         raise HTTPException(status_code=400, detail='no_file')
     tmp = registry / f'upload_tmp_{int(time.time())}.json'
-    tmp.write_bytes(content)
+    await asyncio.to_thread(tmp.write_bytes, content)
     src = str(tmp)
-    # call promote CLI logic (reuse module)
+    # call promote CLI logic (reuse module) — runs sync in thread pool
     try:
         from ml.cli.promote_model import promote
-        res = promote(src, name, alias)
+        res = await asyncio.to_thread(promote, src, name, alias)
         if res != 0:
             raise Exception('promote_failed')
     except Exception as e:
@@ -1516,10 +1526,10 @@ async def promote_model_api(request: Request, name: str | None = None, alias: st
         pass
     # return index
     p = registry / 'index.json'
-    idx = {}
+    idx: dict = {}
     try:
         if p.exists():
-            idx = _json.loads(p.read_text(encoding='utf-8'))
+            idx = await asyncio.to_thread(lambda: _json.loads(p.read_text(encoding='utf-8')))
     except Exception:
         idx = {}
     return {'registry': idx}
@@ -1673,6 +1683,49 @@ from contextlib import asynccontextmanager
 @asynccontextmanager
 async def _lifespan(app):
     # Startup
+    try:
+        if os.getenv('USE_PLATFORM_DB','0').lower() in {'1','true','yes'} or os.getenv('APP_DB_DSN'):
+            try:
+                from src.db import database as _db
+            except Exception:
+                try:
+                    import db.database as _db
+                except Exception:
+                    _db = None
+            if _db is not None:
+                await _db.init_pool()
+                LOGGER.info('server lifespan: database pool initialized')
+                try:
+                    from src.db.migrations import apply_migrations_postgres, apply_migrations_sqlite  # type: ignore
+                except Exception:
+                    try:
+                        from db.migrations import apply_migrations_postgres, apply_migrations_sqlite  # type: ignore
+                    except Exception:
+                        apply_migrations_postgres = apply_migrations_sqlite = None  # type: ignore
+                try:
+                    pool = await _db.get_pool()
+                    if hasattr(_db, 'is_fallback_active') and _db.is_fallback_active():
+                        if apply_migrations_sqlite:
+                            async with pool.acquire() as conn:  # type: ignore[attr-defined]
+                                await apply_migrations_sqlite(conn)
+                    elif apply_migrations_postgres:
+                        try:
+                            import shutil
+                            alembic_available = shutil.which('alembic') is not None
+                        except Exception:
+                            alembic_available = False
+                        if not alembic_available:
+                            LOGGER.warning('server lifespan: skipping database migrations because alembic is not installed')
+                        else:
+                            await apply_migrations_postgres(pool)
+                except Exception:
+                    LOGGER.exception('server lifespan: database migrations failed')
+                    if os.getenv('ENV','').lower() in {'staging', 'prod', 'production'} or os.getenv('APP_ENV','').lower() in {'staging', 'prod', 'production'}:
+                        raise
+    except Exception:
+        LOGGER.exception('server lifespan: database initialization failed')
+        if os.getenv('ENV','').lower() in {'staging', 'prod', 'production'} or os.getenv('APP_ENV','').lower() in {'staging', 'prod', 'production'}:
+            raise
     if not _LITE_MODE:
         try:
             CLUSTERING.start()

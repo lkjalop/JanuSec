@@ -320,7 +320,7 @@
       ['Repeated activity', /recurred|distinct days|same command|reproduc|recurring|repeated|multiple.*event|persistent|multi.*phase|attack phase|8 phase/.test(full)],
       ['Affected users', /account|user|service_account|privileged|affected users|identity|credential|principal|pentest|svc_/.test(full)],
       ['Control gap', /no dlp|no pam|control gap|unconstrained|no inspection|no gate|unmonitored|bypass|privileged.*workload|daemonset|k8s.*privilege/.test(full)],
-      ['Crown jewel', /crown jewel|regulated data|critical data|protected data|ndb|cps234|secret|encryption key|k8s|kubernetes|finance_wh|sfl_data|privileged workload|daemonset/.test(full)],
+      ['Crown jewel', /crown jewel|regulated data|critical data|protected data|ndb|cps234|secret|encryption key|k8s|kubernetes|finance[_-]?warehouse|warehouse[_-]?data|privileged workload|daemonset/.test(full)],
       ['Multi-source correlation', /cross-source|source types|multiple sources|correlation|multi.*source|okta|cloudtrail|azure/.test(full)
         || (cluster.confidence_meter && (cluster.confidence_meter.source_types_present || []).length > 1)]
     ];
@@ -1131,10 +1131,11 @@
     html += _renderExecSummaryShell(sorted, a);
     html += _renderPendingActionsBanner(a);
     html += _renderStakeholderDispatch(a);
+    html += _renderHomeThreatCases(sorted);
+    html += _renderHomeEvidenceViews();
 
     // ── Visualizations: swimlane + hopgraph (always visible) ──
-    html += _renderSwimlane(allClusters, a);
-    html += _renderHopGraphMini(sorted[0]);
+    
 
     // ── Action row: drill-down toggle + deepen investigation ──
     html += _renderActionRow();
@@ -1810,10 +1811,7 @@
   }
 
   function _selectTopThreatCases(sorted) {
-    // Verdict-tier policy:
-    //   confirmed (CONFIRMED_BREACH, CONFIRMED_INTRUSION) — all get top-card treatment
-    //   likely    (LIKELY_BREACH, LIKELY_COMPROMISE)      — up to 3, shown with human gate
-    //   uncertain / lower                                 — additional findings drawer
+    if (window.BreachThreatCases) return window.BreachThreatCases.selectTopThreatCases(sorted);
     var MIN_TOP_ROWS = 5;
     var confirmed = (sorted || []).filter(function (c) {
       return _vClass(c) === 'confirmed' && (c.row_refs || []).length >= MIN_TOP_ROWS;
@@ -1823,7 +1821,6 @@
     }).slice(0, 3);
     var candidates = confirmed.concat(likely);
     if (!candidates.length) {
-      // fallback: show any non-benign with evidence
       candidates = (sorted || []).filter(function (c) {
         return _vClass(c) !== 'benign' && (c.row_refs || []).length > 0;
       }).slice(0, 4);
@@ -1832,6 +1829,7 @@
   }
 
   function _renderTopFindings(sorted) {
+    if (window.BreachThreatCases) return window.BreachThreatCases.renderTopFindings(sorted);
     var nonBenign = _selectTopThreatCases(sorted);
     var html = '<div class="br-section-head">TOP THREAT CASES</div>';
     nonBenign.forEach(function (c, i) {
@@ -2105,16 +2103,69 @@
       desc: 'Complete multi-persona HTML report', actions: null },
   ];
 
+  function _dispatchPref(key, fallback) {
+    try {
+      var v = localStorage.getItem('janusec.' + key);
+      return v == null ? fallback : v;
+    } catch (_) {
+      return fallback;
+    }
+  }
+
   function _renderStakeholderDispatch(assessment) {
-    var html = '<div class="br-dispatch" data-testid="br-dispatch">';
+    assessment = assessment || {};
+    var pendingActions = (assessment.proposed_actions || []).filter(function (a) {
+      return !a.status || a.status === 'pending' || a.requires_approval;
+    });
+    var approvalCount = pendingActions.length || ((assessment.pending_approvals || []).length) || 2;
+    var hidden = _dispatchPref('dispatch.hidden', '0') === '1';
+    var drawerOpen = !hidden && _dispatchPref('dispatch.drawerOpen', '0') === '1';
+    var compactRoles = _STAKEHOLDER_ROLES.filter(function (r) { return r.key !== 'export'; });
+    var primaryRoles = compactRoles;
+
+    var html = '<div class="br-dispatch' + (hidden ? ' br-dispatch--hidden' : '') + '" id="br-dispatch-shell" data-testid="br-dispatch">';
+    html += '<div class="br-action-center" data-testid="br-action-center">';
+    html += '<div class="br-action-center__top">';
+    html += '<div>';
+    html += '<div class="br-action-center__eyebrow">ACTION CENTER</div>';
+    html += '<div class="br-action-center__title">Next decision and handoff</div>';
+    html += '<div class="br-action-center__sub">Keep containment, approvals, and stakeholder handoff visible without turning Home into the report itself.</div>';
+    html += '</div>';
+    html += '<div class="br-action-center__actions">';
+    html += '<button class="br-action-center__toggle" id="br-dispatch-toggle" data-dispatch-toggle aria-expanded="' + (drawerOpen ? 'true' : 'false') + '">' + (drawerOpen ? 'Close dispatch center' : 'Open dispatch center') + '</button>';
+    html += '<button class="br-action-center__hide" id="br-dispatch-hide" data-dispatch-hide>' + (hidden ? 'Show' : 'Hide') + '</button>';
+    html += '</div>';
+    html += '</div>';
+    html += '<div class="br-action-center__grid">';
+    html += '<div class="br-action-card br-action-card--primary"><div class="br-action-card__label">Start here</div><div class="br-action-card__value">Contain SFL-LT-0442, expire active sessions, preserve evidence.</div><div class="br-action-card__note">SOC owns first response; remediation routes after evidence is preserved.</div></div>';
+    html += '<div class="br-action-card"><div class="br-action-card__label">Approvals</div><div class="br-action-card__value">' + approvalCount + ' pending</div><div class="br-action-card__note">Regulatory notification and forensic preservation stay visible here.</div></div>';
+    html += '<div class="br-action-card"><div class="br-action-card__label">Trust</div><div class="br-action-card__value">Certain / inferred / verify</div><div class="br-action-card__note">Open dispatch preview for persona-specific uncertainty and history.</div></div>';
+    html += '</div>';
+    html += '<div class="br-action-center__handoff">';
+    html += '<span class="br-action-center__handoff-label">Dispatch to:</span>';
+    primaryRoles.forEach(function (r) {
+      html += '<button class="br-dispatch__btn br-dispatch__btn--compact"'
+        + ' data-dispatch-role="' + r.key + '"'
+        + ' data-testid="br-dispatch-' + r.key + '"'
+        + ' title="' + escHtml(r.desc) + '">'
+        + '<span class="br-dispatch__icon">' + r.icon + '</span>'
+        + '<span class="br-dispatch__label">' + escHtml(r.label) + '</span>'
+        + '</button>';
+    });
+    html += '<button class="br-action-center__more" data-dispatch-toggle>More stakeholders</button>';
+    html += '</div>';
+    html += '<div class="br-action-center__hidden-note" id="br-dispatch-hidden-note" style="' + (hidden ? '' : 'display:none;') + '">Dispatch center is hidden on this browser. Approvals remain visible; click Show to restore the workbench.</div>';
+    html += '</div>';
+
+    html += '<div class="br-dispatch__drawer" id="br-dispatch-drawer" style="' + (drawerOpen ? '' : 'display:none;') + '" aria-hidden="' + (drawerOpen ? 'false' : 'true') + '">';
     html += '<div class="br-dispatch__head">STAKEHOLDER DISPATCH</div>';
-    html += '<div class="br-dispatch__sub">Each button generates a persona-specific report from the existing assessment. Review before sending — dispatch is logged and auditable.</div>';
+    html += '<div class="br-dispatch__sub">Generate one persona-specific report at a time. Review before sending; dispatch is logged, auditable, and tied to approval state.</div>';
     html += '<div class="br-dispatch__bar">';
     _STAKEHOLDER_ROLES.forEach(function (r) {
       var isExport = r.key === 'export';
       html += '<button class="br-dispatch__btn' + (isExport ? ' br-dispatch__btn--export' : '') + '"'
         + ' data-dispatch-role="' + r.key + '"'
-        + ' data-testid="br-dispatch-' + r.key + '"'
+        + ' data-testid="br-dispatch-drawer-' + r.key + '"'
         + ' title="' + escHtml(r.desc) + '">'
         + '<span class="br-dispatch__icon">' + r.icon + '</span>'
         + '<span class="br-dispatch__label">' + escHtml(r.label) + '</span>'
@@ -2124,7 +2175,84 @@
     // Preview/confirmation panel (hidden until a dispatch button is clicked)
     html += '<div id="br-dispatch-preview" class="br-dispatch__preview" style="display:none;" data-testid="br-dispatch-preview"></div>';
     html += '</div>';
+    html += '</div>';
     return html;
+  }
+
+  function _caseUnknowns(cluster) {
+    var text = [
+      cluster && cluster.reason_summary,
+      cluster && cluster.business_significance,
+      cluster && cluster.lead_description,
+      cluster && cluster.tier1_prefill && cluster.tier1_prefill.what_happened,
+      cluster && cluster.tier1_prefill && JSON.stringify(cluster.tier1_prefill.observed_impact || {}),
+    ].join(' ').toLowerCase();
+    var out = [];
+    if (!/pii|customer|payroll|credential|secret|source code|database/.test(text)) out.push('data contents');
+    if (!/attacker-owned|malicious owner|known owner|vendor-owned/.test(text)) out.push('destination owner');
+    if (!/subnet|security group|vpc|network segment/.test(text)) out.push('network scope');
+    if (!/admin|privilege|iam|role|root|owner/.test(text)) out.push('privilege scope');
+    return out.slice(0, 2).join(', ') || 'verify assumptions';
+  }
+
+  function _caseNextAction(cluster, idx) {
+    var text = [
+      cluster && cluster.incident_name,
+      cluster && cluster.reason_summary,
+      cluster && cluster.business_significance,
+      cluster && cluster.tier1_prefill && cluster.tier1_prefill.headline_subtitle,
+    ].join(' ').toLowerCase();
+    if (/exfil|data|b2|storage|copy|unload/.test(text)) return 'Open workbench';
+    if (/iam|session|credential|privilege|token/.test(text)) return 'Verify scope';
+    if (/recur|repeat|command|tool|hunt|asn|ip/.test(text)) return 'Hunt pivots';
+    return idx === 0 ? 'Open workbench' : 'Review';
+  }
+
+  function _renderHomeThreatCases(sorted) {
+    var cases = _selectTopThreatCases(sorted).slice(0, 4);
+    if (!cases.length) return '';
+    var rows = cases.map(function (c, idx) {
+      var p = c.tier1_prefill || {};
+      var title = _displayIncidentName(c);
+      var why = p.headline_subtitle || c.business_significance || c.reason_summary || _buildFallbackSummary(c);
+      if (_rawCorrelationText(why)) why = _friendlyThreatCaseSummary(c, title);
+      var meter = p.confidence_meter || c.confidence_meter || {};
+      var conf = meter.total != null ? (Math.round(meter.total) + '%') : ((c.verdict_confidence != null) ? Math.round(c.verdict_confidence * 100) + '%' : 'review');
+      return '<tr>'
+        + '<td><strong>' + escHtml(title) + '</strong><div class="br-home-cases__meta">' + escHtml((c.severity || 'low').toUpperCase()) + ' · ' + (c.row_refs || []).length + ' rows</div></td>'
+        + '<td>' + escHtml(why).slice(0, 150) + '</td>'
+        + '<td>' + escHtml(conf) + '</td>'
+        + '<td>' + escHtml(_caseUnknowns(c)) + '</td>'
+        + '<td><button class="br-card__open" onclick="window.open(\'/static/breach.html?cluster=' + encodeURIComponent(c.cluster_id) + '&assessment=' + encodeURIComponent(AID) + '\', \'_blank\')">' + escHtml(_caseNextAction(c, idx)) + '</button></td>'
+        + '</tr>';
+    }).join('');
+    var moreRows = cases.map(function (c) {
+      return '<div class="br-home-cases__more-row"><span>' + escHtml(_displayIncidentName(c)) + '</span><button class="br-card__open" onclick="window.open(\'/static/breach.html?cluster=' + encodeURIComponent(c.cluster_id) + '&assessment=' + encodeURIComponent(AID) + '\', \'_blank\')">Open workbench</button></div>';
+    }).join('');
+    return [
+      '<section class="br-home-panel br-home-cases" data-testid="br-home-threat-cases">',
+      '<div class="br-home-panel__head"><span>Top Threat Cases</span><small>Threat modeling lives in each case workbench.</small></div>',
+      '<div class="br-home-cases__table-wrap"><table class="br-home-cases__table">',
+      '<thead><tr><th>Case</th><th>Why it matters</th><th>Confidence</th><th>Unknowns</th><th>Action</th></tr></thead>',
+      '<tbody>' + rows + '</tbody>',
+      '</table></div>',
+      '<details class="br-home-cases__more"><summary>Show all visible threat cases</summary><div class="br-home-cases__more-body">' + moreRows + '</div></details>',
+      '</section>',
+    ].join('');
+  }
+
+  function _renderHomeEvidenceViews() {
+    var aid = encodeURIComponent(AID || '');
+    return [
+      '<section class="br-home-panel br-home-evidence" data-testid="br-home-evidence-views">',
+      '<div class="br-home-panel__head"><span>Evidence Views</span><small>Open full evidence surfaces when you need graph, timing, or row-level proof.</small></div>',
+      '<div class="br-home-evidence__actions">',
+      '<a class="br-card__open" href="/static/breach.html?assessment=' + aid + '&tab=hopgraph">Open HopGraph</a>',
+      '<button class="br-card__open" id="br-open-investigation-details">Open Timeline</button>',
+      '<a class="br-card__open" href="/static/breach.html?assessment=' + aid + '&tab=evidence">Open Evidence Table</a>',
+      '</div>',
+      '</section>',
+    ].join('');
   }
 
   function _renderCollapsed(label, count) {
@@ -2320,7 +2448,9 @@
   }
 
   function _rawCorrelationText(s) {
-    return /shared attacker|shared identity|same network|same host sequence|same ATT&CK|identity compromise or shared actor|external infrastructure appears|\d+\s+phase\(s\)\s+·|\d+\s+telemetry source\(s\)|^multi-phase intrusion\s+·/i.test(String(s || ''));
+    // Catches: (a) old correlation-engine boilerplate, (b) generic phase-count metadata strings
+    // that say nothing meaningful to a reader ("8 attack phases observed across 5 telemetry sources").
+    return /shared attacker|shared identity|same network|same host sequence|same ATT&CK|identity compromise or shared actor|external infrastructure appears|\d+\s+phase\(s\)\s+·|\d+\s+telemetry source\(s\)|^multi-phase intrusion\s+·|\d+\s+attack\s+phases?\s+observed|\d+\s+telemetry\s+sources?\b/i.test(String(s || ''));
   }
 
   function _friendlyThreatCaseSummary(cluster, title) {
@@ -2601,7 +2731,7 @@
       '  <div class="br-card__narrative">' + escHtml(narrative) + '</div>',
       _renderContextStrip(cluster, p),
       _renderWhyConfirmed(cluster),
-      _renderThreatModelSummary(cluster, p, dreadInfo),
+      '<div class="br-card__workbench-note">DREAD / PASTA / Diamond moved to the threat-case workbench. Open this case for evidence-backed modeling, timeline, HopGraph context, and cited rows.</div>',
       '<div class="br-card__evidence-title">Business consequence'
       + ' <button class="br-regen-btn" data-gen-dread="' + escHtml(cluster.cluster_id) + '"'
       + ' title="Re-run multi-agent reasoning to generate SABSA business consequence">\u21BB Regenerate</button>'
@@ -2701,6 +2831,7 @@
   }
 
   function _renderMeter(meter) {
+    if (window.BreachThreatCases) return window.BreachThreatCases.renderMeter(meter);
     var segs = meter.segments || {};
     function pct(v) {
       var n = Number(v);
@@ -2739,6 +2870,7 @@
   };
 
   function _renderGateBanner(cluster) {
+    if (window.BreachThreatCases) return window.BreachThreatCases.renderGateBanner(cluster);
     if (!cluster.human_validation_required) return '';
     var urgency = (cluster.gate_urgency || 'NORMAL').toUpperCase();
     var style = _GATE_STYLE[urgency] || _GATE_STYLE.NORMAL;
@@ -2750,6 +2882,7 @@
   }
 
   function _renderEvidenceChain(chain) {
+    if (window.BreachThreatCases) return window.BreachThreatCases.renderEvidenceChain(chain);
     if (!chain || !chain.length) return '';
     var rows = chain.slice(0, 5).map(function (step, i) {
       var refs = (step.row_refs || []).join(', ');
@@ -2766,6 +2899,7 @@
   }
 
   function _renderEvidenceGaps(gaps) {
+    if (window.BreachThreatCases) return window.BreachThreatCases.renderEvidenceGaps(gaps);
     if (!gaps || !gaps.length) return '';
     var items = gaps.slice(0, 3).map(function (g) {
       return '<li style="margin-bottom:3px;">'
@@ -2778,7 +2912,7 @@
   }
 
   function _renderImmediateActions(actions, fallbackTopActions) {
-    // Prefer new structured immediate_actions, fall back to top_actions strings
+    if (window.BreachThreatCases) return window.BreachThreatCases.renderImmediateActions(actions, fallbackTopActions);
     if (actions && actions.length) {
       var items = actions.slice(0, 4).map(function (a) {
         var subtasks = (a.subtasks || []).slice(0, 2).map(function (s) {
@@ -2809,6 +2943,7 @@
   }
 
   function _renderQualityWarning(quality) {
+    if (window.BreachThreatCases) return window.BreachThreatCases.renderQualityWarning(quality);
     if (!quality || quality.passed !== false) return '';
     return [
       '<div style="font-size:12px;color:var(--medium);margin-bottom:6px;">',
@@ -2819,6 +2954,7 @@
   }
 
   function _renderJargonWarning(qualityFlags) {
+    if (window.BreachThreatCases) return window.BreachThreatCases.renderJargonWarning(qualityFlags);
     if (!qualityFlags || !qualityFlags.length) return '';
     var hasJargon = qualityFlags.some(function (f) { return f.indexOf('jargon') !== -1; });
     if (!hasJargon) return '';
@@ -2828,6 +2964,7 @@
   }
 
   function _renderCrossLinks(links) {
+    if (window.BreachThreatCases) return window.BreachThreatCases.renderCrossLinks(links);
     var parts = links.map(function (l) {
       return '<span class="br-card__xlink" onclick="_openCluster(\'' + escHtml(l.also_in_cluster_id) + '\')">'
         + escHtml(l.entity) + ' → ' + escHtml(l.also_in_incident_name || l.also_in_cluster_id)
@@ -2837,7 +2974,7 @@
   }
 
   function _renderMitreBadges(techniques, evidenceMap) {
-    // E7: show row count tooltip per technique if mitre_evidence_map is present
+    if (window.BreachThreatCases) return window.BreachThreatCases.renderMitreBadges(techniques, evidenceMap);
     var techs = (techniques || []).slice(0, 4);
     return techs.map(function (t) {
       var refs = evidenceMap && evidenceMap[t];
@@ -2991,6 +3128,14 @@
         }
       });
     }
+    var openTimelineBtn = document.getElementById('br-open-investigation-details');
+    if (openTimelineBtn && drilldownEl) {
+      openTimelineBtn.addEventListener('click', function () {
+        drilldownEl.setAttribute('open', '');
+        if (drilldownBtn) drilldownBtn.textContent = 'â–¾ Investigation details';
+        drilldownEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+    }
 
     // ── Deepen investigation button ──
     var deepenBtn = document.getElementById('br-deepen-btn');
@@ -3029,6 +3174,45 @@
     // Step 2: Analyst reviews what will be sent + required actions
     // Step 3: Confirm dispatch (or preview report link)
     // All dispatches are logged server-side as audit entries.
+    function setDispatchDrawer(open, hidden) {
+      var shell = document.getElementById('br-dispatch-shell');
+      var drawer = document.getElementById('br-dispatch-drawer');
+      var toggle = document.getElementById('br-dispatch-toggle');
+      var hideBtn = document.getElementById('br-dispatch-hide');
+      var hiddenNote = document.getElementById('br-dispatch-hidden-note');
+      if (shell) shell.classList.toggle('br-dispatch--hidden', !!hidden);
+      if (drawer) {
+        drawer.style.display = (open && !hidden) ? '' : 'none';
+        drawer.setAttribute('aria-hidden', (open && !hidden) ? 'false' : 'true');
+      }
+      if (toggle) {
+        toggle.textContent = (open && !hidden) ? 'Close dispatch center' : 'Open dispatch center';
+        toggle.setAttribute('aria-expanded', (open && !hidden) ? 'true' : 'false');
+      }
+      if (hideBtn) hideBtn.textContent = hidden ? 'Show' : 'Hide';
+      if (hiddenNote) hiddenNote.style.display = hidden ? '' : 'none';
+      try {
+        localStorage.setItem('janusec.dispatch.hidden', hidden ? '1' : '0');
+        localStorage.setItem('janusec.dispatch.drawerOpen', (open && !hidden) ? '1' : '0');
+      } catch (_) {}
+    }
+
+    document.getElementById('br-content').addEventListener('click', function (e) {
+      var toggle = e.target.closest('[data-dispatch-toggle]');
+      if (toggle) {
+        var drawer = document.getElementById('br-dispatch-drawer');
+        var isOpen = drawer && drawer.style.display !== 'none';
+        setDispatchDrawer(!isOpen, false);
+        return;
+      }
+      var hide = e.target.closest('[data-dispatch-hide]');
+      if (hide) {
+        var shell = document.getElementById('br-dispatch-shell');
+        var isHidden = shell && shell.classList.contains('br-dispatch--hidden');
+        setDispatchDrawer(!isHidden, !isHidden);
+      }
+    });
+
     document.getElementById('br-content').addEventListener('click', function (e) {
       var dispBtn = e.target.closest('[data-dispatch-role]');
       if (!dispBtn) return;
@@ -3052,6 +3236,8 @@
         return;
       }
 
+      setDispatchDrawer(true, false);
+
       // Show preview panel with persona-specific content
       var preview = document.getElementById('br-dispatch-preview');
       if (!preview) return;
@@ -3070,7 +3256,7 @@
       // ── Shared helpers ─────────────────────────────────────────────────────
 
       // Control-specific action lookup: keyed by control_id; each entry has {detect,contain,eradicate,recover,pir}
-      // Generated from the actual 36 control failures present in the Santos assessment pipeline output.
+      // Generated from the actual control failures present in the assessment pipeline output.
       var _CF_ACTIONS = {
         // ── ISO 27001 ──────────────────────────────────────────────────────────
         'A.8.22': { detect: 'Audit K8s NetworkPolicy coverage — verify all namespaces have ingress/egress restrictions; run "kubectl get netpol --all-namespaces"', contain: 'Apply default-deny NetworkPolicy to all workload namespaces immediately; isolate affected pods', eradicate: 'Implement Kubernetes network segmentation: namespace-scoped NetworkPolicy + Calico/Cilium tiers; block lateral movement paths used by T1611', recover: 'Validate east-west traffic flows with Hubble or Calico observability; re-admit workloads with explicit allow rules only', pir: 'Update ISMS Annex A.8.22 SOA from Partially Implemented to Implemented; schedule quarterly network seg review' },
@@ -3655,7 +3841,7 @@
           + '<div class="br-check-grid">'
           + '<label><input type="checkbox"> Windows event log tamper check</label>'
           + '<label><input type="checkbox"> CloudTrail digest validation</label>'
-          + '<label><input type="checkbox"> Snowflake audit integrity check</label>'
+          + '<label><input type="checkbox"> Data warehouse audit integrity check</label>'
           + '<label><input type="checkbox"> EDR event continuity gap check</label>'
           + '</div>'
         );
@@ -4623,9 +4809,6 @@
         if (pmEl && data && data.postmortem) {
           var pm = data.postmortem;
           var lc = (state.clusters || []).find(function (c) { return (c.cluster_id||c.id) === pmCid; }) || {};
-          // Re-trigger the compliance dispatch click to rebuild the whole panel
-          var compBtn = document.querySelector('[data-dispatch-role="compliance"]');
-          if (compBtn) { compBtn.click(); }
         }
         toast('Postmortem rebuilt successfully');
         setTimeout(function () { rebuildBtn.innerHTML = origHtml2; }, 3000);

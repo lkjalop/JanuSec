@@ -192,7 +192,7 @@ class AutoIncidentScanner:
                 except Exception:
                     continue
 
-            for c in candidates:
+            for c in sorted(candidates):
                 try:
                     res = self.hop.explain_chain(c, max_depth=4, beam_width=6, top_k=3)
                     for ch in res.get('chains', []):
