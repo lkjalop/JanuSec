@@ -150,8 +150,18 @@ def adapt_all_personas(
         pn_list = []
         for cn in cluster_narratives:
             pn = adapt_for_persona(persona, cn, llm_func, model)
-            if persona == 'compliance' and cluster_index:
-                _enrich_compliance_persona(pn, cluster_index.get(str(cn.cluster_id)))
+            if persona == 'compliance':
+                # Prefer witnesses from ClusterNarrative (set by orchestrator) —
+                # these survive the threat_case stripping.  Fall back to the
+                # raw cluster dict only when ClusterNarrative has no witnesses.
+                raw_cluster = cluster_index.get(str(cn.cluster_id)) if cluster_index else None
+                if cn.control_witnesses:
+                    # Build a minimal cluster dict that enricher can consume
+                    enriched_cluster = dict(raw_cluster or {})
+                    enriched_cluster['control_witnesses'] = cn.control_witnesses
+                    _enrich_compliance_persona(pn, enriched_cluster)
+                elif raw_cluster:
+                    _enrich_compliance_persona(pn, raw_cluster)
             pn_list.append(pn)
         result[persona] = pn_list
 
