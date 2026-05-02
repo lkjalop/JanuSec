@@ -438,8 +438,6 @@ class LLMClient(BaseLLMClient):
         # Disable thinking mode for qwen3/deepseek-r1 when prompt starts with /no_think.
         # This skips the CoT reasoning phase, giving 5-10x faster responses for structured output.
         options: dict = {'num_predict': max_tokens or self.max_tokens}
-        if prompt.lstrip().startswith('/no_think'):
-            options['think'] = False
         selected_model = model_override or self.ollama_model
         # NOTE: format=json is intentionally NOT set here.
         # Ollama's JSON grammar mode combined with think=False causes qwen3/deepseek-r1
@@ -453,6 +451,9 @@ class LLMClient(BaseLLMClient):
             'stream': False,
             'options': options,
         }
+        # think=False must be at top level (not inside options) for qwen3/deepseek-r1.
+        if prompt.lstrip().startswith('/no_think') or any(m in selected_model for m in ('qwen3', 'deepseek-r1')):
+            payload['think'] = False
         resp = self._ollama_session.post(f"{self.ollama_host}/api/generate", json=payload, timeout=self.ollama_timeout)
         resp.raise_for_status()
         data = resp.json()
@@ -490,8 +491,10 @@ class LLMClient(BaseLLMClient):
             'stream': False,
             'options': {'num_predict': max_tokens or self.max_tokens},
         }
-
-        sess = requests.Session()
+        # think=False at top level for qwen3/deepseek-r1 to suppress CoT output.
+        _m = model or self.ollama_model or ''
+        if prompt.lstrip().startswith('/no_think') or any(tok in _m for tok in ('qwen3', 'deepseek-r1')):
+            payload['think'] = False
         # short timeout for override attempts to surface failures quickly
         # Allow more generous per-attempt timeouts for larger models and local Ollama instances.
         try:

@@ -1154,6 +1154,8 @@ class ExecSummaryRequest(BaseModel):
     model: str = 'qwen3:14b'
     regenerate: bool = False
     deep: bool = False  # Tier 3 deep analysis (async background job)
+    persona_llm: bool = False  # Rewrite each persona narrative via LLM
+    persona_subset: Optional[list[str]] = None  # Limit to specified persona keys
 
 
 # ── E9: Kill-chain phase lookup (deterministic, zero LLM) ─────────────────────
@@ -1808,6 +1810,8 @@ async def get_executive_summary(
             deterministic_texts=det_texts,
             max_clusters=10,
             tenant=assessment.get('tenant_id', 'default'),
+            persona_llm=bool(body.persona_llm and body.regenerate),
+            persona_subset=body.persona_subset or None,
         )
     except Exception as _pipe_err:
         logger.warning('enriched exec-summary pipeline failed: %s — using legacy result', _pipe_err)

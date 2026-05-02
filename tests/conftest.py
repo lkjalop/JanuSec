@@ -2953,3 +2953,28 @@ def fixed_start_ts():
     import random
     random.seed(1337)
     return 1_700_000_000.0
+
+
+@pytest.fixture(autouse=True)
+def _reset_temporal_rag_corpora():
+    """Clear the TemporalRAG singleton's in-memory corpora before each test.
+
+    Tests that call deep_analyze or connectors endpoints index rows into the
+    global TemporalRAGEngine singleton.  Without this reset, evidence from a
+    prior test leaks into tests that expect an empty/unavailable RAG engine
+    (e.g. TestEvidenceFrame::test_retrieve_no_engine).
+    """
+    yield
+    try:
+        import sys as _sys
+        rag_mod = _sys.modules.get('src.ai.temporal_rag')
+        if rag_mod is None:
+            return
+        engine = getattr(rag_mod, '_ENGINE', None)
+        if engine is None:
+            return
+        corpora = getattr(engine, '_corpora', None)
+        if isinstance(corpora, dict):
+            corpora.clear()
+    except Exception:
+        pass
