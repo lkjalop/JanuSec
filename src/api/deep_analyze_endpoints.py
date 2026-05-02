@@ -13,13 +13,17 @@ from collections import defaultdict
 from fastapi import APIRouter, Request, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, Response
 
+logger = logging.getLogger(__name__)  # auto-added by instrument_silent_excepts
+
+
 try:
     if __name__ in sys.modules and 'api.deep_analyze_endpoints' not in sys.modules:
         sys.modules['api.deep_analyze_endpoints'] = sys.modules[__name__]
-except Exception:
-    pass
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 19, _exc)
 
 from src.api.metrics_init import ensure_metrics, _safe_hist, _safe_counter, _safe_gauge
+from src.api.deep_analyze.helpers import _safe_text, _nested_get, _collect_strings_from_row  # noqa: F401
 _METRICS_INITIALIZED = False
 csv_stage_latency = None
 csv_deep_analyze_total = None
@@ -172,11 +176,11 @@ def publish_llm_event(assessment_id: str, event: dict):
             except Exception:
                 try:
                     listeners.remove(q)
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 175, _exc)
         _SSE_BROADCASTERS[assessment_id] = listeners
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 178, _exc)
 
 
 # ── WebSocket pipeline progress ─────────────────────────────────────────────
@@ -299,8 +303,8 @@ async def ws_pipeline_progress(websocket: WebSocket, assessment_id: str):
                             ws = DEFAULT_WORKER.status(session_id) or {}
                             pct = ws.get('pct')
                             status = ws.get('status') or status
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 302, _exc)
                     msg = {'event': 'heartbeat', 'status': status, 'ts': time.time()}
                     if pct is not None:
                         msg['pct'] = pct
@@ -311,22 +315,22 @@ async def ws_pipeline_progress(websocket: WebSocket, assessment_id: str):
                     await asyncio.sleep(0.2)
                     break
                 await asyncio.sleep(0.8)
-    except (WebSocketDisconnect, Exception):
-        pass
+    except (WebSocketDisconnect, Exception) as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 314, _exc)
     finally:
         try:
             listeners = _SSE_BROADCASTERS.get(assessment_id) or []
             if queue in listeners:
                 listeners.remove(queue)
             _SSE_BROADCASTERS[assessment_id] = listeners
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 322, _exc)
         try:
             ws_list = _WS_CONNECTIONS.get(assessment_id) or []
             if websocket in ws_list:
                 ws_list.remove(websocket)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 328, _exc)
 
 
 # --- TemporalRAG engine (lazy import so offline mode costs nothing) ---------
@@ -423,8 +427,8 @@ def _build_mapping_bundle(canonical: Dict[str, Any] | None, rows: List[dict] | N
             extra_pasta = _coerce_tag_list(tag_bundle.get("pasta"))
             if extra_pasta and isinstance(pasta, dict) and not pasta.get("taxonomy_tags"):
                 pasta = {**pasta, "taxonomy_tags": extra_pasta}
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 426, _exc)
 
     return {
         "mitre": mitre,
@@ -764,8 +768,8 @@ class LLMSummaryStage(StageBase):
                     context['playbook_markdown'] = pb_md
                 except Exception:
                     context['playbook_markdown'] = ''
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 767, _exc)
         # Ensure mitre_tags and playbook guidance are available to the prompt
         try:
             # derive MITRE tags from signals if not already present
@@ -791,8 +795,8 @@ class LLMSummaryStage(StageBase):
                     context['playbook_markdown'] = context.get('playbook_markdown') or ''
             except Exception:
                 context['playbook_markdown'] = context.get('playbook_markdown') or ''
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 794, _exc)
         prompt = llm_prompts.compose_prompt(context)
         # Inject TemporalRAG context block into prompt when available
         rag_ctx = context.get('rag_context') or {}
@@ -854,8 +858,8 @@ class TriageScoreStage(StageBase):
                     row['triage_score'] = result.get('triage_score', 0.0)
                     row['_triage_breakdown'] = result.get('breakdown', {})
                     enriched += 1
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 857, _exc)
         elapsed = (time.time() - t0) * 1000.0
         return {'stage': self.name, 'status': 'done', 'elapsed_ms': elapsed, 'result': {'enriched_rows': enriched}}
 
@@ -902,8 +906,8 @@ async def _run_stage(stage: StageBase, ctx: dict) -> dict:
         # Best-effort metric increment and logging; avoid referencing outer-scope variables
         try:
             logger.exception('Stage %s failed: %s', getattr(stage, 'name', 'unknown'), exc)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 905, _exc)
         return {'stage': getattr(stage, 'name', 'unknown'), 'status': 'error', 'elapsed_ms': elapsed, 'result': {}, 'error': str(exc)}
 
 
@@ -1078,8 +1082,8 @@ def _collect_kill_chain_tags(row: dict | None, assessment: dict | None) -> dict 
             for tag in mapped[:3]:
                 if isinstance(tag, dict) and tag.get('kill_chain_phase'):
                     phases.append(tag['kill_chain_phase'])
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 1081, _exc)
     if not phases:
         return None
     return {'phases': phases[:6]}
@@ -1092,16 +1096,16 @@ def _evidence_policy() -> dict[str, float]:
     critical = 0.3
     try:
         target = float(os.getenv('EVIDENCE_COVERAGE_TARGET', str(target)))
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 1095, _exc)
     try:
         warn = float(os.getenv('EVIDENCE_COVERAGE_WARN', str(warn)))
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 1099, _exc)
     try:
         critical = float(os.getenv('EVIDENCE_COVERAGE_CRITICAL', str(critical)))
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 1103, _exc)
     target = min(1.0, max(0.0, target))
     warn = min(target, max(0.0, warn))
     critical = min(warn, max(0.0, critical))
@@ -1188,8 +1192,8 @@ def _build_playbook_preview(row: dict | None, assessment: dict | None) -> dict |
             formatted_command = tool.get('command', '')
             try:
                 formatted_command = formatted_command.format(**artifact_context)
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 1191, _exc)
             tools.append({
                 'name': tool.get('name'),
                 'purpose': tool.get('purpose'),
@@ -1260,8 +1264,8 @@ def _maybe_cache_heavy_sections(assessment_id: str | None, row_index: Any, row: 
             entry = {'type': key, 'label': label, 'cache_key': cache_key}
             try:
                 entry['size_hint'] = len(json.dumps(blob))  # type: ignore[arg-type]
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 1263, _exc)
             cached.append(entry)
     return cached
 
@@ -1354,8 +1358,8 @@ def _augment_llm_row(llm_row: dict, assessment: dict) -> dict:
                                 min_conf = 0.5
                                 try:
                                     min_conf = float(os.getenv('PERSONA_MIN_CONFIDENCE', '0.5') or 0.5)
-                                except Exception:
-                                    pass
+                                except Exception as _exc:
+                                    logger.debug('silent_swallow at %s:%d: %s', __file__, 1357, _exc)
                                 if not valid or float(parsed.get('confidence') or 0.0) < min_conf:
                                     entry['validation'] = {'valid': False, 'errors': errs, 'confidence': parsed.get('confidence')}
                                     entry['status'] = 'needs_review'
@@ -1380,20 +1384,20 @@ def _augment_llm_row(llm_row: dict, assessment: dict) -> dict:
                                 min_conf = 0.5
                                 try:
                                     min_conf = float(os.getenv('PERSONA_MIN_CONFIDENCE', '0.5') or 0.5)
-                                except Exception:
-                                    pass
+                                except Exception as _exc:
+                                    logger.debug('silent_swallow at %s:%d: %s', __file__, 1383, _exc)
                                 if not valid or float(parsed.get('confidence') or 0.0) < min_conf:
                                     entry['validation'] = {'valid': False, 'errors': errs, 'confidence': parsed.get('confidence')}
                                     entry['status'] = 'needs_review'
                                 else:
                                     entry['validation'] = {'valid': True, 'errors': [], 'confidence': parsed.get('confidence')}
                                     entry.setdefault('status', 'ready')
-                        except Exception:
-                            pass
-        except Exception:
-            pass
-    except Exception:
-        pass
+                        except Exception as _exc:
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 1391, _exc)
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 1393, _exc)
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 1395, _exc)
     return llm_row
 
 
@@ -1465,8 +1469,8 @@ def _evict_expired_evidence() -> None:
         expired = [key for key, rec in EVIDENCE_CACHE.items() if now - rec.get('ts', 0) > EVIDENCE_CACHE_TTL]
         for key in expired:
             EVIDENCE_CACHE.pop(key, None)
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 1468, _exc)
 
 
 def _cache_evidence_blob(assessment_id: str, row_index: int, payload: Any) -> str | None:
@@ -1484,8 +1488,8 @@ def _cache_evidence_blob(assessment_id: str, row_index: int, payload: Any) -> st
                 import redis  # type: ignore
                 rc = redis.from_url(red_url)
                 rc.setex(f"csv:evidence:{cache_key}", EVIDENCE_CACHE_TTL, json.dumps(payload))
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 1487, _exc)
         return cache_key
     except Exception:
         return None
@@ -1503,8 +1507,8 @@ def _load_cached_evidence(cache_key: str) -> Any:
             raw = rc.get(f"csv:evidence:{cache_key}")
             if raw:
                 return json.loads(raw)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 1506, _exc)
     record = EVIDENCE_CACHE.get(cache_key)
     if not record:
         return None
@@ -1578,8 +1582,8 @@ def _build_persona_context(row: dict | None, assessment: dict | None) -> dict:
                 'missing_sources': hb.get('missing_sources'),
                 'gaps': hb.get('gaps')
             }
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 1581, _exc)
     return ctx
 
 
@@ -1617,8 +1621,8 @@ def _render_persona_prompt(persona: str, row: dict, assessment: dict | None, bas
                 secs = int((s.get('seconds_since_ok') or 0) or 0)
                 ttl = int((s.get('ttl') or 0) or 0)
                 prompt_lines.append(f"- {name}: {sev} (age {secs}s, ttl {ttl}s)")
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 1620, _exc)
     prompt_lines.append('')
     prompt_lines.append('CONTEXT JSON:')
     try:
@@ -1657,8 +1661,8 @@ def _auto_route_incident(row: dict, persona: str, persona_text: str, assessment:
     }
     try:
         GLOBAL_INCIDENTS.ingest(event, list(row.get('factors') or []))
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 1660, _exc)
 
 
 def _extract_factor_tokens(row: dict) -> list[str]:
@@ -1802,10 +1806,7 @@ _LOW_VALUE_ACCOUNT_PIVOTS = {
 }
 
 
-def _safe_text(value: Any) -> str:
-    if value is None:
-        return ''
-    return str(value).strip()
+# _safe_text → src.api.deep_analyze.helpers (imported above)
 
 
 def _safe_identity_text(value: Any) -> str:
@@ -1826,26 +1827,7 @@ def _is_low_value_account_pivot(value: Any) -> bool:
     return text in _LOW_VALUE_ACCOUNT_PIVOTS or text.endswith('\\system')
 
 
-def _nested_get(obj: Any, dotted_path: str) -> Any:
-    """Resolve a dotted path through nested dicts/lists (e.g. 'actor.alternateId').
-
-    Integer path segments index into lists. Returns None if any step is missing.
-    """
-    parts = dotted_path.split('.')
-    current = obj
-    for part in parts:
-        if current is None:
-            return None
-        if isinstance(current, dict):
-            current = current.get(part)
-        elif isinstance(current, list):
-            try:
-                current = current[int(part)]
-            except (ValueError, IndexError):
-                return None
-        else:
-            return None
-    return current
+# _nested_get → src.api.deep_analyze.helpers (imported above)
 
 
 def _extract_first_value(row: dict, keys: Tuple[str, ...]) -> str:
@@ -1871,8 +1853,8 @@ def _parse_backend_timestamp(value: Any) -> float | None:
         text = text.replace('/', '-')
         try:
             return datetime.datetime.fromisoformat(text).timestamp()
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 1874, _exc)
         for fmt in (
             '%Y-%m-%d %H:%M:%S',
             '%Y-%m-%d %H:%M',
@@ -1895,11 +1877,7 @@ def _is_private_ip_text(value: str) -> bool:
         return False
 
 
-def _collect_strings_from_row(row: dict) -> str:
-    try:
-        return json.dumps(row, default=str)
-    except Exception:
-        return str(row)
+# _collect_strings_from_row → src.api.deep_analyze.helpers (imported above)
 
 
 def _extract_from_typed_array(arr: Any, type_field: str = 'type', type_values: tuple = ('User', 'user'),
@@ -2073,8 +2051,8 @@ def _extract_tags_backend(row: dict, assessment: dict | None) -> Dict[str, List[
                 _add('mitre', factor_tags.get('mitre'))
                 _add('atlas', factor_tags.get('atlas'))
                 _add('owasp_llm', factor_tags.get('owasp_llm'))
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 2076, _exc)
     for bucket in tags:
         tags[bucket] = tags[bucket][:8]
     return tags
@@ -3580,8 +3558,8 @@ def _hydrate_assessment_semantics(assessment: dict) -> dict:
             row for row in normalized_rows
             if not is_non_evidence_sheet(row.get('_sheet') or row.get('source_sheet'))
         ]
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 3583, _exc)
     clusters, _adjacency = _build_correlation_clusters(normalized_rows)
     # Optional: split mega-clusters into discrete Incident objects so the UI
     # can render multiple coherent stories instead of one confusing blob.
@@ -3627,8 +3605,8 @@ def _hydrate_assessment_semantics(assessment: dict) -> dict:
     assessment['persona_reports'] = persona_reports
     try:
         _apply_cluster_reasoning_to_assessment(assessment, trigger_reason='assessment_hydrate')
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 3630, _exc)
     return assessment
 
 
@@ -3930,8 +3908,8 @@ def _schedule_llm_generation(rows: List[dict], ctx: dict, assessment_obj: dict, 
                 assessment_obj['rows_processed'] = max(len(llm_rows_acc), assessment_obj.get('rows_processed', 0))
                 REPORT_STORE[assessment_id] = assessment_obj
                 _persist_assessment_state(assessment_id, assessment_obj)
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 3933, _exc)
 
         try:
             if hasattr(LLM_CLIENT, '_tenant_budget'):
@@ -3939,18 +3917,18 @@ def _schedule_llm_generation(rows: List[dict], ctx: dict, assessment_obj: dict, 
                     key: float(val) for key, val in getattr(LLM_CLIENT, '_tenant_budget', {}).items()
                 }
             assessment_obj['llm_breakers'] = getattr(LLM_CLIENT, '_breaker_state', {})
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 3942, _exc)
         assessment_obj.setdefault('telemetry', {})['llm_completed_at'] = time.time()
         try:
             await asyncio.to_thread(_hydrate_assessment_semantics, assessment_obj)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 3947, _exc)
         try:
             REPORT_STORE[assessment_id] = assessment_obj
             _persist_assessment_state(assessment_id, assessment_obj)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 3952, _exc)
         # Tier-1 prefill fires via _schedule_prefill_generation (already scheduled
         # from the main pipeline path). No duplicate call needed here.
 
@@ -3968,8 +3946,8 @@ def _persist_assessment_state(assessment_id: str, assessment: dict) -> None:
     if path:
         try:
             atomic_write_json(path, assessment)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 3971, _exc)
 
 
 def _get_assessment_cached(assessment_id: str) -> dict | None:
@@ -3998,8 +3976,8 @@ def _get_assessment_cached(assessment_id: str) -> dict | None:
                         disk2 = json.load(fh)
                     REPORT_STORE[assessment_id] = disk2
                     return disk2
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 4001, _exc)
         if os.path.isdir(base):
             for root, _dirs, files in os.walk(base):
                 for f in files:
@@ -4030,10 +4008,10 @@ def _get_assessment_cached(assessment_id: str) -> dict | None:
                                 return cand
                         except Exception:
                             continue
-            except Exception:
-                pass
-    except Exception:
-        pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 4033, _exc)
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 4035, _exc)
     return None
 
 
@@ -4048,8 +4026,8 @@ def _write_assessment_index(assessment_id: str, persisted_path: str) -> None:
         with open(tmp, 'w', encoding='utf-8') as fh:
             fh.write(persisted_path)
         os.replace(tmp, idx_path)
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 4051, _exc)
 
 
 def _llm_row_entry(assessment: dict, idx: int, orig: dict) -> dict | None:
@@ -4085,8 +4063,8 @@ def _ensure_llm_rows_available(assessment: dict) -> dict:
     try:
         if existing and any((row.get('llm_summary') or row.get('summary') or row.get('llm_output')) for row in existing if isinstance(row, dict)):
             return assessment
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 4088, _exc)
 
     raw_rows = assessment.get('rows') or []
     if not isinstance(raw_rows, list) or not raw_rows:
@@ -4234,8 +4212,8 @@ def _build_progress_payload(assessment_id: str, assessment: dict) -> dict:
                     weight = 0.001
                 weighted_conf_sum += wc * weight
                 weighted_conf_weight += weight
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 4237, _exc)
         rows_map[str(idx)] = {
             'row_index': idx,
             'status': status,
@@ -4302,8 +4280,8 @@ def _compute_rarity_signal(row: Dict[str, Any]) -> float:
             return 0.6
         if rarity == 'COMMON':
             return 0.15
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 4305, _exc)
     return 0.0
 
 
@@ -4316,8 +4294,8 @@ def _compute_factor_diversity(row: Dict[str, Any]) -> int:
         if isinstance(contribs, list):
             cats = {c.get('category') for c in contribs if isinstance(c, dict) and c.get('category')}
             return len(cats)
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 4319, _exc)
     return 0
 
 
@@ -4457,8 +4435,8 @@ def prioritize_rows_for_llm(
         # Persist triage score for downstream UI if not already present
         try:
             rec.setdefault('triage_score', triage_score)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 4460, _exc)
         candidates.append((idx, rec, dread_score, factor_count, triage_score))
 
     # Sort by triage score then dread then factor count
@@ -4587,8 +4565,8 @@ async def generate_llm_summaries(request: Request):
             q.append(time.time())
     except HTTPException:
         raise
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 4590, _exc)
     assessment_id = payload.get('assessment_id') or ''
     if not assessment_id:
         raise HTTPException(status_code=400, detail='missing_assessment_id')
@@ -4622,10 +4600,10 @@ async def generate_llm_summaries(request: Request):
                     merged = {**assessment, **disk}
                     assessment = merged
                     REPORT_STORE[assessment_id] = assessment
-            except Exception:
-                pass
-    except Exception:
-        pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 4625, _exc)
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 4627, _exc)
 
     original_rows = assessment.get('rows') or []
     existing_llm = assessment.get('llm_rows') or []
@@ -4692,8 +4670,8 @@ async def generate_llm_summaries(request: Request):
             llm_row['historical_context'] = hist_ctx
             try:
                 HISTORICAL_REPO.save_incident(row_copy, outcome=row_copy.get('verdict') or 'unknown', org=assessment.get('org'))
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 4695, _exc)
             # lightweight persona placeholder for analyst
             llm_row['persona_reports']['analyst'] = {'text': ''}
             updated_rows.append(llm_row)
@@ -4713,8 +4691,8 @@ async def generate_llm_summaries(request: Request):
         try:
             if r.get('_llm_status') == 'queued' and r.get('row_index') not in assessment['_llm_queue']:
                 assessment['_llm_queue'].append(r.get('row_index'))
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 4716, _exc)
     # update REPORT_STORE with the full assessment so subsequent handlers can find llm_rows
     assessment['llm_rows_count'] = len(merged)
     assessment['assessment_id'] = assessment_id
@@ -4751,8 +4729,8 @@ async def generate_insight(request: Request):
     payload = _build_insight_payload(row, pipeline_context, insight_type)
     try:
         insight_usage_counter.labels(type=insight_type).inc()
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 4754, _exc)
     payload['estimated_cost'] = _INSIGHT_COSTS.get(insight_type, 0.0008)
     return JSONResponse(payload)
 
@@ -4789,8 +4767,8 @@ async def enqueue_llm_rows(assessment_id: str, request: Request):
         for i in range(tries):
             try:
                 time.sleep(0.05)
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 4792, _exc)
             assessment = _get_assessment_cached(assessment_id)
             if assessment:
                 break
@@ -4956,8 +4934,8 @@ async def generate_persona(request: Request):
                         if r.get('row_index') == target_idx_int:
                             target = r
                             break
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 4959, _exc)
     if not target:
         raise HTTPException(status_code=404, detail='row_not_found')
     # persona prompt adaptation using centralized prompt builder and cached LLM helper
@@ -5002,8 +4980,8 @@ async def generate_persona(request: Request):
     entry = {'text': text, 'template': PERSONA_DEFINITIONS.get(persona)}
     try:
         entry['context'] = _build_persona_context(target, assessment)
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 5005, _exc)
     # parse and attach structured parsed output with validation
     try:
         parsed = parse_persona_text(str(text))
@@ -5013,21 +4991,21 @@ async def generate_persona(request: Request):
             min_conf = 0.5
             try:
                 min_conf = float(os.getenv('PERSONA_MIN_CONFIDENCE', '0.5') or 0.5)
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 5016, _exc)
             if not valid or float(parsed.get('confidence') or 0.0) < min_conf:
                 entry['validation'] = {'valid': False, 'errors': errs, 'confidence': parsed.get('confidence')}
                 entry['status'] = 'needs_review'
             else:
                 entry['validation'] = {'valid': True, 'errors': [], 'confidence': parsed.get('confidence')}
                 entry['status'] = 'ready'
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 5024, _exc)
     target.setdefault('persona_reports', {})[persona] = entry
     try:
         _auto_route_incident(target, persona, text, assessment)
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 5029, _exc)
     return JSONResponse({'assessment_id': assessment_id, 'row_index': row_index, 'persona': persona, 'text': text})
 
 
@@ -5088,8 +5066,8 @@ async def run_deep_analyze_pipeline(payload: dict) -> JSONResponse:
     except Exception:
         try:
             csv_deep_analyze_total.inc(1, labels={'auto_llm': str(bool(auto))})
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 5091, _exc)
 
     # Always create assessment record and start a worker session (if available).
     risk_appetite = (payload.get('risk_appetite') or options.get('risk_appetite') or os.getenv('DEFAULT_RISK_APPETITE') or 'medium').lower()
@@ -5134,8 +5112,8 @@ async def run_deep_analyze_pipeline(payload: dict) -> JSONResponse:
                     timestamp=float(_r.get('ts') or _r.get('timestamp') or 0),
                 )
                 _canon_events.append(_ce)
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 5137, _exc)
         if _canon_events:
             _domain_factors = _run_ingestion(_canon_events)
             # Merge returned FactorEmit objects back into matching rows
@@ -5186,8 +5164,8 @@ async def run_deep_analyze_pipeline(payload: dict) -> JSONResponse:
             path = os.path.join(dest, f"{aid}.json")
             try:
                 data['persisted_path'] = path
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 5189, _exc)
             with open(path + '.tmp', 'w', encoding='utf-8') as fh:
                 fh.write(json.dumps(data))
             os.replace(path + '.tmp', path)
@@ -5298,8 +5276,8 @@ async def run_deep_analyze_pipeline(payload: dict) -> JSONResponse:
         if str(os.getenv('TEST_HELPERS_ENABLED', '0')).lower() in ('1', 'true', 'yes'):
             logger.debug('TEST_HELPERS_ENABLED set; skipping automatic _schedule_llm_generation for %s', assessment_id)
             _skip_llm_sched = True
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 5301, _exc)
     if not _skip_llm_sched:
         _schedule_llm_generation(rows, ctx, assessment_obj, assessment_id, org, payload if isinstance(payload, dict) else {})
         # Always schedule tier-1 prefill regardless of auto_llm — prefill only needs clusters,
@@ -5343,8 +5321,8 @@ async def run_deep_analyze_pipeline(payload: dict) -> JSONResponse:
                             assessment_obj['stage_status'] = statuses
                             assessment_obj['rows_processed'] = len(rows)
                             _store_assessment(org, assessment_id, assessment_obj)
-                        except Exception:
-                            pass
+                        except Exception as _exc:
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 5346, _exc)
                     assessment_obj['canonical'] = build_canonical_signals(statuses, proc_ctx)
                     assessment_obj['mappings'] = _build_mapping_bundle(assessment_obj['canonical'], rows, proc_ctx.get('factors') or [])
                     assessment_obj = _hydrate_assessment_semantics(assessment_obj)
@@ -5354,31 +5332,31 @@ async def run_deep_analyze_pipeline(payload: dict) -> JSONResponse:
                         _store_assessment(org, assessment_id, assessment_obj)
                         REPORT_STORE[assessment_id]['status'] = 'completed'
                         REPORT_STORE[assessment_id]['ml_pipeline'] = ml_pipeline_result
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 5357, _exc)
                 except Exception:
                     try:
                         assessment_obj['status'] = 'failed'
                         _store_assessment(org, assessment_id, assessment_obj)
                         REPORT_STORE[assessment_id]['status'] = 'failed'
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 5364, _exc)
 
             try:
                 asyncio.create_task(_local_runner())
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 5369, _exc)
     except Exception as e:
         try:
             csv_deep_analyze_inflight.labels().set(0)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 5374, _exc)
         return JSONResponse({'detail': 'worker_error', 'error': str(e)}, status_code=500)
 
     try:
         csv_deep_analyze_inflight.labels().set(0)
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 5380, _exc)
 
     # Return assessment handle for client to poll
     resp = {
@@ -5416,16 +5394,15 @@ async def run_deep_analyze_pipeline(payload: dict) -> JSONResponse:
         if persisted_path2:
             try:
                 _write_assessment_index(assessment_id, persisted_path2)
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 5419, _exc)
         # cache the authoritative object in REPORT_STORE so subsequent lookups are deterministic
         try:
             REPORT_STORE[assessment_id] = assessment_obj
-        except Exception:
-            # fallback: leave lightweight view in place
-            pass
-    except Exception:
-        pass
+        except Exception as _exc:  # fallback: leave lightweight view in place
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 5424, _exc)
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 5427, _exc)
 
     # Index parent/child relationships for batch flows
     try:
@@ -5447,16 +5424,16 @@ async def run_deep_analyze_pipeline(payload: dict) -> JSONResponse:
                     if assessment_id not in children:
                         children.append(assessment_id)
                         REPORT_STORE[parent_id]['batch_children'] = children
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 5450, _exc)
     # Merge existing view with response for quick GETs
     REPORT_STORE[assessment_id] = {**REPORT_STORE.get(assessment_id, {}), **resp}
     # Overwrite with the authoritative persisted assessment object when available
     try:
         if isinstance(assessment_obj, dict):
             REPORT_STORE[assessment_id] = assessment_obj
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 5458, _exc)
     return JSONResponse(resp)
 
 
@@ -5504,8 +5481,8 @@ def _build_lite_assessment(payload: dict, persist: bool = True) -> dict:
         canonical_ctx = build_canonical_signals([], {'rows': rows})
         if canonical_ctx:
             fallback['canonical'].update(canonical_ctx)
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 5507, _exc)
     fallback['results'] = [
         {
             'row_index': r.get('row_index', idx),
@@ -5540,18 +5517,18 @@ def _build_lite_assessment(payload: dict, persist: bool = True) -> dict:
         dest = os.path.join(base, fallback['org'], datepart)
         try:
             os.makedirs(dest, exist_ok=True)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 5543, _exc)
         persisted_path = os.path.join(dest, f"{fallback_id}.json")
         fallback['persisted_path'] = persisted_path
         try:
             atomic_write_json(persisted_path, fallback)
             try:
                 _write_assessment_index(fallback_id, persisted_path)
-            except Exception:
-                pass
-        except Exception:
-            pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 5551, _exc)
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 5553, _exc)
     REPORT_STORE[fallback_id] = dict(fallback)
     return fallback
 
@@ -5616,8 +5593,8 @@ async def list_batches(parent_id: str):
     # Sort by batch_number if available
     try:
         children.sort(key=lambda x: (x.get('batch_meta', {}).get('batch_number') or 0))
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 5619, _exc)
     return JSONResponse({'parent': {
         'assessment_id': parent.get('assessment_id') or parent_id,
         'status': parent.get('status'),
@@ -5640,8 +5617,8 @@ def _load_assessment_from_disk(assessment_id: str, preferred_path: str | None = 
                 for orgdir in os.listdir(base):
                     p = os.path.join(base, orgdir, d, f"{assessment_id}.json")
                     candidates.append(p)
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 5643, _exc)
     for path in candidates:
         if not path:
             continue
@@ -5830,12 +5807,12 @@ async def get_assessment(assessment_id: str):
                     asyncio.to_thread(_hydrate_assessment_semantics, resp),
                     timeout=8.0
                 )
-            except (asyncio.TimeoutError, Exception):
-                pass
+            except (asyncio.TimeoutError, Exception) as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 5833, _exc)
     try:
         resp = _ensure_llm_rows_available(resp)
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 5837, _exc)
 
     # Retroactively derive verdict labels for any cluster that has confidence_meter
     # but was persisted before verdict derivation was wired in.
@@ -5844,8 +5821,8 @@ async def get_assessment(assessment_id: str):
         _n = backfill_cluster_verdicts(resp)
         if _n:
             logger.debug('get_assessment: backfilled verdicts on %d clusters', _n)
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 5847, _exc)
 
     # Phase 2: upgrade HVR gate state now that verdicts are known.
     # _apply_hvr_gating was called at cluster-build time with no verdict (severity-only).
@@ -5853,8 +5830,8 @@ async def get_assessment(assessment_id: str):
     try:
         for _c in (resp.get('correlation_clusters') or []):
             _apply_hvr_gating(_c)  # no component_rows needed — falls back to existing hvr value
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 5856, _exc)
 
     _preview_rows_for_runtime: list = []
     _preview_seen_for_runtime: set = set()
@@ -5890,8 +5867,8 @@ async def get_assessment(assessment_id: str):
                 _c['tier1_prefill'] = _p
             if isinstance(_p, dict) and _p.get('incident_name'):
                 _ensure_v2_prefill_fields(_p, _c, _cluster_rows(_c, _rows_for_runtime))
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 5893, _exc)
 
     try:
         _clusters = resp.get('correlation_clusters') or []
@@ -5926,8 +5903,8 @@ async def get_assessment(assessment_id: str):
                     _c['top_links'] = _match.get('top_links') or []
                     if not _c.get('reason_summary'):
                         _c['reason_summary'] = _match.get('reason_summary') or ''
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 5929, _exc)
 
     # Build normalized_rows from evidence_preview across all clusters so the
     # browser gets rows that actually match cluster row_refs.  The raw
@@ -5958,24 +5935,24 @@ async def get_assessment_rows(assessment_id: str):
                 # fallback to string coercion
                 try:
                     assessment_id = str(assessment_id)
-                except Exception:
-                    pass
-    except Exception:
-        pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 5961, _exc)
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 5963, _exc)
 
     persisted = _load_assessment_from_disk(assessment_id, (REPORT_STORE.get(assessment_id) or {}).get('persisted_path'))
     if persisted:
         try:
             persisted = _ensure_llm_rows_available(persisted)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 5970, _exc)
         rows = persisted.get('llm_rows') or persisted.get('rows') or []
         return JSONResponse({'assessment_id': assessment_id, 'rows': rows, 'row_count': len(rows)})
     in_mem = REPORT_STORE.get(assessment_id) or {}
     try:
         in_mem = _ensure_llm_rows_available(in_mem)
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 5977, _exc)
     rows = in_mem.get('llm_rows') or in_mem.get('rows') or []
     return JSONResponse({'assessment_id': assessment_id, 'rows': rows, 'row_count': len(rows)})
 
@@ -6009,8 +5986,8 @@ async def get_assessment_topk_sequence(assessment_id: str, k: int = 50):
                     try:
                         ts = float(r.get(kf))
                         break
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 6012, _exc)
             if ts is not None:
                 timestamps.append(ts)
             out_rows.append({
@@ -6066,12 +6043,12 @@ def _start_assessment_cleanup():
                                     if m < cutoff:
                                         try:
                                             os.remove(p)
-                                        except Exception:
-                                            pass
-                                except Exception:
-                                    pass
-            except Exception:
-                pass
+                                        except Exception as _exc:
+                                            logger.debug('silent_swallow at %s:%d: %s', __file__, 6069, _exc)
+                                except Exception as _exc:
+                                    logger.debug('silent_swallow at %s:%d: %s', __file__, 6071, _exc)
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 6073, _exc)
             try:
                 await asyncio.sleep(max(60, interval))
             except Exception:
@@ -6093,10 +6070,10 @@ def register_assessment_cleanup(app):
                     # fallback: schedule using loop directly
                     loop = asyncio.get_event_loop()
                     loop.create_task(loop_factory())
-                except Exception:
-                    pass
-    except Exception:
-        pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 6096, _exc)
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 6098, _exc)
 
 
 # ---------------- New: Composite Investigation Builder -----------------
@@ -6133,8 +6110,8 @@ def _safe_load_assessment(aid: str) -> dict | None:
         disk = _load_assessment_from_disk(aid)
         if disk:
             return disk
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 6136, _exc)
     return None
 
 
@@ -6424,8 +6401,8 @@ async def verify_llm_decision_card(assessment_id: str, request: Request):
                     details['vector_hits'] = hits if isinstance(hits, list) else []
                     if hits:
                         verified = True
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 6427, _exc)
             results.append({'evidence': details, 'verified': bool(verified)})
         except Exception as e:
             results.append({'evidence': {}, 'verified': False, 'error': str(e)})
@@ -6482,8 +6459,8 @@ def _compute_ml_score_for_row(row: dict, assessment: dict | None = None) -> floa
                 preds = []
             if preds:
                 return float(max(0.0, min(100.0, float(preds[0]))))
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 6485, _exc)
 
     # Fallback deterministic heuristic (legacy)
     try:
@@ -6503,12 +6480,12 @@ def _compute_ml_score_for_row(row: dict, assessment: dict | None = None) -> floa
                 score += float(dd.get('score') or 0) * 0.8
             else:
                 score += float(dd or 0) * 0.8
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 6506, _exc)
         try:
             score += min(20.0, float(len(row.get('factors') or [])) * 2.5)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 6510, _exc)
         try:
             gh = (row.get('graph_context') or {})
             if gh.get('hotspots'):
@@ -6517,8 +6494,8 @@ def _compute_ml_score_for_row(row: dict, assessment: dict | None = None) -> floa
                 score += min(8.0, sum(1 for _ in gh.get('mapping_stats', {}).keys()))
             if isinstance(gh.get('hotspots'), (list, tuple)) and len(gh.get('hotspots')) > 0:
                 score += 6.0
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 6520, _exc)
         try:
             ts = None
             for k in ('ts', 'time', 'timestamp', 'created', 'evt_time'):
@@ -6531,8 +6508,8 @@ def _compute_ml_score_for_row(row: dict, assessment: dict | None = None) -> floa
                     score += 4.0
                 elif age < 86400:
                     score += 2.0
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 6534, _exc)
         final = max(0.0, min(100.0, score))
         return round(final, 3)
     except Exception:
@@ -6552,8 +6529,8 @@ def _ensure_triage_on_row(row: dict, assessment: dict | None = None) -> None:
                 row['triage_score'] = float(_compute_triage_score(row) or 0.0)
             except Exception:
                 row['triage_score'] = 0.0
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 6555, _exc)
 
 
 def _ensure_triage_on_rows(rows: list[dict] | None, assessment: dict | None = None) -> None:
@@ -6625,8 +6602,8 @@ def _summarize_ewma_and_hotspots(session_summary: dict | None, session_explain: 
                 top = entries[:8]
                 if top:
                     parts.append('Top overlap hotspots (pair -> overlap weight): ' + ', '.join(f"{a}-{b}:{w:.2f}" for a,b,w in top))
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 6628, _exc)
 
         # Hotspot human explanations
         hotspots = None
@@ -6652,16 +6629,16 @@ def _summarize_ewma_and_hotspots(session_summary: dict | None, session_explain: 
                             notes.append(str(h)[:120])
                 if notes:
                     parts.append('Hotspot notes: ' + '; '.join(notes))
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 6655, _exc)
 
         # mapping stats concise
         try:
             mapping = (session_summary or {}).get('mapping_stats') or (session_explain or {}).get('mapping_stats')
             if mapping and isinstance(mapping, dict):
                 parts.append('Mapping stats: ' + ', '.join(f"{k}:{v}" for k,v in list(mapping.items())[:6]))
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 6663, _exc)
 
         out = '\n'.join(parts)
         if len(out) > max_chars:
@@ -6797,8 +6774,8 @@ def _cluster_review_entries(assessment: dict, cluster: dict | None, cluster_rows
             include = True
         try:
             include = include or int(key) in row_refs
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 6800, _exc)
         if include:
             entries.append(value)
     if cluster_id:
@@ -6906,8 +6883,8 @@ def _estimate_pattern_support(assessment: dict, cluster_rows: list[dict], includ
                         for n in neighbours[:3]
                         if isinstance(n, dict)
                     )
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 6909, _exc)
     return round(support, 3), evidence_used[:8]
 
 
@@ -7552,8 +7529,8 @@ async def build_investigate(assessment_id: str, request: Request):
                 fh.write(json.dumps(record))
             os.replace(path+'.tmp', path)
             record['persisted_path'] = path
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 7555, _exc)
     return JSONResponse({'assessment_id': assessment_id, 'investigate_id': investigate_id, 'status': 'queued'})
 
 @router.get('/{assessment_id}/investigate/{investigate_id}')
@@ -7615,8 +7592,8 @@ def _start_investigate_worker(app, interval_seconds: int = 3):
                                 trigger_reason='investigate_build',
                                 include_temporal=True,
                             )
-                        except Exception:
-                            pass
+                        except Exception as _exc:
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 7618, _exc)
 
                         active_reasoning = assessment.get('cluster_reasoning_state') or {}
                         active_cluster_state = None
@@ -7637,8 +7614,8 @@ def _start_investigate_worker(app, interval_seconds: int = 3):
                                 eh = _summarize_ewma_and_hotspots(session_summary, session_explain, max_chars=1200)
                                 if eh:
                                     extra_ctx.append(f"HopGraph summary: {eh}")
-                            except Exception:
-                                pass
+                            except Exception as _exc:
+                                logger.debug('silent_swallow at %s:%d: %s', __file__, 7640, _exc)
                             if session_summary:
                                 if session_summary.get('mapping_stats'):
                                     extra_ctx.append(f"Session mapping stats: {json.dumps(session_summary.get('mapping_stats'))[:600]}")
@@ -7649,8 +7626,8 @@ def _start_investigate_worker(app, interval_seconds: int = 3):
                                     if r.get(k):
                                         try:
                                             timestamps.append(float(r.get(k)))
-                                        except Exception:
-                                            pass
+                                        except Exception as _exc:
+                                            logger.debug('silent_swallow at %s:%d: %s', __file__, 7652, _exc)
                             if timestamps:
                                 timespan = max(timestamps) - min(timestamps)
                                 extra_ctx.append(f"Observed timeline span (s): {int(timespan)} rows: {len(timestamps)}")
@@ -7667,8 +7644,8 @@ def _start_investigate_worker(app, interval_seconds: int = 3):
                                 )
                             if extra_ctx:
                                 prompt = prompt + "\n\nAdditional session context:\n" + "\n".join(extra_ctx)
-                        except Exception:
-                            pass
+                        except Exception as _exc:
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 7670, _exc)
                         narrative = ''
                         try:
                             # honor per-assessment overrides when available
@@ -7707,8 +7684,8 @@ def _start_investigate_worker(app, interval_seconds: int = 3):
                         # ensure investigate record and rows record triage
                         try:
                             _ensure_triage_on_rows(top_rows, assessment)
-                        except Exception:
-                            pass
+                        except Exception as _exc:
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 7710, _exc)
 
                         rec.update({
                             'status': 'ready',
@@ -7729,8 +7706,8 @@ def _start_investigate_worker(app, interval_seconds: int = 3):
                             assessment['latest_investigate_id'] = iid
                             _store_assessment(assessment.get('org'), assessment.get('assessment_id'), assessment)
                             REPORT_STORE[aid] = assessment
-                        except Exception:
-                            pass
+                        except Exception as _exc:
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 7732, _exc)
                         # persist
                         path = rec.get('persisted_path') or _investigate_persist_path(assessment, iid)
                         if path:
@@ -7739,20 +7716,20 @@ def _start_investigate_worker(app, interval_seconds: int = 3):
                                     fh.write(json.dumps(rec))
                                 os.replace(path+'.tmp', path)
                                 rec['persisted_path'] = path
-                            except Exception:
-                                pass
+                            except Exception as _exc:
+                                logger.debug('silent_swallow at %s:%d: %s', __file__, 7742, _exc)
                     except Exception as e:
                         try:
                             rec['status'] = 'failed'
                             rec['error'] = str(e)
-                        except Exception:
-                            pass
+                        except Exception as _exc:
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 7748, _exc)
                 await asyncio.sleep(interval_seconds)
             except Exception:
                 try:
                     await asyncio.sleep(interval_seconds)
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 7754, _exc)
     # Prefer get_running_loop() — works when called from async lifespan context
     # (add_event_handler startup fires too early and is unavailable post-startup)
     try:
@@ -7767,8 +7744,8 @@ def _start_investigate_worker(app, interval_seconds: int = 3):
         try:
             loop = asyncio.get_event_loop()
             loop.create_task(_loop())
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 7770, _exc)
 
 @router.post('/{assessment_id}/tasks/{task_id}/expand')
 async def expand_task(assessment_id: str, task_id: str, request: Request):
@@ -7984,8 +7961,8 @@ async def assessment_llm_verification(assessment_id: str):
             if c is not None:
                 try: confidences.append(float(c))
                 except Exception: pass
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 7987, _exc)
     avg_confidence = sum(confidences)/len(confidences) if confidences else 0.0
     # Phase3 weighted confidence: emphasize high triage + density rows
     weighted_sum = 0.0
@@ -8077,8 +8054,8 @@ def _start_llm_background_worker(app, interval_seconds: int = 2):
                             continue
                         try:
                             _ensure_triage_on_row(r, assess)
-                        except Exception:
-                            pass
+                        except Exception as _exc:
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 8080, _exc)
                         # already summarized -> mark succeeded
                         if r.get('llm_summary'):
                             if r.get('_llm_status') != 'succeeded':
@@ -8140,8 +8117,8 @@ def _start_llm_background_worker(app, interval_seconds: int = 2):
                             continue
                         try:
                             _ensure_triage_on_row(target, assess)
-                        except Exception:
-                            pass
+                        except Exception as _exc:
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 8143, _exc)
                         try:
                             tri = float(target.get('triage_score') or 0.0)
                         except Exception:
@@ -8225,8 +8202,8 @@ def _start_llm_background_worker(app, interval_seconds: int = 2):
                                     # publish SSE event for UI listeners
                                     try:
                                         publish_llm_event(aid, {'type': 'row_succeeded', 'row_index': rid, 'summary': text, 'meta': meta})
-                                    except Exception:
-                                        pass
+                                    except Exception as _exc:
+                                        logger.debug('silent_swallow at %s:%d: %s', __file__, 8228, _exc)
                                 except Exception as e:
                                     if attempt >= int(os.getenv('LLM_MAX_ATTEMPTS', '3')):
                                         target['_llm_status'] = 'failed'
@@ -8265,8 +8242,8 @@ def _start_llm_background_worker(app, interval_seconds: int = 2):
                     try:
                         if len(queue) > 1000:
                             queue[:] = queue[-1000:]
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 8268, _exc)
 
                     assess['_llm_queue'] = queue
                     if modified:
@@ -8288,17 +8265,17 @@ def _start_llm_background_worker(app, interval_seconds: int = 2):
                                     fh.write(json.dumps(disk))
                                 try:
                                     os.replace(tmp, path)
-                                except Exception:
-                                    pass
-                        except Exception:
-                            pass
+                                except Exception as _exc:
+                                    logger.debug('silent_swallow at %s:%d: %s', __file__, 8291, _exc)
+                        except Exception as _exc:
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 8293, _exc)
 
                 await asyncio.sleep(max(0.1, env_interval))
             except Exception:
                 try:
                     await asyncio.sleep(max(0.1, env_interval))
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 8300, _exc)
 
     try:
         app.add_event_handler('startup', lambda: asyncio.create_task(_worker_loop()))
@@ -8306,8 +8283,8 @@ def _start_llm_background_worker(app, interval_seconds: int = 2):
         try:
             loop = asyncio.get_event_loop()
             loop.create_task(_worker_loop())
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 8309, _exc)
 
 
 
@@ -8348,8 +8325,8 @@ async def llm_event_stream(request: Request, assessment_id: str):
                     except Exception:
                         try:
                             yield f"event: message\ndata: {json.dumps({'error':'event_serialize_error'})}\n\n"
-                        except Exception:
-                            pass
+                        except Exception as _exc:
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 8351, _exc)
                 await asyncio.sleep(0.2)
         finally:
             # remove listener
@@ -8358,8 +8335,8 @@ async def llm_event_stream(request: Request, assessment_id: str):
                 if q in listeners:
                     listeners.remove(q)
                 _SSE_BROADCASTERS[assessment_id] = listeners
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 8361, _exc)
 
     return Response(gen(), media_type='text/event-stream')
 
@@ -8452,8 +8429,8 @@ def _coerce_verdict(verdict_value: Any, risk_score: float) -> Verdict:
     try:
         if verdict_value:
             return Verdict[str(verdict_value).upper()]
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 8455, _exc)
     try:
         return map_risk_to_verdict(risk_score)
     except Exception:
@@ -8574,8 +8551,8 @@ async def export_assessment_report(assessment_id: str, payload: dict | None = No
                     reviewed += 1
             pct = (reviewed/total*100) if total else 0
             data['review_coverage'] = {'total': total, 'reviewed': reviewed, 'percent': round(pct)}
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 8577, _exc)
     document = _build_report_document(assessment, data)
     export_entry = {'ts': int(time.time()), 'payload': data, 'document': document}
     in_mem.setdefault('exports', []).append(export_entry)
@@ -8710,8 +8687,8 @@ async def update_row_review(assessment_id: str, row_index: int, payload: dict | 
             include_temporal=True,
             force_corroboration=bool(cluster_id),
         )
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 8713, _exc)
     REPORT_STORE[assessment_id] = {**in_mem, **assessment}
     # Persist back to disk best-effort
     try:
@@ -8720,8 +8697,8 @@ async def update_row_review(assessment_id: str, row_index: int, payload: dict | 
             with open(path + '.tmp', 'w', encoding='utf-8') as fh:
                 fh.write(json.dumps(assessment, default=str))
             os.replace(path + '.tmp', path)
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 8723, _exc)
     compact_state = {}
     try:
         root_state = assessment.get('cluster_reasoning_state') or {}
@@ -8783,8 +8760,8 @@ async def update_cluster_review(assessment_id: str, cluster_id: str, payload: di
             include_temporal=True,
             force_corroboration=status in {'confirmed', 'escalated'},
         )
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 8786, _exc)
     REPORT_STORE[assessment_id] = {**in_mem, **assessment}
     try:
         path = assessment.get('persisted_path')
@@ -8792,8 +8769,8 @@ async def update_cluster_review(assessment_id: str, cluster_id: str, payload: di
             with open(path + '.tmp', 'w', encoding='utf-8') as fh:
                 fh.write(json.dumps(assessment, default=str))
             os.replace(path + '.tmp', path)
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 8795, _exc)
     root_state = assessment.get('cluster_reasoning_state') or {}
     compact_state = next(
         (compact_cluster_reasoning_state(item) for item in (root_state.get('cluster_states') or []) if item.get('cluster_id') == cluster_id),
@@ -8918,8 +8895,8 @@ async def get_cluster_detail(assessment_id: str, cluster_id: str):
             if value not in (None, [], {})
         })
         compact_state['provider_context'] = existing_provider_context
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 8921, _exc)
     return JSONResponse({
         'assessment_id': assessment_id,
         'cluster_id': cluster_id,
@@ -8994,8 +8971,8 @@ async def gate_assessment_for_escalation(assessment_id: str, request: Request):
             include_temporal=True,
             force_corroboration=verdict in ('approve', 'conditional'),
         )
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 8997, _exc)
     REPORT_STORE[assessment_id] = {**in_mem, **assessment}
 
     # Persist best-effort
@@ -9005,8 +8982,8 @@ async def gate_assessment_for_escalation(assessment_id: str, request: Request):
             with open(path + '.tmp', 'w', encoding='utf-8') as fh:
                 fh.write(json.dumps(assessment, default=str))
             os.replace(path + '.tmp', path)
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 9008, _exc)
 
     return JSONResponse({
         'ok': True,
