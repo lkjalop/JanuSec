@@ -1,39 +1,4 @@
 {
   "cookies": [],
-  "origins": [
-    {
-      "origin": "http://localhost:8080",
-      "localStorage": [
-        {
-          "name": "showDev",
-          "value": "1"
-        },
-        {
-          "name": "testMode",
-          "value": "playwright"
-        },
-        {
-          "name": "apiKey",
-          "value": "devkey123"
-        }
-      ]
-    },
-    {
-      "origin": "http://127.0.0.1:8080",
-      "localStorage": [
-        {
-          "name": "showDev",
-          "value": "1"
-        },
-        {
-          "name": "testMode",
-          "value": "playwright"
-        },
-        {
-          "name": "apiKey",
-          "value": "devkey123"
-        }
-      ]
-    }
-  ]
+  "origins": []
 }

@@ -9,7 +9,6 @@ import logging
 import sys
 import re
 import ipaddress
-import threading
 from collections import defaultdict
 from fastapi import APIRouter, Request, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, Response
@@ -154,136 +153,12 @@ except Exception:  # pragma: no cover
 # Lightweight, deterministic stage implementations for lite-mode tests
 router = APIRouter(prefix='/api/v1/assessments')
 csv_router = APIRouter(prefix='/api/v1')
+REPORT_STORE: dict[str, dict] = {}
+PARENT_CHILD_INDEX: dict[str, list[str]] = {}
 logger = logging.getLogger(__name__)
 
-
-class _BoundedDict(dict):
-    """Dict with FIFO eviction and snapshot iteration for shared runtime stores."""
-
-    def __init__(self, *args, maxsize: int = 10000, **kwargs):
-        super().__init__()
-        self._maxsize = max(1, int(maxsize or 1))
-        self._lock = threading.RLock()
-        if args or kwargs:
-            self.update(*args, **kwargs)
-
-    def __setitem__(self, key, value):
-        with self._lock:
-            if key not in self:
-                while len(self) >= self._maxsize:
-                    try:
-                        oldest = next(iter(self))
-                    except StopIteration:
-                        break
-                    super().__delitem__(oldest)
-            super().__setitem__(key, value)
-
-    def __delitem__(self, key):
-        with self._lock:
-            super().__delitem__(key)
-
-    def update(self, *args, **kwargs):
-        with self._lock:
-            for key, value in dict(*args, **kwargs).items():
-                self[key] = value
-
-    def setdefault(self, key, default=None):
-        with self._lock:
-            if key not in self:
-                self[key] = default
-            return super().__getitem__(key)
-
-    def pop(self, key, *args):
-        with self._lock:
-            return super().pop(key, *args)
-
-    def clear(self):
-        with self._lock:
-            super().clear()
-
-    def items(self):
-        with self._lock:
-            return list(super().items())
-
-    def keys(self):
-        with self._lock:
-            return list(super().keys())
-
-    def values(self):
-        with self._lock:
-            return list(super().values())
-
-
-def _store_cap(name: str, default: int) -> int:
-    try:
-        return max(1, int(os.getenv(name, str(default)) or default))
-    except Exception:
-        logger.warning("Invalid %s value; using %s", name, default)
-        return default
-
-
-REPORT_STORE: dict[str, dict] = _BoundedDict(maxsize=_store_cap('REPORT_STORE_MAX', 10000))
-PARENT_CHILD_INDEX: dict[str, list[str]] = _BoundedDict(maxsize=_store_cap('PARENT_CHILD_INDEX_MAX', 50000))
-
-
-_BACKGROUND_TASKS: set = set()
-
-
-def _track_task(task):
-    """Keep a strong reference to a scheduled task until it completes."""
-    if task is None:
-        return None
-    try:
-        _BACKGROUND_TASKS.add(task)
-        if hasattr(task, 'add_done_callback'):
-            task.add_done_callback(_BACKGROUND_TASKS.discard)
-    except Exception:
-        logger.debug('_track_task: could not register %r', task, exc_info=True)
-    return task
-
-
-def _utcnow() -> datetime.datetime:
-    """Naive UTC timestamp compatible with deprecated datetime.utcnow()."""
-    return datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
-
-
-def _atomic_write_json_sync(path: str, data, default=None) -> None:
-    """Synchronous atomic JSON writer; call via asyncio.to_thread in async code."""
-    if default is None:
-        atomic_write_json(path, data)
-        return
-    directory = os.path.dirname(path)
-    if directory:
-        os.makedirs(directory, exist_ok=True)
-    tmp = f"{path}.{uuid.uuid4().hex}.tmp"
-    with open(tmp, 'w', encoding='utf-8') as fh:
-        json.dump(data, fh, ensure_ascii=False, default=default)
-    os.replace(tmp, path)
-
-
-def _atomic_write_text_sync(path: str, text: str) -> None:
-    """Synchronous atomic text writer; call via asyncio.to_thread in async code."""
-    directory = os.path.dirname(path)
-    if directory:
-        os.makedirs(directory, exist_ok=True)
-    tmp = f"{path}.{uuid.uuid4().hex}.tmp"
-    with open(tmp, 'w', encoding='utf-8') as fh:
-        fh.write(text)
-    os.replace(tmp, path)
-
-
-def _read_text_sync(path: str) -> str:
-    with open(path, 'r', encoding='utf-8') as fh:
-        return fh.read()
-
-
-def _read_json_sync(path: str):
-    with open(path, 'r', encoding='utf-8') as fh:
-        return json.load(fh)
-
 # Simple in-memory SSE broadcaster per-assessment
-# Bounded to prevent stale assessment-id keys accumulating indefinitely.
-_SSE_BROADCASTERS: dict[str, list] = _BoundedDict(maxsize=_store_cap('SSE_BROADCASTERS_MAX', 2000))
+_SSE_BROADCASTERS: dict[str, list] = {}
 
 def publish_llm_event(assessment_id: str, event: dict):
     """Publish an event dict to any connected SSE listeners for assessment_id.
@@ -305,7 +180,7 @@ def publish_llm_event(assessment_id: str, event: dict):
 
 
 # ── WebSocket pipeline progress ─────────────────────────────────────────────
-_WS_CONNECTIONS: dict[str, list] = _BoundedDict(maxsize=_store_cap('WS_CONNECTIONS_MAX', 2000))
+_WS_CONNECTIONS: dict[str, list] = {}
 
 
 def _extract_row_timestamp_value(row: dict | None) -> float | None:
@@ -2583,6 +2458,10 @@ def _initial_cluster_verdict(component_rows: list[dict], severity: str) -> dict:
         'verdict': 'LIKELY_COMPROMISE' if severity in {'critical', 'high'} else 'SUSPICIOUS_ACTIVITY',
         'verdict_confidence': 0.55 if severity in {'critical', 'high'} else 0.35,
         'verdict_rationale': 'Correlated evidence requires investigation; no observed impact field crossed the validated-breach threshold.',
+        # Provisional flag: this verdict was set from severity heuristics alone with
+        # no Tier-1 prefill / CoT data. backfill_cluster_verdicts() will overwrite
+        # it once richer evidence (confidence_meter, prefill, CoT) is attached.
+        'verdict_provisional': True,
     }
 
 
@@ -2698,19 +2577,6 @@ def _normalize_assessment_rows(assessment: dict) -> List[dict]:
         except Exception:
             continue
 
-    def _merge_lists(extracted: List[str], existing: Any) -> List[str]:
-        """Union extractor results with a pre-populated list, deduping and preserving order."""
-        if not isinstance(existing, list) or not existing:
-            return extracted
-        seen = set(extracted)
-        combined = list(extracted)
-        for item in existing:
-            text = str(item).strip() if item else ''
-            if text and text not in seen:
-                seen.add(text)
-                combined.append(text)
-        return combined
-
     normalized: List[dict] = []
     for idx, source in enumerate(source_rows):
         flat = _flatten_row_payload(source, idx)
@@ -2726,23 +2592,6 @@ def _normalize_assessment_rows(assessment: dict) -> List[dict]:
         ips = _extract_ips_backend(merged)
         resources = _extract_resources_backend(merged)
         tags = _extract_tags_backend(merged, assessment)
-        # Preserve semantic arrays already present on input rows (e.g. from
-        # LLM pre-enrichment or manual fixture data) by merging them with
-        # extractor results.  Dedup while preserving order.
-        accounts = _merge_lists(accounts, merged.get('accounts'))
-        hosts = _merge_lists(hosts, merged.get('hosts'))
-        ips = _merge_lists(ips, merged.get('ips'))
-        resources = _merge_lists(resources, merged.get('resources'))
-        # Merge pre-existing mitre/atlas/owasp_llm tags
-        for _tag_key in ('mitre', 'atlas', 'owasp_llm'):
-            existing_tags = merged.get(_tag_key)
-            if isinstance(existing_tags, list):
-                seen_tags = set(tags[_tag_key])
-                for item in existing_tags:
-                    text = str(item).strip() if item else ''
-                    if text and text not in seen_tags:
-                        seen_tags.add(text)
-                        tags[_tag_key].append(text)
         triage = float(merged.get('triage_score') or _compute_triage_score(merged) or 0.0)
         cloud = _extract_cloud_context(merged, assessment)
         identity = _extract_identity_context(merged)
@@ -2768,14 +2617,11 @@ def _normalize_assessment_rows(assessment: dict) -> List[dict]:
             'accounts': accounts,
             'hosts': hosts,
             'ips': ips,
-            'external_ips': _merge_lists(
-                [
-                    ip for ip in ips
-                    if not _is_private_ip_text(ip)
-                    and (_is_ioc_confirmed(ip) or not _is_vendor_egress_ip(ip))
-                ],
-                merged.get('external_ips'),
-            ),
+            'external_ips': [
+                ip for ip in ips
+                if not _is_private_ip_text(ip)
+                and (_is_ioc_confirmed(ip) or not _is_vendor_egress_ip(ip))
+            ],
             'resources': resources,
             'mitre': tags['mitre'],
             'atlas': tags['atlas'],
@@ -3737,6 +3583,26 @@ def _hydrate_assessment_semantics(assessment: dict) -> dict:
     except Exception:
         pass
     clusters, _adjacency = _build_correlation_clusters(normalized_rows)
+    # Optional: split mega-clusters into discrete Incident objects so the UI
+    # can render multiple coherent stories instead of one confusing blob.
+    # Default ON; set DISABLE_INCIDENT_SPLIT=1 to revert to legacy behaviour.
+    if os.getenv('DISABLE_INCIDENT_SPLIT', '0').lower() not in ('1', 'true', 'yes'):
+        try:
+            from src.core.incident_extraction import extract_incidents
+            incidents = extract_incidents(clusters, normalized_rows)
+            if incidents:
+                # Attach as additive metadata; do not replace clusters yet
+                # (UI/verdict-engine still consume correlation_clusters).
+                assessment['incidents'] = [
+                    inc.to_dict() if hasattr(inc, 'to_dict') else inc.__dict__
+                    for inc in incidents
+                ]
+                logger.info(
+                    'incident_extraction: %d clusters → %d incidents',
+                    len(clusters), len(incidents),
+                )
+        except Exception as exc:
+            logger.warning('incident_extraction skipped (non-fatal): %s', exc)
     enrichment_cases = _build_enrichment_guided_cases(normalized_rows)
     if enrichment_cases:
         logger.warning(
@@ -3969,7 +3835,7 @@ def _schedule_prefill_generation(assessment_obj: dict, assessment_id: str) -> No
             logger.debug('tier1_prefill background task failed for %s: %s', assessment_id, exc)
 
     try:
-        _track_task(loop.create_task(_prefill_runner()))
+        loop.create_task(_prefill_runner())
     except Exception as exc:
         logger.debug('tier1_prefill task scheduling failed for %s: %s', assessment_id, exc)
 
@@ -4089,7 +3955,7 @@ def _schedule_llm_generation(rows: List[dict], ctx: dict, assessment_obj: dict, 
         # from the main pipeline path). No duplicate call needed here.
 
     try:
-        _track_task(loop.create_task(_runner()))
+        loop.create_task(_runner())
     except Exception as exc:
         logger.warning("Failed to schedule LLM generation task for %s: %s", assessment_id, exc)
 
@@ -4739,7 +4605,8 @@ async def generate_llm_summaries(request: Request):
                 if persisted_path:
                     break
             if persisted_path and os.path.exists(persisted_path):
-                assessment = await asyncio.to_thread(_read_json_sync, persisted_path)
+                with open(persisted_path,'r',encoding='utf-8') as fh:
+                    assessment = json.load(fh)
         except Exception:
             assessment = None
     if not assessment:
@@ -4920,7 +4787,10 @@ async def enqueue_llm_rows(assessment_id: str, request: Request):
         # Wait briefly for authoritative persisted/cached assessment to appear (server-side stabilization)
         tries = 5
         for i in range(tries):
-            await asyncio.sleep(0.05)
+            try:
+                time.sleep(0.05)
+            except Exception:
+                pass
             assessment = _get_assessment_cached(assessment_id)
             if assessment:
                 break
@@ -5308,7 +5178,7 @@ async def run_deep_analyze_pipeline(payload: dict) -> JSONResponse:
     def _store_assessment(org: str | None, aid: str, data: dict):
         try:
             repo_root = os.getcwd()
-            datepart = _utcnow().strftime('%Y-%m-%d')
+            datepart = datetime.datetime.utcnow().strftime('%Y-%m-%d')
             base = os.getenv('SESSION_PERSIST_DIR') or os.path.join(repo_root, 'data', 'assessments')
             orgdir = (org or 'unknown')
             dest = os.path.join(base, orgdir, datepart)
@@ -5318,10 +5188,11 @@ async def run_deep_analyze_pipeline(payload: dict) -> JSONResponse:
                 data['persisted_path'] = path
             except Exception:
                 pass
-            _atomic_write_json_sync(path, data)
+            with open(path + '.tmp', 'w', encoding='utf-8') as fh:
+                fh.write(json.dumps(data))
+            os.replace(path + '.tmp', path)
             return path
         except Exception:
-            logger.debug('assessment persist failed for %s', aid, exc_info=True)
             return None
 
     # Run lightweight stage registry locally for canonical/mapping hints
@@ -5494,7 +5365,7 @@ async def run_deep_analyze_pipeline(payload: dict) -> JSONResponse:
                         pass
 
             try:
-                _track_task(asyncio.create_task(_local_runner()))
+                asyncio.create_task(_local_runner())
             except Exception:
                 pass
     except Exception as e:
@@ -5664,7 +5535,7 @@ def _build_lite_assessment(payload: dict, persist: bool = True) -> dict:
     fallback['mappings'] = mappings
     if persist:
         repo_root = os.getcwd()
-        datepart = _utcnow().strftime('%Y-%m-%d')
+        datepart = datetime.datetime.utcnow().strftime('%Y-%m-%d')
         base = os.getenv('SESSION_PERSIST_DIR') or os.path.join(repo_root, 'data', 'assessments')
         dest = os.path.join(base, fallback['org'], datepart)
         try:
@@ -5763,8 +5634,8 @@ def _load_assessment_from_disk(assessment_id: str, preferred_path: str | None = 
         repo_root = os.getcwd()
         base = os.getenv('SESSION_PERSIST_DIR') or os.path.join(repo_root, 'data', 'assessments')
         if os.path.isdir(base):
-            dates = [_utcnow().strftime('%Y-%m-%d')]
-            dates.append((_utcnow() - datetime.timedelta(days=1)).strftime('%Y-%m-%d'))
+            dates = [datetime.datetime.utcnow().strftime('%Y-%m-%d')]
+            dates.append((datetime.datetime.utcnow() - datetime.timedelta(days=1)).strftime('%Y-%m-%d'))
             for d in dates:
                 for orgdir in os.listdir(base):
                     p = os.path.join(base, orgdir, d, f"{assessment_id}.json")
@@ -5837,14 +5708,14 @@ def _build_report_document(assessment: dict, params: dict) -> dict:
         storage_hint = persisted_path or os.path.join(
             os.getenv('SESSION_PERSIST_DIR') or os.path.join(os.getcwd(), 'data', 'assessments'),
             org_name,
-            _utcnow().strftime('%Y-%m-%d'),
+            datetime.datetime.utcnow().strftime('%Y-%m-%d'),
             f"{assessment.get('assessment_id')}.json",
         )
     except Exception:
         storage_hint = persisted_path or 'data/assessments'
     audit_metadata = {
         'org': org_name,
-        'org_tag': f"{org_name}:{_utcnow().strftime('%Y%m%d')}",
+        'org_tag': f"{org_name}:{datetime.datetime.utcnow().strftime('%Y%m%d')}",
         'persona': persona,
         'persisted_path': persisted_path,
         'storage_hint': storage_hint,
@@ -6216,12 +6087,12 @@ def register_assessment_cleanup(app):
         loop_factory = _start_assessment_cleanup()
         if loop_factory:
             try:
-                app.add_event_handler('startup', lambda: _track_task(asyncio.create_task(loop_factory())))
+                app.add_event_handler('startup', lambda: asyncio.create_task(loop_factory()))
             except Exception:
                 try:
                     # fallback: schedule using loop directly
                     loop = asyncio.get_event_loop()
-                    _track_task(loop.create_task(loop_factory()))
+                    loop.create_task(loop_factory())
                 except Exception:
                     pass
     except Exception:
@@ -7677,7 +7548,9 @@ async def build_investigate(assessment_id: str, request: Request):
     path = _investigate_persist_path(assessment, investigate_id)
     if path:
         try:
-            await asyncio.to_thread(_atomic_write_json_sync, path, record)
+            with open(path+'.tmp','w',encoding='utf-8') as fh:
+                fh.write(json.dumps(record))
+            os.replace(path+'.tmp', path)
             record['persisted_path'] = path
         except Exception:
             pass
@@ -7862,7 +7735,9 @@ def _start_investigate_worker(app, interval_seconds: int = 3):
                         path = rec.get('persisted_path') or _investigate_persist_path(assessment, iid)
                         if path:
                             try:
-                                await asyncio.to_thread(_atomic_write_json_sync, path, rec)
+                                with open(path+'.tmp','w',encoding='utf-8') as fh:
+                                    fh.write(json.dumps(rec))
+                                os.replace(path+'.tmp', path)
                                 rec['persisted_path'] = path
                             except Exception:
                                 pass
@@ -7882,16 +7757,16 @@ def _start_investigate_worker(app, interval_seconds: int = 3):
     # (add_event_handler startup fires too early and is unavailable post-startup)
     try:
         running_loop = asyncio.get_running_loop()
-        _track_task(running_loop.create_task(_loop()))
+        running_loop.create_task(_loop())
         return
     except RuntimeError:
         pass  # not in a running loop — fall through
     try:
-        app.add_event_handler('startup', lambda: _track_task(asyncio.create_task(_loop())))
+        app.add_event_handler('startup', lambda: asyncio.create_task(_loop()))
     except Exception:
         try:
             loop = asyncio.get_event_loop()
-            _track_task(loop.create_task(_loop()))
+            loop.create_task(_loop())
         except Exception:
             pass
 
@@ -8131,7 +8006,7 @@ async def assessment_llm_verification(assessment_id: str):
             continue
     weighted_confidence = (weighted_sum/weight_total) if weight_total else 0.0
     md_sections = []
-    md_sections.append(f"# LLM Verification Report\nAssessment: {assessment_id}\nGenerated: {_utcnow().isoformat()}Z\n")
+    md_sections.append(f"# LLM Verification Report\nAssessment: {assessment_id}\nGenerated: {datetime.datetime.utcnow().isoformat()}Z\n")
     md_sections.append("## Coverage\n" + f"Baseline rows: {len(baseline)} Enriched rows: {len(enriched)}\nDistinct factors baseline: {len(f_base)} enriched: {len(f_enriched)} uplift: {coverage_uplift}\n")
     md_sections.append("## DREAD\n" + f"Average DREAD baseline: {dread_avg_base:.2f} enriched: {dread_avg_enriched:.2f} delta: {dread_delta:.2f}\n")
     md_sections.append("## Enriched Factor Additions\n" + '\n'.join(f"- {f}" for f in sorted(f_enriched - f_base)))
@@ -8145,7 +8020,9 @@ async def assessment_llm_verification(assessment_id: str):
         if base_path:
             parent = os.path.dirname(base_path)
             out_path = os.path.join(parent, f"{assessment_id}-llm-verification.md")
-            await asyncio.to_thread(_atomic_write_text_sync, out_path, markdown)
+            with open(out_path+'.tmp','w',encoding='utf-8') as fh:
+                fh.write(markdown)
+            os.replace(out_path+'.tmp', out_path)
     except Exception:
         out_path = None
     return JSONResponse({
@@ -8399,14 +8276,18 @@ def _start_llm_background_worker(app, interval_seconds: int = 2):
                             path = assess.get('persisted_path')
                             if path:
                                 try:
-                                    disk = await asyncio.to_thread(_read_json_sync, path)
+                                    with open(path, 'r', encoding='utf-8') as fh:
+                                        disk = json.load(fh)
                                 except Exception:
                                     disk = assess
                                 disk['llm_rows'] = llm_rows
                                 disk['_llm_queue'] = assess.get('_llm_queue')
                                 disk['updated'] = int(time.time())
+                                tmp = path + '.tmp'
+                                with open(tmp, 'w', encoding='utf-8') as fh:
+                                    fh.write(json.dumps(disk))
                                 try:
-                                    await asyncio.to_thread(_atomic_write_json_sync, path, disk)
+                                    os.replace(tmp, path)
                                 except Exception:
                                     pass
                         except Exception:
@@ -8420,11 +8301,11 @@ def _start_llm_background_worker(app, interval_seconds: int = 2):
                     pass
 
     try:
-        app.add_event_handler('startup', lambda: _track_task(asyncio.create_task(_worker_loop())))
+        app.add_event_handler('startup', lambda: asyncio.create_task(_worker_loop()))
     except Exception:
         try:
             loop = asyncio.get_event_loop()
-            _track_task(loop.create_task(_worker_loop()))
+            loop.create_task(_worker_loop())
         except Exception:
             pass
 
@@ -8836,7 +8717,9 @@ async def update_row_review(assessment_id: str, row_index: int, payload: dict | 
     try:
         path = assessment.get('persisted_path')
         if path:
-            await asyncio.to_thread(_atomic_write_json_sync, path, assessment, str)
+            with open(path + '.tmp', 'w', encoding='utf-8') as fh:
+                fh.write(json.dumps(assessment, default=str))
+            os.replace(path + '.tmp', path)
     except Exception:
         pass
     compact_state = {}
@@ -8906,7 +8789,9 @@ async def update_cluster_review(assessment_id: str, cluster_id: str, payload: di
     try:
         path = assessment.get('persisted_path')
         if path:
-            await asyncio.to_thread(_atomic_write_json_sync, path, assessment, str)
+            with open(path + '.tmp', 'w', encoding='utf-8') as fh:
+                fh.write(json.dumps(assessment, default=str))
+            os.replace(path + '.tmp', path)
     except Exception:
         pass
     root_state = assessment.get('cluster_reasoning_state') or {}
@@ -9117,7 +9002,9 @@ async def gate_assessment_for_escalation(assessment_id: str, request: Request):
     try:
         path = assessment.get('persisted_path')
         if path:
-            await asyncio.to_thread(_atomic_write_json_sync, path, assessment, str)
+            with open(path + '.tmp', 'w', encoding='utf-8') as fh:
+                fh.write(json.dumps(assessment, default=str))
+            os.replace(path + '.tmp', path)
     except Exception:
         pass
 
