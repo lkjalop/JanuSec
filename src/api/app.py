@@ -8,11 +8,14 @@ import logging
 import os
 import time
 import sys
+
+logger = logging.getLogger(__name__)  # auto-added by instrument_silent_excepts
+
 try:
     if 'api.app' not in sys.modules:
         sys.modules['api.app'] = sys.modules[__name__]
-except Exception:
-    pass
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 14, _exc)
 from collections import defaultdict, deque
 from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
@@ -86,10 +89,10 @@ try:
         import warnings as _warn
         try:
             _warn.filterwarnings('ignore', message='.*on_event is deprecated.*')
-        except Exception:
-            pass
-except Exception:
-    pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 89, _exc)
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 91, _exc)
 
 
 try:
@@ -101,8 +104,8 @@ try:
     # Ensure ebpf endpoints module is importable early so its router can be included
     if not _introspect_only:
         import src.api.ebpf_endpoints as _ensure_ebpf  # type: ignore
-except Exception:
-    pass
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 104, _exc)
 try:
     from src.core.detectors.ai_security import detect_ai_signals as _lite_ai_detect  # type: ignore
 except Exception:  # pragma: no cover
@@ -127,8 +130,8 @@ def _lite_emit_factor(factor: str, *, decision_id=None, node_ids=None, ts=None):
             from src.core.factors.emission_tracker import record_emission as _rec
             _rec(factor, decision_id=decision_id, node_ids=node_ids, ts=ts)
             return
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 130, _exc)
         try:
             import importlib
             evmod = importlib.import_module('src.api.routes.events')
@@ -136,27 +139,27 @@ def _lite_emit_factor(factor: str, *, decision_id=None, node_ids=None, ts=None):
             if callable(fn):
                 fn(factor, decision_id=decision_id, node_ids=node_ids, ts=ts)
                 return
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 139, _exc)
         try:
             path = os.getenv('EMITTED_FACTORS_LOG_PATH') or os.getenv('EMITTED_FACTORS_LOG','')
             if path:
                 try:
                     os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 146, _exc)
                 entry = {'factor': factor, 'decision_id': decision_id, 'ts': ts or __import__('time').time()}
                 if node_ids:
                     try:
                         entry['nodes'] = list(node_ids)[:10]
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 152, _exc)
                 with open(path, 'a', encoding='utf-8') as fh:
                     fh.write(json.dumps(entry, separators=(',', ':')) + '\n')
-        except Exception:
-            pass
-    except Exception:
-        pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 156, _exc)
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 158, _exc)
 from .config_endpoints import router as config_router
 # Provide a lightweight stub for optional heavy DB drivers when running in
 # PLATFORM_LITE_INIT (used by tests). This prevents import-time ModuleNotFound
@@ -223,10 +226,10 @@ except Exception:
         if precision_metrics_router is not None:
             try:
                 app.include_router(precision_metrics_router)
-            except Exception:
-                pass
-    except Exception:
-        pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 226, _exc)
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 228, _exc)
 from .perf_api_stage import router as perf_api_stage_router
 if not _introspect_only:
     try:
@@ -268,8 +271,8 @@ def _safe_runtime(_app: FastAPI | Any) -> Any:
         fn = globals().get('get_server_runtime_state')
         if callable(fn):
             return fn(_app)  # type: ignore[misc]
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 271, _exc)
     # Ensure a canonical ALERT_RING is created on the app.state so DI accessors
     # can find and reuse the same list object across imports. This reduces the
     # need for tests to import module-level globals directly.
@@ -279,10 +282,10 @@ def _safe_runtime(_app: FastAPI | Any) -> Any:
             try:
                 setattr(st, 'ALERT_RING', [])
                 setattr(st, 'ALERT_RING_LOCK', __import__('threading').Lock())
-            except Exception:
-                pass
-    except Exception:
-        pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 282, _exc)
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 284, _exc)
     return None
 try:
     from src.services.network_ingest import register_network_service
@@ -404,8 +407,8 @@ if playbook_router is None:
                 if not hasattr(app.state, 'playbooks'):
                     app.state.playbooks = {}
                 app.state.playbooks[pbid] = playbook
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 407, _exc)
             return JSONResponse({'playbook_id': pbid, 'playbook': playbook})
 
         @_stub_router.post('/execute')
@@ -420,8 +423,8 @@ if playbook_router is None:
             playbook = None
             try:
                 playbook = (app.state.playbooks or {}).get(pbid)
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 423, _exc)
             steps = (playbook or {}).get('steps') or []
             auto_steps = [s for s in steps if s.get('automated')]
             executed = []
@@ -452,8 +455,8 @@ if playbook_router is None:
         try:
             # include immediately so module-level TestClient sees it
             app.include_router(playbook_router)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 455, _exc)
     except Exception:
         playbook_router = None
 from .report_endpoints import router as report_router
@@ -766,10 +769,10 @@ try:
     if api_sec_router is not None:
         try:
             app.include_router(api_sec_router)
-        except Exception:
-            pass
-except Exception:
-    pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 769, _exc)
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 771, _exc)
 
 # Ensure AB-analysis endpoints are included (compatibility for tests)
 try:
@@ -783,10 +786,10 @@ try:
     if _ab_analysis_router is not None:
         try:
             app.include_router(_ab_analysis_router)
-        except Exception:
-            pass
-except Exception:
-    pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 786, _exc)
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 788, _exc)
 from .telemetry_endpoints import router as telemetry_router
 try:
     from .telemetry_requests_endpoints import router as telemetry_requests_router
@@ -889,8 +892,8 @@ async def lifespan(app: FastAPI):
         prof = os.getenv('CONFIG_PROFILE')
         if prof:
             apply_profile(prof)
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 892, _exc)
     # Initialize the primary DB pool during lifespan startup so staging/prod
     # does not depend on legacy startup event wiring that can be bypassed by
     # alternate app factories or test-oriented router flows.
@@ -953,8 +956,8 @@ async def lifespan(app: FastAPI):
                 try:
                     import graph.hopgraph as _hgmod2  # type: ignore
                     _hgmod2.GLOBAL_HOPGRAPH = hg  # type: ignore[attr-defined]
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 956, _exc)
             async def _restore_hopgraph_state() -> None:
                 await asyncio.sleep(2)
                 def _restore_sync() -> None:
@@ -968,20 +971,20 @@ async def lifespan(app: FastAPI):
                                 store = get_session_store()
                                 if hasattr(store, 'rehydrate'):
                                     store.rehydrate(None)
-                            except Exception:
-                                pass
-                    except Exception:
-                        pass
+                            except Exception as _exc:
+                                logger.debug('silent_swallow at %s:%d: %s', __file__, 971, _exc)
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 973, _exc)
                 try:
                     await asyncio.to_thread(_restore_sync)
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 977, _exc)
             try:
                 app.state._hopgraph_restore_task = asyncio.create_task(_restore_hopgraph_state())
             except Exception:
                 app.state._hopgraph_restore_task = None
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 983, _exc)
     # Defer non-critical scheduler registration and cache rehydration so
     # staging/prod can bind quickly after recreate instead of stalling inside
     # the lifespan startup path.
@@ -990,16 +993,16 @@ async def lifespan(app: FastAPI):
         def _deferred_sync() -> None:
             try:
                 _register_background_schedulers()
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 993, _exc)
             try:
                 from src.api.csv_endpoints import rehydrate_backfill_jobs
                 try:
                     rehydrate_backfill_jobs()
-                except Exception:
-                    pass
-            except Exception:
-                pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 999, _exc)
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 1001, _exc)
             # Gap 12: Warm up LLM client connection at startup so first requests
             # don't pay the 2s Ollama connect penalty.
             if os.getenv('OLLAMA_PREWARM_ON_STARTUP', '1').lower() not in ('0', 'false', 'no'):
@@ -1009,35 +1012,35 @@ async def lifespan(app: FastAPI):
                         _llm_c._ensure_session()
                     elif _llm_c and hasattr(_llm_c, 'health'):
                         _llm_c.health()
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 1012, _exc)
         # Start SSE micro-batch flush worker so Splunk/Sentinel ingest routes
         # drain queued events through the full STAGE_REGISTRY pipeline.
         try:
             from src.api.connectors_sse import start_flush_worker as _start_flush
             _start_flush(app)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 1019, _exc)
         # Start nightly assessment backup scheduler
         try:
             from src.backup.assessment_backup import schedule_nightly_backup as _sched_backup
             _sched_backup()
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 1025, _exc)
         # Register SecurityOrchestrator singleton so T8 weight-push works
         try:
             from src.orchestrator.core import SecurityOrchestrator, set_orchestrator as _set_orch
             _set_orch(SecurityOrchestrator())
             logger.info('SecurityOrchestrator singleton registered')
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 1032, _exc)
         # Start investigate narrative worker (processes INVESTIGATE_QUEUE)
         try:
             from src.api.deep_analyze_endpoints import _start_investigate_worker as _start_inv
             _start_inv(app)
             logger.info('lifespan: investigate worker started')
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 1039, _exc)
         # Start async ingest worker BEFORE the slow _deferred_sync thread so
         # queued jobs begin processing regardless of how long warmup takes.
         try:
@@ -1050,20 +1053,20 @@ async def lifespan(app: FastAPI):
         # LLM prewarm) in a background thread — worker is already running above.
         try:
             await asyncio.to_thread(_deferred_sync)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 1053, _exc)
         # Recover streaming sessions that were open before last shutdown
         try:
             from src.pipeline.streaming_ingest import recover_open_sessions as _recover_sessions
             n = _recover_sessions()
             if n:
                 logger.info('lifespan: recovered %d streaming session(s) from SQLite', n)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 1061, _exc)
         try:
             await asyncio.sleep(0)  # yield so the task is scheduled
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 1065, _exc)
     try:
         app.state._deferred_post_startup = asyncio.create_task(_deferred_post_startup())
     except Exception:
@@ -1094,10 +1097,10 @@ async def lifespan(app: FastAPI):
                             migrated_total += migrate_from_inmemory(rs)
                     except Exception:
                         continue
-            except Exception:
-                pass
-    except Exception:
-        pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 1097, _exc)
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 1099, _exc)
     # Optionally start snapshot cleanup loop if TTL configured
     try:
         _snap_ttl = int(os.getenv('HOPGRAPH_SNAPSHOT_TTL_SECONDS','0') or 0)
@@ -1111,8 +1114,8 @@ async def lifespan(app: FastAPI):
             while True:
                 try:
                     cleanup_old_snapshots(_snap_ttl)
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 1114, _exc)
                 await asyncio.sleep(interval)
         try:
             if _is_test_mode():
@@ -1129,35 +1132,35 @@ async def lifespan(app: FastAPI):
         if _gh is not None:
             try:
                 _gh.save_snapshot()
-            except Exception:
-                pass
-    except Exception:
-        pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 1132, _exc)
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 1134, _exc)
     try:
         from src.soar.playbook_queue_async import shutdown_global_queue_async  # type: ignore
         try:
             await shutdown_global_queue_async()
-        except Exception:
-            pass
-    except Exception:
-        pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 1140, _exc)
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 1142, _exc)
     try:
         from src.core.ingest.assessment_worker import stop_worker as _stop_ingest_worker
         _stop_ingest_worker()
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 1147, _exc)
     try:
         task = getattr(app.state, '_deferred_post_startup', None)
         if task:
             task.cancel()
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 1153, _exc)
     try:
         task = getattr(app.state, '_hopgraph_restore_task', None)
         if task:
             task.cancel()
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 1159, _exc)
 
 app = FastAPI(title='Threat Platform API', version='4.1.0', lifespan=lifespan)
 
@@ -1165,13 +1168,13 @@ app = FastAPI(title='Threat Platform API', version='4.1.0', lifespan=lifespan)
 # factory-built variants so local startup and Playwright exercise the same routes.
 try:
     app.include_router(abtests_router)
-except Exception:
-    pass
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 1168, _exc)
 try:
     if hopgraph_stream_router is not None:
         app.include_router(hopgraph_stream_router)
-except Exception:
-    pass
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 1173, _exc)
 
 # FastAPI/Starlette compatibility: newer versions may drop app.add_event_handler.
 if not hasattr(app, 'add_event_handler'):
@@ -1207,10 +1210,10 @@ try:
                     }
             try:
                 _openapi_utils.get_openapi = _safe_get_openapi  # type: ignore[assignment]
-            except Exception:
-                pass
-    except Exception:
-        pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 1210, _exc)
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 1212, _exc)
     def _custom_openapi():
         try:
             return _get_openapi(
@@ -1228,8 +1231,8 @@ try:
                 },
             }
     app.openapi = _custom_openapi  # type: ignore[attr-defined]
-except Exception:
-    pass
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 1231, _exc)
 
 # Direct, minimal playbook endpoints (fallback) to ensure tests that
 # construct TestClient(app) at import-time always find these routes.
@@ -1280,8 +1283,8 @@ try:
             if not hasattr(app.state, 'playbooks'):
                 app.state.playbooks = {}
             app.state.playbooks[pbid] = playbook
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 1283, _exc)
         return JSONResponse({'playbook_id': pbid, 'playbook': playbook})
 
     @app.post('/api/v1/playbooks/execute')
@@ -1410,20 +1413,20 @@ try:
                         pr = target_row.get('persona_reports') or {}
                         pr[persona] = resp
                         target_row['persona_reports'] = pr
-                    except Exception:
-                        pass
-        except Exception:
-            pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 1413, _exc)
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 1415, _exc)
 
         # allow auto-routing hook when available
         try:
             from src.api.deep_analyze_endpoints import _auto_route_incident
             try:
                 _auto_route_incident(target=None, persona=persona, text=resp.get('text') if isinstance(resp, dict) else str(resp), assessment=report)
-            except Exception:
-                pass
-        except Exception:
-            pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 1423, _exc)
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 1425, _exc)
         return JSONResponse({'ok': True, 'persona': persona, 'response': resp})
     
     @app.post('/api/v1/assessments/hopgraph_report')
@@ -1444,8 +1447,8 @@ try:
         except Exception:
             from fastapi.responses import JSONResponse
             return JSONResponse({'detail': 'deep_analyze_unavailable'}, status_code=503)
-except Exception:
-    pass
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 1447, _exc)
 
 # Ensure essential lightweight routers are included early (labeling + calibration)
 try:
@@ -1459,10 +1462,10 @@ try:
     if _labeling_router is not None:
         try:
             app.include_router(_labeling_router)
-        except Exception:
-            pass
-except Exception:
-    pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 1462, _exc)
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 1464, _exc)
 
 # Lightweight hopgraph test helper endpoints (always present; return mock when inactive)
 try:
@@ -1511,10 +1514,10 @@ try:
                                 if hasattr(hg, 'add_node_factor'):
                                     hg.add_node_factor(node_id, 'iam:as_rep_roasting')
                                 factors = list(set((factors or []) + ['iam:as_rep_roasting']))
-                        except Exception:
-                            pass
-            except Exception:
-                pass
+                        except Exception as _exc:
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 1514, _exc)
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 1516, _exc)
             # Runtime-aware fallback: attach AS-REP factor if recent IAM events indicate it
             try:
                 if (not factors) and isinstance(node_id, str) and node_id.startswith('user:'):
@@ -1538,15 +1541,15 @@ try:
                                         hg.add_node_factor(node_id, 'iam:as_rep_roasting')
                                     factors = list(set((factors or []) + ['iam:as_rep_roasting']))
                                     break
-                            except Exception:
-                                pass
-            except Exception:
-                pass
+                            except Exception as _exc:
+                                logger.debug('silent_swallow at %s:%d: %s', __file__, 1541, _exc)
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 1543, _exc)
             return {'status': 'ok', 'node': node_id, 'attrs': attrs, 'factors': factors}
         except Exception as exc:
             raise _HTTPException(status_code=500, detail=str(exc))
-except Exception:
-    pass
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 1548, _exc)
 try:
     try:
         from src.api.admin_calibration import router as _calib_router
@@ -1558,10 +1561,10 @@ try:
     try:
         if _calib_router is not None:
             app.include_router(_calib_router)
-    except Exception:
-        pass
-except Exception:
-    pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 1561, _exc)
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 1563, _exc)
 
 # Ensure precision_metrics endpoints are available at module import-time
 try:
@@ -1575,10 +1578,10 @@ try:
     if _precision_metrics_router is not None:
         try:
             app.include_router(_precision_metrics_router)
-        except Exception:
-            pass
-except Exception:
-    pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 1578, _exc)
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 1580, _exc)
 
 # Ensure collectors API router is available at import time (safe, idempotent)
 try:
@@ -1592,18 +1595,18 @@ try:
     if _collectors_router is not None:
         try:
             app.include_router(_collectors_router)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 1595, _exc)
     try:
         if admin_reputation_router is not None:
             try:
                 app.include_router(admin_reputation_router)
-            except Exception:
-                pass
-    except Exception:
-        pass
-except Exception:
-    pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 1601, _exc)
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 1603, _exc)
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 1605, _exc)
 
 # Enforce cryptography availability for integrations encryption at import/startup.
 try:
@@ -1625,15 +1628,15 @@ except Exception:
 try:
     from src.api.actor_middleware import ActorHeaderMiddleware
     app.add_middleware(ActorHeaderMiddleware)
-except Exception:
-    pass
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 1628, _exc)
 
 # Tenant middleware: enforce and attach tenant context
 try:
     from src.api.tenant_middleware import TenantMiddleware
     app.add_middleware(TenantMiddleware)
-except Exception:
-    pass
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 1635, _exc)
 
 # Temporary debug middleware: when DEBUG_BODY_INSPECT=1, capture and log body bytes
 # DEBUG_BODY_INSPECT middleware removed: used temporarily during debugging
@@ -1672,8 +1675,8 @@ def create_app(config: dict | None = None):
     except Exception:
         try:
             app.state._factory_mode = 'prod'
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 1675, _exc)
     try:
         if getattr(app.state, '_factory_initialized', False):
             try:
@@ -1681,14 +1684,14 @@ def create_app(config: dict | None = None):
                 # initialized earlier by another import path.
                 try:
                     _ensure_iam_connector_routes()
-                except Exception:
-                    pass
-            except Exception:
-                pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 1684, _exc)
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 1686, _exc)
             return app
         app.state._factory_initialized = True
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 1690, _exc)
 
     # Ensure startup-time heavy initialization is invoked only when running
     # in non-test/lite modes. Tests that need heavy init can call
@@ -1714,9 +1717,8 @@ def create_app(config: dict | None = None):
 
     try:
         app.add_event_handler('startup', _deferred_initialize)
-    except Exception:
-        # Best-effort: if add_event_handler fails, leave function defined for older frameworks
-        pass
+    except Exception as _exc:  # Best-effort: if add_event_handler fails, leave function defined for older frameworks
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 1717, _exc)
 
     # When running in lightweight/test mode, avoid including large numbers of
     # routers that can trigger expensive Pydantic model/schema generation at
@@ -1746,12 +1748,12 @@ def create_app(config: dict | None = None):
                         # on any error, fall back to original include to avoid hiding issues
                         try:
                             return _orig_include(router, *args, **kwargs)
-                        except Exception:
-                            pass
+                        except Exception as _exc:
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 1749, _exc)
                 _lite_include_router._is_lite_wrapper = True
                 app.include_router = _lite_include_router
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 1753, _exc)
 
     # Ensure admin_arc router included for apps created via factory
     try:
@@ -1765,10 +1767,10 @@ def create_app(config: dict | None = None):
         if _admin_arc_router is not None:
             try:
                 app.include_router(_admin_arc_router)
-            except Exception:
-                pass
-    except Exception:
-        pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 1768, _exc)
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 1770, _exc)
 
     # Register ASN reputation refresher on startup when available
     try:
@@ -1780,14 +1782,14 @@ def create_app(config: dict | None = None):
                     return
                 import asyncio
                 asyncio.create_task(background_refresher())
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 1783, _exc)
         try:
             app.add_event_handler('startup', _register_asn_refresher)
-        except Exception:
-            pass
-    except Exception:
-        pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 1787, _exc)
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 1789, _exc)
 
     # Ensure GeoIP loader init at startup so enrichers are ready before scoring
     try:
@@ -1798,24 +1800,24 @@ def create_app(config: dict | None = None):
                 if os.getenv('FAST_TEST_MODE','').lower() in {'1','true','yes'} or os.getenv('PLATFORM_LITE_INIT','').lower() in {'1','true','yes'}:
                     return
                 initialize_geoip()
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 1801, _exc)
         try:
             app.add_event_handler('startup', _init_geo)
-        except Exception:
-            pass
-    except Exception:
-        pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 1805, _exc)
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 1807, _exc)
 
     # Defensive: ensure kape router is included when create_app is used to produce the app
     try:
         if 'kape_router' in globals() and globals().get('kape_router') is not None:
             try:
                 app.include_router(globals().get('kape_router'))
-            except Exception:
-                pass
-    except Exception:
-        pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 1815, _exc)
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 1817, _exc)
 
     # Ensure csv mapping endpoints included for manual ingestion mapping presets
     try:
@@ -1823,10 +1825,10 @@ def create_app(config: dict | None = None):
         if csv_mapping_router is not None:
             try:
                 app.include_router(csv_mapping_router)
-            except Exception:
-                pass
-    except Exception:
-        pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 1826, _exc)
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 1828, _exc)
 
     # Ensure iam_connector router is mounted when using the factory so tests
     # that call `create_app(...)` directly receive the connector endpoints.
@@ -1840,8 +1842,8 @@ def create_app(config: dict | None = None):
                     _m = _sys.modules[_mn]
                     try:
                         _m = _im.reload(_m)
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 1843, _exc)
                     logger.debug('create_app diag: found module in sys.modules: %s', _mn)
                 else:
                     _m = _im.import_module(_mn)
@@ -1859,8 +1861,8 @@ def create_app(config: dict | None = None):
                         logger.debug('create_app diag: include_router failed for %s: %s', _mn, _e)
             except Exception:
                 continue
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 1862, _exc)
 
     return app
 
@@ -1875,8 +1877,8 @@ def create_app(config: dict | None = None):
                 _srv = _il.import_module('api.server')
             except Exception:
                 _srv = None
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 1878, _exc)
 
     # Lightweight health endpoint (simplifies readiness polling for demos/automation)
     @app.get('/health')
@@ -1898,8 +1900,8 @@ def _is_test_mode() -> bool:
             return True
         if os.getenv('PYTEST_CURRENT_TEST'):
             return True
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 1901, _exc)
     return False
 
 
@@ -1934,8 +1936,8 @@ def _apply_fast_test_overrides():
         _ensure('AWS_CFG_SCHED_INTERVAL_SEC', '2')
         _ensure('AWS_CFG_SCHED_DIR', os.getenv('AWS_CFG_SCHED_DIR') or '')
         _ensure('FAST_TEST_MODE', '1')
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 1937, _exc)
 
 
 def _dedupe_operation_ids_for_router(router) -> None:
@@ -1957,15 +1959,15 @@ def _dedupe_operation_ids_for_router(router) -> None:
                     new_oid = f"{oid}_{method}_{sanitized}" if sanitized else f"{oid}_{method}"
                     try:
                         r.operation_id = new_oid
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 1960, _exc)
                     seen_ops.add(new_oid)
                 else:
                     seen_ops.add(oid)
             except Exception:
                 continue
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 1967, _exc)
 
 
 def _dedupe_routes_by_path_method() -> None:
@@ -1984,8 +1986,8 @@ def _dedupe_routes_by_path_method() -> None:
             seen.add(key)
             new_routes.append(r)
         app.router.routes = new_routes
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 1987, _exc)
 
 
 def _enable_router_dedupe():
@@ -2008,8 +2010,8 @@ def _enable_router_dedupe():
                 if rid in seen:
                     return None
                 seen.add(rid)
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 2011, _exc)
             res = original(router, *args, **kwargs)
             _dedupe_operation_ids_for_router(router)
             _dedupe_routes_by_path_method()
@@ -2023,18 +2025,18 @@ def _enable_router_dedupe():
                 try:
                     import inspect as _inspect
                     _dedupe_include_router.__signature__ = _inspect.signature(original)
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 2026, _exc)
         except Exception:
             try:
                 import inspect as _inspect
                 _dedupe_include_router.__signature__ = _inspect.signature(original)
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 2032, _exc)
         app.include_router = _dedupe_include_router
         app.state._include_router_wrapped = True
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 2036, _exc)
 
 
 def _disable_lifespan_in_tests():
@@ -2049,8 +2051,8 @@ def _disable_lifespan_in_tests():
             yield
         app.router.lifespan_context = _noop_lifespan
         app.state._lifespan_disabled = True
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 2052, _exc)
 
 
 # Apply fast-test overrides early so other code reads adjusted envs
@@ -2083,78 +2085,78 @@ async def _dedupe_operation_ids_on_startup():
                     new_oid = f"{oid}_{method}_{sanitized}" if sanitized else f"{oid}_{method}"
                     try:
                         route.operation_id = new_oid
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 2086, _exc)
                 else:
                     seen[oid] = 1
             except Exception:
                 continue
         _dedupe_routes_by_path_method()
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 2093, _exc)
 
 try:
     app.add_event_handler('startup', _dedupe_operation_ids_on_startup)
-except Exception:
-    pass
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 2098, _exc)
 
 # Start Redis pub/sub subscriber to forward assessment events to in-process SSE listeners
 try:
     from src.core.redis_pubsub import start_redis_subscriber
     try:
         app.add_event_handler('startup', lambda: start_redis_subscriber(app))
-    except Exception:
-        pass
-except Exception:
-    pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 2106, _exc)
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 2108, _exc)
 
 # Start rate-limiter cleanup loop
 try:
     from src.core.rate_limiter import start_rate_limiter_cleanup
     try:
         app.add_event_handler('startup', lambda: start_rate_limiter_cleanup(app))
-    except Exception:
-        pass
-except Exception:
-    pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 2116, _exc)
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 2118, _exc)
 
 # Register integrations endpoints (report upload + send hooks)
 try:
     app.include_router(integrations_router_new)
-except Exception:
-    pass
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 2124, _exc)
 try:
     if integrations_sandbox_router is not None:
         app.include_router(integrations_sandbox_router)
-except Exception:
-    pass
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 2129, _exc)
 try:
     from .sandbox_webhooks import router as sandbox_webhooks_router
     try:
         app.include_router(sandbox_webhooks_router)
-    except Exception:
-        pass
-except Exception:
-    pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 2135, _exc)
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 2137, _exc)
 # Ensure tenant quota router included (safe, idempotent)
 try:
     from src.api.tenant_quota import router as tenant_quota_router
     try:
         app.include_router(tenant_quota_router)
-    except Exception:
-        pass
-except Exception:
-    pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 2144, _exc)
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 2146, _exc)
 try:
     if analysis_router is not None:
         app.include_router(analysis_router)
-except Exception:
-    pass
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 2151, _exc)
 try:
     if insights_router is not None:
         app.include_router(insights_router)
-except Exception:
-    pass
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 2156, _exc)
 try:
     from .ingestion_health import router as ingestion_health_router
 except Exception:
@@ -2162,8 +2164,8 @@ except Exception:
 try:
     if ingestion_health_router is not None:
         app.include_router(ingestion_health_router)
-except Exception:
-    pass
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 2165, _exc)
 try:
     from .streaming_endpoints import router as streaming_router
 except Exception:
@@ -2171,8 +2173,8 @@ except Exception:
 try:
     if streaming_router is not None:
         app.include_router(streaming_router)
-except Exception:
-    pass
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 2174, _exc)
 try:
     from .ingest_endpoints import router as ingest_router
 except Exception:
@@ -2180,8 +2182,8 @@ except Exception:
 try:
     if ingest_router is not None:
         app.include_router(ingest_router)
-except Exception:
-    pass
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 2183, _exc)
 try:
     if llm_settings_router is not None:
         app.include_router(llm_settings_router)
@@ -2192,22 +2194,22 @@ try:
         try:
             if llm_health_router is not None:
                 app.include_router(llm_health_router)
-        except Exception:
-            pass
-    except Exception:
-        pass
-except Exception:
-    pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 2195, _exc)
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 2197, _exc)
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 2199, _exc)
 
 # Ensure metrics labeling router included early so tests can access /api/v1/metrics/labeling
 try:
     if 'metrics_labeling_router' in globals() and globals().get('metrics_labeling_router') is not None:
         try:
             app.include_router(globals().get('metrics_labeling_router'))
-        except Exception:
-            pass
-except Exception:
-    pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 2207, _exc)
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 2209, _exc)
 
 # Initialize optional SQLite session backend schema early if configured
 try:
@@ -2223,8 +2225,8 @@ try:
         )
         _cur.execute("CREATE INDEX IF NOT EXISTS idx_sessions_updated_at ON sessions(updated_at)")
         _conn.commit(); _conn.close()
-except Exception:
-    pass
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 2226, _exc)
 
 # Safety middleware: wrap the entire middleware chain to ensure that
 # if any downstream middleware or the endpoint fails to return a
@@ -2250,8 +2252,8 @@ async def _middleware_safety(request: Request, call_next: Callable[[Request], Aw
                     'elapsed_ms': int((time.time()-start)*1000),
                     'error': 'no_response_returned'
                 })
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 2253, _exc)
             return JSONResponse({'detail': 'service_unavailable', 'error': 'no_response_returned'}, status_code=503)
         return resp
     except Exception as exc:
@@ -2270,11 +2272,11 @@ async def _middleware_safety(request: Request, call_next: Callable[[Request], Aw
                         'exception_str': str(exc),
                         'http_status': getattr(exc, 'status_code', None),
                     })
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 2273, _exc)
                 raise
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 2276, _exc)
         # Collect safe diagnostic context
         try:
             safe_hdrs = {}
@@ -2303,8 +2305,8 @@ async def _middleware_safety(request: Request, call_next: Callable[[Request], Aw
                 'exception_str': str(exc),
                 'stack': stack[:8000],
             })
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 2306, _exc)
         from fastapi.responses import JSONResponse
         payload = {'detail': 'service_unavailable', 'error': 'internal_exception', 'method': request.method, 'path': request.url.path}
         return JSONResponse(payload, status_code=503)
@@ -2342,8 +2344,8 @@ def _register_background_schedulers():
             while True:
                 try:
                     GLOBAL_INCIDENTS.save_snapshot()
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 2345, _exc)
                 await asyncio.sleep(max(5, _INCIDENT_SNAPSHOT_INTERVAL))
         app.add_event_handler('startup', lambda: asyncio.create_task(_incident_snapshot_loop()))
     # HopGraph snapshot/prune
@@ -2367,10 +2369,10 @@ def _register_background_schedulers():
                     # Correlation pivot sequence detection (best-effort)
                     try:
                         GLOBAL_HOPGRAPH.detect_domain_pivot_sequences()
-                    except Exception:
-                        pass
-                except Exception:
-                    pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 2370, _exc)
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 2372, _exc)
                 await asyncio.sleep(2)
         app.add_event_handler('startup', lambda: asyncio.create_task(_hopgraph_maintenance_loop()))
 
@@ -2379,10 +2381,10 @@ def _register_background_schedulers():
         from .session_cleanup import register_session_cleanup
         try:
             register_session_cleanup(app)
-        except Exception:
-            pass
-    except Exception:
-        pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 2382, _exc)
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 2384, _exc)
 
     # Register ingestion/explain background tasks from central module
     try:
@@ -2392,10 +2394,10 @@ def _register_background_schedulers():
             from .background_tasks import register_background_tasks as _reg_bg
         try:
             _reg_bg(app)
-        except Exception:
-            pass
-    except Exception:
-        pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 2395, _exc)
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 2397, _exc)
 
     # Email subscription renewer (demo): renew subscriptions approaching expiry
     try:
@@ -2438,33 +2440,33 @@ def _register_background_schedulers():
                                                 from src.api.routes.email_subscriptions import _REGISTRY as _SUBS_LOCAL
                                                 if sid in _SUBS_LOCAL:
                                                     _SUBS_LOCAL[sid]['expires_at'] = int(now + 86400)
-                                            except Exception:
-                                                pass
-                                except Exception:
-                                    pass
-                    except Exception:
-                        pass
+                                            except Exception as _exc:
+                                                logger.debug('silent_swallow at %s:%d: %s', __file__, 2441, _exc)
+                                except Exception as _exc:
+                                    logger.debug('silent_swallow at %s:%d: %s', __file__, 2443, _exc)
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 2445, _exc)
                     await asyncio.sleep(max(5, _SUB_RENEW_INTERVAL))
             app.add_event_handler('startup', lambda: asyncio.create_task(_sub_renewer_loop()))
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 2449, _exc)
 
     # Register daily metrics collector (env-gated)
     try:
         from src.core.tasks.metrics_collector import register_metrics_collector
         try:
             register_metrics_collector(app)
-        except Exception:
-            pass
-    except Exception:
-        pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 2457, _exc)
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 2459, _exc)
 
     # Connector auto-poll background scheduler (set CONNECTOR_AUTOPOLL_ENABLED=1 to activate)
     try:
         from src.api.connector_autopoll import register_autopoll
         register_autopoll(app)
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 2466, _exc)
 
     # Worker pool health exporter (update pool metrics periodically)
     try:
@@ -2476,10 +2478,10 @@ def _register_background_schedulers():
             try:
                 interval = int(os.getenv('POOL_HEALTH_INTERVAL_TEST', '2') or 2)
                 app.add_event_handler('startup', lambda: __import__('asyncio').get_event_loop().create_task(pool_health_loop(interval)))
-            except Exception:
-                pass
-    except Exception:
-        pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 2479, _exc)
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 2481, _exc)
 
     # Orphan temp-file sweeper: run on startup and best-effort cleanup on shutdown
     try:
@@ -2493,8 +2495,8 @@ def _register_background_schedulers():
                 )
                 if removed and os.getenv('DEBUG_DIAGNOSTICS','0').lower() in {'1','true','yes'}:
                     logger.info('Removed %d orphan temp files on startup', removed)
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 2496, _exc)
 
         def _cleanup_tracked():
             try:
@@ -2503,10 +2505,10 @@ def _register_background_schedulers():
                     try:
                         if os.path.exists(p):
                             os.remove(p)
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 2506, _exc)
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 2508, _exc)
 
         try:
             app.add_event_handler('startup', _sweep_startup)
@@ -2514,10 +2516,10 @@ def _register_background_schedulers():
         except Exception:
             try:
                 _sweep_startup()
-            except Exception:
-                pass
-    except Exception:
-        pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 2517, _exc)
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 2519, _exc)
     # Periodic sweeper while app is running (env-gated; skip in test mode)
     try:
         # Default periodic sweep interval to 3600s (1 hour) unless explicitly set to 0
@@ -2533,20 +2535,20 @@ def _register_background_schedulers():
                     try:
                         try:
                             sweep_orphans(prefix=os.getenv('TEMPFILE_PREFIX','threat_pcap_'), suffix=os.getenv('TEMPFILE_SUFFIX','.pcap'), older_than_seconds=int(os.getenv('TEMPFILE_SWEEP_OLDER_THAN','3600') or 3600))
-                        except Exception:
-                            pass
-                    except Exception:
-                        pass
+                        except Exception as _exc:
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 2536, _exc)
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 2538, _exc)
                     await asyncio.sleep(interval)
             try:
                 app.add_event_handler('startup', lambda: __import__('asyncio').get_event_loop().create_task(_periodic_temp_sweep()))
             except Exception:
                 try:
                     __import__('asyncio').get_event_loop().create_task(_periodic_temp_sweep())
-                except Exception:
-                    pass
-    except Exception:
-        pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 2546, _exc)
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 2548, _exc)
 
     # Daily precision aggregator (env-gated)
     try:
@@ -2565,12 +2567,12 @@ def _register_background_schedulers():
                         day = int(datetime.utcfromtimestamp(yesterday).replace(hour=0, minute=0, second=0, microsecond=0).timestamp())
                         await _agg.init_db()
                         await _agg.aggregate_day(day, precision_repo_path=os.environ.get('PRECISION_REPO_PATH','data/precision_metrics.jsonl'))
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 2568, _exc)
                     await _asyncio.sleep(max(60, int(os.getenv('DAILY_PRECISION_AGG_INTERVAL_SECONDS','86400') or 86400)))
             app.add_event_handler('startup', lambda: asyncio.create_task(_precision_agg_loop()))
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 2572, _exc)
 
     # Daily labeling aggregator (env-gated)
     try:
@@ -2585,12 +2587,12 @@ def _register_background_schedulers():
                         except TypeError:
                             # support sync fallback
                             _label_agg()
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 2588, _exc)
                     await _asyncio.sleep(max(60, int(os.getenv('DAILY_LABEL_AGG_INTERVAL_SECONDS','86400') or 86400)))
             app.add_event_handler('startup', lambda: asyncio.create_task(_label_agg_loop()))
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 2592, _exc)
 
     # Decision metrics exporter: periodically update pending decision gauge
     try:
@@ -2602,15 +2604,15 @@ def _register_background_schedulers():
                 while True:
                     try:
                         update_pending_gauge()
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 2605, _exc)
                     await _asyncio.sleep(max(5, _DECISION_METRICS_INTERVAL))
             if _is_test_mode():
                 logger.info('TEST MODE: skipping decision metrics exporter loop')
             else:
                 app.add_event_handler('startup', lambda: asyncio.create_task(_decision_metrics_loop()))
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 2612, _exc)
 
     # Auto-start IPFIX UDP listener when enabled via env
     try:
@@ -2640,32 +2642,32 @@ def _register_background_schedulers():
                         if t is not None:
                             try:
                                 t.close()
-                            except Exception:
-                                pass
+                            except Exception as _exc:
+                                logger.debug('silent_swallow at %s:%d: %s', __file__, 2643, _exc)
                         task = getattr(app.state, '_ipfix_task', None)
                         if task is not None:
                             try:
                                 task.cancel()
-                            except Exception:
-                                pass
-                    except Exception:
-                        pass
+                            except Exception as _exc:
+                                logger.debug('silent_swallow at %s:%d: %s', __file__, 2649, _exc)
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 2651, _exc)
 
                 app.add_event_handler('shutdown', _stop_ipfix_listener)
-            except Exception:
-                pass
-    except Exception:
-        pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 2655, _exc)
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 2657, _exc)
 
     # register rules admin router (safe include)
     try:
         if 'rules_admin_router' in globals() and globals().get('rules_admin_router') is not None:
             try:
                 app.include_router(globals().get('rules_admin_router'))
-            except Exception:
-                pass
-    except Exception:
-        pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 2665, _exc)
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 2667, _exc)
 
     # Optional daily closed-loop propose job (env-gated)
     try:
@@ -2688,12 +2690,12 @@ def _register_background_schedulers():
                                 # propose_weights might be sync
                                 weights = _clm.propose_weights()
                             # log audit already recorded by manager
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 2691, _exc)
                     await _asyncio.sleep(max(10, interval))
             app.add_event_handler('startup', lambda: asyncio.create_task(_daily_learn_loop()))
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 2695, _exc)
 
     # Initialize application DB pool on startup when platform DB enabled
     try:
@@ -2727,28 +2729,27 @@ def _register_background_schedulers():
                                         async with pool.acquire() as conn:  # type: ignore[attr-defined]
                                             if apply_migrations_sqlite:
                                                 await apply_migrations_sqlite(conn)
-                                    except Exception:
-                                        pass
+                                    except Exception as _exc:
+                                        logger.debug('silent_swallow at %s:%d: %s', __file__, 2730, _exc)
                                 else:
                                     # Postgres path: apply against the pool
                                     if apply_migrations_postgres:
                                         try:
                                             await apply_migrations_postgres(pool)
-                                        except Exception:
-                                            pass
-                            except Exception:
-                                # best-effort; continue startup
-                                pass
-                        except Exception:
-                            pass
+                                        except Exception as _exc:
+                                            logger.debug('silent_swallow at %s:%d: %s', __file__, 2737, _exc)
+                            except Exception as _exc:  # best-effort; continue startup
+                                logger.debug('silent_swallow at %s:%d: %s', __file__, 2739, _exc)
+                        except Exception as _exc:
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 2742, _exc)
                     try:
                         _asyncio.create_task(_starter())
                     except Exception:
                         try:
                             loop = _asyncio.get_event_loop()
                             loop.create_task(_starter())
-                        except Exception:
-                            pass
+                        except Exception as _exc:
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 2750, _exc)
                 # register as startup handler
                 try:
                     app.add_event_handler('startup', _start_db_pool)
@@ -2756,20 +2757,20 @@ def _register_background_schedulers():
                     try:
                         # fallback: schedule immediately
                         _start_db_pool()
-                    except Exception:
-                        pass
-    except Exception:
-        pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 2759, _exc)
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 2761, _exc)
 
     # Register false-negative detector (env-gated)
     try:
         from src.core.tasks.fn_detector import register_fn_detector
         try:
             register_fn_detector(app)
-        except Exception:
-            pass
-    except Exception:
-        pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 2769, _exc)
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 2771, _exc)
 
     # Threat Intel refresh schedulers (env-gated)
     try:
@@ -2786,11 +2787,11 @@ def _register_background_schedulers():
                     from src.integrations.misp_client import refresh_24h  # type: ignore
                     try:
                         await asyncio.sleep(0)  # yield
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 2789, _exc)
                     refresh_24h()
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 2792, _exc)
                 await asyncio.sleep(max(60, misp_interval))
         app.add_event_handler('startup', lambda: asyncio.create_task(_misp_loop()))
     # Abuse.ch recent URLs
@@ -2800,8 +2801,8 @@ def _register_background_schedulers():
                 try:
                     from src.integrations.abuse_ch import refresh  # type: ignore
                     refresh()
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 2803, _exc)
                 await asyncio.sleep(max(60, abuse_interval))
         app.add_event_handler('startup', lambda: asyncio.create_task(_abuse_loop()))
     # OpenCTI actor/technique map
@@ -2811,8 +2812,8 @@ def _register_background_schedulers():
                 try:
                     from src.integrations.opencti_client import refresh_actor_technique_map  # type: ignore
                     refresh_actor_technique_map()
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 2814, _exc)
                 await asyncio.sleep(max(60, opencti_interval))
         app.add_event_handler('startup', lambda: asyncio.create_task(_opencti_loop()))
 
@@ -2824,8 +2825,8 @@ def _register_background_schedulers():
             else:
                 app.add_event_handler('startup', lambda: OUTBOX_CONSUMER.start())
                 app.add_event_handler('shutdown', lambda: OUTBOX_CONSUMER.stop())
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 2827, _exc)
 
     # Simple dispatch outbox worker (lightweight) - start unless tests indicate skip
     try:
@@ -2839,10 +2840,10 @@ def _register_background_schedulers():
                 except Exception:
                     try:
                         start_outbox_worker()
-                    except Exception:
-                        pass
-    except Exception:
-        pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 2842, _exc)
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 2844, _exc)
 
 # Start token rotation worker as ASGI background task when configured
 try:
@@ -2867,16 +2868,16 @@ try:
         except Exception:
             try:
                 _start_token_rotation()
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 2870, _exc)
 except Exception:
     logger.debug('Token rotation background task not configured')
     # orderly shutdown for delivery worker
     try:
         from src.services.delivery_queue import shutdown_delivery_worker
         app.add_event_handler('shutdown', lambda: asyncio.create_task(shutdown_delivery_worker()))
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 2878, _exc)
 
     # Optional monitor loop for LLM costs / hopgraph backlog
     try:
@@ -2898,14 +2899,14 @@ except Exception:
                             backlog_fn = lambda: {'inflight': 0}
                         try:
                             check_tier3_usage(usage_fn)
-                        except Exception:
-                            pass
+                        except Exception as _exc:
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 2901, _exc)
                         try:
                             check_hopgraph_backlog(backlog_fn)
-                        except Exception:
-                            pass
-                    except Exception:
-                        pass
+                        except Exception as _exc:
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 2905, _exc)
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 2907, _exc)
                     await asyncio.sleep(10)
             app.add_event_handler('startup', lambda: asyncio.create_task(_monitor_loop()))
     except Exception:
@@ -2941,17 +2942,17 @@ except Exception:
                             alert_mgr = None
                         interval = int(os.getenv('LOG_GAP_INTERVAL_SECONDS', os.getenv('LOG_GAP_INTERVAL', '900')) or 900)
                         await run_log_gap_monitor(db=db, alert_manager=alert_mgr, interval_seconds=interval)
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 2944, _exc)
                 app.add_event_handler('startup', lambda: asyncio.create_task(_log_gap_startup()))
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 2947, _exc)
 
     if hopgraph_persistence_router:
         try:
             app.include_router(hopgraph_persistence_router)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 2953, _exc)
     else:
         # Fallback: directly expose snapshot/restore endpoints if router not included
         try:
@@ -2971,95 +2972,95 @@ except Exception:
                 except Exception:
                     from .hopgraph_persistence import restore_hopgraph
                 return restore_hopgraph(snapshot=payload, request=request)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 2974, _exc)
     if hopgraph_health_router:
         try:
             app.include_router(hopgraph_health_router)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 2979, _exc)
     if remote_access_router:
         try:
             app.include_router(remote_access_router)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 2984, _exc)
     if csv_multi_router:
         try:
             app.include_router(csv_multi_router)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 2989, _exc)
     if 'playbook_tenants_router' in globals() and globals().get('playbook_tenants_router') is not None:
         try:
             app.include_router(globals().get('playbook_tenants_router'))
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 2994, _exc)
     # include csv mapping endpoints for manual ingestion mapping presets
     try:
         from src.api.csv_mapping_endpoints import router as csv_mapping_router
         try:
             app.include_router(csv_mapping_router)
-        except Exception:
-            pass
-    except Exception:
-        pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 3001, _exc)
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 3003, _exc)
     # include onboarding endpoints (tenant connectors)
     try:
         from src.api.onboarding_endpoints import router as onboarding_router
         try:
             app.include_router(onboarding_router)
-        except Exception:
-            pass
-    except Exception:
-        pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 3010, _exc)
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 3012, _exc)
     # include missing-logs endpoints
     try:
         from src.api.missing_logs_endpoints import router as missing_logs_router
         try:
             app.include_router(missing_logs_router)
-        except Exception:
-            pass
-    except Exception:
-        pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 3019, _exc)
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 3021, _exc)
     if email_router:
         try:
             app.include_router(email_router)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 3026, _exc)
     if collectors_api_router:
         try:
             app.include_router(collectors_api_router)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 3031, _exc)
     if malware_router:
         try:
             app.include_router(malware_router)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 3036, _exc)
     if kape_router:
         try:
             app.include_router(kape_router)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 3041, _exc)
     if oauth_connectors_router:
         try:
             app.include_router(oauth_connectors_router)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 3046, _exc)
     if email_subscriptions_router:
         try:
             app.include_router(email_subscriptions_router)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 3051, _exc)
     if connectors_status_router:
         try:
             app.include_router(connectors_status_router)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 3056, _exc)
     if email_subscriptions_router:
         try:
             app.include_router(email_subscriptions_router)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 3061, _exc)
     try:
         # Background renewer for subscriptions using SubscriptionStore
         from src.api.subscription_store import SubscriptionStore
@@ -3086,21 +3087,21 @@ except Exception:
                                         renew_msgraph_subscription(subscription_key=sid, ttl=int(os.getenv('SUB_RENEW_TTL_SECONDS','86400') or 86400))
                                     except TypeError:
                                         renew_msgraph_subscription(sid, int(os.getenv('SUB_RENEW_TTL_SECONDS','86400') or 86400))
-                                except Exception:
-                                    pass
-                        except Exception:
-                            pass
+                                except Exception as _exc:
+                                    logger.debug('silent_swallow at %s:%d: %s', __file__, 3089, _exc)
+                        except Exception as _exc:
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 3091, _exc)
                     await asyncio.sleep(max(5, interval))
                 except Exception:
                     await asyncio.sleep(10)
         app.add_event_handler('startup', lambda: __import__('asyncio').get_event_loop().create_task(_subscription_renewer_db()))
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 3097, _exc)
     if graylabel_router:
         try:
             app.include_router(graylabel_router)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 3102, _exc)
     try:
         try:
             from src.api.labeling_endpoints import router as labeling_router
@@ -3112,96 +3113,96 @@ except Exception:
         try:
             if labeling_router is not None:
                 app.include_router(labeling_router)
-        except Exception:
-            pass
-    except Exception:
-        pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 3115, _exc)
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 3117, _exc)
     try:
         app.include_router(pull_endpoints_router)
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 3121, _exc)
     # Ensure tenant quota router is available in lite/test modes
     try:
         from src.api.tenant_quota import router as _tenant_quota_router
         try:
             app.include_router(_tenant_quota_router)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 3128, _exc)
     except Exception:
         pass
         # Ensure gaps routers are available in test/lite mode for unit tests
         try:
             from src.api.gaps_endpoints import router as _g_router
             app.include_router(_g_router)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 3136, _exc)
         try:
             from src.api.gaps_dispatch import router as _g_drouter
             app.include_router(_g_drouter)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 3141, _exc)
     if data_router:
         try:
             app.include_router(data_router)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 3146, _exc)
     if tenant_quota_router:
         try:
             app.include_router(tenant_quota_router)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 3151, _exc)
     if api_sec_router:
         try:
             app.include_router(api_sec_router)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 3156, _exc)
     try:
         app.include_router(admin_abtests_router)
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 3160, _exc)
     try:
         app.include_router(abtests_router)
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 3164, _exc)
     # include admin_arc router deterministically if available
     try:
         if admin_arc_router is not None:
             app.include_router(admin_arc_router)
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 3170, _exc)
     # Include AB analysis and daily-agg routers when available
     try:
         if ab_analysis_router is not None:
             app.include_router(ab_analysis_router)
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 3176, _exc)
     # Robust fallback: try absolute import if relative import failed
     try:
         if ab_analysis_router is None:
             from src.api.ab_analysis_endpoints import router as _ab_router  # type: ignore
             app.include_router(_ab_router)
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 3183, _exc)
     try:
         if metrics_daily_agg_router is not None:
             app.include_router(metrics_daily_agg_router)
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 3188, _exc)
     try:
         if 'metrics_labeling_router' in globals() and globals().get('metrics_labeling_router') is not None:
             try:
                 app.include_router(globals().get('metrics_labeling_router'))
-            except Exception:
-                pass
-    except Exception:
-        pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 3194, _exc)
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 3196, _exc)
     # Robust fallback for daily agg router
     try:
         if metrics_daily_agg_router is None:
             from src.api.metrics_daily_agg_endpoints import router as _daily_router  # type: ignore
             app.include_router(_daily_router)
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 3203, _exc)
 
     # LLM feedback export/retrain scheduler
     try:
@@ -3249,10 +3250,10 @@ except Exception:
                             except Exception:
                                 try:
                                     await _asyncio.sleep(2 * (attempt + 1))
-                                except Exception:
-                                    pass
-                    except Exception:
-                        pass
+                                except Exception as _exc:
+                                    logger.debug('silent_swallow at %s:%d: %s', __file__, 3252, _exc)
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 3254, _exc)
 
                 try:
                     _asyncio.create_task(_prewarm())
@@ -3260,18 +3261,18 @@ except Exception:
                     try:
                         loop = _asyncio.get_event_loop()
                         loop.create_task(_prewarm())
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 3263, _exc)
 
             try:
                 app.add_event_handler('startup', _start_llm_prewarm)
             except Exception:
                 try:
                     _start_llm_prewarm()
-                except Exception:
-                    pass
-    except Exception:
-        pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 3271, _exc)
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 3273, _exc)
     # KEV auto-refresh background job (optional)
     try:
         _KEV_INTERVAL = int(os.getenv('KEV_REFRESH_INTERVAL_SECONDS', '0') or 0)
@@ -3284,32 +3285,32 @@ except Exception:
                 while True:
                     try:
                         await _ENRICHER.refresh_kev()
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 3287, _exc)
                     await asyncio.sleep(max(60, _KEV_INTERVAL))
             app.add_event_handler('startup', lambda: asyncio.create_task(_kev_loop()))
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 3291, _exc)
 
     # Enrichment seeding worker (EPSS/KEV) - lightweight background task
     try:
         from src.enrichment.worker import register_seed_worker
         try:
             register_seed_worker(app)
-        except Exception:
-            pass
-    except Exception:
-        pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 3299, _exc)
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 3301, _exc)
 
     # Telemetry requests worker (prototype)
     try:
         from src.core.telemetry_requests import register_telemetry_worker
         try:
             register_telemetry_worker(app)
-        except Exception:
-            pass
-    except Exception:
-        pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 3309, _exc)
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 3311, _exc)
 
 # Register GeoIP/ASN enricher into app state so enrichment pipeline can use it
 try:
@@ -3322,13 +3323,13 @@ try:
             try:
                 # fallback: attach directly
                 app.state.geo_asn_enricher = _geo_enricher
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 3325, _exc)
     except Exception:
         try:
             app.state.geo_asn_enricher = _geo_enricher
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 3330, _exc)
 except Exception:
     pass
 
@@ -3337,20 +3338,20 @@ except Exception:
         from src.enrichment.consumer import register_enrichment_consumer
         try:
             register_enrichment_consumer(app)
-        except Exception:
-            pass
-    except Exception:
-        pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 3340, _exc)
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 3342, _exc)
 
     # Enrichment scheduler: periodic refresh with persistence/backoff
     try:
         from src.enrichment.scheduler import register_scheduler
         try:
             register_scheduler(app)
-        except Exception:
-            pass
-    except Exception:
-        pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 3350, _exc)
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 3352, _exc)
 
     # Optional Redis-backed scheduler for higher scale and rate-limiting
     try:
@@ -3380,20 +3381,20 @@ except Exception:
                                         os.makedirs(os.path.dirname(marker_path) or 'data', exist_ok=True)
                                         with open(marker_path, 'w', encoding='utf-8') as fh:
                                             fh.write(str(migrated))
-                                except Exception:
-                                    pass
-                            except Exception:
-                                pass
-                    except Exception:
-                        pass
+                                except Exception as _exc:
+                                    logger.debug('silent_swallow at %s:%d: %s', __file__, 3383, _exc)
+                            except Exception as _exc:
+                                logger.debug('silent_swallow at %s:%d: %s', __file__, 3385, _exc)
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 3387, _exc)
                     stop = asyncio.Event()
                     asyncio.create_task(sched.run_loop(stop))
 
                 app.add_event_handler('startup', lambda: asyncio.create_task(_start_redis_sched()))
-            except Exception:
-                pass
-    except Exception:
-        pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 3393, _exc)
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 3395, _exc)
 
     # DKIM history compaction (periodic cleanup)
     try:
@@ -3406,12 +3407,12 @@ except Exception:
                 while True:
                     try:
                         compact_history(max_entries=int(os.getenv('DKIM_HISTORY_MAX_ENTRIES','5000') or 5000))
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 3409, _exc)
                     await asyncio.sleep(interval)
             app.add_event_handler('startup', lambda: asyncio.create_task(_dkim_compact_loop()))
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 3413, _exc)
 
     # Embedding adaptive scheduler (refresh factor embeddings)
     try:
@@ -3446,17 +3447,17 @@ except Exception:
         from src.api.admin_autogen import router as _autogen_router
         try:
             app.include_router(_autogen_router)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 3449, _exc)
     except Exception:
         try:
             from api.admin_autogen import router as _autogen_router
             try:
                 app.include_router(_autogen_router)
-            except Exception:
-                pass
-        except Exception:
-            pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 3456, _exc)
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 3458, _exc)
 
     try:
         try:
@@ -3469,27 +3470,27 @@ except Exception:
         try:
             if _calib_router is not None:
                 app.include_router(_calib_router)
-        except Exception:
-            pass
-    except Exception:
-        pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 3472, _exc)
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 3474, _exc)
 
     # ARC admin endpoints (email auth verification control)
     try:
         from src.api.admin_arc import router as admin_arc_router
         try:
             app.include_router(admin_arc_router)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 3482, _exc)
     except Exception:
         try:
             from api.admin_arc import router as admin_arc_router
             try:
                 app.include_router(admin_arc_router)
-            except Exception:
-                pass
-        except Exception:
-            pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 3489, _exc)
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 3491, _exc)
 
         # Ensure admin approvals endpoints are included for tests
         try:
@@ -3503,50 +3504,50 @@ except Exception:
             if admin_approvals_router is not None:
                 try:
                     app.include_router(admin_approvals_router)
-                except Exception:
-                    pass
-        except Exception:
-            pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 3506, _exc)
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 3508, _exc)
 
     # Enrichment scheduler admin endpoints (job listing / migration status)
     try:
         from src.api.admin_enrichment_scheduler import router as _enrich_sched_router
         try:
             app.include_router(_enrich_sched_router)
-        except Exception:
-            pass
-    except Exception:
-        pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 3516, _exc)
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 3518, _exc)
 
     # CRQ observation endpoints (recent obs for UI)
     try:
         from src.api.crq_observations_endpoints import router as _crq_obs_router
         try:
             app.include_router(_crq_obs_router)
-        except Exception:
-            pass
-    except Exception:
-        pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 3526, _exc)
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 3528, _exc)
 
     # Worker pool admin endpoints
     try:
         from src.api.admin_pool import router as _worker_pool_router
         try:
             app.include_router(_worker_pool_router)
-        except Exception:
-            pass
-    except Exception:
-        pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 3536, _exc)
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 3538, _exc)
 
     # CRQ admin endpoints (owner priors + scoring weights)
     try:
         from src.api.admin_crq import router as _admin_crq_router
         try:
             app.include_router(_admin_crq_router)
-        except Exception:
-            pass
-    except Exception:
-        pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 3546, _exc)
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 3548, _exc)
 
     # Connector admin policies endpoints (enable/disable, rate limits, allow-hosts)
     try:
@@ -3558,18 +3559,18 @@ except Exception:
             try:
                 import logging as _logging
                 _logging.getLogger(__name__).exception('Failed to include connector_admin router')
-            except Exception:
-                pass
-    except Exception:
-        pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 3561, _exc)
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 3563, _exc)
     try:
         from src.api.connector_admin_endpoints import compat_router as _compat_router
         try:
             app.include_router(_compat_router)
-        except Exception:
-            pass
-    except Exception:
-        pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 3569, _exc)
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 3571, _exc)
 
     # AWS Config/Security Hub adapter scheduler (optional)
     try:
@@ -3606,31 +3607,31 @@ except Exception:
                                 try:
                                     subprocess.run(cmd, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
                                     _processed.add(key)
-                                except Exception:
-                                    pass
-                        except Exception:
-                            pass
+                                except Exception as _exc:
+                                    logger.debug('silent_swallow at %s:%d: %s', __file__, 3609, _exc)
+                        except Exception as _exc:
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 3611, _exc)
                         await asyncio.sleep(max(10, _CFG_INTERVAL))
                 app.add_event_handler('startup', lambda: asyncio.create_task(_cfg_loop()))
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 3615, _exc)
     # Admin DB migrations endpoint (optional)
     try:
         from src.api.admin_migrations import router as _admin_migrations_router
         try:
             app.include_router(_admin_migrations_router)
             logger.info('Included router admin_migrations')
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 3623, _exc)
     except Exception:
         try:
             from api.admin_migrations import router as _admin_migrations_router
             try:
                 app.include_router(_admin_migrations_router)
-            except Exception:
-                pass
-        except Exception:
-            pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 3630, _exc)
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 3632, _exc)
 
     # AWS CloudTrail directory scheduler (optional)
     try:
@@ -3646,12 +3647,12 @@ except Exception:
                 while True:
                     try:
                         _adapter.process_dir(_CT_DIR, _CT_BASE, _CT_APIKEY, _CT_TENANT)
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 3649, _exc)
                     await asyncio.sleep(max(10, _CT_INTERVAL))
             app.add_event_handler('startup', lambda: asyncio.create_task(_ct_loop()))
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 3653, _exc)
 
     # Azure Defender/Policy scheduler (optional)
     try:
@@ -3688,14 +3689,14 @@ except Exception:
                                 try:
                                     subprocess.run(cmd, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
                                     _processed_az.add(key)
-                                except Exception:
-                                    pass
-                        except Exception:
-                            pass
+                                except Exception as _exc:
+                                    logger.debug('silent_swallow at %s:%d: %s', __file__, 3691, _exc)
+                        except Exception as _exc:
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 3693, _exc)
                         await asyncio.sleep(max(10, _AZ_INTERVAL))
                 app.add_event_handler('startup', lambda: asyncio.create_task(_az_loop()))
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 3697, _exc)
 
     # GCP SCC scheduler (optional)
     try:
@@ -3732,14 +3733,14 @@ except Exception:
                                 try:
                                     subprocess.run(cmd, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
                                     _processed_gcp.add(key)
-                                except Exception:
-                                    pass
-                        except Exception:
-                            pass
+                                except Exception as _exc:
+                                    logger.debug('silent_swallow at %s:%d: %s', __file__, 3735, _exc)
+                        except Exception as _exc:
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 3737, _exc)
                         await asyncio.sleep(max(10, _GCP_INTERVAL))
                 app.add_event_handler('startup', lambda: asyncio.create_task(_gcp_loop()))
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 3741, _exc)
 
     # OCI Cloud Guard scheduler (optional)
     try:
@@ -3776,14 +3777,14 @@ except Exception:
                                 try:
                                     subprocess.run(cmd, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
                                     _processed_oci.add(key)
-                                except Exception:
-                                    pass
-                        except Exception:
-                            pass
+                                except Exception as _exc:
+                                    logger.debug('silent_swallow at %s:%d: %s', __file__, 3779, _exc)
+                        except Exception as _exc:
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 3781, _exc)
                         await asyncio.sleep(max(10, _OCI_INTERVAL))
                 app.add_event_handler('startup', lambda: asyncio.create_task(_oci_loop()))
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 3785, _exc)
 
     # Session & EWMA cleanup scheduler
     try:
@@ -3799,8 +3800,8 @@ except Exception:
                         try:
                             from src.api.session_store import get_session_store
                             get_session_store().cleanup(None)
-                        except Exception:
-                            pass
+                        except Exception as _exc:
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 3802, _exc)
                         runtime = get_server_runtime_state(app)
                         cleanup_ewma_history(runtime, ttl_seconds=int(os.getenv('EWMA_HISTORY_TTL_SECONDS','86400') or 86400))
                         # Prune old file hash timestamps (TTL via FILE_HASH_HISTORY_TTL_SECONDS, default 7d)
@@ -3820,8 +3821,8 @@ except Exception:
                                 for k,_dq in ordered[:excess]:
                                     try: hmap.pop(k, None)
                                     except Exception: pass
-                        except Exception:
-                            pass
+                        except Exception as _exc:
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 3823, _exc)
                         # Enforce NX tracker producer cap
                         try:
                             nx_cap = int(os.getenv('NX_TRACKER_MAX_PRODUCERS','200') or 200)
@@ -3832,8 +3833,8 @@ except Exception:
                                 for k,_dq in ordered[:excess]:
                                     try: nx_map.pop(k, None)
                                     except Exception: pass
-                        except Exception:
-                            pass
+                        except Exception as _exc:
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 3835, _exc)
                         # Per-tenant cleanup: prune inactive tenant partitions and enforce per-tenant caps
                         try:
                             from src.api.runtime_state import persist_tenant_runtime
@@ -3867,12 +3868,12 @@ except Exception:
                                         for k,_dq in ordered[:excess]:
                                             try: nx_map_t.pop(k, None)
                                             except Exception: pass
-                                except Exception:
-                                    pass
-                        except Exception:
-                            pass
-                    except Exception:
-                        pass
+                                except Exception as _exc:
+                                    logger.debug('silent_swallow at %s:%d: %s', __file__, 3870, _exc)
+                        except Exception as _exc:
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 3872, _exc)
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 3874, _exc)
                     await asyncio.sleep(max(5,_CLEAN_INTERVAL))
             app.add_event_handler('startup', lambda: asyncio.create_task(_session_cleanup_loop()))
     except Exception:
@@ -3887,15 +3888,15 @@ except Exception:
                 def _start_co_pruner():
                     try:
                         _co_start(interval_seconds=_CO_OCC_INTERVAL, threshold_seconds=_CO_OCC_TTL)
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 3890, _exc)
                 # start as a background task on startup
                 if _is_test_mode():
                     logger.info('TEST MODE: skipping cooccurrence pruner start')
                 else:
                     app.add_event_handler('startup', _start_co_pruner)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 3897, _exc)
 
 _register_background_schedulers()
 
@@ -3912,21 +3913,21 @@ try:
                     try:
                         # call start_decay with interval_seconds from env
                         await _tfadmin.start_decay(x_admin_key=os.getenv('ADMIN_API_KEY'), interval_seconds=_TFIDF_DECAY_SCHED)
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 3915, _exc)
                 try:
                     _asyncio.create_task(_starter())
                 except Exception:
                     try:
                         loop = _asyncio.get_event_loop()
                         loop.create_task(_starter())
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 3923, _exc)
             app.add_event_handler('startup', _start_tfidf_on_startup)
         except Exception:
             logger.debug('Failed to schedule TF-IDF auto-start')
-except Exception:
-    pass
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 3928, _exc)
 
 # Compatibility: ensure admin approval policies endpoints exist
 try:
@@ -3945,24 +3946,24 @@ try:
             except Exception:
                 try:
                     app.router.add_api_route('/api/v1/admin/approval_policies', _admin_approvals_mod.create_policy, methods=['POST'])
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 3948, _exc)
             try:
                 app.add_api_route('/api/v1/admin/approval_policies', _admin_approvals_mod.list_policies, methods=['GET'])
             except Exception:
                 try:
                     app.router.add_api_route('/api/v1/admin/approval_policies', _admin_approvals_mod.list_policies, methods=['GET'])
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 3955, _exc)
             try:
                 app.add_api_route('/api/v1/admin/approval_policies/{name}', _admin_approvals_mod.get_policy, methods=['GET'])
                 app.add_api_route('/api/v1/admin/approval_policies/{name}', _admin_approvals_mod.delete_policy, methods=['DELETE'])
-            except Exception:
-                pass
-        except Exception:
-            pass
-except Exception:
-    pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 3960, _exc)
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 3962, _exc)
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 3964, _exc)
 
 # Ensure topn route is registered even if graph_endpoints router wasn't mounted correctly
 try:
@@ -3975,10 +3976,10 @@ try:
             try:
                 # fallback for older FastAPI versions
                 app.router.add_api_route('/api/v1/graph/topn', getattr(_mod, 'graph_topn'), methods=['GET'])
-            except Exception:
-                pass
-except Exception:
-    pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 3978, _exc)
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 3980, _exc)
 
 # Compatibility: ensure gateway_logs route available even if api_security router wasn't mounted
 try:
@@ -3995,10 +3996,10 @@ try:
         except Exception:
             try:
                 app.router.add_api_route('/api/v1/api_security/gateway_logs', _gateway_logs_fn, methods=['POST'])
-            except Exception:
-                pass
-except Exception:
-    pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 3998, _exc)
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 4000, _exc)
 
 # Compatibility: ensure ab_test result route available even if precision_metrics router wasn't mounted
 try:
@@ -4015,10 +4016,10 @@ try:
         except Exception:
             try:
                 app.router.add_api_route('/api/v1/metrics/ab_test/result', _insert_ab_fn, methods=['POST'])
-            except Exception:
-                pass
-except Exception:
-    pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 4018, _exc)
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 4020, _exc)
 
 try:  # pragma: no cover - optional dependency
     from prometheus_client import CONTENT_TYPE_LATEST, generate_latest  # type: ignore
@@ -4050,8 +4051,8 @@ try:
             from opentelemetry.instrumentation.asgi import OpenTelemetryMiddleware  # type: ignore
             app.add_middleware(OpenTelemetryMiddleware)
             logger.info('ASGI OpenTelemetry middleware enabled')
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 4053, _exc)
 except Exception:
     logger.debug('Tracing initialization skipped or unavailable')
 
@@ -4073,8 +4074,8 @@ try:
     @app.post('/api/v1/stream/ingest')  # type: ignore[misc]
     async def _compat_stream_ingest(request: Request, x_api_key: str | None = Header(None, alias='X-API-Key'), x_tenant_id: str | None = Header(None, alias='X-Tenant-Id')):
         return await zeek_json_ingest(request, x_api_key, x_tenant_id)  # type: ignore[arg-type]
-except Exception:
-    pass
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 4076, _exc)
 
 # Predictive LM hybrid: if feature flag enabled and not explicitly overridden via env,
 # set temporal model to 'hybrid' to blend optional tft_score.
@@ -4085,10 +4086,10 @@ try:
         if GLOBAL_TEMPORAL_MODEL is not None:
             try:
                 GLOBAL_TEMPORAL_MODEL.method = (os.getenv('TEMPORAL_METHOD','hybrid') or 'hybrid')  # type: ignore[attr-defined]
-            except Exception:
-                pass
-except Exception:
-    pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 4088, _exc)
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 4090, _exc)
 
 # Optional deferred route registration for lighter startup when PLATFORM_LITE_INIT is set.
 def register_full_routes():
@@ -4116,18 +4117,18 @@ try:
     from src.api.gaps_endpoints import router as _gaps_router
     try:
         app.include_router(_gaps_router)
-    except Exception:
-        pass
-except Exception:
-    pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 4119, _exc)
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 4121, _exc)
 try:
     from src.api.gaps_dispatch import router as _gaps_dispatch_router
     try:
         app.include_router(_gaps_dispatch_router)
-    except Exception:
-        pass
-except Exception:
-    pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 4127, _exc)
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 4129, _exc)
 
 # Optional network listeners (Syslog/NetFlow)
 try:
@@ -4143,23 +4144,23 @@ try:
             def _start_worker_on_startup():
                 try:
                     start_global_worker()
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 4146, _exc)
             def _stop_worker_on_shutdown():
                 try:
                     stop_global_worker()
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 4151, _exc)
             app.add_event_handler('startup', _start_worker_on_startup)
             try:
                 app.add_event_handler('shutdown', _stop_worker_on_shutdown)
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 4156, _exc)
             logger.info('Job worker enabled via ENABLE_JOB_WORKER')
         except Exception:
             logger.debug('Failed to register job worker handlers')
-except Exception:
-    pass
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 4161, _exc)
 
 # Retention purge scheduler
 _RETENTION_PURGE_INTERVAL = int(os.getenv('RETENTION_PURGE_INTERVAL_SECONDS','0') or 0)
@@ -4202,8 +4203,8 @@ if _RETENTION_PURGE_INTERVAL > 0:
                     rows = await cur.fetchall()
                     for tenant_id, c in rows:
                         per_tenant_purged.labels(tenant_id=str(tenant_id), table='events').inc(0)
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 4205, _exc)
             await asyncio.sleep(_RETENTION_PURGE_INTERVAL)
     if _is_test_mode():
         logger.info('TEST MODE: skipping retention purge loop')
@@ -4269,10 +4270,10 @@ if _CS_SYNC_INTERVAL > 0:
                                         except Exception:
                                             # fallback to asyncio.create_task if safe_task unavailable
                                             asyncio.create_task(persist_to_db_async(event_id, {'observables': d.get('observables') or [], 'confidence': dec['confidence'], 'ts': dec['ts']}, tenant))
-                                    except Exception:
-                                        pass
-                                except Exception:
-                                    pass
+                                    except Exception as _exc:
+                                        logger.debug('silent_swallow at %s:%d: %s', __file__, 4272, _exc)
+                                except Exception as _exc:
+                                    logger.debug('silent_swallow at %s:%d: %s', __file__, 4274, _exc)
                                 try:
                                     if _record_decision_async:
                                         await _record_decision_async(dec)
@@ -4283,8 +4284,8 @@ if _CS_SYNC_INTERVAL > 0:
                                         except Exception:
                                             try:
                                                 _cache_set(event_id, dec)
-                                            except Exception:
-                                                pass
+                                            except Exception as _exc:
+                                                logger.debug('silent_swallow at %s:%d: %s', __file__, 4286, _exc)
                                 except Exception:
                                     try:
                                         from .runtime_state import cache_set as _cache_set
@@ -4292,13 +4293,13 @@ if _CS_SYNC_INTERVAL > 0:
                                     except Exception:
                                         try:
                                             _cache_set(event_id, dec)
-                                        except Exception:
-                                            pass
-                    except Exception:
-                        pass
+                                        except Exception as _exc:
+                                            logger.debug('silent_swallow at %s:%d: %s', __file__, 4295, _exc)
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 4297, _exc)
                     last_run = time.time()
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 4300, _exc)
             await asyncio.sleep(max(5, _CS_SYNC_INTERVAL))
     app.add_event_handler('startup', lambda: asyncio.create_task(_crowdstrike_sync_loop()))
 
@@ -4341,8 +4342,8 @@ def reset_rate_limit_for_tests() -> None:
     """
     try:
         _RATE_LIMIT_STORAGE.clear()
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 4344, _exc)
     # Re-evaluate environment-driven configuration so tests that set
     # RATE_LIMIT_ENABLED / RATE_LIMIT_MAX_REQUESTS / RATE_LIMIT_WINDOW_SECONDS
     # after initial import can deterministically toggle behavior without
@@ -4364,8 +4365,8 @@ def reset_rate_limit_for_tests() -> None:
         _RATE_LIMIT_ENABLED = bool(prior_enabled) if prior_enabled is not None else computed_enabled
         _RATE_LIMIT_MAX_REQUESTS = int(os.getenv('RATE_LIMIT_MAX_REQUESTS', str(_RATE_LIMIT_MAX_REQUESTS)) or _RATE_LIMIT_MAX_REQUESTS)
         _RATE_LIMIT_WINDOW_SECONDS = int(os.getenv('RATE_LIMIT_WINDOW_SECONDS', str(_RATE_LIMIT_WINDOW_SECONDS)) or _RATE_LIMIT_WINDOW_SECONDS)
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 4367, _exc)
     try:
         global _TENANT_RATE_ENABLED, _TENANT_RATE_MAX, _TENANT_RATE_WINDOW
         ten_enabled = os.getenv('TENANT_RATE_LIMIT_ENABLED', None)
@@ -4373,24 +4374,24 @@ def reset_rate_limit_for_tests() -> None:
             _TENANT_RATE_ENABLED = str(ten_enabled).lower() not in {'0','false','no'}
         _TENANT_RATE_MAX = int(os.getenv('TENANT_RATE_LIMIT_MAX', str(_TENANT_RATE_MAX)) or _TENANT_RATE_MAX)
         _TENANT_RATE_WINDOW = int(os.getenv('TENANT_RATE_LIMIT_WINDOW', str(_TENANT_RATE_WINDOW)) or _TENANT_RATE_WINDOW)
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 4376, _exc)
     try:
         _TENANT_RATE_STORAGE.clear()
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 4380, _exc)
     try:
         _TENANT_RATE_DROPS.clear()
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 4384, _exc)
     # Explicit helper: if test requests forced enable via RATE_LIMIT_FORCE_ENABLE, override
     try:
         if os.getenv('RATE_LIMIT_FORCE_ENABLE','').lower() in {'1','true','yes'}:
             # flip module-level flag without re-declaring global (already in outer scope)
             if '_RATE_LIMIT_ENABLED' in globals():
                 globals()['_RATE_LIMIT_ENABLED'] = True
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 4392, _exc)
     # Also clear storages on common module alias objects to avoid duplicate instances retaining state
     try:
         import sys as _sys
@@ -4402,22 +4403,22 @@ def reset_rate_limit_for_tests() -> None:
                 store = getattr(mod, '_RATE_LIMIT_STORAGE', None)
                 if store is not None and hasattr(store, 'clear'):
                     store.clear()
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 4405, _exc)
             try:
                 tstore = getattr(mod, '_TENANT_RATE_STORAGE', None)
                 if tstore is not None and hasattr(tstore, 'clear'):
                     tstore.clear()
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 4411, _exc)
             try:
                 drops = getattr(mod, '_TENANT_RATE_DROPS', None)
                 if drops is not None and hasattr(drops, 'clear'):
                     drops.clear()
-            except Exception:
-                pass
-    except Exception:
-        pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 4417, _exc)
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 4419, _exc)
 
 # Track last-seen tenant config so runtime changes clear stored windows to avoid
 # cross-test pollution when tests toggle env vars at runtime.
@@ -4492,9 +4493,8 @@ try:
         except Exception:
             # Fallback: ensure request still proceeds even if actor-setting fails
             return await call_next(request)
-except Exception:
-    # If actor_context isn't available, continue without middleware
-    pass
+except Exception as _exc:  # If actor_context isn't available, continue without middleware
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 4495, _exc)
 
 def register_core_routers(full: bool = True):
     """Register application routers.
@@ -4510,13 +4510,13 @@ def register_core_routers(full: bool = True):
         load_full_routes = os.getenv('LOAD_FULL_ROUTES', '0').lower() in {'1', 'true', 'yes'}
         if _is_test_mode() and not load_full_routes:
             full = False
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 4513, _exc)
     try:
         if os.getenv('PLATFORM_LITE_INIT', '0').lower() in {'1', 'true', 'yes'}:
             full = False
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 4518, _exc)
     logger.info('register_core_routers called (full=%s)', full)
     # Always-safe minimal routers
     try:
@@ -4580,13 +4580,13 @@ def register_core_routers(full: bool = True):
         try:
             from src.api.connector_admin_endpoints import router as _connector_admin_router
             app.include_router(_connector_admin_router)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 4583, _exc)
         try:
             from src.api.connector_admin_endpoints import compat_router as _compat_router
             app.include_router(_compat_router)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 4588, _exc)
         # Telemetry requests API
         try:
             if telemetry_requests_router:
@@ -4889,8 +4889,8 @@ def register_core_routers(full: bool = True):
                 _cdr = getattr(_dae_mod, 'csv_router', None)
                 globals()['deep_analyze_router'] = _dr
                 globals()['csv_deep_analyze_router'] = _cdr
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 4892, _exc)
         if _dr:
             app.include_router(_dr)
             logger.info('Included deep_analyze_router into app (lite)')
@@ -4930,8 +4930,8 @@ def register_core_routers(full: bool = True):
                 _mod = _im.import_module('src.api.endpoint_malware_endpoints')
                 try:
                     _mod = _im.reload(_mod)
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 4933, _exc)
                 _router = getattr(_mod, 'router', None)
                 if _router is not None:
                     app.include_router(_router)
@@ -4971,8 +4971,8 @@ def register_core_routers(full: bool = True):
                         logger.info('Dynamically loaded artifact_router into app (lite)')
                     except Exception:
                         logger.debug('Dynamic include of artifact_router failed', exc_info=True)
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 4974, _exc)
     # Ensure custody router (/files/batch) is available in lite/test mode
     try:
         present = any(getattr(r, 'path', None) == '/files/batch' for r in app.router.routes)
@@ -4995,8 +4995,8 @@ def register_core_routers(full: bool = True):
                         logger.info('Dynamically loaded custody router into app (lite)')
                     except Exception:
                         logger.debug('Dynamic include of custody router failed', exc_info=True)
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 4998, _exc)
     # Ensure SSE decisions stream router is available in lite/test mode.
     try:
         # If path not present, attempt dynamic import and include
@@ -5020,8 +5020,8 @@ def register_core_routers(full: bool = True):
                         logger.info('Dynamically loaded decisions_stream router into app (lite)')
                     except Exception:
                         logger.debug('Dynamic include of decisions_stream router failed', exc_info=True)
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 5023, _exc)
     try:
         if 'network_ingest_router' in globals() and globals().get('network_ingest_router') is not None:
             app.include_router(globals().get('network_ingest_router'))
@@ -5085,8 +5085,8 @@ def register_core_routers(full: bool = True):
         try:
             routes = sorted({r.path for r in app.router.routes})
             logger.info('App routes after lite registration: %s', ','.join(routes[:50]))
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 5088, _exc)
         try:
             _register_lite_incident_routes()
         except Exception:
@@ -5117,8 +5117,8 @@ def register_core_routers(full: bool = True):
         try:
             if _FORCE_LITE_EVENTS and _r_name == 'events':
                 continue
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 5120, _exc)
         try:
             # lazy import inside loop to avoid overhead in lite mode
             mod_name = f"{__package__}.routes.{_r_name}"
@@ -5206,8 +5206,8 @@ def register_core_routers(full: bool = True):
                 try:
                     from .playbook_endpoints import router as playbook_router
                     globals()['playbook_router'] = playbook_router
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 5209, _exc)
             # Include router if present in globals; attempt dynamic import for new connectors
             robj = globals().get(router_obj)
             if robj is None and router_obj == 'connectors_sysmon_router':
@@ -5427,8 +5427,8 @@ def _ensure_emitted_factors_route() -> None:
                             parsed = []
                         if parsed:
                             items = parsed
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 5430, _exc)
 
             if not items:
                 # If still empty, return empty list rather than 503 so tests can proceed
@@ -5528,8 +5528,8 @@ def _ensure_factors_taxonomy_routes() -> None:
                         for idx, f in enumerate(data.get('factors', [])):
                             if isinstance(f, dict) and 'precedence' not in f:
                                 f['precedence'] = idx + 1
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 5531, _exc)
             return data
 
         @fallback_router.get('/history/{factor}')
@@ -5599,8 +5599,8 @@ def _ensure_test_ingest_routes() -> None:
             for route in app.router.routes:
                 if getattr(route, 'path', None) in required and 'POST' in getattr(route, 'methods', set()):
                     present.add(route.path)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 5602, _exc)
         missing = sorted(required - present)
         if missing:
             try:
@@ -5628,15 +5628,15 @@ def _ensure_test_ingest_routes() -> None:
                 if '/api/v1/endpoints/log_batch' in missing:
                     import importlib as _importlib
                     _importlib.import_module('src.api.server')
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 5631, _exc)
             present = set()
             try:
                 for route in app.router.routes:
                     if getattr(route, 'path', None) in required and 'POST' in getattr(route, 'methods', set()):
                         present.add(route.path)
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 5638, _exc)
             missing = sorted(required - present)
         if not missing:
             return
@@ -5657,8 +5657,8 @@ def _ensure_test_ingest_routes() -> None:
                         setattr(app, 'GLOBAL_HOPGRAPH', hg)
                         if hasattr(app, 'state'):
                             setattr(app.state, 'hopgraph', hg)
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 5660, _exc)
                 # attach identity and user nodes, and AS-REP factor when event indicates it
                 user = ''
                 try:
@@ -5671,13 +5671,13 @@ def _ensure_test_ingest_routes() -> None:
                     try:
                         hg.add_node_attr(f'identity:{user}', type='identity')
                         hg.add_node_attr(f'user:{user}', type='user')
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 5674, _exc)
                     if ('as-rep' in etype) or ('asrep' in etype):
                         try:
                             hg.add_node_factor(f'user:{user}', 'iam:as_rep_roasting')
-                        except Exception:
-                            pass
+                        except Exception as _exc:
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 5679, _exc)
                 return {'status': 'ok'}
             except Exception:
                 return {'status': 'ok'}
@@ -5697,10 +5697,10 @@ def _ensure_test_ingest_routes() -> None:
                         app.add_api_route(path, _fallback_identity_ingest, methods=['POST'], include_in_schema=False)
                     else:
                         app.add_api_route(path, _fallback_ingest, methods=['POST'], include_in_schema=False)
-            except Exception:
-                pass
-    except Exception:
-        pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 5700, _exc)
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 5702, _exc)
 
 
 
@@ -5730,8 +5730,8 @@ try:
             except Exception as e:
                 raise HTTPException(status_code=500, detail=f'reload_failed:{e}')
             return {'reloaded': True}
-except Exception:
-    pass
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 5733, _exc)
 
 # Late safeguard: if endpoint malware router failed initial import, attempt a final mount.
 try:
@@ -5747,8 +5747,8 @@ try:
                 logger.info('Late-mounted endpoint_malware router')
         except Exception as _e:
             logger.debug('Late mount endpoint_malware failed: %s', _e)
-except Exception:
-    pass
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 5750, _exc)
 
 # Late safeguard: ensure KAPE upload router is mounted if available
 try:
@@ -5764,8 +5764,8 @@ try:
                 logger.info('Late-mounted kape_endpoints router')
         except Exception as _e:
             logger.debug('Late mount kape_endpoints failed: %s', _e)
-except Exception:
-    pass
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 5767, _exc)
 
 # Ensure metrics families are available in lite/test mode for assertions in tests
 try:
@@ -5781,23 +5781,22 @@ try:
                 from src.api import decisions_stream as _ds
                 try:
                     _ds.register_metrics(REGISTRY)
-                except Exception:
-                    # best-effort: ignore if registration fails
-                    pass
-            except Exception:
-                pass
+                except Exception as _exc:  # best-effort: ignore if registration fails
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 5784, _exc)
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 5787, _exc)
             try:
                 from src.core.correlation import hunt_correlation as _hc
                 try:
                     _hc.register_metrics(REGISTRY)
-                except Exception:
-                    pass
-            except Exception:
-                pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 5793, _exc)
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 5795, _exc)
         except Exception:
             logger.debug('ensure_metrics failed during lite init')
-except Exception:
-    pass
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 5799, _exc)
 
 # Dump a brief listing of registered routes for debugging test failures (best-effort)
 try:
@@ -5810,11 +5809,11 @@ try:
         except Exception:
             try:
                 paths.append(str(r))
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 5813, _exc)
     logger.debug('App routes: %s', ', '.join(paths[:50]))
-except Exception:
-    pass
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 5816, _exc)
 
 # Ensure tests importing as `api.app` see the same module/app object.
 try:
@@ -5834,8 +5833,8 @@ try:
     else:
         # Create a convenient alias so imports using `api.app` map here.
         _sys.modules[_alias] = _sys.modules.get(__name__)
-except Exception:
-    pass
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 5837, _exc)
 
 # Route inventory audit against allowlist (logs only)
 def _audit_routes_against_allowlist() -> None:
@@ -5879,14 +5878,13 @@ def _audit_routes_against_allowlist() -> None:
         logger.info('Route inventory audit: %d routes, %d allowlisted, %d extras', len(current), len(allowed), len(extras))
         if extras:
             logger.warning('Routes not in allowlist (first 25): %s', ', '.join(extras[:25]))
-    except Exception:
-        # best-effort only
-        pass
+    except Exception as _exc:  # best-effort only
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 5882, _exc)
 
 try:
     _audit_routes_against_allowlist()
-except Exception:
-    pass
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 5888, _exc)
 
 
 # Temporary debug helper: expose registered routes for external testing
@@ -5944,8 +5942,8 @@ try:
                         try:
                             # attempt reload in case previous import failed partially
                             mod = _im.reload(mod)
-                        except Exception:
-                            pass
+                        except Exception as _exc:
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 5947, _exc)
                     else:
                         mod = _im.import_module(mod_name)
                     router = getattr(mod, 'router', None)
@@ -5962,8 +5960,8 @@ try:
                     logger.debug('import %s failed: %s', mod_name, _e)
             # If we reached here, none of the import attempts succeeded
             logger.debug('[_ensure_iam_connector_routes] failed to mount iam_connector router; tried=%s', tried)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 5965, _exc)
 
 
     _ensure_iam_connector_routes()
@@ -5998,13 +5996,13 @@ try:
                     logger.info('Late-mounted connector status router to restore %s', status_required)
                 except Exception as exc:
                     logger.debug('connector status late-mount failed: %s', exc)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 6001, _exc)
 
 
     _ensure_connector_control_plane_routes()
-except Exception:
-    pass
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 6006, _exc)
 
 try:
     if '_register_lite_incident_routes' in globals():
@@ -6035,6 +6033,7 @@ except Exception:
 
 # Add generic webhook guard for /api/v1/webhooks/* endpoints
 try:  # best-effort middleware registration
+    from src.api.webhook_middleware import WebhookGuardMiddleware
     app.add_middleware(WebhookGuardMiddleware)
 except Exception:
     logger.debug('Failed to add WebhookGuardMiddleware')
@@ -6090,8 +6089,8 @@ async def _api_key_enforcer(request: Request, call_next: Callable[[Request], Awa
             # attach for downstream handlers if useful
             try:
                 request.state.auth = ctx
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 6093, _exc)
         except HTTPException as exc:
             return Response(status_code=exc.status_code, content=json.dumps({'detail': exc.detail}), media_type='application/json')
     except Exception:
@@ -6119,10 +6118,10 @@ async def _lite_default_graph_params(request: Request, call_next: Callable[[Requ
                     if (('args' not in qp) or ('kwargs' not in qp)) and (path.endswith('/api/v1/graph/session/build') or path.endswith('/api/v1/graph/build') or path.endswith('/api/v1/graph/reconstruct')):
                         extra = b'args=&kwargs='
                         request.scope['query_string'] = raw_qs + (b'&' if raw_qs else b'') + extra
-                except Exception:
-                    pass
-    except Exception:
-        pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 6122, _exc)
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 6124, _exc)
     return await call_next(request)
 
 
@@ -6138,8 +6137,8 @@ async def _require_tenant_header_for_events(request: Request, call_next: Callabl
                 if not hdr:
                     from fastapi.responses import JSONResponse
                     return JSONResponse({'detail': 'tenant_id_required'}, status_code=400)
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 6141, _exc)
     return await call_next(request)
 
 
@@ -6150,8 +6149,8 @@ async def _rate_limit_requests(request: Request, call_next: Callable[[Request], 
         _path = request.url.path or ''
         if _path.startswith('/static/'):
             return await call_next(request)
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 6153, _exc)
     if not _RATE_LIMIT_ENABLED or _RATE_LIMIT_MAX_REQUESTS <= 0 or _RATE_LIMIT_WINDOW_SECONDS <= 0:
         return await call_next(request)
     try:
@@ -6169,10 +6168,10 @@ async def _rate_limit_requests(request: Request, call_next: Callable[[Request], 
             _worker_header = os.getenv('WORKER_BYPASS_HEADER', 'X-Worker-Secret')
             if _worker_token and request.headers.get(_worker_header) == _worker_token:
                 return await call_next(request)
-        except Exception:
-            pass
-    except Exception:
-        pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 6172, _exc)
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 6174, _exc)
     # Prefer X-Forwarded-For header when present (tests set this to control client IP)
     try:
         xff = request.headers.get('x-forwarded-for') or request.headers.get('X-Forwarded-For')
@@ -6203,8 +6202,8 @@ async def _correlation_and_tenant_context(request: Request, call_next: Callable[
         try:
             set_correlation(cid)
             set_tenant(tenant)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 6206, _exc)
         response = await call_next(request)
         response.headers.setdefault('X-Request-ID', cid)
         return response
@@ -6213,8 +6212,8 @@ async def _correlation_and_tenant_context(request: Request, call_next: Callable[
         try:
             set_correlation(None)
             set_tenant(None)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 6216, _exc)
 
 @app.middleware('http')
 async def _tenant_rate_limit(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
@@ -6243,8 +6242,8 @@ async def _tenant_rate_limit(request: Request, call_next: Callable[[Request], Aw
             _TENANT_RATE_DROPS.clear()
             _TENANT_LAST_ALERT.clear()
             _TENANT_LAST_CONFIG = cfg
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 6246, _exc)
     if not _tenant_enabled:
         return await call_next(request)
     try:
@@ -6256,8 +6255,8 @@ async def _tenant_rate_limit(request: Request, call_next: Callable[[Request], Aw
         _worker_header = os.getenv('WORKER_BYPASS_HEADER', 'X-Worker-Secret')
         if _worker_token and (request.headers.get(_worker_header) == _worker_token or request.headers.get('X-Worker-Secret') == _worker_token):
             return await call_next(request)
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 6259, _exc)
     tenant_id = request.headers.get('X-Tenant-ID') or request.headers.get('x-tenant-id') or DEFAULT_TENANT
     now = time.monotonic()
     async with _TENANT_RATE_LOCK:
@@ -6270,8 +6269,8 @@ async def _tenant_rate_limit(request: Request, call_next: Callable[[Request], Aw
                 # Remove any existing deque for this tenant so we start fresh
                 _TENANT_RATE_STORAGE.pop(tenant_id, None)
                 _TENANT_RATE_DROPS.pop(tenant_id, None)
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 6273, _exc)
         window = _TENANT_RATE_STORAGE[tenant_id]
         cutoff = now - _tenant_window
         while window and window[0] <= cutoff:
@@ -6285,8 +6284,8 @@ async def _tenant_rate_limit(request: Request, call_next: Callable[[Request], Aw
                     labels = emit_labels_with_guard(_safe_runtime(app), {'reason': 'tenant_rate_limit'}, None)
                     if ingest_failures_counter is not None:
                         ingest_failures_counter.labels(**labels).inc()
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 6288, _exc)
                 except Exception: pass
             # Track noisy-tenant drops and emit one-shot alert (cooldown guarded)
             try:
@@ -6307,10 +6306,10 @@ async def _tenant_rate_limit(request: Request, call_next: Callable[[Request], Aw
                                 'tenant_id': tenant_id,
                             }
                             asyncio.create_task(db_manager.store_alert(alert))
-                        except Exception:
-                            pass
-            except Exception:
-                pass
+                        except Exception as _exc:
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 6310, _exc)
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 6312, _exc)
             return Response(status_code=429, content=json.dumps({'detail':'tenant_rate_limit'}), media_type='application/json')
     window.append(now)
     return await call_next(request)
@@ -6334,8 +6333,8 @@ async def _backpressure_guard(request: Request, call_next: Callable[[Request], A
                 except Exception: pass
             if max_size and depth and (depth / max_size) >= _BACKPRESSURE_QUEUE_UTIL:
                 return Response(status_code=503, content=json.dumps({'detail':'backpressure'}), media_type='application/json')
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 6337, _exc)
     try:
         return await call_next(request)
     except RuntimeError as e:
@@ -6360,16 +6359,15 @@ async def _json_content_type_guard(request: Request, call_next: Callable[[Reques
                 try:
                     if int(clen) <= 0:
                         return await call_next(request)
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 6363, _exc)
             ctype = (request.headers.get('content-type') or '').lower()
             # Allow JSON and multipart form data (file uploads). Multipart content
             # types are expected for UploadFile endpoints; reject only other types.
             if not (ctype.startswith('application/json') or ctype.startswith('application/merge-patch+json') or ctype.startswith('multipart/')):
                 return Response(status_code=415, content=json.dumps({'detail': 'unsupported_media_type'}), media_type='application/json')
-    except Exception:
-        # best-effort guard; do not block request on guard error
-        pass
+    except Exception as _exc:  # best-effort guard; do not block request on guard error
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 6370, _exc)
     return await call_next(request)
 
 
@@ -6474,8 +6472,8 @@ try:
                     try:
                         FEEDBACK_RECALC_TIME.observe(dt)
                         FEEDBACK_RECALC_COUNT.inc()
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 6477, _exc)
                     # In test mode prefer short sleep to keep test runs responsive
                     if os.getenv('FAST_TEST_MODE', '').lower() in {'1', 'true', 'yes'} or os.getenv('PYTEST_CURRENT_TEST'):
                         time.sleep(float(os.getenv('TEST_LOOP_INTERVAL') or 0.1))
@@ -6538,10 +6536,10 @@ try:
     from .kape_jobs_endpoints import router as kape_jobs_router
     try:
         app.include_router(kape_jobs_router)
-    except Exception:
-        pass
-except Exception:
-    pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 6541, _exc)
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 6543, _exc)
 try:
     from .graph_endpoints import router as graph_router
     # Always include graph_endpoints router; lightweight and useful for previews/topn even in lite/test mode
@@ -6578,42 +6576,42 @@ try:
     from .admin_autogen import router as admin_autogen_router
     try:
         app.include_router(admin_autogen_router)
-    except Exception:
-        pass
-except Exception:
-    pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 6581, _exc)
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 6583, _exc)
 try:
     from .admin_scoring import router as admin_scoring_router
     try:
         app.include_router(admin_scoring_router)
-    except Exception:
-        pass
-except Exception:
-    pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 6589, _exc)
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 6591, _exc)
 try:
     from .online_trainer_admin import router as online_trainer_admin_router
     try:
         app.include_router(online_trainer_admin_router)
-    except Exception:
-        pass
-except Exception:
-    pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 6597, _exc)
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 6599, _exc)
 try:
     from .admin_factor_quality import router as admin_factor_quality_router
     try:
         app.include_router(admin_factor_quality_router)
-    except Exception:
-        pass
-except Exception:
-    pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 6605, _exc)
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 6607, _exc)
 try:
     from .admin_signatures import router as admin_signatures_router
     try:
         app.include_router(admin_signatures_router)
-    except Exception:
-        pass
-except Exception:
-    pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 6613, _exc)
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 6615, _exc)
 
 try:
     # async outbox consumer
@@ -6642,8 +6640,8 @@ if run_outbox:
             t = getattr(app.state, '_outbox_task', None)
             if t:
                 await t
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 6645, _exc)
 
     app.add_event_handler('startup', _start_outbox)
     app.add_event_handler('shutdown', _stop_outbox)
@@ -6732,14 +6730,14 @@ try:
                     try:
                         from src.live.asn_stats import populate_from_source
                         populate_from_source()
-                    except Exception:
-                        pass
-                except Exception:
-                    pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 6735, _exc)
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 6737, _exc)
                 time.sleep(max(5, _ASN_POP_INTERVAL))
         threading.Thread(target=_asn_pop_loop, name='asn-populate', daemon=True).start()
-except Exception:
-    pass
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 6741, _exc)
 
 # Final attempt to include graph router in case earlier inclusion ran before file edits
 try:
@@ -6753,10 +6751,10 @@ try:
                 app.include_router(_graph_router)
             except Exception:
                 logger.debug('Final include of graph router failed')
-    except Exception:
-        pass
-except Exception:
-    pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 6756, _exc)
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 6758, _exc)
 try:
     from .graph_trace_endpoints import router as graph_trace_router
     if os.getenv('PLATFORM_LITE_INIT','0').lower() not in {'1','true','yes'} or os.getenv('LOAD_FULL_ROUTES','0').lower() in {'1','true','yes'}:
@@ -6816,12 +6814,12 @@ try:
         def _log_handler(item: dict):
             try:
                 logger.info('gmail_queue_item: %s', item)
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 6819, _exc)
         try:
             register_history_handler(_log_handler)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 6823, _exc)
         async def _gmail_drain_loop():  # pragma: no cover
             try:
                 interval_ms = int(os.getenv('GMAIL_QUEUE_DRAIN_INTERVAL_MS','500') or 500)
@@ -6839,13 +6837,13 @@ try:
                             break
                         # No-op here; handlers run on enqueue. This loop enforces progress.
                         logger.debug('gmail_queue_drained_item: %s', item)
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 6842, _exc)
                 await _asyncio.sleep(max(0.05, interval_ms/1000.0))
         try:
             app.add_event_handler('startup', lambda: _asyncio.create_task(_gmail_drain_loop()))
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 6847, _exc)
 except Exception:
     logger.debug('Failed to start Gmail drain loop')
 try:
@@ -6918,8 +6916,8 @@ try:
             while True:
                 try:
                     _sync_all()
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 6921, _exc)
                 time.sleep(max(30, _TI_SYNC_INTERVAL))
         _thr.Thread(target=_ti_sync_loop, name='threat-intel-sync', daemon=True).start()
 except Exception:
@@ -6967,8 +6965,8 @@ async def metrics_endpoint(request: Request) -> Response:
                         lines.append(f'detector_factor_fp_ratio{{factor="{factor}"}} {ratio}')
                     except Exception:
                         continue
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 6970, _exc)
             payload = ("\n".join(lines) + "\n").encode('utf-8')
             return Response(content=payload, media_type=CONTENT_TYPE_LATEST)
         raise HTTPException(status_code=503, detail='metrics_not_available')
@@ -7002,8 +7000,8 @@ async def metrics_endpoint(request: Request) -> Response:
                         extra_lines.append(f'detector_factor_fp_ratio{{factor="{factor}"}} {ratio}')
                     except Exception:
                         continue
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 7005, _exc)
         # HopGraph edges total (best-effort)
         try:
             edge_total = 0
@@ -7031,8 +7029,8 @@ async def metrics_endpoint(request: Request) -> Response:
             try:
                 extra_lines.append('# TYPE hopgraph_edges_total gauge')
                 extra_lines.append('hopgraph_edges_total 0')
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 7034, _exc)
         # HopGraph explain requests total from registry dummy samples
         try:
             # Prefer counting samples recorded in the shared registry fallback store
@@ -7057,14 +7055,13 @@ async def metrics_endpoint(request: Request) -> Response:
             try:
                 extra_lines.append('# TYPE hopgraph_explain_requests_total counter')
                 extra_lines.append('hopgraph_explain_requests_total 0')
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 7060, _exc)
         if extra_lines:
             # Prepend deterministic lines so tests find them even in truncated views
             payload = ("\n".join(extra_lines).encode('utf-8') + b"\n") + (payload or b'')
-    except Exception:
-        # Non-fatal; return whatever we have
-        pass
+    except Exception as _exc:  # Non-fatal; return whatever we have
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 7065, _exc)
     return Response(content=payload or b'', media_type=CONTENT_TYPE_LATEST)
 
 def _env_mode() -> str:
@@ -7113,8 +7110,8 @@ def _worker_status() -> dict[str, Any]:
                     'last_heartbeat_ts': ts,
                     'heartbeat_age_seconds': round(age, 3),
                 }
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 7116, _exc)
     try:
         from src.core.event_pipeline.process_workers import pool_health  # type: ignore
         data = pool_health()
@@ -7126,8 +7123,8 @@ def _worker_status() -> dict[str, Any]:
                 'mode': 'process_pool',
             }
             return status
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 7129, _exc)
     try:
         from src.core.event_pipeline.worker_supervisor import get_supervisor  # type: ignore
         sup = get_supervisor()
@@ -7140,8 +7137,8 @@ def _worker_status() -> dict[str, Any]:
                 'mode': 'supervisor',
             }
             return status
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 7143, _exc)
     if redis_url:
         status['mode'] = 'redis_queue'
     return status
@@ -7242,10 +7239,10 @@ try:
         try:
             app.add_api_route('/api/v1/hopgraph/snapshot', _hopgraph_snapshot_proxy, methods=['POST'], include_in_schema=False)
             app.add_api_route('/api/v1/hopgraph/restore', _hopgraph_restore_proxy, methods=['POST'], include_in_schema=False)
-        except Exception:
-            pass
-except Exception:
-    pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 7245, _exc)
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 7247, _exc)
 
 
 # ---------------- Test helpers (lite/test-only) -----------------
@@ -7320,9 +7317,8 @@ async def test_create_incident(request: Request, payload: dict = None) -> dict:
     except Exception:
         try:
             _LITE_INCIDENT_STORE.append(item)
-        except Exception:
-            # best-effort fallback: ignore if in-memory store not available
-            pass
+        except Exception as _exc:  # best-effort fallback: ignore if in-memory store not available
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 7323, _exc)
     return {'incident': item}
 
 
@@ -7767,8 +7763,8 @@ async def incident_recommendation_action(iid: str, payload: dict, request: Reque
         }
         if gates_enabled and len(met) < 2 and str(status).lower() == 'completed':
             updated.setdefault('rollback_audit', []).append({'reason': 'gates_not_met', 'ts': int(time.time()), 'action_id': str(action_id)})
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 7770, _exc)
     return updated
 
 @app.post('/api/v1/incidents/{iid}/comment')
@@ -7816,10 +7812,10 @@ async def incident_add_comment(iid: str, payload: dict, request: Request):
                         # Store evidence of intended delta without changing score
                         hist = inc.setdefault('comment_influence', [])
                         hist.append({'delta': delta, 'actor': actor, 'status': body['status'], 'ts': int(time.time())})
-                except Exception:
-                    pass
-    except Exception:
-        pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 7819, _exc)
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 7821, _exc)
     # Update persisted incident metadata if DB-backed repo available
     try:
         import src.repositories.incidents_repo as incidents_repo  # type: ignore
@@ -7852,8 +7848,8 @@ async def incident_add_comment(iid: str, payload: dict, request: Request):
                 await coro
             # Prefer returning DB-backed list of last N comments when available
             record = record or {'comment': body, 'comments': comments[-20:], 'history': meta.get('comment_influence') or []}
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 7855, _exc)
     if not record:
         raise HTTPException(status_code=404, detail='incident_not_found')
     return record
@@ -8031,14 +8027,14 @@ def _obj_tenant(obj: object) -> str | None:
         v = getattr(obj, 'tenant_id', None)
         if v:
             return v
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 8034, _exc)
     try:
         if isinstance(obj, dict):
             v = obj.get('tenant_id')
             return v  # type: ignore[return-value]
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 8040, _exc)
     return None
 
 
@@ -8058,15 +8054,15 @@ if os.getenv('PLATFORM_LITE_INIT','0').lower() in {'1','true','yes'}:
                 api_key = request.headers.get('x-api-key') or request.headers.get('X-API-Key')
                 try:
                     logger.debug('lite_create_incident invoked tenant=%s keys=%s', request.headers.get('X-Tenant-ID') or request.headers.get('x-tenant-id'), sorted(payload.keys()))
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 8061, _exc)
                 try:
                     from src.security import rbac as _rb
                     try:
                         if hasattr(_rb, '_load_existing') and callable(_rb._load_existing):
                             _rb._load_existing()
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 8068, _exc)
                     store_populated = bool(getattr(_rb, '_ROLE_MAP', {}))
                 except Exception:
                     store_populated = False
@@ -8107,8 +8103,8 @@ if os.getenv('PLATFORM_LITE_INIT','0').lower() in {'1','true','yes'}:
                     rows = await incidents_repo.list_incidents(limit=limit, tenant_id=tnt)
                     if isinstance(rows, list):
                         return {'incidents': rows[:limit], 'count': min(len(rows), limit)}
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 8110, _exc)
                 # Merge any module-level in-memory incident stores (e.g., src.api.server._INCIDENT_STORE)
                 try:
                     import src.api.server as server_mod
@@ -8138,8 +8134,8 @@ if os.getenv('PLATFORM_LITE_INIT','0').lower() in {'1','true','yes'}:
                             raise HTTPException(status_code=403, detail='forbidden')
                         meta = inc.get('metadata') or {}
                         return {'attack_subgraph': meta.get('attack_subgraph')}
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 8141, _exc)
                 for i in _LITE_INCIDENT_STORE:
                     if i.get('id') == incident_id:
                         if tnt and (i.get('tenant_id') != tnt):
@@ -8180,8 +8176,8 @@ if os.getenv('PLATFORM_LITE_INIT','0').lower() in {'1','true','yes'}:
                     insert_idx += 1
             try:
                 app.router.routes = filtered
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 8183, _exc)
 
         lite_mode = os.getenv('PLATFORM_LITE_INIT','0').lower() in {'1','true','yes'} or 'PYTEST_CURRENT_TEST' in os.environ
         if lite_mode:
@@ -8218,14 +8214,14 @@ if os.getenv('PLATFORM_LITE_INIT','0').lower() in {'1','true','yes'}:
         try:
             from time import time as _now
             FACTOR_STATS.update_from_label(factors, label, _now())
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 8221, _exc)
         try:
             from src.api.server import audit_user as _audit_user, audit_emit as _audit_emit  # type: ignore
             user = _audit_user(request=request)
             _audit_emit('label_written', user, {'event_id': event_id, 'label': label, 'source': payload.source, 'reviewer': payload.reviewer})
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 8227, _exc)
         return {'status': 'ok', 'event_id': event_id, 'label': label, 'factors_count': len(factors)}
 
     def _remove_canonical_label_routes() -> None:
@@ -8248,8 +8244,8 @@ if os.getenv('PLATFORM_LITE_INIT','0').lower() in {'1','true','yes'}:
             filtered.append(route)
         try:
             app.router.routes = filtered
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 8251, _exc)
 
     def _register_lite_label_route() -> None:
         if getattr(app.state, '_lite_label_route_registered', False):
@@ -8309,8 +8305,8 @@ if os.getenv('PLATFORM_LITE_INIT','0').lower() in {'1','true','yes'}:
             filtered.append(route)
         try:
             app.router.routes = filtered
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 8312, _exc)
 
     def _register_lite_factor_status_route() -> None:
         if getattr(app.state, '_lite_factor_route_registered', False):
@@ -8339,8 +8335,8 @@ if os.getenv('PLATFORM_LITE_INIT','0').lower() in {'1','true','yes'}:
         def _cache_set(k, v):  # type: ignore
             try:
                 DECISION_CACHE[k] = v
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 8342, _exc)
 
     _RARE_LINEAGE_COUNTS: dict[str, dict[tuple[str, str], int]] = {}
     _COMMON_LINEAGE_ALLOWLIST: set[tuple[str, str]] = {
@@ -8370,8 +8366,8 @@ if os.getenv('PLATFORM_LITE_INIT','0').lower() in {'1','true','yes'}:
     if os.getenv('PLATFORM_LITE_INIT','0').lower() in {'1','true','yes'} or os.getenv('PYTEST_CURRENT_TEST'):
         try:
             app.router.routes = [r for r in app.router.routes if getattr(r, 'path', None) != '/api/v1/events']
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 8373, _exc)
 
     @app.post('/api/v1/events')
     async def lite_ingest_event(request: Request, payload: dict = Body(...)) -> dict:
@@ -8430,8 +8426,8 @@ if os.getenv('PLATFORM_LITE_INIT','0').lower() in {'1','true','yes'}:
                     factors.append(f)
                 try:
                     _lite_emit_factor(factor=f, decision_id=eid)
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 8433, _exc)
         record = {
             'event_id': eid,
             'verdict': verdict,
@@ -8450,13 +8446,13 @@ if os.getenv('PLATFORM_LITE_INIT','0').lower() in {'1','true','yes'}:
             except Exception:
                 try:
                     rt.DECISION_CACHE[eid] = record  # type: ignore[index]
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 8453, _exc)
         except Exception:
             try:
                 DECISION_CACHE[eid] = record  # type: ignore[index]
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 8458, _exc)
         # If this created an alert-level decision, mirror into the runtime
         # PlatformState and the shared alert ring so alerts endpoints see it.
         try:
@@ -8478,12 +8474,12 @@ if os.getenv('PLATFORM_LITE_INIT','0').lower() in {'1','true','yes'}:
                             'ts': record.get('timestamp'),
                             'tenant_id': record.get('tenant_id'),
                         })
-                    except Exception:
-                        pass
-                except Exception:
-                    pass
-        except Exception:
-            pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 8481, _exc)
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 8483, _exc)
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 8485, _exc)
         return {
             'event_id': eid,
             'verdict': verdict,
@@ -8511,14 +8507,14 @@ def _prioritize_lite_events_route() -> None:
         try:
             app.router.routes = filtered
             app.add_api_route('/api/v1/events', lite_ingest_event, methods=['POST'], include_in_schema=False)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 8514, _exc)
         return
     filtered.append(lite_route)
     try:
         app.router.routes = filtered
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 8520, _exc)
 
 # Register routers according to mode. Honor LOAD_FULL_ROUTES when in lite mode so
 # tests can opt into mounting the full set of routers without performing the
@@ -8588,16 +8584,16 @@ async def lite_decisions_recent(request: Request, limit: int = 50, tenant_id: st
                 except Exception:
                     try:
                         rows.extend(list(cache.values()))
-                    except Exception:
-                        pass
-        except Exception:
-            pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 8591, _exc)
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 8593, _exc)
         try:
             seeded = getattr(rt, 'SEEDED_DECISIONS', None)
             if isinstance(seeded, dict):
                 rows.extend(list(seeded.values()))
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 8599, _exc)
     except Exception:
         try:
             rows = list(getattr(DECISION_CACHE, 'values', lambda: [])())  # type: ignore[attr-defined]
@@ -8610,8 +8606,8 @@ async def lite_decisions_recent(request: Request, limit: int = 50, tenant_id: st
         seeded_store = getattr(app.state, '_seeded_decisions', None)
         if isinstance(seeded_store, dict):
             rows.extend(list(seeded_store.values()))
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 8613, _exc)
     try:
         # de-duplicate by event_id/id
         unique = {}
@@ -8622,8 +8618,8 @@ async def lite_decisions_recent(request: Request, limit: int = 50, tenant_id: st
                 key = getattr(r, 'event_id', None) or getattr(r, 'id', None)
             unique[key or id(r)] = r
         rows = list(unique.values())
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 8625, _exc)
     rows = list(rows)[-limit:][::-1]
     try:
         tnt = resolve_tenant_id(request, tenant_id) or _resolve_tenant(request)
@@ -8643,14 +8639,14 @@ async def lite_decisions_recent(request: Request, limit: int = 50, tenant_id: st
                 seeded = getattr(rt, 'SEEDED_DECISIONS', None)
                 if isinstance(seeded, dict):
                     seeded_rows.extend(list(seeded.values()))
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 8646, _exc)
             try:
                 seeded_store = getattr(app.state, '_seeded_decisions', None)
                 if isinstance(seeded_store, dict):
                     seeded_rows.extend(list(seeded_store.values()))
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 8652, _exc)
             rows = [r for r in seeded_rows if _obj_tenant(r) == explicit_tenant]
         def _summarize(r: Any) -> dict:
             # Base fields
@@ -8699,8 +8695,8 @@ async def lite_decisions_recent(request: Request, limit: int = 50, tenant_id: st
                         v = getattr(r, k, None)
                         if v is not None:
                             summary[k] = v
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 8702, _exc)
             return summary
         return {
             'decisions': [_summarize(r) for r in rows[:limit]],
@@ -8755,8 +8751,8 @@ async def lite_decisions_recent(request: Request, limit: int = 50, tenant_id: st
                         v = getattr(r, k, None)
                         if v is not None:
                             summary[k] = v
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 8758, _exc)
             return summary
 
         return {
@@ -8802,8 +8798,8 @@ async def decisions_stream(request: Request, tenant_id: str | None = None):
             if resolved_tenant:
                 try:
                     rows = [r for r in rows if _obj_tenant(r) == resolved_tenant]
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 8805, _exc)
             # stream only new items
             if len(rows) > last_len:
                 new = rows[last_len:]
@@ -8830,8 +8826,8 @@ try:
     @app.get('/api/v1/decisions/stream', include_in_schema=False, operation_id='decisions_stream_alias')
     async def _decisions_stream_alias() -> RedirectResponse:
         return RedirectResponse(url='/api/v1/stream/decisions', status_code=307)
-except Exception:
-    pass
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 8833, _exc)
 
 @app.get('/api/v1/decisions/{event_id}/explain')
 async def lite_decision_explain(event_id: str, request: Request) -> dict:
@@ -8851,10 +8847,10 @@ async def lite_decision_explain(event_id: str, request: Request) -> dict:
                 return _full_explain(event_id, request)
             except HTTPException:
                 raise
-            except Exception:
-                pass
-        except Exception:
-            pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 8854, _exc)
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 8856, _exc)
     dec = None
     try:
         import importlib as _importlib
@@ -8891,8 +8887,8 @@ async def lite_decision_explain(event_id: str, request: Request) -> dict:
     try:
         from src.analysis.explain_mapping import map_factors_to_tags as _map_tags  # type: ignore
         mapping_tags = _map_tags(list(factors or []))
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 8894, _exc)
     try:
         corr = getattr(dec, 'correlation_factors', None) if not isinstance(dec, dict) else dec.get('correlation_factors')
     except Exception:
