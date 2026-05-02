@@ -238,6 +238,92 @@ def attach_control_witnesses(cluster: dict, rows: Iterable[dict]) -> dict:
                     if norm_tid not in entry['mitre']:
                         entry['mitre'].append(norm_tid)
 
+    # ── Text-keyword fallback ──────────────────────────────────────────────
+    # Last resort: scan cluster text fields (DREAD fragments, narrative, etc.)
+    # using both _KEYWORD_TECHNIQUE_MAP (MITRE inference) and directly via
+    # derive_controls_breached (_COMPLIANCE_MAP) for higher-level keywords.
+    if not witnesses:
+        corpus_parts: list[str] = []
+        # Cluster narrative / description fields
+        for key in ('attack_narrative', 'lead_description', 'reason_summary',
+                    'ioc_summary', 'verdict', 'cluster_id', 'headline',
+                    'summary', 'description'):
+            v = cluster.get(key)
+            if v and isinstance(v, str):
+                corpus_parts.append(v.lower())
+        # DREAD narrative fragments
+        prefill = cluster.get('tier1_prefill') or {}
+        dn = (prefill.get('dread_narrative') or {})
+        for v in (dn.get('fragments') or {}).values():
+            if v and isinstance(v, str):
+                corpus_parts.append(v.lower())
+        # PASTA + diamond fields
+        for sub in (prefill.get('pasta_summary') or {}).values():
+            if sub and isinstance(sub, str):
+                corpus_parts.append(sub.lower())
+        for sub in (prefill.get('diamond_model') or {}).values():
+            if isinstance(sub, list):
+                corpus_parts.extend(str(x).lower() for x in sub if x)
+            elif sub and isinstance(sub, str):
+                corpus_parts.append(sub.lower())
+        # LLM narrative fields
+        enriched = cluster.get('llm_narrative') or {}
+        for v in enriched.values():
+            if v and isinstance(v, str):
+                corpus_parts.append(v.lower())
+        corpus = ' '.join(corpus_parts)
+
+        # Step 1: MITRE technique inference from keyword map
+        inferred: list[str] = []
+        for keywords, tid in _KEYWORD_TECHNIQUE_MAP:
+            if any(kw in corpus for kw in keywords):
+                inferred.append(tid)
+        for raw_tid in inferred:
+            norm_tid = _normalise_technique(raw_tid)
+            if not norm_tid:
+                continue
+            for tid in _expand_technique(norm_tid):
+                for fw, cid, name in _MITRE_TO_CONTROLS.get(tid, []):
+                    entry = witnesses.get(cid)
+                    if entry is None:
+                        entry = {
+                            'control_id':    cid,
+                            'control_name':  name,
+                            'framework':     fw,
+                            'rows':          [],
+                            'mitre':         [norm_tid],
+                            'sources':       ['text_keyword'],
+                            'witness_count': 1,
+                            'downgraded':    False,
+                            'derivation':    'text_keyword_fallback',
+                        }
+                        witnesses[cid] = entry
+                    else:
+                        if norm_tid not in entry['mitre']:
+                            entry['mitre'].append(norm_tid)
+
+        # Step 2: direct _COMPLIANCE_MAP keyword matching on corpus
+        if not witnesses and corpus_parts:
+            try:
+                from src.prefill.compliance_tags import derive_controls_breached
+                kw_controls = derive_controls_breached({'text': corpus})
+                for ctrl in kw_controls:
+                    cid_k = ctrl['control_id']
+                    if cid_k not in witnesses:
+                        witnesses[cid_k] = {
+                            'control_id':    cid_k,
+                            'control_name':  ctrl['control_name'],
+                            'framework':     ctrl['framework'],
+                            'rows':          [],
+                            'mitre':         [],
+                            'sources':       ['compliance_keyword'],
+                            'witness_count': 1,
+                            'downgraded':    False,
+                            'derivation':    'compliance_keyword_fallback',
+                        }
+            except Exception:
+                pass
+
     cluster['control_witnesses'] = witnesses
     return witnesses
 
