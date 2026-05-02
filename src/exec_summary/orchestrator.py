@@ -212,6 +212,11 @@ async def run_enriched_pipeline(
         except Exception as cw_exc:
             logger.warning('control_witnesses attachment failed for %s: %s', cid, cw_exc)
 
+        # Copy witnesses onto the ClusterNarrative object so they survive model_dump()
+        cw = cluster.get('control_witnesses') or {}
+        if cw:
+            cn.control_witnesses = cw
+
         cluster_narratives.append(cn)
 
     # ── Phase 3: Assessment-level rollup ──────────────────────────────────

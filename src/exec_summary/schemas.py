@@ -96,6 +96,7 @@ class ClusterNarrative(BaseModel):
     temporal_context: str = ''
     deterministic_fallback: bool = False
     provenance: str = 'deterministic'
+    control_witnesses: dict = Field(default_factory=dict)
 
 
 class PersonaNarrative(BaseModel):
