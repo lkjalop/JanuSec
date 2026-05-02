@@ -163,7 +163,13 @@ async def run_enriched_pipeline(
             int(r) for r in (cluster.get('row_refs') or [])
             if isinstance(r, (int, str)) and str(r).isdigit()
         )
-        cn = validate_claims(cn, valid_row_ids)
+        # bypass_strict when no row data was available for the LLM to cite
+        _evidence_available = bool(
+            assessment.get('normalized_rows') or assessment.get('evidence_rows') or assessment.get('rows')
+        )
+        cn = validate_claims(cn, valid_row_ids, bypass_strict=not _evidence_available)
+        # Copy severity from the raw cluster dict
+        cn.severity = str(cluster.get('severity') or '').lower()
 
         # ── Control-witness attachment (MITRE → compliance mapping) ───────
         # Attach control witnesses so the compliance persona can render
@@ -212,6 +218,35 @@ async def run_enriched_pipeline(
                         )
                 except Exception as kw_exc:
                     logger.debug('control_witnesses keyword fallback failed for %s: %s', cid, kw_exc)
+
+            # ── Verdict-based monitoring fallback for synthetic clusters ──
+            # When _full_cluster is the original stripped threat_case (no
+            # matching correlation_cluster found), synthesise basic detection
+            # gap / monitoring controls from the verdict string so the
+            # compliance persona is never empty for any cluster.
+            if not _full_cluster.get('control_witnesses'):
+                _verdict_str = str(_full_cluster.get('verdict') or _full_cluster.get('final_verdict') or '').upper()
+                _monitoring_witnesses: dict = {
+                    'A.8.16': {
+                        'control_id': 'A.8.16', 'control_name': 'Monitoring activities',
+                        'framework': 'ISO 27001:2022', 'rows': [], 'mitre': [],
+                        'sources': ['verdict_synthesis'], 'witness_count': 1,
+                        'downgraded': False, 'derivation': 'verdict_fallback',
+                    },
+                    'DE.CM-01': {
+                        'control_id': 'DE.CM-01',
+                        'control_name': 'Networks monitored for anomalous activity',
+                        'framework': 'NIST CSF 2.0', 'rows': [], 'mitre': [],
+                        'sources': ['verdict_synthesis'], 'witness_count': 1,
+                        'downgraded': 'NO_VALIDATED_BREACH' in _verdict_str,
+                        'derivation': 'verdict_fallback',
+                    },
+                }
+                _full_cluster['control_witnesses'] = _monitoring_witnesses
+                logger.info(
+                    'control_witnesses cluster_id=%s verdict_fallback controls=%d',
+                    cid, len(_monitoring_witnesses),
+                )
             else:
                 logger.info(
                     'control_witnesses cluster_id=%s mitre_mapped controls=%d',

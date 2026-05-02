@@ -3391,6 +3391,34 @@ async def run_deep_analyze_pipeline(payload: dict) -> JSONResponse:
     rows = payload.get('rows') or []
     options = payload.get('options') or {}
     batch_meta = payload.get('batch_meta') or {}
+
+    # If no rows provided but an assessment_id was given, attempt to return the
+    # existing assessment's clusters without re-running the full pipeline.
+    if not rows and payload.get('assessment_id'):
+        _aid = str(payload['assessment_id'])
+        _existing = _get_assessment_cached(_aid)
+        if _existing:
+            _clusters = (
+                _existing.get('correlation_clusters') or
+                _existing.get('threat_cases') or []
+            )
+            _max = int(payload.get('max_clusters') or 10)
+            _verdict_rank = {'VALIDATED_BREACH': 3, 'LIKELY_BREACH': 2, 'UNCERTAIN': 1}
+            _sorted = sorted(
+                [c for c in _clusters if isinstance(c, dict)],
+                key=lambda c: _verdict_rank.get(
+                    str(c.get('verdict') or c.get('final_verdict') or '').upper(), 0
+                ),
+                reverse=True,
+            )[:_max]
+            return JSONResponse({
+                'assessment_id': _aid,
+                'clusters': _sorted,
+                'cluster_count': len(_sorted),
+                'status': _existing.get('status', 'ready'),
+                'from_cache': True,
+            })
+
     try:
         csv_deep_analyze_inflight.labels().set(1)
     except Exception:
