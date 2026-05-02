@@ -1117,7 +1117,7 @@ async def summarize(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
         return {'provider':'disabled', 'summary': text[:500]}
     if provider == 'ollama':
         host = os.getenv('OLLAMA_HOST','http://localhost:11434').rstrip('/')
-        model = os.getenv('OLLAMA_MODEL','llama3')
+        model = os.getenv('OLLAMA_MODEL', os.getenv('LLM_MODEL', 'qwen3:14b'))
         prompt = f"Summarize for executive compliance: {text}\nConcise, actionable bullets."
         try:
             async with httpx.AsyncClient(timeout=20) as client:

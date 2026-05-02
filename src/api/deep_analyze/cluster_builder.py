@@ -191,8 +191,59 @@ def _build_enrichment_guided_cases(rows: List[dict]) -> List[dict]:
     return []
 
 
-def _build_inverted_index(row_map: Dict[int, dict]) -> Dict[str, List[int]]:
-    """Build key → [row_index, ...] inverted index for all pivot dimensions."""
+def _build_identity_ip_bridge(
+    row_map: Dict[int, dict],
+) -> Dict[str, List[str]]:
+    """Build a mapping of IP address → list of account identities.
+
+    Only identity-source rows (Okta, Entra, SailPoint, SAML, SSO, etc.)
+    contribute to the bridge.  Network-only rows are skipped so that attacker
+    IPs don't pollute the identity index.
+
+    Returns: {ip_str: [account1, account2, ...]}
+    """
+    _IDENTITY_SHEETS = frozenset({
+        'okta', 'entra', 'azure ad', 'azure_ad', 'sailpoint', 'sso', 'saml',
+        'identity', 'azure-entra', 'microsoft_graph',
+    })
+    bridge: Dict[str, List[str]] = {}
+    for row in row_map.values():
+        sheet = str(
+            row.get('source_sheet') or row.get('_sheet') or
+            row.get('_source') or row.get('source') or ''
+        ).lower()
+        is_identity = any(tok in sheet for tok in _IDENTITY_SHEETS)
+        if not is_identity:
+            continue
+        accounts = [a for a in (row.get('accounts') or []) if a]
+        if not accounts:
+            continue
+        ips: List[str] = []
+        for f in ('client_ip', 'src_ip', 'external_ips'):
+            v = row.get(f)
+            if isinstance(v, list):
+                ips.extend(str(x) for x in v if x)
+            elif v:
+                ips.append(str(v))
+        for ip in ips:
+            if ip not in bridge:
+                bridge[ip] = []
+            for acc in accounts:
+                if acc not in bridge[ip]:
+                    bridge[ip].append(acc)
+    return bridge
+
+
+def _build_inverted_index(
+    row_map: Dict[int, dict],
+    _identity_bridge: Optional[Dict[str, List[str]]] = None,
+) -> Dict[str, List[int]]:
+    """Build key → [row_index, ...] inverted index for all pivot dimensions.
+
+    When ``_identity_bridge`` is provided (built by ``_build_identity_ip_bridge``),
+    network rows whose external IP maps to an identity are also indexed under
+    ``xid:<account>`` so cross-domain correlation picks them up.
+    """
     idx: Dict[str, List[int]] = defaultdict(list)
     for row_idx, row in row_map.items():
         # Account / identity pivots
@@ -226,6 +277,13 @@ def _build_inverted_index(row_map: Dict[int, dict]) -> Dict[str, List[int]]:
         for res in (row.get('resources') or []):
             if res and len(res) > 4:
                 idx[f'res:{res.lower()[:80]}'].append(row_idx)
+        # Cross-domain identity bridge: inject xid: keys when the row's IPs
+        # resolve to known accounts via the identity bridge.
+        if _identity_bridge:
+            for ip in (row.get('external_ips') or []):
+                if ip and ip in _identity_bridge:
+                    for acc in _identity_bridge[ip]:
+                        idx[f'xid:{acc}'].append(row_idx)
     return idx
 
 

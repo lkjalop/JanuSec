@@ -1471,7 +1471,7 @@ async def promote_model_api(request: Request, name: str | None = None, alias: st
     except Exception as _exc:
         logger.debug('silent_swallow at %s:%d: %s', __file__, 1472, _exc)
     registry = _pathlib.Path('models/registry')
-    await asyncio.to_thread(registry.mkdir, True, True)  # parents=True, exist_ok=True
+    await asyncio.to_thread(registry.mkdir, 0o777, True, True)  # mode, parents=True, exist_ok=True
     # Tolerant input handling: prefer multipart form 'file' but fall back to JSON or raw body.
     content: bytes | None = None
     # Try form first (multipart). This may raise if form parsing fails; handle gracefully.
