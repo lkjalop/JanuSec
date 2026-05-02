@@ -9,3 +9,11 @@ from src.api.deep_analyze.helpers import (  # noqa: F401
     _nested_get,
     _collect_strings_from_row,
 )
+from src.api.deep_analyze.persistence import (  # noqa: F401
+    REPORT_STORE,
+    PARENT_CHILD_INDEX,
+    _persist_assessment_state,
+    _get_assessment_cached,
+    _write_assessment_index,
+    _load_assessment_from_disk,
+)
