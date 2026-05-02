@@ -24,6 +24,11 @@ except Exception as _exc:
 
 from src.api.metrics_init import ensure_metrics, _safe_hist, _safe_counter, _safe_gauge
 from src.api.deep_analyze.helpers import _safe_text, _nested_get, _collect_strings_from_row  # noqa: F401
+from src.api.deep_analyze.persistence import (  # noqa: F401
+    REPORT_STORE, PARENT_CHILD_INDEX,
+    _persist_assessment_state, _get_assessment_cached,
+    _write_assessment_index, _load_assessment_from_disk,
+)
 _METRICS_INITIALIZED = False
 csv_stage_latency = None
 csv_deep_analyze_total = None
@@ -157,8 +162,7 @@ except Exception:  # pragma: no cover
 # Lightweight, deterministic stage implementations for lite-mode tests
 router = APIRouter(prefix='/api/v1/assessments')
 csv_router = APIRouter(prefix='/api/v1')
-REPORT_STORE: dict[str, dict] = {}
-PARENT_CHILD_INDEX: dict[str, list[str]] = {}
+# REPORT_STORE / PARENT_CHILD_INDEX → src.api.deep_analyze.persistence (imported above)
 logger = logging.getLogger(__name__)
 
 # Simple in-memory SSE broadcaster per-assessment
@@ -3938,96 +3942,8 @@ def _schedule_llm_generation(rows: List[dict], ctx: dict, assessment_obj: dict, 
         logger.warning("Failed to schedule LLM generation task for %s: %s", assessment_id, exc)
 
 
-def _persist_assessment_state(assessment_id: str, assessment: dict) -> None:
-    if not assessment_id or not isinstance(assessment, dict):
-        return
-    REPORT_STORE[assessment_id] = assessment
-    path = assessment.get('persisted_path')
-    if path:
-        try:
-            atomic_write_json(path, assessment)
-        except Exception as _exc:
-            logger.debug('silent_swallow at %s:%d: %s', __file__, 3971, _exc)
-
-
-def _get_assessment_cached(assessment_id: str) -> dict | None:
-    assessment = REPORT_STORE.get(assessment_id)
-    if assessment:
-        return assessment
-
-    # Try the standard disk loader first
-    disk = _load_assessment_from_disk(assessment_id, None)
-    if disk:
-        REPORT_STORE[assessment_id] = disk
-        return disk
-
-    # Fallback: scan the SESSION_PERSIST_DIR for any file starting with the assessment_id
-    try:
-        repo_root = os.getcwd()
-        base = os.getenv('SESSION_PERSIST_DIR') or os.path.join(repo_root, 'data', 'assessments')
-        index_dir = os.path.join(base, 'index')
-        idx_path = os.path.join(index_dir, f"{assessment_id}.path")
-        if os.path.exists(idx_path):
-            try:
-                with open(idx_path, 'r', encoding='utf-8') as fh:
-                    p = fh.read().strip()
-                if p and os.path.exists(p):
-                    with open(p, 'r', encoding='utf-8') as fh:
-                        disk2 = json.load(fh)
-                    REPORT_STORE[assessment_id] = disk2
-                    return disk2
-            except Exception as _exc:
-                logger.debug('silent_swallow at %s:%d: %s', __file__, 4001, _exc)
-        if os.path.isdir(base):
-            for root, _dirs, files in os.walk(base):
-                for f in files:
-                    if f.startswith(str(assessment_id)) and f.endswith('.json'):
-                        path = os.path.join(root, f)
-                        try:
-                            with open(path, 'r', encoding='utf-8') as fh:
-                                disk2 = json.load(fh)
-                            REPORT_STORE[assessment_id] = disk2
-                            return disk2
-                        except Exception:
-                            continue
-        # Final content scan is intentionally opt-in. On local demo machines
-        # data/assessments can contain large acceptance artifacts, and a 404
-        # lookup should not open every JSON file in that tree.
-        if str(os.getenv('ASSESSMENT_CONTENT_SCAN_FALLBACK') or '').lower() in {'1', 'true', 'yes'}:
-            try:
-                for root, _dirs, files in os.walk(base):
-                    for f in files:
-                        if not f.endswith('.json'):
-                            continue
-                        path = os.path.join(root, f)
-                        try:
-                            with open(path, 'r', encoding='utf-8') as fh:
-                                cand = json.load(fh)
-                            if isinstance(cand, dict) and str(cand.get('assessment_id') or '') == str(assessment_id):
-                                REPORT_STORE[assessment_id] = cand
-                                return cand
-                        except Exception:
-                            continue
-            except Exception as _exc:
-                logger.debug('silent_swallow at %s:%d: %s', __file__, 4033, _exc)
-    except Exception as _exc:
-        logger.debug('silent_swallow at %s:%d: %s', __file__, 4035, _exc)
-    return None
-
-
-def _write_assessment_index(assessment_id: str, persisted_path: str) -> None:
-    try:
-        repo_root = os.getcwd()
-        base = os.getenv('SESSION_PERSIST_DIR') or os.path.join(repo_root, 'data', 'assessments')
-        index_dir = os.path.join(base, 'index')
-        os.makedirs(index_dir, exist_ok=True)
-        idx_path = os.path.join(index_dir, f"{assessment_id}.path")
-        tmp = idx_path + '.tmp'
-        with open(tmp, 'w', encoding='utf-8') as fh:
-            fh.write(persisted_path)
-        os.replace(tmp, idx_path)
-    except Exception as _exc:
-        logger.debug('silent_swallow at %s:%d: %s', __file__, 4051, _exc)
+# _persist_assessment_state, _get_assessment_cached, _write_assessment_index
+# → src.api.deep_analyze.persistence (imported above)
 
 
 def _llm_row_entry(assessment: dict, idx: int, orig: dict) -> dict | None:
@@ -5603,32 +5519,7 @@ async def list_batches(parent_id: str):
     }, 'children': children, 'child_count': len(children)})
 
 
-def _load_assessment_from_disk(assessment_id: str, preferred_path: str | None = None):
-    candidates = []
-    if preferred_path:
-        candidates.append(preferred_path)
-    try:
-        repo_root = os.getcwd()
-        base = os.getenv('SESSION_PERSIST_DIR') or os.path.join(repo_root, 'data', 'assessments')
-        if os.path.isdir(base):
-            dates = [datetime.datetime.utcnow().strftime('%Y-%m-%d')]
-            dates.append((datetime.datetime.utcnow() - datetime.timedelta(days=1)).strftime('%Y-%m-%d'))
-            for d in dates:
-                for orgdir in os.listdir(base):
-                    p = os.path.join(base, orgdir, d, f"{assessment_id}.json")
-                    candidates.append(p)
-    except Exception as _exc:
-        logger.debug('silent_swallow at %s:%d: %s', __file__, 5643, _exc)
-    for path in candidates:
-        if not path:
-            continue
-        if os.path.exists(path):
-            try:
-                with open(path, 'r', encoding='utf-8') as fh:
-                    return json.load(fh)
-            except Exception:
-                continue
-    return None
+# _load_assessment_from_disk → src.api.deep_analyze.persistence (imported above)
 
 
 def _build_report_document(assessment: dict, params: dict) -> dict:
