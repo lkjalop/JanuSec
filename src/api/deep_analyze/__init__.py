@@ -17,3 +17,9 @@ from src.api.deep_analyze.persistence import (  # noqa: F401
     _write_assessment_index,
     _load_assessment_from_disk,
 )
+from src.api.deep_analyze.verdict_seed import (  # noqa: F401
+    _derive_human_validation_required,
+    _VERDICT_HVR_MAP,
+    _apply_hvr_gating,
+    _initial_cluster_verdict,
+)
