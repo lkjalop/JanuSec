@@ -16,20 +16,28 @@ logger = logging.getLogger(__name__)
 def validate_claims(
     narrative: ClusterNarrative,
     valid_row_ids: Set[int],
+    bypass_strict: bool = False,
 ) -> ClusterNarrative:
     """Validate each claim's evidence_row_ids against the cluster's row set.
 
     Marks each claim as grounded=True/False. Returns the narrative with
     updated claim ground-truth flags.
+
+    When ``bypass_strict=True`` (rows were not available to the LLM so it
+    could not produce row citations), claims without evidence_row_ids are
+    treated as grounded rather than penalised for missing citations.
     """
     grounded_claims: list[Claim] = []
     ungrounded_count = 0
 
     for claim in narrative.claims:
         if not claim.evidence_row_ids:
-            # No citation provided — mark ungrounded
-            claim.grounded = False
-            ungrounded_count += 1
+            if bypass_strict:
+                # LLM was not shown evidence rows — don't penalise missing cites
+                claim.grounded = True
+            else:
+                claim.grounded = False
+                ungrounded_count += 1
         elif all(rid in valid_row_ids for rid in claim.evidence_row_ids):
             claim.grounded = True
         else:
