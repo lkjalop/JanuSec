@@ -108,10 +108,10 @@ def _try_import_deep_pipeline() -> None:
                                 shim.generate_latest = lambda reg=None: b""
                                 _sys.modules['prometheus_client'] = shim
                                 _prom = shim
-                    except Exception:
-                        pass
-                except Exception:
-                    pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 111, _exc)
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 113, _exc)
                 # retry the relative import once more
                 try:
                     from .deep_analyze_endpoints import run_deep_analyze_pipeline as _pipeline  # type: ignore
@@ -120,8 +120,8 @@ def _try_import_deep_pipeline() -> None:
                     return
                 except Exception as exc2:
                     last_exc = exc2
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 123, _exc)
     _run_deep_analyze_pipeline = None
     _deep_pipeline_import_error = last_exc
     if last_exc:
@@ -170,8 +170,8 @@ async def ingest_rows_endpoint(payload: IngestRowsRequest, tenant_id: str | None
             try:
                 if isinstance(v, str) and len(v) > 2000:
                     v = v[:2000]
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 173, _exc)
             cr[ck] = v
         cleaned_rows.append(cr)
     processor = get_csv_processor()
@@ -274,8 +274,8 @@ async def analyze_row(payload: dict, tenant_id: str | None = Header(None, alias=
         # Merge: caller-supplied factors take priority, raw-derived fill gaps
         existing = set(raw_factors)
         raw_factors = raw_factors + [f for f in derived if f not in existing]
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 277, _exc)
     # Compose risk score if available
     score_payload: dict[str, float | str | list] = {
         'event_id': event_id or 'adhoc',
@@ -319,15 +319,15 @@ async def analyze_row(payload: dict, tenant_id: str | None = Header(None, alias=
             from src.core.mappings.factor_to_mitre import get_all_mappings as _get_mitre  # type: ignore
             _md = _get_mitre(list(raw_factors))
             mitre = _md.get('mitre', [])
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 322, _exc)
         try:
             from src.core.scoring.dread_engine import compute_dread as _cd  # type: ignore
             _dread_artifact = {'event_id': event_id or 'adhoc', 'factors': list(raw_factors)}
             _dread_factors = [{'name': str(f)} for f in raw_factors]
             dread = _cd(_dread_artifact, _dread_factors) or {}
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 329, _exc)
         try:
             _STRIDE_LOOKUP: dict = {
                 'suspicious_process': ['Elevation of Privilege', 'Tampering'],
@@ -356,14 +356,14 @@ async def analyze_row(payload: dict, tenant_id: str | None = Header(None, alias=
                     if _cat not in seen_cats:
                         stride_heuristics.append(_cat)
                         seen_cats.add(_cat)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 359, _exc)
     try:
         from integrations.threat_intel_client import CLIENT as _TI  # type: ignore
         if getattr(_TI, 'factor_techniques', None):
             techniques_map = _TI.techniques_for_factors(list(raw_factors))
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 365, _exc)
 
     # Compute top positive/negative contributors from breakdown if not supplied
     br = risk.get('breakdown') or []
@@ -374,8 +374,8 @@ async def analyze_row(payload: dict, tenant_id: str | None = Header(None, alias=
         ranked_neg = sorted([b for b in br if (b.get('impact') or 0) < 0], key=lambda x: x.get('impact', 0))
         top_positive = [{'factor': (b.get('factor') or b.get('name') or ''), 'impact': b.get('impact', 0)} for b in ranked_pos[:5]]
         top_negative = [{'factor': (b.get('factor') or b.get('name') or ''), 'impact': b.get('impact', 0)} for b in ranked_neg[:5]]
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 377, _exc)
 
     # Decisioning relative to threshold and human‑in‑loop policy
     policy = { 'threshold': threshold, 'require_human_ack': require_human_ack }
@@ -389,8 +389,8 @@ async def analyze_row(payload: dict, tenant_id: str | None = Header(None, alias=
         key = _policy_key(tenant_id, api_key)
         if _POLICY_NAC.get(key, False):
             disposition = 'review'
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 392, _exc)
 
     response: dict = {
         'event_id': event_id or 'adhoc',
@@ -498,8 +498,8 @@ async def upload_csv(
                     ingest_parse_failures_gauge.labels(source='excel').inc()  # type: ignore
                 if upload_errors_gauge:
                     upload_errors_gauge.labels(route='/api/v1/csv/upload', reason='excel_parse').inc()  # type: ignore
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 501, _exc)
             raise HTTPException(status_code=400, detail=f"Excel parse error: {e}")
     else:
         content = raw
@@ -515,8 +515,8 @@ async def upload_csv(
         try:
             if upload_errors_gauge:
                 upload_errors_gauge.labels(route='/api/v1/csv/upload', reason='processing_error').inc()  # type: ignore
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 518, _exc)
         raise HTTPException(status_code=400, detail=results.get('error') or 'processing_error')
 
     # Create a tabular session for executive report linkage (store CSV bytes)
@@ -569,11 +569,10 @@ async def upload_csv(
                     gs = _graph_build(payload)  # type: ignore
                 if isinstance(gs, dict) and gs.get('session_id'):
                     results['graph_session'] = gs['session_id']
-            except Exception:
-                pass
-    except Exception:
-        # Non-fatal: continue without session wiring
-        pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 572, _exc)
+    except Exception as _exc:  # Non-fatal: continue without session wiring
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 574, _exc)
 
     # Best-effort: push lightweight decisions into DECISION_CACHE so
     # executive verdict/severity stats reflect this batch
@@ -594,11 +593,10 @@ async def upload_csv(
                 entry['tenant_id'] = tenant_id
             try:
                 DECISION_CACHE[evt_id] = entry
-            except Exception:
-                pass
-    except Exception:
-        # Do not fail the upload on cache wiring errors
-        pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 597, _exc)
+    except Exception as _exc:  # Do not fail the upload on cache wiring errors
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 599, _exc)
 
     # Annotate execution metadata
     if tenant_id:
@@ -697,8 +695,8 @@ async def analyze_csv_profile(file: UploadFile = File(...), tenant_id: str | Non
             except Exception: pass
             try: _csv_lat.observe(_t.time()-_start)
             except Exception: pass
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 700, _exc)
     return result
 
 
@@ -794,8 +792,8 @@ async def _run_backfill(assessment_id: str, target: float, window_seconds: int, 
     max_iters = 10000
     try:
         max_iters = int(os.getenv('BACKFILL_MAX_ITERS', str(max_iters)))
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 797, _exc)
     processed = set()
     # adaptive parameters
     burst = int(os.getenv('BACKFILL_BURST_SIZE', '3'))  # number of batches to start immediately
@@ -831,8 +829,8 @@ async def _run_backfill(assessment_id: str, target: float, window_seconds: int, 
             'total': 0,
             'coverage': 0.0,
         }
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 834, _exc)
     _persist_backfill_job(assessment_id)
     # Test-mode shortcut: when running under pytest, perform a single deterministic
     # backfill invocation (call the deep pipeline once with rows ordered by triage desc)
@@ -856,8 +854,8 @@ async def _run_backfill(assessment_id: str, target: float, window_seconds: int, 
                         alt_assessment = getattr(alt_mod, 'REPORT_STORE', {}).get(assessment_id) or {}
                         if alt_assessment:
                             assessment = alt_assessment
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 859, _exc)
             except Exception:
                 assessment = {}
             rows = assessment.get('rows') or []
@@ -876,8 +874,8 @@ async def _run_backfill(assessment_id: str, target: float, window_seconds: int, 
                 job = BACKFILL_JOBS.get(assessment_id) or {}
                 job['test_last_payload_rows'] = [int(r.get('row_index', idx)) if isinstance(r, dict) else idx for idx, r in enumerate(payload.get('rows', []))]
                 BACKFILL_JOBS[assessment_id] = job
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 879, _exc)
             try:
                 run_deep = getattr(mod, 'run_deep_analyze_pipeline', None)
                 if run_deep:
@@ -888,8 +886,8 @@ async def _run_backfill(assessment_id: str, target: float, window_seconds: int, 
                     print('DEBUG: no run_deep_analyze_pipeline found in module')
                     # nothing to do
                     pass
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 891, _exc)
             try:
                 job = BACKFILL_JOBS.get(assessment_id) or {}
                 job['status'] = 'completed'
@@ -904,17 +902,17 @@ async def _run_backfill(assessment_id: str, target: float, window_seconds: int, 
                     if total_rows:
                         coverage = min(1.0, max(0.0, float(job['processed']) / float(total_rows)))
                     job['coverage'] = coverage
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 907, _exc)
                 job['eta_seconds'] = job.get('eta_seconds', -1)
                 job['recent_rate_per_sec'] = job.get('recent_rate_per_sec', 0.0)
                 BACKFILL_JOBS[assessment_id] = job
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 912, _exc)
             _persist_backfill_job(assessment_id)
             return
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 916, _exc)
     try:
         # Ensure deep analyze module initializes metrics and optional model lazily
         try:
@@ -924,33 +922,33 @@ async def _run_backfill(assessment_id: str, target: float, window_seconds: int, 
                 mod = importlib.import_module('src.api.deep_analyze_endpoints')
             try:
                 getattr(mod, '_ensure_deep_metrics', lambda: None)()
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 927, _exc)
             try:
                 getattr(mod, '_load_model_if_present', lambda: None)()
-            except Exception:
-                pass
-        except Exception:
-            pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 931, _exc)
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 933, _exc)
         while True:
             iter_count += 1
             try:
                 if iter_count % 50 == 0:
                     logger.debug('Backfill loop iter=%s assessment=%s elapsed=%s processed=%s', iter_count, assessment_id, int(time.time()-start), len(processed))
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 940, _exc)
             if iter_count > max_iters:
                 try:
                     logger.warning('Backfill: reached max_iters=%s for assessment=%s, terminating loop', max_iters, assessment_id)
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 945, _exc)
                 try:
                     job = BACKFILL_JOBS.get(assessment_id) or {}
                     job['status'] = 'terminated'
                     BACKFILL_JOBS[assessment_id] = job
                     _persist_backfill_job(assessment_id)
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 952, _exc)
                 break
             # simple stop conditions
             elapsed = time.time() - start
@@ -965,8 +963,8 @@ async def _run_backfill(assessment_id: str, target: float, window_seconds: int, 
                     BACKFILL_JOBS[assessment_id] = job
                     _persist_backfill_job(assessment_id)
                     break
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 968, _exc)
             # load assessment state via helper if available
             try:
                 from src.api.deep_analyze_endpoints import _get_assessment_cached
@@ -979,8 +977,8 @@ async def _run_backfill(assessment_id: str, target: float, window_seconds: int, 
                         rs = getattr(mod, 'REPORT_STORE', None)
                         if isinstance(rs, dict) and rs.get(assessment_id):
                             assessment = rs.get(assessment_id) or assessment
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 982, _exc)
             except Exception:
                 # If we cannot import the helper, try to read REPORT_STORE directly from the module
                 try:
@@ -992,8 +990,8 @@ async def _run_backfill(assessment_id: str, target: float, window_seconds: int, 
             rows = assessment.get('rows') or []
             try:
                 logger.debug('Backfill: loaded assessment %s rows=%s sample=%s', assessment_id, len(rows), rows[:3])
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 995, _exc)
             # One-off diagnostic: persist a small, trimmed snapshot of the assessment rows
             try:
                 job = BACKFILL_JOBS.get(assessment_id) or {}
@@ -1016,8 +1014,8 @@ async def _run_backfill(assessment_id: str, target: float, window_seconds: int, 
                 job['debug']['assessment_snapshot'] = snapshot
                 BACKFILL_JOBS[assessment_id] = job
                 _persist_backfill_job(assessment_id)
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 1019, _exc)
             # If rows are list-of-lists (raw CSV rows), attempt to map them to dicts using headers.
             try:
                 mapped_rows = None
@@ -1114,8 +1112,8 @@ async def _run_backfill(assessment_id: str, target: float, window_seconds: int, 
                                         else:
                                             int(s)
                                             stats[h]['int'] += 1
-                                    except Exception:
-                                        pass
+                                    except Exception as _exc:
+                                        logger.debug('silent_swallow at %s:%d: %s', __file__, 1117, _exc)
                                     # label heuristics
                                     low = s.lower()
                                     if low in {'suspicious','probably good','probably_bad','verified good','unknown','undetermined'}:
@@ -1207,8 +1205,8 @@ async def _run_backfill(assessment_id: str, target: float, window_seconds: int, 
                                     else:
                                         # ignore implausible large numeric values
                                         pass
-                                except Exception:
-                                    pass
+                                except Exception as _exc:
+                                    logger.debug('silent_swallow at %s:%d: %s', __file__, 1210, _exc)
                             # factors heuristic: try to parse JSON-like
                             if mapping.get('factors') and mapping['factors'] in d:
                                 fv = d.get(mapping['factors'])
@@ -1223,8 +1221,8 @@ async def _run_backfill(assessment_id: str, target: float, window_seconds: int, 
                 if mapped_rows is not None:
                     # Use mapped rows for downstream triage and candidate selection
                     rows = mapped_rows
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 1226, _exc)
             total = len(rows)
             # Persist early diagnostics when rows are empty or unexpectedly zero
             try:
@@ -1241,8 +1239,8 @@ async def _run_backfill(assessment_id: str, target: float, window_seconds: int, 
                 job['debug']['rows_sample_keys'] = sample_keys
                 BACKFILL_JOBS[assessment_id] = job
                 _persist_backfill_job(assessment_id)
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 1244, _exc)
             if total == 0:
                 break
             enriched = [r for r in rows if r.get('status') == 'ready' or r.get('_pipeline_done')]
@@ -1251,8 +1249,8 @@ async def _run_backfill(assessment_id: str, target: float, window_seconds: int, 
                 BACKFILL_JOBS[assessment_id]['processed'] = len(enriched)
                 BACKFILL_JOBS[assessment_id]['total'] = total
                 BACKFILL_JOBS[assessment_id]['coverage'] = coverage
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 1254, _exc)
             _persist_backfill_job(assessment_id)
             if coverage >= target:
                 break
@@ -1277,8 +1275,8 @@ async def _run_backfill(assessment_id: str, target: float, window_seconds: int, 
                     try:
                         from src.api.deep_analyze_endpoints import _ensure_triage_on_row
                         _ensure_triage_on_row(r, assessment)
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 1280, _exc)
                     if r.get('triage_score') is not None:
                         triage = float(r.get('triage_score') or 0.0)
                     else:
@@ -1321,8 +1319,8 @@ async def _run_backfill(assessment_id: str, target: float, window_seconds: int, 
                 # allow override for batch size
                 if _OVERRIDE_BATCH_SIZE is not None:
                     batch_size = _OVERRIDE_BATCH_SIZE
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 1324, _exc)
 
             # record diagnostics in job for visibility
             try:
@@ -1336,8 +1334,8 @@ async def _run_backfill(assessment_id: str, target: float, window_seconds: int, 
                 job['debug']['applied_min_triage'] = min_tri
                 BACKFILL_JOBS[assessment_id] = job
                 _persist_backfill_job(assessment_id)
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 1339, _exc)
 
             # Apply minimum triage filter for backfill candidates
             try:
@@ -1346,8 +1344,8 @@ async def _run_backfill(assessment_id: str, target: float, window_seconds: int, 
                     if tri < min_tri:
                         try:
                             r['llm_skipped_reason'] = f'backfill_triage_below:{tri:.3f}'
-                        except Exception:
-                            pass
+                        except Exception as _exc:
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 1349, _exc)
                         continue
                     filtered.append((tri, idx, r))
                 # If filtering removes all candidates, log a warning and include debug marker
@@ -1359,11 +1357,11 @@ async def _run_backfill(assessment_id: str, target: float, window_seconds: int, 
                         job['debug']['filtered_to_zero'] = True
                         BACKFILL_JOBS[assessment_id] = job
                         _persist_backfill_job(assessment_id)
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 1362, _exc)
                 candidates = filtered
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 1365, _exc)
             # sort low->high? we want high triage first
             candidates.sort(key=lambda t: t[0], reverse=True)
             batch = [c[2] for c in candidates[:batch_size]]
@@ -1379,8 +1377,8 @@ async def _run_backfill(assessment_id: str, target: float, window_seconds: int, 
                         # sort fallback by triage_score descending (default 0.0)
                         fallback_sorted = sorted(fallback, key=lambda rr: float(rr.get('triage_score') or 0.0), reverse=True)
                         batch = fallback_sorted[:batch_size]
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 1382, _exc)
             # if we're within initial burst, allow multiple concurrent batches (conceptually)
             concurrent = burst if len(sent_batches) < burst else 1
             # For simplicity we will process up to `concurrent` sequentially here but mark ETA accordingly
@@ -1437,8 +1435,8 @@ async def _run_backfill(assessment_id: str, target: float, window_seconds: int, 
                     try:
                         try:
                             logger.debug('Backfill: invoking deep pipeline, run_deep_analyze_pipeline=%s, attempt=%s, payload_rows=%s', bool(run_deep_analyze_pipeline), attempt, len(payload.get('rows', [])))
-                        except Exception:
-                            pass
+                        except Exception as _exc:
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 1440, _exc)
                         if run_deep_analyze_pipeline:
                             # in-process call (async)
                             print('DEBUG: invoking run_deep_analyze_pipeline with payload rows=', len(payload.get('rows', [])))
@@ -1460,8 +1458,8 @@ async def _run_backfill(assessment_id: str, target: float, window_seconds: int, 
                         try:
                             BACKFILL_JOBS[assessment_id]['last_error'] = str(bexc)
                             BACKFILL_JOBS[assessment_id]['last_attempt'] = int(time.time())
-                        except Exception:
-                            pass
+                        except Exception as _exc:
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 1463, _exc)
                         if attempt < max_retries:
                             await asyncio.sleep(backoff_base ** attempt)
                         else:
@@ -1469,16 +1467,16 @@ async def _run_backfill(assessment_id: str, target: float, window_seconds: int, 
                             for c in batch:
                                 try:
                                     batch_failed.append(int(c.get('row_index') or -1))
-                                except Exception:
-                                    pass
+                                except Exception as _exc:
+                                    logger.debug('silent_swallow at %s:%d: %s', __file__, 1472, _exc)
                 # best-effort: record which indexes we sent successfully
                 if success:
                     for b in batches_to_send:
                         for c in b:
                             try:
                                 processed.add(int(c.get('row_index') or -1))
-                            except Exception:
-                                pass
+                            except Exception as _exc:
+                                logger.debug('silent_swallow at %s:%d: %s', __file__, 1480, _exc)
                     sent_batches.append({'ts': int(time.time()), 'count': sum(len(b) for b in batches_to_send)})
                     # trim history
                     if len(sent_batches) > rolling_window:
@@ -1501,21 +1499,21 @@ async def _run_backfill(assessment_id: str, target: float, window_seconds: int, 
                                                 try:
                                                     rows_ref[ridx] = dict(rows_ref[ridx])
                                                     rows_ref[ridx]['_pipeline_done'] = True
-                                                except Exception:
-                                                    pass
+                                                except Exception as _exc:
+                                                    logger.debug('silent_swallow at %s:%d: %s', __file__, 1504, _exc)
                                             try:
                                                 rows_ref[ridx]['status'] = 'ready'
-                                            except Exception:
-                                                pass
+                                            except Exception as _exc:
+                                                logger.debug('silent_swallow at %s:%d: %s', __file__, 1508, _exc)
                                     except Exception:
                                         continue
                             ass_obj['rows'] = rows_ref
                             try:
                                 _persist_assessment_state(assessment_id, ass_obj)
-                            except Exception:
-                                pass
-                    except Exception:
-                        pass
+                            except Exception as _exc:
+                                logger.debug('silent_swallow at %s:%d: %s', __file__, 1515, _exc)
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 1517, _exc)
                     # estimate ETA: simple linear extrapolation based on avg batch send rate
                     try:
                         total_sent = sum(s.get('count', 0) for s in sent_batches) or 1
@@ -1527,8 +1525,8 @@ async def _run_backfill(assessment_id: str, target: float, window_seconds: int, 
                         job['eta_seconds'] = eta_seconds
                         job['recent_rate_per_sec'] = rate_per_sec
                         BACKFILL_JOBS[assessment_id] = job
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 1530, _exc)
                 if batch_failed:
                     try:
                         job = BACKFILL_JOBS.get(assessment_id) or {}
@@ -1536,24 +1534,24 @@ async def _run_backfill(assessment_id: str, target: float, window_seconds: int, 
                         job['failed_rows'].extend(batch_failed)
                         job['failed_count'] = len(job['failed_rows'])
                         BACKFILL_JOBS[assessment_id] = job
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 1539, _exc)
                     _persist_backfill_job(assessment_id)
                 try:
                     BACKFILL_JOBS[assessment_id]['last_batch_sent'] = int(time.time())
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 1544, _exc)
                 _persist_backfill_job(assessment_id)
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 1547, _exc)
             # Avoid a tight busy-loop when window_seconds is 0 (tests often set 0).
             try:
                 sleep_time = float(window_seconds) if (window_seconds and float(window_seconds) > 0) else 0.01
             except Exception:
                 sleep_time = 0.01
             await asyncio.sleep(sleep_time)
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 1555, _exc)
     finally:
         try:
             job = BACKFILL_JOBS.get(assessment_id) or {}
@@ -1564,8 +1562,8 @@ async def _run_backfill(assessment_id: str, target: float, window_seconds: int, 
                 job['status'] = 'completed'
                 job['completed_at'] = int(time.time())
             BACKFILL_JOBS[assessment_id] = job
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 1567, _exc)
         _persist_backfill_job(assessment_id)
 
 
@@ -1612,17 +1610,17 @@ def _persist_backfill_job(assessment_id: str) -> None:
                     try:
                         if os.path.exists(tmp_path):
                             os.remove(tmp_path)
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 1615, _exc)
         except Exception:
             # Swallow persistence errors to avoid failing the background job
             try:
                 if os.path.exists(tmp_path):
                     os.remove(tmp_path)
-            except Exception:
-                pass
-    except Exception:
-        pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 1622, _exc)
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 1624, _exc)
 
 
 def rehydrate_backfill_jobs() -> None:
@@ -1647,8 +1645,8 @@ def rehydrate_backfill_jobs() -> None:
                         BACKFILL_JOBS[aid] = data
             except Exception:
                 continue
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 1650, _exc)
 
 
 def _load_backfill_job_from_disk(assessment_id: str, target_map: dict | None = None) -> dict | None:
@@ -1677,8 +1675,8 @@ async def csv_deep_analyze_auto_backfill_status(assessment_id: str):
         alt = _sys.modules.get('src.api.csv_endpoints') or _sys.modules.get('api.csv_endpoints')
         if alt is not None:
             job_map = getattr(alt, 'BACKFILL_JOBS', job_map)
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 1680, _exc)
     job = job_map.get(assessment_id)
     if not job:
         # Fallback: attempt to load a persisted job directly and rehydrate registry.
@@ -1704,8 +1702,8 @@ async def csv_deep_analyze_auto_backfill_stop(assessment_id: str):
         alt = _sys.modules.get('src.api.csv_endpoints') or _sys.modules.get('api.csv_endpoints')
         if alt is not None:
             job_map = getattr(alt, 'BACKFILL_JOBS', job_map)
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 1707, _exc)
     job = job_map.get(assessment_id)
     if not job:
         job = _load_backfill_job_from_disk(assessment_id, job_map)
@@ -1720,8 +1718,8 @@ async def csv_deep_analyze_auto_backfill_stop(assessment_id: str):
         job['stop_requested_at'] = int(time.time())
         job_map[assessment_id] = job
         _persist_backfill_job(assessment_id)
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 1723, _exc)
     return {'assessment_id': assessment_id, 'status': 'stopping'}
 
 
@@ -1752,10 +1750,10 @@ async def csv_deep_analyze_auto_backfill_force_cancel(assessment_id: str, auth=D
         path = os.path.join(base, 'backfill_jobs', f"{assessment_id}.json")
         try:
             if os.path.exists(path): os.remove(path)
-        except Exception:
-            pass
-    except Exception:
-        pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 1755, _exc)
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 1757, _exc)
     return {'assessment_id': assessment_id, 'status': 'cancelled'}
 
 
@@ -1901,8 +1899,8 @@ async def inspect_csv(file: UploadFile = File(...), tenant_id: str | None = Head
                 try:
                     datetime.datetime.fromisoformat(v.replace('Z','').replace('T',' '))
                     dt_hits += 1
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 1904, _exc)
         if dt_hits >= max(1, len(non_empty)//4):
             return 'datetime'
         return 'string'
@@ -1927,8 +1925,8 @@ async def inspect_csv(file: UploadFile = File(...), tenant_id: str | None = Head
             s = suggest(h)
             if s:
                 mapping_suggestions[s] = h
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 1930, _exc)
     # Basic anomalies: high uniqueness ratio or high null ratio
     warnings = []
     for h, info in type_info.items():

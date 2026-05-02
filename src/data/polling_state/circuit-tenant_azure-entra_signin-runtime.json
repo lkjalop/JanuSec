@@ -1,8 +1,10 @@
 {
-  "consecutive_failures": 243,
-  "circuit_open_until": 1775918158,
+  "consecutive_failures": 354,
+  "circuit_open_until": 1777635402,
   "last_error": "boom",
   "last_success_ts": null,
   "last_latency_ms": null,
-  "last_duplicate_count": 0
+  "last_duplicate_count": 0,
+  "streaming_mode": false,
+  "stream_assessment_id": null
 }

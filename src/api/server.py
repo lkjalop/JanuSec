@@ -14,6 +14,9 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse
 from src.security.auth import require_scopes, require_api_key
 from .app import app, create_app
+
+logger = logging.getLogger(__name__)  # auto-added by instrument_silent_excepts
+
 # Ensure module-level `app` is produced by factory when available so running
 # `uvicorn src.api.server:app` uses the factory semantics and doesn't trigger
 # heavy initialization during import for test runners that import this module.
@@ -26,8 +29,8 @@ try:
         prod_app = create_app({'mode': 'prod'})
         # rebind the module-level name to the factory result
         app = prod_app
-except Exception:
-    pass
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 29, _exc)
 try:
     from src.analysis.domain_tools import get_tools_for_domain, get_logs_for_mitre, build_collection_playbook
 except Exception:  # pragma: no cover - optional dependency in some test modes
@@ -38,58 +41,58 @@ try:  # Attempt to include new compliance coverage router
     from .compliance_coverage_endpoints import router as _cov_router
     try:
         app.include_router(_cov_router)
-    except Exception:
-        pass
-except Exception:
-    pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 41, _exc)
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 43, _exc)
 try:  # Attempt to include enrichment endpoints (KEV/EPSS)
     from .enrichment_endpoints import router as _enrich_router
     try:
         app.include_router(_enrich_router)
-    except Exception:
-        pass
-except Exception:
-    pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 49, _exc)
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 51, _exc)
 try:  # Email security (headers + typosquat)
     from .email_security_endpoints import router as _email_sec_router
     try:
         app.include_router(_email_sec_router)
-    except Exception:
-        pass
-except Exception:
-    pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 57, _exc)
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 59, _exc)
 try:
     from .typosquat_endpoints import router as _typo_router
     try:
         app.include_router(_typo_router)
-    except Exception:
-        pass
-except Exception:
-    pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 65, _exc)
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 67, _exc)
 try:  # Threat hunting DSL
     from .hunt_endpoints import router as _hunt_router
     try:
         app.include_router(_hunt_router)
-    except Exception:
-        pass
-except Exception:
-    pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 73, _exc)
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 75, _exc)
 try:  # HopGraph attack reconstruction
     from .graph_endpoints import router as _graph_router
     try:
         app.include_router(_graph_router)
-    except Exception:
-        pass
-except Exception:
-    pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 81, _exc)
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 83, _exc)
 try:  # AI-powered insights (DREAD, playbook, hunt, executive)
     from .insights_endpoints import router as _insights_router
     try:
         app.include_router(_insights_router)
-    except Exception:
-        pass
-except Exception:
-    pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 89, _exc)
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 91, _exc)
 # If the package was previously imported via the short name `api.app` (or vice
 # versa), ensure sys.modules points to the canonical `src.api.app` so reloads and
 # subsequent imports don't create a duplicate module object and re-run heavy
@@ -99,8 +102,8 @@ try:
     import sys as _sys
     if 'api.app' in _sys.modules and 'src.api.app' in _sys.modules:
         _sys.modules['api.app'] = _sys.modules['src.api.app']
-except Exception:
-    pass
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 102, _exc)
 
 # Ensure common short-name aliases for other api.* modules map to the canonical
 # src.api.* modules when both are loaded. This reduces duplicate module objects
@@ -112,8 +115,8 @@ try:
         long_name = f'src.api.{short}'
         if short_name in _sys.modules and long_name in _sys.modules:
             _sys.modules[short_name] = _sys.modules[long_name]
-except Exception:
-    pass
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 115, _exc)
 
 # Also ensure aliasing for api.server -> src.api.server so tests importing
 # Also ensure aliasing for api.server -> src.api.server so tests importing
@@ -140,8 +143,8 @@ try:
     import sys as _sys
     if 'api.server' in _sys.modules and 'src.api.server' in _sys.modules:
         _sys.modules['api.server'] = _sys.modules['src.api.server']
-except Exception:
-    pass
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 143, _exc)
 
 # Lite-mode flag (mirrors app.py usage) to skip heavy startup actions when tests
 # only need a narrow subset of endpoints (e.g., admin feature flags).
@@ -178,16 +181,16 @@ def _decision_policy() -> dict[str, float]:
     critical = 0.3
     try:
         target = float(os.getenv('EVIDENCE_COVERAGE_TARGET', str(target)))
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 181, _exc)
     try:
         warn = float(os.getenv('EVIDENCE_COVERAGE_WARN', str(warn)))
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 185, _exc)
     try:
         critical = float(os.getenv('EVIDENCE_COVERAGE_CRITICAL', str(critical)))
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 189, _exc)
     target = min(1.0, max(0.0, target))
     warn = min(target, max(0.0, warn))
     critical = min(warn, max(0.0, critical))
@@ -261,8 +264,8 @@ def _decision_playbook_preview(decision: Any, mitre_tags: List[str]) -> dict[str
             cmd = tool.get('command', '')
             try:
                 cmd = cmd.format(**artifact_context)
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 264, _exc)
             tools.append({
                 'name': tool.get('name'),
                 'purpose': tool.get('purpose'),
@@ -320,9 +323,8 @@ try:  # pragma: no cover - defensive
                 # Fallback: return empty iterator
                 return iter(())
         httpx.Response.iter_content = _iter_content
-except Exception:
-    # Ignore if httpx is unavailable or monkeypatching fails
-    pass
+except Exception as _exc:  # Ignore if httpx is unavailable or monkeypatching fails
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 323, _exc)
 from core.metrics.registry import expected_metrics
 from core.threat_modeling.factor_taxonomy import aggregate_threat_model
 import json as _json
@@ -355,8 +357,8 @@ try:
     if _sec_mod is not None and hasattr(_sec_mod, 'require_api_key'):
         from security.auth import require_scopes  # type: ignore  # real module alias
     # else: keep the require_scopes from src.security.auth imported at line 15
-except Exception:
-    pass
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 358, _exc)
 try:
     # Optional import used only when CLUSTER_MINHASH_ENABLED is set and package is installed
     from datasketch import MinHash  # type: ignore
@@ -381,8 +383,8 @@ from .artifact_endpoints import router as _artifact_router
 try:
     # Expose a canonical name expected by app.register_core_routers loop
     globals()['artifact_router'] = _artifact_router
-except Exception:
-    pass
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 384, _exc)
 from .custody import router as _custody_router
 from .decisions_stream import publish_decision as _publish_decision  # SSE publisher
 from .dependencies import get_platform_state
@@ -518,11 +520,10 @@ try:
             # `src.api.runtime_state` are observed by this module which
             # imported `runtime_state` as `_rt` earlier.
             _rt = _src_runtime
-        except Exception:
-            pass
-except Exception:
-    # not available or import failed; keep the originally imported DECISION_CACHE
-    pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 521, _exc)
+except Exception as _exc:  # not available or import failed; keep the originally imported DECISION_CACHE
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 523, _exc)
 
 
 def safe_task(coro, *, name: str | None = None):
@@ -534,29 +535,29 @@ def safe_task(coro, *, name: str | None = None):
         try:
             # register task to global tracking set so we can cancel/await on shutdown
             BACKGROUND_TASKS.add(task)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 537, _exc)
         def _on_done(t):
             try:
                 exc = t.exception()
                 if exc:
                     LOGGER.exception('background task %s failed', name or '<task>', exc_info=exc)
-            except asyncio.CancelledError:
-                pass
+            except asyncio.CancelledError as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 544, _exc)
             except Exception:
                 try:
                     LOGGER.exception('background task done-callback failed')
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 549, _exc)
             finally:
                 try:
                     BACKGROUND_TASKS.discard(t)
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 554, _exc)
         try:
             task.add_done_callback(_on_done)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 558, _exc)
         return task
     except Exception:
         try:
@@ -564,8 +565,8 @@ def safe_task(coro, *, name: str | None = None):
         except Exception:
             try:
                 LOGGER.exception('failed to schedule background task')
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 567, _exc)
             return None
 
 
@@ -595,8 +596,8 @@ def _emit_metric_inc(metric, runtime, base_labels: dict | None = None, tenant_ra
                 labels = emit_labels_with_guard(globals().get('_RUNTIME'), base_labels or {}, tnt)
                 metric.labels(**labels).inc()
                 return
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 598, _exc)
         # fallback attempts
         try:
             if base_labels:
@@ -607,10 +608,10 @@ def _emit_metric_inc(metric, runtime, base_labels: dict | None = None, tenant_ra
         except Exception:
             try:
                 metric.inc()
-            except Exception:
-                pass
-    except Exception:
-        pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 610, _exc)
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 612, _exc)
 
 
 def _emit_metric_observe(metric, runtime, base_labels: dict | None, tenant_raw: str | None, value: float):
@@ -632,8 +633,8 @@ def _emit_metric_observe(metric, runtime, base_labels: dict | None, tenant_raw: 
                 labels = emit_labels_with_guard(globals().get('_RUNTIME'), base_labels or {}, tnt)
                 metric.labels(**labels).observe(value)
                 return
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 635, _exc)
         try:
             if base_labels:
                 metric.labels(**{**base_labels, 'tenant': tnt}).observe(value)
@@ -642,10 +643,10 @@ def _emit_metric_observe(metric, runtime, base_labels: dict | None, tenant_raw: 
         except Exception:
             try:
                 metric.observe(value)
-            except Exception:
-                pass
-    except Exception:
-        pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 645, _exc)
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 647, _exc)
 from core.baseline_service import BASELINES
 from core.geo_velocity import GEO_VELOCITY
 from core.clustering_service import CLUSTERING
@@ -836,8 +837,8 @@ async def dlq_retry(dlq_id: int, request: Request = None) -> dict:
             if mgr and hasattr(mgr, '_attempt_redeliver'):
                 ok = await mgr._attempt_redeliver(row)
                 return {'requeued': ok}
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 839, _exc)
         raise HTTPException(status_code=500, detail='dlq_retry_failed')
     except HTTPException:
         raise
@@ -919,8 +920,8 @@ async def dlq_requeue_as(dlq_id: int, request: Request) -> dict:
         user = audit_user(request=request)
         try:
             audit_emit('dlq_requeue', user, {'dlq_id': dlq_id, 'original': row.get('payload') or {}, 'new_payload': body})
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 922, _exc)
     except Exception:
         LOGGER.debug('dlq audit failed', exc_info=True)
     # attempt delivery via DLQ manager path
@@ -1131,9 +1132,8 @@ async def admin_sessions_revoke(session_id: str, request: Request) -> dict:
             try:
                 user = getattr(request.state, 'user', None)
                 await conn.execute('INSERT INTO admin_session_audit(session_id, action, user_info, created_at) VALUES($1,$2,$3, NOW())', session_id, 'revoke', dict(user or {}))
-            except Exception:
-                # swallow audit failures
-                pass
+            except Exception as _exc:  # swallow audit failures
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 1134, _exc)
             return {'revoked': True}
     except Exception:
         raise HTTPException(status_code=500, detail='revoke_failed')
@@ -1335,9 +1335,8 @@ try:
     if 'decisions_repo' not in globals() or globals().get('decisions_repo') is None:
         from repositories.decisions_repo_adapter import repo as decisions_repo
         globals()['decisions_repo'] = decisions_repo
-except Exception:
-    # best-effort: leave decisions_repo unset if adapter not available
-    pass
+except Exception as _exc:  # best-effort: leave decisions_repo unset if adapter not available
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 1338, _exc)
 
 
 # --- Startup: auto-load and optionally watch baseline sigmoid model ---
@@ -1372,8 +1371,8 @@ async def _auto_load_sigmoid_model():  # pragma: no cover (startup side-effect)
                 if str(data.get('type')) == 'sigmoid' and 'k' in data and 'x0' in data:
                     _risk_score.apply_sigmoid_override(float(data['k']), float(data['x0']))
                     last_mtime = mt
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 1375, _exc)
 
         if enabled:
             await _load_once()
@@ -1386,8 +1385,8 @@ async def _auto_load_sigmoid_model():  # pragma: no cover (startup side-effect)
                             _emit_metric_inc(recon_counter, globals().get('_RUNTIME'), {'result': 'failure'}, None)
                         await _asyncio.sleep(watch_sec)
                 _asyncio.create_task(_watch())
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 1389, _exc)
 
 # --- Calibration dataset exports ---
 @app.get('/api/v1/risk/calibration/export.csv')
@@ -1439,8 +1438,8 @@ async def set_alias(payload: AliasPayload, request: Request):
         try:
             if p.exists():
                 idx = _json.loads(p.read_text(encoding='utf-8'))
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 1442, _exc)
         aliases = idx.get('aliases', {})
         aliases[payload.alias] = payload.model_name
         idx['aliases'] = aliases
@@ -1458,8 +1457,8 @@ async def set_alias(payload: AliasPayload, request: Request):
     try:
         user = audit_user(request=request)
         audit_emit('model_alias_set', user, {'alias': payload.alias, 'model': payload.model_name})
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 1461, _exc)
     return {'ok': True, 'alias': payload.alias, 'model': payload.model_name}
 
 
@@ -1469,8 +1468,8 @@ async def promote_model_api(request: Request, name: str | None = None, alias: st
     await check_admin_token_async(request)
     try:
         LOGGER.info('promote_model_api invoked; content-type=%s', request.headers.get('content-type'))
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 1472, _exc)
     registry = _pathlib.Path('models/registry')
     await asyncio.to_thread(registry.mkdir, True, True)  # parents=True, exist_ok=True
     # Tolerant input handling: prefer multipart form 'file' but fall back to JSON or raw body.
@@ -1522,8 +1521,8 @@ async def promote_model_api(request: Request, name: str | None = None, alias: st
     try:
         user = audit_user(request=request)
         audit_emit('model_promote', user, {'name': name, 'alias': alias, 'src': tmp.name})
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 1525, _exc)
     # return index
     p = registry / 'index.json'
     idx: dict = {}
@@ -1541,8 +1540,8 @@ try:
     if not (dec_repo and callable(getattr(dec_repo, 'persist', None))):
         from repositories.decisions_repo_adapter import repo as decisions_repo
         globals()['decisions_repo'] = decisions_repo
-except Exception:
-    pass
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 1544, _exc)
 
 
 async def detections_governance_report(limit_trends: int = 50, min_sessions: int = 2, top_n: int = 15) -> Any:
@@ -1605,8 +1604,8 @@ async def factor_promotion_status(request: Request, limit: int = 500) -> dict[st
             import repositories.decisions_repo as real_mod  # type: ignore
             if hasattr(real_mod, 'list_recent'):
                 decisions = await real_mod.list_recent(limit, tenant_id)  # type: ignore
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 1608, _exc)
         # 2. If still empty, try adapter instance list_recent if dynamically attached
         if not decisions and DECISIONS_REPO and hasattr(DECISIONS_REPO, 'list_recent'):
             try:
@@ -1674,8 +1673,8 @@ async def finops_overview(tenant_id: str | None = None, alpha: float = 0.3, k: f
 try:  # pragma: no cover
     if not _LITE_MODE:  # only start hot-reload watcher in full mode
         ensure_watcher()
-except Exception:
-    pass
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 1677, _exc)
 
 from contextlib import asynccontextmanager
 
@@ -1742,10 +1741,10 @@ async def _lifespan(app):
         if os.getenv('ENABLE_TENANT_METRICS','0').lower() in {'1','true','yes'}:
             try:
                 LOGGER.warning('TENANT METRICS ENABLED: tenant-level labels are active. Ensure TENANT_METRICS_WHITELIST or hash buckets are configured to prevent high cardinality.')
-            except Exception:
-                pass
-    except Exception:
-        pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 1745, _exc)
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 1747, _exc)
     # Start tenant cleaner when configured (avoid starting during tests or lite mode)
     try:
         try:
@@ -1757,10 +1756,10 @@ async def _lifespan(app):
             try:
                 from src.core.tenant_cleaner import start_tenant_cleaner
                 start_tenant_cleaner(interval_seconds=interval)
-            except Exception:
-                pass
-    except Exception:
-        pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 1760, _exc)
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 1762, _exc)
     try:
         yield
     finally:
@@ -1790,8 +1789,8 @@ async def _lifespan(app):
                     try:
                         if not getattr(t, 'done', lambda: False)():
                             t.cancel()
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 1793, _exc)
                 import asyncio as _asyncio
                 try:
                     try:
@@ -1801,21 +1800,21 @@ async def _lifespan(app):
                             try:
                                 if not tt.done():
                                     tt.cancel()
-                            except Exception:
-                                pass
-                except Exception:
-                    pass
-        except Exception:
-            pass
+                            except Exception as _exc:
+                                logger.debug('silent_swallow at %s:%d: %s', __file__, 1804, _exc)
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 1806, _exc)
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 1808, _exc)
         # Stop tenant cleaner if running
         try:
             try:
                 from src.core.tenant_cleaner import stop_tenant_cleaner
                 stop_tenant_cleaner()
-            except Exception:
-                pass
-        except Exception:
-            pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 1815, _exc)
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 1817, _exc)
 
 
 app.router.lifespan_context = _lifespan  # type: ignore[attr-defined]
@@ -1846,8 +1845,8 @@ try:
             return _orig_create_task(coro, *args, **kwargs)
         try:
             BACKGROUND_TASKS.add(t)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 1849, _exc)
         def _on_done(tt):
             try:
                 # observe exception to avoid "Task exception was never retrieved"
@@ -1859,19 +1858,19 @@ try:
                 if exc:
                     try:
                         LOGGER.exception('background task failed', exc_info=exc)
-                    except Exception:
-                        pass
-            except asyncio.CancelledError:
-                pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 1862, _exc)
+            except asyncio.CancelledError as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 1864, _exc)
             finally:
                 try:
                     BACKGROUND_TASKS.discard(tt)
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 1869, _exc)
         try:
             t.add_done_callback(_on_done)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 1873, _exc)
         return t
     # Only override if not already patched, and avoid doing this in
     # lite/test contexts where AnyIO/Starlette manage the loop and
@@ -1886,8 +1885,8 @@ try:
         _is_test_ctx = True
     if not _is_test_ctx and getattr(asyncio, 'create_task', None) is not _tracked_create_task:
         asyncio.create_task = _tracked_create_task
-except Exception:
-    pass
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 1889, _exc)
 
 
 class LogEvent(BaseModel):  # type: ignore[misc]
@@ -2002,8 +2001,8 @@ async def list_incidents(request: Request = None, limit: int = 50, tenant_id: st
     try:
         if request is not None and not tenant_id:
             tenant_id = request.headers.get('X-Tenant-ID') or request.headers.get('x-tenant-id') or getattr(request.state, 'tenant_id', None)
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 2005, _exc)
     # If in-memory incident stores have entries, prefer serving from them first to
     # satisfy tests that explicitly append to _INCIDENT_STORE and disable adapters.
     try:
@@ -2011,8 +2010,8 @@ async def list_incidents(request: Request = None, limit: int = 50, tenant_id: st
         combined: list[dict] = []
         try:
             combined.extend(list(_INCIDENT_STORE))
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 2014, _exc)
         for mn in ('src.api.server','api.server'):
             try:
                 mod = _sys.modules.get(mn)
@@ -2021,16 +2020,16 @@ async def list_incidents(request: Request = None, limit: int = 50, tenant_id: st
                 other = getattr(mod, '_INCIDENT_STORE', None)
                 if other and isinstance(other, list):
                     combined.extend(list(other))
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 2024, _exc)
         if combined:
             _dbg = os.getenv('INCIDENTS_DEBUG','0').lower() not in {'0','false','no'}
             if _dbg:
                 try:
                     ids = [it.get('id') for it in combined[-5:]]
                     LOGGER.warning('incidents_debug: inmem-first branch; combined_count=%d, tail_ids=%s', len(combined), ids)
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 2032, _exc)
             # newest-first, tenant filter
             rows = []
             seen = set()
@@ -2046,12 +2045,12 @@ async def list_incidents(request: Request = None, limit: int = 50, tenant_id: st
             if _dbg:
                 try:
                     LOGGER.warning('incidents_debug: inmem-first rows_count=%d sample=%s', len(rows), rows[0] if rows else None)
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 2049, _exc)
             if rows:
                 return {'incidents': rows[:limit], 'count': min(len(rows), limit)}
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 2053, _exc)
     # Strong preference: use incidents_repo directly with tenant predicates
     try:
         import src.repositories.incidents_repo as incidents_repo
@@ -2073,8 +2072,8 @@ async def list_incidents(request: Request = None, limit: int = 50, tenant_id: st
                         other = getattr(mod, '_INCIDENT_STORE', None)
                         if other and isinstance(other, list):
                             combined.extend(list(other))
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 2076, _exc)
                 # Build final incidents list: start with newest in-memory, then repo rows
                 final: list[dict] = []
                 seen: set = set()
@@ -2104,11 +2103,11 @@ async def list_incidents(request: Request = None, limit: int = 50, tenant_id: st
                 try:
                     head = incidents[0] if incidents else None
                     LOGGER.warning('incidents_debug: repo-merge final_count=%d sample=%s', len(incidents), head)
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 2107, _exc)
             return {'incidents': incidents[:limit], 'count': min(len(incidents), limit)}
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 2110, _exc)
     # Prefer DB-backed decisions repo/listing when available so persisted incidents
     # (including metadata.attack_subgraph) are surfaced to API callers. However,
     # locate the repo across possible aliased module objects and only return
@@ -2129,8 +2128,8 @@ async def list_incidents(request: Request = None, limit: int = 50, tenant_id: st
                 r = getattr(mod, 'decisions_repo', None) or getattr(mod, 'DECISIONS_REPO', None)
                 if r:
                     return r
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 2132, _exc)
         return None
 
     try:
@@ -2167,8 +2166,8 @@ async def list_incidents(request: Request = None, limit: int = 50, tenant_id: st
                                     other = getattr(mod, '_INCIDENT_STORE', None)
                                     if other and isinstance(other, list):
                                         combined.extend(list(other))
-                                except Exception:
-                                    pass
+                                except Exception as _exc:
+                                    logger.debug('silent_swallow at %s:%d: %s', __file__, 2170, _exc)
                             # Prepend newest in-memory, then existing incidents from repo
                             final: list[dict] = []
                             seen: set = set()
@@ -2189,17 +2188,17 @@ async def list_incidents(request: Request = None, limit: int = 50, tenant_id: st
                                     seen.add(iid)
                                 final.append(i)
                             incidents = final
-                        except Exception:
-                            pass
+                        except Exception as _exc:
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 2192, _exc)
                         _dbg = os.getenv('INCIDENTS_DEBUG','0').lower() not in {'0','false','no'}
                         if _dbg:
                             try:
                                 LOGGER.warning('incidents_debug: mem-merge final_count=%d sample=%s', len(incidents), (incidents[0] if incidents else None))
-                            except Exception:
-                                pass
+                            except Exception as _exc:
+                                logger.debug('silent_swallow at %s:%d: %s', __file__, 2198, _exc)
                         return {'incidents': incidents[:limit], 'count': min(len(incidents), limit)}
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 2201, _exc)
             # If repo exposes a list_memory for in-memory adapters, read it and
             # return if non-empty
             try:
@@ -2231,8 +2230,8 @@ async def list_incidents(request: Request = None, limit: int = 50, tenant_id: st
                                     other = getattr(mod, '_INCIDENT_STORE', None)
                                     if other and isinstance(other, list):
                                         combined.extend(list(other))
-                                except Exception:
-                                    pass
+                                except Exception as _exc:
+                                    logger.debug('silent_swallow at %s:%d: %s', __file__, 2234, _exc)
                             final: list[dict] = []
                             seen: set = set()
                             for itm in reversed(combined):
@@ -2252,19 +2251,19 @@ async def list_incidents(request: Request = None, limit: int = 50, tenant_id: st
                                     seen.add(iid)
                                 final.append(i)
                             incidents = final
-                        except Exception:
-                            pass
+                        except Exception as _exc:
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 2255, _exc)
                         _dbg = os.getenv('INCIDENTS_DEBUG','0').lower() not in {'0','false','no'}
                         if _dbg:
                             try:
                                 LOGGER.warning('incidents_debug: mem-merge(list_memory) final_count=%d sample=%s', len(incidents), (incidents[0] if incidents else None))
-                            except Exception:
-                                pass
+                            except Exception as _exc:
+                                logger.debug('silent_swallow at %s:%d: %s', __file__, 2261, _exc)
                         return {'incidents': incidents[:limit], 'count': min(len(incidents), limit)}
-            except Exception:
-                pass
-    except Exception:
-        pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 2264, _exc)
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 2266, _exc)
 
     # Fallback: in-memory incident store created by older flows
     # If this module's in-memory store is empty, try to locate an aliased
@@ -2280,8 +2279,8 @@ async def list_incidents(request: Request = None, limit: int = 50, tenant_id: st
         # Start with this module's store
         try:
             combined.extend(list(_INCIDENT_STORE))
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 2283, _exc)
         import sys as _sys
         for mn in ('src.api.server', 'api.server'):
             try:
@@ -2291,13 +2290,13 @@ async def list_incidents(request: Request = None, limit: int = 50, tenant_id: st
                 other_store = getattr(mod, '_INCIDENT_STORE', None)
                 if other_store and isinstance(other_store, list):
                     combined.extend(list(other_store))
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 2294, _exc)
         # Reverse to present most-recent-first across combined sources, then de-duplicate
         try:
             LOGGER.debug('list_incidents combined_count=%d combined_ids=%s', len(combined), [i.get('id') for i in combined[:10]])
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 2299, _exc)
 
         # Iterate reversed(combined) so we process newest items first and keep the
         # first-seen instance of each id (preserves most-recent-first ordering)
@@ -2426,8 +2425,8 @@ async def graph_reconstruct(seed: Optional[dict] = None, seed_event_id: Optional
                             incidents_repo = getattr(mod, 'incidents_repo', None) or getattr(mod, 'INCIDENTS_REPO', None)
                             if incidents_repo is not None:
                                 break
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 2429, _exc)
                 if incidents_repo is not None:
                     incident_id = f"inc-{int(time.time() * 1000)}"
                     payload = {
@@ -2499,8 +2498,8 @@ async def graph_reconstruct(seed: Optional[dict] = None, seed_event_id: Optional
                             r = getattr(mod, 'DECISIONS_REPO', None) or getattr(mod, 'decisions_repo', None)
                             if r:
                                 return r
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 2502, _exc)
                     return None
 
                 repo = _locate_repo()
@@ -2525,8 +2524,8 @@ async def graph_reconstruct(seed: Optional[dict] = None, seed_event_id: Optional
                 maybe = audit_repo.append_audit(inc.get('artifact_id'), 'incident_created', {'title': inc.get('title')}, custody_hash, None, inc.get('tenant_id'))
                 if _asyncio.iscoroutine(maybe):
                     await maybe
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 2528, _exc)
 
         # record success metric
         try:
@@ -2551,10 +2550,10 @@ async def graph_reconstruct(seed: Optional[dict] = None, seed_event_id: Optional
                             _emit_metric_inc(recon_counter, globals().get('_RUNTIME'), {'result': 'success'}, None)
                     else:
                         _emit_metric_inc(recon_counter, globals().get('_RUNTIME'), {'result': 'success'}, None)
-                except Exception:
-                    pass
-        except Exception:
-            pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 2554, _exc)
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 2556, _exc)
         return {'subgraph': res}
     except HTTPException:
         raise
@@ -2577,14 +2576,14 @@ async def graph_reconstruct(seed: Optional[dict] = None, seed_event_id: Optional
                             except Exception:
                                 emit_labels_with_guard = None
                             _emit_metric_inc(recon_counter, globals().get('_RUNTIME'), {'result': 'failure'}, tnt)
-                        except Exception:
-                            pass
+                        except Exception as _exc:
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 2580, _exc)
                     else:
                         _emit_metric_inc(recon_counter, globals().get('_RUNTIME'), {'result': 'failure'}, None)
-                except Exception:
-                    pass
-        except Exception:
-            pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 2584, _exc)
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 2586, _exc)
         raise HTTPException(status_code=500, detail='graph_reconstruct_failed')
     finally:
         try:
@@ -2622,14 +2621,14 @@ async def graph_reconstruct(seed: Optional[dict] = None, seed_event_id: Optional
                             except Exception:
                                 emit_labels_with_guard = None
                             _emit_metric_observe(recon_hist, globals().get('_RUNTIME'), {'depth_bucket': depth_bucket}, tnt, _t.time() - _t0)
-                        except Exception:
-                            pass
+                        except Exception as _exc:
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 2625, _exc)
                     else:
                         _emit_metric_observe(recon_hist, globals().get('_RUNTIME'), {'depth_bucket': depth_bucket}, None, _t.time() - _t0)
-                except Exception:
-                    pass
-        except Exception:
-            pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 2629, _exc)
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 2631, _exc)
 
 
 async def incident_attack_subgraph(incident_id: str, request: Request = None, auth=Depends(require_scopes('factors.search'))) -> dict:
@@ -2647,8 +2646,8 @@ async def incident_attack_subgraph(incident_id: str, request: Request = None, au
         if inc and isinstance(inc, dict):
             meta = inc.get('metadata') or {}
             return {'attack_subgraph': meta.get('attack_subgraph')}
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 2650, _exc)
     # Fallback to in-memory store
     tenant_header = None
     try:
@@ -2664,8 +2663,8 @@ async def incident_attack_subgraph(incident_id: str, request: Request = None, au
                     raise HTTPException(status_code=404, detail='incident_not_found')
             except HTTPException:
                 raise
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 2667, _exc)
             return {'attack_subgraph': (i.get('attack_subgraph') or (i.get('metadata') or {}).get('attack_subgraph'))}
     raise HTTPException(status_code=404, detail='incident_not_found')
 
@@ -2680,8 +2679,8 @@ else:
 try:
     from src.api.app import _register_lite_incident_routes as _ensure_lite_incidents  # type: ignore
     _ensure_lite_incidents()
-except Exception:
-    pass
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 2683, _exc)
 
 
 @app.get('/api/v1/graph/temporal_query', summary='Temporal query over recent observed events in HopGraph')
@@ -2749,14 +2748,14 @@ async def graph_temporal_query(request: Request, start_ts: float = 0.0, end_ts: 
                         except Exception:
                             try:
                                 tq_counter.inc()
-                            except Exception:
-                                pass
+                            except Exception as _exc:
+                                logger.debug('silent_swallow at %s:%d: %s', __file__, 2752, _exc)
                     else:
                         tq_counter.inc()
-                except Exception:
-                    pass
-        except Exception:
-            pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 2756, _exc)
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 2758, _exc)
         try:
             if tq_hist is not None:
                 try:
@@ -2776,14 +2775,14 @@ async def graph_temporal_query(request: Request, start_ts: float = 0.0, end_ts: 
                         except Exception:
                             try:
                                 tq_hist.observe(_t.time() - _start)
-                            except Exception:
-                                pass
+                            except Exception as _exc:
+                                logger.debug('silent_swallow at %s:%d: %s', __file__, 2779, _exc)
                     else:
                         tq_hist.observe(_t.time() - _start)
-                except Exception:
-                    pass
-        except Exception:
-            pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 2783, _exc)
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 2785, _exc)
         return {'result': res}
     except Exception as exc:
         LOGGER.debug('graph_temporal_query failed: %s', exc, exc_info=True)
@@ -2835,8 +2834,8 @@ async def label_decision(event_id: str, payload: DecisionLabelPayload, request: 
         try:
             user = audit_user(request=request)
             audit_emit('decision_label', user, {'event_id': event_id, 'label': lab, 'rule': payload.rule, 'comment': payload.comment})
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 2838, _exc)
         # Increment metric
         try:
             from .metrics_init import ensure_metrics, operator_true_positive, operator_false_positive  # type: ignore
@@ -2858,29 +2857,29 @@ async def label_decision(event_id: str, payload: DecisionLabelPayload, request: 
                 if lab == 'tp' and operator_true_positive is not None:
                     try:
                         _emit_metric_inc(operator_true_positive, globals().get('_RUNTIME'), {'rule': rule_lbl}, tenant_label)
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 2861, _exc)
                 if lab == 'fp' and operator_false_positive is not None:
                     try:
                         _emit_metric_inc(operator_false_positive, globals().get('_RUNTIME'), {'rule': rule_lbl}, tenant_label)
-                    except Exception:
-                        pass
-            except Exception:
-                pass
-        except Exception:
-            pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 2866, _exc)
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 2868, _exc)
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 2870, _exc)
         # Persist label in LABELS store and update factor stats if attribution snapshot exists
         try:
             LABELS.add_label(event_id, lab, payload.comment or 'operator')
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 2875, _exc)
         try:
             snap = FACTOR_ATTRIBUTIONS.get(event_id)
             if snap:
                 # update rolling stats
                 FACTOR_STATS.update_from_label(snap.factors, lab, time.time())
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 2882, _exc)
         return {'ok': True, 'label': lab, 'event_id': event_id}
     except HTTPException:
         raise
@@ -3036,16 +3035,16 @@ async def _process_endpoint_event(event_model: LogEvent, ctx: LogBatchContext) -
         # Merge normalized view into event for downstream stages
         try:
             event.update(norm)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 3039, _exc)
         if not ok:
             try:
                 event.setdefault('factors', []).append('invalid:endpoint_event')
                 event['validation_errors'] = list(errs)
             except Exception:
                 event['validation_errors'] = errs
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 3047, _exc)
 
     # Stage: normalize
     try:
@@ -3103,8 +3102,8 @@ async def _process_endpoint_event(event_model: LogEvent, ctx: LogBatchContext) -
                 pp = event.get('parent_proc') or event.get('parent_image') or event.get('parent_name')
                 if pp:
                     event['parent_process'] = str(pp)
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 3106, _exc)
 
     # Dynamic lookup of rules engine so late wiring (startup init) is respected
     # Prefer the `src.api.runtime_state` module's rules_engine if present
@@ -3113,8 +3112,8 @@ async def _process_endpoint_event(event_model: LogEvent, ctx: LogBatchContext) -
         import importlib as _importlib
         _src_rt_mod = _importlib.import_module('src.api.runtime_state')
         _re = getattr(_src_rt_mod, 'rules_engine', _re)
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 3116, _exc)
     # If tests monkeypatch `src.api.runtime_state.rules_engine` the
     # local `_rt` binding may not reflect that change. Try to re-resolve
     # the rules_engine from common runtime_state module aliases to be
@@ -3129,8 +3128,8 @@ async def _process_endpoint_event(event_model: LogEvent, ctx: LogBatchContext) -
                 import importlib as _importlib
                 _alt_rt = _importlib.import_module('api.runtime_state')
                 _re = getattr(_alt_rt, 'rules_engine', None)
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 3132, _exc)
     # Last-resort: search loaded modules for any runtime_state providing rules_engine
     if _re is None:
         try:
@@ -3145,8 +3144,8 @@ async def _process_endpoint_event(event_model: LogEvent, ctx: LogBatchContext) -
                         break
                 except Exception:
                     continue
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 3148, _exc)
     # Enrich event with graph-derived features before rule evaluation (best-effort, cached)
     try:
         try:
@@ -3159,14 +3158,12 @@ async def _process_endpoint_event(event_model: LogEvent, ctx: LogBatchContext) -
                     from src.core.graph.graph_features import enrich_event_with_graph
                     try:
                         enrich_event_with_graph(event, seed_event_id=event.get('id'), user=event.get('user'))
-                    except Exception:
-                        # enrichment should never block rule evaluation
-                        pass
-                except Exception:
-                    # graph features module not available or import failed; continue
-                    pass
-    except Exception:
-        pass
+                    except Exception as _exc:  # enrichment should never block rule evaluation
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 3162, _exc)
+                except Exception as _exc:  # graph features module not available or import failed; continue
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 3165, _exc)
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 3168, _exc)
 
     try:
         try:
@@ -3207,8 +3204,8 @@ async def _process_endpoint_event(event_model: LogEvent, ctx: LogBatchContext) -
                 if nx_t >= 10 and nx_t > 0 and (nx_n / nx_t) >= thr:
                     rules.append('nx_burst')
                     classification = {'verdict': 'SUSPICIOUS', 'score': 0.6}
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 3210, _exc)
 
     sanitized = _sanitize_event(event, rules, classification)
     async with ctx.runtime.get_sanitized_lock():
@@ -3258,8 +3255,8 @@ async def _process_endpoint_event(event_model: LogEvent, ctx: LogBatchContext) -
                                             await q.enqueue(rp, dry_run=True)
                                         except Exception:
                                             continue
-                            except Exception:
-                                pass
+                            except Exception as _exc:
+                                logger.debug('silent_swallow at %s:%d: %s', __file__, 3261, _exc)
                         asyncio.create_task(_do())
                     # schedule background enqueue without blocking request
                     try:
@@ -3270,8 +3267,8 @@ async def _process_endpoint_event(event_model: LogEvent, ctx: LogBatchContext) -
                         try:
                             import asyncio
                             asyncio.create_task(_bg_enqueue(list(rules), ctx_map))
-                        except Exception:
-                            pass
+                        except Exception as _exc:
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 3273, _exc)
                 except Exception:
                     # if background tasks unavailable, best-effort: enqueue in sync queue
                     try:
@@ -3289,14 +3286,14 @@ async def _process_endpoint_event(event_model: LogEvent, ctx: LogBatchContext) -
                                         continue
                             except Exception:
                                 continue
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 3292, _exc)
                 if scheduled:
                     LOGGER.info('Auto-scheduled playbooks: %s for event=%s', scheduled, event_id)
-            except Exception:
-                pass
-    except Exception:
-        pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 3296, _exc)
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 3298, _exc)
 
     # Use an async lock around the dedup cache manipulation to avoid races
     # where multiple concurrent requests could both think they are the first
@@ -3309,8 +3306,8 @@ async def _process_endpoint_event(event_model: LogEvent, ctx: LogBatchContext) -
             try:
                 if dedup_key not in ALERT_DEDUP_CACHE:
                     ALERT_DEDUP_CACHE[dedup_key] = time.time()
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 3312, _exc)
         try:
             # If we're in an async context, await the lock and reserve
             await ALERT_DEDUP_LOCK.__aenter__()
@@ -3319,8 +3316,8 @@ async def _process_endpoint_event(event_model: LogEvent, ctx: LogBatchContext) -
         except TypeError:
             # Fallback for sync test import-time: call directly
             _reserve_dedup()
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 3322, _exc)
 
     # ---------------- Alert Clustering Integration ----------------
     try:
@@ -3359,8 +3356,8 @@ async def _process_endpoint_event(event_model: LogEvent, ctx: LogBatchContext) -
             # If an explicit TTL is provided, update CLUSTERING instance
             if ttl_val is not None:
                 CLUSTERING.ttl_seconds = ttl_val
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 3362, _exc)
 
         if minhash_enabled and (len(iocs) + len(extra_factors)) > 32:
             # Best-effort: use datasketch MinHash if available
@@ -3386,8 +3383,8 @@ async def _process_endpoint_event(event_model: LogEvent, ctx: LogBatchContext) -
         # clustering is best-effort; log exception for visibility in tests
         try:
             LOGGER.debug('Clustering integration failed: %s', exc, exc_info=exc)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 3389, _exc)
 
     # ---------------- Baseline Anomaly Integration ----------------
     try:
@@ -3458,8 +3455,8 @@ async def _process_endpoint_event(event_model: LogEvent, ctx: LogBatchContext) -
                     'distance_km': gv.get('distance_km'),
                     'delta_seconds': gv.get('delta_seconds')
                 })
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 3461, _exc)
 
     # ---------------- Enrichment completeness ----------------
     try:
@@ -3470,8 +3467,8 @@ async def _process_endpoint_event(event_model: LogEvent, ctx: LogBatchContext) -
             ef = 'enrich:incomplete'
             if ef not in rules:
                 rules.append(ef)
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 3473, _exc)
 
     # Build a best-effort meta payload with any baseline/geo signals computed above
     meta_payload: dict[str, Any] = {}
@@ -3479,8 +3476,8 @@ async def _process_endpoint_event(event_model: LogEvent, ctx: LogBatchContext) -
         # If baseline anomalies were appended to processed_event, include them
         if 'anomalies' in processed_event:
             meta_payload['anomalies'] = processed_event.get('anomalies')
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 3482, _exc)
     try:
         corr = sanitized.get('correlation_insights')
         if corr:
@@ -3553,8 +3550,8 @@ async def _process_endpoint_event(event_model: LogEvent, ctx: LogBatchContext) -
             if primary_synth and primary_synth.get('factor_synthesis'):
                 meta_payload['factor_synthesis'] = primary_synth.get('factor_synthesis')
                 meta_payload['factor_synthesis_insight'] = primary_synth.get('factor_synthesis')
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 3556, _exc)
     if 'dependency_status' not in meta_payload:
         try:
             from .graph_sessions import _check_dependency_status as _dep_status  # type: ignore
@@ -3575,17 +3572,16 @@ async def _process_endpoint_event(event_model: LogEvent, ctx: LogBatchContext) -
         except Exception:
             # Fall back to compatibility helper which schedules or runs sync
             _record_decision(event_id, sanitized['verdict'] or 'OBSERVE', sanitized['score'] or 0.0, rules, meta_payload)
-    except Exception:
-        # swallow to keep pipeline best-effort
-        pass
+    except Exception as _exc:  # swallow to keep pipeline best-effort
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 3578, _exc)
 
     # Attach tenant context to decision object (enables tenant-aware reporting)
     try:
         dec_obj = DECISION_CACHE.get(event_id)
         if dec_obj is not None and not getattr(dec_obj, 'tenant_id', None):
             dec_obj.tenant_id = ctx.tenant_id or os.getenv('DEFAULT_TENANT','default')
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 3587, _exc)
 
     alert: dict[str, Any] | None = None
     if ctx.send_alerts:
@@ -3604,8 +3600,8 @@ async def _process_endpoint_event(event_model: LogEvent, ctx: LogBatchContext) -
                 try:
                     if os.getenv('DEDUP_DEBUG','0').lower() in {'1','true','yes'}:
                         LOGGER.debug('DEDUP_DEBUG key=%s existing_ts=%s emitted=%s now=%s ttl=%s', dedup_key, existing_ts, dedup_key in ALERT_DEDUP_EMITTED, now, ctx.dedup_ttl)
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 3607, _exc)
                 if existing_ts is not None and dedup_key in ALERT_DEDUP_EMITTED and (now - existing_ts) <= ctx.dedup_ttl:
                     dedup_hit = True
                 if not dedup_hit:
@@ -3630,8 +3626,8 @@ async def _process_endpoint_event(event_model: LogEvent, ctx: LogBatchContext) -
                 try:
                     if os.getenv('DEDUP_DEBUG','0').lower() in {'1','true','yes'}:
                         LOGGER.debug('DEDUP_DEBUG key=%s existing_ts=%s emitted=%s now=%s ttl=%s', dedup_key, existing_ts, dedup_key in ALERT_DEDUP_EMITTED, now, ctx.dedup_ttl)
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 3633, _exc)
                 if existing_ts is not None and dedup_key in ALERT_DEDUP_EMITTED and (now - existing_ts) <= ctx.dedup_ttl:
                     dedup_hit = True
                 if not dedup_hit:
@@ -3649,8 +3645,8 @@ async def _process_endpoint_event(event_model: LogEvent, ctx: LogBatchContext) -
             finally:
                 try:
                     await ALERT_DEDUP_LOCK.__aexit__(None, None, None)
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 3652, _exc)
         except Exception:
             # best-effort: fall back to non-atomic behavior
             for key, ts in list(ALERT_DEDUP_CACHE.items()):
@@ -3728,16 +3724,16 @@ async def log_batch(payload: LogBatchRequest) -> dict[str, Any]:
                 "log_batch slow_path triggered: size=%d threshold=%d tenant=%s",
                 len(payload.events), slow_threshold, tenant,
             )
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 3731, _exc)
         # Increment Prometheus counter for visibility
         try:
             from .metrics_init import slow_path_counter, ensure_metrics
             ensure_metrics()
             if slow_path_counter:
                 slow_path_counter.inc()
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 3739, _exc)
 
     for event_model in payload.events:
         processed, alert = await _process_endpoint_event(event_model, ctx)
@@ -3753,8 +3749,8 @@ async def log_batch(payload: LogBatchRequest) -> dict[str, Any]:
                         for f in ef:
                             if f not in cf:
                                 cf.append(f)
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 3756, _exc)
                     try:
                         from src.graph.hopgraph import GLOBAL_HOPGRAPH as _HG  # type: ignore
                         if _HG is not None:
@@ -3763,12 +3759,12 @@ async def log_batch(payload: LogBatchRequest) -> dict[str, Any]:
                                     if hasattr(_HG, 'add_node_attr'):
                                         _HG.add_node_attr(nid, type=(nid.split(':',1)[0] if ':' in nid else 'node'))
                                     _HG.add_node_factor(nid, fac)
-                                except Exception:
-                                    pass
-                    except Exception:
-                        pass
-        except Exception:
-            pass
+                                except Exception as _exc:
+                                    logger.debug('silent_swallow at %s:%d: %s', __file__, 3766, _exc)
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 3768, _exc)
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 3770, _exc)
         # Phase 3 IAM: Persistence (endpoint-side) – SSP DLL / Auth Packages (flag-gated in detector)
         try:
             from src.core.detectors.iam_phase3_4 import detect_endpoint_phase3  # type: ignore
@@ -3779,8 +3775,8 @@ async def log_batch(payload: LogBatchRequest) -> dict[str, Any]:
                     for f in ef3:
                         if f not in cf:
                             cf.append(f)
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 3782, _exc)
                 try:
                     from src.graph.hopgraph import GLOBAL_HOPGRAPH as _HG3  # type: ignore
                     if _HG3 is not None:
@@ -3789,12 +3785,12 @@ async def log_batch(payload: LogBatchRequest) -> dict[str, Any]:
                                 if hasattr(_HG3, 'add_node_attr'):
                                     _HG3.add_node_attr(nid, type=(nid.split(':',1)[0] if ':' in nid else 'node'))
                                 _HG3.add_node_factor(nid, fac)
-                            except Exception:
-                                pass
-                except Exception:
-                    pass
-        except Exception:
-            pass
+                            except Exception as _exc:
+                                logger.debug('silent_swallow at %s:%d: %s', __file__, 3792, _exc)
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 3794, _exc)
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 3796, _exc)
         # Redact processed record for response/export except allowlisted fields
         try:
             red = scrub_record(processed)
@@ -3827,8 +3823,8 @@ async def log_batch(payload: LogBatchRequest) -> dict[str, Any]:
                                 if (now - prev_ts) < dedup_ttl:
                                     alert = None
                                 break
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 3830, _exc)
             if alert:
                 try:
                     try:
@@ -3842,8 +3838,8 @@ async def log_batch(payload: LogBatchRequest) -> dict[str, Any]:
                     try:
                         append_alert(alert)
                         alerts_emitted += 1
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 3845, _exc)
 
     return {
         'accepted': accepted,
@@ -3857,36 +3853,36 @@ async def log_batch(payload: LogBatchRequest) -> dict[str, Any]:
 # Ensure investigation alias router is included (idempotent if already present)
 try:
     app.include_router(_investigation_router)
-except Exception:
-    pass
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 3860, _exc)
 try:
     app.include_router(_alerts_router)
-except Exception:
-    pass
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 3864, _exc)
 try:
     from .stream_ingest import router as _stream_ingest_router
     app.include_router(_stream_ingest_router)
-except Exception:
-    pass
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 3869, _exc)
 try:
     app.include_router(_report_router)
-except Exception:
-    pass
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 3873, _exc)
 try:
     app.include_router(_analytics_router)
-except Exception:
-    pass
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 3877, _exc)
 try:
     from .case_endpoints import router as _case_router  # type: ignore
     app.include_router(_case_router)
-except Exception:
-    pass
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 3882, _exc)
 
 try:
     from .telemetry_endpoints import router as _telemetry_router  # type: ignore
     app.include_router(_telemetry_router)
-except Exception:
-    pass
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 3888, _exc)
 
 try:
     from .playbooks_endpoints import router as _playbooks_router  # type: ignore
@@ -3894,39 +3890,39 @@ try:
     try:
         from .playbook_tenants import router as _playbook_tenants_router  # type: ignore
         app.include_router(_playbook_tenants_router)
-    except Exception:
-        pass
-except Exception:
-    pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 3897, _exc)
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 3899, _exc)
 
 try:  # Executive report export
     from .executive_report_endpoints import router as _exec_report_router  # type: ignore
     app.include_router(_exec_report_router)
-except Exception:
-    pass
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 3905, _exc)
 
 try:
     from .replay_endpoints import router as _replay_router  # type: ignore
     app.include_router(_replay_router)
-except Exception:
-    pass
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 3911, _exc)
 try:
     from .csv_endpoints import router as _csv_router  # type: ignore
     app.include_router(_csv_router)
-except Exception:
-    pass
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 3916, _exc)
 
 # Ensure metrics summary and dashboard endpoints are registered (some tests expect /api/v1/metrics/summary and dashboard/status)
 try:
     from .routes.metrics import router as _metrics_router  # type: ignore
     app.include_router(_metrics_router)
-except Exception:
-    pass
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 3923, _exc)
 try:
     from .dashboard_endpoints import router as _dashboard_router  # type: ignore
     app.include_router(_dashboard_router)
-except Exception:
-    pass
+except Exception as _exc:
+    logger.debug('silent_swallow at %s:%d: %s', __file__, 3928, _exc)
 
 # ---------------- Runtime Feature Flags Admin Endpoints ----------------
 from fastapi import Body as _Body
@@ -3965,8 +3961,8 @@ async def flags_set(payload: _FlagChange, request: Request) -> dict[str, Any]:
     try:
         user = audit_user(request=request)
         audit_emit('flag_set', user, {'name': payload.name, 'value': payload.value, 'persist': bool(payload.persist)})
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 3968, _exc)
     _set_flag(payload.name, payload.value, persist=bool(payload.persist))
     return {'ok': True, 'name': payload.name, 'value': _get_flag(payload.name)}
 
@@ -3977,8 +3973,8 @@ async def flags_clear(name: str, request: Request, persist: bool | None = True) 
     try:
         user = audit_user(request=request)
         audit_emit('flag_clear', user, {'name': name, 'persist': bool(persist)})
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 3980, _exc)
     _clear_flag(name, persist=bool(persist))
     return {'ok': True, 'name': name, 'value': _get_flag(name)}
 
@@ -4008,8 +4004,8 @@ def explain_decision(event_id: str, request: Request = None) -> dict[str, Any]:
                 raise HTTPException(status_code=403, detail='forbidden_tenant_mismatch')
     except HTTPException:
         raise
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 4011, _exc)
     # Support both object-style DecisionRecord and dict-based cache entries
     if isinstance(decision, dict):
         factors = list(decision.get('factors') or [])
@@ -4027,8 +4023,8 @@ def explain_decision(event_id: str, request: Request = None) -> dict[str, Any]:
         from integrations.threat_intel_client import CLIENT as _TI  # type: ignore
         if getattr(_TI, 'factor_techniques', None):
             techniques_map = _TI.techniques_for_factors(factors)
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 4030, _exc)
     # Taxonomy enrichment: domain & precedence
     try:
         from src.core.factors.taxonomy_loader import domain_for_factor, precedence_for_factor  # type: ignore
@@ -4053,8 +4049,8 @@ def explain_decision(event_id: str, request: Request = None) -> dict[str, Any]:
     try:
         from src.analysis.explain_mapping import map_factors_to_tags as _map_tags  # type: ignore
         mapping_tags = _map_tags(list(factors))
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 4056, _exc)
 
     # Unified threat model (STRIDE/DREAD/MAESTRO) and compliance controls (best-effort)
     threat_model = None
@@ -4078,21 +4074,21 @@ def explain_decision(event_id: str, request: Request = None) -> dict[str, Any]:
                     for k in ('user','host','proc','process'):
                         if k in decision and decision.get(k):
                             seed[k] = decision.get(k)
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 4081, _exc)
             ctxs: dict[str, Any] = {}
             # HopGraph-lite
             try:
                 from src.core.graph.hopgraph_lite import get_graph as _get_lite  # type: ignore
                 ctxs['lite'] = _get_lite().reconstruct_attack(seed, depth=3)
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 4088, _exc)
             # HopGraph light (sidecar) – may be empty if not initialized
             try:
                 from src.core.hunt.hopgraph_light import get_hopgraph as _get_light  # type: ignore
                 ctxs['light'] = _get_light().reconstruct_attack(seed, depth=3)
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 4094, _exc)
             graph_context = ctxs if ctxs else None
     except Exception:
         graph_context = None
@@ -4109,8 +4105,8 @@ def explain_decision(event_id: str, request: Request = None) -> dict[str, Any]:
                     eds = ctx.get(k, {}).get('edges') or []
                     if eds:
                         edges.extend(eds[:6])
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 4112, _exc)
             if not edges:
                 return None
             parts = []
@@ -4166,10 +4162,10 @@ def explain_decision(event_id: str, request: Request = None) -> dict[str, Any]:
             if is_policy_triage_enabled(tenant_id, api_key):
                 resp['final_decision'] = 'review'
                 resp['policy_forced'] = True
-        except Exception:
-            pass
-    except Exception:
-        pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 4169, _exc)
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 4171, _exc)
     # Always return a stable dict payload so FastAPI response validation
     # doesn't raise when handlers accidentally fall through.
     return resp
@@ -4202,8 +4198,8 @@ def _emit_metric_set(metric, runtime, base_labels: dict | None, tenant_raw: str 
                 labels = emit_labels_with_guard(globals().get('_RUNTIME'), base_labels or {}, tnt)
                 metric.labels(**labels).set(value)
                 return
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 4205, _exc)
         try:
             if base_labels:
                 metric.labels(**{**base_labels, 'tenant': tnt}).set(value)
@@ -4212,10 +4208,10 @@ def _emit_metric_set(metric, runtime, base_labels: dict | None, tenant_raw: str 
         except Exception:
             try:
                 metric.set(value)
-            except Exception:
-                pass
-    except Exception:
-        pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 4215, _exc)
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 4217, _exc)
     return
 
 
@@ -4253,8 +4249,8 @@ def explain_decision_verbose(event_id: str) -> dict[str, Any]:
         from integrations.threat_intel_client import CLIENT as _TI  # type: ignore
         if getattr(_TI, 'factor_techniques', None):
             techniques_map = _TI.techniques_for_factors(factors)
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 4256, _exc)
 
     # DREAD calculation (best-effort)
     try:
@@ -4285,19 +4281,19 @@ def explain_decision_verbose(event_id: str) -> dict[str, Any]:
                     for k in ('user','host','proc','process'):
                         if k in decision and decision.get(k):
                             seed[k] = decision.get(k)
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 4288, _exc)
             ctxs: dict[str, Any] = {}
             try:
                 from src.core.graph.hopgraph_lite import get_graph as _get_lite  # type: ignore
                 ctxs['lite'] = _get_lite().reconstruct_attack(seed, depth=3)
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 4294, _exc)
             try:
                 from src.core.hunt.hopgraph_light import get_hopgraph as _get_light  # type: ignore
                 ctxs['light'] = _get_light().reconstruct_attack(seed, depth=3)
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 4299, _exc)
             graph_context = ctxs if ctxs else None
     except Exception:
         graph_context = None
@@ -4386,8 +4382,8 @@ async def crowdstrike_sync(request: Request):
     api_key = None
     try:
         api_key = request.headers.get('x-api-key')
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 4389, _exc)
     if not api_key:
         raise HTTPException(status_code=401, detail='missing api key')
 
@@ -4426,8 +4422,8 @@ async def crowdstrike_sync(request: Request):
                     # Best-effort: swallow failures to avoid breaking ingestion flow
                     try:
                         _rt.cache_set(event_id, dec)
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 4429, _exc)
             created.append(event_id)
         except Exception:
             try:
@@ -4436,8 +4432,8 @@ async def crowdstrike_sync(request: Request):
                 except Exception:
                     try:
                         _rt.cache_set(event_id, dec)
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 4439, _exc)
                 created.append(event_id)
             except Exception:
                 LOGGER.exception('failed to persist cs detection %s', event_id)
@@ -4513,9 +4509,8 @@ def platform_slo() -> dict[str, Any]:
                 'per_stage': {k: round(v, 4) for k, v in per_stage_rate.items()},
                 'by_reason': {k: int(v) for k, v in reason_counts.items()},
             }
-        except Exception:
-            # metrics not available (lite runs) — omit skip_rates
-            pass
+        except Exception as _exc:  # metrics not available (lite runs) — omit skip_rates
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 4516, _exc)
         # Best-effort include per-tenant external AI budgets if configured
         try:
             from src.core.policy.external_budget import get_budget_manager  # type: ignore
@@ -4533,8 +4528,8 @@ def platform_slo() -> dict[str, Any]:
                     }
             if budgets:
                 slo_resp['external_ai_budgets'] = budgets  # type: ignore[index]
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 4536, _exc)
     except Exception:
         slo_resp = {
             'explain_latency_ms_p95': 200,
@@ -4657,8 +4652,8 @@ async def decisions_recent(limit: int = 50, tenant_id: str | None = None, reques
             seeded = getattr(_rt, 'SEEDED_DECISIONS', None)
             if isinstance(seeded, dict):
                 cache = {**cache, **seeded}
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 4660, _exc)
         if not cache:
             return data
         seen = {str(row.get('event_id') or row.get('id') or '') for row in data}
@@ -4705,8 +4700,8 @@ async def decisions_recent(limit: int = 50, tenant_id: str | None = None, reques
                     tenant_hdr = None
             if tenant_hdr:
                 tenant_id = tenant_hdr
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 4708, _exc)
     # H2: If the authenticated API key is scoped to a specific tenant, enforce it regardless
     # of what the caller passes. This prevents cross-tenant data access.
     try:
@@ -4717,8 +4712,8 @@ async def decisions_recent(limit: int = 50, tenant_id: str | None = None, reques
             tenant_id = key_tenant
     except HTTPException:
         raise
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 4720, _exc)
 
     if adapter and hasattr(adapter, 'pool'):
         # Postgres path
@@ -4793,16 +4788,16 @@ async def decisions_recent(limit: int = 50, tenant_id: str | None = None, reques
     try:
         if tenant_id:
             rows = [r for r in rows if (r.get('tenant_id') == tenant_id)]
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 4796, _exc)
     return {'decisions': rows, 'count': len(rows), 'tenant_id': tenant_id}
 
 # Register /decisions/recent now that the handler is defined
 if _CANONICAL_FULL_ROUTES_ENABLED:
     try:
         app.get('/api/v1/decisions/recent', summary='Recent decisions persisted in database')(decisions_recent)  # type: ignore[misc]
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 4804, _exc)
 
 @app.get('/api/v1/decisions/cache_stats', summary='Decision cache stats (test/lite only)')  # type: ignore[misc]
 def decision_cache_stats() -> dict[str, Any]:
@@ -4822,8 +4817,8 @@ def decision_cache_stats() -> dict[str, Any]:
         try:
             for k in list(DECISION_CACHE)[:50]:
                 keys.append(str(k))
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 4825, _exc)
     return {'status': 'ok', 'cache_size': size, 'sample_keys': keys}
 
 @app.get('/api/v1/health', summary='Platform health & metrics presence')  # type: ignore[misc]
@@ -4888,10 +4883,10 @@ async def baseline_entity(entity_type: str, entity_id: str, metric: str, current
         except Exception:
             try:
                 _baseline_endpoint_latency.observe(_t.perf_counter()-_start)
-            except Exception:
-                pass
-    except Exception:
-        pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 4891, _exc)
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 4893, _exc)
     return {'entity_type': entity_type, 'entity_id': entity_id, 'metric': metric, **res}
 
 @app.post('/api/v1/baselines/zscores', summary='Batch baseline z-scores')  # type: ignore[misc]
@@ -4909,10 +4904,10 @@ async def baseline_batch(payload: BaselineBatchRequest, auth=Depends(require_sco
         except Exception:
             try:
                 _baseline_endpoint_latency.observe(_t.perf_counter()-_start)
-            except Exception:
-                pass
-    except Exception:
-        pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 4912, _exc)
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 4914, _exc)
     return {'results': results, 'count': len(results)}
 
 @app.delete('/api/v1/baselines/entity/{entity_type}/{entity_id}/{metric}', summary='Delete a specific baseline record')  # type: ignore[misc]
@@ -4945,8 +4940,8 @@ def metrics_self_test() -> dict[str, Any]:
         if GLOBAL_REG:
             for fam in GLOBAL_REG.collect():
                 names_present.add(fam.name)
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 4948, _exc)
     missing = []
     for name,_ in expected_metrics().items():
         if name not in names_present:
@@ -5005,10 +5000,10 @@ async def decision_risk_explain(event_id: str, request: Request) -> dict[str, An
                     if is_policy_triage_enabled(tenant_id, api_key):
                         out['final_decision'] = 'review'
                         out['policy_forced'] = True
-                except Exception:
-                    pass
-            except Exception:
-                pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 5008, _exc)
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 5010, _exc)
             return out
         # Otherwise compute on-demand
         try:
@@ -5124,8 +5119,8 @@ async def label_decision(event_id: str, payload: LabelPayload, request: Request,
         # audit label writes
         user = audit_user(request=request, auth=auth)
         audit_emit('label_written', user, {'event_id': event_id, 'label': label, 'source': payload.source, 'reviewer': payload.reviewer})
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 5127, _exc)
     return {'status': 'ok', 'event_id': event_id, 'label': label, 'factors_count': len(factors)}
 
 if not _CANONICAL_FULL_ROUTES_ENABLED:
@@ -5133,8 +5128,8 @@ if not _CANONICAL_FULL_ROUTES_ENABLED:
         from src.api.app import _remove_canonical_label_routes as _drop_label_routes, _register_lite_label_route as _ensure_lite_labels  # type: ignore
         _drop_label_routes()
         _ensure_lite_labels()
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 5136, _exc)
 
 
 # Factor feedback endpoint to capture analyst up/down votes per factor
@@ -5170,8 +5165,8 @@ async def factor_feedback(payload: FactorFeedbackPayload, request: Request, auth
     try:
         user = audit_user(request=request, auth=auth)
         audit_emit('factor_feedback', user, {'event_id': ev, 'factor': fac, 'vote': int(payload.vote), 'tenant_id': tenant_id})
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 5173, _exc)
     return {'status': 'ok', 'event_id': ev, 'factor': fac, 'vote': int(payload.vote), 'tenant_id': tenant_id}
 
 @app.get('/api/v1/quality/factors/summary', summary='Summarize factor quality & promotion states')  # type: ignore[misc]
@@ -5199,8 +5194,8 @@ if not _CANONICAL_FULL_ROUTES_ENABLED:
         from src.api.app import _remove_canonical_factor_status_route as _drop_factor_status, _register_lite_factor_status_route as _ensure_factor_status  # type: ignore
         _drop_factor_status()
         _ensure_factor_status()
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 5202, _exc)
 
 @app.get('/api/v1/risk/calibration/export', summary='Export labeled samples for calibration')  # type: ignore[misc]
 async def calibration_export(limit: int = 1000, auth=Depends(require_scopes('feedback.write'))):  # type: ignore[misc]
@@ -5270,8 +5265,8 @@ async def accept_proposal(ts: float, request: Request, auth=Depends(require_scop
         try:
             user = audit_user(request=request, auth=auth)
             audit_emit('calibration_accept', user, {'ts': ts})
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 5273, _exc)
         return {'status': 'accepted', 'ts': ts}
     except HTTPException:
         raise
@@ -5290,8 +5285,8 @@ async def reject_proposal(ts: float, request: Request, auth=Depends(require_scop
         try:
             user = audit_user(request=request, auth=auth)
             audit_emit('calibration_reject', user, {'ts': ts})
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 5293, _exc)
         return {'status': 'rejected', 'ts': ts}
     except HTTPException:
         raise
@@ -5313,8 +5308,8 @@ async def calibration_auto_accept(apply: bool = False, min_samples: int = 50, mi
         try:
             user = audit_user(request=request, auth=auth)
             audit_emit('calibration_auto_accept', user, {'apply': apply, 'min_samples': min_samples, 'min_ll_delta': min_ll_delta, 'result_ok': bool(res.get('ok'))})
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 5316, _exc)
         return res
     except Exception as exc:
         LOGGER.debug('Auto-accept evaluation failed: %s', exc, exc_info=exc)
@@ -5381,8 +5376,8 @@ async def calibration_report(request: Request, auth=Depends(require_scopes('fact
         try:
             user = audit_user(request=request, auth=auth)
             audit_emit('calibration_report_view', user, {'ts': p.get('ts')})
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 5384, _exc)
         return HTMLResponse('\n'.join(html))
     except Exception as exc:
         LOGGER.debug('Report render failed: %s', exc, exc_info=exc)
@@ -5532,8 +5527,8 @@ async def network_summary(limit_events: int = 1000) -> dict[str, Any]:
             if host and isinstance(nxd, (int,float)) and isinstance(tot, (int,float)) and tot > 0:
                 prev = nx_by_host.get(str(host), (0,0))
                 nx_by_host[str(host)] = (prev[0] + int(nxd), prev[1] + int(tot))
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 5535, _exc)
     # threshold from env or default
     try:
         nx_thr = float(os.getenv('ZEEK_NXDOMAIN_RATE_THRESHOLD', '0.35') or 0.35)
@@ -5587,8 +5582,8 @@ async def network_summary(limit_events: int = 1000) -> dict[str, Any]:
             if cnt >= 50:
                 break
         hunt_metrics['lolbins'] = cnt
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 5590, _exc)
     # Feature flags (exposed for UI to toggle experimental panels)
     try:
         from core.feature_flags import all_flags as _all_flags  # type: ignore
@@ -5653,8 +5648,8 @@ async def _record_decision_async(event_id: str, verdict: str, confidence: float,
                 ],
                 'recommended_actions': getattr(chain, 'recommended_actions', []),
             }
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 5656, _exc)
         # Scenario enrichment (PASTA Phase 1) + risk factor injection
         try:
             from core.threat_modeling.scenario_engine import ENGINE as _SCEN_ENGINE
@@ -5687,9 +5682,8 @@ async def _record_decision_async(event_id: str, verdict: str, confidence: float,
                 if added_any:
                     # persist updated factors into dec
                     dec['factors'] = factors
-        except Exception:
-            # Silent failure – enrichment is best-effort
-            pass
+        except Exception as _exc:  # Silent failure – enrichment is best-effort
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 5690, _exc)
         # Insert / rotate cache with simple confidence fusion and bounded size
         cache = globals().get('DECISION_CACHE')
         max_cache = int(os.getenv('SLO_DECISION_CACHE_MAX', '5000') or 5000)
@@ -5707,8 +5701,8 @@ async def _record_decision_async(event_id: str, verdict: str, confidence: float,
                     prev_insights = prior.get('correlation_insights') if isinstance(prior, dict) else getattr(prior, 'correlation_insights', None)
                     if prev_insights and 'correlation_insights' not in dec:
                         dec['correlation_insights'] = list(prev_insights)
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 5710, _exc)
             # Attach intel_summary: small vendor->hits list (best-effort)
             try:
                 from integrations.threat_intel_client import CLIENT as _TI  # type: ignore
@@ -5724,8 +5718,8 @@ async def _record_decision_async(event_id: str, verdict: str, confidence: float,
                                 conf = _TI.ioc_confidence(kind, str(v))
                                 if conf is not None:
                                     intel_summary.setdefault('threat_intel', []).append({'kind': kind, 'value': v, 'confidence': conf, 'origin': _TI.origin_for(str(v))})
-                            except Exception:
-                                pass
+                            except Exception as _exc:
+                                logger.debug('silent_swallow at %s:%d: %s', __file__, 5727, _exc)
                 # fallback: per-factor mapping (check tokens)
                 if not intel_summary:
                     for f in factors:
@@ -5736,13 +5730,12 @@ async def _record_decision_async(event_id: str, verdict: str, confidence: float,
                                 k = 'ioc'
                                 c = _TI.ioc_confidence('domain', token) or _TI.ioc_confidence('ip', token) or _TI.ioc_confidence('hash', token) or None
                                 intel_summary.setdefault('threat_intel', []).append({'kind': k, 'value': token, 'confidence': c, 'origin': _TI.origin_for(token)})
-                        except Exception:
-                            pass
+                        except Exception as _exc:
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 5739, _exc)
                 if intel_summary:
                     dec['intel_summary'] = intel_summary
-            except Exception:
-                # best-effort; skip if intel client missing
-                pass
+            except Exception as _exc:  # best-effort; skip if intel client missing
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 5743, _exc)
 
             # If a DecisionRecord (or dict) already exists in the cache (e.g. the
             # synchronous ingest path placed a DecisionRecord with correlation_factors),
@@ -5767,16 +5760,16 @@ async def _record_decision_async(event_id: str, verdict: str, confidence: float,
                                 dec['correlation_factors'] = list(prev_cf)
                                 try:
                                     LOGGER.debug('preserved synchronous correlation_factors for event %s (count=%d)', event_id, len(prev_cf))
-                                except Exception:
-                                    pass
+                                except Exception as _exc:
+                                    logger.debug('silent_swallow at %s:%d: %s', __file__, 5770, _exc)
                             except Exception:
                                 dec['correlation_factors'] = prev_cf
                         if prev_tnt and not dec.get('tenant_id'):
                             dec['tenant_id'] = prev_tnt
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 5776, _exc)
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 5778, _exc)
             # If a prior cached entry exists and is object-like (e.g. Pydantic
             # DecisionRecord), update it in-place so tests and callers holding
             # references continue to see attributes (avoid replacing with a
@@ -5796,19 +5789,19 @@ async def _record_decision_async(event_id: str, verdict: str, confidence: float,
                                     for kk, vv in v.items():
                                         try:
                                             setattr(prior_cached, kk, vv)
-                                        except Exception:
-                                            pass
-                            except Exception:
-                                pass
+                                        except Exception as _exc:
+                                            logger.debug('silent_swallow at %s:%d: %s', __file__, 5799, _exc)
+                            except Exception as _exc:
+                                logger.debug('silent_swallow at %s:%d: %s', __file__, 5801, _exc)
                     # ensure mapping reflects same object reference
                     try:
                         cache[event_id] = prior_cached
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 5806, _exc)
                 else:
                     cache[event_id] = dec
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 5810, _exc)
             # trim if exceeds configured max: evict oldest by timestamp (more stable than dict order)
             try:
                 if len(cache) > max_cache:
@@ -5825,8 +5818,8 @@ async def _record_decision_async(event_id: str, verdict: str, confidence: float,
                     to_evict = [k for k, _ in items[:evict_n]]
                     for k in to_evict:
                         cache.pop(k, None)
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 5828, _exc)
         # Update tenant decisions gauge (best-effort)
         try:
             from .metrics_init import tenant_decisions_gauge  # type: ignore
@@ -5839,11 +5832,11 @@ async def _record_decision_async(event_id: str, verdict: str, confidence: float,
                         try:
                             if (v.get('tenant_id') if isinstance(v, dict) else getattr(v,'tenant_id', None)) in {tnt}:
                                 cnt += 1
-                        except Exception:
-                            pass
+                        except Exception as _exc:
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 5842, _exc)
                     _emit_metric_set(tenant_decisions_gauge, globals().get('_RUNTIME'), {'tenant_id': tnt}, tnt, cnt)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 5845, _exc)
         # Fire SSE publish (async)
         try:
             # Robust resolution: scan sys.modules for a module that exposes the
@@ -5878,8 +5871,8 @@ async def _record_decision_async(event_id: str, verdict: str, confidence: float,
                         if rd is not None:
                             try:
                                 rd.append(dec)
-                            except Exception:
-                                pass
+                            except Exception as _exc:
+                                logger.debug('silent_swallow at %s:%d: %s', __file__, 5881, _exc)
                         p = getattr(m, 'publish_decision', None)
                         if p:
                             pubs.append(p)
@@ -5890,10 +5883,10 @@ async def _record_decision_async(event_id: str, verdict: str, confidence: float,
                     from .decisions_stream import _RECENT_DECISIONS as _RECENT_DECISIONS_FALLBACK
                     try:
                         _RECENT_DECISIONS_FALLBACK.append(dec)
-                    except Exception:
-                        pass
-                except Exception:
-                    pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 5893, _exc)
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 5895, _exc)
 
                 # Invoke publishers (await each; best-effort)
                 for pub in pubs:
@@ -5902,14 +5895,14 @@ async def _record_decision_async(event_id: str, verdict: str, confidence: float,
                         if asyncio.iscoroutine(maybe):
                             try:
                                 await maybe
-                            except Exception:
-                                pass
-                    except Exception:
-                        pass
-            except Exception:
-                pass
-        except Exception:
-            pass
+                            except Exception as _exc:
+                                logger.debug('silent_swallow at %s:%d: %s', __file__, 5905, _exc)
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 5907, _exc)
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 5909, _exc)
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 5911, _exc)
         # Compose a risk score and persist in background (best-effort).
         try:
             from core.risk_score import compose_risk_score
@@ -5925,8 +5918,8 @@ async def _record_decision_async(event_id: str, verdict: str, confidence: float,
                         nv = first_cl.get('novelty')
                         if isinstance(nv,(int,float)):
                             decision_obj['novelty_score'] = float(nv)
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 5928, _exc)
                 try:
                     rs = await compose_risk_score(decision_obj, tenant_id=decision_obj.get('tenant_id'))
                     if rs:
@@ -5969,11 +5962,10 @@ async def _record_decision_async(event_id: str, verdict: str, confidence: float,
                                 ci95=tuple(rs.get('ci95')) if rs.get('ci95') else None,
                             )
                             FACTOR_ATTRIBUTIONS.add_snapshot(snap)
-                        except Exception:
-                            # best-effort; do not disrupt pipeline
-                            pass
-                except Exception:
-                    pass
+                        except Exception as _exc:  # best-effort; do not disrupt pipeline
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 5972, _exc)
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 5975, _exc)
                 # Optional auto-escalation after composition
                 try:
                     auto_flag = os.getenv('RISK_AUTO_ESCALATE','0').lower() in {'1','true','yes'}
@@ -5984,8 +5976,8 @@ async def _record_decision_async(event_id: str, verdict: str, confidence: float,
                             thr = 0.8
                         if decision_obj['risk_score'] >= thr and decision_obj.get('verdict','').upper() != 'MALICIOUS':
                             decision_obj['verdict'] = 'SUSPICIOUS' if decision_obj['risk_score'] < 0.95 else 'MALICIOUS'
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 5987, _exc)
                 # persistence (best-effort)
                 try:
                     decisions_repo = globals().get('decisions_repo')
@@ -6001,22 +5993,21 @@ async def _record_decision_async(event_id: str, verdict: str, confidence: float,
                                 if mod is not None and getattr(mod, '_PERSISTED_DECISIONS', None) is not _PERSISTED_DECISIONS:
                                     try:
                                         setattr(mod, '_PERSISTED_DECISIONS', _PERSISTED_DECISIONS)
-                                    except Exception:
-                                        pass
-                        except Exception:
-                            pass
-                    except Exception:
-                        pass
+                                    except Exception as _exc:
+                                        logger.debug('silent_swallow at %s:%d: %s', __file__, 6004, _exc)
+                        except Exception as _exc:
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 6006, _exc)
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 6008, _exc)
                     if decisions_repo and callable(getattr(decisions_repo, 'persist', None)):
                         try:
                             maybe = decisions_repo.persist(payload)
                             if asyncio.iscoroutine(maybe):
                                 await maybe
-                        except Exception:
-                            # best-effort fallback: ignore
-                            pass
-                except Exception:
-                    pass
+                        except Exception as _exc:  # best-effort fallback: ignore
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 6015, _exc)
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 6018, _exc)
                 # Temporal model scoring (best-effort)
                 try:
                     from src.ml.temporal_model import GLOBAL_TEMPORAL_MODEL  # type: ignore
@@ -6039,11 +6030,10 @@ async def _record_decision_async(event_id: str, verdict: str, confidence: float,
                             temporal_entities_total.set(GLOBAL_TEMPORAL_MODEL.stats().get('entities', 0))
                         if temporal_avg_score:
                             temporal_avg_score.set(GLOBAL_TEMPORAL_MODEL.stats().get('avg_score', 0.0))
-                    except Exception:
-                        pass
-                except Exception:
-                    # best-effort; ignore temporal errors
-                    pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 6042, _exc)
+                except Exception as _exc:  # best-effort; ignore temporal errors
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 6044, _exc)
 
                 # Correlation rules: evaluate and attach any fired rules as factors
                 try:
@@ -6103,15 +6093,14 @@ async def _record_decision_async(event_id: str, verdict: str, confidence: float,
                                 graph_evidence['examples'] = examples
                                 try:
                                     LOGGER.debug('attached %d graph evidence examples for event %s', len(examples), decision_obj.get('event_id'))
-                                except Exception:
-                                    pass
-                        except Exception:
-                            # non-fatal; continue without examples
-                            pass
+                                except Exception as _exc:
+                                    logger.debug('silent_swallow at %s:%d: %s', __file__, 6106, _exc)
+                        except Exception as _exc:  # non-fatal; continue without examples
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 6108, _exc)
                         if graph_evidence:
                             decision_obj['graph_evidence'] = graph_evidence
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 6113, _exc)
                     # persist structured correlation_factors
                     if corr_objs:
                         # merge with any existing structured correlation_factors
@@ -6119,8 +6108,8 @@ async def _record_decision_async(event_id: str, verdict: str, confidence: float,
                         decision_obj['correlation_factors'] = existing + corr_objs
                     # persist updated factors back into decision object
                     decision_obj['factors'] = list(factors)
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 6122, _exc)
 
             # run composition and persist in background to avoid blocking
             try:
@@ -6131,17 +6120,17 @@ async def _record_decision_async(event_id: str, verdict: str, confidence: float,
                     # fallback: fire-and-forget via asyncio.create_task
                     try:
                         asyncio.create_task(_compose_and_persist(dec, meta))
-                    except Exception:
-                        pass
-            except Exception:
-                pass
-        except Exception:
-            pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 6134, _exc)
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 6136, _exc)
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 6138, _exc)
     except Exception:
         try:
             LOGGER.exception('_record_decision_async failed')
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 6143, _exc)
 
 
 @app.post('/api/v1/evict/decisions', summary='Evict decisions to reduce memory')
@@ -6168,8 +6157,8 @@ def evict_decisions(limit: int | None = None) -> dict[str, Any]:
         for k in list(cache.keys())[:evict_count]:
             cache.pop(k, None)
             evicted += 1
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 6171, _exc)
     return {'evicted': evicted, 'current': len(cache), 'target': target}
 
 
@@ -6190,24 +6179,24 @@ def _record_decision(event_id: str, verdict: str, confidence: float, factors: li
                     exc = t.exception()
                     if exc:
                         LOGGER.exception('background task failed', exc_info=exc)
-                except asyncio.CancelledError:
-                    pass
+                except asyncio.CancelledError as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 6193, _exc)
                 except Exception:
                     try:
                         LOGGER.exception('background task callback error')
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 6198, _exc)
             try:
                 task.add_done_callback(_cb)
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 6202, _exc)
             return task
         except Exception:
             # Fallback: run synchronously if we cannot schedule
             try:
                 return asyncio.run(coro)
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 6209, _exc)
 
     try:
         loop = asyncio.get_event_loop()
@@ -6241,19 +6230,19 @@ def _record_decision(event_id: str, verdict: str, confidence: float, factors: li
                                 exc = f.exception()
                                 if exc:
                                     LOGGER.exception('sse-scheduled _record_decision_async failed', exc_info=exc)
-                            except Exception:
-                                pass
+                            except Exception as _exc:
+                                logger.debug('silent_swallow at %s:%d: %s', __file__, 6244, _exc)
                         fut.add_done_callback(_on_done)
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 6247, _exc)
                 except Exception:
                     try:
                         _safe_schedule(_record_decision_async(event_id, verdict, confidence, factors, meta))
                     except Exception:
                         try:
                             asyncio.run(_record_decision_async(event_id, verdict, confidence, factors, meta))
-                        except Exception:
-                            pass
+                        except Exception as _exc:
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 6255, _exc)
             else:
                 try:
                     _safe_schedule(_record_decision_async(event_id, verdict, confidence, factors, meta))
@@ -6261,19 +6250,19 @@ def _record_decision(event_id: str, verdict: str, confidence: float, factors: li
                     try:
                         # Last resort: run sync
                         asyncio.run(_record_decision_async(event_id, verdict, confidence, factors, meta))
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 6264, _exc)
         except Exception:
             try:
                 # Last resort: run sync
                 asyncio.run(_record_decision_async(event_id, verdict, confidence, factors, meta))
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 6270, _exc)
     else:
         try:
             asyncio.run(_record_decision_async(event_id, verdict, confidence, factors, meta))
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 6275, _exc)
 
 
 _EXTRA_DECISION_FIELDS = (

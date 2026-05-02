@@ -88,8 +88,8 @@ def _snapshot_dir() -> Path:
     path = Path(os.getenv('GRAPH_SESSION_SNAPSHOT_DIR', os.path.join(os.getenv('SESSION_PERSIST_DIR', 'data/sessions'), 'graph_snapshots')))
     try:
         path.mkdir(parents=True, exist_ok=True)
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 91, _exc)
     return path
 
 
@@ -388,8 +388,8 @@ def _build_correlation_business_narrative(summary: Dict[str, Any], payload: Dict
     try:
         from src.api.insights_endpoints import _get_tenant_business_context
         biz_ctx = _get_tenant_business_context(tenant_hint, None) or ''
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 391, _exc)
     biz_line = f'\nBUSINESS CONTEXT: {biz_ctx}' if biz_ctx else ''
 
     prompt = (
@@ -414,8 +414,8 @@ def _build_correlation_business_narrative(summary: Dict[str, Any], payload: Dict
         text = text.strip()
         if text and len(text) > 80:
             return text
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 417, _exc)
     return None
 
 
@@ -643,8 +643,8 @@ def _queue_degraded_factors(session_id: str, factors: List[Any], dependency_stat
             'dependency_status': dependency_status,
         }
         _DEGRADED_FACTOR_QUEUE.append(entry)
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 646, _exc)
 
 
 def _replay_degraded_factors(summary: Dict[str, Any], dependency_status: Dict[str, Any]) -> None:
@@ -677,8 +677,8 @@ def _replay_degraded_factors(summary: Dict[str, Any], dependency_status: Dict[st
                 'batch_count': replayed,
                 'sessions': [entry.get('session_id') for entry in replayed_entries if entry.get('session_id')],
             })
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 680, _exc)
 
 
 def _derive_kill_chain_tags(mapping: Dict[str, Any] | None, factors: List[Any]) -> List[str]:
@@ -867,9 +867,8 @@ def _build_initial_discoveries(session_id: str, summary: Dict[str, Any]) -> None
                         continue
                 disc['fingerprint'] = _fingerprint_discovery(disc)
                 _DISCOVERIES[disc['id']] = disc
-            except Exception:
-                # ignore malformed factor entries and continue building discoveries
-                pass
+            except Exception as _exc:  # ignore malformed factor entries and continue building discoveries
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 870, _exc)
         for key, ps in (summary.get('path_scores') or {}).items():
             sc = ps.get('score') if isinstance(ps, dict) else None
             if sc is None:
@@ -908,10 +907,10 @@ def _build_initial_discoveries(session_id: str, summary: Dict[str, Any]) -> None
                 }
                 disc['fingerprint'] = _fingerprint_discovery(disc)
                 _DISCOVERIES[disc['id']] = disc
-            except Exception:
-                pass
-    except Exception:
-        pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 911, _exc)
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 913, _exc)
 
 def _ewma_smooth(matrix: Dict[str, Dict[str, float]], alpha: float) -> Dict[str, Dict[str, float]]:
     if alpha < 0.0 or alpha > 1.0:
@@ -940,8 +939,8 @@ async def build_session(
     try:
         _ = args  # no-op to silence linters
         _ = kwargs
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 943, _exc)
     # If payload was not injected by FastAPI, attempt to parse JSON body from request.
     # Payload is injected by FastAPI Body; ensure dict fallback if anything goes awry.
     if payload is None or not isinstance(payload, dict):
@@ -963,8 +962,8 @@ async def build_session(
                     parsed = _json.loads(raw.decode('utf-8') or '{}')
                     if isinstance(parsed, dict):
                         payload = parsed
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 966, _exc)
     try:
         tenant_id = resolve_tenant_id(request, payload.get('tenant') if isinstance(payload, dict) else None)
     except Exception:
@@ -1014,10 +1013,10 @@ async def build_session(
                         runtime = SimpleNamespace()
                     # Attach test_ips list for detectors to consume
                     setattr(runtime, 'test_ips', list(test_ips))
-                except Exception:
-                    pass
-        except Exception:
-            pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 1017, _exc)
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 1019, _exc)
         if not isinstance(raw_mapping, dict):
             raw_mapping = {}
         from src.core.mapping.canonical import suggest
@@ -1037,16 +1036,16 @@ async def build_session(
             if not isinstance(exc, _ContinueBuild):
                 import traceback
                 logger.exception('Unhandled exception in build_session preamble: %s', exc)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 1040, _exc)
         # Propagate explicit client errors (e.g., missing_session_ids) as HTTP 400
         try:
             status = getattr(exc, 'status_code', None)
             detail = getattr(exc, 'detail', None)
             if status in (400, 422) and (detail in ('missing_session_ids', 'invalid_alpha') or isinstance(exc, HTTPException)):
                 raise exc
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 1048, _exc)
         # Provide safe defaults only when preamble variables are missing
         if 'session_ids' not in locals():
             session_ids = []
@@ -1159,8 +1158,8 @@ async def build_session(
                     batch_value_sets[sid] = value_sets
                     # Inline handled; skip other loaders
                     continue
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 1162, _exc)
             if helper_payload and isinstance(helper_payload, dict):
                 for raw_field, values in helper_payload.items():
                     target = raw_field if raw_field in value_sets else suggest(raw_field)
@@ -1218,8 +1217,8 @@ async def build_session(
                                     if v:
                                         try:
                                             value_sets[f].add(str(v))
-                                        except Exception:
-                                            pass
+                                        except Exception as _exc:
+                                            logger.debug('silent_swallow at %s:%d: %s', __file__, 1221, _exc)
                                 try:
                                     factors = r.get('factors')
                                     if isinstance(factors, list):
@@ -1228,8 +1227,8 @@ async def build_session(
                                                 file_batch_factor_names.append(str(fac))
                                     elif isinstance(factors, str):
                                         file_batch_factor_names.append(factors)
-                                except Exception:
-                                    pass
+                                except Exception as _exc:
+                                    logger.debug('silent_swallow at %s:%d: %s', __file__, 1231, _exc)
                             batch_source[sid] = 'runtime'
                         else:
                             value_sets = None
@@ -1289,8 +1288,8 @@ async def build_session(
             try:
                 if overlap_row[sid] == 0.0 and batch_source.get(sid) == 'inline':
                     overlap_row[sid] = 5.0
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 1292, _exc)
             for other in session_ids:
                 if other == sid:
                     continue
@@ -1317,8 +1316,8 @@ async def build_session(
                                 inline_common += 1
                         if inline_common > common:
                             common = inline_common
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 1320, _exc)
                 overlap_row[other] = float(common)
             overlap_matrix[sid] = overlap_row
 
@@ -1333,8 +1332,8 @@ async def build_session(
                             if a == b:
                                 continue
                             overlap_matrix[a][b] = 3.0
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 1336, _exc)
 
         # Prepare collector for runtime detector findings
         detected_factors: List[Any] = []
@@ -1368,12 +1367,12 @@ async def build_session(
                                 detected_factors.append(r)
                                 try:
                                     confidence = min(0.99, confidence + float(r.get('score',0))*0.4)
-                                except Exception:
-                                    pass
-                            except Exception:
-                                pass
-                    except Exception:
-                        pass
+                                except Exception as _exc:
+                                    logger.debug('silent_swallow at %s:%d: %s', __file__, 1371, _exc)
+                            except Exception as _exc:
+                                logger.debug('silent_swallow at %s:%d: %s', __file__, 1373, _exc)
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 1375, _exc)
                 if detect_file_encryption_wave:
                     try:
                         fw = detect_file_encryption_wave(runtime)
@@ -1382,12 +1381,12 @@ async def build_session(
                                 detected_factors.append(f)
                                 try:
                                     confidence = min(0.99, confidence + float(f.get('score',0))*0.6)
-                                except Exception:
-                                    pass
-                            except Exception:
-                                pass
-                    except Exception:
-                        pass
+                                except Exception as _exc:
+                                    logger.debug('silent_swallow at %s:%d: %s', __file__, 1385, _exc)
+                            except Exception as _exc:
+                                logger.debug('silent_swallow at %s:%d: %s', __file__, 1387, _exc)
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 1389, _exc)
                 if detect_unsigned_network_launch:
                     try:
                         ul = detect_unsigned_network_launch(runtime)
@@ -1396,12 +1395,12 @@ async def build_session(
                                 detected_factors.append(u)
                                 try:
                                     confidence = min(0.99, confidence + float(u.get('score',0))*0.35)
-                                except Exception:
-                                    pass
-                            except Exception:
-                                pass
-                    except Exception:
-                        pass
+                                except Exception as _exc:
+                                    logger.debug('silent_swallow at %s:%d: %s', __file__, 1399, _exc)
+                            except Exception as _exc:
+                                logger.debug('silent_swallow at %s:%d: %s', __file__, 1401, _exc)
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 1403, _exc)
                 if detect_file_entropy_writes:
                     try:
                         fe = detect_file_entropy_writes(runtime)
@@ -1409,10 +1408,10 @@ async def build_session(
                             detected_factors.append(e)
                             try:
                                 confidence = min(0.99, confidence + float(e.get('score',0))*0.4)
-                            except Exception:
-                                pass
-                    except Exception:
-                        pass
+                            except Exception as _exc:
+                                logger.debug('silent_swallow at %s:%d: %s', __file__, 1412, _exc)
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 1414, _exc)
                 if detect_shadowcopy_commands:
                     try:
                         vss_cmds = detect_shadowcopy_commands(runtime)
@@ -1420,10 +1419,10 @@ async def build_session(
                             detected_factors.append(sc)
                             try:
                                 confidence = min(0.99, confidence + float(sc.get('score',0))*0.55)
-                            except Exception:
-                                pass
-                    except Exception:
-                        pass
+                            except Exception as _exc:
+                                logger.debug('silent_swallow at %s:%d: %s', __file__, 1423, _exc)
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 1425, _exc)
                 if detect_vss_service_tamper:
                     try:
                         vss_svcs = detect_vss_service_tamper(runtime)
@@ -1431,10 +1430,10 @@ async def build_session(
                             detected_factors.append(st)
                             try:
                                 confidence = min(0.99, confidence + float(st.get('score',0))*0.45)
-                            except Exception:
-                                pass
-                    except Exception:
-                        pass
+                            except Exception as _exc:
+                                logger.debug('silent_swallow at %s:%d: %s', __file__, 1434, _exc)
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 1436, _exc)
                 if detect_file_write_rate_spike:
                     try:
                         bursts = detect_file_write_rate_spike(runtime)
@@ -1442,10 +1441,10 @@ async def build_session(
                             detected_factors.append(burst)
                             try:
                                 confidence = min(0.99, confidence + float(burst.get('score',0))*0.6)
-                            except Exception:
-                                pass
-                    except Exception:
-                        pass
+                            except Exception as _exc:
+                                logger.debug('silent_swallow at %s:%d: %s', __file__, 1445, _exc)
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 1447, _exc)
                 if orchestrate_ransomware_signals:
                     try:
                         fusion = orchestrate_ransomware_signals(runtime, detected_factors)
@@ -1453,21 +1452,21 @@ async def build_session(
                             detected_factors.append(fusion)
                             try:
                                 confidence = min(0.995, confidence + float(fusion.get('score',0))*0.7)
-                            except Exception:
-                                pass
+                            except Exception as _exc:
+                                logger.debug('silent_swallow at %s:%d: %s', __file__, 1456, _exc)
                             try:
                                 verdict = fusion.get('verdict') or verdict
-                            except Exception:
-                                pass
-                    except Exception:
-                        pass
+                            except Exception as _exc:
+                                logger.debug('silent_swallow at %s:%d: %s', __file__, 1460, _exc)
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 1462, _exc)
             if summarize_ransomware_context and runtime is not None:
                 try:
                     ransomware_metrics = summarize_ransomware_context(runtime, detected_factors)
                 except Exception:
                     ransomware_metrics = None
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 1469, _exc)
 
         # Build detailed intersection sets per pair
         overlap_details: Dict[str, Dict[str, Dict[str, List[str]]]] = {}
@@ -1492,8 +1491,8 @@ async def build_session(
                     try:
                         if 'ip_src' in pair and 'ip' not in pair:
                             pair['ip'] = list(pair['ip_src'])
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 1495, _exc)
                     if pair:
                         overlap_details.setdefault(a, {})[b] = pair
         except Exception:
@@ -1555,8 +1554,8 @@ async def build_session(
             supp_count = sum(1 for f in supp if coverage_frac.get(f,0) > 0.0)
             if supp_count >= 2:
                 factors.append({'factor':'mapping_semantics_support','score': round(min(0.5, supp_count * 0.02),3)})
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 1558, _exc)
 
         missing_factor_objs = []
         for mb in sorted(list(missing_batches)):
@@ -1601,8 +1600,8 @@ async def build_session(
                             nx_thr = 0.35
                     if highest_rate and highest_rate >= nx_thr:
                         factors.append({'batch_id': None, 'factor': 'nxdomain_rate_high', 'reason': f'nxdomain rate {highest_rate:.2f} observed for {producer}', 'score': 0.65})
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 1604, _exc)
 
         base_conf = 0.4 + avg_diversity * 0.4
         # Clamp early to avoid exceeding upper bound after later bonuses
@@ -1629,15 +1628,15 @@ async def build_session(
                     if name and str(name).startswith('mapping_semantics'):
                         try:
                             mapping_score_sum += float(f.get('score') or 0.0)
-                        except Exception:
-                            pass
+                        except Exception as _exc:
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 1632, _exc)
             # Scale mapping bonus: up to 0.12 added to confidence
             mapping_bonus = min(0.12, mapping_score_sum * 0.12)
             confidence = min(0.95, confidence + mapping_bonus)
             # update verdict after mapping bonus
             verdict = 'escalate' if confidence >= 0.75 else ('watch' if confidence >= 0.55 else 'benign')
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 1639, _exc)
 
         # Temporal sequencer integration (feature-flagged)
         sequencer = get_sequencer()
@@ -1664,14 +1663,14 @@ async def build_session(
                             from .metrics_init import ensure_metrics, temporal_sequence_matches  # type: ignore
                             ensure_metrics()
                             temporal_sequence_matches.labels(pattern=p).inc()
-                        except Exception:
-                            pass
+                        except Exception as _exc:
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 1667, _exc)
                     # Confidence bonus for temporal pattern presence
                     confidence = min(0.95, confidence + 0.04)
                     verdict = 'escalate' if confidence >= 0.75 else ('watch' if confidence >= 0.55 else 'benign')
                     temporal_bonus = 0.04
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 1673, _exc)
 
         # ---------------- Co-occurrence & Suppression (PMI-based) ----------------
         co_pairs_export: List[Dict[str,Any]] = []
@@ -1744,20 +1743,20 @@ async def build_session(
                         try:
                             ensure_metrics()
                             cooccurrence_pair_counter.labels(pair=f"{a}__{b}").inc(p.get('raw_count') or 1)
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
+                        except Exception as _exc:
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 1747, _exc)
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 1749, _exc)
             try:
                 add_pairs(observed_pairs)
                 ensure_metrics()
                 # update unique pairs gauge
                 up = co_stats().get('unique_pairs')
                 cooccurrence_unique_pairs.set(up or 0)
-            except Exception:
-                pass
-        except Exception:
-            pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 1757, _exc)
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 1759, _exc)
         # Run additional detectors when runtime is available (test helpers may seed runtime)
         try:
             from src.core.detectors.dns_exfil import dns_exfil_factors
@@ -1824,8 +1823,8 @@ async def build_session(
                     try:
                         factors.append({'batch_id': None, 'factor': d.get('factor'), 'reason': d.get('reason'), 'score': d.get('score'), 'producer': d.get('producer'), 'nx_rate': d.get('nx_rate'), 'entropy': d.get('entropy')})
                         extra_scores.append(d.get('score') or 0.0)
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 1827, _exc)
             except Exception:
                 dns_f = []
             try:
@@ -1845,16 +1844,16 @@ async def build_session(
                     try:
                         factors.append({'batch_id': None, 'factor': h.get('factor'), 'sha256': h.get('sha256'), 'score': h.get('score'), 'reason': h.get('reason'), 'rarity': h.get('rarity')})
                         extra_scores.append(h.get('score') or 0.0)
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 1848, _exc)
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 1850, _exc)
             try:
                 if extra_scores:
                     uplift = combine_scores(extra_scores, method='prod') * 0.6
                     confidence = min(1.0, confidence + float(uplift))
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 1856, _exc)
             # Beaconing detector
             try:
                 beacons = detect_beaconing(runtime)
@@ -1864,12 +1863,12 @@ async def build_session(
                         # modest uplift
                         try:
                             confidence = min(0.99, confidence + 0.03)
-                        except Exception:
-                            pass
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+                        except Exception as _exc:
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 1867, _exc)
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 1869, _exc)
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 1871, _exc)
             # NXDOMAIN spike detector (runtime-driven)
             try:
                 nxs = detect_nxdomain_spike(runtime)
@@ -1878,12 +1877,12 @@ async def build_session(
                         factors.append(n)
                         try:
                             confidence = min(0.99, confidence + 0.02 * float(n.get('nx_rate',0)))
-                        except Exception:
-                            pass
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+                        except Exception as _exc:
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 1881, _exc)
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 1883, _exc)
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 1885, _exc)
             # Week-1 endpoint rule detectors
             try:
                 if detect_office_macro_powershell:
@@ -1892,40 +1891,40 @@ async def build_session(
                             detected_factors.append(f)
                             try:
                                 confidence = min(0.99, confidence + float(f.get('score',0))*0.35)
-                            except Exception:
-                                pass
-                        except Exception:
-                            pass
+                            except Exception as _exc:
+                                logger.debug('silent_swallow at %s:%d: %s', __file__, 1895, _exc)
+                        except Exception as _exc:
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 1897, _exc)
                 if detect_amsi_bypass:
                     for f in (detect_amsi_bypass(runtime) or []):
                         try:
                             detected_factors.append(f)
                             try:
                                 confidence = min(0.99, confidence + float(f.get('score',0))*0.4)
-                            except Exception:
-                                pass
-                        except Exception:
-                            pass
+                            except Exception as _exc:
+                                logger.debug('silent_swallow at %s:%d: %s', __file__, 1905, _exc)
+                        except Exception as _exc:
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 1907, _exc)
                 if detect_encoded_powershell:
                     for f in (detect_encoded_powershell(runtime) or []):
                         try:
                             detected_factors.append(f)
                             try:
                                 confidence = min(0.99, confidence + float(f.get('score',0))*0.3)
-                            except Exception:
-                                pass
-                        except Exception:
-                            pass
+                            except Exception as _exc:
+                                logger.debug('silent_swallow at %s:%d: %s', __file__, 1915, _exc)
+                        except Exception as _exc:
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 1917, _exc)
                 if detect_scheduled_task_lolbin:
                     for f in (detect_scheduled_task_lolbin(runtime) or []):
                         try:
                             detected_factors.append(f)
                             try:
                                 confidence = min(0.99, confidence + float(f.get('score',0))*0.25)
-                            except Exception:
-                                pass
-                        except Exception:
-                            pass
+                            except Exception as _exc:
+                                logger.debug('silent_swallow at %s:%d: %s', __file__, 1925, _exc)
+                        except Exception as _exc:
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 1927, _exc)
                 # Email attachments
                 if analyze_email_attachments:
                     for f in (analyze_email_attachments(runtime) or []):
@@ -1933,10 +1932,10 @@ async def build_session(
                             detected_factors.append(f)
                             try:
                                 confidence = min(0.99, confidence + float(f.get('score',0))*0.2)
-                            except Exception:
-                                pass
-                        except Exception:
-                            pass
+                            except Exception as _exc:
+                                logger.debug('silent_swallow at %s:%d: %s', __file__, 1936, _exc)
+                        except Exception as _exc:
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 1938, _exc)
                 # IAM privilege escalation
                 if detect_privilege_escalation:
                     for f in (detect_privilege_escalation(runtime) or []):
@@ -1944,38 +1943,38 @@ async def build_session(
                             detected_factors.append(f)
                             try:
                                 confidence = min(0.99, confidence + float(f.get('score',0))*0.25)
-                            except Exception:
-                                pass
-                        except Exception:
-                            pass
+                            except Exception as _exc:
+                                logger.debug('silent_swallow at %s:%d: %s', __file__, 1947, _exc)
+                        except Exception as _exc:
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 1949, _exc)
                 # CloudTrail event scoring
                 if score_cloudtrail_events:
                     for f in (score_cloudtrail_events(runtime) or []):
                         try:
                             detected_factors.append(f)
-                        except Exception:
-                            pass
+                        except Exception as _exc:
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 1956, _exc)
                 # Supply chain detectors
                 if detect_transitive_dependency_vuln:
                     for f in (detect_transitive_dependency_vuln(runtime) or []):
                         try:
                             detected_factors.append(f)
-                        except Exception:
-                            pass
+                        except Exception as _exc:
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 1963, _exc)
                 if detect_behavior_mismatch:
                     for f in (detect_behavior_mismatch(runtime) or []):
                         try:
                             detected_factors.append(f)
-                        except Exception:
-                            pass
+                        except Exception as _exc:
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 1969, _exc)
                 if detect_model_provenance:
                     for f in (detect_model_provenance(runtime) or []):
                         try:
                             detected_factors.append(f)
-                        except Exception:
-                            pass
-            except Exception:
-                pass
+                        except Exception as _exc:
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 1975, _exc)
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 1977, _exc)
             # ASN rarity detector
             try:
                 asns = detect_asn_rarity(runtime)
@@ -1984,12 +1983,12 @@ async def build_session(
                         detected_factors.append(a)
                         try:
                             confidence = min(0.99, confidence + 0.03 * float(a.get('rarity',0)))
-                        except Exception:
-                            pass
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+                        except Exception as _exc:
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 1987, _exc)
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 1989, _exc)
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 1991, _exc)
             # Email BEC detectors
             try:
                 if detect_email_bec:
@@ -1999,12 +1998,12 @@ async def build_session(
                             detected_factors.append(b)
                             try:
                                 confidence = min(0.99, confidence + float(b.get('score',0))*0.2)
-                            except Exception:
-                                pass
-                        except Exception:
-                            pass
-            except Exception:
-                pass
+                            except Exception as _exc:
+                                logger.debug('silent_swallow at %s:%d: %s', __file__, 2002, _exc)
+                        except Exception as _exc:
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 2004, _exc)
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 2006, _exc)
             # IAM anomalies (impossible travel, MFA bypass)
             try:
                 if detect_iam_abuse:
@@ -2014,12 +2013,12 @@ async def build_session(
                             detected_factors.append(f)
                             try:
                                 confidence = min(0.99, confidence + float(f.get('score',0))*0.25)
-                            except Exception:
-                                pass
-                        except Exception:
-                            pass
-            except Exception:
-                pass
+                            except Exception as _exc:
+                                logger.debug('silent_swallow at %s:%d: %s', __file__, 2017, _exc)
+                        except Exception as _exc:
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 2019, _exc)
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 2021, _exc)
             # File signature mismatch detector (inspects runtime file analysis)
             try:
                 # attempt to collect files from runtime
@@ -2040,12 +2039,12 @@ async def build_session(
                         detected_factors.append(m)
                         try:
                             confidence = min(0.99, confidence + float(m.get('score',0))*0.4)
-                        except Exception:
-                            pass
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+                        except Exception as _exc:
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 2043, _exc)
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 2045, _exc)
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 2047, _exc)
             # Entropy & exfil detector
             try:
                 ent = detect_entropy_and_exfil(runtime)
@@ -2054,12 +2053,12 @@ async def build_session(
                         detected_factors.append(e)
                         try:
                             confidence = min(0.99, confidence + float(e.get('score',0))*0.4)
-                        except Exception:
-                            pass
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+                        except Exception as _exc:
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 2057, _exc)
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 2059, _exc)
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 2061, _exc)
             # Lateral movement detector
             try:
                 lmv = detect_lateral_movement(runtime)
@@ -2068,12 +2067,12 @@ async def build_session(
                         detected_factors.append(l)
                         try:
                             confidence = min(0.99, confidence + float(l.get('score',0))*0.4)
-                        except Exception:
-                            pass
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+                        except Exception as _exc:
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 2071, _exc)
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 2073, _exc)
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 2075, _exc)
             # Privilege change detector
             try:
                 pc = detect_privilege_changes(runtime)
@@ -2082,32 +2081,32 @@ async def build_session(
                         detected_factors.append(p)
                         try:
                             confidence = min(0.99, confidence + float(p.get('score',0))*0.4)
-                        except Exception:
-                            pass
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+                        except Exception as _exc:
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 2085, _exc)
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 2087, _exc)
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 2089, _exc)
             # Port/protocol anomalies
             try:
                 ppa = detect_port_protocol_anomalies(runtime)
                 for p in (ppa or []):
                     try:
                         detected_factors.append(p)
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 2097, _exc)
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 2099, _exc)
             # Cloud metadata anomalies
             try:
                 cma = detect_cloud_metadata_anomalies(runtime)
                 for c in (cma or []):
                     try:
                         detected_factors.append(c)
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 2107, _exc)
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 2109, _exc)
             # Human-reported email confidence boost (Cofense/PhishER/mailbox)
             try:
                 events = list(getattr(runtime, 'sanitized_events', []) or [])
@@ -2124,18 +2123,18 @@ async def build_session(
                     summary.setdefault('factors', []).append({'factor': 'human_reported_email', 'score': 0.05, 'reason': 'Analyst-reported email present'})
                     confidence = min(0.99, confidence + 0.05)
                     verdict = 'escalate' if confidence >= 0.75 else ('watch' if confidence >= 0.55 else 'benign')
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 2127, _exc)
             # Time-of-day anomalies
             try:
                 tod = detect_time_of_day_anomalies(runtime)
                 for t in (tod or []):
                     try:
                         detected_factors.append(t)
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 2135, _exc)
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 2137, _exc)
             # If detectors were run and produced strong signals, align verdict naming
             try:
                 detector_names = {'dns_exfil', 'file_hash_rarity', 'nxdomain_rate_high', 'asn_rare'}
@@ -2148,10 +2147,10 @@ async def build_session(
                         continue
                 if has_strong or float(confidence) >= 0.65:
                     verdict = 'SUSPECT'
-            except Exception:
-                pass
-        except Exception:
-            pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 2151, _exc)
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 2153, _exc)
 
         # Helper: enrich factor with canonical metadata
         try:
@@ -2182,8 +2181,8 @@ async def build_session(
             except Exception:
                 try:
                     summary.setdefault('factors', []).append(fobj)
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 2185, _exc)
 
         # Enrich any factors already collected into canonical metadata-backed objects
         try:
@@ -2195,10 +2194,10 @@ async def build_session(
                 except Exception:
                     try:
                         summary.setdefault('factors', []).append(ef)
-                    except Exception:
-                        pass
-        except Exception:
-            pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 2198, _exc)
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 2200, _exc)
 
         session_id = _generate_id()
         dependency_status = _check_dependency_status()
@@ -2253,8 +2252,8 @@ async def build_session(
                     if isinstance(canon, str):
                         dom2 = _classify_token(canon)
                         if dom2: taxonomy_fields[dom2].add(canon)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 2256, _exc)
         # Factor-driven classification
         try:
             for f in factors:
@@ -2268,8 +2267,8 @@ async def build_session(
                     if tok in name_l:
                         dom = _classify_token(tok)
                         if dom: taxonomy_fields[dom].add(tok)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 2271, _exc)
         # Session id hints
         try:
             for sid in session_ids:
@@ -2279,8 +2278,8 @@ async def build_session(
                         mapped = 'api_app' if tok in {'api','app'} else ('identity' if tok=='iam' else tok)
                         if mapped in taxonomy_fields:
                             taxonomy_fields[mapped].add(tok)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 2282, _exc)
         # Compute diversity
         present_domains = [d for d, vals in taxonomy_fields.items() if vals]
         domain_diversity_score = len(present_domains) / 9.0
@@ -2306,8 +2305,8 @@ async def build_session(
                         if name and str(name).startswith('mapping_semantics'):
                             try:
                                 mapping_semantics_score += float(f.get('score') or 0.0)
-                            except Exception:
-                                pass
+                            except Exception as _exc:
+                                logger.debug('silent_swallow at %s:%d: %s', __file__, 2309, _exc)
         except Exception:
             mapping_semantics_score = 0.0
 
@@ -2331,8 +2330,8 @@ async def build_session(
                     for k in ('mapped_mitre','mapped_controls','playbook','playbook_hints','tags','description'):
                         if k in meta:
                             mapping_factor_obj[k] = meta[k]
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 2334, _exc)
         except Exception:
             mapping_factor_obj = None
 
@@ -2364,8 +2363,8 @@ async def build_session(
             try:
                 confidence = min(confidence, 0.95)
                 verdict = 'escalate' if confidence >= 0.75 else ('watch' if confidence >= 0.55 else 'benign')
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 2367, _exc)
 
         # Factor normalization: preserve structured factor dicts (keep dicts intact)
         normalized_factors: List[Any] = []
@@ -2462,8 +2461,8 @@ async def build_session(
                 else:
                     cleaned_factors.append(it)
             normalized_factors = cleaned_factors
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 2465, _exc)
 
         # If fully fixture-driven (or fixture files exist), prefer the deterministic expected factor set used in strict tests
         try:
@@ -2489,10 +2488,10 @@ async def build_session(
                 # mark as fixture-driven so later enrichment step preserves string factors
                 try:
                     all_from_fixtures = True
-                except Exception:
-                    pass
-            except Exception:
-                pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 2492, _exc)
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 2494, _exc)
 
         entity_resolution_summary = aggregate_resolution(batch_entity_resolution)
 
@@ -2517,8 +2516,8 @@ async def build_session(
                             except Exception:
                                 new_smoothed[a][b] = 0
                 smoothed = new_smoothed
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 2520, _exc)
 
         # Compute confidence band label
         def _band(val: float) -> str:
@@ -2629,8 +2628,8 @@ async def build_session(
         try:
             from src.core.graph.chain_helpers import build_multi_stage_chain  # type: ignore
             summary['graph_summary']['chains'] = build_multi_stage_chain(session_ids, overlap_matrix)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 2632, _exc)
         # Ensure final summary factors are enriched with canonical metadata, but skip enrichment
         # when the build was fully fixture-driven to preserve backward-compatible string-only factors.
         try:
@@ -2667,8 +2666,8 @@ async def build_session(
                         except Exception:
                             enriched.append({'factor': str(f), 'score': None, 'metadata': get_metadata_for_factor(str(f)) or {}})
                 summary['factors'] = enriched
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 2670, _exc)
         # Ensure mapping_semantics factor is present (re-append if enrichment step removed it)
         try:
             if 'mapping_semantics_score' in locals():
@@ -2699,13 +2698,13 @@ async def build_session(
                                 for k in ('mapped_mitre','mapped_controls','playbook','playbook_hints','tags','description'):
                                     if k in meta:
                                         mf[k] = meta[k]
-                        except Exception:
-                            pass
+                        except Exception as _exc:
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 2702, _exc)
                         summary.setdefault('factors', []).append(mf)
-                    except Exception:
-                        pass
-        except Exception:
-            pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 2705, _exc)
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 2707, _exc)
         # Merge any detected runtime factors into the summary factors list
         try:
             if detected_factors:
@@ -2733,8 +2732,8 @@ async def build_session(
                             summary.setdefault('factors', []).append(df)
                     except Exception:
                         continue
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 2736, _exc)
         # HopGraph-style factor path scoring for Week-1 factors (contextual enrichment)
         factor_paths = []
         sf = summary.get('factors') or []
@@ -2773,9 +2772,8 @@ async def build_session(
                         path = [normalize_event(n) for n in path]
                     res = score_path(path)
                     factor_paths.append({'factor': name, 'score': res.get('score'), 'contributions': res.get('contributions')})
-                except Exception:
-                    # Continue if any single factor path scoring fails
-                    pass
+                except Exception as _exc:  # Continue if any single factor path scoring fails
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 2776, _exc)
             if factor_paths:
                 summary['factor_paths'] = factor_paths
                 try:
@@ -2785,8 +2783,8 @@ async def build_session(
                         cb['factor_path_max'] = round(max(scores),4)
                         cb['factor_path_avg'] = round(sum(scores)/len(scores),4)
                         summary['confidence_breakdown'] = cb
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 2788, _exc)
         # Enrich graph_summary with Email/IAM/Cloud entity edges derived from detectors
         try:
             sf = summary.get('factors') or []
@@ -2851,10 +2849,10 @@ async def build_session(
             try:
                 summary['graph_summary']['node_count'] = len(node_list)
                 summary['graph_summary']['edge_count'] = len(edge_list)
-            except Exception:
-                pass
-        except Exception:
-            pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 2854, _exc)
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 2856, _exc)
         # Post-processing: if detectors produced strong signals or confidence exceeds detector threshold,
         # prefer the uppercase 'SUSPECT' verdict expected by integration tests and downstream modules.
         try:
@@ -2873,8 +2871,8 @@ async def build_session(
             runtime_present = any(batch_source.get(sid) == 'runtime' for sid in session_ids) if 'batch_source' in locals() else False
             if runtime_present and (strong or float(summary.get('confidence') or 0.0) >= 0.65):
                 summary['verdict'] = 'SUSPECT'
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 2876, _exc)
         # Final safety merge: ensure any runtime-detected factors (detected_factors)
         # are preserved in the final summary factors list. This protects against
         # earlier normalization passes that may convert or drop detector dicts
@@ -2900,8 +2898,8 @@ async def build_session(
                         summary.setdefault('factors', []).append(df)
                 except Exception:
                     continue
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 2903, _exc)
         # Trust & audit fields
         try:
             summary['version'] = os.getenv('PLATFORM_VERSION','unknown')
@@ -2929,8 +2927,8 @@ async def build_session(
                     'policy_version': None,
                     'scoring_config_version': None,
                 }
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 2932, _exc)
         # Confidence breakdown retained for explanation endpoint (non-breaking addition)
         # Confidence breakdown (robust defaults for missing components)
         try:
@@ -3010,10 +3008,10 @@ async def build_session(
                             cb.setdefault('domain_diversity_score', summary.get('domain_diversity_score'))
                             cb.setdefault('mapping_semantics_score', summary.get('mapping_semantics_score'))
                             summary['confidence_breakdown'] = cb
-                except Exception:
-                    pass
-        except Exception:
-            pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 3013, _exc)
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 3015, _exc)
         # ---------------- ASN rarity enrichment (best-effort) ----------------
         try:
             # Attempt to import ASN stats helper and lookup helper
@@ -3034,8 +3032,8 @@ async def build_session(
                                     ip = str(v).strip()
                                     if ip:
                                         ips_seen.add(ip)
-                                except Exception:
-                                    pass
+                                except Exception as _exc:
+                                    logger.debug('silent_swallow at %s:%d: %s', __file__, 3037, _exc)
                         else:
                             for v in (vals if isinstance(vals, list) else [vals]):
                                 try:
@@ -3043,8 +3041,8 @@ async def build_session(
                                     # quick ip-like detection
                                     if sv.count('.') == 3 and all(part.isdigit() for part in sv.split('.') if part):
                                         ips_seen.add(sv)
-                                except Exception:
-                                    pass
+                                except Exception as _exc:
+                                    logger.debug('silent_swallow at %s:%d: %s', __file__, 3046, _exc)
 
                 # Derive ASN candidates via seeded lookup or heuristic
                 asn_map = {}
@@ -3061,10 +3059,10 @@ async def build_session(
                         for ip in injected:
                             try:
                                 ips_seen.add(str(ip))
-                            except Exception:
-                                pass
-                except Exception:
-                    pass
+                            except Exception as _exc:
+                                logger.debug('silent_swallow at %s:%d: %s', __file__, 3064, _exc)
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 3066, _exc)
 
                 for ip in ips_seen:
                     try:
@@ -3076,12 +3074,12 @@ async def build_session(
                                 try:
                                     if test_helpers:
                                         pass
-                                except Exception:
-                                    pass
+                                except Exception as _exc:
+                                    logger.debug('silent_swallow at %s:%d: %s', __file__, 3079, _exc)
                                 # ensure we call the canonical asn_stats.record
                                 asn_stats.record(asn)
-                            except Exception:
-                                pass
+                            except Exception as _exc:
+                                logger.debug('silent_swallow at %s:%d: %s', __file__, 3083, _exc)
                     except Exception:
                         continue
             except Exception:
@@ -3101,12 +3099,12 @@ async def build_session(
                                 asn_map.setdefault(asn, []).append(str(k))
                                 try:
                                     asn_stats.record(asn)
-                                except Exception:
-                                    pass
+                                except Exception as _exc:
+                                    logger.debug('silent_swallow at %s:%d: %s', __file__, 3104, _exc)
                             except Exception:
                                 continue
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 3108, _exc)
 
             # Also accept explicit ASN appearances in overlap_details
             explicit_asns = set()
@@ -3123,10 +3121,10 @@ async def build_session(
                                         explicit_asns.add(vs)
                                         try:
                                             asn_stats.record(vs)
-                                        except Exception:
-                                            pass
-                                except Exception:
-                                    pass
+                                        except Exception as _exc:
+                                            logger.debug('silent_swallow at %s:%d: %s', __file__, 3126, _exc)
+                                except Exception as _exc:
+                                    logger.debug('silent_swallow at %s:%d: %s', __file__, 3128, _exc)
 
             all_asns = set(list(asn_map.keys()) + list(explicit_asns))
             thr = float(os.getenv('ASN_RARITY_THRESHOLD','0.9') or 0.9)
@@ -3135,28 +3133,28 @@ async def build_session(
                     try:
                         # placeholder for optional debug removed
                         pass
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 3138, _exc)
                     r = asn_stats.rarity(asn)
                     pct = asn_stats.percentile(asn)
                     try:
                         # placeholder for optional debug removed
                         pass
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 3145, _exc)
                     if r >= thr:
                         fobj = {'batch_id': None, 'factor': 'asn_rare', 'asn': asn, 'rarity': round(r,3), 'percentile': round(pct,3), 'reason': f'ASN {asn} rare (rarity={r:.2f})', 'score': round(min(1.0, r),3), 'tags': ['CVSS:AV:N','KEV:CANDIDATE']}
                         try:
                             summary.setdefault('factors', []).append(fobj)
                             try:
                                 summary.setdefault('_runtime_asn_factors', []).append(fobj)
-                            except Exception:
-                                pass
-                        except Exception:
-                            pass
+                            except Exception as _exc:
+                                logger.debug('silent_swallow at %s:%d: %s', __file__, 3153, _exc)
+                        except Exception as _exc:
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 3155, _exc)
                         asn_factors.append(fobj)
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 3158, _exc)
 
             if asn_factors:
                 try:
@@ -3168,14 +3166,14 @@ async def build_session(
                     cb.setdefault('domain_diversity_score', summary.get('domain_diversity_score'))
                     cb.setdefault('mapping_semantics_score', summary.get('mapping_semantics_score'))
                     summary['confidence_breakdown'] = cb
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 3171, _exc)
                 try:
                     pass
-                except Exception:
-                    pass
-        except Exception:
-            pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 3175, _exc)
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 3177, _exc)
         # Derive path_length (max BFS depth) and distinct_phase_count (proxy: unique overlap weights categories)
         try:
             adj = {n['id']: [] for n in node_list}
@@ -3212,8 +3210,8 @@ async def build_session(
                     w = int(e.get('weight') or 0)
                     if w > 0:
                         weights_categories.add(w)
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 3215, _exc)
             distinct_phase_count = len(weights_categories)
             summary['path_length'] = max_depth
             summary['distinct_phase_count'] = distinct_phase_count
@@ -3244,10 +3242,10 @@ async def build_session(
                     if fixtures_present or bool(locals().get('all_from_fixtures', False)):
                         continue
                     summary.setdefault('factors', []).append(m)
-            except Exception:
-                pass
-        except Exception:
-            pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 3247, _exc)
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 3249, _exc)
         # Normalize factor payloads into dict objects for tests/UI and UI expectations.
         # Ensure canonical keys: prefer 'factor' and 'score'. Accept legacy 'name'/'value'
         # and convert them into the canonical shape. Also keep 'name' for backward
@@ -3262,10 +3260,10 @@ async def build_session(
                     summary['factors'] = expected.get('factors', [])
                     summary['confidence'] = expected.get('confidence', summary.get('confidence'))
                     summary['verdict'] = expected.get('verdict', summary.get('verdict'))
-                except Exception:
-                    pass
-        except Exception:
-            pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 3265, _exc)
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 3267, _exc)
         try:
             normalized_factors = []
             for entry in summary.get('factors', []) or []:
@@ -3313,16 +3311,16 @@ async def build_session(
                 if _TI_CLIENT and factor_names:
                     try:
                         summary['techniques'] = _TI_CLIENT.techniques_for_factors(factor_names) or {}
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 3316, _exc)
                     try:
                         summary['technique_provenance'] = _TI_CLIENT.technique_provenance() or {}
-                    except Exception:
-                        pass
-            except Exception:
-                pass
-        except Exception:
-            pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 3320, _exc)
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 3322, _exc)
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 3324, _exc)
         # Inject file-batch factors discovered from runtime file metadata (if any).
         try:
             if not file_batch_factor_names and runtime is not None:
@@ -3344,8 +3342,8 @@ async def build_session(
                                                 file_batch_factor_names.append(str(fac))
                                     elif isinstance(factors, str):
                                         file_batch_factor_names.append(factors)
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 3347, _exc)
             if file_batch_factor_names:
                 existing = set()
                 for f in (summary.get('factors') or []):
@@ -3361,8 +3359,8 @@ async def build_session(
                         continue
                     summary.setdefault('factors', []).append({'factor': nm, 'score': None})
                     existing.add(nm)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 3364, _exc)
         # Update per-factor occurrence counts for FP ratio metrics (best-effort).
         try:
             if runtime is not None:
@@ -3371,8 +3369,8 @@ async def build_session(
                     counts = {}
                     try:
                         runtime.fp_factor_counts = counts
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 3374, _exc)
                 if isinstance(counts, dict):
                     for f in summary.get('factors') or []:
                         try:
@@ -3385,8 +3383,8 @@ async def build_session(
                             counts[name] = int(counts.get(name, 0) or 0) + 1
                         except Exception:
                             continue
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 3388, _exc)
         # Attach build timestamp for TTL reasoning
         summary['created_at'] = time.time()
         _SESSIONS[session_id] = summary
@@ -3403,10 +3401,10 @@ async def build_session(
                             fname = s.get('factor') or s.get('name') or None
                             if fname:
                                 summary.setdefault('factors', []).append(str(fname))
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 3406, _exc)
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 3408, _exc)
             # Read any emissions files placed by hunt lanes into emit_dir
             if emit_dir.exists():
                 for p in emit_dir.glob('*.json'):
@@ -3422,12 +3420,12 @@ async def build_session(
                         # optionally remove the file after consumption to avoid reprocessing
                         try:
                             p.unlink()
-                        except Exception:
-                            pass
+                        except Exception as _exc:
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 3425, _exc)
                     except Exception:
                         continue
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 3429, _exc)
         # Persist tenant partition if tenant provided in payload (best-effort)
         try:
             tenant = payload.get('tenant') or os.getenv('DEFAULT_TENANT')
@@ -3439,10 +3437,10 @@ async def build_session(
                 if persist_tenant_partition:
                     try:
                         persist_tenant_partition(tenant, {'last_graph_session': session_id, 'ts': time.time()})
-                    except Exception:
-                        pass
-        except Exception:
-            pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 3442, _exc)
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 3444, _exc)
 
         reset_session_store()
         store = get_session_store()
@@ -3481,10 +3479,10 @@ async def build_session(
                             # persist updated summary
                             try:
                                 store.save(session_id, summary)
-                            except Exception:
-                                pass
-                        except Exception:
-                            pass
+                            except Exception as _exc:
+                                logger.debug('silent_swallow at %s:%d: %s', __file__, 3484, _exc)
+                        except Exception as _exc:
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 3486, _exc)
                     else:
                         async def _bg_llm():
                             try:
@@ -3497,17 +3495,16 @@ async def build_session(
                                     cur['llm_summary'] = text
                                     try:
                                         store.save(session_id, cur)
-                                    except Exception:
-                                        pass
-                            except Exception:
-                                pass
+                                    except Exception as _exc:
+                                        logger.debug('silent_swallow at %s:%d: %s', __file__, 3500, _exc)
+                            except Exception as _exc:
+                                logger.debug('silent_swallow at %s:%d: %s', __file__, 3502, _exc)
                         try:
                             asyncio.create_task(_bg_llm())
-                        except Exception:
-                            # best-effort: ignore scheduling failures
-                            pass
-        except Exception:
-            pass
+                        except Exception as _exc:  # best-effort: ignore scheduling failures
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 3506, _exc)
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 3509, _exc)
         # Emit streaming overlay event (best-effort)
         try:
             tenant_hint = payload.get('tenant')
@@ -3555,10 +3552,10 @@ async def build_session(
             if _publish_overlay:
                 try:
                     await _publish_overlay(overlay_event)
-                except Exception:
-                    pass
-        except Exception:
-            pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 3558, _exc)
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 3560, _exc)
         # Build discovery objects (factor + path based) for explanation detail endpoint
         _build_initial_discoveries(session_id, summary)
         # TEST HELPERS: optionally inject synthetic discoveries from payload for deterministic tests
@@ -3568,8 +3565,8 @@ async def build_session(
                 td = payload.get('test_discoveries') or []
                 try:
                     logger.debug('graph_sessions test_helpers active, payload test_discoveries count=%s', (len(td) if isinstance(td, list) else 'N/A'))
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 3571, _exc)
                 if isinstance(td, list) and td:
                     for d in td:
                         try:
@@ -3588,12 +3585,12 @@ async def build_session(
                             _DISCOVERIES[d['id']] = d
                             try:
                                 logger.debug('graph_sessions injected discovery id=%s session_id=%s type=%s confidence=%s', d.get('id'), d.get('session_id'), d.get('type'), d.get('confidence'))
-                            except Exception:
-                                pass
-                        except Exception:
-                            pass
-        except Exception:
-            pass
+                            except Exception as _exc:
+                                logger.debug('silent_swallow at %s:%d: %s', __file__, 3591, _exc)
+                        except Exception as _exc:
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 3593, _exc)
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 3595, _exc)
         # ---------------- Incident Auto-Generation (high-confidence path discoveries) -----------------
         try:
             if os.getenv('INCIDENT_AUTOGEN_ENABLED','1').lower() in {'1','true','yes'}:
@@ -3642,8 +3639,8 @@ async def build_session(
                                 nm = f.get('factor') or f.get('name')
                                 if nm:
                                     factors_for_incident.append(str(nm))
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 3645, _exc)
                     factors_for_incident.append('path_high_confidence')
                     # Import aggregator and ingest
                     try:
@@ -3663,26 +3660,26 @@ async def build_session(
                                         gi = getattr(m, 'GLOBAL_INCIDENTS')
                                         try:
                                             logger.debug('graph_sessions ingest target id(GLOBAL_INCIDENTS)=%s event_id=%s', id(gi), evt.get('event_id'))
-                                        except Exception:
-                                            pass
+                                        except Exception as _exc:
+                                            logger.debug('silent_swallow at %s:%d: %s', __file__, 3666, _exc)
                                         gi.ingest(evt, factors_for_incident)
                                         ingested = True
-                                    except Exception:
-                                        pass
-                            except Exception:
-                                pass
+                                    except Exception as _exc:
+                                        logger.debug('silent_swallow at %s:%d: %s', __file__, 3670, _exc)
+                            except Exception as _exc:
+                                logger.debug('silent_swallow at %s:%d: %s', __file__, 3672, _exc)
                         if ingested:
                             _AUTOGEN_INCIDENT_KEYS.add(fp)
                             # Attach reference list to session summary for UI discoverability
                             try:
                                 promoted = summary.setdefault('auto_generated_incidents', [])
                                 promoted.append({'discovery_id': d['id'], 'incident_fingerprint': fp, 'path_confidence': sc})
-                            except Exception:
-                                pass
-                    except Exception:
-                        pass
-        except Exception:
-            pass
+                            except Exception as _exc:
+                                logger.debug('silent_swallow at %s:%d: %s', __file__, 3680, _exc)
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 3682, _exc)
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 3684, _exc)
         sqlite_path = os.getenv('SESSION_PERSIST_SQLITE_PATH')
         if sqlite_path:
             try:
@@ -3702,8 +3699,8 @@ async def build_session(
                     (session_id, payload, now, now),
                 )
                 conn.commit(); conn.close()
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 3705, _exc)
         store.cleanup(None)
         try:
             summary['persist_path'] = getattr(store, 'db_path', None)
@@ -3716,8 +3713,8 @@ async def build_session(
             if feature_use_counter is not None:
                 try:
                     feature_use_counter.labels(feature='graph_session_build').inc()
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 3719, _exc)
             # New hopgraph session build metrics
             try:
                 from .metrics_init import hopgraph_sessions_built_total, hopgraph_session_batches_gauge, hopgraph_session_paths_gauge  # type: ignore
@@ -3727,17 +3724,17 @@ async def build_session(
                     hopgraph_session_paths_gauge.set(len(summary.get('path_scores') or {}))
                 except Exception:
                     hopgraph_session_paths_gauge.set(0)
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 3730, _exc)
             # Record EWMA alpha selection metric (adaptive label yes/no)
             try:
                 from .metrics_init import graph_session_ewma_alpha  # type: ignore
                 adaptive_label = 'yes' if (adaptive_enabled and provided_alpha in (None,'')) else 'no'
                 graph_session_ewma_alpha.labels(adaptive=adaptive_label).set(ewma_alpha if use_ewma else 0.0)
-            except Exception:
-                pass
-        except Exception:
-            pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 3737, _exc)
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 3739, _exc)
         # Construct a top-level compatibility `graph` object for UI/tests.
         try:
             g_nodes = []
@@ -3781,8 +3778,8 @@ async def build_session(
                 for nid, node in entity_map.items():
                     # connect session to each entity with weight equal to evidence_count
                     g_edges.append({'src': f"session:{session_id}", 'dst': nid, 'type': 'evidence', 'weight': node.get('evidence_count', 1)})
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 3784, _exc)
 
             # include edges between sessions from overlap_matrix as session->session edges
             for e in edge_list:
@@ -3829,8 +3826,8 @@ async def build_session(
             enforce_final_fixture = (fixtures_present_final or bool(locals().get('all_from_fixtures', False))) and not has_test_ips_final
             try:
                 pass
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 3832, _exc)
             # Ensure runtime-injected ASN factors survive final fixture enforcement
             try:
                 runtime_asn = summary.pop('_runtime_asn_factors', []) if isinstance(summary.get('_runtime_asn_factors'), list) else []
@@ -3847,8 +3844,8 @@ async def build_session(
                             summary.setdefault('factors', []).append(df)
                     except Exception:
                         continue
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 3850, _exc)
 
             if enforce_final_fixture:
                 try:
@@ -3867,17 +3864,17 @@ async def build_session(
                     if runtime_signals_present:
                         try:
                             pass
-                        except Exception:
-                            pass
+                        except Exception as _exc:
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 3870, _exc)
                     else:
                         expected = _compute_expected_for_fixtures(session_ids, correlate=correlate, use_ewma=use_ewma, ewma_alpha=ewma_alpha)
                         summary['factors'] = expected.get('factors', [])
                         summary['confidence'] = expected.get('confidence', summary.get('confidence'))
                         summary['verdict'] = expected.get('verdict', summary.get('verdict'))
-                except Exception:
-                    pass
-        except Exception:
-            pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 3877, _exc)
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 3879, _exc)
 
         try:
             # Ensure metric-derived factor objects like path_length and
@@ -3912,21 +3909,21 @@ async def build_session(
                 if not skip_metrics and pl_val is not None and 'path_length' not in seen_names:
                     try:
                         summary.setdefault('factors', []).append({'name': 'path_length', 'value': pl_val, 'kind': 'graph_metric', 'reason': f'max depth {pl_val}'})
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 3915, _exc)
                 if not skip_metrics and dp_val is not None and 'distinct_phase_count' not in seen_names:
                     try:
                         summary.setdefault('factors', []).append({'name': 'distinct_phase_count', 'value': dp_val, 'kind': 'graph_metric', 'reason': f'{dp_val} overlap weights'})
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 3920, _exc)
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 3922, _exc)
             try:
                 pass
-            except Exception:
-                pass
-        except Exception:
-            pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 3926, _exc)
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 3928, _exc)
         # Ensure any runtime-injected ASN factors survive final fixture enforcement
         try:
             runtime_asn = summary.pop('_runtime_asn_factors', []) if isinstance(summary.get('_runtime_asn_factors'), list) else []
@@ -3943,8 +3940,8 @@ async def build_session(
                         summary.setdefault('factors', []).append(df)
                 except Exception:
                     continue
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 3946, _exc)
         # Ensure metric-derived factor objects exist as dicts and that all
         # factors are normalized to dicts with a 'name' key for strict tests.
         try:
@@ -3997,8 +3994,8 @@ async def build_session(
                             if len(inter) >= max(1, int(min(len(req_paths), len(mod_paths)) * 0.6)):
                                 if (factory_mode is None) and (not factory_initialized):
                                     is_module_app_request = True
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 4000, _exc)
             except Exception:
                 # Fallback: if factory flags aren't present, assume module-level app
                 if factory_mode is None and not factory_initialized:
@@ -4022,13 +4019,13 @@ async def build_session(
                 if pl_val is not None and 'path_length' not in existing_names:
                     try:
                         summary.setdefault('factors', []).append({'name': 'path_length', 'factor': 'path_length', 'value': pl_val, 'kind': 'graph_metric', 'reason': f'max depth {pl_val}'})
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 4025, _exc)
                 if dp_val is not None and 'distinct_phase_count' not in existing_names:
                     try:
                         summary.setdefault('factors', []).append({'name': 'distinct_phase_count', 'factor': 'distinct_phase_count', 'value': dp_val, 'kind': 'graph_metric', 'reason': f'{dp_val} overlap weights'})
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 4030, _exc)
 
                 # Normalize any remaining string factors into dicts with 'name'
                 normalized_final = []
@@ -4049,8 +4046,8 @@ async def build_session(
                     except Exception:
                         try:
                             normalized_final.append({'name': str(f), 'score': None})
-                        except Exception:
-                            pass
+                        except Exception as _exc:
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 4052, _exc)
                 summary['factors'] = normalized_final
             else:
                 # Fixture-driven: generally leave string factors as-is and avoid
@@ -4082,13 +4079,13 @@ async def build_session(
                             except Exception:
                                 try:
                                     normalized_final.append({'factor': str(f), 'score': None})
-                                except Exception:
-                                    pass
+                                except Exception as _exc:
+                                    logger.debug('silent_swallow at %s:%d: %s', __file__, 4085, _exc)
                         summary['factors'] = normalized_final
-                except Exception:
-                    pass
-        except Exception:
-            pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 4088, _exc)
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 4090, _exc)
         # Final normalization: convert to dicts except when the build was
         # strictly fixture-driven and the caller is a factory-created app
         # (tests that call create_app() expect deterministic string-shaped
@@ -4135,8 +4132,8 @@ async def build_session(
                                 if runtime_signals_present and (name == 'asn_rare' or 'asn' in entry):
                                     cleaned.append(entry)
                                     continue
-                            except Exception:
-                                pass
+                            except Exception as _exc:
+                                logger.debug('silent_swallow at %s:%d: %s', __file__, 4138, _exc)
                             kind = entry.get('kind')
                             if kind == 'graph_metric' or (isinstance(name, str) and name in {'path_length','distinct_phase_count'}):
                                 cleaned.append(entry)
@@ -4149,8 +4146,8 @@ async def build_session(
                     except Exception:
                         try:
                             cleaned.append(str(entry))
-                        except Exception:
-                            pass
+                        except Exception as _exc:
+                            logger.debug('silent_swallow at %s:%d: %s', __file__, 4152, _exc)
                 summary['factors'] = cleaned
             elif fixtures_final_flag and (is_module_app_req or (not bool(locals().get('use_ewma', False)))):
                 # Module-level TestClient with fixtures: ensure canonical dict-shaped
@@ -4234,8 +4231,8 @@ async def build_session(
                     else:
                         final_list.append({'name': str(f), 'factor': str(f), 'score': None})
                 summary['factors'] = final_list
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 4237, _exc)
             # Ensure no lingering string factors remain for module-level app requests
             try:
                 if any(isinstance(x, str) for x in (summary.get('factors') or [])):
@@ -4253,8 +4250,8 @@ async def build_session(
                         else:
                             normalized.append({'name': str(x), 'factor': str(x), 'score': None})
                     summary['factors'] = normalized
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 4256, _exc)
         else:
             # Factory-created app: prefer deterministic string factor outputs
             # in strict fixture-driven flows. Convert any lingering dicts to
@@ -4303,8 +4300,8 @@ async def build_session(
                         else:
                             cleaned.append(str(entry))
                     summary['factors'] = cleaned
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug('silent_swallow at %s:%d: %s', __file__, 4306, _exc)
 
         # Ultimate guard: ensure dict-shaped factors for module-style responses
         # or when EWMA smoothing is disabled (tests expect object form).
@@ -4322,8 +4319,8 @@ async def build_session(
                     else:
                         _fl.append({'name': str(_f), 'factor': str(_f), 'score': None})
                 summary['factors'] = _fl
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 4325, _exc)
         compat = {
             'session_id': session_id,
             'summary': summary,
@@ -4340,20 +4337,20 @@ async def build_session(
                 biz_narr = _build_correlation_business_narrative(summary, payload, tenant_id)
                 if biz_narr:
                     summary['business_narrative'] = biz_narr
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 4343, _exc)
         try:
             session_record = await _persist_graph_session_record(session_id, summary, payload, tenant_id)
             compat['tenant_id'] = tenant_id
             compat['status'] = session_record.get('status')
             compat['graph_snapshot_ref'] = session_record.get('graph_snapshot_ref')
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 4350, _exc)
         # diagnostics removed
         try:
             logger.debug('build_session returning compat for session_id=%s', compat.get('session_id'))
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 4355, _exc)
         return compat
 
 @router.get('/list', operation_id='graph_session_list')
@@ -4551,8 +4548,8 @@ async def get_session(session_id: str, as_of: str | None = None, request: Reques
             created = data.get('created_at') or None
             if isinstance(created, (int, float)):
                 compat['age_seconds_as_of'] = max(0.0, as_of_ts - float(created))
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 4554, _exc)
     return compat
 
 @router.get('/{session_id}/paths')
@@ -4741,8 +4738,8 @@ async def explain_session(session_id: str, as_of: str | None = None, request: Re
                 if b != a:
                     try:
                         vals.append(float(v))
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.debug('silent_swallow at %s:%d: %s', __file__, 4744, _exc)
         if vals:
             mean = sum(vals)/len(vals)
             var = sum((x-mean)**2 for x in vals)/len(vals)
@@ -4787,8 +4784,8 @@ async def explain_session(session_id: str, as_of: str | None = None, request: Re
         # Generic synthetic fallback if still empty (non-breaking for tests expecting at least one hotspot)
         if hotspots == [] and len(sids) >= 2:
             hotspots = [{'a': sids[0], 'b': sids[1], 'fields': 1}]
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 4790, _exc)
     diversity_score = rec.get('domain_diversity_score')
     mapping_score = rec.get('mapping_semantics_score')
     domains_present = rec.get('domains_present') or []
@@ -4808,8 +4805,8 @@ async def explain_session(session_id: str, as_of: str | None = None, request: Re
         if breakdown:
             try:
                 parts.append("Confidence components -> " + ", ".join([f"{k}:{v}" for k,v in breakdown.items() if k!='final']) + f", final:{breakdown.get('final')}")
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 4811, _exc)
         narrative = " ".join(parts)
     except Exception:
         narrative = "Session explanation unavailable."
@@ -4819,8 +4816,8 @@ async def explain_session(session_id: str, as_of: str | None = None, request: Re
         ensure_metrics()
         hopgraph_explanations_generated_total.labels(llm='yes' if os.getenv('LLM_SUMMARIES_ENABLED','0').lower() in {'1','true','yes'} else 'no').inc()
         hopgraph_explanation_latency_seconds.observe(max(0.0, time.time() - (rec.get('generated_at') or time.time())))
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 4822, _exc)
     llm_summary = _maybe_llm_summarize(narrative)
     # Attach trust/audit fields
     version = rec.get('version') or os.getenv('PLATFORM_VERSION','unknown')
@@ -4852,8 +4849,8 @@ async def explain_session(session_id: str, as_of: str | None = None, request: Re
             created = rec.get('created_at') or None
             if isinstance(created, (int, float)):
                 out['age_seconds_as_of'] = max(0.0, as_of_ts - float(created))
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 4855, _exc)
     return out
 
 @router.get('/{session_id}/narrative')
@@ -4895,8 +4892,8 @@ async def preview_score(payload: Dict[str, Any], auth=Depends(require_api_key)) 
     try:
         if normalize_event:
             path = [normalize_event(p) for p in path]
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 4898, _exc)
     try:
         res = score_path(path, weights=weights)
     except Exception as exc:
@@ -4944,8 +4941,8 @@ async def list_graph_presets(auth=Depends(require_api_key)):
             dynamic = graph.list_saved_queries()
             if dynamic:
                 presets = dynamic
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug('silent_swallow at %s:%d: %s', __file__, 4947, _exc)
     return {'presets': presets}
 
 

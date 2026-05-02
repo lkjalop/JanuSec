@@ -137,21 +137,43 @@ def backfill_cluster_verdicts(assessment: dict) -> int:
     """Attach verdict fields to any cluster that has tier1_prefill but no verdict.
 
     Returns count of clusters updated. Mutates assessment in-place.
-    Safe to call repeatedly — skips clusters that already have a non-empty verdict.
+
+    Refinement policy:
+    * Skips clusters with a non-empty verdict that is *not* marked
+      ``verdict_provisional`` and is not in the placeholder set
+      ('UNCERTAIN', 'MISSING', '').
+    * Re-derives clusters whose verdict was set by the legacy severity-only
+      ``_initial_cluster_verdict`` heuristic (flagged ``verdict_provisional``)
+      so Tier-1 / CoT evidence can upgrade or downgrade the label. The new
+      verdict only overwrites when it reflects richer evidence — i.e., when
+      Tier-1 prefill or a CoT signal is now present.
     """
     clusters = assessment.get('correlation_clusters') or []
     updated = 0
+    placeholder = {'UNCERTAIN', 'MISSING', ''}
     for cluster in clusters:
         existing = cluster.get('verdict') or ''
-        if existing and existing not in ('UNCERTAIN', 'MISSING', ''):
+        is_provisional = bool(cluster.get('verdict_provisional'))
+        if existing and existing not in placeholder and not is_provisional:
             continue
         # Always derive a verdict if we have at least a severity field
         if not cluster.get('severity'):
+            continue
+        prefill = cluster.get('tier1_prefill') or {}
+        has_richer_evidence = bool(
+            prefill.get('_cot') or prefill.get('verdict_reasoning')
+            or prefill.get('confidence_meter') or cluster.get('confidence_meter')
+        )
+        # For provisional verdicts, only refine when richer evidence has arrived;
+        # otherwise the legacy severity-only heuristic is the best we can do and
+        # rerunning it would be a no-op churn.
+        if is_provisional and not has_richer_evidence:
             continue
         result = compute_cluster_verdict(cluster)
         cluster['verdict'] = result['verdict']
         cluster['verdict_rationale'] = result['verdict_rationale']
         cluster['verdict_confidence'] = result['verdict_confidence']
+        cluster.pop('verdict_provisional', None)
         updated += 1
 
     # If any clusters were updated, invalidate the stale exec summary cache

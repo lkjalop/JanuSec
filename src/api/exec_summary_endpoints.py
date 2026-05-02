@@ -12,13 +12,14 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 import sys
 import time
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -1152,6 +1153,7 @@ def _evidence_cues(cluster: dict, assessment: dict) -> list[str]:
 class ExecSummaryRequest(BaseModel):
     model: str = 'qwen3:14b'
     regenerate: bool = False
+    deep: bool = False  # Tier 3 deep analysis (async background job)
 
 
 # ── E9: Kill-chain phase lookup (deterministic, zero LLM) ─────────────────────
@@ -1776,6 +1778,40 @@ async def get_executive_summary(
             'headline_subtitle': prefill.get('headline_subtitle') or _cluster_subtitle(c),
         })
 
+    # ── Enriched pipeline: TemporalRAG + bitemporal + per-cluster narratives ──
+    enriched: dict = {}
+    try:
+        from src.exec_summary.orchestrator import run_enriched_pipeline
+
+        # Build per-cluster deterministic texts so the pipeline has a backbone
+        det_texts: dict[str, str] = {}
+        for c in sorted_clusters:
+            cid = str(c.get('cluster_id', ''))
+            txt, _prov = _build_attack_chain_exec_summary(c, assessment)
+            if txt:
+                det_texts[cid] = txt
+
+        # The pipeline LLM function must be synchronous (thread-offloaded inside)
+        _pipeline_llm = None
+        if body.regenerate:
+            try:
+                _pipeline_llm = _legacy_helper('_get_llm', _get_llm)(body.model).generate
+            except Exception:
+                pass
+
+        enriched = await run_enriched_pipeline(
+            assessment_id=assessment_id,
+            assessment=assessment,
+            sorted_clusters=sorted_clusters,
+            llm_func=_pipeline_llm,
+            model=body.model,
+            deterministic_texts=det_texts,
+            max_clusters=10,
+            tenant=assessment.get('tenant_id', 'default'),
+        )
+    except Exception as _pipe_err:
+        logger.warning('enriched exec-summary pipeline failed: %s — using legacy result', _pipe_err)
+
     result = {
         'headline': headline,
         'subline': subline,
@@ -1808,8 +1844,129 @@ async def get_executive_summary(
         'normalizer_version': assessment.get('normalizer_version'),
         'cluster_merge_version': assessment.get('cluster_merge_version'),
         'clustering_mode': assessment.get('clustering_mode'),
+        # Enriched pipeline outputs (new — blueprint architecture)
+        'cluster_summaries': enriched.get('cluster_summaries', []),
+        'belief_trajectories': enriched.get('belief_trajectories', {}),
+        'temporal_rag_context': enriched.get('temporal_rag_context', {}),
+        'verdict_reasoning': enriched.get('verdict_reasoning', {}),
+        'rollup_summary': enriched.get('rollup_summary', ''),
+        'rollup_provenance': enriched.get('rollup_provenance', ''),
+        'persona_summaries': enriched.get('persona_summaries', {}),
+        'pipeline_ran': enriched.get('pipeline_ran', False),
     }
     assessment['exec_summary_llm'] = result
     _legacy_helper('_persist', _persist)(assessment_id, assessment)
 
+    # If deep=True, queue the Tier 3 background job and include the job_id
+    if body.deep and body.regenerate:
+        try:
+            from src.exec_summary.deep_analysis import create_job, run_deep_analysis_job
+
+            _deep_llm_func = None
+            try:
+                _deep_llm_func = _legacy_helper('_get_llm', _get_llm)(body.model).generate
+            except Exception:
+                pass
+
+            _deep_job_id = create_job(assessment_id)
+            # Fire-and-forget — do NOT await, the SSE stream delivers results
+            asyncio.ensure_future(run_deep_analysis_job(
+                job_id=_deep_job_id,
+                assessment_id=assessment_id,
+                assessment=assessment,
+                sorted_clusters=sorted_clusters,
+                llm_func=_deep_llm_func,
+                model=body.model,
+            ))
+            result['deep_job_id'] = _deep_job_id
+            result['deep_status'] = 'queued'
+        except Exception as _deep_err:
+            logger.warning('deep analysis job creation failed: %s', _deep_err)
+
     return JSONResponse({'assessment_id': assessment_id, **result})
+
+
+# ── Deep exec summary: job status ─────────────────────────────────────────────
+
+@router.get('/{assessment_id}/deep-exec-summary/status/{job_id}')
+async def get_deep_exec_status(
+    assessment_id: str,
+    job_id: str,
+) -> JSONResponse:
+    """Poll the status of a deep analysis background job."""
+    from src.exec_summary.deep_analysis import get_job
+    job = get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail='deep_analysis_job_not_found')
+    if job.get('assessment_id') != assessment_id:
+        raise HTTPException(status_code=403, detail='job_not_for_assessment')
+    return JSONResponse({
+        'job_id': job_id,
+        'assessment_id': assessment_id,
+        'status': job.get('status'),
+        'phase': job.get('phase'),
+        'progress': job.get('progress', 0),
+        'created_at': job.get('created_at'),
+        'updated_at': job.get('updated_at'),
+        'error': job.get('error'),
+        # Include full result when ready
+        'result': job.get('result') if job.get('status') == 'ready' else None,
+    })
+
+
+# ── Deep exec summary: SSE stream ─────────────────────────────────────────────
+
+@router.get('/{assessment_id}/deep-exec-summary/stream/{job_id}')
+async def stream_deep_exec_analysis(
+    assessment_id: str,
+    job_id: str,
+) -> StreamingResponse:
+    """Stream Tier 3 deep analysis events via Server-Sent Events.
+
+    Events:
+        progress  — {phase: str, progress: int}
+        cluster_complete — {cluster_id, ceo_one_liner, cross_source_count, ...}
+        complete  — {rollup: dict, cluster_count: int}
+        error     — {message: str}
+    """
+    from src.exec_summary.deep_analysis import get_job, subscribe_job
+
+    job = get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail='deep_analysis_job_not_found')
+    if job.get('assessment_id') != assessment_id:
+        raise HTTPException(status_code=403, detail='job_not_for_assessment')
+
+    async def _generate():
+        # If job already completed, return result immediately
+        if job.get('status') == 'ready' and job.get('result'):
+            yield f'data: {json.dumps({"type": "complete", "result": job["result"]})}\n\n'
+            return
+        if job.get('status') == 'failed':
+            yield f'data: {json.dumps({"type": "error", "message": job.get("error", "unknown")})}\n\n'
+            return
+
+        # Subscribe for live events
+        q = subscribe_job(job_id)
+        timeout = int(os.getenv('DEEP_ANALYSIS_STREAM_TIMEOUT', '180'))
+        deadline = time.monotonic() + timeout
+
+        # Send heartbeat every 15s to keep connection alive
+        while time.monotonic() < deadline:
+            try:
+                msg = await asyncio.wait_for(q.get(), timeout=15)
+                yield f'data: {msg}\n\n'
+                parsed = json.loads(msg)
+                if parsed.get('type') in ('complete', 'error'):
+                    break
+            except asyncio.TimeoutError:
+                yield 'data: {"type":"heartbeat"}\n\n'
+
+    return StreamingResponse(
+        _generate(),
+        media_type='text/event-stream',
+        headers={
+            'Cache-Control': 'no-cache',
+            'X-Accel-Buffering': 'no',
+        },
+    )

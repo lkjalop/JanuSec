@@ -612,6 +612,18 @@ async def run_assessment_pipeline(
         except Exception as exc:
             logger.warning("persona dispatch stage failed for %s: %s", assessment_id, exc, exc_info=True)
 
+        # ── Stage 5e: index evidence rows into TemporalRAG ───────────────────
+        # This ensures the exec summary's evidence_frame module can retrieve
+        # time-windowed neighbours per cluster from the TemporalRAG engine.
+        try:
+            from src.ai.temporal_rag import get_engine as _get_rag_engine
+            _rag = _get_rag_engine()
+            if _rag is not None:
+                _rag_count = _rag.index_rows(filtered_rows, tenant=org)
+                logger.info("Stage 5e: indexed %d rows into TemporalRAG for %s", _rag_count, assessment_id)
+        except Exception as exc:
+            logger.debug("TemporalRAG row indexing skipped for %s: %s", assessment_id, exc)
+
         # ── Stage 6: tier-1 prefill (top-10 cluster cards) ────────────────────
         _progress("reasoning", 85, "Tier-1 prefill for cluster cards")
         try:
