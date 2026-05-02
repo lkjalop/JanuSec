@@ -343,13 +343,19 @@ def _build_persona_payload(persona_key: str,
         payload['evidence_pinned'] = narrative.get('evidence_refs') or []
 
     elif persona_key == 'threat_hunter':
+        # Prefer explicit narrative techniques; fall back to register's inferred set
+        _th_mitre = (narrative.get('mitre_techniques') or []) or (register.get('mitre_techniques') or [])
         payload['headline'] = (
             f"Hunt seeds: {len(infra.get('external_ips') or [])} IPs, "
             f"{len(infra.get('asns') or [])} ASNs, "
-            f"{len(narrative.get('mitre_techniques') or [])} techniques"
+            f"{len(_th_mitre)} techniques"
         )
+        # Back-fill narrative so _build_threat_hunter_hypotheses sees techniques
+        if _th_mitre and not narrative.get('mitre_techniques'):
+            narrative = dict(narrative)
+            narrative['mitre_techniques'] = _th_mitre
         payload['hypotheses'] = _build_threat_hunter_hypotheses(narrative)
-        payload['mitre_techniques'] = narrative.get('mitre_techniques') or []
+        payload['mitre_techniques'] = _th_mitre
         payload['kill_chain_stage'] = narrative.get('kill_chain_stage')
         payload['context_blocks'] = [
             {'label': 'Operator infrastructure', 'value': infra.get('external_ips') or []},
@@ -501,10 +507,11 @@ def _build_persona_payload(persona_key: str,
         payload['impact_notes'] = impact_notes
 
     elif persona_key == 'mssp':
+        _mssp_mitre = (narrative.get('mitre_techniques') or []) or (register.get('mitre_techniques') or [])
         payload['headline'] = (
             f"Tenant: {narrative.get('tenant_id', 'unknown')} — "
             f"{narrative.get('verdict', 'UNKNOWN')} — "
-            f"{len(narrative.get('mitre_techniques') or [])} techniques observed"
+            f"{len(_mssp_mitre)} techniques observed"
         )
         payload['client_comms_draft_technical'] = _mssp_client_comms(narrative, level='technical')
         payload['client_comms_draft_executive'] = _mssp_client_comms(narrative, level='executive')
