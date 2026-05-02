@@ -760,6 +760,12 @@ _CAP_TO_MITRE: list[tuple[str, str]] = [
     ('iam enumeration', 'T1087'),
     # Staging
     ('staging', 'T1074.002'),
+    # Generic / low-signal fallbacks — used when diamond.caps only says 'Unknown TTPs'
+    # Map broad phase names to the most common technique for that phase so
+    # build_control_failure_register can still produce useful control mappings.
+    ('unknown ttps', 'T1078'),        # Valid Accounts is the most common initial-access technique
+    ('unknown', 'T1078'),             # broad fallback
+    ('suspicious', 'T1078'),
 ]
 
 
@@ -823,6 +829,55 @@ def _infer_mitre_from_cluster(cluster: dict) -> list[str]:
     return found
 
 
+def _synthesize_affected_data_from_techniques(
+        narrative: dict,
+        techniques: list[str],
+        cluster: dict | None = None,
+) -> None:
+    """Back-fill narrative['affected_data']['classes'] when empty.
+
+    Used when evidence rows aren't available for enrich_narrative to
+    extract actual data classes.  Synthesises from MITRE technique set so
+    evaluate_regulatory_triggers can still fire relevant notification clocks.
+    """
+    affected = narrative.setdefault('affected_data', {})
+    if affected.get('classes'):           # Already populated
+        return
+
+    tech_set = {str(t).upper() for t in (techniques or [])}
+    classes: set[str] = set()
+
+    # Exfiltration techniques → data left the org
+    if tech_set & {'T1537', 'T1567', 'T1567.002', 'T1020', 'T1041', 'T1048'}:
+        classes.add('exfiltrated_data')
+
+    # Credential access → employee credential data
+    if tech_set & {'T1003', 'T1003.001', 'T1552', 'T1552.005', 'T1621'}:
+        classes.add('credentials')
+
+    # If users in scope AND credential / exfil techniques → employee PII
+    principals = (narrative.get('affected_principals') or {})
+    has_users = bool((principals.get('users') or []) or
+                     (cluster or {}).get('shared_users') or [])
+    if has_users and (tech_set & {'T1003', 'T1003.001', 'T1078', 'T1621',
+                                   'T1537', 'T1567.002', 'T1552', 'T1552.005'}):
+        classes.add('employee_pii')
+
+    # Cloud/SaaS credential abuse with exfil → possible financial data
+    if tech_set & {'T1552.005', 'T1078.004'} and tech_set & {'T1537', 'T1567.002'}:
+        classes.add('financial')          # conservative — may be business data
+
+    if classes:
+        affected['classes'] = sorted(classes)
+        # Ensure sensitivity is set
+        if not affected.get('sensitivity'):
+            affected['sensitivity'] = (
+                'critical' if 'employee_pii' in classes or 'financial' in classes
+                else 'high' if 'credentials' in classes
+                else 'moderate'
+            )
+
+
 def build_control_failure_register(narrative: dict,
                                    evidence_rows: list[dict] | None = None,
                                    entity_context: dict | None = None,
@@ -840,6 +895,11 @@ def build_control_failure_register(narrative: dict,
         if techniques and isinstance(narrative, dict):
             if not narrative.get('mitre_techniques'):
                 narrative['mitre_techniques'] = techniques
+
+    # Synthesise affected_data.classes from techniques so regulatory triggers
+    # can fire even when evidence rows aren't available for enrich_narrative.
+    if techniques and isinstance(narrative, dict):
+        _synthesize_affected_data_from_techniques(narrative, techniques, cluster)
 
     mapping = map_techniques_to_controls(techniques)
     triggers = evaluate_regulatory_triggers(narrative, entity_context)
