@@ -200,6 +200,44 @@ def attach_control_witnesses(cluster: dict, rows: Iterable[dict]) -> dict:
                     if approved:
                         entry['downgraded'] = True
 
+    # ── Cluster-level fallback ────────────────────────────────────────────
+    # When row scanning yields nothing (e.g. rows not available in-memory
+    # after restart), synthesise witnesses from MITRE techniques already
+    # stored at the cluster level by the ingest/narrator pipeline.
+    if not witnesses:
+        cluster_techniques: list[str] = []
+        for key in ('mitre_techniques', 'top_mitre', 'mitre_tags'):
+            v = cluster.get(key) or []
+            if isinstance(v, list):
+                cluster_techniques.extend(str(x) for x in v if x)
+        prefill = cluster.get('tier1_prefill') or {}
+        for key in ('mitre_techniques', 'top_techniques'):
+            v = prefill.get(key) or []
+            if isinstance(v, list):
+                cluster_techniques.extend(str(x) for x in v if x)
+        for raw_tid in cluster_techniques:
+            norm_tid = _normalise_technique(raw_tid)
+            if not norm_tid:
+                continue
+            for tid in _expand_technique(norm_tid):
+                for fw, cid, name in _MITRE_TO_CONTROLS.get(tid, []):
+                    entry = witnesses.get(cid)
+                    if entry is None:
+                        entry = {
+                            'control_id':    cid,
+                            'control_name':  name,
+                            'framework':     fw,
+                            'rows':          [],
+                            'mitre':         [],
+                            'sources':       ['cluster_level'],
+                            'witness_count': 1,
+                            'downgraded':    False,
+                            'derivation':    'cluster_mitre_fallback',
+                        }
+                        witnesses[cid] = entry
+                    if norm_tid not in entry['mitre']:
+                        entry['mitre'].append(norm_tid)
+
     cluster['control_witnesses'] = witnesses
     return witnesses
 
