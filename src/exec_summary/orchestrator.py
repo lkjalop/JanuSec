@@ -170,14 +170,22 @@ async def run_enriched_pipeline(
         # control_failures, cross_framework_evidence and regulatory triggers.
         # Uses MITRE-based mapping when technique IDs exist in rows, falls back
         # to keyword matching on the deterministic text when rows lack MITRE IDs.
+        _full_cluster = cluster  # may be replaced with full correlation_cluster below
         try:
             from src.core.verdict_engine import attach_control_witnesses
             cluster_rows = _get_cluster_rows(cluster, assessment)
-            attach_control_witnesses(cluster, cluster_rows)
+            # threat_cases are stripped summaries; look up the full correlation
+            # cluster (which has attack_narrative, DREAD fragments etc.) so the
+            # text-keyword fallback has something to work with.
+            if not cluster.get('attack_narrative') and not (cluster.get('tier1_prefill') or {}).get('dread_narrative'):
+                full_clusters = assessment.get('correlation_clusters') or []
+                cid_map = {str(c.get('cluster_id', '')): c for c in full_clusters}
+                _full_cluster = cid_map.get(cid, cluster)
+            attach_control_witnesses(_full_cluster, cluster_rows)
             # Keyword-based fallback: if MITRE mapping produced no witnesses,
             # synthesise witnesses from DREAD/deterministic text keywords so the
             # compliance persona is never completely empty.
-            if not cluster.get('control_witnesses'):
+            if not _full_cluster.get('control_witnesses'):
                 try:
                     from src.prefill.compliance_tags import derive_controls_breached
                     det_text_for_kw = deterministic_texts.get(cid) or ''
@@ -197,7 +205,7 @@ async def run_enriched_pipeline(
                                 'downgraded':    False,
                                 'derivation':    'keyword_fallback',
                             }
-                        cluster['control_witnesses'] = synth_witnesses
+                        _full_cluster['control_witnesses'] = synth_witnesses
                         logger.info(
                             'control_witnesses cluster_id=%s keyword_fallback controls=%d',
                             cid, len(synth_witnesses),
@@ -207,13 +215,13 @@ async def run_enriched_pipeline(
             else:
                 logger.info(
                     'control_witnesses cluster_id=%s mitre_mapped controls=%d',
-                    cid, len(cluster.get('control_witnesses', {})),
+                    cid, len(_full_cluster.get('control_witnesses', {})),
                 )
         except Exception as cw_exc:
             logger.warning('control_witnesses attachment failed for %s: %s', cid, cw_exc)
 
         # Copy witnesses onto the ClusterNarrative object so they survive model_dump()
-        cw = cluster.get('control_witnesses') or {}
+        cw = _full_cluster.get('control_witnesses') or {}
         if cw:
             cn.control_witnesses = cw
 
