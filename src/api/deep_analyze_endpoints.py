@@ -2845,7 +2845,27 @@ async def get_assessment_by_id(assessment_id: str, request: Request):
         'gaps': assessment.get('gaps') or [],
         # Classified clusters (preferred by breach.js) — includes persona_dispatch
         'analysis_clusters': assessment.get('analysis_clusters') or [],
+        # Derive status from DuckDB job record so callers can gate on completion
+        'status': _derive_assessment_status(assessment_id, clusters),
     }
+
+
+def _derive_assessment_status(assessment_id: str, clusters: list) -> str:
+    """Return 'ready', 'failed', or 'pending' by checking the DuckDB job record.
+
+    Falls back to content-based heuristic so API responses are always consistent
+    even when the DB job row is missing (e.g. assessments created before the
+    ingest pipeline existed).
+    """
+    try:
+        from src.core.ingest import store as _store  # type: ignore
+        job = _store.get_job(assessment_id)
+        if job:
+            return job.get('status') or 'ready'
+    except Exception:
+        pass
+    # Heuristic: if we have clusters, the pipeline completed
+    return 'ready' if clusters else 'pending'
 
 
 @router.post('/generate_llm_summaries')

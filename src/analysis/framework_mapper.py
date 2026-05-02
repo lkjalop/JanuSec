@@ -834,15 +834,14 @@ def _synthesize_affected_data_from_techniques(
         techniques: list[str],
         cluster: dict | None = None,
 ) -> None:
-    """Back-fill narrative['affected_data']['classes'] when empty.
+    """Merge MITRE-inferred data classes into narrative['affected_data']['classes'].
 
-    Used when evidence rows aren't available for enrich_narrative to
-    extract actual data classes.  Synthesises from MITRE technique set so
-    evaluate_regulatory_triggers can still fire relevant notification clocks.
+    Additive: always merges synthesised classes into any existing set so that
+    evidence-based classes (from enrich_narrative) are preserved and augmented,
+    not replaced.  Used when evidence rows aren't available for enrich_narrative
+    to extract actual data classes, enabling regulatory triggers to fire.
     """
     affected = narrative.setdefault('affected_data', {})
-    if affected.get('classes'):           # Already populated
-        return
 
     tech_set = {str(t).upper() for t in (techniques or [])}
     classes: set[str] = set()
@@ -868,14 +867,20 @@ def _synthesize_affected_data_from_techniques(
         classes.add('financial')          # conservative — may be business data
 
     if classes:
-        affected['classes'] = sorted(classes)
-        # Ensure sensitivity is set
-        if not affected.get('sensitivity'):
-            affected['sensitivity'] = (
-                'critical' if 'employee_pii' in classes or 'financial' in classes
-                else 'high' if 'credentials' in classes
-                else 'moderate'
-            )
+        # Additive merge — preserve existing evidence-based classes
+        existing = set(affected.get('classes') or [])
+        merged = sorted(existing | classes)
+        affected['classes'] = merged
+        # Upgrade sensitivity only if the synthesised set warrants it
+        _SENS_RANK = {'unknown': 0, 'low': 1, 'moderate': 2, 'high': 3, 'crown_jewel': 4, 'critical': 5}
+        synth_sens = (
+            'critical' if 'employee_pii' in classes or 'financial' in classes
+            else 'high' if 'credentials' in classes
+            else 'moderate'
+        )
+        existing_sens = affected.get('sensitivity') or 'unknown'
+        if _SENS_RANK.get(synth_sens, 0) > _SENS_RANK.get(existing_sens, 0):
+            affected['sensitivity'] = synth_sens
 
 
 def build_control_failure_register(narrative: dict,
