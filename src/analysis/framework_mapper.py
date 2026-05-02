@@ -196,6 +196,70 @@ _TECHNIQUE_TO_CONTROLS: dict[str, list[dict]] = {
         {'framework': 'asd_ism', 'control_id': 'ISM-1543', 'control_name': 'Pod admission control',
          'failure_type': 'CONTROL_ABSENT', 'severity': 'high', 'remediation_priority': 'P1'},
     ],
+
+    # ── Lateral Movement: Remote Services (T1021 / T1021.001 RDP / T1021.002 SMB)
+    'T1021': [
+        {'framework': 'iso27001', 'control_id': 'A.8.22', 'control_name': 'Segregation of networks',
+         'failure_type': 'PREVENTIVE_FAILED', 'severity': 'high', 'remediation_priority': 'P1'},
+        {'framework': 'iso27001', 'control_id': 'A.5.15', 'control_name': 'Access control',
+         'failure_type': 'PREVENTIVE_FAILED', 'severity': 'high', 'remediation_priority': 'P1'},
+        {'framework': 'iso27001', 'control_id': 'A.8.16', 'control_name': 'Monitoring activities',
+         'failure_type': 'DETECTIVE_FAILED', 'severity': 'high', 'remediation_priority': 'P2'},
+        {'framework': 'nist_csf', 'control_id': 'DE.CM-01', 'control_name': 'Networks and network services are monitored',
+         'failure_type': 'DETECTIVE_FAILED', 'severity': 'high', 'remediation_priority': 'P2'},
+        {'framework': 'asd_ism', 'control_id': 'ISM-1815', 'control_name': 'Network egress filtering for cloud platforms',
+         'failure_type': 'CONTROL_ABSENT', 'severity': 'high', 'remediation_priority': 'P1'},
+    ],
+    'T1021.002': [
+        {'framework': 'iso27001', 'control_id': 'A.8.22', 'control_name': 'Segregation of networks',
+         'failure_type': 'PREVENTIVE_FAILED', 'severity': 'high', 'remediation_priority': 'P1'},
+        {'framework': 'iso27001', 'control_id': 'A.8.20', 'control_name': 'Networks security',
+         'failure_type': 'PREVENTIVE_FAILED', 'severity': 'high', 'remediation_priority': 'P1'},
+        {'framework': 'nist_csf', 'control_id': 'DE.CM-01', 'control_name': 'Networks and network services are monitored',
+         'failure_type': 'DETECTIVE_FAILED', 'severity': 'high', 'remediation_priority': 'P2'},
+        {'framework': 'asd_ism', 'control_id': 'ISM-1815', 'control_name': 'Network egress filtering (block SMB across segments)',
+         'failure_type': 'PREVENTIVE_FAILED', 'severity': 'high', 'remediation_priority': 'P1'},
+    ],
+    'T1021.001': [
+        {'framework': 'iso27001', 'control_id': 'A.8.22', 'control_name': 'Segregation of networks',
+         'failure_type': 'PREVENTIVE_FAILED', 'severity': 'high', 'remediation_priority': 'P1'},
+        {'framework': 'iso27001', 'control_id': 'A.5.15', 'control_name': 'Access control',
+         'failure_type': 'PREVENTIVE_FAILED', 'severity': 'high', 'remediation_priority': 'P1'},
+        {'framework': 'nist_csf', 'control_id': 'DE.CM-01', 'control_name': 'Networks and network services are monitored',
+         'failure_type': 'DETECTIVE_FAILED', 'severity': 'moderate', 'remediation_priority': 'P2'},
+    ],
+
+    # ── Command and Control: Application Layer Protocol (T1071 / T1071.001 / T1071.004)
+    'T1071': [
+        {'framework': 'iso27001', 'control_id': 'A.8.16', 'control_name': 'Monitoring activities',
+         'failure_type': 'DETECTIVE_FAILED', 'severity': 'high', 'remediation_priority': 'P1'},
+        {'framework': 'iso27001', 'control_id': 'A.8.20', 'control_name': 'Networks security',
+         'failure_type': 'PREVENTIVE_FAILED', 'severity': 'high', 'remediation_priority': 'P1'},
+        {'framework': 'nist_csf', 'control_id': 'DE.CM-01', 'control_name': 'Networks and network services are monitored',
+         'failure_type': 'DETECTIVE_FAILED', 'severity': 'high', 'remediation_priority': 'P1'},
+        {'framework': 'asd_ism', 'control_id': 'ISM-1815', 'control_name': 'Network egress filtering for cloud platforms',
+         'failure_type': 'CONTROL_ABSENT', 'severity': 'high', 'remediation_priority': 'P1'},
+    ],
+    'T1071.001': [
+        {'framework': 'iso27001', 'control_id': 'A.8.16', 'control_name': 'Monitoring activities',
+         'failure_type': 'DETECTIVE_FAILED', 'severity': 'high', 'remediation_priority': 'P1'},
+        {'framework': 'iso27001', 'control_id': 'A.8.23', 'control_name': 'Web filtering',
+         'failure_type': 'PREVENTIVE_FAILED', 'severity': 'high', 'remediation_priority': 'P2'},
+        {'framework': 'nist_csf', 'control_id': 'DE.CM-01', 'control_name': 'Networks and network services are monitored',
+         'failure_type': 'DETECTIVE_FAILED', 'severity': 'high', 'remediation_priority': 'P1'},
+        {'framework': 'nist_csf', 'control_id': 'DE.AE-02', 'control_name': 'Potentially adverse events are analyzed',
+         'failure_type': 'DETECTIVE_FAILED', 'severity': 'moderate', 'remediation_priority': 'P2'},
+    ],
+    'T1071.004': [
+        {'framework': 'iso27001', 'control_id': 'A.8.16', 'control_name': 'Monitoring activities',
+         'failure_type': 'DETECTIVE_FAILED', 'severity': 'high', 'remediation_priority': 'P1'},
+        {'framework': 'iso27001', 'control_id': 'A.8.20', 'control_name': 'Networks security',
+         'failure_type': 'PREVENTIVE_FAILED', 'severity': 'high', 'remediation_priority': 'P1'},
+        {'framework': 'nist_csf', 'control_id': 'DE.CM-01', 'control_name': 'Networks and network services are monitored',
+         'failure_type': 'DETECTIVE_FAILED', 'severity': 'high', 'remediation_priority': 'P1'},
+        {'framework': 'asd_ism', 'control_id': 'ISM-1815', 'control_name': 'Network egress filtering (block DNS tunnelling)',
+         'failure_type': 'CONTROL_ABSENT', 'severity': 'high', 'remediation_priority': 'P1'},
+    ],
 }
 
 
@@ -668,11 +732,25 @@ _CAP_TO_MITRE: list[tuple[str, str]] = [
     ('backblaze', 'T1567.002'),
     ('dropbox', 'T1567.002'),
     ('s3 exfil', 'T1537'),
-    # C2
+    # Lateral movement
+    ('lateral smb', 'T1021.002'),
+    ('smb lateral', 'T1021.002'),
+    ('smb movement', 'T1021.002'),
+    ('smb', 'T1021.002'),
+    ('rdp lateral', 'T1021.001'),
+    ('rdp', 'T1021.001'),
+    ('lateral movement', 'T1021'),
+    ('lateral', 'T1021'),
+    # C2 / beaconing
     ('dns c2', 'T1071.004'),
     ('dns tunnel', 'T1071.004'),
     ('dns beaconing', 'T1071.004'),
+    ('low-reputation dns', 'T1071.004'),
     ('c2 beacon', 'T1071.001'),
+    ('c2 communication', 'T1071'),
+    ('c2 beaconing', 'T1071.001'),
+    ('beaconing', 'T1071.001'),
+    ('network flow', 'T1071'),
     # Execution
     ('powershell', 'T1059.003'),
     ('cmd.exe', 'T1059.003'),
@@ -721,6 +799,15 @@ def _infer_mitre_from_cluster(cluster: dict) -> list[str]:
     llm_n = cluster.get('llm_narrative') or {}
     combined_text += str(llm_n.get('attack_narrative') or '').lower() + ' '
 
+    # Top-level cluster fields (available even before llm_narrative is set)
+    combined_text += str(cluster.get('attack_narrative') or '').lower() + ' '
+    combined_text += str(cluster.get('kill_chain_stage') or '').lower() + ' '
+    combined_text += str(cluster.get('lead_description') or '').lower() + ' '
+    combined_text += str(cluster.get('ioc_summary') or '').lower() + ' '
+    for _phase in (cluster.get('phases') or []):
+        combined_text += str(_phase.get('name') or '').lower() + ' '
+        combined_text += str(_phase.get('case_role') or '').lower() + ' '
+
     found: list[str] = []
     seen: set[str] = set()
     for keyword, technique_id in _CAP_TO_MITRE:
@@ -747,9 +834,12 @@ def build_control_failure_register(narrative: dict,
     # haven't run the MITRE tagging stage), infer from Diamond/kill-chain/DREAD.
     if not techniques and cluster:
         techniques = _infer_mitre_from_cluster(cluster)
-        # Back-fill so downstream callers see the inferred set
+        # Back-fill so downstream callers see the inferred set.
+        # Use direct assignment (not setdefault) so an existing empty list
+        # is also replaced with the inferred techniques.
         if techniques and isinstance(narrative, dict):
-            narrative.setdefault('mitre_techniques', techniques)
+            if not narrative.get('mitre_techniques'):
+                narrative['mitre_techniques'] = techniques
 
     mapping = map_techniques_to_controls(techniques)
     triggers = evaluate_regulatory_triggers(narrative, entity_context)

@@ -3538,6 +3538,18 @@
       if (/^0 failed controls/i.test(_rawHeadline)) {
         _rawHeadline = 'Compliance assessment in progress — control mapping pending enrichment.';
       }
+      // Sanitise forensics: '0 host(s)' means network-only data source, not a pipeline failure
+      if (/^Acquire from 0 host\(s\)/i.test(_rawHeadline)) {
+        _rawHeadline = 'Network-source scope — no endpoint hosts in this data source. Preserve network logs and cloud audit trails below.';
+      }
+      // Sanitise executive: '0 employee account(s)' means no user fields in network telemetry
+      if (/^0 employee account\(s\) compromised/i.test(_rawHeadline)) {
+        _rawHeadline = 'Network-layer breach detected — account identifiers not available from this data source. See scope summary below.';
+      }
+      // Enrich threat hunter when 0 techniques: add hint to click Regenerate
+      if (/Hunt seeds:.*,\s*0 techniques\b/i.test(_rawHeadline) && !/Regenerate/i.test(_rawHeadline)) {
+        _rawHeadline = _rawHeadline.replace(/,\s*0 techniques\b/i, ', 0 techniques — click Regenerate to infer from cluster narrative');
+      }
       var descHtml = _rawHeadline
         ? '<div class="br-dispatch__preview-evidence-headline">' + escHtml(_rawHeadline) + '</div>'
         : '<div class="br-dispatch__preview-desc">' + escHtml(roleDef.desc) + '</div>';
