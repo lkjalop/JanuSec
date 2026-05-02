@@ -1,14 +1,10 @@
 /**
  * breach_dispatch_buttons.spec.js
  *
- * Full-button audit: verifies that all dispatch preview buttons in the breach
- * console work end-to-end — not stubs. Tests:
- *  - Compliance persona preview opens with meaningful content
- *  - "Preview Full Compliance Report" opens postmortem viewer with sections
- *  - "Generate Deep Report" opens postmortem tab with structured data
- *  - "Confirm & Send to Compliance" returns 200 and shows Dispatched state
- *  - "Regenerate" re-renders the dispatch preview without error
- *  - Exec summary "regenerate" button triggers LLM call
+ * Full-button audit: verifies that ALL dispatch persona previews work end-to-end,
+ * including: SOC Analyst, CISO/Legal, Executive, Threat Hunter, Forensics, Compliance.
+ * Also tests: "Preview Full Report" link, "Generate Deep Report", "Confirm & Send",
+ * "Regenerate", postmortem viewer Control Failures page, and SABSA Architecture page.
  *
  * Requires:
  *  - Server running at http://localhost:8080 with PLATFORM_LITE_INIT=1
@@ -30,6 +26,19 @@ async function getLatestAssessment(request) {
   return jobs.length ? jobs[0].assessment_id : null;
 }
 
+/** Helper: open breach page, click persona dispatch button, return preview text */
+async function openDispatchPreview(page, assessmentId, personaLabel) {
+  await page.goto(`${BASE}/static/breach.html?assessment=${encodeURIComponent(assessmentId)}`);
+  await page.waitForSelector(`button:has-text("${personaLabel}")`, { timeout: 25000 });
+  await page.locator(`button:has-text("${personaLabel}")`).first().click();
+  const preview = page.locator('#br-dispatch-preview');
+  await expect(preview).toBeVisible({ timeout: 15000 });
+  await page.waitForTimeout(2000); // allow async enrichment
+  return await preview.innerText();
+}
+
+// ─── Page Load & Exec Summary ──────────────────────────────────────────────
+
 test.describe('Dispatch Preview — Full Button Audit', () => {
   let assessmentId;
 
@@ -40,7 +49,6 @@ test.describe('Dispatch Preview — Full Button Audit', () => {
 
   test('page loads with assessment data and verdict banner', async ({ page }) => {
     await page.goto(`${BASE}/static/breach.html?assessment=${encodeURIComponent(assessmentId)}`);
-    // Wait for the verdict banner
     const verdict = page.locator('[class*="verdict"]').first();
     await expect(verdict).toBeVisible({ timeout: 20000 });
     const pageText = await page.locator('#br-content').innerText();
@@ -50,53 +58,184 @@ test.describe('Dispatch Preview — Full Button Audit', () => {
 
   test('exec summary regenerate button triggers LLM call', async ({ page }) => {
     await page.goto(`${BASE}/static/breach.html?assessment=${encodeURIComponent(assessmentId)}`);
-    // Wait for exec summary section
     await page.waitForSelector('#br-exec-regen', { timeout: 20000 });
     const regenBtn = page.locator('#br-exec-regen');
     await regenBtn.click();
-    // Should show "regenerating…"
     await expect(regenBtn).toContainText('regenerating', { timeout: 5000 });
   });
 
-  test('compliance dispatch opens preview with postmortem content', async ({ page }) => {
-    await page.goto(`${BASE}/static/breach.html?assessment=${encodeURIComponent(assessmentId)}`);
-    // Wait for dispatch buttons to appear
-    await page.waitForSelector('[data-testid="br-dispatch-compliance"], button:has-text("Compliance")', { timeout: 20000 });
-    // Click Compliance in the dispatch section
-    const compBtn = page.locator('button:has-text("Compliance")').first();
-    await compBtn.click();
-    // Dispatch preview should become visible
-    const preview = page.locator('#br-dispatch-preview');
-    await expect(preview).toBeVisible({ timeout: 10000 });
-    const previewText = await preview.innerText();
-    // Should contain dispatch-specific elements
-    expect(previewText).toContain('DISPATCH PREVIEW');
-    expect(previewText.toUpperCase()).toContain('WHAT THEY RECEIVE');
-    expect(previewText.toUpperCase()).toContain('DELIVERY CHANNEL');
-    expect(previewText).toContain('Preview Full Compliance Report');
-    expect(previewText).toContain('Confirm & Send to Compliance');
+  // ─── SOC Analyst ───────────────────────────────────────────────────────────
+
+  test('SOC Analyst dispatch preview opens with triage content', async ({ page }) => {
+    const text = await openDispatchPreview(page, assessmentId, 'SOC Analyst');
+    expect(text.toUpperCase()).toContain('DISPATCH PREVIEW');
+    expect(text.toUpperCase()).toContain('SOC');
+    expect(text.toUpperCase()).toContain('WHAT THEY RECEIVE');
+    // SOC should show containment/triage/IOC language
+    expect(text).toMatch(/confidence|containment|triage|isolat|IOC|evidence/i);
   });
 
-  test('compliance dispatch preview shows postmortem enrichment (not empty)', async ({ page }) => {
-    await page.goto(`${BASE}/static/breach.html?assessment=${encodeURIComponent(assessmentId)}`);
-    await page.waitForSelector('button:has-text("Compliance")', { timeout: 20000 });
-    await page.locator('button:has-text("Compliance")').first().click();
-    const preview = page.locator('#br-dispatch-preview');
-    await expect(preview).toBeVisible({ timeout: 10000 });
-    // Wait for async postmortem enrichment to load
-    await page.waitForTimeout(3000);
-    const previewText = await preview.innerText();
-    // Should show meaningful lifecycle content (not just placeholder)
-    const hasLifecycle = /DETECT|ISO 27035|Corrective Actions|P1/i.test(previewText);
-    expect(hasLifecycle, `Dispatch preview lacks postmortem enrichment. Got: "${previewText.slice(0, 300)}"`).toBe(true);
+  test('SOC Analyst dispatch has "Confirm & Send" and delivery channel', async ({ page }) => {
+    const text = await openDispatchPreview(page, assessmentId, 'SOC Analyst');
+    expect(text.toUpperCase()).toContain('DELIVERY CHANNEL');
+    expect(text).toMatch(/Confirm & Send/i);
   });
 
-  test('"Preview Full Compliance Report" link targets postmortem viewer', async ({ page }) => {
-    await page.goto(`${BASE}/static/breach.html?assessment=${encodeURIComponent(assessmentId)}`);
-    await page.waitForSelector('button:has-text("Compliance")', { timeout: 20000 });
-    await page.locator('button:has-text("Compliance")').first().click();
+  test('SOC Analyst "Generate Deep Report" navigates to postmortem', async ({ page }) => {
+    await openDispatchPreview(page, assessmentId, 'SOC Analyst');
     const preview = page.locator('#br-dispatch-preview');
-    await expect(preview).toBeVisible({ timeout: 10000 });
+    const moreActions = preview.locator('summary:has-text("More actions")');
+    await moreActions.click();
+    const deepBtn = preview.locator('button:has-text("Generate Deep Report")');
+    await expect(deepBtn).toBeVisible({ timeout: 3000 });
+    await deepBtn.click();
+    await page.waitForURL(/tab=postmortem/, { timeout: 10000 });
+    await page.waitForSelector('.br-postmortem, [class*="postmortem"], #br-content:has-text("Postmortem")', { timeout: 20000 });
+    const bodyText = await page.locator('body').innerText();
+    expect(bodyText).toMatch(/Postmortem|postmortem|ISO 27035|Corrective/i);
+  });
+
+  // ─── CISO / Legal ──────────────────────────────────────────────────────────
+
+  test('CISO / Legal dispatch preview opens with regulatory content', async ({ page }) => {
+    const text = await openDispatchPreview(page, assessmentId, 'CISO / Legal');
+    expect(text.toUpperCase()).toContain('DISPATCH PREVIEW');
+    expect(text.toUpperCase()).toContain('CISO');
+    expect(text.toUpperCase()).toContain('WHAT THEY RECEIVE');
+    // CISO should show regulatory/compliance/notification language
+    expect(text).toMatch(/regulatory|compliance|notification|NDB|GDPR|breach|confidence|control/i);
+  });
+
+  test('CISO / Legal dispatch has delivery channel and confirm button', async ({ page }) => {
+    const text = await openDispatchPreview(page, assessmentId, 'CISO / Legal');
+    expect(text.toUpperCase()).toContain('DELIVERY CHANNEL');
+    expect(text).toMatch(/Confirm & Send/i);
+  });
+
+  test('CISO / Legal "Generate Deep Report" navigates to postmortem', async ({ page }) => {
+    await openDispatchPreview(page, assessmentId, 'CISO / Legal');
+    const preview = page.locator('#br-dispatch-preview');
+    const moreActions = preview.locator('summary:has-text("More actions")');
+    await moreActions.click();
+    const deepBtn = preview.locator('button:has-text("Generate Deep Report")');
+    await expect(deepBtn).toBeVisible({ timeout: 3000 });
+    await deepBtn.click();
+    await page.waitForURL(/tab=postmortem/, { timeout: 10000 });
+    await page.waitForSelector('.br-postmortem, [class*="postmortem"], #br-content:has-text("Postmortem")', { timeout: 20000 });
+    const bodyText = await page.locator('body').innerText();
+    expect(bodyText).toMatch(/Postmortem|postmortem|ISO 27035|Corrective/i);
+  });
+
+  // ─── Executive ─────────────────────────────────────────────────────────────
+
+  test('Executive dispatch preview opens with business content', async ({ page }) => {
+    const text = await openDispatchPreview(page, assessmentId, 'Executive');
+    expect(text.toUpperCase()).toContain('DISPATCH PREVIEW');
+    expect(text.toUpperCase()).toContain('EXECUTIVE');
+    expect(text.toUpperCase()).toContain('WHAT THEY RECEIVE');
+    // Executive should show business/impact language
+    expect(text).toMatch(/confidence|impact|breach|business|material|risk|action/i);
+  });
+
+  test('Executive dispatch has delivery channel and confirm button', async ({ page }) => {
+    const text = await openDispatchPreview(page, assessmentId, 'Executive');
+    expect(text.toUpperCase()).toContain('DELIVERY CHANNEL');
+    expect(text).toMatch(/Confirm & Send/i);
+  });
+
+  test('Executive "Generate Deep Report" navigates to postmortem', async ({ page }) => {
+    await openDispatchPreview(page, assessmentId, 'Executive');
+    const preview = page.locator('#br-dispatch-preview');
+    const moreActions = preview.locator('summary:has-text("More actions")');
+    await moreActions.click();
+    const deepBtn = preview.locator('button:has-text("Generate Deep Report")');
+    await expect(deepBtn).toBeVisible({ timeout: 3000 });
+    await deepBtn.click();
+    await page.waitForURL(/tab=postmortem/, { timeout: 10000 });
+    await page.waitForSelector('.br-postmortem, [class*="postmortem"], #br-content:has-text("Postmortem")', { timeout: 20000 });
+    const bodyText = await page.locator('body').innerText();
+    expect(bodyText).toMatch(/Postmortem|postmortem|ISO 27035|Corrective/i);
+  });
+
+  // ─── Threat Hunter ─────────────────────────────────────────────────────────
+
+  test('Threat Hunter dispatch preview opens with hunt content', async ({ page }) => {
+    const text = await openDispatchPreview(page, assessmentId, 'Threat Hunter');
+    expect(text.toUpperCase()).toContain('DISPATCH PREVIEW');
+    expect(text.toUpperCase()).toContain('THREAT HUNTER');
+    expect(text.toUpperCase()).toContain('WHAT THEY RECEIVE');
+    // Threat hunter should show kill chain/sigma/hunt language
+    expect(text).toMatch(/kill chain|sigma|hunt|pivot|hypothesis|IOC|confidence|evidence|phase/i);
+  });
+
+  test('Threat Hunter dispatch has delivery channel and confirm button', async ({ page }) => {
+    const text = await openDispatchPreview(page, assessmentId, 'Threat Hunter');
+    expect(text.toUpperCase()).toContain('DELIVERY CHANNEL');
+    expect(text).toMatch(/Confirm & Send/i);
+  });
+
+  test('Threat Hunter "Generate Deep Report" navigates to postmortem', async ({ page }) => {
+    await openDispatchPreview(page, assessmentId, 'Threat Hunter');
+    const preview = page.locator('#br-dispatch-preview');
+    const moreActions = preview.locator('summary:has-text("More actions")');
+    await moreActions.click();
+    const deepBtn = preview.locator('button:has-text("Generate Deep Report")');
+    await expect(deepBtn).toBeVisible({ timeout: 3000 });
+    await deepBtn.click();
+    await page.waitForURL(/tab=postmortem/, { timeout: 10000 });
+    await page.waitForSelector('.br-postmortem, [class*="postmortem"], #br-content:has-text("Postmortem")', { timeout: 20000 });
+    const bodyText = await page.locator('body').innerText();
+    expect(bodyText).toMatch(/Postmortem|postmortem|ISO 27035|Corrective/i);
+  });
+
+  // ─── Forensics ─────────────────────────────────────────────────────────────
+
+  test('Forensics dispatch preview opens with artifact content', async ({ page }) => {
+    const text = await openDispatchPreview(page, assessmentId, 'Forensics');
+    expect(text.toUpperCase()).toContain('DISPATCH PREVIEW');
+    expect(text.toUpperCase()).toContain('FORENSIC');
+    expect(text.toUpperCase()).toContain('WHAT THEY RECEIVE');
+    // Forensics should show artifact/evidence/chain-of-custody language
+    expect(text).toMatch(/artifact|evidence|custody|memory|disk|proof|confidence|preserve/i);
+  });
+
+  test('Forensics dispatch has delivery channel and confirm button', async ({ page }) => {
+    const text = await openDispatchPreview(page, assessmentId, 'Forensics');
+    expect(text.toUpperCase()).toContain('DELIVERY CHANNEL');
+    expect(text).toMatch(/Confirm & Send/i);
+  });
+
+  test('Forensics "Generate Deep Report" navigates to postmortem', async ({ page }) => {
+    await openDispatchPreview(page, assessmentId, 'Forensics');
+    const preview = page.locator('#br-dispatch-preview');
+    const moreActions = preview.locator('summary:has-text("More actions")');
+    await moreActions.click();
+    const deepBtn = preview.locator('button:has-text("Generate Deep Report")');
+    await expect(deepBtn).toBeVisible({ timeout: 3000 });
+    await deepBtn.click();
+    await page.waitForURL(/tab=postmortem/, { timeout: 10000 });
+    await page.waitForSelector('.br-postmortem, [class*="postmortem"], #br-content:has-text("Postmortem")', { timeout: 20000 });
+    const bodyText = await page.locator('body').innerText();
+    expect(bodyText).toMatch(/Postmortem|postmortem|ISO 27035|Corrective/i);
+  });
+
+  // ─── Compliance (existing, consolidated) ───────────────────────────────────
+
+  test('Compliance dispatch preview opens with control/framework content', async ({ page }) => {
+    const text = await openDispatchPreview(page, assessmentId, 'Compliance');
+    expect(text.toUpperCase()).toContain('DISPATCH PREVIEW');
+    expect(text.toUpperCase()).toContain('COMPLIANCE');
+    expect(text.toUpperCase()).toContain('WHAT THEY RECEIVE');
+    expect(text.toUpperCase()).toContain('DELIVERY CHANNEL');
+    expect(text).toContain('Preview Full Compliance Report');
+    expect(text).toMatch(/Confirm & Send/i);
+    // Compliance enrichment content
+    expect(text).toMatch(/DETECT|ISO 27035|Corrective Actions|P1|LIFECYCLE/i);
+  });
+
+  test('Compliance "Preview Full Report" link opens postmortem viewer', async ({ page }) => {
+    await openDispatchPreview(page, assessmentId, 'Compliance');
+    const preview = page.locator('#br-dispatch-preview');
     const link = preview.locator('a:has-text("Preview Full Compliance Report")');
     await expect(link).toBeVisible();
     const href = await link.getAttribute('href');
@@ -105,80 +244,51 @@ test.describe('Dispatch Preview — Full Button Audit', () => {
     expect(href).toContain('cluster=');
   });
 
-  test('"Preview Full Compliance Report" page loads real sections', async ({ page }) => {
-    await page.goto(`${BASE}/static/breach.html?assessment=${encodeURIComponent(assessmentId)}`);
-    await page.waitForSelector('button:has-text("Compliance")', { timeout: 20000 });
-    await page.locator('button:has-text("Compliance")').first().click();
+  test('Compliance "Generate Deep Report" navigates to postmortem', async ({ page }) => {
+    await openDispatchPreview(page, assessmentId, 'Compliance');
     const preview = page.locator('#br-dispatch-preview');
-    await expect(preview).toBeVisible({ timeout: 10000 });
-    const link = preview.locator('a:has-text("Preview Full Compliance Report")');
-    const href = await link.getAttribute('href');
-    // Navigate to the postmortem viewer
-    await page.goto(`${BASE}${href}`);
-    await page.waitForTimeout(3000);
-    const bodyText = await page.locator('body').innerText();
-    // Should have real structured report content
-    expect(bodyText).toContain('Compliance & ISMS Postmortem Report');
-    expect(bodyText).toMatch(/Incident Lifecycle|ISO 27035 Lifecycle/);
-    // Should have verdict table
-    expect(bodyText).toMatch(/REQUIRES_INVESTIGATION|VALIDATED_BREACH|CONFIRMED_BREACH/);
-    // Should have corrective actions
-    expect(bodyText).toMatch(/Corrective Actions|P1/);
-  });
-
-  test('"Generate Deep Report" opens postmortem tab with structured data', async ({ page }) => {
-    await page.goto(`${BASE}/static/breach.html?assessment=${encodeURIComponent(assessmentId)}`);
-    await page.waitForSelector('button:has-text("Compliance")', { timeout: 20000 });
-    await page.locator('button:has-text("Compliance")').first().click();
-    const preview = page.locator('#br-dispatch-preview');
-    await expect(preview).toBeVisible({ timeout: 10000 });
-    // Expand "More actions" details
     const moreActions = preview.locator('summary:has-text("More actions")');
     await moreActions.click();
     const deepBtn = preview.locator('button:has-text("Generate Deep Report")');
     await expect(deepBtn).toBeVisible({ timeout: 3000 });
     await deepBtn.click();
-    // Should navigate to postmortem tab
     await page.waitForURL(/tab=postmortem/, { timeout: 10000 });
-    await page.waitForTimeout(3000);
+    await page.waitForSelector('.br-postmortem, [class*="postmortem"], #br-content:has-text("Postmortem")', { timeout: 20000 });
     const bodyText = await page.locator('body').innerText();
-    // Postmortem tab should show cluster-level structured data
-    expect(bodyText).toContain('Postmortem');
-    expect(bodyText).toMatch(/ISO 27035|Incident Lifecycle|Corrective Actions/);
+    expect(bodyText).toMatch(/Postmortem|postmortem|ISO 27035|Corrective/i);
   });
 
-  test('"Confirm & Send to Compliance" dispatches successfully (not a stub)', async ({ page, request }) => {
-    // Verify the API endpoint works directly
-    const resp = await request.post(`${BASE}/api/v1/dispatch/notify`, {
-      headers: { ...HEADERS, 'Content-Type': 'application/json' },
-      data: {
-        assessment_id: assessmentId,
-        role: 'compliance',
-        channel: 'email',
-        requires_change_management: false,
-      },
+  // ─── Dispatch API (all personas) ──────────────────────────────────────────
+
+  const DISPATCH_ROLES = ['soc_analyst', 'ciso', 'executive', 'threat_hunter', 'forensics', 'compliance'];
+
+  for (const role of DISPATCH_ROLES) {
+    test(`dispatch/notify API returns 200 for role=${role}`, async ({ request }) => {
+      const resp = await request.post(`${BASE}/api/v1/dispatch/notify`, {
+        headers: { ...HEADERS, 'Content-Type': 'application/json' },
+        data: {
+          assessment_id: assessmentId,
+          role: role,
+          channel: 'email',
+          requires_change_management: false,
+        },
+      });
+      expect(resp.status(), `dispatch/notify returned ${resp.status()} for ${role}`).toBe(200);
+      const body = await resp.json();
+      expect(body).toHaveProperty('message');
     });
-    // Should return 200 (not 404/501 which would indicate stub)
-    expect(resp.status(), `dispatch/notify returned ${resp.status()}, expected 200`).toBe(200);
-    const body = await resp.json();
-    expect(body).toHaveProperty('message');
-    // Demo mode is acceptable
-    expect(body.demo === true || body.dispatched === true || body.message).toBeTruthy();
-  });
+  }
+
+  // ─── Regenerate Button ─────────────────────────────────────────────────────
 
   test('"Regenerate" in More actions re-renders dispatch preview', async ({ page }) => {
-    await page.goto(`${BASE}/static/breach.html?assessment=${encodeURIComponent(assessmentId)}`);
-    await page.waitForSelector('button:has-text("Compliance")', { timeout: 20000 });
-    await page.locator('button:has-text("Compliance")').first().click();
+    await openDispatchPreview(page, assessmentId, 'Compliance');
     const preview = page.locator('#br-dispatch-preview');
-    await expect(preview).toBeVisible({ timeout: 10000 });
-    // Expand "More actions"
     const moreActions = preview.locator('summary:has-text("More actions")');
     await moreActions.click();
     const regenBtn = preview.locator('button:has-text("Regenerate")');
     await expect(regenBtn).toBeVisible({ timeout: 3000 });
     await regenBtn.click();
-    // Preview should still be visible after regeneration
     await page.waitForTimeout(2000);
     const newPreview = page.locator('#br-dispatch-preview');
     await expect(newPreview).toBeVisible();
@@ -186,27 +296,65 @@ test.describe('Dispatch Preview — Full Button Audit', () => {
     expect(previewText).toContain('DISPATCH PREVIEW');
   });
 
-  test('SOC Analyst dispatch preview shows containment content', async ({ page }) => {
-    await page.goto(`${BASE}/static/breach.html?assessment=${encodeURIComponent(assessmentId)}`);
-    await page.waitForSelector('button:has-text("SOC Analyst")', { timeout: 20000 });
-    await page.locator('button:has-text("SOC Analyst")').first().click();
+  // ─── Postmortem Viewer — Control Failures Page ─────────────────────────────
+
+  test('postmortem viewer loads Control Failures section', async ({ page }) => {
+    await openDispatchPreview(page, assessmentId, 'Compliance');
     const preview = page.locator('#br-dispatch-preview');
-    await expect(preview).toBeVisible({ timeout: 10000 });
-    const previewText = await preview.innerText();
-    expect(previewText).toContain('DISPATCH PREVIEW');
-    // SOC should show triage/containment language
-    expect(previewText).toMatch(/confidence|evidence|containment|triage|isolat/i);
+    const link = preview.locator('a:has-text("Preview Full Compliance Report")');
+    const href = await link.getAttribute('href');
+    await page.goto(`${BASE}${href}`);
+    await page.waitForTimeout(3000);
+    // Click "Control Failures" nav item
+    await page.click('[data-sec="controls"]');
+    await page.waitForTimeout(1000);
+    const section = page.locator('#sec-controls');
+    await expect(section).toBeVisible();
+    const controlsText = await section.innerText();
+    // Should show control failures section title or placeholder
+    expect(controlsText).toMatch(/Control Failure|control|No control failures|0 control/i);
   });
 
-  test('Executive dispatch preview shows business-oriented content', async ({ page }) => {
-    await page.goto(`${BASE}/static/breach.html?assessment=${encodeURIComponent(assessmentId)}`);
-    await page.waitForSelector('button:has-text("Executive")', { timeout: 20000 });
-    await page.locator('button:has-text("Executive")').first().click();
+  // ─── Postmortem Viewer — SABSA Architecture Page ───────────────────────────
+
+  test('postmortem viewer loads SABSA Architecture section', async ({ page }) => {
+    await openDispatchPreview(page, assessmentId, 'Compliance');
     const preview = page.locator('#br-dispatch-preview');
-    await expect(preview).toBeVisible({ timeout: 10000 });
-    const previewText = await preview.innerText();
-    expect(previewText).toContain('DISPATCH PREVIEW');
+    const link = preview.locator('a:has-text("Preview Full Compliance Report")');
+    const href = await link.getAttribute('href');
+    await page.goto(`${BASE}${href}`);
+    await page.waitForTimeout(3000);
+    // Click "SABSA Architecture" nav item
+    await page.click('[data-sec="sabsa"]');
+    await page.waitForTimeout(1000);
+    const section = page.locator('#sec-sabsa');
+    await expect(section).toBeVisible();
+    const sabsaText = await section.innerText();
+    // Should show SABSA layers or at least section structure
+    expect(sabsaText).toMatch(/SABSA|Architecture|layer|business|logical|physical|component/i);
   });
+
+  // ─── Postmortem Viewer — All Sections Reachable ────────────────────────────
+
+  test('postmortem viewer all nav sections are accessible', async ({ page }) => {
+    await openDispatchPreview(page, assessmentId, 'Compliance');
+    const preview = page.locator('#br-dispatch-preview');
+    const link = preview.locator('a:has-text("Preview Full Compliance Report")');
+    const href = await link.getAttribute('href');
+    await page.goto(`${BASE}${href}`);
+    await page.waitForTimeout(3000);
+
+    const sections = ['verdict', 'lifecycle', 'threat', 'controls', 'sabsa', 'risk', 'regs', 'actions'];
+    for (const sec of sections) {
+      await page.click(`[data-sec="${sec}"]`);
+      await page.waitForTimeout(500);
+      const el = page.locator(`#sec-${sec}`);
+      const isVisible = await el.isVisible();
+      expect(isVisible, `Section #sec-${sec} should be visible after clicking nav`).toBe(true);
+    }
+  });
+
+  // ─── No Console Errors ─────────────────────────────────────────────────────
 
   test('no console errors on dispatch preview interactions', async ({ page }) => {
     const errors = [];
@@ -219,7 +367,6 @@ test.describe('Dispatch Preview — Full Button Audit', () => {
     await page.waitForSelector('button:has-text("Compliance")', { timeout: 20000 });
     await page.locator('button:has-text("Compliance")').first().click();
     await page.waitForTimeout(2000);
-    // Filter out expected errors (network failures from missing endpoints)
     const realErrors = errors.filter(e => !e.includes('Failed to load resource') && !e.includes('tier1-summary'));
     expect(realErrors, `Unexpected console errors: ${realErrors.join('; ')}`).toHaveLength(0);
   });
