@@ -2080,8 +2080,10 @@
   // Maps each dispatch role to the existing 8-persona report system.
   // Each button opens a preview of what the stakeholder will receive,
   // requires confirmation before sending, and logs an audit entry.
+  // Rendering is delegated to window.BreachDispatch when available
+  // (breach_dispatch.js must be loaded before breach.js).
 
-  var _STAKEHOLDER_ROLES = [
+  var _STAKEHOLDER_ROLES = (window.BreachDispatch && window.BreachDispatch.roles) || [
     { key: 'soc_analyst',    icon: _icon('shield'),    label: 'SOC Analyst',  persona: 'soc_analyst',
       desc: 'Triage focus, containment options, IOCs, decision tree, priority',
       actions: 'Confirm/deny/escalate triage. Execute containment playbook. Validate IOC scope.' },
@@ -2105,6 +2107,7 @@
   ];
 
   function _dispatchPref(key, fallback) {
+    if (window.BreachDispatch) return window.BreachDispatch.pref(key, fallback);
     try {
       var v = localStorage.getItem('janusec.' + key);
       return v == null ? fallback : v;
@@ -2114,6 +2117,7 @@
   }
 
   function _renderStakeholderDispatch(assessment) {
+    if (window.BreachDispatch) return window.BreachDispatch.renderBar(assessment);
     assessment = assessment || {};
     var pendingActions = (assessment.proposed_actions || []).filter(function (a) {
       return !a.status || a.status === 'pending' || a.requires_approval;
