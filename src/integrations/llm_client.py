@@ -54,17 +54,62 @@ class LocalDeterministicClient(BaseLLMClient):
         self._tenant_budget: Dict[str, float] = {}
 
     def _deterministic_text(self, prompt: str, max_tokens: int) -> str:
-        # Return a compact deterministic summary derived from the prompt
+        # Return a compact deterministic summary derived from the prompt.
+        # When the prompt is for a structured incident assessment (tier1_prefill),
+        # return the required JSON schema so downstream parsers don't log warnings.
         h = hashlib.sha256(prompt.encode('utf-8')).hexdigest()[:12]
-        # Include a short snippet of the prompt for debugging (trimmed)
         snippet = prompt.replace('\n', ' ')[:200]
-        text = json.dumps({
-            'provider': self.provider,
-            'summary': f'deterministic-summary-{h}',
-            'prompt_snippet': snippet,
-            'max_tokens': max_tokens,
-            'generated_at': int(time.time())
-        })
+
+        # Detect tier1_prefill prompts — they start with /no_think or ask for
+        # "structured incident assessment" and expect specific JSON keys.
+        is_prefill = (
+            prompt.lstrip().startswith('/no_think') or
+            'structured incident assessment' in prompt or
+            'incident_name' in prompt or
+            'headline_subtitle' in prompt or
+            'short_narrative' in prompt
+        )
+        if is_prefill:
+            # Extract what we can from the prompt to populate deterministic fields
+            import re as _re
+            verdict_m = _re.search(r'verdict[:\s=]+([A-Z_\-]+)', prompt, _re.IGNORECASE)
+            severity_m = _re.search(r'severity[:\s=]+([a-z]+)', prompt, _re.IGNORECASE)
+            verdict = (verdict_m.group(1).lower() if verdict_m else 'confirmed_breach').replace('_', ' ')
+            severity = severity_m.group(1) if severity_m else 'high'
+            text = json.dumps({
+                'incident_name': f'Security Incident {h[:8].upper()}',
+                'headline_subtitle': f'{severity.capitalize()}-severity {verdict} detected in monitored environment',
+                'short_narrative': (
+                    f'Analysis of telemetry data identified a {severity}-severity {verdict}. '
+                    f'Evidence from multiple sources was correlated to identify the activity pattern. '
+                    f'Immediate investigation and containment is recommended.'
+                ),
+                'confidence_rationale': (
+                    f'Confidence based on correlated indicators across data sources. '
+                    f'Deterministic analysis applied (LLM not available).'
+                ),
+                'top_actions': [
+                    'Isolate affected systems and accounts',
+                    'Revoke and rotate any compromised credentials',
+                    'Preserve forensic artifacts for investigation',
+                    'Notify security incident response team',
+                    'Review access logs for lateral movement indicators',
+                ],
+                'mitre_techniques': [],
+                'provider': self.provider,
+                'summary': f'deterministic-summary-{h}',
+                'prompt_snippet': snippet,
+                'max_tokens': max_tokens,
+                'generated_at': int(time.time()),
+            })
+        else:
+            text = json.dumps({
+                'provider': self.provider,
+                'summary': f'deterministic-summary-{h}',
+                'prompt_snippet': snippet,
+                'max_tokens': max_tokens,
+                'generated_at': int(time.time()),
+            })
         return text
 
     def generate(self, prompt: str, max_tokens: int = 512, tenant_id: str | None = None, overrides: Dict[str, Any] | None = None, model: str | None = None, **kwargs: Any) -> Dict[str, Any]:

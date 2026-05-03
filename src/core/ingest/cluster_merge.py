@@ -777,11 +777,30 @@ def build_scope_qualified_pivots(rows: list[dict]) -> dict[str, list[int]]:
         # missing lever that lets us correlate "alice@corp on Azure logs in" →
         # "AWS AssumeRole-as-alice 4 hours later" → "GCP WIF token issued to
         # alice's GitHub workflow" into a single cross-cloud kill chain.
+        #
+        # Handle nested CloudTrail / Azure AD structures that haven't been fully
+        # flattened by the file_parser. AWS CloudTrail stores userIdentity as a
+        # dict: {"type":"IAMUser","arn":"...","userName":"alice",...}.
+        # Azure AD stores principal under properties.userPrincipalName.
+        _uid_raw = r.get('userIdentity')
+        if isinstance(_uid_raw, dict):
+            # AWS CloudTrail nested userIdentity — extract userName or ARN
+            _uid_raw = (
+                _uid_raw.get('userName') or
+                _uid_raw.get('arn') or
+                _uid_raw.get('principalId') or ''
+            )
+        _props = r.get('properties') or {}
+        if isinstance(_props, dict):
+            _azure_upn = _props.get('userPrincipalName') or _props.get('userId') or ''
+        else:
+            _azure_upn = ''
         _cloud_id = _lower(
             r.get('cloud_principal') or r.get('cloud_identity') or
             r.get('iam_principal') or r.get('userIdentity_arn') or
-            r.get('userIdentity') or r.get('principal_id') or
-            r.get('service_account_email') or r.get('upn')
+            _uid_raw or r.get('principal_id') or
+            r.get('service_account_email') or r.get('upn') or
+            _azure_upn
         )
         if _cloud_id and len(_cloud_id) >= 6 and _cloud_id not in ('-', 'n/a', 'unknown', 'system', 'anonymous'):
             # Normalize to a canonical short form so AWS ARN and bare email collide
