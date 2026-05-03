@@ -1785,9 +1785,11 @@ def create_app(config: dict | None = None):
         logger.debug('silent_swallow at %s:%d: %s', __file__, 1878, _exc)
 
     # Lightweight health endpoint (simplifies readiness polling for demos/automation)
-    @app.get('/health')
-    async def health() -> dict:
-        return {'status': 'ok'}
+    # Guard: only register if the production health endpoint hasn't been added yet.
+    if not any(getattr(r, 'path', '') == '/health' for r in app.routes):
+        @app.get('/health', include_in_schema=False)
+        async def _health_lite() -> dict:
+            return {'status': 'ok'}
 
 logger = logging.getLogger(__name__)
 
@@ -2858,24 +2860,27 @@ except Exception:
         except Exception as _exc:
             logger.debug('silent_swallow at %s:%d: %s', __file__, 2953, _exc)
     else:
-        # Fallback: directly expose snapshot/restore endpoints if router not included
+        # Fallback: directly expose snapshot/restore endpoints if router not included.
+        # Guard: skip if the route was already registered by a later block.
         try:
-            from fastapi import Request
-            @app.post('/api/v1/hopgraph/snapshot', include_in_schema=False)
-            async def _hopgraph_snapshot_fallback(request: Request):
-                try:
-                    from src.api.hopgraph_persistence import snapshot_hopgraph
-                except Exception:
-                    from .hopgraph_persistence import snapshot_hopgraph
-                return snapshot_hopgraph(request=request)
+            _existing_hg = {getattr(r, 'path', '') for r in app.routes}
+            if '/api/v1/hopgraph/snapshot' not in _existing_hg:
+                from fastapi import Request as _HgRequest
+                @app.post('/api/v1/hopgraph/snapshot', include_in_schema=False)
+                async def _hopgraph_snapshot_fallback(_req: _HgRequest):
+                    try:
+                        from src.api.hopgraph_persistence import snapshot_hopgraph
+                    except Exception:
+                        from .hopgraph_persistence import snapshot_hopgraph
+                    return snapshot_hopgraph(request=_req)
 
-            @app.post('/api/v1/hopgraph/restore', include_in_schema=False)
-            async def _hopgraph_restore_fallback(payload: dict, request: Request):
-                try:
-                    from src.api.hopgraph_persistence import restore_hopgraph
-                except Exception:
-                    from .hopgraph_persistence import restore_hopgraph
-                return restore_hopgraph(snapshot=payload, request=request)
+                @app.post('/api/v1/hopgraph/restore', include_in_schema=False)
+                async def _hopgraph_restore_fallback(_payload: dict, _req: _HgRequest):
+                    try:
+                        from src.api.hopgraph_persistence import restore_hopgraph
+                    except Exception:
+                        from .hopgraph_persistence import restore_hopgraph
+                    return restore_hopgraph(snapshot=_payload, request=_req)
         except Exception as _exc:
             logger.debug('silent_swallow at %s:%d: %s', __file__, 2974, _exc)
     if hopgraph_health_router:
@@ -7115,33 +7120,30 @@ async def ready() -> dict:
     payload['status'] = 'ready'
     return payload
 
-# Ensure HopGraph snapshot/restore endpoints exist in test/lite when persistence is enabled
+# Ensure HopGraph snapshot/restore endpoints exist in test/lite when persistence is enabled.
+# Guard against duplicate registration (fallback block above may have already added them).
 try:
     import os as _os
-    if _os.getenv('HOPGRAPH_PERSISTENCE_ENABLED','0').lower() in {'1','true','yes', 'true'} or _os.getenv('TEST_HELPERS_ENABLED','0').lower() in {'1','true','yes'}:
-        from fastapi import Request
+    if _os.getenv('HOPGRAPH_PERSISTENCE_ENABLED','0').lower() in {'1','true','yes'} or _os.getenv('TEST_HELPERS_ENABLED','0').lower() in {'1','true','yes'}:
+        _hg_existing = {getattr(r, 'path', '') for r in app.routes}
+        if '/api/v1/hopgraph/snapshot' not in _hg_existing:
+            from fastapi import Request as _HgRequest2
 
-        @app.post('/api/v1/hopgraph/snapshot', include_in_schema=False)
-        async def _hopgraph_snapshot_proxy(request: Request):
-            try:
-                from src.api.hopgraph_persistence import snapshot_hopgraph
-            except Exception:
-                from .hopgraph_persistence import snapshot_hopgraph
-            return snapshot_hopgraph(request=request)
+            @app.post('/api/v1/hopgraph/snapshot', include_in_schema=False)
+            async def _hopgraph_snapshot_proxy(_request: _HgRequest2):
+                try:
+                    from src.api.hopgraph_persistence import snapshot_hopgraph
+                except Exception:
+                    from .hopgraph_persistence import snapshot_hopgraph
+                return snapshot_hopgraph(request=_request)
 
-        @app.post('/api/v1/hopgraph/restore', include_in_schema=False)
-        async def _hopgraph_restore_proxy(payload: dict, request: Request):
-            try:
-                from src.api.hopgraph_persistence import restore_hopgraph
-            except Exception:
-                from .hopgraph_persistence import restore_hopgraph
-            return restore_hopgraph(snapshot=payload, request=request)
-        # Also register via add_api_route to handle decorator edge cases
-        try:
-            app.add_api_route('/api/v1/hopgraph/snapshot', _hopgraph_snapshot_proxy, methods=['POST'], include_in_schema=False)
-            app.add_api_route('/api/v1/hopgraph/restore', _hopgraph_restore_proxy, methods=['POST'], include_in_schema=False)
-        except Exception as _exc:
-            logger.debug('silent_swallow at %s:%d: %s', __file__, 7245, _exc)
+            @app.post('/api/v1/hopgraph/restore', include_in_schema=False)
+            async def _hopgraph_restore_proxy(_payload: dict, _request: _HgRequest2):
+                try:
+                    from src.api.hopgraph_persistence import restore_hopgraph
+                except Exception:
+                    from .hopgraph_persistence import restore_hopgraph
+                return restore_hopgraph(snapshot=_payload, request=_request)
 except Exception as _exc:
     logger.debug('silent_swallow at %s:%d: %s', __file__, 7247, _exc)
 
@@ -8739,12 +8741,15 @@ async def decisions_stream(request: Request, tenant_id: str | None = None):
 
     return StreamingResponse(_gen(), media_type='text/event-stream')
 
-# Alias to canonical streaming route if clients request older path
+# Alias to canonical streaming route if clients request older path — guard
+# against duplicate if the route was already registered by include_router.
 try:
-    from fastapi.responses import RedirectResponse
-    @app.get('/api/v1/decisions/stream', include_in_schema=False, operation_id='decisions_stream_alias')
-    async def _decisions_stream_alias() -> RedirectResponse:
-        return RedirectResponse(url='/api/v1/stream/decisions', status_code=307)
+    _stream_paths = {getattr(r, 'path', '') for r in app.routes}
+    if '/api/v1/decisions/stream' not in _stream_paths:
+        @app.get('/api/v1/decisions/stream', include_in_schema=False, operation_id='decisions_stream_alias')
+        async def _decisions_stream_alias() -> None:  # type: ignore[return]
+            from fastapi.responses import RedirectResponse
+            return RedirectResponse(url='/api/v1/stream/decisions', status_code=307)
 except Exception as _exc:
     logger.debug('silent_swallow at %s:%d: %s', __file__, 8833, _exc)
 
