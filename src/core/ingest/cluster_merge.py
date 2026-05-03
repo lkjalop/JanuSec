@@ -1254,6 +1254,41 @@ def _classify_component(
                 pivot_keys=pivot_keys_used,
                 cloud_providers=_clouds,
             )
+            # Layer in actor tags emitted by the threat intel stage (MISP/OpenCTI)
+            # If any member row carries threat_intel_actor_tags that match a known
+            # alias in APT_PROFILES, annotate the attribution (or create a stub
+            # intel_attribution when no TTP match fired).
+            _intel_tags: set[str] = set()
+            for _mr in member_rows:
+                for _t in (_mr.get('threat_intel_actor_tags') or []):
+                    _intel_tags.add(str(_t).lower().strip())
+            if _intel_tags:
+                if apt_attribution:
+                    # Merge intel tags into matched indicators for analyst visibility
+                    apt_attribution['threat_intel_actor_tags'] = sorted(_intel_tags)
+                    # Check if any intel tag matches the attributed actor or its aliases
+                    from src.core.enrichment.apt_profiles import APT_PROFILES as _APC
+                    _attr_actor = apt_attribution.get('actor', '')
+                    _profile = _APC.get(_attr_actor, {})
+                    _all_names = {_attr_actor} | {str(a).lower() for a in _profile.get('aliases', [])}
+                    if _intel_tags & _all_names:
+                        # Intel feed corroborates TTP attribution → raise confidence
+                        apt_attribution['confidence'] = round(
+                            min(0.97, apt_attribution['confidence'] + 0.07), 3
+                        )
+                        apt_attribution['attribution_basis'] = 'ttp_pattern_match+threat_intel'
+                else:
+                    # No TTP match but MISP/OpenCTI tags present → create intel-only stub
+                    apt_attribution = {
+                        'actor': sorted(_intel_tags)[0],
+                        'aliases': sorted(_intel_tags),
+                        'origin': '',
+                        'confidence': 0.45,  # below TTP floor — intel only, low confidence
+                        'description': 'Actor tag from threat intelligence feed (no TTP pattern match)',
+                        'matched_indicators': [f'intel:{t}' for t in sorted(_intel_tags)],
+                        'attribution_basis': 'threat_intel_only',
+                        'threat_intel_actor_tags': sorted(_intel_tags),
+                    }
         except Exception:   # noqa: BLE001
             logger.debug("APT attribution skipped for cluster %s", root, exc_info=True)
             apt_attribution = None

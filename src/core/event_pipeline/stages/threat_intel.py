@@ -46,7 +46,8 @@ async def threat_intel_stage(event: dict[str, Any], ctx: StageContext) -> StageR
                 try:
                     origin = CLIENT.origin_for(domain)
                     conf = CLIENT.ioc_confidence('domain', str(domain).lower())
-                    metadata['hits']['domain'] = {'value': domain, 'origin': origin, 'confidence': conf}
+                    actor_tags = CLIENT.actor_tags_for(domain)
+                    metadata['hits']['domain'] = {'value': domain, 'origin': origin, 'confidence': conf, 'actor_tags': actor_tags}
                 except Exception:
                     pass
         except Exception:
@@ -60,7 +61,8 @@ async def threat_intel_stage(event: dict[str, Any], ctx: StageContext) -> StageR
                 try:
                     origin = CLIENT.origin_for(url)
                     conf = CLIENT.ioc_confidence('url', str(url).lower())
-                    metadata['hits']['url'] = {'value': url, 'origin': origin, 'confidence': conf}
+                    actor_tags = CLIENT.actor_tags_for(url)
+                    metadata['hits']['url'] = {'value': url, 'origin': origin, 'confidence': conf, 'actor_tags': actor_tags}
                 except Exception:
                     pass
         except Exception:
@@ -74,7 +76,8 @@ async def threat_intel_stage(event: dict[str, Any], ctx: StageContext) -> StageR
                 try:
                     origin = CLIENT.origin_for(ip)
                     conf = CLIENT.ioc_confidence('ip', str(ip).lower())
-                    metadata['hits']['ip'] = {'value': ip, 'origin': origin, 'confidence': conf}
+                    actor_tags = CLIENT.actor_tags_for(ip)
+                    metadata['hits']['ip'] = {'value': ip, 'origin': origin, 'confidence': conf, 'actor_tags': actor_tags}
                 except Exception:
                     pass
         except Exception:
@@ -88,7 +91,8 @@ async def threat_intel_stage(event: dict[str, Any], ctx: StageContext) -> StageR
                 try:
                     origin = CLIENT.origin_for(h)
                     conf = CLIENT.ioc_confidence('hash', str(h).lower())
-                    metadata['hits']['hash'] = {'value': h, 'origin': origin, 'confidence': conf}
+                    actor_tags = CLIENT.actor_tags_for(h)
+                    metadata['hits']['hash'] = {'value': h, 'origin': origin, 'confidence': conf, 'actor_tags': actor_tags}
                 except Exception:
                     pass
         except Exception:
@@ -103,7 +107,8 @@ async def threat_intel_stage(event: dict[str, Any], ctx: StageContext) -> StageR
                 try:
                     origin = CLIENT.origin_for(ja3)
                     conf = CLIENT.ioc_confidence('ja3', str(ja3).lower())
-                    metadata['hits']['ja3'] = {'value': ja3, 'origin': origin, 'confidence': conf}
+                    actor_tags = CLIENT.actor_tags_for(ja3)
+                    metadata['hits']['ja3'] = {'value': ja3, 'origin': origin, 'confidence': conf, 'actor_tags': actor_tags}
                 except Exception:
                     pass
         except Exception:
@@ -117,7 +122,8 @@ async def threat_intel_stage(event: dict[str, Any], ctx: StageContext) -> StageR
                 try:
                     origin = CLIENT.origin_for(certfp)
                     conf = CLIENT.ioc_confidence('certfp', str(certfp).lower())
-                    metadata['hits']['certfp'] = {'value': certfp, 'origin': origin, 'confidence': conf}
+                    actor_tags = CLIENT.actor_tags_for(certfp)
+                    metadata['hits']['certfp'] = {'value': certfp, 'origin': origin, 'confidence': conf, 'actor_tags': actor_tags}
                 except Exception:
                     pass
         except Exception:
@@ -142,6 +148,24 @@ async def threat_intel_stage(event: dict[str, Any], ctx: StageContext) -> StageR
             event['threat_intel_hit'] = True
             event['threat_intel_hits'] = len(hits)
             event['threat_intel_types'] = list(hits.keys())
+            # Propagate actor tags from all hit IOCs onto the event so that
+            # assessment_worker / cluster_merge can incorporate them into
+            # apt_attribution without requiring live MISP access at cluster time.
+            all_actor_tags: list[str] = []
+            seen_tags: set[str] = set()
+            for hit_meta in hits.values():
+                for tag in (hit_meta.get('actor_tags') or []):
+                    t = str(tag).lower().strip()
+                    if t and t not in seen_tags:
+                        seen_tags.add(t)
+                        all_actor_tags.append(t)
+            if all_actor_tags:
+                existing = event.get('threat_intel_actor_tags') or []
+                merged = list(existing)
+                for t in all_actor_tags:
+                    if t not in merged:
+                        merged.append(t)
+                event['threat_intel_actor_tags'] = merged
     except Exception:
         pass
 
