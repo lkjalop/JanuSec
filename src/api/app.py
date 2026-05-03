@@ -1330,123 +1330,14 @@ try:
         return JSONResponse({'tenant_id': tenant_id, 'vision_analysis': config})
 
     # Lightweight direct endpoint for asking logs (test/demo tolerant)
-    @app.post('/api/v1/reports/{report_id}/ask_for_logs')
-    async def _direct_ask_for_logs(report_id: str, req: Request):
-        try:
-            payload = await req.json()
-        except Exception:
-            payload = {}
-        recipient = (payload.get('recipient') or payload.get('email') or 'security@example.com')
-        reason = payload.get('reason') or 'Please provide forensic logs and timeline for further triage.'
-        message = {
-            'to': recipient,
-            'subject': f"Request for additional logs: report {report_id}",
-            'body': (
-                f"Hello,\n\nWe are investigating report {report_id}. Please provide the following logs and context:\n"
-                "- Mail server logs (timestamps +/- 15m)\n"
-                "- Web proxy logs for linked URLs\n"
-                "- Endpoint telemetry for recipient hosts\n\n"
-                f"Reason: {reason}\n\nThanks,\nSecurity Team"
-            ),
-        }
-        return JSONResponse({'ok': True, 'message': message})
-    
-    @app.post('/api/v1/assessments/generate_persona')
-    async def _direct_generate_persona(req: Request):
-        try:
-            payload = await req.json()
-        except Exception:
-            payload = {}
-        assessment_id = payload.get('assessment_id')
-        if not assessment_id:
-            return JSONResponse({'detail': 'missing_assessment_id'}, status_code=400)
-        row_index = int(payload.get('row_index') or 0)
-        persona = (payload.get('persona') or 'soc').strip()
-        # best-effort: find REPORT_STORE on deep_analyze router module
-        try:
-            from src.api import deep_analyze_endpoints as dae
-            report = getattr(dae, 'REPORT_STORE', {}).get(assessment_id)
-        except Exception:
-            report = None
-        if not report:
-            return JSONResponse({'detail': 'report_not_found'}, status_code=404)
-        rows = report.get('per_row') or report.get('rows') or []
-        # support dict-based rows used in some tests
-        if isinstance(rows, dict):
-            rows = list(rows.values())
-        if row_index < 0 or row_index >= len(rows):
-            return JSONResponse({'detail': 'invalid_row_index'}, status_code=400)
-        incident = rows[row_index]
-        # Try cached_generate first, else fall back to DEFAULT_CLIENT.generate
-        try:
-            from src.reporting.llm_helper import cached_generate
-            resp = cached_generate(persona, incident)
-        except Exception:
-            try:
-                from src.integrations.llm_client import DEFAULT_CLIENT
-                prompt = incident.get('summary') or incident.get('text') or json.dumps(incident)
-                gen = DEFAULT_CLIENT.generate(prompt)
-                if isinstance(gen, dict) and 'text' in gen:
-                    resp = {'text': gen['text']}
-                else:
-                    resp = {'text': str(gen)}
-            except Exception:
-                return JSONResponse({'detail': 'llm_unavailable'}, status_code=500)
-        # persist persona report back into REPORT_STORE when possible
-        try:
-            if report is not None:
-                # prefer llm_rows array, else per_row or rows dict
-                if isinstance(report.get('llm_rows'), list) and len(report.get('llm_rows'))>row_index:
-                    target_row = report['llm_rows'][row_index]
-                else:
-                    rows = report.get('per_row') or report.get('rows') or {}
-                    if isinstance(rows, dict):
-                        # choose first matching key by index order
-                        vals = list(rows.values())
-                        target_row = vals[row_index] if row_index < len(vals) else None
-                    elif isinstance(rows, list):
-                        target_row = rows[row_index] if row_index < len(rows) else None
-                    else:
-                        target_row = None
-                if target_row is not None:
-                    try:
-                        pr = target_row.get('persona_reports') or {}
-                        pr[persona] = resp
-                        target_row['persona_reports'] = pr
-                    except Exception as _exc:
-                        logger.debug('silent_swallow at %s:%d: %s', __file__, 1413, _exc)
-        except Exception as _exc:
-            logger.debug('silent_swallow at %s:%d: %s', __file__, 1415, _exc)
-
-        # allow auto-routing hook when available
-        try:
-            from src.api.deep_analyze_endpoints import _auto_route_incident
-            try:
-                _auto_route_incident(target=None, persona=persona, text=resp.get('text') if isinstance(resp, dict) else str(resp), assessment=report)
-            except Exception as _exc:
-                logger.debug('silent_swallow at %s:%d: %s', __file__, 1423, _exc)
-        except Exception as _exc:
-            logger.debug('silent_swallow at %s:%d: %s', __file__, 1425, _exc)
-        return JSONResponse({'ok': True, 'persona': persona, 'response': resp})
-    
-    @app.post('/api/v1/assessments/hopgraph_report')
-    async def _direct_hopgraph_report(req: Request):
-        try:
-            payload = await req.json()
-        except Exception:
-            payload = {}
-        # Try to delegate to deep_analyze_endpoints.ingest_hopgraph_report
-        try:
-            from src.api.deep_analyze_endpoints import ingest_hopgraph_report
-            # ingest_hopgraph_report expects a dict payload and returns a Response
-            try:
-                return await ingest_hopgraph_report(payload)
-            except TypeError:
-                # older signature may expect (payload,) synchronous call
-                return ingest_hopgraph_report(payload)
-        except Exception:
-            from fastapi.responses import JSONResponse
-            return JSONResponse({'detail': 'deep_analyze_unavailable'}, status_code=503)
+    # NOTE: these routes have been extracted to src/api/routes/assessments.py.
+    # The include_router call below registers them; this comment block is kept
+    # so that line-numbering in error logs remains stable during the transition.
+    try:
+        from src.api.routes.assessments import router as _assessments_extra_router
+        app.include_router(_assessments_extra_router)
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 1333, _exc)
 except Exception as _exc:
     logger.debug('silent_swallow at %s:%d: %s', __file__, 1447, _exc)
 
