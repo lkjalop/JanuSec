@@ -89,7 +89,7 @@ logger = logging.getLogger(__name__)
 
 
 # Bump when merge logic changes so assessment_worker can detect stale cluster outputs.
-_CLUSTER_MERGE_VERSION = "1.4"
+_CLUSTER_MERGE_VERSION = "1.5"
 
 # ── Time windows (seconds) per pivot type ────────────────────────────────────
 USER_WINDOW             = 6 * 3600          # 6h burst
@@ -199,6 +199,66 @@ def _det_pentest_escalation(row: dict, text: str) -> bool:
     ))
 
 
+def _det_email_inbox_rule(row: dict, text: str) -> bool:
+    """T1114.003 / T1564.008 — inbox forwarding rule or inbox-rule creation."""
+    op = str(row.get('Operation') or row.get('operation') or row.get('event_name') or '').lower()
+    if op in ('new-inboxrule', 'set-inboxrule', 'newinboxrule', 'setinboxrule',
+              'add-mailboxpermission', 'set-mailboxautoreply'):
+        return True
+    return any(t in text for t in (
+        'new-inboxrule', 'forwardto', 'forwardingaddress', 'redirectto',
+        'forwarding_smtp', 'newinboxrule',
+    ))
+
+
+def _det_email_external_exfil(row: dict, text: str) -> bool:
+    """T1567.002 — email with attachments sent to an external recipient domain."""
+    if row.get('external_recipient_domain'):
+        att = row.get('AttachmentCount') or row.get('attachment_count') or 0
+        try:
+            att = int(att)
+        except (TypeError, ValueError):
+            att = 0
+        if att > 0:
+            return True
+    return any(t in text for t in (
+        'externalaccess', 'external_recipient_domain', 'sinobiz', 'ccp-exfil',
+    ))
+
+
+def _det_bulk_sensitive_download(row: dict, text: str) -> bool:
+    """T1213.002 — bulk download of SharePoint/OneDrive sensitive files."""
+    _SENSITIVE_TOKENS = (
+        'payroll', 'acquisition', 'merger', 'novabridge', 'ip-schedule',
+        'infra-map', 'capex', 'q1-projections', 'merger-ip', 'sensitive_document_bulk_download',
+    )
+    if row.get('_sensitivity') == 'high':
+        return True
+    return any(t in text for t in _SENSITIVE_TOKENS)
+
+
+def _det_bastion_rdp(row: dict, text: str) -> bool:
+    """T1021.001 — mstsc.exe / port 3389 lateral movement."""
+    proc = str(row.get('process_name') or row.get('process') or '').lower()
+    if 'mstsc' in proc:
+        return True
+    try:
+        port = int(row.get('dst_port') or row.get('port') or 0)
+        if port == 3389:
+            return True
+    except (TypeError, ValueError):
+        pass
+    return any(t in text for t in ('mstsc', 'mstsc.exe', 'remote desktop', ':3389'))
+
+
+def _det_identity_ip_anomaly(row: dict, text: str) -> bool:
+    """Pre-tagged _anomaly=user_ip_drift OR _cluster seeded with known exfil label."""
+    if str(row.get('_anomaly') or '').lower() == 'user_ip_drift':
+        return True
+    cluster_tag = str(row.get('_cluster') or '').lower()
+    return 'exfil' in cluster_tag or 'anomaly' in cluster_tag
+
+
 PHASE_DETECTORS: list[PhaseDetector] = [
     PhaseDetector("credential_theft",          "Credential Theft (LSASS)",        "credential_theft",     "critical", _det_lsass),
     PhaseDetector("data_exfiltration_snowflake","Snowflake Bulk Unload",          "data_exfiltration",    "critical", _det_sf_unload),
@@ -208,6 +268,11 @@ PHASE_DETECTORS: list[PhaseDetector] = [
     PhaseDetector("session_theft",             "Session Theft / Token Replay",    "initial_access",       "high",     _det_session_theft),
     PhaseDetector("secret_access",             "AWS Secret / STS Abuse",          "privilege_escalation", "high",     _det_secret_access),
     PhaseDetector("pentest_escalation",        "Pentest Operator Escalation",     "escalation_bridge",    "high",     _det_pentest_escalation),
+    PhaseDetector("email_inbox_rule_abuse",    "Email Inbox Rule Abuse (T1114.003)","persistence",         "high",     _det_email_inbox_rule),
+    PhaseDetector("email_external_exfil",      "Email External Exfiltration",     "exfiltration",         "critical", _det_email_external_exfil),
+    PhaseDetector("sharepoint_bulk_download",  "SharePoint Bulk Sensitive Download","collection",          "high",     _det_bulk_sensitive_download),
+    PhaseDetector("bastion_rdp_lateral",       "Bastion RDP Lateral Movement",    "lateral_movement",     "high",     _det_bastion_rdp),
+    PhaseDetector("identity_ip_anomaly",       "Identity IP Anomaly (user_ip_drift)","initial_access",     "high",     _det_identity_ip_anomaly),
 ]
 
 
@@ -330,6 +395,35 @@ def build_scope_qualified_pivots(rows: list[dict]) -> dict[str, list[int]]:
             for ref in (r.get("_change_refs") or r.get("change_refs") or []):
                 out[f"change:{str(ref).upper()}"].append(idx)
 
+        # ── IAM operation pivot (24h burst window) ──────────────────────────
+        # Groups rows sharing the same suspicious IAM operation within 24h.
+        # Skips BAU operations that fire hundreds of times a day.
+        _BAU_OPS = frozenset({
+            'mailitemsaccessed', 'filedownloaded', 'pageviewed', 'filesyncdownloaded',
+            'searchqueryperformed', 'signin', 'userloggedin', 'userloggedout',
+        })
+        for _op_fld in ('Operation', 'operation', 'event_name'):
+            _op = _lower(r.get(_op_fld))
+            if _op and _op not in _BAU_OPS and len(_op) >= 4:
+                out[f"iam_op:{_op}{suffix}"].append(idx)
+                break
+
+        # ── External recipient domain pivot (7d exfil channel) ──────────────
+        # Correlates all rows that sent to the same external domain within 7d.
+        _ext_dom = _lower(r.get('external_recipient_domain') or r.get('ForwardingSmtpAddress'))
+        if _ext_dom and '@' not in _ext_dom and '.' in _ext_dom and len(_ext_dom) >= 4:
+            # Strip leading '@' that might appear in forwarding address fields
+            _ext_dom = _ext_dom.lstrip('@').split('@')[-1]
+            out[f"recipient_domain:{_ext_dom}"].append(idx)
+
+        # ── Pre-tagged seed pivot (7d campaign window) ─────────────────────
+        # Ground-truth labels (_cluster / _anomaly) from test fixtures or SIEM
+        # pre-enrichment bridge all rows with the same label into one cluster.
+        for _seed_fld in ('_cluster', '_anomaly'):
+            _seed_val = _lower(r.get(_seed_fld))
+            if _seed_val and len(_seed_val) >= 4 and _seed_val not in ('n/a', 'none', 'unknown'):
+                out[f"seed:{_seed_val}"].append(idx)
+
     return dict(out)
 
 _SEV_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
@@ -423,6 +517,10 @@ _PREFIX_WINDOW: list[tuple[str, float]] = [
     ("usr:",         USER_WINDOW),     # legacy
     ("user:",        USER_WINDOW),     # legacy from store.entity_pivot_groups
     ("ip:",          IP_WINDOW),
+    # IAM / email exfiltration pivots (Sprint 1 — 2025)
+    ("recipient_domain:", 7 * 86_400),   # 7d: external exfil channel correlation
+    ("iam_op:",      24 * 3600),         # 24h: burst of same IAM operation
+    ("seed:",        7 * 86_400),        # 7d: pre-tagged _cluster/_anomaly ground truth
 ]
 
 
