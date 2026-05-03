@@ -502,6 +502,61 @@ async def run_assessment_pipeline(
         except Exception as _exc2b:
             logger.debug("Stage 2b user-IP anomaly tagging failed for %s: %s", assessment_id, _exc2b)
 
+        # ── Stage 2c: GeoIP / ASN inline enrichment ───────────────────────────
+        # Tag every row with a public src_ip / dst_ip with structured asn,
+        # asn_name, country fields. This feeds: (a) the executive summary's
+        # "attacker pivoted from AS4134 (CN)" sentence, (b) the proposed_actions
+        # "Block egress to AS<X>" recommendation, (c) the breach.js infra panel
+        # (replaces hardcoded AS209132 placeholder), and (d) downstream
+        # geopolitical-risk scoring (CN/RU/KP/IR triage boost).
+        try:
+            from src.live.asn_lookup import lookup_ip_meta, is_high_risk_country
+            _ip_cache: dict[str, dict] = {}
+            _enriched_count = 0
+            _high_risk_count = 0
+            _high_risk_countries: set[str] = set()
+            for _r2c in filtered_rows:
+                for _ip_fld in ("src_ip", "dst_ip", "external_ip", "client_ip", "remote_ip"):
+                    _ip2c = str(_r2c.get(_ip_fld) or "").strip()
+                    if not _ip2c or _ip2c in ("-", "0.0.0.0", "::") or _ip2c.startswith("10.") or _ip2c.startswith("192.168."):
+                        continue
+                    if _ip2c not in _ip_cache:
+                        try:
+                            _ip_cache[_ip2c] = lookup_ip_meta(_ip2c) or {}
+                        except Exception:
+                            _ip_cache[_ip2c] = {}
+                    _meta = _ip_cache[_ip2c]
+                    if _meta:
+                        # Per-row enrichment fields (src vs dst variants for clarity)
+                        _prefix = "src_" if _ip_fld == "src_ip" else (
+                            "dst_" if _ip_fld == "dst_ip" else "")
+                        if _meta.get("asn"):
+                            _r2c.setdefault(f"{_prefix}asn", _meta["asn"])
+                            _r2c.setdefault("asn", _meta["asn"])  # convenience top-level
+                        if _meta.get("asn_name"):
+                            _r2c.setdefault(f"{_prefix}asn_name", _meta["asn_name"])
+                        if _meta.get("country"):
+                            _r2c.setdefault(f"{_prefix}country", _meta["country"])
+                            _r2c.setdefault("country", _meta["country"])
+                            if is_high_risk_country(_meta["country"]):
+                                _r2c.setdefault("_geopolitical_risk", "high")
+                                _r2c["triage_score"] = max(
+                                    float(_r2c.get("triage_score") or 0.0), 0.7,
+                                )
+                                _high_risk_count += 1
+                                _high_risk_countries.add(_meta["country"])
+                        _enriched_count += 1
+                        # Only enrich one IP per row to avoid double-counting
+                        break
+            if _enriched_count:
+                logger.info(
+                    "Stage 2c: GeoIP/ASN enriched %d rows (%d unique IPs, %d high-risk in %s)",
+                    _enriched_count, len(_ip_cache), _high_risk_count,
+                    sorted(_high_risk_countries) if _high_risk_countries else "none",
+                )
+        except Exception as _exc2c:
+            logger.debug("Stage 2c GeoIP/ASN enrichment failed for %s: %s", assessment_id, _exc2c)
+
         _progress("clustering", 40, f"Clustering {len(filtered_rows):,} high-signal rows")
 
         # ── Stage 3: build assessment shell and run hydration ─────────────────
@@ -881,6 +936,16 @@ async def run_assessment_pipeline(
             exec_result = _generate_deterministic_executive_summary(assessment, clusters, filtered_rows)
             assessment["executive_summary"] = exec_result.get("executive_summary", "")
             assessment["exec_summary_llm"] = exec_result
+            # Promote compliance violations to top-level so the breach.html
+            # frontend, /api/v1/assessments/{id} consumers, and downstream
+            # report exporters can render an evidence-backed compliance panel.
+            _cv = exec_result.get("compliance_violations") or []
+            if _cv:
+                assessment["compliance_violations"] = _cv
+                logger.info(
+                    "Stage 6c: surfaced %d compliance control violation(s) at top level for %s",
+                    len(_cv), assessment_id,
+                )
             logger.info("Stage 6c: deterministic executive summary generated for %s", assessment_id)
         except Exception as exc:
             logger.debug("Executive summary generation skipped for %s: %s", assessment_id, exc)
@@ -1380,11 +1445,127 @@ def _generate_deterministic_executive_summary(
         f"{len(breach_clusters)} breach-relevant cluster(s), {len(benign_clusters)} benign/expected cluster(s), "
         f"{int(total_rows or 0):,} event(s), {int(source_count or 0)} source(s)."
     )
-    body = (
+
+    # ── Evidence-grounded narrative facts ───────────────────────────────────
+    # Extract concrete entities so analysts see "wei.zhang from AS4134 (CN)
+    # exfiltrated to sinobiz-sg.com" instead of "Lead cluster: ..." abstractions.
+    from collections import Counter as _Counter
+    _user_counter: _Counter = _Counter()
+    _ext_domain_counter: _Counter = _Counter()
+    _country_counter: _Counter = _Counter()
+    _asn_counter: _Counter = _Counter()
+    _high_risk_users: set[str] = set()
+    _top_evidence_rows: list[dict] = []
+
+    for _r in (rows or []):
+        if not isinstance(_r, dict):
+            continue
+        _u = str(_r.get("user_canonical") or _r.get("user") or "").strip().lower()
+        if _u and _u not in ("-", "n/a", "system", "root", ""):
+            _user_counter[_u] += 1
+        _dom = str(_r.get("external_recipient_domain") or "").strip().lower()
+        if _dom and "." in _dom:
+            _ext_domain_counter[_dom] += 1
+        _ctry = str(_r.get("country") or _r.get("src_country") or "").strip().upper()
+        if _ctry and len(_ctry) == 2:
+            _country_counter[_ctry] += 1
+        _asn = str(_r.get("asn") or _r.get("src_asn") or "").strip().upper()
+        if _asn.startswith("AS"):
+            _asn_counter[_asn] += 1
+        if str(_r.get("_geopolitical_risk") or "") == "high" and _u:
+            _high_risk_users.add(_u)
+
+    # Top-3 high-triage evidence rows for direct citation
+    try:
+        _top_evidence_rows = sorted(
+            (r for r in (rows or []) if isinstance(r, dict)),
+            key=lambda r: float(r.get("triage_score") or 0.0),
+            reverse=True,
+        )[:3]
+    except Exception:
+        _top_evidence_rows = []
+
+    _top_users = [u for u, _ in _user_counter.most_common(3)]
+    _top_domains = [d for d, _ in _ext_domain_counter.most_common(3)]
+    _top_countries = [c for c, _ in _country_counter.most_common(3)]
+    _top_asns = [a for a, _ in _asn_counter.most_common(3)]
+
+    # Aggregate compliance violations across breach clusters → top-level field.
+    _compliance_lines: list[str] = []
+    _compliance_violations: list[dict] = []
+    _seen_controls: set[str] = set()
+    for _bc in breach_clusters:
+        _reg = _bc.get("control_failure_register") or {}
+        _by_fw = _reg.get("control_failures_by_framework") or {}
+        if isinstance(_by_fw, dict):
+            for _fw, _ctrls in _by_fw.items():
+                if _fw == "unmapped_techniques" or not isinstance(_ctrls, list):
+                    continue
+                for _c in _ctrls:
+                    if not isinstance(_c, dict):
+                        continue
+                    _cid = str(_c.get("control_id") or _c.get("id") or "")
+                    _key = f"{_fw}:{_cid}"
+                    if _cid and _key not in _seen_controls:
+                        _seen_controls.add(_key)
+                        _compliance_violations.append({
+                            "framework": _fw,
+                            "control_id": _cid,
+                            "title": _c.get("title") or _c.get("control_title") or "",
+                            "severity": _c.get("severity") or "medium",
+                            "evidence_refs": _c.get("evidence_refs") or [],
+                            "triggered_by": _c.get("triggered_by") or [],
+                        })
+    if _compliance_violations:
+        _by_fw_summary: dict[str, int] = {}
+        for _cv in _compliance_violations:
+            _by_fw_summary[_cv["framework"]] = _by_fw_summary.get(_cv["framework"], 0) + 1
+        _compliance_lines.append(
+            "Compliance impact: " + ", ".join(
+                f"{_n} {_fw} control(s)" for _fw, _n in sorted(_by_fw_summary.items())
+            ) + "."
+        )
+
+    # Build narrative paragraph
+    _narrative_parts: list[str] = [
         f"{headline}. Lead cluster: {str(top_name)[:180]} "
-        f"(verdict {top_verdict}, {_cluster_row_count(top_cluster)} evidence row(s)). "
-        f"Verdict distribution: {', '.join(f'{k}={v}' for k, v in sorted(verdict_counts.items())) or 'none'}."
+        f"(verdict {top_verdict}, {_cluster_row_count(top_cluster)} evidence row(s))."
+    ]
+    if _top_users:
+        _user_str = ", ".join(_top_users)
+        if _high_risk_users & set(_top_users):
+            _narrative_parts.append(
+                f"Principal actors: {_user_str} "
+                f"({len(_high_risk_users & set(_top_users))} on high-risk geopolitical infrastructure)."
+            )
+        else:
+            _narrative_parts.append(f"Principal actors: {_user_str}.")
+    if _top_asns or _top_countries:
+        _infra_bits = []
+        if _top_asns:
+            _infra_bits.append("ASN " + "/".join(_top_asns))
+        if _top_countries:
+            _infra_bits.append("country " + "/".join(_top_countries))
+        _narrative_parts.append("Source infrastructure: " + ", ".join(_infra_bits) + ".")
+    if _top_domains:
+        _narrative_parts.append(
+            f"External destinations: {', '.join(_top_domains)}."
+        )
+    if _top_evidence_rows:
+        _ev_bits = []
+        for _ev in _top_evidence_rows:
+            _ts = str(_ev.get("timestamp") or _ev.get("ts") or "").split(".")[0][:19]
+            _evt = str(_ev.get("event_type") or _ev.get("Operation") or _ev.get("event_name") or "event")[:40]
+            _u = str(_ev.get("user_canonical") or _ev.get("user") or "")[:40]
+            _ev_bits.append(f"{_ts} {_evt}{' by ' + _u if _u else ''}")
+        _narrative_parts.append("Top evidence: " + " | ".join(_ev_bits) + ".")
+    _narrative_parts.extend(_compliance_lines)
+    _narrative_parts.append(
+        "Verdict distribution: " +
+        (', '.join(f'{k}={v}' for k, v in sorted(verdict_counts.items())) or 'none') + "."
     )
+    body = " ".join(_narrative_parts)
+
     return {
         "headline": headline,
         "subline": subline,
@@ -1400,8 +1581,14 @@ def _generate_deterministic_executive_summary(
             "total_clusters": len(clusters),
             "total_rows": int(total_rows or 0),
             "source_count": int(source_count or 0),
+            "principal_users": _top_users,
+            "external_destinations": _top_domains,
+            "source_countries": _top_countries,
+            "source_asns": _top_asns,
+            "high_risk_users": sorted(_high_risk_users),
         },
         "verdict_counts": verdict_counts,
+        "compliance_violations": _compliance_violations,
     }
 
 

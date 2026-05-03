@@ -771,6 +771,37 @@ def build_scope_qualified_pivots(rows: list[dict]) -> dict[str, list[int]]:
             _ext_dom = _ext_dom.lstrip('@').split('@')[-1]
             out[f"recipient_domain:{_ext_dom}"].append(idx)
 
+        # ── Cloud identity pivot (cross-cloud lateral movement, 7d) ──────────
+        # Stitches AWS principal ARNs, Azure UPNs, and GCP service accounts when
+        # they belong to the same human or workload identity. This is the
+        # missing lever that lets us correlate "alice@corp on Azure logs in" →
+        # "AWS AssumeRole-as-alice 4 hours later" → "GCP WIF token issued to
+        # alice's GitHub workflow" into a single cross-cloud kill chain.
+        _cloud_id = _lower(
+            r.get('cloud_principal') or r.get('cloud_identity') or
+            r.get('iam_principal') or r.get('userIdentity_arn') or
+            r.get('userIdentity') or r.get('principal_id') or
+            r.get('service_account_email') or r.get('upn')
+        )
+        if _cloud_id and len(_cloud_id) >= 6 and _cloud_id not in ('-', 'n/a', 'unknown', 'system', 'anonymous'):
+            # Normalize to a canonical short form so AWS ARN and bare email collide
+            _norm = _cloud_id
+            if 'arn:aws:iam::' in _norm:
+                # arn:aws:iam::123456789012:user/alice → alice
+                _norm = _norm.split('/')[-1] or _norm.split(':')[-1]
+            elif 'arn:aws:sts::' in _norm:
+                _norm = _norm.split('/')[-1] or _norm.split(':')[-1]
+            elif _norm.endswith('.iam.gserviceaccount.com'):
+                # alice@my-proj.iam.gserviceaccount.com → alice
+                _norm = _norm.split('@')[0]
+            elif '@' in _norm:
+                # alice@corp.com → alice (so it collides with bare 'alice' identity)
+                _local = _norm.split('@')[0]
+                if len(_local) >= 3:
+                    _norm = _local
+            if len(_norm) >= 3:
+                out[f"cloud_identity:{_norm}"].append(idx)
+
         # ── Pre-tagged seed pivot (7d campaign window) ─────────────────────
         # Ground-truth labels (_cluster / _anomaly) from test fixtures or SIEM
         # pre-enrichment bridge all rows with the same label into one cluster.
@@ -875,6 +906,7 @@ _PREFIX_WINDOW: list[tuple[str, float]] = [
     # IAM / email exfiltration pivots (Sprint 1 — 2025)
     ("recipient_domain:", 7 * 86_400),   # 7d: external exfil channel correlation
     ("iam_op:",      24 * 3600),         # 24h: burst of same IAM operation
+    ("cloud_identity:", 7 * 86_400),     # 7d: cross-cloud principal lateral movement
     ("seed:",        7 * 86_400),        # 7d: pre-tagged _cluster/_anomaly ground truth
 ]
 
@@ -1195,7 +1227,38 @@ def _classify_component(
     elif kind in ("pentest", "ops"):
         confidence = 0.92   # high — explicit ref attestation
 
-    return {
+    # ── APT attribution (best-effort TTP pattern match) ───────────────────
+    # Only run for campaign clusters where phase_tags carry weight. Returns
+    # None if no profile clears the floor — never fabricates attribution.
+    apt_attribution = None
+    if kind == "campaign" and phase_hits:
+        try:
+            from src.core.enrichment.apt_profiles import attribute_apt
+            # Cloud providers inferred from sources + pivot keys
+            _clouds: set[str] = set()
+            for _src in sources:
+                _src_l = str(_src).lower()
+                for _cp in ("aws", "azure", "gcp", "okta", "m365", "github", "kubernetes", "aad"):
+                    if _cp in _src_l:
+                        _clouds.add(_cp)
+            for _pk in pivot_keys_used:
+                _pk_l = str(_pk).lower()
+                if "azure" in _pk_l or "aad" in _pk_l:
+                    _clouds.add("azure")
+                if "aws" in _pk_l:
+                    _clouds.add("aws")
+                if "gcp" in _pk_l:
+                    _clouds.add("gcp")
+            apt_attribution = attribute_apt(
+                phase_tags=set(phase_hits.keys()),
+                pivot_keys=pivot_keys_used,
+                cloud_providers=_clouds,
+            )
+        except Exception:   # noqa: BLE001
+            logger.debug("APT attribution skipped for cluster %s", root, exc_info=True)
+            apt_attribution = None
+
+    cluster_out = {
         "cluster_id": f"analysis-{root}",
         "cluster_kind": kind,
         "verdict": verdict,
@@ -1226,6 +1289,12 @@ def _classify_component(
             "span_seconds": (max(times) - min(times)) if len(times) >= 2 else 0,
         },
     }
+    if apt_attribution:
+        cluster_out["apt_attribution"] = apt_attribution
+        # Bonus to confidence when a high-quality APT profile match fires
+        if apt_attribution.get("confidence", 0) >= 0.7:
+            cluster_out["confidence"] = round(min(0.97, cluster_out["confidence"] + 0.05), 3)
+    return cluster_out
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
