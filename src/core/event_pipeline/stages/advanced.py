@@ -66,6 +66,22 @@ async def hunt_lanes_stage(event: dict, ctx: StageContext) -> StageResult:
                 registry.register(build_pivot())
             except Exception:
                 pass
+        # Always-on lanes: data_insider, user_session_fusion, endpoint_storyline
+        try:
+            from core.hunt.lanes.data_insider import LANE as data_insider_lane
+            registry.register(data_insider_lane)
+        except Exception:
+            pass
+        try:
+            from core.hunt.lanes.user_session_fusion import LANE as fusion_lane
+            registry.register(fusion_lane)
+        except Exception:
+            pass
+        try:
+            from core.hunt.lanes.endpoint_storyline import LANE as storyline_lane
+            registry.register(storyline_lane)
+        except Exception:
+            pass
 
     envelope = EvidenceEnvelope(event)
     try:

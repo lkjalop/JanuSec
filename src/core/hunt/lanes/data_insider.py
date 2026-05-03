@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from typing import Any
 
 from ..evidence_envelope import EvidenceEnvelope
@@ -21,6 +22,68 @@ _PRIVILEGED_SAAS_EXPORTS = frozenset({
     'snowflake_unload', 'tableau_data_export',
     'salesforce_bulk_export', 's3_getobject_burst',
 })
+
+# ── Varonis DatAdvantage: File sensitivity classification at rest ────────────
+# Classify file paths / names into sensitivity tiers so that even a single
+# FileDownloaded on a payroll or M&A file triggers a DLP signal independent
+# of volume threshold — matching what Varonis does natively.
+
+_SENS_PAYROLL = re.compile(
+    r'(?i)(payroll|salary|compensation|bonus|w.?2\b|1099|merit|raise'
+    r'|stock.option|equity.grant|severance)',
+)
+_SENS_MA = re.compile(
+    r'(?i)(m.?(?:and|&).?a|merger|acquisition|deal.sheet|loi|term.sheet'
+    r'|due.diligence|project.[ _]?[a-z]{3,12}(?=[ _.])|target.company'
+    r'|synergy|carve.out)',
+)
+_SENS_LEGAL = re.compile(
+    r'(?i)(nda|non.disclosure|settlement|litigation|outside.counsel'
+    r'|privileged|attorney.client|work.product|legal.hold|regulatory)',
+)
+_SENS_PII = re.compile(
+    r'(?i)(ssn|social.security|passport|dob|date.of.birth|tax.id'
+    r'|national.id|drivers.license|credit.card|ccpan|medical|hipaa'
+    r'|phi\b|health.record)',
+)
+_SENS_SECRETS = re.compile(
+    r'(?i)(password|passwd|credentials?|secret|api.?key|private.?key'
+    r'|\.pem\b|\.p12\b|\.pfx\b|\.key\b|vault|kms|hsm)',
+)
+
+
+def classify_file_sensitivity(file_path: str | None,
+                               data_classification: str | None = None) -> list[str]:
+    """Return sensitivity tier tags for a file path (Varonis DatAdvantage equivalent).
+
+    Inputs:
+      file_path        — full path or filename string
+      data_classification — pre-existing label from DLP/MDM (optional)
+
+    Returns list of factor strings like 'data:sensitive_file_payroll',
+    'data:sensitive_file_ma', etc.  Empty list means unclassified / benign.
+    """
+    tags: list[str] = []
+    try:
+        # Honour existing upstream classification first
+        dc = (data_classification or '').lower()
+        if dc in ('confidential', 'restricted', 'secret', 'top_secret', 'pii'):
+            tags.append('data:sensitive_file_classified_label')
+
+        combined = f'{file_path or ""} {data_classification or ""}'
+        if _SENS_PAYROLL.search(combined):
+            tags.append('data:sensitive_file_payroll')
+        if _SENS_MA.search(combined):
+            tags.append('data:sensitive_file_ma')
+        if _SENS_LEGAL.search(combined):
+            tags.append('data:sensitive_file_legal')
+        if _SENS_PII.search(combined):
+            tags.append('data:sensitive_file_pii')
+        if _SENS_SECRETS.search(combined):
+            tags.append('data:sensitive_file_secrets')
+    except Exception:
+        pass
+    return tags
 
 
 class DataInsiderLane:
@@ -157,6 +220,23 @@ class DataInsiderLane:
         if isinstance(resource_type_count, (int, float)) and resource_type_count >= 3:
             if 'data:unusual_sensitive_resource_combo' not in factors:
                 factors.append('data:unusual_sensitive_resource_combo')
+
+        # ── 11. File sensitivity tagging (Varonis DatAdvantage equivalent) ───
+        # Classify individual file access events by sensitivity — a single
+        # FileDownloaded on a payroll/M&A file triggers DLP signal regardless
+        # of volume, matching what Varonis does with classified content at rest.
+        file_path = ev.get('file_path') or ev.get('file_name') or ev.get('ObjectId') or ''
+        file_dc = ev.get('data_classification') or ev.get('sensitivity_label') or ''
+        sensitivity_tags = classify_file_sensitivity(file_path, file_dc)
+        if sensitivity_tags:
+            factors.extend(sensitivity_tags)
+            # Compound: sensitive file + external destination = high-confidence exfil
+            dest = str(ev.get('destination') or ev.get('external_recipient_domain') or '').lower()
+            if dest and not dest.endswith(('.corp', '.internal', '.local', '.sharepoint.com')):
+                factors.append('data:sensitive_file_external_dest')
+            # Compound: sensitive file + offboarding user = insider theft signal
+            if offboarding:
+                factors.append('data:sensitive_file_access_offboarding_user')
 
         if factors:
             envelope.add_emission(self.name, factors, notes='auto-detect-batch4', latency_ms=ctx.elapsed_ms())

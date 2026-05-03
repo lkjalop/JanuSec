@@ -45,6 +45,10 @@ class HostPivotLane:
         self._if_models: Dict[Tuple[str, str], IsolationForestDetector] = {}  # (role,user)->model
         self._if_history: Dict[str, Deque[List[float]]] = {}  # user->deque of feature vectors
         self._port_hist: Dict[str, Deque[int]] = {}
+        # Darktrace-equivalent: per-device connection profile (ASN + country baseline)
+        # device_id → set of (asn, country) tuples seen historically
+        self._device_asn_profile: Dict[str, Set[Tuple[str, str]]] = {}
+        self._device_profile_ts: Dict[str, Deque[float]] = {}  # last seen timestamps
 
     async def run(self, envelope, context):
         e = envelope.event
@@ -138,6 +142,37 @@ class HostPivotLane:
                             factors.append('if_lateral_anomaly')
             except Exception:
                 pass
+
+        # ── Darktrace-equivalent: device connection profile deviation ────────
+        # Maintain a per-device baseline of (ASN, country) pairs seen historically.
+        # Any connection to an ASN/country not in the device's profile is flagged.
+        # No rules required — purely profile-based, like Darktrace's "Self-Learning AI".
+        try:
+            device_id = src or user or ''
+            asn = str(ev.get('src_asn') or ev.get('asn') or '').strip()
+            country = str(ev.get('src_country') or ev.get('country') or '').strip().upper()
+            dst_asn = str(ev.get('dst_asn') or ev.get('dest_asn') or '').strip()
+            dst_country = str(ev.get('dst_country') or ev.get('dest_country') or '').strip().upper()
+
+            if device_id and (asn or country or dst_asn or dst_country):
+                profile = self._device_asn_profile.setdefault(device_id, set())
+                ts_ring = self._device_profile_ts.setdefault(device_id, deque(maxlen=500))
+
+                # Check destination connection profile
+                for a, c in ((dst_asn, dst_country), (asn, country)):
+                    if not (a or c):
+                        continue
+                    pair = (a, c)
+                    if len(ts_ring) >= 5:  # require at least 5 events before flagging
+                        if pair not in profile:
+                            factors.append('darktrace:device_new_asn_country_connection')
+                            # Escalate for high-risk countries (*.sg, CN, RU, KP, IR)
+                            if c in ('CN', 'RU', 'KP', 'IR', 'SG'):
+                                factors.append(f'darktrace:device_new_high_risk_country_{c}')
+                    profile.add(pair)
+                    ts_ring.append(now)
+        except Exception:
+            pass
 
         # Consult hopgraph for broader context factors (best-effort)
         try:

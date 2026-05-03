@@ -397,6 +397,126 @@ def arc_chain_broken(headers: dict) -> List[str]:
     return factors
 
 
+# ── InboxRule / Forwarding session detectors (T1114.003) ───────────────────
+# Splunk ESCU: index=o365 EventCode=11 (New-InboxRule) + forwarding to external
+# Exabeam Smart Timelines: New-InboxRule → Send session → "Email Exfiltration" scenario
+
+_INBOX_RULE_OP_NAMES = frozenset({
+    'new-inboxrule', 'set-inboxrule', 'newinboxrule', 'updateinboxrule',
+    'new_inbox_rule', 'set_inbox_rule',
+    # O365 audit operations
+    'new-mailboxrule', 'set-mailboxrule',
+    # Exchange event IDs
+    'eventid_11',
+})
+
+_FORWARDING_OP_NAMES = frozenset({
+    'set-mailbox', 'set-casmailbox',
+    'setmailboxforwardingsmtpaddress', 'set_mailbox_forwarding',
+    # O365 Mail flow operations
+    'add-mailboxpermission', 'set-transportrule',
+    'enable_email_forwarding', 'updatemailbox',
+})
+
+
+def inbox_rule_external_forward(event_name: str, forwarding_address: str | None,
+                                 corp_domains: set[str] | None = None) -> List[str]:
+    """Detect New-InboxRule creating external forwarding (T1114.003).
+
+    Triggers on a single event that sets a forwarding address to a non-corporate
+    domain, or on the combination of an inbox rule operation where the rule
+    recipient/forward destination is external.
+    """
+    factors: List[str] = []
+    try:
+        en = (event_name or '').lower().replace(' ', '_').replace('-', '_')
+        corp = corp_domains or CORPORATE_DOMAINS
+
+        is_rule_op = en in _INBOX_RULE_OP_NAMES or 'inboxrule' in en or 'mailboxrule' in en
+        is_fwd_op = en in _FORWARDING_OP_NAMES or 'forward' in en or 'transportrule' in en
+
+        if not (is_rule_op or is_fwd_op):
+            return factors
+
+        fwd = (forwarding_address or '').lower().strip()
+        if fwd:
+            domain = fwd.split('@')[-1] if '@' in fwd else fwd
+            # Strip smtp: prefix (Exchange format)
+            if domain.startswith('smtp:'):
+                domain = domain[5:]
+            if domain and not any(domain == c or domain.endswith('.' + c) for c in corp):
+                if is_rule_op:
+                    factors.append('email:inbox_rule_external_forward')
+                    factors.append('email:T1114.003_inbox_rule')
+                elif is_fwd_op:
+                    factors.append('email:mailbox_forwarding_external')
+                    factors.append('email:T1114.003_forwarding_config')
+        elif is_rule_op:
+            # Rule created/modified without explicit forward visible — still flag
+            factors.append('email:inbox_rule_created')
+    except Exception:
+        pass
+    return factors
+
+
+def email_exfiltration_session_chain(session_events: list[dict]) -> List[str]:
+    """Detect Exabeam / Splunk 'Email Exfiltration' session scenario.
+
+    Looks for: New-InboxRule (or forwarding config) followed by Send/attachment
+    within the same user session window. session_events is a list of normalized
+    event dicts ordered by timestamp, all belonging to the same user.
+
+    Required event fields (best-effort):
+      event_name / operation / Operation — audit operation name
+      recipient / ForwardingSmtpAddress / forwarding_address
+      has_attachment / attachments_count
+      destination_domain / external_recipient_domain
+    """
+    factors: List[str] = []
+    try:
+        if not session_events or len(session_events) < 2:
+            return factors
+        corp = CORPORATE_DOMAINS
+        saw_rule = False
+        saw_send_with_attachment = False
+        saw_bulk_download = False
+        for ev in session_events:
+            en = (ev.get('event_name') or ev.get('operation') or ev.get('Operation') or '').lower()
+            en_norm = en.replace(' ', '_').replace('-', '_')
+            # Check for inbox rule / forwarding op
+            if (en_norm in _INBOX_RULE_OP_NAMES or 'inboxrule' in en_norm
+                    or 'forward' in en_norm or 'transportrule' in en_norm):
+                fwd = (ev.get('forwarding_address') or ev.get('ForwardingSmtpAddress')
+                       or ev.get('recipient') or '')
+                fwd_domain = str(fwd).lower().split('@')[-1] if '@' in str(fwd) else ''
+                is_external = fwd_domain and not any(
+                    fwd_domain == c or fwd_domain.endswith('.' + c) for c in corp
+                )
+                if is_external or not fwd:
+                    saw_rule = True
+            # Check for Send with attachment
+            att = ev.get('has_attachment') or ev.get('attachments_count') or 0
+            if (att or ev.get('attachment')) and 'send' in en_norm:
+                ext_dest = ev.get('destination_domain') or ev.get('external_recipient_domain') or ''
+                if ext_dest and not any(
+                    ext_dest.endswith(c) for c in corp
+                ):
+                    saw_send_with_attachment = True
+            # Check for bulk SharePoint/OneDrive download (Sentinel Fusion scenario)
+            if ('sharepointfiledownloaded' in en_norm or 'filedownloaded' in en_norm
+                    or en_norm in ('sharepoint_bulk_download', 'onedrive_bulk_download')):
+                saw_bulk_download = True
+
+        if saw_rule and saw_send_with_attachment:
+            factors.append('email:exfiltration_session_inbox_rule_then_send')
+            factors.append('email:T1114.003_session_chain')
+        if saw_rule and saw_bulk_download:
+            factors.append('email:exfiltration_session_inbox_rule_bulk_download')
+    except Exception:
+        pass
+    return factors
+
+
 def build(config: dict = None):
     """Return a lane-like callable compatible with LaneRegistry.run_lanes
 
@@ -462,6 +582,19 @@ def build(config: dict = None):
                     factors.extend(dmarc_quarantine(hdrs, sdomain))
                 factors.extend(dkim_key_weak(hdrs))
                 factors.extend(arc_chain_broken(hdrs))
+            except Exception:
+                pass
+            # ── InboxRule / Forwarding detection (T1114.003, Splunk/Exabeam) ──
+            try:
+                ev = getattr(envelope, 'event', {}) or {}
+                en = (ev.get('event_name') or ev.get('operation') or ev.get('Operation') or '')
+                fwd_addr = (ev.get('forwarding_address') or ev.get('ForwardingSmtpAddress')
+                            or ev.get('rule_forward_to') or '')
+                factors.extend(inbox_rule_external_forward(en, fwd_addr, corp))
+                # Session-level chain detection: envelope may carry session_events list
+                sess_evs = ev.get('session_events') or getattr(envelope, 'session_events', None)
+                if isinstance(sess_evs, list) and len(sess_evs) >= 2:
+                    factors.extend(email_exfiltration_session_chain(sess_evs))
             except Exception:
                 pass
             # DKIM crypto verification signal usage (from pipeline)
