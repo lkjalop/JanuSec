@@ -425,6 +425,10 @@ async def run_assessment_pipeline(
 
                     batch.append(norm)
                     total_rows += 1
+                    # Yield to event loop every 500 rows so asyncio timeouts
+                    # and cancellations can fire on large files (e.g. 11 MB ndjson).
+                    if total_rows % 500 == 0:
+                        await asyncio.sleep(0)
                     if len(batch) >= PARSE_BATCH_SIZE:
                         await asyncio.to_thread(_store.persist_row_batch, assessment_id, batch)
                         batch = []

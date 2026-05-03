@@ -205,6 +205,9 @@ def _normalize_iam(row: dict) -> dict:
     # SailPoint: identityName
     if not user:
         user = _safe(row.get('identityName') or row.get('identity') or '')
+    # Janusec Okta/M365 export: snake_case user_principal_name
+    if not user:
+        user = _safe(row.get('user_principal_name') or '')
     r['user'] = user
 
     # IP address
@@ -238,7 +241,7 @@ def _normalize_email(row: dict) -> dict:
 
 
 def _normalize_network(row: dict) -> dict:
-    """Zeek / Suricata / NetFlow / DNS → canonical."""
+    """Zeek / Suricata / NetFlow / DNS / BGP → canonical."""
     r = dict(row)
     r.setdefault('src_ip', _safe(row.get('id.orig_h') or row.get('src_ip') or row.get('sourceAddress')))
     r.setdefault('dst_ip', _safe(row.get('id.resp_h') or row.get('dst_ip') or row.get('destinationAddress')))
@@ -246,6 +249,14 @@ def _normalize_network(row: dict) -> dict:
     r.setdefault('dst_port', row.get('id.resp_p') or row.get('dst_port') or row.get('destinationPort'))
     r.setdefault('proto', _safe(row.get('proto') or row.get('transport_protocol') or ''))
     r.setdefault('event_name', _safe(row.get('alert', {}).get('signature') if isinstance(row.get('alert'), dict) else '' or row.get('dns.qtype_name') or row.get('event_type') or 'flow'))
+    # BGP/proxy/network CSV files export pre-enriched geo columns — promote to
+    # canonical field names so GeoIP display, pivot index, and hunt lanes see them.
+    r.setdefault('src_country', _safe(row.get('geo_src_country') or row.get('src_country') or row.get('country') or ''))
+    r.setdefault('dst_country', _safe(row.get('geo_dst_country') or row.get('dst_country') or ''))
+    r.setdefault('src_asn',     _safe(row.get('geo_src_asn')     or row.get('src_asn')     or row.get('bgp_origin_asn') or ''))
+    r.setdefault('dst_asn',     _safe(row.get('geo_dst_asn')     or row.get('dst_asn')     or ''))
+    r.setdefault('src_org',     _safe(row.get('geo_src_org')     or row.get('src_org')     or ''))
+    r.setdefault('dst_org',     _safe(row.get('geo_dst_org')     or row.get('dst_org')     or ''))
     r['_source_type'] = SOURCE_NETWORK
     return r
 
@@ -257,9 +268,11 @@ def _normalize_endpoint(row: dict) -> dict:
     r.setdefault('hostname', _safe(
         row.get('ComputerName') or row.get('device_name') or row.get('hostname') or row.get('device_id') or ''
     ))
-    # user: add user_name fallback (CrowdStrike Santos uses user_name, not UserName)
+    # user: add user_name / username fallbacks (CrowdStrike Santos uses user_name;
+    # KAPE/XLSX exports use lowercase 'username' without underscore)
     r.setdefault('user', _safe(
-        row.get('UserName') or row.get('user_name') or row.get('user') or row.get('SubjectUserName') or ''
+        row.get('UserName') or row.get('user_name') or row.get('username')
+        or row.get('user') or row.get('SubjectUserName') or ''
     ))
     # src_ip: CrowdStrike uses remote_address for outbound connections
     r.setdefault('src_ip', _safe(row.get('remote_address') or row.get('src_ip') or ''))

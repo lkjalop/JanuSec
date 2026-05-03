@@ -63,6 +63,9 @@ _BUNDLED_CATALOG: Dict[str, tuple[str, str, str]] = {
     "13.32.0.0/15":      ("AS16509", "AWS CloudFront", "US"),
     "18.32.0.0/12":      ("AS16509", "AWS US", "US"),
     "52.0.0.0/11":       ("AS16509", "AWS Global", "US"),
+    "52.64.0.0/11":      ("AS16509", "AWS AP-Southeast", "AU"),
+    "52.94.0.0/15":      ("AS16509", "Amazon.com", "US"),
+    "52.96.0.0/12":      ("AS16509", "AWS US", "US"),
     # ── Azure ───────────────────────────────────────────────────────────────
     "13.64.0.0/11":      ("AS8075", "Microsoft Azure", "US"),
     "20.0.0.0/8":        ("AS8075", "Microsoft Azure", "US"),
