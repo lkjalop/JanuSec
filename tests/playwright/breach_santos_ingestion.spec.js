@@ -22,11 +22,12 @@ const BASE = process.env.PLAYWRIGHT_BASE_URL || 'http://127.0.0.1:8080';
 const BREACH_URL = BASE + '/static/breach.html';
 const API_BASE = BASE;
 
-const FILES_DIR = path.join(__dirname, '../../dump/test files');
+const FILES_DIR = path.join(__dirname, '../../dump/test files/Santos');
+const ENRICH_DIR = path.join(__dirname, '../../dump/test files');
 const NDJSON_FILE = path.join(FILES_DIR, 'janusec_endpoint_k8s_v1.ndjson');
 const JSON_FILE   = path.join(FILES_DIR, 'janusec_cloud_identity_v1.json');
 const CSV_FILE    = path.join(FILES_DIR, 'janusec_network_v1.csv');
-const XLSX_FILE   = path.join(FILES_DIR, 'janusec_enrichment_context_v1.xlsx');
+const XLSX_FILE   = path.join(ENRICH_DIR, 'janusec_enrichment_context_v1.xlsx');
 
 const API_KEY = process.env.JANUSEC_PLAYWRIGHT_API_KEY || 'devkey123';
 const AUTH_HEADERS = { 'x-api-key': API_KEY, 'x-tenant-id': 'default' };
@@ -274,11 +275,15 @@ test('10. Lead cluster significance is not boilerplate IP-only text', async ({ p
   await page.goto(BREACH_URL + '?assessment=' + assessmentId);
   await expect(page.locator('[data-testid="br-meta"]')).toBeVisible({ timeout: 15000 });
 
-  const firstCard = page.locator('[data-testid^="br-card-"]').first();
-  await expect(firstCard).toBeVisible({ timeout: 10000 });
-  const subtitle = await firstCard.locator('.br-card__subtitle').textContent();
+  // The home threat-cases panel is always visible (not inside a collapsed <details>).
+  // It shows the same headline_subtitle / business_significance as the card subtitle.
+  const homePanel = page.locator('[data-testid="br-home-threat-cases"]');
+  await expect(homePanel).toBeVisible({ timeout: 10000 });
+  const firstRow = homePanel.locator('tbody tr').first();
+  await expect(firstRow).toBeVisible({ timeout: 10000 });
+  const subtitle = await firstRow.locator('td').nth(1).textContent();
   const isPureBoilerplate = /^same network infrastructure; same resource or artifact path/.test(subtitle.trim());
-  expect(isPureBoilerplate, `Card subtitle is pure boilerplate: "${subtitle.trim()}"`).toBe(false);
+  expect(isPureBoilerplate, `Lead case subtitle is pure boilerplate: "${subtitle.trim()}"`).toBe(false);
 });
 
 // ── Test 11: Progress endpoint provides structured stages ─────────────────────
