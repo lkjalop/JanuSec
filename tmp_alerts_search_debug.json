@@ -1,1 +1,0 @@
-{"rows_collected": 10, "deduped": 5, "slice": 2, "rings": [{"mod": "src.api.server", "id": 1953415618624, "len": 5}, {"mod": "tests.test_alert_search", "id": 1953415618624, "len": 5}, {"mod": "src.api.server", "id": 1953415618624, "len": 5}, {"mod": "tests.test_dedup_concurrency", "id": 1953415618624, "len": 5}]}
