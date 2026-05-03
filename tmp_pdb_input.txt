@@ -1,7 +1,0 @@
-p r.status_code
- p r.text
- p r.headers
- import os
- print(os.getenv('POSTURE_LOG_PATH'))
- c
-

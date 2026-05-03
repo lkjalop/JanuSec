@@ -1,9 +1,0 @@
-﻿{
-  "org": "unittest",
-  "options": { "auto_llm": true },
-  "rows": [
-    { "row_index": 0, "raw": { "process_name": "svchost.exe", "file_path": "C:\\Windows\\System32\\svchost.exe", "host":"host-01", "sha256":"aaa111", "avPositives": 0 } },
-    { "row_index": 1, "raw": { "process_name": "powershell.exe", "file_path": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", "host":"host-02", "sha256":"bbb222", "avPositives": 5 } },
-    { "row_index": 2, "raw": { "process_name": "unknown.exe", "file_path": "C:\\Temp\\unknown.exe", "host":"host-03", "sha256":"ccc333", "avPositives": 12 } }
-  ]
-}
