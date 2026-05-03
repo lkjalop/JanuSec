@@ -53,24 +53,18 @@ except Exception:  # pragma: no cover
     _FP_RATIO_GAUGE = None
 
 try:
-    from src.core.graph.hopgraph_core import GLOBAL_HOPGRAPH  # type: ignore
-except Exception:
     from src.graph.hopgraph import GLOBAL_HOPGRAPH  # type: ignore
+except Exception:
+    GLOBAL_HOPGRAPH = None  # type: ignore
 from src.api.runtime_state import get_tenant_runtime, get_server_runtime_state
 if GLOBAL_HOPGRAPH is None:  # pragma: no cover
-    try:
-        from graph.hopgraph import GLOBAL_HOPGRAPH as _ALT  # type: ignore
-        GLOBAL_HOPGRAPH = _ALT
-    except Exception:
-        GLOBAL_HOPGRAPH = None  # type: ignore
+    GLOBAL_HOPGRAPH = None  # type: ignore
 else:
-    # Tests sometimes import the graph via alternate module paths (e.g. "graph.hopgraph"
-    # or "src.graph.hopgraph") that produce a separate GLOBAL_HOPGRAPH object. If
-    # an alternate module has a populated graph (edges/nodes), prefer that instance
-    # so endpoints observe the same test-seeded graph used by tests.
+    # Keep the canonical src.graph.hopgraph singleton as the only accepted import
+    # identity so endpoints do not observe a split graph object.
     try:
         import sys as _sys
-        for _mn in ('src.graph.hopgraph', 'graph.hopgraph'):
+        for _mn in ('src.graph.hopgraph',):
             _m = _sys.modules.get(_mn)
             if not _m:
                 continue
@@ -267,7 +261,7 @@ def explain(request: Request = None, node: str = Query(..., min_length=3), depth
             # if the current global has no visible nodes/adj, try alternate modules
             has_adj = bool(getattr(graph_instance, 'nodes', None) or getattr(graph_instance, 'adj', None))
             if not has_adj:
-                for _mn in ('src.graph.hopgraph', 'graph.hopgraph'):
+                for _mn in ('src.graph.hopgraph',):
                     _m = _sys.modules.get(_mn)
                     if not _m:
                         continue
@@ -305,7 +299,7 @@ def explain(request: Request = None, node: str = Query(..., min_length=3), depth
     # different module paths prior to endpoint invocation.
     try:
         import sys as _sys
-        for _mn in ('src.core.graph.hopgraph', 'src.graph.hopgraph', 'graph.hopgraph'):
+        for _mn in ('src.core.graph.hopgraph', 'src.graph.hopgraph'):
             _m = _sys.modules.get(_mn)
             if not _m:
                 continue

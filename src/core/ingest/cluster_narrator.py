@@ -68,9 +68,10 @@ Respond ONLY with valid JSON matching this exact schema — no prose, no markdow
 {{
   "verdict": "<one of: VALIDATED_BREACH | SUSPECTED_BREACH | BENIGN_EXPECTED | REQUIRES_INVESTIGATION | INSUFFICIENT_EVIDENCE>",
   "confidence": <float 0.0-1.0>,
-  "kill_chain_stage": "<one of: recon | weaponization | delivery | exploitation | installation | c2 | exfiltration | impact | unknown>",
+  "kill_chain_stages": ["<list the 1-3 MOST PROMINENT phases from: recon, delivery, exploitation, installation, c2, lateral_movement, collection, exfiltration, impact. Choose the dominant phases based on evidence volume. NEVER use 'unknown' if any evidence is present.>"],
+  "kill_chain_stage": "<first/dominant item from kill_chain_stages for legacy consumers>",
   "ioc_summary": "<1-2 sentence description of the key indicators of compromise>",
-  "attack_narrative": "<3-5 sentence analyst narrative explaining what happened, why it matters, and what the attacker achieved>",
+  "attack_narrative": "<REQUIRED: Write 3-5 sentences describing the attack timeline from initial access through exfiltration. Include specific IPs, hostnames, users, and techniques observed. Example: 'The attacker gained initial access via compromised credentials for analyst@corp.com at 02:14 UTC, then moved laterally to DC01 using PsExec. LSASS dumps were staged in C:\\Users\\Public before exfiltration via rclone to external cloud storage.'>",
   "evidence_refs": [<list of 1-based row numbers from the evidence list above that most strongly support the verdict>],
   "fp_indicators": ["<strings explaining why this might be a false positive, if any>"],
   "next_steps": [
@@ -88,9 +89,23 @@ _VALID_VERDICTS = {
     "REQUIRES_INVESTIGATION", "INSUFFICIENT_EVIDENCE",
 }
 
+_VERDICT_RANK = {
+    "INSUFFICIENT_EVIDENCE": 0,
+    "BENIGN_EXPECTED": 1,
+    "REQUIRES_INVESTIGATION": 2,
+    "SUSPECTED_BREACH": 3,
+    "SUSPICIOUS_ACTIVITY": 3,
+    "LIKELY_COMPROMISE": 3,
+    "LIKELY_BREACH": 3,
+    "VALIDATED_BREACH": 4,
+    "CONFIRMED_INTRUSION": 4,
+    "CONFIRMED_BREACH": 4,
+}
+
 _VALID_KILL_CHAIN = {
     "recon", "weaponization", "delivery", "exploitation",
-    "installation", "c2", "exfiltration", "impact", "unknown",
+    "installation", "c2", "lateral_movement", "collection",
+    "exfiltration", "impact", "unknown",
 }
 
 
@@ -117,9 +132,25 @@ def _parse_llm_output(raw: str, cluster_id: str) -> dict:
     if verdict not in _VALID_VERDICTS:
         verdict = "REQUIRES_INVESTIGATION"
 
-    kill_chain = str(obj.get("kill_chain_stage") or "unknown").lower()
-    if kill_chain not in _VALID_KILL_CHAIN:
-        kill_chain = "unknown"
+    kill_chain_raw = obj.get("kill_chain_stages")
+    if kill_chain_raw is None:
+        kill_chain_raw = obj.get("kill_chain_stage") or []
+    if isinstance(kill_chain_raw, str):
+        kill_chain_values = [kill_chain_raw]
+    elif isinstance(kill_chain_raw, list):
+        kill_chain_values = kill_chain_raw
+    else:
+        kill_chain_values = []
+    kill_chain_stages = []
+    for stage in kill_chain_values:
+        normalised = str(stage or "").strip().lower()
+        if normalised in _VALID_KILL_CHAIN and normalised not in kill_chain_stages:
+            kill_chain_stages.append(normalised)
+        if len(kill_chain_stages) >= 3:
+            break
+    if not kill_chain_stages:
+        kill_chain_stages = ["unknown"]
+    kill_chain = kill_chain_stages[0]
 
     confidence = float(obj.get("confidence") or 0.5)
     confidence = max(0.0, min(1.0, confidence))
@@ -141,6 +172,7 @@ def _parse_llm_output(raw: str, cluster_id: str) -> dict:
         "verdict": verdict,
         "confidence": confidence,
         "kill_chain_stage": kill_chain,
+        "kill_chain_stages": kill_chain_stages,
         "ioc_summary": str(obj.get("ioc_summary") or ""),
         "attack_narrative": str(obj.get("attack_narrative") or ""),
         "evidence_refs": evidence_refs,
@@ -155,6 +187,7 @@ def _fallback_narrative(cluster_id: str, *, raw_text: str = "") -> dict:
         "verdict": "REQUIRES_INVESTIGATION",
         "confidence": 0.3,
         "kill_chain_stage": "unknown",
+        "kill_chain_stages": ["unknown"],
         "ioc_summary": "LLM narrative unavailable — deterministic clustering only.",
         "attack_narrative": raw_text[:300] if raw_text else "",
         "evidence_refs": [],
@@ -162,6 +195,46 @@ def _fallback_narrative(cluster_id: str, *, raw_text: str = "") -> dict:
         "next_steps": [{"priority": "P2", "action": "Manual analyst review required", "rationale": "Automated narrative generation failed", "tool": ""}],
         "_narrator_source": "fallback",
     }
+
+
+def _apply_narrative_to_cluster(cluster: dict, narrative: dict, *, upgrade_only: bool) -> None:
+    """Attach narrative fields while preserving stronger deterministic verdicts."""
+    cluster["llm_narrative"] = narrative
+
+    existing_verdict = str(
+        cluster.get("final_verdict") or cluster.get("verdict") or "REQUIRES_INVESTIGATION"
+    ).upper()
+    llm_verdict = str(narrative.get("verdict") or "REQUIRES_INVESTIGATION").upper()
+    existing_rank = _VERDICT_RANK.get(existing_verdict, _VERDICT_RANK["REQUIRES_INVESTIGATION"])
+    llm_rank = _VERDICT_RANK.get(llm_verdict, _VERDICT_RANK["REQUIRES_INVESTIGATION"])
+
+    try:
+        existing_confidence = float(cluster.get("confidence") or cluster.get("verdict_confidence") or 0.0)
+    except Exception:
+        existing_confidence = 0.0
+    try:
+        narrative_confidence = float(narrative.get("confidence") or 0.0)
+    except Exception:
+        narrative_confidence = 0.0
+
+    selected_verdict = existing_verdict
+    selected_confidence = existing_confidence
+    if not upgrade_only or llm_rank > existing_rank:
+        selected_verdict = llm_verdict
+        selected_confidence = max(narrative_confidence, existing_confidence)
+    elif llm_rank == existing_rank:
+        selected_confidence = max(narrative_confidence, existing_confidence)
+
+    cluster["final_verdict"] = selected_verdict
+    cluster["verdict"] = selected_verdict
+    cluster["confidence"] = max(0.0, min(1.0, selected_confidence))
+    cluster["kill_chain_stage"] = narrative.get("kill_chain_stage") or "unknown"
+    cluster["kill_chain_stages"] = narrative.get("kill_chain_stages") or [cluster["kill_chain_stage"]]
+    cluster["ioc_summary"] = narrative.get("ioc_summary") or ""
+    cluster["attack_narrative"] = narrative.get("attack_narrative") or ""
+    cluster["next_steps"] = narrative.get("next_steps") or []
+    cluster["fp_indicators"] = narrative.get("fp_indicators") or []
+    cluster["evidence_refs_llm"] = narrative.get("evidence_refs") or []
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
@@ -178,17 +251,9 @@ def narrate_cluster(
     calling the LLM — row-level cost is bounded regardless of cluster size.
     """
     # Critical addition #2 — evidence budget
-    if cluster.get("case_role"):
+    if cluster.get("cluster_kind") in {"pentest", "ops"} or cluster.get("case_role"):
         narrative = _case_narrative(cluster)
-        cluster["llm_narrative"] = narrative
-        cluster["final_verdict"] = narrative["verdict"]
-        cluster["confidence"] = narrative["confidence"]
-        cluster["kill_chain_stage"] = narrative["kill_chain_stage"]
-        cluster["ioc_summary"] = narrative["ioc_summary"]
-        cluster["attack_narrative"] = narrative["attack_narrative"]
-        cluster["next_steps"] = narrative["next_steps"]
-        cluster["fp_indicators"] = narrative["fp_indicators"]
-        cluster["evidence_refs_llm"] = narrative["evidence_refs"]
+        _apply_narrative_to_cluster(cluster, narrative, upgrade_only=False)
         return narrative
 
     candidate_idxs = set(cluster.get("row_refs") or [])
@@ -228,20 +293,13 @@ def narrate_cluster(
     narrative = _parse_llm_output(raw, cluster_id)
 
     # Enrich the cluster object with the structured output
-    cluster["llm_narrative"] = narrative
-    cluster["final_verdict"] = narrative["verdict"]
-    cluster["confidence"] = narrative["confidence"]
-    cluster["kill_chain_stage"] = narrative["kill_chain_stage"]
-    cluster["ioc_summary"] = narrative["ioc_summary"]
-    cluster["attack_narrative"] = narrative["attack_narrative"]
-    cluster["next_steps"] = narrative["next_steps"]
-    cluster["fp_indicators"] = narrative["fp_indicators"]
-    cluster["evidence_refs_llm"] = narrative["evidence_refs"]
+    _apply_narrative_to_cluster(cluster, narrative, upgrade_only=True)
     return narrative
 
 
 def _case_narrative(cluster: dict) -> dict:
     role = str(cluster.get("case_role") or "")
+    kind = str(cluster.get("cluster_kind") or "")
     verdict = str(cluster.get("verdict") or cluster.get("final_verdict") or "REQUIRES_INVESTIGATION")
     confidence = float(cluster.get("confidence") or 0.5)
     if role == "primary_breach":
@@ -255,6 +313,16 @@ def _case_narrative(cluster: dict) -> dict:
         stage = "unknown"
         next_steps = [
             {"priority": "P3", "action": "Confirm authorized-test scope", "rationale": "High-noise activity is expected only if it matches authorisation", "tool": "Compare IPs, operators, and dates with the rules of engagement"},
+        ]
+    elif kind == "pentest":
+        stage = "unknown"
+        next_steps = [
+            {"priority": "P3", "action": "Validate red-team engagement boundaries", "rationale": "The cluster is tagged as authorized testing and should remain outside breach counts when scope matches", "tool": "Compare engagement refs, operator IPs, and dates with the rules of engagement"},
+        ]
+    elif kind == "ops":
+        stage = "unknown"
+        next_steps = [
+            {"priority": "P3", "action": "Validate change-management evidence", "rationale": "The cluster is tagged as expected operational activity and should remain outside breach counts when change refs match", "tool": "Compare change tickets, owners, and windows with telemetry timestamps"},
         ]
     elif role == "approved_travel":
         stage = "unknown"
@@ -273,6 +341,7 @@ def _case_narrative(cluster: dict) -> dict:
         "verdict": verdict,
         "confidence": confidence,
         "kill_chain_stage": stage,
+        "kill_chain_stages": [stage],
         "ioc_summary": str(cluster.get("headline_subtitle") or cluster.get("lead_description") or ""),
         "attack_narrative": str(cluster.get("lead_description") or ""),
         "evidence_refs": list(range(1, min(6, int(cluster.get("row_count") or 0) + 1))),

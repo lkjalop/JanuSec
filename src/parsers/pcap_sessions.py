@@ -7,10 +7,7 @@ import time
 try:
     from src.graph.hopgraph import GLOBAL_HOPGRAPH
 except Exception:
-    try:
-        from graph.hopgraph import GLOBAL_HOPGRAPH
-    except Exception:
-        GLOBAL_HOPGRAPH = None  # type: ignore
+    GLOBAL_HOPGRAPH = None  # type: ignore
 
 
 def _canonical_flow_key(p: Dict[str, Any]) -> Tuple[str, int, str, int, str]:

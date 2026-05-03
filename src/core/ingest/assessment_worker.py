@@ -47,6 +47,116 @@ CLUSTER_ROW_CAP = int(os.getenv("JANUSEC_CLUSTER_ROW_CAP", "25000"))
 PARSE_BATCH_SIZE = int(os.getenv("JANUSEC_PARSE_BATCH_SIZE", "5000"))
 ASSESSMENT_EVIDENCE_PREVIEW_CAP = int(os.getenv("JANUSEC_ASSESSMENT_EVIDENCE_PREVIEW_CAP", "500"))
 
+_BREACH_VERDICTS = {
+    "VALIDATED_BREACH",
+    "CONFIRMED_BREACH",
+    "CONFIRMED_INTRUSION",
+    "LIKELY_BREACH",
+    "LIKELY_COMPROMISE",
+    "SUSPECTED_BREACH",
+}
+
+_VERDICT_RANK = {
+    "INSUFFICIENT_EVIDENCE": 0,
+    "BENIGN_EXPECTED": 1,
+    "REQUIRES_INVESTIGATION": 2,
+    "SUSPECTED_BREACH": 3,
+    "SUSPICIOUS_ACTIVITY": 3,
+    "LIKELY_COMPROMISE": 3,
+    "LIKELY_BREACH": 3,
+    "VALIDATED_BREACH": 4,
+    "CONFIRMED_INTRUSION": 4,
+    "CONFIRMED_BREACH": 4,
+}
+
+
+def _cluster_source_count(cluster: dict) -> int:
+    sources = cluster.get("sources") or cluster.get("shared_sources") or []
+    if isinstance(sources, dict):
+        return len(sources)
+    if isinstance(sources, (list, tuple, set)):
+        source_count = len({str(s) for s in sources if s})
+        if source_count:
+            return source_count
+    phases = cluster.get("phases") or []
+    if isinstance(phases, list):
+        phase_sources = {
+            str(source)
+            for phase in phases
+            if isinstance(phase, dict)
+            for source in (phase.get("sources") or [])
+            if source
+        }
+        if phase_sources:
+            return len(phase_sources)
+    try:
+        return int(cluster.get("source_count") or 0)
+    except Exception:
+        return 0
+
+
+def _cluster_row_count(cluster: dict) -> int:
+    try:
+        return int(cluster.get("row_count") or len(cluster.get("row_refs") or []))
+    except Exception:
+        return 0
+
+
+def _cluster_verdict(cluster: dict) -> str:
+    return str(cluster.get("final_verdict") or cluster.get("verdict") or "").upper()
+
+
+def _is_breach_cluster(cluster: dict) -> bool:
+    verdict = _cluster_verdict(cluster)
+    if verdict in _BREACH_VERDICTS:
+        return True
+    if verdict == "REQUIRES_INVESTIGATION":
+        return (
+            _cluster_source_count(cluster) >= 2
+            or _cluster_row_count(cluster) >= 50
+            or int(cluster.get("phase_count") or 0) >= 2
+        )
+    return False
+
+
+def _coerce_event_ts(value: Any) -> float | str | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, (int, float)):
+        return float(value) / 1000.0 if float(value) > 1e12 else float(value)
+    try:
+        return datetime.datetime.fromisoformat(str(value).replace("Z", "+00:00")).timestamp()
+    except Exception:
+        return value
+
+
+def _hopgraph_event_from_row(row: dict) -> dict:
+    event = dict(row)
+    event.setdefault("src_host", row.get("src_host") or row.get("source_host") or row.get("hostname") or row.get("host") or row.get("device_name"))
+    event.setdefault("host", event.get("src_host") or row.get("dest_host") or row.get("dst_host"))
+    event.setdefault("process", row.get("process") or row.get("process_name") or row.get("image") or row.get("exe"))
+    event.setdefault("dst_ip", row.get("dst_ip") or row.get("destination_ip") or row.get("dest_ip") or row.get("ip_dst") or row.get("server_ip"))
+    event.setdefault("src_ip", row.get("src_ip") or row.get("source_ip") or row.get("client_ip") or row.get("ip_src"))
+    event.setdefault("domain", row.get("domain") or row.get("domain_name") or row.get("dns_query") or row.get("query"))
+    if not event.get("domain") and row.get("url"):
+        try:
+            from urllib.parse import urlparse
+            event["domain"] = urlparse(str(row.get("url"))).hostname or None
+        except Exception:
+            pass
+    event.setdefault("file_hash", row.get("file_hash") or row.get("sha256") or row.get("hash"))
+    ts = (
+        row.get("timestamp")
+        or row.get("event_time")
+        or row.get("eventTime")
+        or row.get("time")
+        or row.get("@timestamp")
+    )
+    coerced_ts = _coerce_event_ts(ts)
+    if coerced_ts is not None:
+        event["timestamp"] = coerced_ts
+    return event
+
 
 # ── Progress callback type ─────────────────────────────────────────────────────
 ProgressFn = Callable[[str, str, int, str], None]  # (assessment_id, stage, percent, label)
@@ -484,7 +594,6 @@ async def run_assessment_pipeline(
         # compact exec-summary path in breach.js._compactExecSummary.
         # Result: cards show real evidence text immediately, before LLM fires.
         # "source: Legacy fallback" only appears if NO fragments at all are present.
-        _breach_verdicts = {'VALIDATED_BREACH', 'CONFIRMED_BREACH', 'LIKELY_BREACH', 'LIKELY_COMPROMISE'}
         try:
             from src.prefill.dread_fragments import build_dread_narrative, fragments_fill_rate
             from src.prefill.sabsa_coda import build_sabsa_coda, derive_breached_attributes
@@ -498,8 +607,7 @@ async def run_assessment_pipeline(
                         pass
             _dread_ok = 0
             for _cl in clusters:
-                _verdict = str(_cl.get('verdict') or _cl.get('final_verdict') or '').upper()
-                if _verdict not in _breach_verdicts:
+                if not _is_breach_cluster(_cl):
                     continue
                 _cl_rows = []
                 for _ref5b in (_cl.get('row_refs') or []):
@@ -554,8 +662,7 @@ async def run_assessment_pipeline(
                         pass
             _ei_ok = 0
             for _cl in clusters:
-                _verdict_ei = str(_cl.get('verdict') or _cl.get('final_verdict') or '').upper()
-                if _verdict_ei not in _breach_verdicts:
+                if not _is_breach_cluster(_cl):
                     continue
                 _cl_rows_ei = []
                 for _ref5c in (_cl.get('row_refs') or []):
@@ -624,6 +731,34 @@ async def run_assessment_pipeline(
         except Exception as exc:
             logger.debug("TemporalRAG row indexing skipped for %s: %s", assessment_id, exc)
 
+        try:
+            from src.graph.hopgraph import GLOBAL_HOPGRAPH as _hg
+            _hg_count = 0
+            if _hg is not None and hasattr(_hg, "ingest_event"):
+                for _row_hg in filtered_rows[:5000]:
+                    if not isinstance(_row_hg, dict):
+                        continue
+                    try:
+                        _hg.ingest_event(_hopgraph_event_from_row(_row_hg), source=f"assessment:{assessment_id}")
+                        _hg_count += 1
+                    except Exception:
+                        continue
+                _node_count = len(getattr(_hg, "nodes", {}) or {})
+                _edge_count = _hg.edge_count() if hasattr(_hg, "edge_count") else sum(
+                    len(v) for v in (getattr(_hg, "adj", {}) or {}).values()
+                )
+                assessment["hopgraph_summary"] = {
+                    "status": "populated" if _hg_count else "empty",
+                    "ingested_rows": _hg_count,
+                    "node_count": _node_count,
+                    "edge_count": _edge_count,
+                    "source": f"assessment:{assessment_id}",
+                    "cap": 5000,
+                }
+                logger.info("Stage 5f: ingested %d rows into HopGraph for %s", _hg_count, assessment_id)
+        except Exception as exc:
+            logger.debug("HopGraph ingestion skipped for %s: %s", assessment_id, exc)
+
         # ── Stage 6: tier-1 prefill (top-10 cluster cards) ────────────────────
         _progress("reasoning", 85, "Tier-1 prefill for cluster cards")
         try:
@@ -643,6 +778,14 @@ async def run_assessment_pipeline(
                         assessment_id)
         except Exception as exc:
             logger.debug("proposed_actions/kill_chain seeding skipped for %s: %s", assessment_id, exc)
+
+        try:
+            exec_result = _generate_deterministic_executive_summary(assessment, clusters, filtered_rows)
+            assessment["executive_summary"] = exec_result.get("executive_summary", "")
+            assessment["exec_summary_llm"] = exec_result
+            logger.info("Stage 6c: deterministic executive summary generated for %s", assessment_id)
+        except Exception as exc:
+            logger.debug("Executive summary generation skipped for %s: %s", assessment_id, exc)
 
         # ── Stage 7: persist final assessment JSON ─────────────────────────────
         _progress("persisting", 92, "Saving assessment")
@@ -748,10 +891,10 @@ _ACTION_TEMPLATES: list[dict] = [
 # Kill chain phase mapping from evidence keywords to canonical phase names.
 _KC_KEYWORD_MAP: list[tuple[str, list[str]]] = [
     ("initial_access", ["phish", "spearphish", "credential", "brute", "login", "mfa"]),
+    ("lateral_movement", ["rdp", "smb", "psexec", "wmi", "lateral", "pivot"]),
     ("execution", ["powershell", "cmd.exe", "wscript", "script", "invoke", "exec"]),
     ("persistence", ["scheduled task", "registry", "autorun", "cron", "startup"]),
     ("privilege_escalation", ["admin", "root", "elevation", "uac", "sudo", "lsass"]),
-    ("lateral_movement", ["rdp", "smb", "psexec", "wmi", "lateral", "pivot"]),
     ("collection", ["compress", "archive", "staging", "copy into", "select"]),
     ("exfiltration", ["exfil", "upload", "rclone", "backblaze", "outbound", "egress"]),
     ("command_and_control", ["c2", "beacon", "callback", "dns tunnel", "covert"]),
@@ -798,8 +941,6 @@ def _enrich_and_dispatch_personas(
 ) -> None:
     """Stage 5d: enrich narratives, build framework register, generate
     per-persona dispatch payloads, and wrap in bitemporal trace."""
-    _breach_verdicts = {'VALIDATED_BREACH', 'CONFIRMED_BREACH', 'LIKELY_BREACH', 'LIKELY_COMPROMISE'}
-
     # Build row lookup for cluster evidence
     row_lookup: dict[int, dict] = {}
     for r in rows:
@@ -841,8 +982,7 @@ def _enrich_and_dispatch_personas(
 
     dispatch_ok = 0
     for cl in clusters:
-        verdict = str(cl.get('verdict') or cl.get('final_verdict') or '').upper()
-        if verdict not in _breach_verdicts:
+        if not _is_breach_cluster(cl):
             continue
 
         # Gather cluster rows
@@ -963,11 +1103,7 @@ def _seed_proposed_actions_and_kill_chain(
     Runs after LLM enrichment so prefill data is available. Only triggers for
     confirmed/validated breach clusters to avoid noise.
     """
-    breach_verdicts = {"VALIDATED_BREACH", "CONFIRMED_BREACH", "CONFIRMED_INTRUSION"}
-    breach_clusters = [
-        c for c in clusters
-        if (c.get("verdict") or c.get("final_verdict") or "").upper() in breach_verdicts
-    ]
+    breach_clusters = [c for c in clusters if _is_breach_cluster(c)]
     if not breach_clusters:
         return
 
@@ -1036,7 +1172,30 @@ def _seed_proposed_actions_and_kill_chain(
         cl_rows.sort(key=_ts_key)
 
         for r in cl_rows[:20]:  # cap per cluster
-            desc = (r.get("description") or r.get("event_name") or "").lower()
+            desc = " ".join(
+                str(v)
+                for v in [
+                    r.get("description"),
+                    r.get("event_name"),
+                    r.get("eventName"),
+                    r.get("action"),
+                    r.get("process_name"),
+                    r.get("process"),
+                    r.get("command_line"),
+                    r.get("cmdline"),
+                    r.get("file_path"),
+                    r.get("path"),
+                    r.get("dest_host"),
+                    r.get("dst_host"),
+                    r.get("hostname"),
+                    r.get("protocol"),
+                    r.get("url"),
+                    r.get("domain"),
+                    r.get("query"),
+                    r.get("threat_name"),
+                ]
+                if v
+            ).lower()
             phase = "execution"  # default
             for ph, keywords in _KC_KEYWORD_MAP:
                 if any(kw in desc for kw in keywords):
@@ -1062,6 +1221,90 @@ def _seed_proposed_actions_and_kill_chain(
         kill_chain[i]["enables_phase_id"] = kill_chain[i + 1]["phase_id"]
 
     assessment["kill_chain"] = kill_chain
+
+
+def _generate_deterministic_executive_summary(
+    assessment: dict,
+    clusters: list[dict],
+    rows: list[dict],
+) -> dict:
+    """Build a no-LLM executive summary so persisted assessments are complete."""
+    verdict_counts: dict[str, int] = {}
+    for cluster in clusters:
+        verdict = _cluster_verdict(cluster) or "UNKNOWN"
+        verdict_counts[verdict] = verdict_counts.get(verdict, 0) + 1
+
+    breach_clusters = [cluster for cluster in clusters if _is_breach_cluster(cluster)]
+    benign_clusters = [
+        cluster for cluster in clusters
+        if _cluster_verdict(cluster) in {"BENIGN_EXPECTED", "INSUFFICIENT_EVIDENCE"}
+    ]
+    top_cluster = max(
+        clusters,
+        key=lambda cluster: (
+            _VERDICT_RANK.get(_cluster_verdict(cluster), 0),
+            str(cluster.get("severity") or "").lower() == "critical",
+            _cluster_row_count(cluster),
+            float(cluster.get("confidence") or 0),
+        ),
+        default={},
+    )
+    top_verdict = _cluster_verdict(top_cluster) or "UNKNOWN"
+    top_name = (
+        top_cluster.get("incident_name")
+        or top_cluster.get("lead_description")
+        or top_cluster.get("reason_summary")
+        or "No lead cluster"
+    )
+    total_rows = (
+        (assessment.get("evidence_store") or {}).get("row_count")
+        or assessment.get("rows_processed")
+        or len(rows or [])
+    )
+    source_count = (
+        assessment.get("source_count")
+        or len((assessment.get("source_counts") or {}).keys())
+        or len({
+            str(row.get("_source") or row.get("source") or row.get("source_file") or "")
+            for row in rows
+            if isinstance(row, dict) and (row.get("_source") or row.get("source") or row.get("source_file"))
+        })
+    )
+
+    headline = (
+        "Validated breach evidence identified"
+        if any(_cluster_verdict(c) in {"VALIDATED_BREACH", "CONFIRMED_BREACH", "CONFIRMED_INTRUSION"} for c in breach_clusters)
+        else "Security investigation requires review"
+        if breach_clusters
+        else "No validated breach cluster identified"
+    )
+    subline = (
+        f"{len(breach_clusters)} breach-relevant cluster(s), {len(benign_clusters)} benign/expected cluster(s), "
+        f"{int(total_rows or 0):,} event(s), {int(source_count or 0)} source(s)."
+    )
+    body = (
+        f"{headline}. Lead cluster: {str(top_name)[:180]} "
+        f"(verdict {top_verdict}, {_cluster_row_count(top_cluster)} evidence row(s)). "
+        f"Verdict distribution: {', '.join(f'{k}={v}' for k, v in sorted(verdict_counts.items())) or 'none'}."
+    )
+    return {
+        "headline": headline,
+        "subline": subline,
+        "executive_summary": body,
+        "deterministic": "\n".join([headline, subline, body]),
+        "generated_at": int(time.time()),
+        "from_cache": False,
+        "narrative_provenance": "assessment_worker_deterministic",
+        "narrative_source": "deterministic_pipeline",
+        "scope": {
+            "breach_clusters": len(breach_clusters),
+            "benign_clusters": len(benign_clusters),
+            "total_clusters": len(clusters),
+            "total_rows": int(total_rows or 0),
+            "source_count": int(source_count or 0),
+        },
+        "verdict_counts": verdict_counts,
+    }
 
 
 def _persist_assessment_json(assessment_id: str, org: str, data: dict) -> str | None:

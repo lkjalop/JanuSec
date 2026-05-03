@@ -590,10 +590,7 @@ except Exception:
 try:
     from src.graph.hopgraph import GLOBAL_HOPGRAPH  # type: ignore
 except Exception:
-    try:
-        from graph.hopgraph import GLOBAL_HOPGRAPH  # type: ignore
-    except Exception:
-        GLOBAL_HOPGRAPH = None  # type: ignore
+    GLOBAL_HOPGRAPH = None  # type: ignore
 try:
     try:
         from src.api.hopgraph_stream import router as hopgraph_stream_router
@@ -952,12 +949,8 @@ async def lifespan(app: FastAPI):
             try:
                 import src.graph.hopgraph as _hgmod  # type: ignore
                 _hgmod.GLOBAL_HOPGRAPH = hg  # type: ignore[attr-defined]
-            except Exception:
-                try:
-                    import graph.hopgraph as _hgmod2  # type: ignore
-                    _hgmod2.GLOBAL_HOPGRAPH = hg  # type: ignore[attr-defined]
-                except Exception as _exc:
-                    logger.debug('silent_swallow at %s:%d: %s', __file__, 956, _exc)
+            except Exception as _exc:
+                logger.debug('silent_swallow at %s:%d: %s', __file__, 956, _exc)
             async def _restore_hopgraph_state() -> None:
                 await asyncio.sleep(2)
                 def _restore_sync() -> None:
@@ -5541,8 +5534,8 @@ def _ensure_test_ingest_routes() -> None:
                 if hg is None:
                     try:
                         from src.graph.hopgraph import HopGraph  # type: ignore
-                    except Exception:
-                        from graph.hopgraph import HopGraph  # type: ignore
+                    except Exception as exc:
+                        raise RuntimeError("canonical HopGraph import unavailable") from exc
                     hg = HopGraph()
                     try:
                         setattr(app, 'GLOBAL_HOPGRAPH', hg)
@@ -6897,12 +6890,9 @@ async def metrics_endpoint(request: Request) -> Response:
         try:
             edge_total = 0
             try:
-                from src.core.graph.hopgraph import GLOBAL_HOPGRAPH as _HG  # type: ignore
+                from src.graph.hopgraph import GLOBAL_HOPGRAPH as _HG  # type: ignore
             except Exception:
-                try:
-                    from src.graph.hopgraph import GLOBAL_HOPGRAPH as _HG  # type: ignore
-                except Exception:
-                    _HG = None  # type: ignore
+                _HG = None  # type: ignore
             if _HG is not None:
                 try:
                     if hasattr(_HG, 'edge_count') and callable(getattr(_HG, 'edge_count')):
@@ -7228,6 +7218,24 @@ async def temporal_stats() -> dict:
         return GLOBAL_TEMPORAL_MODEL.stats()
     except Exception:
         return {'entities': 0, 'avg_score': 0.0}
+
+
+@app.get('/api/v1/temporal-rag/stats', include_in_schema=False)
+async def temporal_rag_stats() -> dict:
+    try:
+        from src.ai.temporal_rag import get_engine  # type: ignore
+        engine = get_engine()
+        if engine is not None and hasattr(engine, 'stats'):
+            return engine.stats()
+    except Exception:
+        pass
+    return {
+        'available': False,
+        'entities': 0,
+        'indexed_rows': 0,
+        'tenant_count': 0,
+        'tenants': {},
+    }
 
 
 # Lightweight shim for report ingestion used by UI tests and the LIVE console.
