@@ -212,6 +212,11 @@ _HIGH_SIGNAL_TERMS = (
     "newcountry", "newdevice", "mfafailure", "suspicious", "atypical",
     # K8s escape signals
     "hostpid", "hostnetwork", "hostipc", "docker.sock",
+    # IAM / email exfiltration signals (Sprint 1 additions — Meridian scenario)
+    "new-inboxrule", "newinboxrule", "forwardto", "forwarding_smtp",
+    "externalaccess", "sensitive_document_bulk_download", "ccp-exfil",
+    # Bastion / RDP lateral movement
+    "mstsc", "mstsc.exe", "remote desktop",
 )
 
 # Security-relevant cloud/IAM event names that should survive triage even without
@@ -236,6 +241,11 @@ _CLOUD_SECURITY_EVENT_NAMES = frozenset({
     # M365 risk signals (mailboxlogin/filedownloaded excluded — fire on every BAU access)
     "filesharinginfected",
     "searchqueryinitiatedshareddocument",
+    # M365/Exchange high-risk IAM operations
+    "new-inboxrule", "set-inboxrule", "disable-inboxrule",
+    "add-mailboxpermission", "set-mailboxautoreply",
+    # External send surfaced by Exchange audit
+    "send",
 })
 
 _LOW_NOISE_SOURCE_TYPES = frozenset({"cloud", "iam", "email", "remote"})
@@ -376,6 +386,43 @@ async def run_assessment_pipeline(
                     norm = _normalize_ingest_row(row, total_rows)
                     # Tag every row with its evidence lane for downstream policy enforcement.
                     norm.setdefault("_lane", file_lane)
+
+                    # ── Stage 1b: file-sensitivity tagging ───────────────────────
+                    _SENSITIVE_PATH_TOKENS = (
+                        "payroll", "acquisition", "merger", "novabridge", "ip-schedule",
+                        "infra-map", "capex", "q1-projections", "ceo", "board",
+                        "ma-document", "merger-ip", "novabridge-acquisition",
+                        "critical-infra", "critical_infra",
+                    )
+                    _obj = str(
+                        norm.get("ObjectId") or norm.get("object_id") or
+                        norm.get("file_path") or norm.get("resource") or ""
+                    ).lower()
+                    if any(tok in _obj for tok in _SENSITIVE_PATH_TOKENS):
+                        norm.setdefault("_sensitivity", "high")
+                        norm["triage_score"] = max(norm.get("triage_score") or 0.0, 0.65)
+
+                    # ── Stage 1b: external_recipient_domain tagging for email rows ──
+                    _own_tld = (".com.au", ".gov.au", ".net.au", ".org.au")
+                    for _rec_fld in ("Recipients", "recipients"):
+                        _recs = norm.get(_rec_fld)
+                        if not _recs:
+                            continue
+                        if isinstance(_recs, str):
+                            _recs = [_recs]
+                        for _rec in _recs[:4]:
+                            _dom = str(_rec).split("@")[-1].lower().strip() if "@" in str(_rec) else ""
+                            if _dom and "." in _dom and not any(_dom.endswith(t) for t in _own_tld):
+                                norm.setdefault("external_recipient_domain", _dom)
+                                norm["triage_score"] = max(norm.get("triage_score") or 0.0, 0.25)
+                                break
+                    _fwd = str(norm.get("ForwardingSmtpAddress") or norm.get("forwarding_smtp") or "").strip()
+                    if "@" in _fwd:
+                        _fdom = _fwd.split("@")[-1].lower()
+                        if not any(_fdom.endswith(t) for t in _own_tld):
+                            norm.setdefault("external_recipient_domain", _fdom)
+                            norm["triage_score"] = max(norm.get("triage_score") or 0.0, 0.65)
+
                     batch.append(norm)
                     total_rows += 1
                     if len(batch) >= PARSE_BATCH_SIZE:
@@ -417,6 +464,43 @@ async def run_assessment_pipeline(
             "assessment %s: %d total rows, %d above triage threshold %.2f (cap %d)",
             assessment_id, total_rows, len(filtered_rows), TRIAGE_MIN_FOR_CLUSTER, CLUSTER_ROW_CAP,
         )
+
+        # ── Stage 2b: user-IP /16 anomaly pre-tagging ──────────────────────────
+        try:
+            from collections import defaultdict as _dd
+            _user_ip16: dict[str, set] = _dd(set)
+            for _r2b in filtered_rows:
+                _u2b = str(_r2b.get("user_canonical") or _r2b.get("user") or "").strip()
+                _ip2b = str(_r2b.get("src_ip") or "").strip()
+                if not _u2b or not _ip2b or _u2b in ("-", "n/a", ""):
+                    continue
+                parts = _ip2b.split(".")
+                if len(parts) >= 2:
+                    _user_ip16[_u2b].add(f"{parts[0]}.{parts[1]}")
+            for _u2b, _blocks in _user_ip16.items():
+                _others: set = set()
+                for _ou, _ob in _user_ip16.items():
+                    if _ou != _u2b:
+                        _others.update(_ob)
+                _personal = _blocks - _others
+                if _personal:
+                    _tagged = 0
+                    for _r2b in filtered_rows:
+                        if str(_r2b.get("user_canonical") or _r2b.get("user") or "") == _u2b:
+                            _ip_r = str(_r2b.get("src_ip") or "").strip()
+                            _blk_r = ".".join(_ip_r.split(".")[:2]) if "." in _ip_r else ""
+                            if _blk_r in _personal:
+                                if not _r2b.get("_anomaly"):
+                                    _r2b["_anomaly"] = "user_ip_drift"
+                                _r2b["triage_score"] = max(float(_r2b.get("triage_score") or 0.0), 0.65)
+                                _tagged += 1
+                    if _tagged:
+                        logger.info(
+                            "assessment %s: user %s on anomalous /16s %s — tagged %d rows user_ip_drift",
+                            assessment_id, _u2b, _personal, _tagged,
+                        )
+        except Exception as _exc2b:
+            logger.debug("Stage 2b user-IP anomaly tagging failed for %s: %s", assessment_id, _exc2b)
 
         _progress("clustering", 40, f"Clustering {len(filtered_rows):,} high-signal rows")
 
@@ -770,8 +854,22 @@ async def run_assessment_pipeline(
         # ── Stage 6b: seed proposed_actions + kill_chain for breach clusters ───
         # Deterministic — gives the CEO banner + path-of-intrusion table content
         # without requiring the full agent investigation loop.
+        # Also bridges threat_cases into the seeding input so that clusters
+        # whose final_verdict is sub-threshold but whose corresponding threat_case
+        # is VALIDATED_BREACH still produce proposed actions.
         try:
-            _seed_proposed_actions_and_kill_chain(assessment, clusters, filtered_rows)
+            _seed_clusters = list(clusters)
+            _threat_cases = assessment.get("threat_cases") or []
+            for _tc in _threat_cases:
+                _tc_verdict = str(_tc.get("final_verdict") or _tc.get("verdict") or "").upper()
+                if _tc_verdict in _BREACH_VERDICTS:
+                    _proxy = dict(_tc)
+                    _proxy.setdefault("final_verdict", _tc_verdict)
+                    _proxy.setdefault("row_refs", _tc.get("row_refs") or [])
+                    if not any(c.get("cluster_id") == _tc.get("cluster_id") or
+                               c.get("case_id") == _tc.get("case_id") for c in _seed_clusters):
+                        _seed_clusters.append(_proxy)
+            _seed_proposed_actions_and_kill_chain(assessment, _seed_clusters, filtered_rows)
             logger.info("Stage 6b: seeded proposed_actions=%d, kill_chain=%d for %s",
                         len(assessment.get('proposed_actions', [])),
                         len(assessment.get('kill_chain', [])),
