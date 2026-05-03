@@ -109,6 +109,12 @@ class ThreatIntelClient:
             'ip': {}, 'domain': {}, 'url': {}, 'hash': {}, 'ja3': {}, 'certfp': {}
         }
         self._current_origin = 'manual'
+        # Actor-tag registry: ioc_value → list of actor/group tags from feed metadata
+        # e.g. {"1.2.3.4": ["apt29", "cozy_bear"], "evil.com": ["fin7"]}
+        self._actor_tags: dict[str, dict[str, list[str]]] = {
+            'ip': {}, 'domain': {}, 'url': {}, 'hash': {}, 'ja3': {}, 'certfp': {}
+        }
+        self._current_actor_tags: list[str] = []  # set per MISP/OpenCTI event before _add_*
 
         self._sightings: dict[str, dict[str, Set[str]]] = {
             'ip': {}, 'domain': {}, 'url': {}, 'hash': {}, 'ja3': {}, 'certfp': {}
@@ -464,6 +470,10 @@ class ThreatIntelClient:
         self.ip_ttl[ip_s] = self._expiry(ttl_hours)
         try: self._origins['ip'][ip_s] = self._current_origin
         except Exception: pass
+        if self._current_actor_tags:
+            self._actor_tags['ip'].setdefault(ip_s, []).extend(
+                t for t in self._current_actor_tags if t not in self._actor_tags['ip'].get(ip_s, [])
+            )
         self._record_sighting('ip', ip_s)
 
     def _add_domain(self, domain: str, ttl_hours: float | int | None = 24):
@@ -472,6 +482,10 @@ class ThreatIntelClient:
         self.domain_ttl[d] = self._expiry(ttl_hours)
         try: self._origins['domain'][d] = self._current_origin
         except Exception: pass
+        if self._current_actor_tags:
+            self._actor_tags['domain'].setdefault(d, []).extend(
+                t for t in self._current_actor_tags if t not in self._actor_tags['domain'].get(d, [])
+            )
         self._record_sighting('domain', d)
 
     def _add_url(self, url: str, ttl_hours: float | int | None = 24):
@@ -488,6 +502,10 @@ class ThreatIntelClient:
         self.hash_ttl[he] = self._expiry(ttl_hours)
         try: self._origins['hash'][he] = self._current_origin
         except Exception: pass
+        if self._current_actor_tags:
+            self._actor_tags['hash'].setdefault(he, []).extend(
+                t for t in self._current_actor_tags if t not in self._actor_tags['hash'].get(he, [])
+            )
         self._record_sighting('hash', he)
 
     def _add_ja3(self, ja3: str, ttl_hours: float | int | None = 168):
@@ -566,6 +584,25 @@ class ThreatIntelClient:
             if v in self._origins.get(kind, {}):
                 return self._origins[kind].get(v)
         return None
+
+    def actor_tags_for(self, value: str) -> list[str]:
+        """Return actor/group tags associated with this IOC from feed metadata.
+
+        Returns a deduplicated list of canonical actor names (e.g. ['apt29',
+        'cozy_bear']). Empty list when no actor information was recorded.
+        Returns the union across all IOC types in case the same string appears
+        in multiple categories (e.g. a hash seen in both MISP and OpenCTI).
+        """
+        v = str(value).strip().lower()
+        seen: set[str] = set()
+        out: list[str] = []
+        for kind in ('ip', 'domain', 'url', 'hash', 'ja3', 'certfp'):
+            for tag in (self._actor_tags.get(kind, {}).get(v) or []):
+                t = str(tag).lower().strip()
+                if t and t not in seen:
+                    seen.add(t)
+                    out.append(t)
+        return out
 
     def techniques_for_factors(self, factors: list[str]) -> dict[str, list[str]]:
         out: dict[str, list[str]] = {}
