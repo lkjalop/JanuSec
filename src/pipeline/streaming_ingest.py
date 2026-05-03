@@ -84,30 +84,35 @@ SOURCE_REMOTE   = 'remote'
 SOURCE_UNKNOWN  = 'unknown'
 
 _SOURCE_ALIASES: Dict[str, str] = {
-    # Cloud
+    # Cloud — vendor names and canonical sheet/section names
     'aws': SOURCE_CLOUD, 'azure': SOURCE_CLOUD, 'gcp': SOURCE_CLOUD,
     'cloudtrail': SOURCE_CLOUD, 'azure_activity': SOURCE_CLOUD, 'gcs': SOURCE_CLOUD,
     's3': SOURCE_CLOUD, 'vpcflow': SOURCE_CLOUD, 'guardduty': SOURCE_CLOUD,
     'snowflake': SOURCE_CLOUD,                          # Snowflake query logs
+    'cloud': SOURCE_CLOUD,                              # generic sheet/section name
     # IAM
     'okta': SOURCE_IAM, 'entra': SOURCE_IAM, 'aad': SOURCE_IAM, 'sailpoint': SOURCE_IAM,
     'pingidentity': SOURCE_IAM, 'azure_signin': SOURCE_IAM, 'azure_audit': SOURCE_IAM,
     'active_directory': SOURCE_IAM, 'ldap': SOURCE_IAM,
+    'identity': SOURCE_IAM,                             # Janusec XLSX sheet name
     # Email / M365
     'exchange': SOURCE_EMAIL, 'o365': SOURCE_EMAIL, 'gmail': SOURCE_EMAIL,
     'proofpoint': SOURCE_EMAIL, 'mimecast': SOURCE_EMAIL, 'defender_email': SOURCE_EMAIL,
     'm365': SOURCE_EMAIL, 'unified_audit': SOURCE_EMAIL,  # M365 Unified Audit
+    'email': SOURCE_EMAIL,                              # generic sheet/section name
     # Network
     'zeek': SOURCE_NETWORK, 'suricata': SOURCE_NETWORK, 'netflow': SOURCE_NETWORK,
     'network': SOURCE_NETWORK, 'flow': SOURCE_NETWORK,   # whole-word aliases
     'dns': SOURCE_NETWORK, 'proxy': SOURCE_NETWORK, 'paloalto': SOURCE_NETWORK,
     'checkpoint': SOURCE_NETWORK, 'fortinet': SOURCE_NETWORK, 'firewall': SOURCE_NETWORK,
+    'bgp': SOURCE_NETWORK,                              # BGP route telemetry files
     # Endpoint
     'crowdstrike': SOURCE_ENDPOINT, 'sentinelone': SOURCE_ENDPOINT,
     'defender': SOURCE_ENDPOINT, 'sysmon': SOURCE_ENDPOINT, 'edr': SOURCE_ENDPOINT,
     'wef': SOURCE_ENDPOINT, 'etw': SOURCE_ENDPOINT, 'cbr': SOURCE_ENDPOINT,
     'falco': SOURCE_ENDPOINT,                           # Falco runtime security
     'k8s': SOURCE_ENDPOINT, 'kubernetes': SOURCE_ENDPOINT,  # K8s audit logs
+    'endpoint': SOURCE_ENDPOINT,                        # generic sheet/section/file name
     # Remote / VPN / RDP
     'vpn': SOURCE_REMOTE, 'rdp': SOURCE_REMOTE, 'citrix': SOURCE_REMOTE,
     'anyconnect': SOURCE_REMOTE, 'globalprotect': SOURCE_REMOTE,
@@ -436,11 +441,12 @@ def normalize_row(row: dict, source_type: str | None = None) -> dict:
         r = _normalize_k8s_falco(row)
         st = SOURCE_ENDPOINT
     else:
-        # When _source is a filename (no vendor matched), try _section as
-        # a routing hint — set by file_parser when using ijson on multi-
-        # section JSON bundles (e.g. janusec_cloud_identity_v1.json).
+        # When _source is a filename (no vendor matched), try _section/_sheet
+        # as a routing hint.  _section is set by file_parser for multi-section
+        # JSON bundles; _sheet is set for XLSX workbooks.
         if st == SOURCE_UNKNOWN:
-            section_st = classify_source(_safe(row.get('_section') or ''))
+            hint = _safe(row.get('_section') or row.get('_sheet') or '')
+            section_st = classify_source(hint)
             if section_st != SOURCE_UNKNOWN:
                 st = section_st
         normalizer = _NORMALIZERS.get(st)
