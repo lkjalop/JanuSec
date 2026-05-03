@@ -51,13 +51,27 @@
 
   <!-- ── Scripts ──────────────────────────────────────────────────────────── -->
   <script>
-    // Live feed "coming soon" toast
+    // Live feed integration probe — checks /api/v1/integrations/{name}/status
+    // and renders the result. Falls back to a "not configured" message if
+    // the integration endpoint is absent (rather than the previous "coming
+    // soon" stub which gave analysts no actionable signal).
     function _liveToast(src) {
       var el = document.createElement('div');
       el.className = 'br-toast';
-      el.textContent = src + ' integration — coming soon';
+      el.textContent = 'Probing ' + src + '…';
       document.body.appendChild(el);
-      setTimeout(function () { el.remove(); }, 2500);
+      var name = src.toLowerCase();
+      var key = (typeof localStorage !== 'undefined' && localStorage.apiKey) ? localStorage.apiKey : 'devkey123';
+      fetch('/api/v1/integrations/' + name + '/status', { headers: { 'x-api-key': key } })
+        .then(function (r) { return r.ok ? r.json() : { configured: false, status: 'unreachable' }; })
+        .catch(function () { return { configured: false, status: 'not_configured' }; })
+        .then(function (j) {
+          var cfg = j && j.configured;
+          var status = (j && j.status) || 'unknown';
+          el.textContent = src + ': ' + (cfg ? ('connected (' + status + ')') : 'not configured — set webhook in Integrations');
+          el.style.borderColor = cfg ? 'var(--accent-success, #22c55e)' : 'var(--accent-warning, #f59e0b)';
+          setTimeout(function () { el.remove(); }, 4000);
+        });
     }
   </script>
 

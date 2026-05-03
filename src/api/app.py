@@ -66,9 +66,29 @@ except Exception:
     except Exception:
         require_roles = None  # type: ignore
 import csv as _csv
-from core.factor_attribution_store import FACTOR_ATTRIBUTIONS
-from core.factor_stats_manager import FACTOR_STATS
-from core.labels_store import LABELS, VALID_LABELS
+# Production-grade import guards: prefer the canonical src.core.* path; fall
+# back to the bare core.* path for legacy script invocations.
+try:
+    from src.core.factor_attribution_store import FACTOR_ATTRIBUTIONS  # type: ignore
+except Exception:  # noqa: BLE001
+    try:
+        from core.factor_attribution_store import FACTOR_ATTRIBUTIONS  # type: ignore
+    except Exception:  # noqa: BLE001
+        FACTOR_ATTRIBUTIONS = {}  # type: ignore
+try:
+    from src.core.factor_stats_manager import FACTOR_STATS  # type: ignore
+except Exception:  # noqa: BLE001
+    try:
+        from core.factor_stats_manager import FACTOR_STATS  # type: ignore
+    except Exception:  # noqa: BLE001
+        FACTOR_STATS = {}  # type: ignore
+try:
+    from src.core.labels_store import LABELS, VALID_LABELS  # type: ignore
+except Exception:  # noqa: BLE001
+    try:
+        from core.labels_store import LABELS, VALID_LABELS  # type: ignore
+    except Exception:  # noqa: BLE001
+        LABELS, VALID_LABELS = {}, set()  # type: ignore
 
 # Silence noisy FastAPI deprecation warnings during tests/lite runs
 try:
