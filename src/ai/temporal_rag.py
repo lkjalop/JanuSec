@@ -309,6 +309,37 @@ class TemporalRAGEngine:
             "summary_hint": summary_hint,
         }
 
+    def stats(self) -> dict:
+        """Return lightweight corpus stats for runtime health endpoints."""
+        now = time.time()
+        tenants: dict[str, dict[str, Any]] = {}
+        total_entries = 0
+        total_window_entries = 0
+        for tenant, corpus in self._corpora.items():
+            entries = corpus.all_entries()
+            window_entries = corpus.entries_in_window(_WINDOW_SECONDS, now=now)
+            total_entries += len(entries)
+            total_window_entries += len(window_entries)
+            tenants[tenant] = {
+                "entries": len(entries),
+                "window_entries": len(window_entries),
+                "oldest_ts": min((e.ts for e in entries), default=None),
+                "newest_ts": max((e.ts for e in entries), default=None),
+            }
+        return {
+            "available": True,
+            "tenant_count": len(self._corpora),
+            "entities": total_entries,
+            "indexed_rows": total_entries,
+            "window_entries": total_window_entries,
+            "embedding_mode": _EMBED_MODE,
+            "embedding_model": _EMBED_MODEL if _EMBED_MODE != "off" else None,
+            "ollama_ok": self._ollama_ok,
+            "corpus_max_rows": _CORPUS_MAX_ROWS,
+            "window_seconds": _WINDOW_SECONDS,
+            "tenants": tenants,
+        }
+
 
 # ---------------------------------------------------------------------------
 # Timestamp extractor

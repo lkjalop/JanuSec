@@ -5334,7 +5334,7 @@ async def api_multi_merge(payload: dict, auth=Depends(require_scopes('factors.se
             # adjacency access duck-typed and test-friendly.
             from src.core.rules.join_helpers import _get_adj_list  # type: ignore
             try:
-                from graph.hopgraph import GLOBAL_HOPGRAPH  # type: ignore
+                from src.graph.hopgraph import GLOBAL_HOPGRAPH  # type: ignore
                 _adj = _get_adj_list(GLOBAL_HOPGRAPH)
             except Exception:
                 # Fallback: empty accessor

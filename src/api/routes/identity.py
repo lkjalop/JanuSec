@@ -51,8 +51,8 @@ async def ingest_identity(request: Request):
             if (_os.getenv('TEST_HELPERS_ENABLED','0').lower() in {'1','true','yes'}) or ('PYTEST_CURRENT_TEST' in _os.environ):
                 try:
                     from src.graph.hopgraph import HopGraph  # type: ignore
-                except Exception:
-                    from graph.hopgraph import HopGraph  # type: ignore
+                except Exception as exc:
+                    raise RuntimeError("canonical HopGraph import unavailable") from exc
                 hg = HopGraph()
                 try:
                     setattr(request.app, 'GLOBAL_HOPGRAPH', hg)
