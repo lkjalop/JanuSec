@@ -89,7 +89,7 @@ logger = logging.getLogger(__name__)
 
 
 # Bump when merge logic changes so assessment_worker can detect stale cluster outputs.
-_CLUSTER_MERGE_VERSION = "1.5"
+_CLUSTER_MERGE_VERSION = "1.6"
 
 # ── Time windows (seconds) per pivot type ────────────────────────────────────
 USER_WINDOW             = 6 * 3600          # 6h burst
@@ -259,6 +259,339 @@ def _det_identity_ip_anomaly(row: dict, text: str) -> bool:
     return 'exfil' in cluster_tag or 'anomaly' in cluster_tag
 
 
+# ── Sprint 3: APT-aligned phase detectors ────────────────────────────────────
+# Each detector targets a specific MITRE ATT&CK technique group seen in real APT
+# campaigns. Functions use structured row fields first, then fall back to the
+# pre-serialised text blob for free-text log sources.
+
+
+def _det_lolbin_execution(row: dict, text: str) -> bool:
+    """T1218 / T1059 — Living-off-the-land binary abuse.
+    certutil, mshta, regsvr32, wscript, bitsadmin fetching / decoding payloads.
+    APT28, APT41, Lazarus Group, Fin7."""
+    proc = str(row.get('process_name') or row.get('process') or '').lower()
+    if proc in (
+        'certutil.exe', 'mshta.exe', 'regsvr32.exe', 'wscript.exe',
+        'cscript.exe', 'bitsadmin.exe', 'installutil.exe', 'msiexec.exe',
+        'odbcconf.exe', 'mavinject.exe', 'appsyncpublishingtool.exe',
+    ):
+        cmdline = str(row.get('CommandLine') or row.get('command_line') or '').lower()
+        if any(t in cmdline for t in (
+            'http://', 'https://', '-decode', '-decodehex', '-urlcache', '/transfer',
+            'javascript:', 'vbscript:', 'scrobj', '/i:http',
+        )):
+            return True
+    return any(t in text for t in (
+        'certutil -decode', 'certutil -urlcache', 'certutil.exe -urlcache',
+        'mshta http', 'mshta.exe http', 'mshta vbscript',
+        'regsvr32 /s /n /u /i:http', 'regsvr32.exe /s /n',
+        'bitsadmin /transfer', 'installutil /logfile=',
+        'odbcconf /a {regsvr', 'mavinject.exe',
+    ))
+
+
+def _det_oauth_device_code(row: dict, text: str) -> bool:
+    """T1528 / T1550.001 — OAuth Device Code flow phishing; suspicious app consent.
+    APT29 (Midnight Blizzard), Storm-0558 primary initial-access technique.
+    Also covers delegated-permission grant abuse and rogue app registration."""
+    op = str(row.get('Operation') or row.get('operation') or row.get('event_name') or '').lower()
+    if op in (
+        'consent to application', 'add app role assignment to service principal',
+        'add delegated permission grant', 'update application',
+        'add oauth2permissiongrant', 'add service principal',
+    ):
+        return True
+    return any(t in text for t in (
+        'device_code', 'oauth2/devicecode', 'devicecodeflow',
+        'consent to application', 'add app role assignment',
+        'add delegated permission', 'oauth2permissiongrant',
+        'malicious oauth', 'suspicious app consent', 'stolen refresh token',
+    ))
+
+
+def _det_cloud_imds_theft(row: dict, text: str) -> bool:
+    """T1552.005 — Cloud instance metadata service (IMDS) credential theft.
+    Access to 169.254.169.254, metadata.google.internal, metadata.azure.com.
+    APT41, TeamTNT, Pacu framework operator."""
+    dst = str(row.get('dst_ip') or row.get('dst') or '').strip()
+    if dst in ('169.254.169.254', '169.254.170.2'):  # AWS IMDS + ECS task metadata
+        return True
+    url = str(
+        row.get('url') or row.get('http_url') or row.get('uri') or row.get('http.uri') or ''
+    ).lower()
+    if any(t in url for t in (
+        '169.254.169.254', 'metadata.google.internal', 'metadata.azure.com',
+        'metadata/instance', 'latest/meta-data/iam/security-credentials',
+    )):
+        return True
+    return any(t in text for t in (
+        '169.254.169.254', 'metadata.google.internal', 'metadata.azure.com',
+        'imds credential', 'ecs credentials endpoint', 'taskrole',
+        'containerrole', 'meta-data/iam/security-credentials', 'imdsv1',
+    ))
+
+
+def _det_dcsync(row: dict, text: str) -> bool:
+    """T1003.006 — DCSync domain replication credential harvest.
+    Windows Event 4662 with GUID {1131f6aa} / {1131f6ad} / {89e95b76}.
+    APT29, Conti, LockBit post-exploitation toolkit chains."""
+    event_id = str(row.get('event_id') or row.get('EventID') or '').strip()
+    if event_id == '4662':
+        props = str(row.get('Properties') or row.get('property_names') or '').lower()
+        if any(t in props for t in (
+            '1131f6aa', '1131f6ad', '89e95b76', 'ds-replication-get-changes',
+        )):
+            return True
+    return any(t in text for t in (
+        'getncchanges', 'ms-drsr', 'drsuapi', 'ds-replication-get-changes',
+        '1131f6aa', '1131f6ad', '89e95b76',
+        'dcsync', 'dc sync', 'domain replication attack',
+        'impacket secretsdump', 'secretsdump.py',
+    ))
+
+
+def _det_kerberoasting(row: dict, text: str) -> bool:
+    """T1558.003 / T1558.004 — Kerberoasting and AS-REP roasting.
+    RC4_HMAC_MD5 (etype 0x17) TGS requests; pre-auth disabled accounts.
+    Near-universal in targeted attacks: APT29, Fin6, many ransomware groups."""
+    event_id = str(row.get('event_id') or row.get('EventID') or '').strip()
+    if event_id == '4769':
+        enc_type = str(row.get('TicketEncryptionType') or row.get('ticket_encryption_type') or '').strip()
+        if enc_type in ('0x17', '0x18', '23', '18', '0x17 rc4'):
+            return True
+    if event_id == '4768':
+        preauth = str(row.get('PreAuthType') or row.get('pre_auth_type') or '').strip()
+        if preauth in ('0', '0x0'):
+            return True
+    return any(t in text for t in (
+        'kerberoasting', 'as-rep roasting', 'asreproasting', 'asrep roasting',
+        'rc4_hmac_md5', 'rc4 downgrade', '0x17 ticket',
+        'spn enumeration', 'gmsapassword',
+        'kerbrute', 'rubeus.exe', 'impacket getuserspns', 'getuserspns.py',
+    ))
+
+
+def _det_shadow_copy_deletion(row: dict, text: str) -> bool:
+    """T1490 — Inhibit system recovery: shadow copy / backup catalog deletion.
+    vssadmin, wmic shadowcopy delete, bcdedit, wbadmin.
+    LockBit, BlackCat/ALPHV, Cl0p, Royal, BlackBasta staging signature."""
+    return any(t in text for t in (
+        'vssadmin delete shadows', 'vssadmin.exe delete',
+        'wmic shadowcopy delete', 'wmic shadowcopy call delete',
+        'bcdedit /set recoveryenabled no', 'bcdedit /set bootstatuspolicy',
+        'diskshadow /s ', 'delete shadows /all /quiet',
+        'wbadmin delete catalog', 'wbadmin disable backup',
+        'set-mppreference -disablerealtimemonitoring',
+        'netsh advfirewall set allprofiles state off',
+    ))
+
+
+def _det_wmi_dcom_lateral(row: dict, text: str) -> bool:
+    """T1047 / T1021.003 — WMI and DCOM lateral movement.
+    wmic /node: Win32_Process Create, DCOM via RPC port 135/593.
+    APT29, Fin7, Sandworm lateral movement tradecraft."""
+    proc = str(row.get('process_name') or row.get('process') or '').lower()
+    cmdline = str(row.get('CommandLine') or row.get('command_line') or '').lower()
+    if ('wmic' in proc or proc == 'wmiprvse.exe') and any(
+        t in cmdline for t in ('/node:', 'win32_process', 'call create', 'process call')
+    ):
+        return True
+    try:
+        port = int(row.get('dst_port') or row.get('port') or 0)
+        if port == 135:
+            conn = str(row.get('conn_state') or row.get('connection_state') or '').upper()
+            if conn in ('SF', 'S0', 'ESTABLISHED', 'RSTO', 'OTH'):
+                return True
+    except (TypeError, ValueError):
+        pass
+    return any(t in text for t in (
+        'win32_process create', 'wmic /node:', 'wbemexec',
+        'impacket wmiexec', 'wmiexec.py', 'dcom lateral',
+        'invoke-wmimethod', 'invoke-cimmethod', 'invoke-dcomobject',
+    ))
+
+
+def _det_entra_privesc(row: dict, text: str) -> bool:
+    """T1098.001 / T1136.003 — Azure AD / Entra ID privilege escalation.
+    Adding principals to Global Administrator, app role assignments, federation abuse.
+    APT29 (Midnight Blizzard), Storm-0558, Scattered Spider."""
+    op = str(row.get('Operation') or row.get('operation') or row.get('event_name') or '').lower()
+    if op in (
+        'add member to role', 'add owner to application',
+        'add app role assignment to service principal',
+        'add delegated permission grant', 'set domain authentication',
+        'add verified domain', 'add unverified domain',
+        'update federation settings on domain',
+    ):
+        target = str(
+            row.get('ModifiedProperties') or row.get('Target') or
+            row.get('target_resource') or row.get('target_id') or ''
+        ).lower()
+        if any(t in target for t in (
+            'global administrator', 'privileged role administrator',
+            'user access administrator', 'application administrator',
+            'cloud application administrator', 'exchange administrator',
+            'security administrator',
+        )):
+            return True
+    return any(t in text for t in (
+        'global administrator', 'privileged role administrator',
+        'add member to privileged', 'add service principal to role',
+        'federated domain added', 'trustedformasauth',
+        'set domain authentication', 'add verified domain to company',
+        'golden saml', 'aadinternals', 'roadtools',
+    ))
+
+
+def _det_powershell_staged_payload(row: dict, text: str) -> bool:
+    """T1059.001 / T1105 — PowerShell staged payload delivery.
+    IEX + DownloadString, -EncodedCommand, AMSI bypass, reflection loading.
+    APT29, Lazarus, QakBot, BazarLoader, many commodity loaders."""
+    cmdline = str(
+        row.get('CommandLine') or row.get('command_line') or row.get('command') or ''
+    ).lower()
+    # Combination of download + exec in one invocation = high confidence
+    has_download = any(t in cmdline for t in (
+        'downloadstring', 'downloadfile', 'webclient', 'webrequest',
+        'invoke-webrequest', 'iwr ', '.downloaddata(', 'urldownloadtofile',
+    ))
+    has_exec = any(t in cmdline for t in (
+        'iex ', 'invoke-expression', '| iex', '|iex', '(iex',
+        '[system.reflection.assembly]', 'load([',
+    ))
+    if has_download and has_exec:
+        return True
+    # Standalone AMSI bypass / heavy obfuscation indicators
+    if any(t in cmdline for t in (
+        '-encodedcommand', '-enc ', ' -nop ', '-noni ',
+        'amsiutils', 'amsicontext', '[ref].assembly',
+        '[system.runtime.interopservices.marshal]',
+        '[convert]::frombase64string', 'set-itemproperty.*run.*powershell',
+    )):
+        return True
+    return any(t in text for t in (
+        'amsiscanbuffer', 'amsiutils', 'amsicontext', 'amsibypass',
+        'invoke-obfuscation', 'powersploit', 'nishang',
+        'empire payload', 'covenant payload', 'powershell cradle',
+    ))
+
+
+def _det_dns_tunnel(row: dict, text: str) -> bool:
+    """T1071.004 — DNS tunneling / covert channel exfiltration.
+    Long subdomain labels (>50 chars), base64-like query content, iodine/dnscat.
+    APT32 (OceanLotus), APT34 (OilRig), SUNBURST C2 channel."""
+    import re as _re
+    query = str(
+        row.get('query') or row.get('dns_query') or
+        row.get('dns_question_name') or row.get('qname') or ''
+    ).lower().rstrip('.')
+    if query:
+        first_label = query.split('.')[0]
+        if len(first_label) > 50:
+            return True
+        # High base64-char density in a long label
+        if len(first_label) > 20:
+            b64_chars = len(_re.findall(r'[A-Za-z0-9+/=\-_]', first_label))
+            if b64_chars / max(len(first_label), 1) > 0.92:
+                return True
+    return any(t in text for t in (
+        'dns tunnel', 'dnstunnel', 'dnscat', 'iodine',
+        'dns2tcp', 'dns exfil', 'txt record exfil',
+        'nxdomain_rate_high', 'nxdomain_spike', 'sunburst beacon',
+    ))
+
+
+def _det_ntlm_relay_pth(row: dict, text: str) -> bool:
+    """T1550.002 — Pass-the-hash and NTLM relay attacks.
+    ntlmrelayx, Responder, Impacket, hash capture and lateral movement.
+    Fin7, APT19, Conti, many ransomware lateral movement phases."""
+    return any(t in text for t in (
+        'ntlmrelayx', 'ntlm relay', 'responder.py', 'responder capture',
+        'impacket psexec', 'impacket smbexec', 'impacket atexec',
+        'pass-the-hash', 'pass the hash', 'pth-winexe', 'pth-smbclient',
+        'ntlm_theft', 'hash capture', 'ntlm hash captured',
+        'ntlm authentication from foreign', 'lm hash', 'overpass-the-hash',
+    ))
+
+
+def _det_cloud_iam_privesc(row: dict, text: str) -> bool:
+    """T1098 — Cloud IAM privilege escalation via key creation or policy attachment.
+    CreateAccessKey, AttachUserPolicy, iam:* wildcard, new admin user creation.
+    APT41, ShinyHunters, TeamTNT, Scattered Spider post-compromise activity."""
+    event_name = str(
+        row.get('event_name') or row.get('eventName') or
+        row.get('Operation') or row.get('operation') or ''
+    ).lower()
+    if event_name in (
+        'createaccesskey', 'attachuserpolicy', 'attachrolepolicy',
+        'putuserpolicy', 'createloginprofile', 'updateloginprofile',
+        'addusertogroup', 'createuser', 'createpolicy',
+        'setdefaultpolicyversion', 'attachgrouppolicy',
+    ):
+        return True
+    policy_body = str(
+        row.get('requestParameters') or row.get('request_parameters') or
+        row.get('ResourceProperties') or ''
+    ).lower()
+    if 'iam:*' in policy_body or ('administratoraccess' in policy_body):
+        return True
+    return any(t in text for t in (
+        '"iam:*"', 'iam:*', 'administratoraccess', 'createaccesskey',
+        'attachuserpolicy', 'attachrolepolicy', 'putuserinlinepolicy',
+        'createloginprofile', 'updateloginprofile', 'addusertogroup.*admin',
+    ))
+
+
+def _det_insider_after_hours(row: dict, text: str) -> bool:
+    """Insider threat: privileged after-hours access to sensitive resources,
+    or explicit _risk=insider tagging from UEBA/SIEM pre-enrichment.
+    Covers Meridian-class scenarios and deliberate data theft by departing employees."""
+    if str(row.get('_risk') or '').lower() in ('insider', 'insider_threat', 'insider-threat'):
+        return True
+    # After-hours access (22:00–06:00 UTC) combined with high-sensitivity resource
+    if row.get('_sensitivity') == 'high':
+        import re as _re
+        ts_raw = str(
+            row.get('timestamp') or row.get('TimeGenerated') or
+            row.get('ts') or row.get('CreationTime') or ''
+        )
+        if ts_raw:
+            try:
+                hr_match = _re.search(r'T(\d{2}):', ts_raw) or _re.search(r' (\d{2}):\d{2}:\d{2}', ts_raw)
+                if hr_match:
+                    hour = int(hr_match.group(1))
+                    if hour >= 22 or hour < 6:
+                        return True
+            except Exception:
+                pass
+    return any(t in text for t in (
+        '"_risk": "insider"', '_risk": "insider', 'insider_threat',
+        'anomalous_access_pattern', 'after_hours_access', 'out_of_role_access',
+        'departing employee', 'terminated employee',
+    ))
+
+
+def _det_ransomware_staging(row: dict, text: str) -> bool:
+    """Multi-signal ransomware / wiper preparation pattern.
+    Covers LockBit, BlackCat/ALPHV, Cl0p, Royal, BlackBasta, Akira, Rhysida.
+    Complements shadow_copy_deletion — this fires on ransomware binary artefacts
+    and encryption-prep activity rather than the recovery-inhibit phase."""
+    return any(t in text for t in (
+        # Ransomware family / group names
+        'lockbit', 'blackcat', 'alphv', 'cl0p', 'clop',
+        'blackbasta', 'black basta', 'royal ransomware', 'akira ransomware',
+        'rhysida', 'scattered spider', 'unc3944',
+        # Encryption artefacts and ransom notes
+        '.lockbit', '.blackcat', 'readme_to_decrypt', '!!! all your files',
+        'how_to_decrypt', 'recovery_key.txt', 'ransom_note',
+        # Defender / AV disablement (pair with shadow deletion)
+        'disable windows defender', 'disablerealtimemonitoring',
+        'reg add.*wscsvc.*4',
+        # SMB propagation artefacts
+        'smb spread', 'psexec ransomware propagation',
+    ))
+
+
 PHASE_DETECTORS: list[PhaseDetector] = [
     PhaseDetector("credential_theft",          "Credential Theft (LSASS)",        "credential_theft",     "critical", _det_lsass),
     PhaseDetector("data_exfiltration_snowflake","Snowflake Bulk Unload",          "data_exfiltration",    "critical", _det_sf_unload),
@@ -273,6 +606,28 @@ PHASE_DETECTORS: list[PhaseDetector] = [
     PhaseDetector("sharepoint_bulk_download",  "SharePoint Bulk Sensitive Download","collection",          "high",     _det_bulk_sensitive_download),
     PhaseDetector("bastion_rdp_lateral",       "Bastion RDP Lateral Movement",    "lateral_movement",     "high",     _det_bastion_rdp),
     PhaseDetector("identity_ip_anomaly",       "Identity IP Anomaly (user_ip_drift)","initial_access",     "high",     _det_identity_ip_anomaly),
+    # ── Sprint 3: APT-aligned detectors ──────────────────────────────────────
+    # LOLBin / staged execution
+    PhaseDetector("lolbin_execution",          "LOLBin Payload Fetch/Decode (T1218)",  "execution",          "critical", _det_lolbin_execution),
+    PhaseDetector("powershell_staged_payload", "PowerShell Staged Payload/AMSI Bypass (T1059.001)", "execution", "critical", _det_powershell_staged_payload),
+    # Credential access
+    PhaseDetector("dcsync_replication",        "DCSync Domain Replication (T1003.006)","credential_access",  "critical", _det_dcsync),
+    PhaseDetector("kerberoasting",             "Kerberoasting/AS-REP Roasting (T1558.003)", "credential_access", "high", _det_kerberoasting),
+    PhaseDetector("ntlm_relay_pth",            "NTLM Relay / Pass-the-Hash (T1550.002)", "lateral_movement", "high",     _det_ntlm_relay_pth),
+    PhaseDetector("cloud_imds_theft",          "Cloud IMDS Credential Theft (T1552.005)", "credential_access", "critical", _det_cloud_imds_theft),
+    # Lateral movement
+    PhaseDetector("wmi_dcom_lateral",          "WMI/DCOM Lateral Movement (T1047)", "lateral_movement",    "high",     _det_wmi_dcom_lateral),
+    # Persistence / identity / cloud
+    PhaseDetector("oauth_device_code",         "OAuth Device Code Phishing (T1528)", "initial_access",     "critical", _det_oauth_device_code),
+    PhaseDetector("entra_privesc",             "Entra ID/AAD Privilege Escalation (T1098.001)", "privilege_escalation", "critical", _det_entra_privesc),
+    PhaseDetector("cloud_iam_privesc",         "Cloud IAM Privilege Escalation (T1098)", "privilege_escalation", "critical", _det_cloud_iam_privesc),
+    # Exfiltration
+    PhaseDetector("dns_tunnel_exfil",          "DNS Tunneling Exfiltration (T1071.004)", "exfiltration",    "high",     _det_dns_tunnel),
+    # Impact / ransomware
+    PhaseDetector("shadow_copy_deletion",      "Shadow Copy Deletion/Recovery Inhibit (T1490)", "impact",   "critical", _det_shadow_copy_deletion),
+    PhaseDetector("ransomware_staging",        "Ransomware Staging/Wiper Prep",    "impact",               "critical", _det_ransomware_staging),
+    # Insider threat
+    PhaseDetector("insider_after_hours",       "Insider After-Hours Sensitive Access", "exfiltration",     "high",     _det_insider_after_hours),
 ]
 
 
