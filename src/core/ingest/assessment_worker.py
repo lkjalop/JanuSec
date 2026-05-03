@@ -314,6 +314,203 @@ def _score_async_ingest_row(raw: dict, normalized: dict) -> float:
     return float(max(0.0, min(1.0, score)))
 
 
+# ── Stage 1 shared constants (used by _parse_file_to_store) ───────────────────
+_SENSITIVE_PATH_TOKENS_STAGE1: tuple[str, ...] = (
+    "payroll", "acquisition", "merger", "novabridge", "ip-schedule",
+    "infra-map", "capex", "q1-projections", "ceo", "board",
+    "ma-document", "merger-ip", "novabridge-acquisition",
+    "critical-infra", "critical_infra",
+)
+_CORP_TLDS: tuple[str, ...] = (".com.au", ".gov.au", ".net.au", ".org.au")
+
+
+def _parse_file_to_store(
+    path: str,
+    filename: str,
+    file_lane: str,
+    row_offset: int,
+    assessment_id: str,
+    store,
+) -> int:
+    """Parse + normalize + tag one file and flush rows to DuckDB in batches.
+
+    Runs synchronously inside asyncio.to_thread() so large NDJSON / CSV files
+    do not block the event loop.  Returns the number of rows stored.
+    """
+    from src.core.ingest.file_parser import parse_file as _pf
+
+    batch: list[dict] = []
+    local_count = 0
+    try:
+        for raw_row in _pf(path, filename=filename):
+            norm = _normalize_ingest_row(raw_row, row_offset + local_count)
+            norm.setdefault("_lane", file_lane)
+
+            # file-sensitivity tagging
+            _obj = str(
+                norm.get("ObjectId") or norm.get("object_id") or
+                norm.get("file_path") or norm.get("resource") or ""
+            ).lower()
+            if any(tok in _obj for tok in _SENSITIVE_PATH_TOKENS_STAGE1):
+                norm.setdefault("_sensitivity", "high")
+                norm["triage_score"] = max(norm.get("triage_score") or 0.0, 0.65)
+
+            # external_recipient_domain tagging for email rows
+            for _rec_fld in ("Recipients", "recipients"):
+                _recs = norm.get(_rec_fld)
+                if not _recs:
+                    continue
+                if isinstance(_recs, str):
+                    _recs = [_recs]
+                for _rec in _recs[:4]:
+                    _dom = str(_rec).split("@")[-1].lower().strip() if "@" in str(_rec) else ""
+                    if _dom and "." in _dom and not any(_dom.endswith(t) for t in _CORP_TLDS):
+                        norm.setdefault("external_recipient_domain", _dom)
+                        norm["triage_score"] = max(norm.get("triage_score") or 0.0, 0.25)
+                        break
+            _fwd = str(norm.get("ForwardingSmtpAddress") or norm.get("forwarding_smtp") or "").strip()
+            if "@" in _fwd:
+                _fdom = _fwd.split("@")[-1].lower()
+                if not any(_fdom.endswith(t) for t in _CORP_TLDS):
+                    norm.setdefault("external_recipient_domain", _fdom)
+                    norm["triage_score"] = max(norm.get("triage_score") or 0.0, 0.65)
+
+            batch.append(norm)
+            local_count += 1
+            if len(batch) >= PARSE_BATCH_SIZE:
+                store.persist_row_batch(assessment_id, batch)
+                batch = []
+    except Exception as exc:
+        logger.warning("parse failed for %s in job %s: %s", filename, assessment_id, exc)
+    if batch:
+        store.persist_row_batch(assessment_id, batch)
+    return local_count
+
+
+def _collect_lane_factor_tags(rows: list[dict]) -> dict[int, list[str]]:
+    """Lightweight synchronous scan of normalized rows for detectable hunt-lane patterns.
+
+    Returns a dict mapping row_index (int) -> list of factor strings.
+    This mirrors the factor IDs emitted by the live hunt lanes
+    (email_bec, user_session_fusion, endpoint_storyline, data_insider)
+    so that assessment clusters can carry ``factor_tags`` without running
+    the full async lane infrastructure.
+    """
+    from collections import defaultdict
+    result: dict[int, list[str]] = defaultdict(list)
+
+    # Per-user events for impossible-travel detection: user -> [(ts, country, ridx)]
+    user_events: dict[str, list[tuple[float, str, int]]] = defaultdict(list)
+
+    # MITRE technique ID → factor string mappings (common breach patterns)
+    _MITRE_FACTORS: dict[str, str] = {
+        "T1003": "endpoint:T1003_credential_dump",
+        "T1003.001": "endpoint:T1003.001_lsass_dump",
+        "T1110": "endpoint:T1110_brute_force",
+        "T1110.003": "endpoint:T1110.003_password_spray",
+        "T1078": "endpoint:T1078_valid_accounts",
+        "T1021.001": "endpoint:T1021.001_rdp_lateral",
+        "T1071.001": "endpoint:T1071.001_web_c2",
+        "T1071.004": "endpoint:T1071.004_dns_c2",
+        "T1041": "endpoint:T1041_exfil_c2",
+        "T1048": "endpoint:T1048_exfil_alt_channel",
+        "T1048.003": "endpoint:T1048.003_exfil_unenc",
+        "T1114.003": "email:T1114.003_inbox_rule",
+        "T1550.002": "endpoint:T1550.002_pass_the_hash",
+        "T1059.001": "endpoint:T1059.001_powershell",
+        "T1204.002": "endpoint:T1204.002_malicious_attachment",
+        "T1564.001": "endpoint:T1564.001_hidden_file",
+        "T1046": "endpoint:T1046_port_scan",
+    }
+
+    for row in rows:
+        _ri = row.get("row_index")
+        if _ri is None:
+            continue
+        try:
+            ridx = int(float(_ri))
+        except (TypeError, ValueError):
+            continue
+
+        # ── MITRE technique direct mapping ───────────────────────────────────
+        mitre_id = str(row.get("mitre_technique") or "").strip()
+        if mitre_id:
+            # Try full match first, then prefix (T1003.001 → also add T1003)
+            if mitre_id in _MITRE_FACTORS:
+                result[ridx].append(_MITRE_FACTORS[mitre_id])
+            parent_id = mitre_id.split(".")[0]
+            if parent_id != mitre_id and parent_id in _MITRE_FACTORS:
+                result[ridx].append(_MITRE_FACTORS[parent_id])
+
+        # ── email_bec: inbox rule with external forwarding ──────────────────
+        ev_name = str(
+            row.get("event_name") or row.get("EventName") or
+            row.get("operation") or row.get("Operation") or ""
+        ).lower().replace("-", "").replace("_", "")
+        if "inboxrule" in ev_name:
+            fwd = str(
+                row.get("ForwardingSmtpAddress") or row.get("forwarding_smtp") or
+                row.get("external_recipient_domain") or ""
+            ).strip()
+            if fwd and ("@" in fwd or "." in fwd):
+                result[ridx].append("email:T1114.003_inbox_rule")
+                result[ridx].append("email:inbox_rule_external_forward")
+
+        # ── data_insider: sensitive file access ─────────────────────────────
+        if row.get("_sensitivity") == "high":
+            result[ridx].append("data:sensitive_file_access")
+
+        # ── endpoint_storyline: LSASS access (T1003.001) ────────────────────
+        # Check both process_name (CrowdStrike/Sysmon) and parent_process (XLSX/KAPE)
+        proc = str(
+            row.get("process_name") or row.get("TargetProcessName") or
+            row.get("image") or row.get("process") or ""
+        ).lower()
+        parent = str(
+            row.get("parent_process_name") or row.get("ParentProcessName") or
+            row.get("parent_process") or ""
+        ).lower()
+        if "lsass" in proc or ("lsass" in parent and mitre_id.startswith("T1003")):
+            result[ridx].append("storyline:lsass_access")
+            result[ridx].append("endpoint:T1003.001_lsass_dump")
+
+        # ── endpoint_storyline: mstsc from suspicious parent ────────────────
+        _MSTSC_BENIGN = {"explorer.exe", "taskmgr.exe", "rdpclip.exe", ""}
+        if proc.endswith("mstsc.exe") and parent not in _MSTSC_BENIGN:
+            result[ridx].append("storyline:mstsc_suspicious_parent")
+            result[ridx].append("endpoint:T1021.001_rdp_lateral")
+
+        # ── user_session_fusion: collect for impossible-travel check ────────
+        user = str(row.get("user") or row.get("user_canonical") or "").strip()
+        country = str(row.get("src_country") or "").strip()
+        if user and len(country) == 2 and country.isalpha():
+            ts_raw = str(
+                row.get("event_time") or row.get("timestamp") or
+                row.get("date_utc") or row.get("eventTime") or "0"
+            )
+            try:
+                import datetime as _dt
+                ts = _dt.datetime.fromisoformat(ts_raw.replace("Z", "+00:00")).timestamp()
+            except Exception:
+                try:
+                    ts = float(ts_raw)
+                except Exception:
+                    ts = 0.0
+            user_events[user].append((ts, country.upper(), ridx))
+
+    # ── user_session_fusion: impossible travel per user ──────────────────────
+    for user, events in user_events.items():
+        sorted_evs = sorted(events, key=lambda x: x[0])
+        last_country: str | None = None
+        for _ts, country, ridx in sorted_evs:
+            if last_country and country != last_country:
+                result[ridx].append("fusion:impossible_travel")
+                result[ridx].append(f"fusion:impossible_travel_{last_country}_to_{country}")
+            last_country = country
+
+    return dict(result)
+
+
 # ── Per-job pipeline ───────────────────────────────────────────────────────────
 
 async def run_assessment_pipeline(
@@ -354,7 +551,6 @@ async def run_assessment_pipeline(
         context_files: list[dict] = []
         telemetry_files: list[str] = []
 
-        from src.core.ingest.file_parser import parse_file
         from src.core.ingest.input_classifier import LANE_TELEMETRY_EVIDENCE, LANE_EVALUATION_ANSWER_KEY
 
         for file_idx, (path, filename) in enumerate(file_paths):
@@ -380,63 +576,16 @@ async def run_assessment_pipeline(
             if file_lane == LANE_TELEMETRY_EVIDENCE:
                 telemetry_files.append(filename)
 
-            batch: list[dict] = []
-            try:
-                for row in parse_file(path, filename=filename):
-                    norm = _normalize_ingest_row(row, total_rows)
-                    # Tag every row with its evidence lane for downstream policy enforcement.
-                    norm.setdefault("_lane", file_lane)
-
-                    # ── Stage 1b: file-sensitivity tagging ───────────────────────
-                    _SENSITIVE_PATH_TOKENS = (
-                        "payroll", "acquisition", "merger", "novabridge", "ip-schedule",
-                        "infra-map", "capex", "q1-projections", "ceo", "board",
-                        "ma-document", "merger-ip", "novabridge-acquisition",
-                        "critical-infra", "critical_infra",
-                    )
-                    _obj = str(
-                        norm.get("ObjectId") or norm.get("object_id") or
-                        norm.get("file_path") or norm.get("resource") or ""
-                    ).lower()
-                    if any(tok in _obj for tok in _SENSITIVE_PATH_TOKENS):
-                        norm.setdefault("_sensitivity", "high")
-                        norm["triage_score"] = max(norm.get("triage_score") or 0.0, 0.65)
-
-                    # ── Stage 1b: external_recipient_domain tagging for email rows ──
-                    _own_tld = (".com.au", ".gov.au", ".net.au", ".org.au")
-                    for _rec_fld in ("Recipients", "recipients"):
-                        _recs = norm.get(_rec_fld)
-                        if not _recs:
-                            continue
-                        if isinstance(_recs, str):
-                            _recs = [_recs]
-                        for _rec in _recs[:4]:
-                            _dom = str(_rec).split("@")[-1].lower().strip() if "@" in str(_rec) else ""
-                            if _dom and "." in _dom and not any(_dom.endswith(t) for t in _own_tld):
-                                norm.setdefault("external_recipient_domain", _dom)
-                                norm["triage_score"] = max(norm.get("triage_score") or 0.0, 0.25)
-                                break
-                    _fwd = str(norm.get("ForwardingSmtpAddress") or norm.get("forwarding_smtp") or "").strip()
-                    if "@" in _fwd:
-                        _fdom = _fwd.split("@")[-1].lower()
-                        if not any(_fdom.endswith(t) for t in _own_tld):
-                            norm.setdefault("external_recipient_domain", _fdom)
-                            norm["triage_score"] = max(norm.get("triage_score") or 0.0, 0.65)
-
-                    batch.append(norm)
-                    total_rows += 1
-                    # Yield to event loop every 500 rows so asyncio timeouts
-                    # and cancellations can fire on large files (e.g. 11 MB ndjson).
-                    if total_rows % 500 == 0:
-                        await asyncio.sleep(0)
-                    if len(batch) >= PARSE_BATCH_SIZE:
-                        await asyncio.to_thread(_store.persist_row_batch, assessment_id, batch)
-                        batch = []
-                        _progress("parsing", file_pct, f"Parsed {total_rows:,} rows from {filename}…")
-                if batch:
-                    await asyncio.to_thread(_store.persist_row_batch, assessment_id, batch)
-            except Exception as exc:
-                logger.warning("parse failed for %s in job %s: %s", filename, assessment_id, exc)
+            # ── Stage 1b: parse + normalize + tag in a thread ────────────────
+            # Running in asyncio.to_thread() means large NDJSON/CSV files (e.g.
+            # Meridian's 11 MB corpus) do not block the event loop: DuckDB writes
+            # still hold _lock sequentially, but I/O and JSON parsing happen
+            # in a worker thread, freeing the loop for timeouts and SSE ticks.
+            file_rows = await asyncio.to_thread(
+                _parse_file_to_store, path, filename, file_lane, total_rows, assessment_id, _store,
+            )
+            total_rows += file_rows
+            _progress("parsing", file_pct, f"Parsed {total_rows:,} rows ({filename})")
 
         _store.update_job(assessment_id, row_count=total_rows)
         _progress("normalizing", 32, f"Stored {total_rows:,} rows — preparing clustering")
@@ -825,6 +974,66 @@ async def run_assessment_pipeline(
             _progress('reasoning', 73, f'Cluster intelligence enrichments complete ({_ei_ok} clusters)')
         except Exception as exc:
             logger.warning('cluster intelligence enrichment stage failed for %s: %s', assessment_id, exc, exc_info=True)
+
+        # ── Stage 5x: aggregate hunt-lane factor tags into each cluster ───────
+        # Runs _collect_lane_factor_tags() (synchronous pattern scan) over
+        # filtered_rows then folds the per-row factors into cluster.factor_tags
+        # so the breach.html factor panel, tier-2 dispatch, and SBOM surfaces
+        # all see inbox_rule / fusion / storyline signals without requiring the
+        # full async live-event lane infrastructure.
+        try:
+            _lane_factors_by_row = _collect_lane_factor_tags(filtered_rows)
+            _fx_count = 0
+            for _cl in clusters:
+                _cl_factor_set: set[str] = set(_cl.get("factor_tags") or [])
+                for _ref in (_cl.get("row_refs") or []):
+                    try:
+                        _rk = int(float(_ref))
+                        _row_factors = _lane_factors_by_row.get(_rk)
+                        if _row_factors:
+                            _cl_factor_set.update(_row_factors)
+                    except (TypeError, ValueError):
+                        pass
+                if _cl_factor_set:
+                    _cl["factor_tags"] = sorted(_cl_factor_set)
+                    _fx_count += 1
+            logger.info("Stage 5x: factor tags aggregated into %d clusters for %s", _fx_count, assessment_id)
+        except Exception as exc:
+            logger.debug("Lane factor tag aggregation failed for %s: %s", assessment_id, exc)
+
+        # ── Stage 5y: populate per-cluster evidence_preview ───────────────────
+        # Clusters only store row_ref indices; the breach.html cluster card
+        # needs a sample of actual row dicts to render the in-cluster evidence
+        # table without a second API round-trip.  Populate evidence_preview
+        # (up to 20 rows) from filtered_rows via the row_lookup built in 5b.
+        try:
+            _row_lookup_ep: dict[int, dict] = {}
+            for _r in filtered_rows:
+                _ri = _r.get("row_index")
+                if _ri is not None:
+                    try:
+                        _row_lookup_ep[int(float(_ri))] = _r
+                    except (TypeError, ValueError):
+                        pass
+            _ep_count = 0
+            for _cl in clusters:
+                if _cl.get("evidence_preview"):
+                    continue  # already populated upstream
+                _preview: list[dict] = []
+                for _ref in (_cl.get("row_refs") or [])[:20]:
+                    try:
+                        _r = _row_lookup_ep.get(int(float(_ref)))
+                        if _r:
+                            _preview.append(_r)
+                    except (TypeError, ValueError):
+                        pass
+                if _preview:
+                    _cl["evidence_preview"] = _preview
+                    _ep_count += 1
+            logger.info("Stage 5y: evidence_preview populated for %d clusters (%d rows lookup) for %s",
+                        _ep_count, len(_row_lookup_ep), assessment_id)
+        except Exception as exc:
+            logger.debug("evidence_preview population failed for %s: %s", assessment_id, exc)
 
         if clusters:
             _progress("reasoning", 72, "Generating LLM narratives for top clusters")
