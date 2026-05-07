@@ -12,7 +12,7 @@ const { test, expect } = require('@playwright/test');
 const fs = require('fs');
 const path = require('path');
 
-const BASE     = process.env.PLAYWRIGHT_BASE_URL || 'http://127.0.0.1:8080';
+const BASE     = process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:8080';
 const DUMP_DIR = path.resolve(__dirname, '../../dump/test files');
 const FILES_V11 = [
   { file: 'janusec_net_c2_bgp.v1.1.csv',         mime: 'text/csv' },

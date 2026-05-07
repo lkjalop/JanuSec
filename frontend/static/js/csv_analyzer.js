@@ -2211,7 +2211,19 @@
       if(_backfillPoller) return;
       if(!assessment_id) assessment_id = localStorage.getItem('csv_last_parent_assessment');
       if(!assessment_id) return;
-      _backfillPoller = setInterval(async function(){
+      _backfillPoller = window.JanuSecPollers
+        ? window.JanuSecPollers.setInterval('csv.backfill.ribbon', async function(){
+        try{
+          var res = await fetch('/api/v1/csv/deep_analyze/auto_backfill/'+encodeURIComponent(assessment_id)+'/status', { headers: {...authHeaders()} });
+          if(!res.ok) return;
+          var j = await res.json();
+          updateBackfillRibbon(j);
+          if(j && j.state && j.state !== 'running'){
+            stopBackfillPolling();
+          }
+        }catch(e){ console.warn('backfill poll error', e); }
+      }, 2500)
+        : setInterval(async function(){
         try{
           var res = await fetch('/api/v1/csv/deep_analyze/auto_backfill/'+encodeURIComponent(assessment_id)+'/status', { headers: {...authHeaders()} });
           if(!res.ok) return;
@@ -2225,7 +2237,7 @@
     }catch(_){ }
   }
 
-  function stopBackfillPolling(){ try{ if(_backfillPoller){ clearInterval(_backfillPoller); _backfillPoller = null; } }catch(_){ } }
+  function stopBackfillPolling(){ try{ if(_backfillPoller){ if(window.JanuSecPollers) window.JanuSecPollers.clear('csv.backfill.ribbon'); else clearInterval(_backfillPoller); _backfillPoller = null; } }catch(_){ } }
 
       // After rendering rows we will update LLM indicators if available from aggregated llm_rows merge
   window.ensureTbodyRowsFromList = function(list){ window.LAST_RESULTS = list||[]; try{ applyRiskAppetite(window.LAST_RESULTS); }catch(_){ } renderTableFromResults(); };
@@ -2603,7 +2615,8 @@
     if(sel){ sel.addEventListener('change', updateLLMLimitUI); updateLLMLimitUI(); }
     try{ if(typeof probeLLMHealth === 'function') probeLLMHealth(); }catch(_){ }
     pollLLMProgress();
-    setInterval(pollLLMProgress, 15000);
+    if(window.JanuSecPollers) window.JanuSecPollers.setInterval('csv.llm.progress', pollLLMProgress, 15000);
+    else setInterval(pollLLMProgress, 15000);
     // Wire Deep Backfill toggle button
     try{
       var toggle = document.getElementById('deepBackfillToggleGlobal');
@@ -4257,8 +4270,8 @@ document.addEventListener('keydown', function(e){ if(e.key==='Escape'){ hideTier
           }
 
           var _backfillPollTimer = null;
-          async function startBackfillStatusPoll(aid){ try{ aid = aid || localStorage.getItem('csv_last_parent_assessment') || window.currentAssessmentId; if(!aid) return; if(_backfillPollTimer) clearInterval(_backfillPollTimer); _backfillPollTimer = setInterval(function(){ fetchBackfillStatus(aid); }, 2500); fetchBackfillStatus(aid); }catch(_){ } }
-          async function stopBackfillStatusPoll(){ try{ if(_backfillPollTimer){ clearInterval(_backfillPollTimer); _backfillPollTimer=null; } }catch(_){ } }
+          async function startBackfillStatusPoll(aid){ try{ aid = aid || localStorage.getItem('csv_last_parent_assessment') || window.currentAssessmentId; if(!aid) return; if(_backfillPollTimer){ if(window.JanuSecPollers) window.JanuSecPollers.clear('csv.backfill.status'); else clearInterval(_backfillPollTimer); } _backfillPollTimer = window.JanuSecPollers ? window.JanuSecPollers.setInterval('csv.backfill.status', function(){ fetchBackfillStatus(aid); }, 2500) : setInterval(function(){ fetchBackfillStatus(aid); }, 2500); fetchBackfillStatus(aid); }catch(_){ } }
+          async function stopBackfillStatusPoll(){ try{ if(_backfillPollTimer){ if(window.JanuSecPollers) window.JanuSecPollers.clear('csv.backfill.status'); else clearInterval(_backfillPollTimer); _backfillPollTimer=null; } }catch(_){ } }
             async function fetchBackfillStatus(aid){ try{ if(!aid) return; var resp = await fetch('/api/v1/csv/deep_analyze/auto_backfill/'+encodeURIComponent(aid)+'/status', { headers: {...authHeadersWithTenant()} }); if(!resp.ok) return; var j = await resp.json(); window.__BACKFILL_STATUS = j; updateBackfillRibbon(); if(j && j.state && (j.state === 'completed' || j.state === 'failed' || j.state === 'stopped')){ stopBackfillStatusPoll(); var btn = document.getElementById('deepBackfillToggle'); if(btn){ btn.removeAttribute('data-running'); btn.textContent = 'Start'; } } }catch(e){ console.warn('fetchBackfillStatus', e); } }
           function updateBackfillRibbon(){ try{ var ribbon = document.getElementById('deepBackfillRibbon'); if(!ribbon) return; var statusEl = document.getElementById('deepBackfillStatus'); var aid = localStorage.getItem('csv_last_parent_assessment') || window.currentAssessmentId; if(!statusEl) return; var s = window.__BACKFILL_STATUS || {}; if(s && s.state){ // prefer server-provided ETA when available
             var processed = (s.progress && typeof s.progress.processed !== 'undefined') ? s.progress.processed : (s.processed || 0);

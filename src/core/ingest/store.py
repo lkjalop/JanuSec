@@ -130,6 +130,29 @@ def _init_schema(conn) -> None:
             cluster_json  TEXT NOT NULL
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS investigation_sessions (
+            session_id       TEXT PRIMARY KEY,
+            tenant_id        TEXT NOT NULL DEFAULT 'default',
+            assessment_id    TEXT NOT NULL,
+            cluster_id       TEXT DEFAULT '',
+            status           TEXT NOT NULL DEFAULT 'running',
+            close_reason     TEXT DEFAULT '',
+            cycles_completed INTEGER DEFAULT 0,
+            events_json      TEXT NOT NULL DEFAULT '[]',
+            state_json       TEXT NOT NULL DEFAULT '{}',
+            created_at       DOUBLE,
+            updated_at       DOUBLE
+        )
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_inv_session_tenant
+            ON investigation_sessions(tenant_id, status)
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_inv_session_assessment
+            ON investigation_sessions(assessment_id)
+    """)
 
 
 # ── Job CRUD ──────────────────────────────────────────────────────────────────
@@ -195,6 +218,117 @@ def get_job(assessment_id: str) -> dict | None:
         "error": r[6], "row_count": r[7], "cluster_count": r[8],
         "created_at": r[9], "updated_at": r[10],
     }
+
+
+# ── Investigation session persistence ─────────────────────────────────────────
+
+def create_investigation_session(
+    session_id: str,
+    tenant_id: str,
+    assessment_id: str,
+    cluster_id: str = "",
+) -> None:
+    with _lock:
+        db = _db()
+        existing = db.execute(
+            "SELECT session_id FROM investigation_sessions WHERE session_id = ?",
+            [session_id],
+        ).fetchone()
+        if existing:
+            return
+        db.execute(
+            """INSERT INTO investigation_sessions
+               (session_id, tenant_id, assessment_id, cluster_id, status,
+                events_json, state_json, created_at, updated_at)
+               VALUES (?, ?, ?, ?, 'running', '[]', '{}', ?, ?)""",
+            [session_id, tenant_id, assessment_id, cluster_id,
+             time.time(), time.time()],
+        )
+
+
+def append_investigation_event(session_id: str, event: dict) -> None:
+    """Append one event to the session's events_json array (append-only)."""
+    with _lock:
+        db = _db()
+        row = db.execute(
+            "SELECT events_json, cycles_completed FROM investigation_sessions "
+            "WHERE session_id = ?",
+            [session_id],
+        ).fetchone()
+        if not row:
+            return
+        try:
+            events = json.loads(row[0] or "[]")
+        except Exception:
+            events = []
+        events.append(event)
+        new_cycles = row[1] + (1 if event.get("type") == "cycle_complete" else 0)
+        db.execute(
+            "UPDATE investigation_sessions "
+            "SET events_json = ?, cycles_completed = ?, updated_at = ? "
+            "WHERE session_id = ?",
+            [json.dumps(events), new_cycles, time.time(), session_id],
+        )
+
+
+def get_investigation_session(session_id: str) -> dict | None:
+    with _lock:
+        row = _db().execute(
+            "SELECT session_id, tenant_id, assessment_id, cluster_id, status, "
+            "close_reason, cycles_completed, events_json, state_json, "
+            "created_at, updated_at "
+            "FROM investigation_sessions WHERE session_id = ?",
+            [session_id],
+        ).fetchone()
+    if not row:
+        return None
+    return {
+        "session_id": row[0], "tenant_id": row[1], "assessment_id": row[2],
+        "cluster_id": row[3], "status": row[4], "close_reason": row[5],
+        "cycles_completed": row[6], "events": json.loads(row[7] or "[]"),
+        "state": json.loads(row[8] or "{}"), "created_at": row[9],
+        "updated_at": row[10],
+    }
+
+
+def update_investigation_state(
+    session_id: str,
+    *,
+    state: dict,
+    status: str | None = None,
+    close_reason: str | None = None,
+) -> None:
+    sets = ["state_json = ?", "updated_at = ?"]
+    params: list = [json.dumps(state), time.time()]
+    if status is not None:
+        sets.append("status = ?"); params.append(status)
+    if close_reason is not None:
+        sets.append("close_reason = ?"); params.append(close_reason)
+    params.append(session_id)
+    with _lock:
+        _db().execute(
+            f"UPDATE investigation_sessions SET {', '.join(sets)} WHERE session_id = ?",
+            params,
+        )
+
+
+def list_investigation_sessions(tenant_id: str, limit: int = 50) -> list[dict]:
+    with _lock:
+        rows = _db().execute(
+            "SELECT session_id, assessment_id, cluster_id, status, close_reason, "
+            "cycles_completed, created_at, updated_at "
+            "FROM investigation_sessions WHERE tenant_id = ? "
+            "ORDER BY created_at DESC LIMIT ?",
+            [tenant_id, limit],
+        ).fetchall()
+    return [
+        {
+            "session_id": r[0], "assessment_id": r[1], "cluster_id": r[2],
+            "status": r[3], "close_reason": r[4], "cycles_completed": r[5],
+            "created_at": r[6], "updated_at": r[7],
+        }
+        for r in rows
+    ]
 
 
 def list_recoverable_jobs(limit: int = 100) -> list[dict]:

@@ -7,9 +7,9 @@ import time
 # Ensure fast test mode is enabled before importing the app to skip heavy startup
 os.environ['FAST_TEST_MODE'] = '1'
 from src.api.server import app
-from core.factor_attribution_store import FactorAttributionSnapshot, FACTOR_ATTRIBUTIONS
-from core.labels_store import LABELS
-from core.factor_stats_manager import FACTOR_STATS
+from src.core.factor_attribution_store import FactorAttributionSnapshot, FACTOR_ATTRIBUTIONS
+from src.core.labels_store import LABELS
+from src.core.factor_stats_manager import FACTOR_STATS
 
 # Ensure API keys env var is present before app/TestClient initialization
 api_keys = [{'key':'testkey','scopes':['feedback.write','factors.search','risk.read']}]

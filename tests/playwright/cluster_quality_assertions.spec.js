@@ -11,7 +11,7 @@
 
 const { test, expect } = require('@playwright/test');
 
-const BASE = process.env.PLAYWRIGHT_BASE_URL || 'http://127.0.0.1:8080';
+const BASE = process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:8080';
 
 // CSV with deliberate cross-source pivots so at least 2 clusters form
 const MULTI_SOURCE_CSV = [

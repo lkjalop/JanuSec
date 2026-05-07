@@ -25,7 +25,7 @@ const fs = require('fs');
 
 test.describe.configure({ mode: 'serial' });
 
-const BASE    = process.env.PLAYWRIGHT_BASE_URL || 'http://127.0.0.1:8080';
+const BASE    = process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:8080';
 const API_KEY = process.env.JANUSEC_PLAYWRIGHT_API_KEY || 'devkey123';
 const AUTH    = { 'x-api-key': API_KEY, 'x-tenant-id': 'default' };
 

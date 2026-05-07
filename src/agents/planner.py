@@ -84,6 +84,8 @@ def build_planner_prompt(
     corrective_feedback: List[RejectionReason] | None = None,
     gaps: List[Gap] | None = None,
     cycle: int = 1,
+    memory: Any | None = None,
+    compressed_prior: str = "",
 ) -> str:
     """Build the full prompt for the Planner LLM call."""
     sections = [_PLANNER_SYSTEM, ""]
@@ -98,8 +100,19 @@ def build_planner_prompt(
     sections.append(f"Summary: {json.dumps(assessment_summary, default=str)[:2000]}")
     sections.append("")
 
-    # Previous findings
-    if previous_findings:
+    # Previous findings — use compressed digest at cycle 4+, raw list earlier
+    if compressed_prior:
+        sections.append(compressed_prior)
+        sections.append("")
+    elif memory is not None and memory.artifacts:
+        sections.append("## Previous Verified Findings (structured)")
+        for art in memory.recent_snapshot(limit=15):
+            sections.append(
+                f"- [{art['confidence']:.2f}] [{art['artifact_type']}] "
+                f"{art['content'][:200]}"
+            )
+        sections.append("")
+    elif previous_findings:
         sections.append("## Previous Verified Findings")
         for vf in previous_findings[:10]:
             sections.append(f"- [{vf.confidence:.2f}] {vf.raw.summary[:200]}")
@@ -205,6 +218,8 @@ async def plan(
     gaps: List[Gap] | None = None,
     cycle: int = 1,
     llm_client: Any = None,
+    memory: Any | None = None,
+    compressed_prior: str = "",
 ) -> InvestigationPlan:
     """Run the Planner agent: build prompt → call LLM → parse plan.
 
@@ -216,6 +231,8 @@ async def plan(
         corrective_feedback=corrective_feedback,
         gaps=gaps,
         cycle=cycle,
+        memory=memory,
+        compressed_prior=compressed_prior,
     )
 
     if llm_client is None:

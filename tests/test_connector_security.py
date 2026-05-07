@@ -196,6 +196,7 @@ class TestBackpressure:
         """When QUEUE_POLICY=reject and queue is full, 503 is returned."""
         import src.api.stream_ingest as si
 
+        monkeypatch.setattr(si, "_buckets", {})  # reset rate-limiter so prior tests don't cause 429
         monkeypatch.setattr(si, "QUEUE_POLICY", "reject")
         monkeypatch.setattr(si, "QUEUE_UTIL_HIGH", 0.0)  # everything looks full
 

@@ -239,7 +239,7 @@ async def run_deep_analysis_job(
                             cluster, assessment, llm_func, model,
                             lambda phase, pct, _b=base_pct: progress_cb(phase, _b + pct // 4),
                         ),
-                        timeout=90,
+                        timeout=float(os.getenv('DEEP_ANALYSIS_CLUSTER_TIMEOUT_SECONDS') or os.getenv('OLLAMA_TIMEOUT_SECONDS') or os.getenv('LLM_TIMEOUT_SECONDS') or 45),
                     )
                     cluster_results.append(cluster_result)
                     _publish_event(job_id, 'cluster_complete', {

@@ -119,6 +119,196 @@ def _is_breach_cluster(cluster: dict) -> bool:
     return False
 
 
+_VPS_ASN_TERMS = (
+    "akamai", "alibaba", "amazon", "aws", "azure", "backblaze", "choopa",
+    "cloudflare", "cloudfront", "contabo", "datacamp", "digitalocean",
+    "google cloud", "google llc", "hetzner", "leaseweb", "linode", "m247",
+    "mega", "microsoft", "ovh", "packet", "scaleway", "vultr", "wasabi",
+)
+
+
+def _row_text(row: dict) -> str:
+    try:
+        return json.dumps(row, default=str).lower()
+    except Exception:
+        return str(row).lower()
+
+
+def _row_ts(row: dict) -> datetime.datetime | None:
+    for key in ("timestamp_utc", "timestamp", "@timestamp", "event_time", "eventTime", "time", "ts", "created_at"):
+        value = row.get(key)
+        if value in (None, ""):
+            continue
+        if isinstance(value, (int, float)):
+            try:
+                ts = float(value) / 1000.0 if float(value) > 1e12 else float(value)
+                return datetime.datetime.fromtimestamp(ts, datetime.timezone.utc)
+            except Exception:
+                continue
+        try:
+            parsed = datetime.datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=datetime.timezone.utc)
+            return parsed
+        except Exception:
+            continue
+    return None
+
+
+def _row_user(row: dict) -> str:
+    for key in (
+        "user_canonical", "user_principal_name", "userPrincipalName", "username",
+        "user_name", "account", "actor", "user", "initiator", "email",
+    ):
+        value = row.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip().lower()
+        if isinstance(value, dict):
+            inner = value.get("alternateId") or value.get("login") or value.get("id") or value.get("email")
+            if inner:
+                return str(inner).strip().lower()
+    return ""
+
+
+def _row_country(row: dict) -> str:
+    geo = row.get("_geo") if isinstance(row.get("_geo"), dict) else {}
+    for key in (
+        "country_code", "geo_country_code", "geoip_country_code", "src_country",
+        "dst_country", "country", "geo_country", "geo_src_country", "geo_dst_country",
+    ):
+        value = row.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip().upper()
+    for key in ("country_code", "country", "src_country", "dst_country"):
+        value = geo.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip().upper()
+    return ""
+
+
+def _row_asn_org(row: dict) -> str:
+    geo = row.get("_geo") if isinstance(row.get("_geo"), dict) else {}
+    for key in (
+        "as_org", "asn_org", "asn_organization", "isp", "geo_isp",
+        "autonomous_system_organization", "source_as_org", "src_as_org",
+        "destination_as_org", "geo_dst_org",
+    ):
+        value = row.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    for key in ("as_org", "asn_org", "isp", "src_org", "dst_org"):
+        value = geo.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def _row_ips(row: dict) -> list[str]:
+    values: list[str] = []
+    for key in (
+        "src_ip", "source_ip", "client_ip", "remote_address", "ip_address",
+        "dst_ip", "destination_ip", "dest_ip", "ip_dst", "server_ip",
+    ):
+        value = row.get(key)
+        if isinstance(value, str) and value.strip():
+            values.append(value.strip())
+    return values
+
+
+def _is_public_ip(value: str) -> bool:
+    try:
+        import ipaddress
+        ip = ipaddress.ip_address(value)
+        return not (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved)
+    except Exception:
+        return False
+
+
+def _derive_santos_tier2_aliases(cluster: dict, rows: list[dict]) -> None:
+    """Populate deterministic Tier-2 flags consumed by breach.html quality checks."""
+    texts = [_row_text(row) for row in rows[:200]]
+    combined = " ".join(texts)
+    explicit_travel = any(term in combined for term in ("impossible travel", "geo-velocity", "geovelocity", "newcountry"))
+    travel_details: list[dict] = []
+    by_user: dict[str, list[tuple[datetime.datetime, str, int]]] = {}
+    for row in rows:
+        user = _row_user(row)
+        country = _row_country(row)
+        ts = _row_ts(row)
+        if user and country and ts:
+            try:
+                idx = int(float(row.get("row_index", row.get("row_number", -1))))
+            except Exception:
+                idx = -1
+            by_user.setdefault(user, []).append((ts, country, idx))
+    for user, events in by_user.items():
+        ordered = sorted(events, key=lambda item: item[0])
+        for prev, cur in zip(ordered, ordered[1:]):
+            prev_ts, prev_country, prev_idx = prev
+            cur_ts, cur_country, cur_idx = cur
+            hours = abs((cur_ts - prev_ts).total_seconds()) / 3600.0
+            if prev_country and cur_country and prev_country != cur_country and hours <= 12:
+                travel_details.append({
+                    "user": user,
+                    "from_country": prev_country,
+                    "to_country": cur_country,
+                    "hours_between": round(hours, 2),
+                    "row_index_from": prev_idx,
+                    "row_index_to": cur_idx,
+                })
+                break
+    cluster["_impossible_travel"] = bool(explicit_travel or travel_details)
+    if travel_details:
+        cluster["_impossible_travel_detail"] = travel_details[:5]
+
+    vps_details: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    for row in rows:
+        org = _row_asn_org(row)
+        org_l = org.lower()
+        row_has_vps = any(term in org_l for term in _VPS_ASN_TERMS)
+        text_has_vps = any(term in _row_text(row) for term in _VPS_ASN_TERMS)
+        if not row_has_vps and not text_has_vps:
+            continue
+        public_ips = [ip for ip in _row_ips(row) if _is_public_ip(ip)]
+        if not public_ips and not org:
+            continue
+        for ip in public_ips or [""]:
+            key = (ip, org)
+            if key in seen:
+                continue
+            seen.add(key)
+            vps_details.append({"ip": ip, "asn_org": org or "cloud/VPS provider"})
+            if len(vps_details) >= 8:
+                break
+        if len(vps_details) >= 8:
+            break
+    cluster["_commercial_vps"] = bool(vps_details)
+    if vps_details:
+        cluster["_commercial_vps_detail"] = vps_details
+
+
+def _sync_cluster_prefill_aliases(cluster: dict) -> None:
+    prefill = cluster.get("tier1_prefill") or {}
+    alias_pairs = (
+        ("dread_score", "dread_score"),
+        ("diamond_model", "diamond_model"),
+        ("kill_chain_summary", "kill_chain_summary"),
+        ("event_chain_summary", "event_chain_summary"),
+        ("pasta_summary", "pasta_summary"),
+        ("known_technical", "known_technical"),
+        ("unknown_technical", "unknown_technical"),
+    )
+    for source_key, target_key in alias_pairs:
+        value = prefill.get(source_key)
+        if value not in (None, "", [], {}):
+            cluster[target_key] = value
+    if "adversarial_sequence" in prefill:
+        cluster["_adversarial_sequence"] = bool(prefill.get("adversarial_sequence"))
+        if prefill.get("adversarial_sequence_detail"):
+            cluster["_adversarial_sequence_detail"] = prefill.get("adversarial_sequence_detail")
+
+
 def _coerce_event_ts(value: Any) -> float | str | None:
     if value is None or value == "":
         return None
@@ -967,6 +1157,8 @@ async def run_assessment_pipeline(
                 _t1_ei = _cl.setdefault('tier1_prefill', {})
                 try:
                     _enrich_cluster_intelligence(_t1_ei, _cl, _cl_rows_ei)
+                    _derive_santos_tier2_aliases(_cl, _cl_rows_ei)
+                    _sync_cluster_prefill_aliases(_cl)
                     _ei_ok += 1
                 except Exception as _ei_err:
                     logger.warning('cluster intelligence enrichment failed for %s: %s', _cl.get('cluster_id'), _ei_err, exc_info=True)
@@ -1040,7 +1232,7 @@ async def run_assessment_pipeline(
             # Cap narration at 90s for background ingest — avoids blocking the queue
             # for many minutes when Ollama is under load. Deterministic enrichments
             # (DREAD, SABSA, cluster intelligence) already ran above and are preserved.
-            _narrate_timeout = float(os.getenv("JANUSEC_INGEST_NARRATE_TIMEOUT_S", "90"))
+            _narrate_timeout = float(os.getenv("JANUSEC_INGEST_NARRATE_TIMEOUT_S", "50"))
             try:
                 from src.core.ingest.cluster_narrator import narrate_top_clusters
                 await asyncio.wait_for(
@@ -1078,8 +1270,16 @@ async def run_assessment_pipeline(
             from src.ai.temporal_rag import get_engine as _get_rag_engine
             _rag = _get_rag_engine()
             if _rag is not None:
-                _rag_count = _rag.index_rows(filtered_rows, tenant=org)
-                logger.info("Stage 5e: indexed %d rows into TemporalRAG for %s", _rag_count, assessment_id)
+                _rag_cap = int(os.getenv("JANUSEC_TEMPORAL_RAG_INDEX_CAP", "200"))
+                _rag_rows = filtered_rows[:_rag_cap] if _rag_cap > 0 else []
+                _rag_count = _rag.index_rows(_rag_rows, tenant=org) if _rag_rows else 0
+                logger.info(
+                    "Stage 5e: indexed %d/%d rows into TemporalRAG for %s (cap=%d)",
+                    _rag_count,
+                    len(filtered_rows),
+                    assessment_id,
+                    _rag_cap,
+                )
         except Exception as exc:
             logger.debug("TemporalRAG row indexing skipped for %s: %s", assessment_id, exc)
 

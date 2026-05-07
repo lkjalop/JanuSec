@@ -123,26 +123,42 @@ if 'psycopg2' not in sys.modules:
     # Stub aiohttp (empty module to satisfy imports in lite mode)
     sys.modules.setdefault('aiohttp', types.ModuleType('aiohttp'))
 
-    # Stub lark essentials used by lightweight tests
-    lark = types.ModuleType('lark')
+    # Stub lark essentials used by lightweight tests — only if real lark is absent
+    if 'lark' not in sys.modules:
+        try:
+            import importlib
+            importlib.import_module('lark')
+        except ImportError:
+            lark_stub = types.ModuleType('lark')
 
-    class Lark:
-        def __init__(self, *args, **kwargs):
-            pass
+            class Lark:
+                def __init__(self, *args, **kwargs):
+                    pass
 
-    class Transformer:
-        pass
+            class Transformer:
+                pass
 
-    def v_args(*a, **k):
-        def _wrap(x):
-            return x
+            def v_args(*a, **k):
+                def _wrap(x):
+                    return x
 
-        return _wrap
+                return _wrap
 
-    lark.Lark = Lark
-    lark.Transformer = Transformer
-    lark.v_args = v_args
-    sys.modules.setdefault('lark', lark)
+            class UnexpectedInput(Exception):
+                pass
+
+            class Token(str):
+                def __new__(cls, type_, value):
+                    inst = super().__new__(cls, value)
+                    inst.type = type_
+                    return inst
+
+            lark_stub.Lark = Lark
+            lark_stub.Transformer = Transformer
+            lark_stub.v_args = v_args
+            lark_stub.UnexpectedInput = UnexpectedInput
+            lark_stub.Token = Token
+            sys.modules['lark'] = lark_stub
 
 
 if os.environ.get('PLATFORM_LITE_INIT') in ('1', 'true', 'True'):

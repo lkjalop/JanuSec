@@ -15,7 +15,7 @@
 
 const { test, expect } = require('@playwright/test');
 
-const BASE = process.env.PLAYWRIGHT_BASE_URL || 'http://127.0.0.1:8080';
+const BASE = process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:8080';
 
 // Minimal 4-row CSV with entity diversity to exercise OPT-1/OPT-2
 const SAMPLE_CSV = [

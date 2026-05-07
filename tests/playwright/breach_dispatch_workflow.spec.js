@@ -1,6 +1,6 @@
 const { test, expect } = require('@playwright/test');
 
-const BASE = process.env.PLAYWRIGHT_BASE_URL || 'http://127.0.0.1:8080';
+const BASE = process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:8080';
 
 async function resolveAssessmentId(request) {
   const fallback = process.env.PLAYWRIGHT_ASSESSMENT_ID || 'assessment-1777494094-eb6931fb';

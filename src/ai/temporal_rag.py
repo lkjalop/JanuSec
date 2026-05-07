@@ -33,7 +33,12 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 _EMBED_MODE: str = os.getenv("TEMPORAL_RAG_EMBED", "ollama").lower()
 _EMBED_MODEL: str = os.getenv("TEMPORAL_RAG_MODEL", "nomic-embed-text")
-_OLLAMA_HOST: str = os.getenv("TEMPORAL_RAG_OLLAMA_HOST", "http://127.0.0.1:11434")
+_OLLAMA_HOST: str = (
+    os.getenv("TEMPORAL_RAG_OLLAMA_HOST")
+    or os.getenv("OLLAMA_HOST")
+    or os.getenv("OLLAMA_URL")
+    or "http://localhost:11434"
+)
 _CORPUS_MAX_ROWS: int = int(os.getenv("TEMPORAL_RAG_CORPUS_SIZE", "2000"))
 _WINDOW_SECONDS: int = int(os.getenv("TEMPORAL_RAG_WINDOW_SECONDS", "7200"))  # 2h default
 _DEFAULT_TOP_K: int = int(os.getenv("TEMPORAL_RAG_TOP_K", "5"))

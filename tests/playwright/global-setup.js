@@ -5,7 +5,7 @@ module.exports = async () => {
   const browser = await chromium.launch();
   const context = await browser.newContext();
   const page = await context.newPage();
-  const configured = process.env.PLAYWRIGHT_BASE_URL || process.env.BASE_URL || 'http://127.0.0.1:8080';
+  const configured = process.env.PLAYWRIGHT_BASE_URL || process.env.BASE_URL || 'http://localhost:8080';
   // Normalize to ensure we set localStorage for both common dev origins: 127.0.0.1 and localhost
   const urlCandidates = new Set([configured]);
   try {

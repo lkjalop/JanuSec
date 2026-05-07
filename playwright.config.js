@@ -4,7 +4,7 @@ module.exports = {
   timeout: 60 * 1000,
   retries: process.env.CI ? 2 : 1,
   use: {
-    baseURL: process.env.PLAYWRIGHT_BASE_URL || 'http://127.0.0.1:8080',
+    baseURL: process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:8080',
     actionTimeout: 8 * 1000,
     navigationTimeout: 15 * 1000,
     headless: true,

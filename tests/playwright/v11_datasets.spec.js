@@ -17,7 +17,7 @@
 //  10. Row cap warning: uploading all 241 events shows row-limit warning
 //
 // All LLM calls are mocked via Playwright route intercepts.
-// Server must be running at PLAYWRIGHT_BASE_URL (default: http://127.0.0.1:8080).
+// Server must be running at PLAYWRIGHT_BASE_URL (default: http://localhost:8080).
 
 const { test, expect } = require('@playwright/test');
 const path = require('path');
@@ -27,7 +27,7 @@ const fs = require('fs');
 // and sets up route intercepts. Parallel execution causes connection races.
 test.describe.configure({ mode: 'serial' });
 
-const BASE = process.env.PLAYWRIGHT_BASE_URL || 'http://127.0.0.1:8080';
+const BASE = process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:8080';
 
 // ── Dataset paths ─────────────────────────────────────────────────────────────
 const DUMP_DIR = path.join(__dirname, '../../dump/test files');

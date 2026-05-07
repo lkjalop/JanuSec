@@ -163,6 +163,7 @@ _LEGACY_EXEC_PATTERNS = (
     'janusec found observed attacker action',
     'janusec grouped',
     'janusec identified',
+    'janusec confirmed a breach in the supplied telemetry',
     'observed attacker action against a protected business process',
     'highest finding:',
 )
@@ -171,12 +172,424 @@ _LEGACY_EXEC_PATTERNS = (
 _CHAIN_ARROW = ' → '
 
 
-def _build_attack_chain_exec_summary(cluster: dict, assessment: dict) -> tuple[str, str]:
+# ── Nation-state / cross-border nexus classification ─────────────────────────
+# Maps observable signals (domain TLD, naming patterns, ASN) to jurisdictions.
+# Confidence is always LOW or LOW-MEDIUM from automated signals alone;
+# MEDIUM / HIGH require human analyst and intelligence corroboration.
+# NOTE: These are *indicators only* — never assert attribution without analyst sign-off.
+_NEXUS_PROFILES: dict[str, dict] = {
+    'CN': {
+        'tlds': ('.cn', '.com.cn', '.gov.cn', '.net.cn'),
+        'domain_keywords': ('sino', 'cnlink', 'huawei', 'alibaba', 'tencent', 'baidu'),
+        # Singapore-registered front-company naming patterns associated with PRC data relay
+        'sg_proxy_keywords': ('sino', 'nova', 'orient', 'dragon', 'bright'),
+        'asns': frozenset({'AS4134', 'AS4837', 'AS9808', 'AS17816', 'AS58461', 'AS37963'}),
+        'actor_prefixes': ('wei.', 'zhang.', 'li.', 'wang.', 'chen.', 'liu.',
+                           'zhao.', 'xu.', 'sun.', 'ma.', 'hu.', 'guo.'),
+        'jurisdiction': 'China (PRC)',
+        'relay_jurisdiction': 'Singapore',
+        'relay_note': ('Singapore-registered intermediaries are a documented PRC data-relay pattern; '
+                       'does not confirm state direction without further intelligence'),
+        'law_ref': 'PRC National Intelligence Law 2017 (Art. 7)',
+        'regulator_action': 'ASIO/AFP',
+        'authorised_possible': False,
+    },
+    'RU': {
+        'tlds': ('.ru', '.su'),
+        'domain_keywords': ('runet', 'gazprom', 'sberbank', 'vkontakte'),
+        'sg_proxy_keywords': (),
+        'asns': frozenset({'AS8359', 'AS12389', 'AS25478', 'AS3216', 'AS31133'}),
+        'actor_prefixes': (),
+        'jurisdiction': 'Russia (RF)',
+        'relay_jurisdiction': None,
+        'relay_note': None,
+        'law_ref': 'RF Federal Law 187-FZ (Critical Information Infrastructure)',
+        'regulator_action': 'ASD/AFP',
+        'authorised_possible': False,
+    },
+    'IR': {
+        'tlds': ('.ir',),
+        'domain_keywords': (),
+        'sg_proxy_keywords': (),
+        'asns': frozenset({'AS48159', 'AS44244', 'AS197207'}),
+        'actor_prefixes': (),
+        'jurisdiction': 'Iran',
+        'relay_jurisdiction': None,
+        'relay_note': None,
+        'law_ref': None,
+        'regulator_action': 'ASIO/AFP',
+        'authorised_possible': False,
+    },
+    'KP': {
+        'tlds': ('.kp',),
+        'domain_keywords': (),
+        'sg_proxy_keywords': (),
+        'asns': frozenset({'AS131279'}),
+        'actor_prefixes': (),
+        'jurisdiction': 'DPRK',
+        'relay_jurisdiction': None,
+        'relay_note': None,
+        'law_ref': None,
+        'regulator_action': 'ASIO/AFP',
+        'authorised_possible': False,
+    },
+    'US_GOV': {
+        'tlds': ('.gov', '.mil'),
+        'domain_keywords': ('nsa.gov', 'fbi.gov', 'dhs.gov', 'cia.gov', 'cisa.gov'),
+        'sg_proxy_keywords': (),
+        'asns': frozenset(),
+        'actor_prefixes': (),
+        'jurisdiction': 'United States (Federal)',
+        'relay_jurisdiction': None,
+        'relay_note': ('May represent a lawful CLOUD Act order or authorised law-enforcement request; '
+                       'verify with legal counsel before classifying as exfiltration'),
+        'law_ref': 'CLOUD Act (18 U.S.C. § 2713)',
+        'regulator_action': 'Legal counsel review',
+        'authorised_possible': True,
+    },
+}
+
+
+def _classify_nexus(
+    exfil_domains: list,
+    actor_names: list,
+    asn_strings: list,
+) -> dict:
+    """
+    Classify cross-border data movement signals into jurisdiction indicators.
+    Returns:
+      detected           — list of (state_code, profile, signals_dict) for matching states
+      confidence         — 'NONE' | 'LOW' | 'LOW-MEDIUM'
+      authorised_possible— True if any matched state could have lawful access (e.g. CLOUD Act)
+      sg_plain_domains   — .sg domains without CN proxy naming
+      sg_relay_domains   — .sg domains with CN proxy naming patterns
+    Never returns HIGH confidence; that requires human analyst corroboration.
+    """
+    asn_set = {a.upper().strip() for a in asn_strings if a}
+    cn_sg_keywords = _NEXUS_PROFILES['CN']['sg_proxy_keywords']
+    sg_plain_domains: list = []
+    sg_relay_domains: list = []
+    for d in exfil_domains:
+        if d.endswith('.sg') or '.sg.' in d:
+            if any(kw in d.lower() for kw in cn_sg_keywords):
+                sg_relay_domains.append(d)
+            else:
+                sg_plain_domains.append(d)
+
+    detected = []
+    for state_code, profile in _NEXUS_PROFILES.items():
+        signals: dict[str, list] = {}
+        matched_tld = [
+            d for d in exfil_domains
+            if any(d.endswith(t) or f'.{t.lstrip(".")}.' in d for t in profile['tlds'])
+        ]
+        if matched_tld:
+            signals['tld'] = matched_tld
+        matched_kw = [
+            d for d in exfil_domains
+            if any(kw in d.lower() for kw in profile.get('domain_keywords', ()))
+        ]
+        if matched_kw:
+            signals['keyword'] = matched_kw
+        if state_code == 'CN' and sg_relay_domains:
+            signals['sg_relay'] = sg_relay_domains
+        matched_asns = list(asn_set & profile.get('asns', frozenset()))
+        if matched_asns:
+            signals['asn'] = matched_asns
+        matched_actors = [
+            a for a in actor_names
+            if any(
+                a.lower().startswith(pfx) or a.lower() == pfx.rstrip('.')
+                for pfx in profile.get('actor_prefixes', ())
+            )
+        ]
+        if matched_actors:
+            signals['actor'] = matched_actors
+        if signals:
+            detected.append((state_code, profile, signals))
+
+    max_sig_types = max((len(s) for _, _, s in detected), default=0)
+    confidence = 'LOW-MEDIUM' if max_sig_types >= 2 else ('LOW' if detected else 'NONE')
+    authorised_possible = any(p.get('authorised_possible') for _, p, _ in detected)
+    return {
+        'detected': detected,
+        'confidence': confidence,
+        'authorised_possible': authorised_possible,
+        'sg_plain_domains': sg_plain_domains,
+        'sg_relay_domains': sg_relay_domains,
+    }
+
+
+def _nexus_sentence(nexus: dict, persona: str = 'ir', org_context: str = '') -> str:
+    """
+    Build a state-nexus indicator sentence calibrated to the audience persona and org context.
+
+    persona:
+      'ir'         — IR team: full technical indicators, regulator referral language
+      'ciso'/'board'— Risk framing only, no specific state assertion
+      'legal'/'gc' — Factual only: transfer observed, legal review required, no inference
+      'regulator'  — Observed facts, no speculation or state attribution
+    org_context:
+      'merger'     — Suppress nexus assertion; substitute M&A authorisation language
+      'pentest'    — Suppress entirely (authorised test context)
+      ''           — Normal operation
+
+    Returns '' if there is nothing to report.
+    """
+    detected = nexus.get('detected', [])
+    sg_relay = nexus.get('sg_relay_domains', [])
+    sg_plain = nexus.get('sg_plain_domains', [])
+    confidence = nexus.get('confidence', 'NONE')
+
+    if not detected and not sg_plain and not sg_relay:
+        return ''
+
+    # Collect all foreign domain evidence
+    all_evidence_domains: list = []
+    for _, _, sigs in detected:
+        for stype in ('tld', 'keyword', 'sg_relay'):
+            all_evidence_domains.extend(sigs.get(stype, []))
+    all_evidence_domains.extend(sg_plain)
+    all_evidence_domains = list(dict.fromkeys(all_evidence_domains))[:4]
+
+    # ── M&A / merger context: suppress state attribution ──────────────────────
+    if org_context == 'merger':
+        dest_str = ', '.join(all_evidence_domains[:3]) or 'external destinations'
+        return (
+            f"Cross-border data movement detected to external destinations ({dest_str}). "
+            f"If an active acquisition, merger, or due diligence process is in scope, "
+            f"confirm transfer authorisation with legal counsel before classifying as exfiltration."
+        )
+
+    # ── Authorised pentest / red team context ─────────────────────────────────
+    if org_context == 'pentest':
+        return ''
+
+    # ── Legal / GC persona: factual, no inference ─────────────────────────────
+    if persona in ('legal', 'gc'):
+        parts = []
+        for _, profile, sigs in detected:
+            ev = list(dict.fromkeys(d for st in ('tld', 'keyword', 'sg_relay') for d in sigs.get(st, [])))[:3]
+            if ev:
+                auth_note = (
+                    f" Note: {profile['law_ref']} may apply if transfer originates from a government authority."
+                    if profile.get('authorised_possible') and profile.get('law_ref') else ''
+                )
+                parts.append(
+                    f"observed outbound data transfer to {', '.join(ev)} "
+                    f"(destination jurisdiction indicator: {profile['jurisdiction']})"
+                    f"{auth_note}"
+                )
+        if not parts and all_evidence_domains:
+            parts.append(f"observed outbound data transfer to {', '.join(all_evidence_domains[:3])}")
+        if not parts:
+            return ''
+        return (
+            f"Legal review required: {'; '.join(parts)}. "
+            f"Transfer authorisation status is unverified. "
+            f"Do not assert attribution or disclose externally without legal and regulatory counsel review."
+        )
+
+    # ── Regulator persona: factual events only ────────────────────────────────
+    if persona == 'regulator':
+        parts = []
+        for _, profile, sigs in detected:
+            ev = list(dict.fromkeys(d for st in ('tld', 'keyword', 'sg_relay') for d in sigs.get(st, [])))[:3]
+            if ev:
+                parts.append(
+                    f"outbound data transfer observed to {', '.join(ev)} "
+                    f"(destination jurisdiction: {profile['jurisdiction']})"
+                )
+        if not parts and all_evidence_domains:
+            parts.append(f"outbound data transfer observed to {', '.join(all_evidence_domains[:3])}")
+        return (f"Observed: {'; '.join(parts)}." if parts else '')
+
+    # ── CISO / Board persona: risk framing, no specific state assertion ────────
+    if persona in ('ciso', 'board'):
+        dest_str = ', '.join(all_evidence_domains[:3]) or 'external third-party destinations'
+        return (
+            f"Foreign data movement indicator: outbound transfers to unverified third-party infrastructure "
+            f"({dest_str}) detected. "
+            f"State-nexus assessment required — do not assert attribution in external communications "
+            f"without analyst sign-off (confidence: {confidence})."
+        )
+
+    # ── IR persona (default): full technical detail ────────────────────────────
+    state_blocks = []
+    for state_code, profile, sigs in detected:
+        ev_domains = list(dict.fromkeys(d for st in ('tld', 'keyword', 'sg_relay') for d in sigs.get(st, [])))[:3]
+        actor_list = sigs.get('actor', [])
+        asn_list = sigs.get('asn', [])
+        jurisdiction = profile['jurisdiction']
+        block_parts = [f"cross-border data movement to {jurisdiction}-associated infrastructure"]
+        if ev_domains:
+            block_parts.append(f"destination(s): {', '.join(ev_domains)}")
+        if actor_list:
+            block_parts.append(f"actor(s) with {jurisdiction}-pattern naming: {', '.join(actor_list[:2])}")
+        if asn_list:
+            block_parts.append(f"ASN overlap: {', '.join(asn_list[:2])}")
+        if profile.get('relay_note'):
+            block_parts.append(profile['relay_note'])
+        if profile.get('law_ref'):
+            block_parts.append(f"relevant instrument: {profile['law_ref']}")
+        state_blocks.append('; '.join(block_parts))
+
+    if not state_blocks and all_evidence_domains:
+        state_blocks = [f"cross-border movement to {', '.join(all_evidence_domains[:3])} — jurisdiction unclassified"]
+    if not state_blocks:
+        return ''
+
+    regulator_actions = list(dict.fromkeys(
+        p.get('regulator_action', '') for _, p, _ in detected if p.get('regulator_action')
+    ))
+    referral_str = (
+        f" {' / '.join(r for r in regulator_actions if r)} referral warranted pending analyst sign-off."
+        if regulator_actions else ''
+    )
+    return (
+        f"State-nexus risk indicator: {'; '.join(state_blocks)}. "
+        f"Attribution confidence: {confidence} (automated signals only — "
+        f"human analyst review required before any external disclosure or referral).{referral_str}"
+    )
+
+
+# ── Plain-language humanisation helpers ───────────────────────────────────
+# Maps technical jargon keywords → (plain description, tech label for parens).
+# Checked in order; first match wins.
+_TECHNIQUE_PLAIN: list[tuple[str, str, str]] = [
+    ('comsvcs',           'stole employee login credentials directly from server memory',                   'comsvcs.dll / LSASS dump'),
+    ('lsass',             'stole employee login credentials directly from server memory',                   'LSASS credential dump'),
+    ('pass-the-hash',     'used stolen password data to impersonate staff without knowing their real password', 'pass-the-hash relay'),
+    ('ntlm',              'captured password hashes that can be used to impersonate accounts',               'NTLM hash theft'),
+    ('kerberos',          'obtained authentication tokens that grant access to other systems',               'Kerberos ticket theft'),
+    ('rclone',            'copied large volumes of data to external cloud storage using a sync tool',        'Rclone exfiltration'),
+    ('certutil',          'installed malicious software via a trusted Windows built-in utility to avoid detection', 'certutil / LOLBin'),
+    ('lolbin',            'misused built-in OS tools to evade security monitoring',                         'Living-off-the-land technique'),
+    ('daemonset',         'escaped from an isolated application container to reach broader server infrastructure', 'Kubernetes privileged DaemonSet escape'),
+    ('k8s',               'escaped from an isolated application container to reach broader server infrastructure', 'Kubernetes container escape'),
+    ('container escape',  'escaped from an isolated application container to reach broader server infrastructure', 'container escape'),
+    ('snowflake',         'bulk-exported records from the company\'s cloud analytics database',             'Snowflake COPY INTO'),
+    ('bulk data unload',  'extracted a large volume of database records in a single automated operation',   'bulk data unload'),
+    ('cloud sync exfil',  'transferred data to an external cloud storage service outside company control',  'cloud sync exfiltration'),
+    ('assumerole',        'escalated cloud privileges by assuming another account\'s identity',              'AWS AssumeRole abuse'),
+    ('privilege escalat', 'gained elevated system access beyond what their account should allow',           'privilege escalation'),
+    ('lateral movement',  'moved between internal systems using stolen credentials',                        'lateral movement'),
+    ('credential harvest','collected employee usernames, passwords, or session tokens',                     'credential harvesting'),
+    ('payload delivery',  'delivered and installed malicious tools onto company systems',                   'payload delivery'),
+    ('scheduled task',    'set up an automated task to restore attacker access after system reboots',       'scheduled task persistence'),
+    ('persistence',       'established a mechanism to keep access even after the systems were restarted',   'persistence mechanism'),
+    ('exfil',             'transferred company data to an external location outside company control',       'data exfiltration'),
+]
+
+
+def _humanize_chain_step(step: str) -> str:
+    """Rewrite one arrow-chain step as plain English with the technical term in ().
+    'LSASS memory access (credential harvest)' →
+    'stole employee login credentials directly from server memory (LSASS credential dump)'
+    """
+    step_lower = step.lower()
+    for match_kw, plain_text, tech_label in _TECHNIQUE_PLAIN:
+        if match_kw in step_lower:
+            # Capture any existing parenthesised content so we don't lose it
+            paren_m = re.search(r'\(([^)]+)\)', step)
+            existing_paren = (paren_m.group(1).strip() if paren_m else '')
+            # If there's an existing paren, prefer it as the tech label
+            # (avoids redundant "Rclone exfiltration: cloud sync exfil" duplication)
+            if existing_paren:
+                combined = existing_paren
+            else:
+                combined = tech_label
+            return f'{plain_text} ({combined})'
+    # No translation found — return original
+    return step
+
+
+def _clean_damage_text(damage: str) -> str:
+    """Strip Python dict/JSON artifacts, service-account tokens, and bare email addresses
+    from the raw DREAD damage fragment before display to non-technical audiences."""
+    import re as _re_d
+    # Strip Python dict literals  e.g. {'id': '...', 'type': 'User', ...}
+    damage = _re_d.sub(r'\{[^}]{0,400}\}', '', damage)
+    # Strip service-account tokens like SVC_SFL_ANALYTICS_FED
+    damage = _re_d.sub(r'\bSVC_\w+\b,?\s*', '', damage)
+    # Strip bare email addresses (user display names are kept via shared_users later)
+    damage = _re_d.sub(r'\b[\w.+%-]+@[\w.-]+\.[a-z]{2,}\b,?\s*', '', damage)
+    # Collapse leftover punctuation artefacts
+    damage = _re_d.sub(r',(\s*,)+', ',', damage)
+    damage = _re_d.sub(r'\bfor\s*,', 'involving', damage)  # "material for ," → "material involving"
+    damage = _re_d.sub(r'\bfor\s*\.', '.', damage)
+    damage = _re_d.sub(r'\s{2,}', ' ', damage).strip().strip(',').strip()
+    return damage
+
+
+def _humanize_intro_damage(damage: str) -> str:
+    """Rewrite the technical intro damage sentence into plain English.
+    Keeps all technical detail in () for analysts.
+    """
+    import re as _re_h
+    d_lower = damage.lower()
+
+    # Pattern: "Credential material ... was harvested via <tool>" → plain opener
+    if 'credential material' in d_lower or ('credential' in d_lower and ('lsass' in d_lower or 'comsvcs' in d_lower or 'harvested' in d_lower)):
+        # Extract the date range if present
+        date_m = _re_h.search(r'(Between[\s\S]{0,80}?),\s+[Cc]redential', damage)
+        date_prefix = date_m.group(1).strip() if date_m else ''
+        # Extract the tool/method
+        tool_m = _re_h.search(r'via\s+([\w./]+(?:\s+\([^)]+\))?)', damage)
+        tool = tool_m.group(1).strip() if tool_m else 'a memory-extraction technique'
+        # Extract risk consequence sentence if present (NTLM/pass-the-hash)
+        risk_sent = ''
+        if 'pass-the-hash' in d_lower or 'offline crack' in d_lower:
+            risk_sent = ' These stolen credentials can be used to impersonate staff accounts without knowing their actual passwords (pass-the-hash / offline cracking attack).'
+        elif 'ntlm' in d_lower:
+            risk_sent = ' The stolen credential data can be used to impersonate those staff accounts (NTLM hash relay).'
+        plain = (
+            f"{date_prefix + ', an' if date_prefix else 'An'}"
+            f" attacker stole login credentials belonging to company staff accounts"
+            f" (method: {tool}).{risk_sent}"
+        )
+        # Clean up any residual double-article artefacts
+        plain = _re_h.sub(r'\ba\s+an\b', 'an', plain)
+        return plain.strip()
+
+    # Pattern: ransomware / encryption
+    if 'encrypt' in d_lower or 'ransomware' in d_lower:
+        return damage  # already reasonably plain
+
+    # Pattern: "an actor transferred data" / cloud exfil without credential context
+    if re.search(r'\b(actor|attacker)\b.*\btransferred\b', d_lower) or re.search(r'\bdata.*\bexfil', d_lower):
+        # Extract date range
+        date_m = re.search(r'(Between\s+[\d\-]+\s+and\s+[\d\-]+)', damage)
+        date_prefix = date_m.group(1) if date_m else ''
+        opener = f'{date_prefix}, an' if date_prefix else 'An'
+        return (
+            f'{opener} attacker used compromised cloud credentials to access company systems '
+            f'and transfer sensitive data outside the organisation.'
+        )
+
+    # Fallback: apply technique humanisation to each clause
+    sentences = damage.split('. ')
+    result = []
+    for sent in sentences:
+        rewritten = _humanize_chain_step(sent) if any(kw in sent.lower() for kw, *_ in _TECHNIQUE_PLAIN) else sent
+        result.append(rewritten)
+    return '. '.join(result)
+
+
+def _build_attack_chain_exec_summary(
+    cluster: dict,
+    assessment: dict,
+    *,
+    persona: str = 'ir',
+    org_context: str = '',
+) -> tuple[str, str, str]:
     """
     Build a concise, evidence-specific executive summary from the attack chain.
     Prioritises enriched llm_narrative (Stage 5d) for infra/geo/cloud detail;
     falls back to DREAD/PASTA/Diamond from tier1_prefill.
-    Returns (summary_text, provenance_label).
+    Returns (summary_text, provenance_label, attribution_confidence).
+    persona:     'ir' | 'ciso' | 'board' | 'legal' | 'gc' | 'regulator'
+    org_context: '' | 'merger' | 'pentest'
     """
     full = _resolve_full_cluster(cluster, assessment)
     prefill = full.get('tier1_prefill') or {}
@@ -192,10 +605,37 @@ def _build_attack_chain_exec_summary(cluster: dict, assessment: dict) -> tuple[s
     e_principals = enriched.get('affected_principals') or {}
     e_discovery = enriched.get('discovery') or {}
 
+    # Extract external domains / IPs / principal actors / compliance counts from
+    # assessment-level executive_summary text
+    _assess_exec_text = _safe_text(assessment.get('executive_summary', '')).strip()
+    _assess_ext_domains: list[str] = []
+    _assess_ext_ips: list[str] = []
+    _assess_principal_actors: list[str] = []
+    _assess_compliance_map: dict[str, int] = {}
+    if _assess_exec_text:
+        import re as _re
+        _dom_m = _re.search(r'External destinations?:\s*([^;\n]+?)(?:\.\s+[A-Z]|\.$|\n|$)', _assess_exec_text)
+        if _dom_m:
+            _assess_ext_domains = [d.strip().rstrip('.') for d in _dom_m.group(1).split(',') if d.strip()][:4]
+        _ip_m = _re.search(r'external infra:\s*([0-9\., ]+)', _assess_exec_text)
+        if _ip_m:
+            _assess_ext_ips = [ip.strip() for ip in _ip_m.group(1).split(',') if ip.strip()][:4]
+        _actor_m = _re.search(r'Principal actors?:\s*([^\.]+?)(?:\.\s+[A-Z]|\.$|Source infra|External)', _assess_exec_text)
+        if _actor_m:
+            _assess_principal_actors = [a.strip() for a in _actor_m.group(1).split(',') if a.strip()][:8]
+        for _cnt, _fw in _re.findall(r'(\d+)\s+(apra_cps234|asd_ism|essential_eight|iso27001|nist_800_53|nist_csf)\s+control', _assess_exec_text):
+            _assess_compliance_map[_fw] = int(_cnt)
+
     # ── Sentence 1: Initial compromise — who, how, when
     damage = _safe_text(frags.get('damage')).strip()
     intro_sentence = ''
     if damage:
+        # Strip row-number references, Python dict artifacts, service accounts, raw emails
+        import re as _re_row
+        damage = _re_row.sub(r'\s*\(rows?\s+[\d,\s]+\)', '', damage).strip()
+        damage = _clean_damage_text(damage)
+        # Rewrite into plain English with technical terms in ()
+        damage = _humanize_intro_damage(damage)
         clip = damage[:500]
         last_dot = clip.rfind('.')
         if last_dot > 50:
@@ -203,14 +643,34 @@ def _build_attack_chain_exec_summary(cluster: dict, assessment: dict) -> tuple[s
         else:
             intro_sentence = clip[:400].rsplit(' ', 1)[0] + ('…' if len(damage) > 400 else '')
 
+    # Inject affected accounts: merge cluster shared_users + assessment principal actors,
+    # deduplicated, preserving order. Wei.zhang-pattern names appear at front if present.
+    _shared_users = full.get('shared_users') or []
+    _all_actors: list[str] = []
+    _seen_actors: set[str] = set()
+    for _u in _shared_users + _assess_principal_actors:
+        _k = str(_u).lower().strip()
+        if _k and _k not in _seen_actors:
+            _seen_actors.add(_k)
+            _all_actors.append(str(_u))
+    _users_str = ', '.join(_all_actors[:8])
+    if _users_str:
+        if intro_sentence:
+            intro_sentence = intro_sentence.rstrip('.') + f'. Compromised employee accounts: {_users_str}.'
+        else:
+            intro_sentence = f'Compromised employee accounts: {_users_str}.'
+
     # Supplement intro with specific attacker IPs + geo attribution from enriched narrative
     attacker_ips = e_infra.get('external_ips') or []
     attacker_countries = e_infra.get('countries') or []
     attacker_asns = e_infra.get('asns') or []
+    # Fall back to assessment-level external IPs when enriched narrative is empty
+    if not attacker_ips and _assess_ext_ips:
+        attacker_ips = _assess_ext_ips
     if attacker_ips and intro_sentence:
         geo_parts = []
         if attacker_ips[:2]:
-            geo_parts.append(f"attacker IPs: {', '.join(attacker_ips[:2])}")
+            geo_parts.append(f"attacker source IPs: {', '.join(attacker_ips[:2])}")
         if attacker_countries:
             geo_parts.append(f"origin: {', '.join(attacker_countries[:2])}")
         if attacker_asns:
@@ -233,29 +693,55 @@ def _build_attack_chain_exec_summary(cluster: dict, assessment: dict) -> tuple[s
     staging = e_infra.get('staging_resources') or []
     cloud_pivot_parts = []
     if cloud_roles:
-        cloud_pivot_parts.append(f"assumed role: {cloud_roles[0].split('assumed-role/')[-1] if 'assumed-role/' in cloud_roles[0] else cloud_roles[0]}")
+        _role_plain = cloud_roles[0].split('assumed-role/')[-1] if 'assumed-role/' in cloud_roles[0] else cloud_roles[0]
+        cloud_pivot_parts.append(f"assumed a higher-privilege cloud identity ({_role_plain})")
     if cloud_keys:
-        cloud_pivot_parts.append(f"AWS key: {cloud_keys[0]}")
+        cloud_pivot_parts.append(f"used cloud access credentials ({cloud_keys[0]})")
     if svc_accts:
-        cloud_pivot_parts.append(f"service account: {svc_accts[0]}")
+        cloud_pivot_parts.append(f"operated as a service account ({svc_accts[0]})")
     if e_data.get('tables'):
-        cloud_pivot_parts.append(f"accessed tables: {', '.join(e_data['tables'][:2])}")
+        cloud_pivot_parts.append(f"accessed database tables ({', '.join(e_data['tables'][:2])})")
 
     if isinstance(capability, list) and capability:
         chain_steps = [str(c).strip() for c in capability[:8] if c]
         if chain_steps:
-            pivot_sentence = 'Attack chain: ' + _CHAIN_ARROW.join(chain_steps) + '.'
+            # Humanise each step: plain English with technical detail in ()
+            plain_steps = [_humanize_chain_step(s) for s in chain_steps]
+            count = len(plain_steps)
+            stage_word = 'stage' if count == 1 else 'stages'
+            step_list = '; '.join(f'({i+1}) {s}' for i, s in enumerate(plain_steps))
+            pivot_sentence = (
+                f"The attacker moved through company systems in {count} {stage_word}: {step_list}."
+            )
     elif isinstance(capability, str) and capability.strip():
-        pivot_sentence = 'Attack chain: ' + capability.strip()[:350] + '.'
+        # Inline arrow-chain string — split and humanise
+        raw_steps = [s.strip() for s in re.split(r'\s*[→>]\s*', capability.strip()) if s.strip()]
+        if raw_steps:
+            plain_steps = [_humanize_chain_step(s) for s in raw_steps[:8]]
+            count = len(plain_steps)
+            stage_word = 'stage' if count == 1 else 'stages'
+            step_list = '; '.join(f'({i+1}) {s}' for i, s in enumerate(plain_steps))
+            pivot_sentence = (
+                f"The attacker moved through company systems in {count} {stage_word}: {step_list}."
+            )
+        else:
+            pivot_sentence = 'Attack path: ' + capability.strip()[:350] + '.'
     if not pivot_sentence:
         exploit = _safe_text(pasta.get('exploitation_path')).strip()
         if exploit:
-            pivot_sentence = 'Exploitation path: ' + exploit[:300] + '.'
+            pivot_sentence = 'Attack path: ' + exploit[:300] + '.'
     if not pivot_sentence and cloud_pivot_parts:
-        pivot_sentence = 'Cloud pivot: ' + '; '.join(cloud_pivot_parts) + '.'
+        pivot_sentence = 'The attacker used cloud access to: ' + '; '.join(cloud_pivot_parts) + '.'
     elif pivot_sentence and cloud_pivot_parts:
-        # Append cloud detail if Diamond/PASTA didn't already capture it
-        pivot_sentence = pivot_sentence.rstrip('.') + f' Cloud services: {"; ".join(cloud_pivot_parts[:2])}.'
+        # Only append cloud detail when pivot doesn't already describe it
+        _piv_low = pivot_sentence.lower()
+        _already_covered = (
+            'privilege escalation' in _piv_low
+            or 'assumed' in _piv_low
+            or 'cloud credentials' in _piv_low
+        )
+        if not _already_covered:
+            pivot_sentence = pivot_sentence.rstrip('.') + f' Cloud access used: {"; ".join(cloud_pivot_parts[:2])}.'
 
     # ── Sentence 3: Data impact + exfil
     victim_data = diamond.get('victim_data') or []
@@ -263,33 +749,60 @@ def _build_attack_chain_exec_summary(cluster: dict, assessment: dict) -> tuple[s
     _EXFIL_KW = ('mega.nz', 's3://', 'backblaze', 'dropbox', 'gdrive', '.b2.', 'exfil',
                  'onedrive', 'pastebin', 'transfer.sh', 'wetransfer', 'rclone', 'hetzner')
     exfil_infra = [str(x) for x in infra_raw if any(kw in str(x).lower() for kw in _EXFIL_KW)][:3]
-    # Prefer enriched exfil destinations
+    # Prefer enriched exfil destinations; fall back to assessment-level external domains
     enriched_exfil = e_infra.get('exfil_destinations') or []
-    all_exfil = list(dict.fromkeys(enriched_exfil[:3] + exfil_infra))[:3]
+    all_exfil = list(dict.fromkeys(enriched_exfil[:3] + exfil_infra + _assess_ext_domains))[:4]
 
     data_sentence = ''
     e_tables = e_data.get('tables') or []
     e_classes = e_data.get('classes') or []
     e_records = e_data.get('record_count_estimate')
+    # Filter out internal sentinel values from victim_data before display
+    _JUNK_DATA = {'unknown', 'n/a', 'none', '', '-'}
+    victim_data_clean = [
+        d for d in (victim_data or [])
+        if str(d).strip().lower().split(' ')[0] not in _JUNK_DATA
+        and 'insufficient' not in str(d).lower()
+        and 'metadata' not in str(d).lower()
+        and len(str(d).strip()) > 2
+    ]
     crown_jewel = e_data.get('crown_jewel_touched', False)
 
-    if e_tables or victim_data:
+    if e_tables or victim_data_clean or e_classes:
         data_parts = []
         if crown_jewel and e_tables:
-            data_parts.append(f"Crown-jewel data accessed: {', '.join(e_tables[:2])}")
+            data_parts.append(f"The organisation's most sensitive data was accessed (crown-jewel datasets: {', '.join(e_tables[:2])})")
         elif e_tables:
-            data_parts.append(f"Tables accessed: {', '.join(e_tables[:2])}")
-        elif victim_data:
-            data_parts.append(f"Data at risk: {', '.join(str(d) for d in victim_data[:4])}")
+            data_parts.append(f"Company database records were accessed ({', '.join(e_tables[:2])})")
+        elif victim_data_clean and e_classes:
+            data_parts.append(f"Company data stolen: {', '.join(e_classes[:3])}")
+        elif victim_data_clean:
+            data_parts.append(f"Company data stolen: {', '.join(str(d) for d in victim_data_clean[:4])}")
+        elif e_classes:
+            data_parts.append(f"Company data stolen: {', '.join(e_classes[:3])}")
         if e_records:
-            data_parts.append(f"~{e_records:,} records")
-        if e_classes:
-            data_parts.append(f"classes: {', '.join(e_classes[:3])}")
+            data_parts.append(f"approximately {e_records:,} records were affected")
+        # Fold exfil destinations into the data sentence as a continuation, not a separate fragment
         if all_exfil:
-            data_parts.append(f"exfiltrated to {', '.join(all_exfil[:2])}")
+            # Plain-language destination description
+            _dest_plain = ', '.join(
+                d.replace('mega.nz', 'Mega.nz (public cloud storage)')
+                 .replace('backblaze', 'Backblaze (cloud backup service)')
+                 .replace('dropbox', 'Dropbox')
+                 .replace('onedrive', 'OneDrive')
+                for d in all_exfil[:2]
+            )
+            if data_parts:
+                data_parts[-1] = data_parts[-1] + f" — copied outside the organisation to {_dest_plain}"
+            else:
+                data_parts.append(f"Data was transferred outside the organisation to {_dest_plain}")
         data_sentence = '. '.join(data_parts) + '.'
     elif pasta.get('business_impact'):
-        data_sentence = _safe_text(pasta.get('business_impact'))[:200] + '.'
+        _bi = _safe_text(pasta.get('business_impact')).strip()
+        # Suppress internal risk-rating placeholders (e.g. "MEDIUM risk rating — business impact requires analyst investigation")
+        _bi_low = _bi.lower()
+        if not ('risk rating' in _bi_low or 'requires analyst' in _bi_low or 'insufficient' in _bi_low or len(_bi) < 20):
+            data_sentence = _bi[:200] + '.'
 
     # ── Sentence 4: Discovery + regulatory
     disc_source = e_discovery.get('source') or ''
@@ -305,12 +818,12 @@ def _build_attack_chain_exec_summary(cluster: dict, assessment: dict) -> tuple[s
             'deterministic_pipeline': 'automated detection pipeline',
         }
         disc_label = _disc_labels.get(disc_source, disc_source)
-        disc_sentence = f'Discovered by {disc_label}'
+        disc_sentence = f'Breach identified by {disc_label}'
         if disc_who and disc_who != 'unknown':
             disc_sentence += f' ({disc_who})'
         if disc_lag and disc_lag > 0:
             dwell_days = round(disc_lag / 86400, 1)
-            disc_sentence += f'; {dwell_days}d dwell time'
+            disc_sentence += f'; the attacker was active for {dwell_days} days before detection (dwell time)'
         disc_sentence += '.'
     else:
         # Fall back to DREAD discoverability fragment
@@ -329,10 +842,65 @@ def _build_attack_chain_exec_summary(cluster: dict, assessment: dict) -> tuple[s
 
     parts = [p for p in [intro_sentence, pivot_sentence, data_sentence, disc_sentence] if p]
     if not parts:
-        return '', 'attack_chain_fallback'
+        return '', 'attack_chain_fallback', 'NONE'
 
-    provenance = 'attack_chain_narrative+enriched' if (e_infra or e_data) else 'attack_chain_narrative'
-    return ' '.join(parts), provenance
+    # ── Sentence 5: State-nexus / cross-border movement indicator
+    # Generalised to any nation-state jurisdiction; language calibrated to persona.
+    _nexus = _classify_nexus(all_exfil, _all_actors, attacker_asns or [])
+    _nexus_sent = _nexus_sentence(_nexus, persona=persona, org_context=org_context)
+    if _nexus_sent:
+        parts.append(_nexus_sent)
+
+    # ── Sentence 6: Business consequence + control gaps
+    _control_gaps_plain = []
+    _control_gaps_tech = []
+    if pivot_sentence and ('assumerole' in pivot_sentence.lower() or 'assumed a higher-privilege' in pivot_sentence.lower()):
+        _control_gaps_plain.append('cloud accounts were not restricted to minimum required permissions')
+        _control_gaps_tech.append('AWS least-privilege / AssumeRole boundary absent')
+    _combined_text = (disc_sentence + data_sentence + pivot_sentence).lower()
+    if 'smb' in _combined_text or 'rdp' in _combined_text or not disc_sentence:
+        _control_gaps_plain.append('systems were not isolated from each other, allowing the attacker to move freely')
+        _control_gaps_tech.append('no network micro-segmentation or jump-server controls (SMB/RDP lateral movement)')
+    if _assess_ext_domains:
+        _control_gaps_plain.append('outbound data transfers to external services were not monitored or blocked')
+        _control_gaps_tech.append('DLP not blocking outbound transfers to external domains')
+    if not _control_gaps_plain:
+        _control_gaps_plain.append('the attacker was able to escalate privileges and move between systems without restriction')
+        _control_gaps_tech.append('privilege escalation and lateral movement controls absent')
+    # Format as plain sentences with technical detail in ()
+    gap_sentences = [
+        f'{plain} ({tech})'
+        for plain, tech in zip(_control_gaps_plain, _control_gaps_tech)
+    ]
+    gap_str = '; '.join(gap_sentences)
+    parts.append(
+        f"What this means for the organisation: The attacker gained and maintained access across multiple systems "
+        f"without being detected or stopped. "
+        f"Security controls that should have prevented this were missing or bypassed: {gap_str}."
+    )
+
+    # ── Sentence 7: Compliance control failures
+    if _assess_compliance_map:
+        _fw_labels = {
+            'apra_cps234': 'APRA CPS234',
+            'asd_ism': 'ASD ISM',
+            'essential_eight': 'ASD Essential Eight',
+            'iso27001': 'ISO 27001',
+            'nist_800_53': 'NIST 800-53',
+            'nist_csf': 'NIST CSF',
+        }
+        _fw_parts = [f"{_fw_labels.get(fw, fw)} ({cnt} control{'s' if cnt > 1 else ''})"
+                     for fw, cnt in sorted(_assess_compliance_map.items(), key=lambda x: -x[1])]
+        # Check proposed actions for NDB
+        _proposed = assessment.get('proposed_actions') or []
+        _has_ndb = any('NDB' in str(a.get('description', '')) or 'ndb' in str(a.get('action_type', '')) for a in _proposed)
+        _ndb_str = ' The NDB Scheme 72-hour mandatory breach notification clock is running.' if _has_ndb else ''
+        parts.append(
+            f"Regulatory impact: This breach has triggered failures against {', '.join(_fw_parts)}.{_ndb_str}"
+        )
+
+    provenance = 'attack_chain_narrative+enriched' if (e_infra or e_data or _assess_compliance_map) else 'attack_chain_narrative'
+    return ' '.join(parts), provenance, _nexus.get('confidence', 'NONE')
 
 
 def _dread_summary_for_cluster(cluster: dict, assessment: dict, *, total_rows: int, total_sources: int, ruled_out_rows: int = 0) -> Optional[dict]:
@@ -451,8 +1019,19 @@ def _cached_summary_is_stale(cached: dict, lead: dict) -> bool:
     if not cached:
         return False
     provenance = _safe_text(cached.get('narrative_provenance') or cached.get('narrative_source')).lower()
-    # Already generated with the new attack chain format — not stale
+    # LLM-generated results are never considered stale — only an explicit regenerate should replace them
+    if provenance.startswith('llm_') or provenance.startswith('qwen') or provenance.startswith('gpt') or provenance.startswith('claude'):
+        return False
+    # Already generated with the new attack chain format.
+    # But mark stale if it's missing account names that are now available.
     if 'attack_chain_narrative' in provenance:
+        shared_users = lead.get('shared_users') or []
+        if shared_users:
+            summary_text_chk = _safe_text(cached.get('executive_summary') or '').lower()
+            # If none of the top-3 user accounts appear in the summary, it needs refresh
+            top_users = [str(u).lower() for u in shared_users[:3] if u]
+            if top_users and not any(u in summary_text_chk for u in top_users):
+                return True
         return False
     # Legacy generic template text is always stale regardless of provenance
     summary_text = _safe_text(cached.get('executive_summary') or '').lower()
@@ -558,6 +1137,186 @@ def _cluster_rows(cluster: dict, assessment: dict) -> list[dict]:
     # normalized_rows/evidence_rows may not overlap with this cluster's row_refs —
     # fall back to evidence_preview which is pre-sampled against the actual refs.
     return preview
+
+
+def _scope_uniq(values: list[Any], limit: int = 8) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        text = _safe_text(value).strip()
+        if not text or text.lower() in {'-', 'n/a', 'none', 'null', 'unknown'}:
+            continue
+        if text.lower() in seen:
+            continue
+        seen.add(text.lower())
+        out.append(text)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _is_public_ip_text(value: Any) -> bool:
+    try:
+        import ipaddress
+        ip = ipaddress.ip_address(str(value))
+        return not (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved)
+    except Exception:
+        return False
+
+
+def _build_affected_scope_footer(assessment: dict, sorted_clusters: list[dict], lead: dict) -> str:
+    """Append-only executive scope footer for infra/network/endpoint/users."""
+    scoped_clusters = [c for c in ([lead] + list(sorted_clusters[:8])) if isinstance(c, dict)]
+    rows: list[dict] = []
+    seen_rows: set[int] = set()
+    for cluster in scoped_clusters:
+        for row in _cluster_rows(cluster, assessment):
+            if not isinstance(row, dict):
+                continue
+            marker = id(row)
+            if marker in seen_rows:
+                continue
+            seen_rows.add(marker)
+            rows.append(row)
+            if len(rows) >= 400:
+                break
+        if len(rows) >= 400:
+            break
+    if not rows:
+        rows = [
+            row for row in (
+                assessment.get('evidence_rows')
+                or assessment.get('normalized_rows')
+                or assessment.get('rows')
+                or []
+            )
+            if isinstance(row, dict)
+        ][:400]
+
+    cloud_values: list[Any] = []
+    subnets: list[Any] = []
+    tiers: list[str] = []
+    data_stores: list[str] = []
+    external_ips: list[Any] = []
+    destinations: list[Any] = []
+    zones: list[Any] = []
+    hosts: list[Any] = []
+    processes: list[Any] = []
+    containment: list[Any] = []
+    users: list[Any] = []
+
+    for cluster in scoped_clusters:
+        users.extend(cluster.get('affected_accounts') or cluster.get('shared_users') or cluster.get('shared_accounts') or [])
+        hosts.extend(cluster.get('affected_assets') or cluster.get('shared_hosts') or [])
+        external_ips.extend(cluster.get('shared_ips') or [])
+        prefill = cluster.get('tier1_prefill') or {}
+        fragments = ((prefill.get('dread_narrative') or {}).get('fragments') or {})
+        if isinstance(fragments, dict):
+            fragment_text = ' '.join(_safe_text(v) for v in fragments.values())
+            lower_fragment = fragment_text.lower()
+            if 'backblaze' in lower_fragment:
+                destinations.append('Backblaze B2')
+                data_stores.append('object storage')
+            if 'mega.nz' in lower_fragment or 'mega ' in lower_fragment:
+                destinations.append('mega.nz')
+                data_stores.append('object storage')
+            if 'snowflake' in lower_fragment or 'copy into' in lower_fragment:
+                data_stores.append('database')
+            affected_fragment = _safe_text(fragments.get('affected_users') or '')
+            if affected_fragment:
+                for token in re.split(r'[:,]', affected_fragment, maxsplit=1)[-1].split(','):
+                    users.append(token.strip().strip('.'))
+            for token in re.findall(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b', fragment_text):
+                users.append(token)
+        diamond = prefill.get('diamond_model') or cluster.get('diamond_model') or {}
+        if isinstance(diamond, dict):
+            infra = diamond.get('infrastructure') or []
+            victims = diamond.get('victims') or []
+            for item in (infra if isinstance(infra, list) else [infra]):
+                if isinstance(item, dict):
+                    external_ips.append(item.get('ip') or item.get('address') or item.get('identity'))
+                    destinations.append(item.get('domain') or item.get('service') or item.get('label'))
+                else:
+                    destinations.append(item)
+            for item in (victims if isinstance(victims, list) else [victims]):
+                if isinstance(item, dict):
+                    users.append(item.get('identity') or item.get('user') or item.get('account'))
+                else:
+                    users.append(item)
+
+    for row in rows:
+        source_type = _safe_text(row.get('_source_type') or row.get('source_type') or row.get('source')).lower()
+        provider = row.get('cloud_provider') or row.get('provider') or row.get('account_id') or row.get('subscription_id')
+        if provider or source_type in {'cloud', 'aws', 'azure', 'gcp', 'snowflake'}:
+            cloud_values.append(provider or source_type.upper())
+        for key in ('subnet', 'subnet_id', 'src_ip_cidr24', 'dst_ip_cidr24', 'vpc_subnet', 'network_cidr'):
+            if row.get(key):
+                subnets.append(row.get(key))
+        for key in ('src_ip', 'source_ip', 'client_ip', 'remote_address', 'dst_ip', 'destination_ip', 'dest_ip', 'ip_dst'):
+            value = row.get(key)
+            if value and _is_public_ip_text(value):
+                external_ips.append(value)
+            elif value:
+                tiers.append('private tier')
+        text = ' '.join(_safe_text(row.get(k)) for k in (
+            'event_name', 'event_type', 'object', 'resource', 'bucket', 'database',
+            'table', 'service', 'operation', 'url', 'domain', 'dns_query',
+        )).lower()
+        if any(term in text for term in ('s3', 'bucket', 'object storage', 'blob', 'backblaze', 'mega.nz', 'wasabi')):
+            data_stores.append('object storage')
+        if any(term in text for term in ('snowflake', 'database', 'table', 'copy into', 'sql')):
+            data_stores.append('database')
+        if any(term in text for term in ('secret', 'key vault', 'secretsmanager')):
+            data_stores.append('secret store')
+        for key in ('domain', 'dns_query', 'sni', 'url', 'destination_domain', 'dst_domain'):
+            if row.get(key):
+                destinations.append(row.get(key))
+        for key in ('zone', 'network_zone', 'security_zone', 'vpc', 'vpc_id'):
+            if row.get(key):
+                zones.append(row.get(key))
+        for key in ('hostname', 'host', 'src_host', 'dest_host', 'dst_host', 'device_name', 'computer'):
+            if row.get(key):
+                hosts.append(row.get(key))
+        for key in ('process_name', 'process', 'image', 'exe', 'command_line'):
+            if row.get(key):
+                processes.append(row.get(key))
+        for key in ('containment_state', 'isolation_status', 'quarantine_status', 'action', 'status'):
+            if row.get(key):
+                containment.append(row.get(key))
+        for key in ('user_canonical', 'user_principal_name', 'userPrincipalName', 'username', 'user_name', 'account', 'actor', 'user', 'email'):
+            value = row.get(key)
+            if isinstance(value, dict):
+                value = value.get('alternateId') or value.get('login') or value.get('id') or value.get('email')
+            if value:
+                users.append(value)
+
+    if external_ips:
+        tiers.append('public tier')
+
+    infrastructure = '; '.join(filter(None, [
+        'Cloud: ' + ', '.join(_scope_uniq(cloud_values, 4)) if _scope_uniq(cloud_values, 4) else 'Cloud: not identified in available evidence',
+        'subnet: ' + ', '.join(_scope_uniq(subnets, 4)) if _scope_uniq(subnets, 4) else 'subnet: not identified',
+        'tier: ' + ', '.join(_scope_uniq(tiers, 3)) if _scope_uniq(tiers, 3) else 'tier: not identified',
+        'data: ' + ', '.join(_scope_uniq(data_stores, 4)) if _scope_uniq(data_stores, 4) else 'data: not identified',
+    ]))
+    network = '; '.join(filter(None, [
+        'external IPs: ' + ', '.join(_scope_uniq(external_ips, 8)) if _scope_uniq(external_ips, 8) else 'external IPs: not identified',
+        'C2/exfil destinations: ' + ', '.join(_scope_uniq(destinations, 8)) if _scope_uniq(destinations, 8) else 'C2/exfil destinations: not identified',
+        'zones: ' + ', '.join(_scope_uniq(zones, 4)) if _scope_uniq(zones, 4) else 'zones: not identified',
+    ]))
+    endpoint = '; '.join(filter(None, [
+        'hosts: ' + ', '.join(_scope_uniq(hosts, 8)) if _scope_uniq(hosts, 8) else 'hosts: not identified',
+        'processes: ' + ', '.join(_scope_uniq(processes, 6)) if _scope_uniq(processes, 6) else 'processes: not identified',
+        'containment: ' + ', '.join(_scope_uniq(containment, 4)) if _scope_uniq(containment, 4) else 'containment: not identified',
+    ]))
+    affected_users = ', '.join(_scope_uniq(users, 10)) or 'not identified in available evidence'
+
+    return (
+        f"Infrastructure: {infrastructure}\n"
+        f"Network: {network}\n"
+        f"Endpoint: {endpoint}\n"
+        f"Affected users: {affected_users}"
+    )
 
 
 _NOISY_INCIDENT_NAME_PREFIXES = (
@@ -1156,6 +1915,9 @@ class ExecSummaryRequest(BaseModel):
     deep: bool = False  # Tier 3 deep analysis (async background job)
     persona_llm: bool = False  # Rewrite each persona narrative via LLM
     persona_subset: Optional[list[str]] = None  # Limit to specified persona keys
+    # Audience calibration — controls attribution language and nexus sentence content
+    persona: str = 'ir'  # 'ir' | 'ciso' | 'board' | 'legal' | 'gc' | 'regulator'
+    context: str = ''    # '' | 'merger' | 'pentest' — suppresses/rewrites nexus block
 
 
 # ── E9: Kill-chain phase lookup (deterministic, zero LLM) ─────────────────────
@@ -1480,7 +2242,15 @@ async def get_executive_summary(
     ) if lead else None
 
     # Build the attack chain narrative (deterministic, evidence-specific, no LLM needed).
-    attack_chain_exec, attack_chain_provenance = _build_attack_chain_exec_summary(lead, assessment) if lead else ('', 'fallback')
+    # IMPORTANT: use _resolve_full_cluster so that tier1_prefill (DREAD, Diamond, PASTA, enriched
+    # llm_narrative) is present — without this _build_attack_chain_exec_summary returns empty.
+    attack_chain_exec, attack_chain_provenance, _nexus_confidence = (
+        _build_attack_chain_exec_summary(
+            _resolve_full_cluster(lead, assessment), assessment,
+            persona=body.persona, org_context=body.context,
+        )
+        if lead else ('', 'fallback', 'NONE')
+    )
 
     if lead and lead_verdict in {'VALIDATED_BREACH', 'CONFIRMED_INTRUSION', 'CONFIRMED_BREACH', 'LIKELY_BREACH'}:
         headline = f"Confirmed breach: {lead_name}"
@@ -1548,6 +2318,7 @@ async def get_executive_summary(
 
             raw_accounts = (
                 lead_prefill.get('affected_users')
+                or lead.get('shared_users')
                 or lead.get('shared_accounts')
                 or lead.get('affected_accounts')
                 or row_accounts
@@ -1557,6 +2328,7 @@ async def get_executive_summary(
             raw_ips = (
                 lead.get('shared_external_ips')
                 or lead.get('external_ips')
+                or lead.get('shared_ips')
                 or lead_prefill.get('source_ips')
                 or row_ips
             )
@@ -1688,6 +2460,12 @@ async def get_executive_summary(
                 context_parts.append(f"Data classes: {', '.join(data_classes[:4])}.")
             if record_est:
                 context_parts.append(f"Estimated records exfiltrated: {record_est:,}.")
+            # Inject assessment-level deterministic intelligence (external IPs, principal actors,
+            # external domains) as supplementary context so the LLM can name names even when
+            # enriched llm_narrative fields are sparse.
+            _det_exec = assessment.get('executive_summary', '')
+            if _det_exec and len(_det_exec) > 50:
+                context_parts.append(f"Assessment intelligence (use as additional context): {_det_exec[:700]}")
             if cloud_keys_str:
                 context_parts.append(f"Cloud access keys compromised: {cloud_keys_str}.")
 
@@ -1786,10 +2564,13 @@ async def get_executive_summary(
         from src.exec_summary.orchestrator import run_enriched_pipeline
 
         # Build per-cluster deterministic texts so the pipeline has a backbone
+        # Resolve each cluster so tier1_prefill is available to the humaniser
         det_texts: dict[str, str] = {}
         for c in sorted_clusters:
             cid = str(c.get('cluster_id', ''))
-            txt, _prov = _build_attack_chain_exec_summary(c, assessment)
+            txt, _prov, _ = _build_attack_chain_exec_summary(
+                _resolve_full_cluster(c, assessment), assessment
+            )
             if txt:
                 det_texts[cid] = txt
 
@@ -1816,6 +2597,97 @@ async def get_executive_summary(
     except Exception as _pipe_err:
         logger.warning('enriched exec-summary pipeline failed: %s — using legacy result', _pipe_err)
 
+    # ── Deterministic postscript: always append compliance + state-nexus + business consequence
+    # regardless of whether the main executive_summary came from the LLM or deterministic path.
+    _assess_exec_text_ps = _safe_text(assessment.get('executive_summary', '')).strip()
+    _ps_compliance_map: dict[str, int] = {}
+    _ps_ext_domains: list[str] = []
+    _ps_principal_actors: list[str] = []
+    if _assess_exec_text_ps:
+        import re as _re_ps
+        for _cnt, _fw in _re_ps.findall(r'(\d+)\s+(apra_cps234|asd_ism|essential_eight|iso27001|nist_800_53|nist_csf)\s+control', _assess_exec_text_ps):
+            _ps_compliance_map[_fw] = int(_cnt)
+        _dm = _re_ps.search(r'External destinations?:\s*([^;\n]+?)(?:\.\s+[A-Z]|\.$|\n|$)', _assess_exec_text_ps)
+        if _dm:
+            _ps_ext_domains = [x.strip().rstrip('.') for x in _dm.group(1).split(',') if x.strip()][:4]
+        _am = _re_ps.search(r'Principal actors?:\s*([^\.]+?)(?:\.\s+[A-Z]|\.$|Source infra|External)', _assess_exec_text_ps)
+        if _am:
+            _ps_principal_actors = [a.strip() for a in _am.group(1).split(',') if a.strip()][:8]
+
+    _postscript_parts: list[str] = []
+
+    # State-nexus / cross-border movement indicator (generalised, persona-aware)
+    _ps_nexus = _classify_nexus(_ps_ext_domains, _ps_principal_actors, [])
+    _ps_nexus_sent = _nexus_sentence(_ps_nexus, persona=body.persona, org_context=body.context)
+    if _ps_nexus_sent:
+        _postscript_parts.append(_ps_nexus_sent)
+
+    # Business consequence + control gaps (postscript fallback — only fires if not already in main text)
+    _pivot_lower = executive_summary.lower()
+    _ctrl_gaps_ps = []
+    if 'assumerole' in _pivot_lower or 'assume role' in _pivot_lower or 'assumed a higher-privilege' in _pivot_lower:
+        _ctrl_gaps_ps.append('cloud accounts were not restricted to minimum required permissions (AWS AssumeRole least-privilege boundary absent)')
+    if _ps_ext_domains:
+        _ctrl_gaps_ps.append(f"outbound data transfers were not blocked to {', '.join(_ps_ext_domains[:2])} (DLP controls absent)")
+    if not _ctrl_gaps_ps:
+        _ctrl_gaps_ps.append('the attacker escalated privileges and moved between systems without restriction (privilege escalation and lateral movement controls absent)')
+    _postscript_parts.append(
+        f"What this means for the organisation: The attacker gained and maintained access across "
+        f"multiple systems without detection. "
+        f"Security controls that failed: {'; '.join(_ctrl_gaps_ps)}."
+    )
+
+    # Compliance control failures
+    if _ps_compliance_map:
+        _fw_labels = {
+            'apra_cps234': 'APRA CPS234',
+            'asd_ism': 'ASD ISM',
+            'essential_eight': 'ASD Essential Eight',
+            'iso27001': 'ISO 27001',
+            'nist_800_53': 'NIST 800-53',
+            'nist_csf': 'NIST CSF',
+        }
+        _fw_parts = [
+            f"{_fw_labels.get(fw, fw)} ({cnt} control{'s' if cnt > 1 else ''})"
+            for fw, cnt in sorted(_ps_compliance_map.items(), key=lambda x: -x[1])
+        ]
+        _proposed_ps = assessment.get('proposed_actions') or []
+        _has_ndb = any('NDB' in str(a.get('description', '')) for a in _proposed_ps)
+        _ndb_clause = ' The NDB Scheme 72-hour mandatory breach notification clock is running.' if _has_ndb else ''
+        _postscript_parts.append(
+            f"Regulatory impact: This breach has triggered failures against {', '.join(_fw_parts)}.{_ndb_clause}"
+        )
+
+    # Only append postscript sections that are not already present in the text
+    _es_lower = executive_summary.lower()
+    _filtered_postscript: list[str] = []
+    for _ps_part in _postscript_parts:
+        # Detect which section this is and whether it's already covered
+        _ps_lower = _ps_part.lower()
+        if ('state-nexus' in _ps_lower or 'cross-border movement' in _ps_lower or
+                'foreign data movement' in _ps_lower or 'legal review required' in _ps_lower) and (
+                'state-nexus' in _es_lower or 'cross-border' in _es_lower or
+                'foreign data movement' in _es_lower or 'legal review required' in _es_lower):
+            continue  # already included by deterministic path
+        # Match both old ('business consequence') and new ('what this means') phrasing
+        _biz_in_ps = 'business consequence' in _ps_lower or 'what this means' in _ps_lower
+        _biz_in_es = 'business consequence' in _es_lower or 'what this means' in _es_lower
+        if _biz_in_ps and _biz_in_es:
+            continue
+        # Match both old ('compliance control') and new ('regulatory impact') phrasing
+        _comp_in_ps = 'compliance control' in _ps_lower or 'regulatory impact' in _ps_lower
+        _comp_in_es = 'compliance control' in _es_lower or 'regulatory impact' in _es_lower
+        if _comp_in_ps and _comp_in_es:
+            continue
+        _filtered_postscript.append(_ps_part)
+    if _filtered_postscript:
+        executive_summary = executive_summary.rstrip() + ' ' + ' '.join(_filtered_postscript)
+
+    if 'infrastructure:' not in executive_summary.lower() or 'affected users:' not in executive_summary.lower():
+        _scope_footer = _build_affected_scope_footer(assessment, sorted_clusters, lead)
+        if _scope_footer.strip():
+            executive_summary = executive_summary.rstrip() + '\n\n' + _scope_footer
+
     result = {
         'headline': headline,
         'subline': subline,
@@ -1823,6 +2695,9 @@ async def get_executive_summary(
         'deterministic': deterministic,
         'llm_color': llm_color,
         'model_used': body.model,
+        'attribution_confidence': _nexus_confidence,
+        'persona': body.persona,
+        'org_context': body.context,
         'generated_at': int(time.time()),
         'from_cache': False,
         'narrative_provenance': attack_chain_provenance if not _llm_ran else f'llm_{body.model}',
