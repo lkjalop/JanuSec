@@ -16,6 +16,7 @@ Two public entry points:
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone, timedelta
 from typing import Any
 
 
@@ -227,6 +228,96 @@ _TECHNIQUE_TO_CONTROLS: dict[str, list[dict]] = {
          'failure_type': 'PREVENTIVE_FAILED', 'severity': 'high', 'remediation_priority': 'P1'},
         {'framework': 'nist_csf', 'control_id': 'DE.CM-01', 'control_name': 'Networks and network services are monitored',
          'failure_type': 'DETECTIVE_FAILED', 'severity': 'moderate', 'remediation_priority': 'P2'},
+    ],
+
+    # ── Phishing (T1566) — spear-phishing attachment/link
+    'T1566': [
+        {'framework': 'iso27001', 'control_id': 'A.6.3', 'control_name': 'Information security awareness, education and training',
+         'failure_type': 'PREVENTIVE_FAILED', 'severity': 'high', 'remediation_priority': 'P1'},
+        {'framework': 'iso27001', 'control_id': 'A.8.7', 'control_name': 'Protection against malware',
+         'failure_type': 'PREVENTIVE_FAILED', 'severity': 'high', 'remediation_priority': 'P1'},
+        {'framework': 'nist_csf', 'control_id': 'PR.AT-01', 'control_name': 'Personnel are informed and trained',
+         'failure_type': 'PREVENTIVE_FAILED', 'severity': 'high', 'remediation_priority': 'P1'},
+        {'framework': 'essential_eight', 'control_id': 'E5', 'control_name': 'User application hardening',
+         'failure_type': 'PREVENTIVE_FAILED', 'severity': 'high', 'remediation_priority': 'P2'},
+        {'framework': 'nist_800_53', 'control_id': 'AT-2', 'control_name': 'Literacy Training and Awareness',
+         'failure_type': 'PREVENTIVE_FAILED', 'severity': 'medium', 'remediation_priority': 'P2'},
+    ],
+
+    # ── Exploit Public-Facing Application (T1190)
+    'T1190': [
+        {'framework': 'iso27001', 'control_id': 'A.8.8', 'control_name': 'Management of technical vulnerabilities',
+         'failure_type': 'PREVENTIVE_FAILED', 'severity': 'critical', 'remediation_priority': 'P1'},
+        {'framework': 'iso27001', 'control_id': 'A.8.20', 'control_name': 'Networks security',
+         'failure_type': 'PREVENTIVE_FAILED', 'severity': 'high', 'remediation_priority': 'P1'},
+        {'framework': 'nist_csf', 'control_id': 'ID.RA-01', 'control_name': 'Vulnerabilities in assets are identified, validated, and recorded',
+         'failure_type': 'PREVENTIVE_FAILED', 'severity': 'critical', 'remediation_priority': 'P1'},
+        {'framework': 'essential_eight', 'control_id': 'E7', 'control_name': 'Patch applications',
+         'failure_type': 'PREVENTIVE_FAILED', 'severity': 'critical', 'remediation_priority': 'P1'},
+        {'framework': 'asd_ism', 'control_id': 'ISM-1698', 'control_name': 'Internet-facing services patching',
+         'failure_type': 'CONTROL_ABSENT', 'severity': 'critical', 'remediation_priority': 'P1'},
+        {'framework': 'nist_800_53', 'control_id': 'SI-2', 'control_name': 'Flaw Remediation',
+         'failure_type': 'PREVENTIVE_FAILED', 'severity': 'critical', 'remediation_priority': 'P1'},
+    ],
+
+    # ── Data Encrypted for Impact / Ransomware (T1486)
+    'T1486': [
+        {'framework': 'iso27001', 'control_id': 'A.8.13', 'control_name': 'Information backup',
+         'failure_type': 'RECOVERY_FAILED', 'severity': 'critical', 'remediation_priority': 'P1'},
+        {'framework': 'iso27001', 'control_id': 'A.8.7', 'control_name': 'Protection against malware',
+         'failure_type': 'DETECTIVE_FAILED', 'severity': 'critical', 'remediation_priority': 'P1'},
+        {'framework': 'nist_csf', 'control_id': 'RC.RP-01', 'control_name': 'Recovery plan is executed during or after a cybersecurity incident',
+         'failure_type': 'RECOVERY_FAILED', 'severity': 'critical', 'remediation_priority': 'P1'},
+        {'framework': 'essential_eight', 'control_id': 'E4', 'control_name': 'Configure Microsoft Office macro settings',
+         'failure_type': 'PREVENTIVE_FAILED', 'severity': 'high', 'remediation_priority': 'P2'},
+        {'framework': 'nist_800_53', 'control_id': 'CP-9', 'control_name': 'System Backup',
+         'failure_type': 'RECOVERY_FAILED', 'severity': 'critical', 'remediation_priority': 'P1'},
+    ],
+
+    # ── User Execution (T1204) — malicious file/link execution
+    'T1204': [
+        {'framework': 'iso27001', 'control_id': 'A.6.3', 'control_name': 'Information security awareness, education and training',
+         'failure_type': 'PREVENTIVE_FAILED', 'severity': 'high', 'remediation_priority': 'P2'},
+        {'framework': 'iso27001', 'control_id': 'A.8.7', 'control_name': 'Protection against malware',
+         'failure_type': 'PREVENTIVE_FAILED', 'severity': 'high', 'remediation_priority': 'P1'},
+        {'framework': 'nist_csf', 'control_id': 'PR.AT-01', 'control_name': 'Personnel are informed and trained',
+         'failure_type': 'PREVENTIVE_FAILED', 'severity': 'high', 'remediation_priority': 'P2'},
+        {'framework': 'essential_eight', 'control_id': 'E5', 'control_name': 'User application hardening',
+         'failure_type': 'PREVENTIVE_FAILED', 'severity': 'high', 'remediation_priority': 'P1'},
+        {'framework': 'nist_800_53', 'control_id': 'SI-3', 'control_name': 'Malicious Code Protection',
+         'failure_type': 'DETECTIVE_FAILED', 'severity': 'high', 'remediation_priority': 'P1'},
+    ],
+
+    # ── External Remote Services (T1133) — VPN/RDP/Citrix without MFA
+    'T1133': [
+        {'framework': 'iso27001', 'control_id': 'A.8.5', 'control_name': 'Secure authentication',
+         'failure_type': 'PREVENTIVE_FAILED', 'severity': 'high', 'remediation_priority': 'P1'},
+        {'framework': 'iso27001', 'control_id': 'A.8.20', 'control_name': 'Networks security',
+         'failure_type': 'PREVENTIVE_FAILED', 'severity': 'high', 'remediation_priority': 'P1'},
+        {'framework': 'nist_csf', 'control_id': 'PR.AA-03', 'control_name': 'Users, services, and hardware are authenticated',
+         'failure_type': 'PREVENTIVE_FAILED', 'severity': 'high', 'remediation_priority': 'P1'},
+        {'framework': 'essential_eight', 'control_id': 'E3', 'control_name': 'Multi-factor authentication',
+         'failure_type': 'PREVENTIVE_FAILED', 'severity': 'high', 'remediation_priority': 'P1'},
+        {'framework': 'asd_ism', 'control_id': 'ISM-1504', 'control_name': 'Phishing-resistant MFA for privileged users',
+         'failure_type': 'CONTROL_ABSENT', 'severity': 'high', 'remediation_priority': 'P1'},
+        {'framework': 'nist_800_53', 'control_id': 'IA-2(1)', 'control_name': 'Multi-Factor Authentication to Privileged Accounts',
+         'failure_type': 'PREVENTIVE_FAILED', 'severity': 'high', 'remediation_priority': 'P1'},
+    ],
+
+    # ── Server Software Component: Web Shell (T1505.003)
+    'T1505.003': [
+        {'framework': 'iso27001', 'control_id': 'A.8.8', 'control_name': 'Management of technical vulnerabilities',
+         'failure_type': 'PREVENTIVE_FAILED', 'severity': 'critical', 'remediation_priority': 'P1'},
+        {'framework': 'iso27001', 'control_id': 'A.8.16', 'control_name': 'Monitoring activities',
+         'failure_type': 'DETECTIVE_FAILED', 'severity': 'critical', 'remediation_priority': 'P1'},
+        {'framework': 'nist_csf', 'control_id': 'DE.CM-01', 'control_name': 'Networks and network services are monitored',
+         'failure_type': 'DETECTIVE_FAILED', 'severity': 'critical', 'remediation_priority': 'P1'},
+        {'framework': 'essential_eight', 'control_id': 'E7', 'control_name': 'Patch applications',
+         'failure_type': 'PREVENTIVE_FAILED', 'severity': 'critical', 'remediation_priority': 'P1'},
+        {'framework': 'asd_ism', 'control_id': 'ISM-1806', 'control_name': 'Web server integrity monitoring',
+         'failure_type': 'DETECTIVE_FAILED', 'severity': 'critical', 'remediation_priority': 'P1'},
+        {'framework': 'nist_800_53', 'control_id': 'SI-7', 'control_name': 'Software, Firmware, and Information Integrity',
+         'failure_type': 'DETECTIVE_FAILED', 'severity': 'critical', 'remediation_priority': 'P1'},
     ],
 
     # ── Command and Control: Application Layer Protocol (T1071 / T1071.001 / T1071.004)
@@ -918,6 +1009,7 @@ def build_control_failure_register(narrative: dict,
     critical = sum(1 for c in all_controls if c['severity'] == 'critical')
     tightest = min((t['clock_seconds'] for t in triggers), default=0)
 
+    earliest_ts: float | None = None
     if evidence_rows:
         tech_to_rows: dict[str, list[int]] = {}
         for r in evidence_rows:
@@ -929,11 +1021,31 @@ def build_control_failure_register(narrative: dict,
                 row_techs = [row_techs]
             for t in row_techs:
                 tech_to_rows.setdefault(str(t).upper(), []).append(int(ridx))
+            # Track earliest row timestamp for notification deadline calculation
+            for ts_field in ('ts', 'timestamp', 'event_time', '@timestamp', 'eventTime'):
+                val = r.get(ts_field)
+                if val:
+                    try:
+                        ts_f = float(val) if val < 1e12 else float(val) / 1000.0
+                        if earliest_ts is None or ts_f < earliest_ts:
+                            earliest_ts = ts_f
+                        break
+                    except (TypeError, ValueError):
+                        pass
         for c in all_controls:
             evrefs: list[int] = []
             for t in c.get('triggered_by', []):
                 evrefs.extend(tech_to_rows.get(t, []))
             c['evidence_refs'] = sorted(set(evrefs))
+
+    # Attach computed notification deadlines to each regulatory trigger
+    for trig in triggers:
+        clock = trig.get('clock_seconds', 0)
+        if earliest_ts and clock:
+            deadline_dt = datetime.fromtimestamp(earliest_ts, tz=timezone.utc) + timedelta(seconds=clock)
+            trig['notification_deadline_utc'] = deadline_dt.strftime('%Y-%m-%dT%H:%M:%SZ')
+        else:
+            trig['notification_deadline_utc'] = None
 
     return {
         'mitre_techniques': techniques,

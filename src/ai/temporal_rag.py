@@ -49,13 +49,14 @@ _RECENCY_WEIGHT: float = float(os.getenv("TEMPORAL_RAG_RECENCY_WEIGHT", "0.3"))
 # Corpus entry
 # ---------------------------------------------------------------------------
 class _Entry:
-    __slots__ = ("embedding", "row", "ts", "text")
+    __slots__ = ("embedding", "row", "ts", "text", "tokens")
 
     def __init__(self, text: str, row: dict, ts: float, embedding: list[float] | None):
         self.text = text
         self.row = row
         self.ts = ts
         self.embedding = embedding
+        self.tokens: list[str] | None = None  # cached lazily on first BM25 query
 
 
 # ---------------------------------------------------------------------------
@@ -95,12 +96,18 @@ def _cosine_similarity(a: list[float], b: list[float]) -> float:
     return dot / (mag_a * mag_b)
 
 
+_ROW_TEXT_FIELDS = (
+    "entity", "description", "event_type", "action", "user",
+    "ip", "domain", "process", "file_hash", "severity",
+    "factors", "threat_name", "source", "domain_name",
+    "mitre_technique", "factor_tags", "kill_chain_phase",
+)
+
+
 def _row_to_text(row: dict) -> str:
     """Convert an evidence row to a short text blob suitable for embedding."""
     parts = []
-    for field in ("entity", "description", "event_type", "action", "user",
-                   "ip", "domain", "process", "file_hash", "severity",
-                   "factors", "threat_name", "source", "domain_name"):
+    for field in _ROW_TEXT_FIELDS:
         val = row.get(field)
         if val is None:
             continue
@@ -150,10 +157,11 @@ class TemporalRAGEngine:
         self._ollama_client: Any = None
 
     # -- Corpus access -------------------------------------------------------
-    def corpus(self, tenant: str = "default") -> TemporalCorpus:
-        if tenant not in self._corpora:
-            self._corpora[tenant] = TemporalCorpus()
-        return self._corpora[tenant]
+    def corpus(self, tenant: str = "default", assessment_id: str | None = None) -> TemporalCorpus:
+        key = f"{tenant}:{assessment_id}" if assessment_id else tenant
+        if key not in self._corpora:
+            self._corpora[key] = TemporalCorpus()
+        return self._corpora[key]
 
     # -- Ollama probe --------------------------------------------------------
     def _get_ollama_client(self) -> Any | None:
@@ -205,9 +213,10 @@ class TemporalRAGEngine:
         rows: list[dict],
         tenant: str = "default",
         ts_override: float | None = None,
+        assessment_id: str | None = None,
     ) -> int:
         """Embed and store evidence rows in the tenant corpus. Returns indexed count."""
-        corp = self.corpus(tenant)
+        corp = self.corpus(tenant, assessment_id)
         indexed = 0
         now = ts_override or time.time()
         for row in rows:
@@ -231,14 +240,20 @@ class TemporalRAGEngine:
         top_k: int = _DEFAULT_TOP_K,
         window_seconds: int = _WINDOW_SECONDS,
         recency_weight: float = _RECENCY_WEIGHT,
+        assessment_id: str | None = None,
+        mode: str = "live",
     ) -> list[dict]:
         """Return top_k most relevant evidence rows from the tenant corpus.
 
         Scoring = (1 - recency_weight) * semantic_score + recency_weight * recency_score
         Falls back to BM25 when embeddings are unavailable.
+        mode='live' applies the time window; mode='historical' uses all entries.
         """
-        corp = self.corpus(tenant)
-        candidates = corp.entries_in_window(window_seconds) or corp.all_entries()
+        corp = self.corpus(tenant, assessment_id)
+        if mode == "historical":
+            candidates = corp.all_entries()
+        else:
+            candidates = corp.entries_in_window(window_seconds) or corp.all_entries()
         if not candidates:
             return []
 
@@ -255,8 +270,9 @@ class TemporalRAGEngine:
             if use_embed and entry.embedding:
                 sem = _cosine_similarity(query_embedding, entry.embedding)
             elif query_tokens:
-                entry_tokens = _tokenize(entry.text)
-                raw_bm25 = _bm25_score(query_tokens, entry_tokens)
+                if entry.tokens is None:
+                    entry.tokens = _tokenize(entry.text)
+                raw_bm25 = _bm25_score(query_tokens, entry.tokens)
                 sem = min(1.0, raw_bm25 / 10.0)  # normalise to ~[0,1]
             else:
                 sem = 0.5
@@ -274,9 +290,14 @@ class TemporalRAGEngine:
         tenant: str = "default",
         top_k: int = _DEFAULT_TOP_K,
         window_seconds: int = _WINDOW_SECONDS,
+        assessment_id: str | None = None,
+        mode: str = "live",
     ) -> dict:
         """Return a structured context block ready for LLM prompt injection."""
-        neighbours = self.query(query_text, tenant=tenant, top_k=top_k, window_seconds=window_seconds)
+        neighbours = self.query(
+            query_text, tenant=tenant, top_k=top_k,
+            window_seconds=window_seconds, assessment_id=assessment_id, mode=mode,
+        )
         if not neighbours:
             return {
                 "rag_available": False,

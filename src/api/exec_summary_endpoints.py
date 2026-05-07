@@ -134,6 +134,12 @@ def _lead_dread(cluster: dict) -> tuple[dict, dict, bool]:
     return dn, frags, has_dread
 
 
+def _has_dread_fragments(prefill: dict | None) -> bool:
+    if not prefill or not isinstance(prefill, dict):
+        return False
+    return bool((prefill.get('dread_narrative') or {}).get('fragments'))
+
+
 def _resolve_full_cluster(cluster: dict, assessment: dict) -> dict:
     """
     Return the full correlation_cluster entry that corresponds to *cluster*.
@@ -143,18 +149,18 @@ def _resolve_full_cluster(cluster: dict, assessment: dict) -> dict:
     cid = cluster.get('cluster_id') or cluster.get('id')
     if not cid:
         return cluster
-    for c in (assessment.get('correlation_clusters') or []):
-        if (c.get('cluster_id') or c.get('id')) == cid:
-            # Prefer the correlation_cluster if it has richer prefill data
-            if c.get('tier1_prefill') and not cluster.get('tier1_prefill'):
-                return c
-            if c.get('tier1_prefill') and c.get('tier1_prefill') != cluster.get('tier1_prefill'):
-                # Use whichever has the dread_narrative fragments
-                dn_c = (c.get('tier1_prefill') or {}).get('dread_narrative') or {}
-                dn_cl = (cluster.get('tier1_prefill') or {}).get('dread_narrative') or {}
-                if dn_c.get('fragments') and not dn_cl.get('fragments'):
-                    return c
-            return cluster
+    # Build O(1) lookup instead of re-iterating
+    cluster_map = {
+        (c.get('cluster_id') or c.get('id')): c
+        for c in (assessment.get('correlation_clusters') or [])
+    }
+    c = cluster_map.get(cid)
+    if c is None:
+        return cluster
+    cluster_has_frags = _has_dread_fragments(cluster.get('tier1_prefill'))
+    c_has_frags = _has_dread_fragments(c.get('tier1_prefill'))
+    if c_has_frags and not cluster_has_frags:
+        return c
     return cluster
 
 
@@ -2544,6 +2550,8 @@ async def get_executive_summary(
             if llm_text and len(llm_text) > 30 and not llm_text.startswith('{'):
                 executive_summary = llm_text
                 _llm_ran = True
+                if not _extract_row_refs_from_text(llm_text):
+                    logger.warning('exec_summary: LLM output contains no row references — may be ungrounded')
         except asyncio.TimeoutError:
             logger.warning('exec_summary LLM timed out after %ss — using deterministic fallback', _LLM_TIMEOUT)
         except Exception as _llm_err:
@@ -2692,6 +2700,7 @@ async def get_executive_summary(
         'headline': headline,
         'subline': subline,
         'executive_summary': executive_summary,
+        'grounded': bool(_extract_row_refs_from_text(executive_summary)),
         'deterministic': deterministic,
         'llm_color': llm_color,
         'model_used': body.model,

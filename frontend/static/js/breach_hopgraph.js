@@ -42,7 +42,7 @@
     }
     function _addEdge(a, b) {
       if (!a || !b || a === b) return;
-      var k = a < b ? a + '||' + b : b + '||' + a;
+      var k = a + '||' + b;  // directed: preserve source→target order
       if (!edgeMap[k]) edgeMap[k] = { source: a, target: b, count: 0 };
       edgeMap[k].count++;
     }
@@ -130,9 +130,17 @@
       if (c1 && c2 && nodes[c2]) nodes[c2]._travel = flag.verdict;
     });
 
+    // Type-aware node budget: cap per type so no single category floods the graph
+    var TYPE_BUDGET = { actor: 10, ip: 8, process: 6, resource: 8, technique: 6, geo: 6 };
+    var typeCounts = {};
     var sortedNodes = Object.values(nodes)
       .sort(function (a, b) { return b.count - a.count; })
-      .slice(0, 20);
+      .filter(function (n) {
+        var budget = TYPE_BUDGET[n.type] || 4;
+        typeCounts[n.type] = (typeCounts[n.type] || 0) + 1;
+        return typeCounts[n.type] <= budget;
+      })
+      .slice(0, 40);
     var nodeIds = new Set(sortedNodes.map(function (n) { return n.id; }));
     var edges = Object.values(edgeMap)
       .filter(function (e) { return nodeIds.has(e.source) && nodeIds.has(e.target); });
@@ -186,6 +194,20 @@
       .style('background', 'rgba(255,255,255,0.02)')
       .style('border-radius', '4px');
 
+    // Arrow marker for directed edges
+    svg.append('defs').append('marker')
+      .attr('id', 'hopgraph-arrow')
+      .attr('viewBox', '0 -4 8 8')
+      .attr('refX', 14)
+      .attr('refY', 0)
+      .attr('markerWidth', 5)
+      .attr('markerHeight', 5)
+      .attr('orient', 'auto')
+      .append('path')
+        .attr('d', 'M0,-4L8,0L0,4')
+        .attr('fill', '#888')
+        .attr('fill-opacity', '0.6');
+
     var sim = d3.forceSimulation(graph.nodes)
       .force('link', d3.forceLink(graph.edges).id(function (d) { return d.id; }).distance(70).strength(0.6))
       .force('charge', d3.forceManyBody().strength(-140))
@@ -195,7 +217,8 @@
     var link = svg.append('g').attr('stroke-opacity', '0.3')
       .selectAll('line').data(graph.edges).enter().append('line')
       .attr('stroke', '#888')
-      .attr('stroke-width', function (d) { return Math.min(3, 0.5 + d.count * 0.5); });
+      .attr('stroke-width', function (d) { return Math.min(3, 0.5 + d.count * 0.5); })
+      .attr('marker-end', 'url(#hopgraph-arrow)');
 
     var nodeG = svg.append('g')
       .selectAll('g').data(graph.nodes).enter().append('g')
@@ -211,10 +234,14 @@
           d.fx = null; d.fy = null;
         }));
 
-    // Fix 7 — Pin exfil-destination nodes with high-visibility style
-    var _EXFIL_RE = /mega\.nz|backblaze|b2\.backblazeb2|hetzner|AS24940|31\.216\.148|s3:\/\//i;
+    // Pin exfil-destination nodes: use cluster.shared_external_ips when available,
+    // fall back to a hardcoded pattern for well-known exfil services
+    var _exfilIpSet = new Set((cluster && cluster.shared_external_ips) || []);
+    var _EXFIL_FALLBACK_RE = /mega\.nz|backblaze|b2\.backblazeb2|hetzner|AS24940|31\.216\.148|s3:\/\//i;
     graph.nodes.forEach(function (d) {
-      d._isExfil = _EXFIL_RE.test(d.id) || _EXFIL_RE.test(d.label);
+      d._isExfil = _exfilIpSet.size > 0
+        ? (_exfilIpSet.has(d.id) || _exfilIpSet.has(d.label))
+        : (_EXFIL_FALLBACK_RE.test(d.id) || _EXFIL_FALLBACK_RE.test(d.label));
     });
 
     nodeG.append('circle')
