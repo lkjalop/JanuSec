@@ -1731,20 +1731,15 @@
       btn.disabled = true;
       btn.textContent = 'Generating… (~8s)';
 
-      // Gather completed evidence refs from expanded steps
-      var completedRefs = [];
+      // All steps expanded = analyst reviewed all cluster evidence
+      var completedRefs = (_ctx.cluster && _ctx.cluster.row_refs)
+        ? _ctx.cluster.row_refs.map(Number).filter(function (n) { return !isNaN(n); })
+        : [];
       var completedTitles = [];
       document.querySelectorAll('.bct-step').forEach(function (s) {
         if (s.dataset.expanded === 'true') {
           var titleEl = s.querySelector('.bct-step__title');
           if (titleEl) completedTitles.push(titleEl.textContent.trim());
-          var refsEl = s.querySelector('.bct-step__refs');
-          if (refsEl) {
-            refsEl.textContent.replace(/\d+/g, function (n) {
-              completedRefs.push(parseInt(n, 10));
-              return n;
-            });
-          }
         }
       });
 

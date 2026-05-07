@@ -67,13 +67,12 @@ def build_narrator_prompt(
         sections.append(previous_narrative[:1000])
         sections.append("")
 
-    # Kill chain timeline (Fix 4: causal order instead of bullets)
     if kill_chain:
         sections.append(f"## Kill Chain (causal order, Cycle {cycle})")
         for p in kill_chain:
             ts_str = p.timestamp.strftime("%Y-%m-%d %H:%M") if hasattr(p, 'timestamp') else "unknown"
-            rows_str = str(p.evidence_row_ids[:3]) if p.evidence_row_ids else "[]"
-            mitre_str = ", ".join(p.mitre_techniques[:3]) if p.mitre_techniques else "N/A"
+            rows_str = str(p.evidence_row_ids[:8]) if p.evidence_row_ids else "[]"
+            mitre_str = ", ".join(p.mitre_techniques[:8]) if p.mitre_techniques else "N/A"
             sections.append(
                 f"{ts_str} | {p.phase} | {p.actor} | "
                 f"{p.action[:150]} | rows {rows_str} | MITRE {mitre_str}"
@@ -135,8 +134,15 @@ def compute_aggregate_confidence(
     # Gap penalty: each gap reduces confidence by ~0.05, max 0.3
     gap_count = len(gaps) if gaps else 0
     gap_penalty = min(gap_count * 0.05, 0.3)
+    result = base - gap_penalty
 
-    return max(round(base - gap_penalty, 3), 0.0)
+    # Apply per-gap confidence caps (e.g. missing forensic evidence hard-caps at 0.6)
+    if gaps:
+        caps = [g.confidence_cap for g in gaps if hasattr(g, 'confidence_cap') and g.confidence_cap is not None]
+        if caps:
+            result = min(result, min(caps))
+
+    return max(round(result, 3), 0.0)
 
 
 def collect_compliance_controls(

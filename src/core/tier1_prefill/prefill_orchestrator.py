@@ -2131,6 +2131,19 @@ def run_single_cluster_prefill(
                     orig[key] = cluster.get(key)
             break
 
+    # Build control failure register now that prefill data is populated
+    try:
+        from src.analysis.framework_mapper import build_control_failure_register
+        from .evidence_binder import _get_rows_for_cluster as _grfc
+        _narrative = cluster.get('llm_narrative') or {}
+        _rows = _grfc(cluster, assessment)
+        _entity_ctx = assessment.get('entity_context') or {}
+        cluster['control_failure_register'] = build_control_failure_register(
+            _narrative, evidence_rows=_rows, entity_context=_entity_ctx, cluster=cluster
+        )
+    except Exception as _cfr_err:
+        logger.warning('run_single_cluster_prefill: control_failure_register failed %s: %s', cluster_id, _cfr_err)
+
     return {
         'status': result.get('status'),
         'cluster_id': cluster_id,
