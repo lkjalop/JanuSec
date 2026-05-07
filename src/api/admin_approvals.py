@@ -51,7 +51,7 @@ class PolicyIn(BaseModel):
 def create_policy(payload: PolicyIn, _=Depends(require_admin)):
     try:
         approval_repo.save_policy(payload.name, payload.action_pattern, payload.n_required, payload.m_total, payload.approver_pool, payload.scope, payload.enabled)
-        return {'ok': True, 'policy': payload.dict()}
+        return {'ok': True, 'policy': payload.model_dump()}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

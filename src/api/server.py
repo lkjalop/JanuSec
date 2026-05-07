@@ -14,6 +14,8 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse
 from src.security.auth import require_scopes, require_api_key
 from .app import app, create_app
+from src.api.background_registry import get_background_manager
+from src.api.router_registry import include_router_specs
 
 logger = logging.getLogger(__name__)  # auto-added by instrument_silent_excepts
 
@@ -37,62 +39,43 @@ except Exception:  # pragma: no cover - optional dependency in some test modes
     get_tools_for_domain = None  # type: ignore
     get_logs_for_mitre = None  # type: ignore
     build_collection_playbook = None  # type: ignore
-try:  # Attempt to include new compliance coverage router
+_early_router_specs = []
+try:
     from .compliance_coverage_endpoints import router as _cov_router
-    try:
-        app.include_router(_cov_router)
-    except Exception as _exc:
-        logger.debug('silent_swallow at %s:%d: %s', __file__, 41, _exc)
+    _early_router_specs.append(('compliance_coverage', _cov_router))
 except Exception as _exc:
     logger.debug('silent_swallow at %s:%d: %s', __file__, 43, _exc)
-try:  # Attempt to include enrichment endpoints (KEV/EPSS)
+try:
     from .enrichment_endpoints import router as _enrich_router
-    try:
-        app.include_router(_enrich_router)
-    except Exception as _exc:
-        logger.debug('silent_swallow at %s:%d: %s', __file__, 49, _exc)
+    _early_router_specs.append(('enrichment', _enrich_router))
 except Exception as _exc:
     logger.debug('silent_swallow at %s:%d: %s', __file__, 51, _exc)
-try:  # Email security (headers + typosquat)
+try:
     from .email_security_endpoints import router as _email_sec_router
-    try:
-        app.include_router(_email_sec_router)
-    except Exception as _exc:
-        logger.debug('silent_swallow at %s:%d: %s', __file__, 57, _exc)
+    _early_router_specs.append(('email_security', _email_sec_router))
 except Exception as _exc:
     logger.debug('silent_swallow at %s:%d: %s', __file__, 59, _exc)
 try:
     from .typosquat_endpoints import router as _typo_router
-    try:
-        app.include_router(_typo_router)
-    except Exception as _exc:
-        logger.debug('silent_swallow at %s:%d: %s', __file__, 65, _exc)
+    _early_router_specs.append(('typosquat', _typo_router))
 except Exception as _exc:
     logger.debug('silent_swallow at %s:%d: %s', __file__, 67, _exc)
-try:  # Threat hunting DSL
+try:
     from .hunt_endpoints import router as _hunt_router
-    try:
-        app.include_router(_hunt_router)
-    except Exception as _exc:
-        logger.debug('silent_swallow at %s:%d: %s', __file__, 73, _exc)
+    _early_router_specs.append(('hunt', _hunt_router))
 except Exception as _exc:
     logger.debug('silent_swallow at %s:%d: %s', __file__, 75, _exc)
-try:  # HopGraph attack reconstruction
+try:
     from .graph_endpoints import router as _graph_router
-    try:
-        app.include_router(_graph_router)
-    except Exception as _exc:
-        logger.debug('silent_swallow at %s:%d: %s', __file__, 81, _exc)
+    _early_router_specs.append(('graph', _graph_router))
 except Exception as _exc:
     logger.debug('silent_swallow at %s:%d: %s', __file__, 83, _exc)
-try:  # AI-powered insights (DREAD, playbook, hunt, executive)
+try:
     from .insights_endpoints import router as _insights_router
-    try:
-        app.include_router(_insights_router)
-    except Exception as _exc:
-        logger.debug('silent_swallow at %s:%d: %s', __file__, 89, _exc)
+    _early_router_specs.append(('insights', _insights_router))
 except Exception as _exc:
     logger.debug('silent_swallow at %s:%d: %s', __file__, 91, _exc)
+include_router_specs(app, _early_router_specs, logger)
 # If the package was previously imported via the short name `api.app` (or vice
 # versa), ensure sys.modules points to the canonical `src.api.app` so reloads and
 # subsequent imports don't create a duplicate module object and re-run heavy
@@ -1845,6 +1828,14 @@ try:
             return _orig_create_task(coro, *args, **kwargs)
         try:
             BACKGROUND_TASKS.add(t)
+            try:
+                _task_name = getattr(t, 'get_name', lambda: 'server_background_task')()
+                if str(_task_name).startswith('Task-'):
+                    _task_name = f'server_background_task_{id(t)}'
+                if not str(_task_name).startswith('starlette.'):
+                    get_background_manager(app).track_existing(_task_name, t)
+            except Exception:
+                get_background_manager(app).track_existing(f'server_background_task_{id(t)}', t)
         except Exception as _exc:
             logger.debug('silent_swallow at %s:%d: %s', __file__, 1849, _exc)
         def _on_done(tt):

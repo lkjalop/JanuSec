@@ -1581,11 +1581,12 @@ def _render_dread_narrative(
     filled = filled.replace('{fragment_block}', fragment_block)
 
     rendered_text = ''
+    render_timeout = int(os.getenv('PREFILL_RENDER_TIMEOUT_S') or os.getenv('PREFILL_TIMEOUT_S') or os.getenv('OLLAMA_TIMEOUT_SECONDS') or os.getenv('LLM_TIMEOUT_SECONDS') or '45')
     try:
         result = llm.generate(
             filled,
             max_tokens=512,
-            overrides={'timeout': 180},
+            overrides={'timeout': render_timeout, 'retries': 0},
             model=model,
         )
         raw_rendered = (
@@ -1621,7 +1622,7 @@ def _render_dread_narrative(
             + filled
         )
         try:
-            retry_result = llm.generate('/no_think\n' + retry_prompt, max_tokens=320, overrides={'timeout': 180}, model=model)
+            retry_result = llm.generate('/no_think\n' + retry_prompt, max_tokens=320, overrides={'timeout': render_timeout, 'retries': 0}, model=model)
             retry_text = (
                 retry_result.get('text') or retry_result.get('response')
                 or retry_result.get('content') or ''
@@ -1845,7 +1846,7 @@ def run_prefill(
                 prompts=prompts,
                 max_tokens=PREFILL_MAX_TOKENS,
                 tenant_id=tenant_id,
-                overrides={'timeout': PREFILL_TIMEOUT_S},
+                overrides={'timeout': PREFILL_TIMEOUT_S, 'retries': 0},
                 model=model,
             )
         except Exception as exc:
@@ -1856,7 +1857,7 @@ def run_prefill(
                         prompt=p,
                         max_tokens=PREFILL_MAX_TOKENS,
                         tenant_id=tenant_id,
-                        overrides={'timeout': PREFILL_TIMEOUT_S},
+                        overrides={'timeout': PREFILL_TIMEOUT_S, 'retries': 0},
                         model=model,
                     )
                     results.append(r)

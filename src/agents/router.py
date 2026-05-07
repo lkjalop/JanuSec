@@ -22,10 +22,13 @@ from src.agents.types import (
     AgentCycle,
     Gap,
     InvestigationContext,
+    InvestigationMemory,
+    MemoryArtifact,
     ProposedAction,
     RejectionReason,
     VerifiedFinding,
 )
+from src.agents.session_store import InvestigationSessionStore
 from src.agents.verifier import verify
 from src.audit.logger import audit
 
@@ -39,6 +42,8 @@ async def run_investigation(
     engagement_actors: Optional[Set[str]] = None,
     engagement_ips: Optional[Set[str]] = None,
     llm_client: Any = None,
+    cluster_id: str = "",
+    _resume_state: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     """Run the full agentic investigation loop.
 
@@ -70,12 +75,38 @@ async def run_investigation(
     total_tokens = 0
     total_queries = 0
     close_reason = "max_cycles"
+    narration: Dict[str, Any] = {}
+    kill_chain: list = []
+    memory = InvestigationMemory()
+
+    # Seed loop state from resume snapshot when provided (fix: resume actually resumes)
+    if _resume_state:
+        all_verified = _rebuild_verified_findings(_resume_state.get("all_verified", []))
+        all_gaps = _rebuild_gaps(_resume_state.get("all_gaps", []))
+        corrective_feedback = _rebuild_rejection_reasons(_resume_state.get("corrective_feedback", []))
+        narrative = _resume_state.get("narrative", "")
+        LOGGER.info(
+            "Resume: seeded %d verified, %d gaps, %d feedback entries from prior state",
+            len(all_verified), len(all_gaps), len(corrective_feedback),
+        )
+
+    session = InvestigationSessionStore(
+        session_id=context.investigation_id,
+        tenant_id=context.tenant_id,
+        assessment_id=context.assessment_id,
+        cluster_id=cluster_id,
+    )
 
     for cycle_num in range(1, context.max_cycles + 1):
         LOGGER.info("=== Investigation %s — Cycle %d/%d ===",
                      context.investigation_id, cycle_num, context.max_cycles)
 
         # ── 1. PLAN ──────────────────────────────────────────────────────
+        # Compute compressed prior at cycle 4+ (Compress primitive)
+        compressed_prior = ""
+        if cycle_num >= 4:
+            compressed_prior = memory.compress(up_to_cycle=cycle_num - 1)
+
         investigation_plan = await plan(
             context,
             assessment_summary,
@@ -84,6 +115,8 @@ async def run_investigation(
             gaps=all_gaps[-10:] if all_gaps else None,
             cycle=cycle_num,
             llm_client=llm_client,
+            memory=memory,
+            compressed_prior=compressed_prior,
         )
 
         if not investigation_plan.steps and not investigation_plan.gaps:
@@ -108,6 +141,9 @@ async def run_investigation(
         )
         all_verified.extend(verified)
 
+        # Write primitive: persist new discoveries to InvestigationMemory
+        memory.write_from_findings(verified, cycle=cycle_num)
+
         # Feed rejected reasons back into corrective feedback (structured)
         for rej in rejected:
             if rej.rejection_reason:
@@ -126,10 +162,28 @@ async def run_investigation(
             kill_chain=kill_chain,
             cycle=cycle_num,
             llm_client=llm_client,
+            compressed_prior=compressed_prior,
         )
         narrative = narration.get("narrative", narrative)
         # Keep all_gaps as Gap objects (don't overwrite with serialized dicts)
         all_gaps = combined_gaps
+
+        # ── PERSIST CYCLE TO SESSION STORE ──────────────────────────────────
+        cycle_summary_for_store = {
+            "cycle": cycle_num,
+            "hypothesis": investigation_plan.hypothesis if investigation_plan else "",
+            "findings_verified": len(verified),
+            "findings_rejected": len(rejected),
+            "findings_weak": len(weak),
+        }
+        resumable_state = {
+            "narrative": narrative,
+            "all_verified": all_verified,
+            "all_gaps": all_gaps,
+            "corrective_feedback": corrective_feedback,
+            "cycle_count": cycle_num,
+        }
+        session.append_cycle(cycle_summary_for_store, resumable_state)
 
         # ── 5. BUILD CYCLE RECORD ────────────────────────────────────────
         cycle_result = AgentCycle(
@@ -154,15 +208,62 @@ async def run_investigation(
         cross_domain_gaps = [g for g in investigation_plan.gaps if g.type == "cross_domain"]
 
         if not has_new_findings and not fetchable_gaps:
+            # Harness completion checklist — mechanical, not self-reported.
+            verifier_ran = (len(verified) + len(rejected) + len(weak)) == len(raw_findings)
+            narrator_produced_output = bool(narration.get("narrative", "").strip())
+            has_cumulative_findings = len(all_verified) > 0
+
+            if not verifier_ran:
+                _retry_v = getattr(context, "_verifier_retry_count", 0)
+                if _retry_v >= 2:
+                    close_reason = "verifier_count_mismatch"
+                    LOGGER.error(
+                        "Harness: Verifier count mismatch exceeded retry limit — closing"
+                    )
+                    break
+                context._verifier_retry_count = _retry_v + 1  # type: ignore[attr-defined]
+                LOGGER.warning(
+                    "Harness: Verifier output count (%d) != raw finding count (%d) — "
+                    "continuing cycle to re-verify",
+                    len(verified) + len(rejected) + len(weak), len(raw_findings),
+                )
+                continue
+
+            if not narrator_produced_output:
+                _retry_n = getattr(context, "_narrator_retry_count", 0)
+                if _retry_n >= 2:
+                    close_reason = "narrator_no_output"
+                    LOGGER.error(
+                        "Harness: Narrator produced no output after retry limit — closing"
+                    )
+                    break
+                context._narrator_retry_count = _retry_n + 1  # type: ignore[attr-defined]
+                LOGGER.warning(
+                    "Harness: Narrator produced empty output on cycle %d — "
+                    "continuing to force narration",
+                    cycle_num,
+                )
+                continue
+
+            if not has_cumulative_findings:
+                close_reason = "no_verified_findings"
+                LOGGER.info("Harness: 0 verified findings across all cycles — closing as inconclusive")
+                break
+
             close_reason = "investigation_complete"
-            LOGGER.info("No new findings and no fetchable gaps — investigation complete")
+            LOGGER.info(
+                "Harness: Completion checklist passed — %d verified findings, "
+                "Verifier ran, Narrator produced output",
+                len(all_verified),
+            )
             break
 
         if scope.exceeded:
             close_reason = "budget_exhausted"
             LOGGER.warning("Scope budget exhausted — closing investigation")
             break
-
+    # ── CLOSE SESSION STORE ─────────────────────────────────────────────────────
+    session.close(close_reason, {"narrative": narrative, "cycle_count": len(all_cycles)})
     # ── FINAL AUDIT ──────────────────────────────────────────────────────
     audit("investigation_close",
           investigation_id=context.investigation_id,
@@ -190,8 +291,8 @@ async def run_investigation(
             for c in all_cycles
         ],
         "final_narrative": narrative,
-        "confidence": narration.get("confidence", 0.0) if 'narration' in dir() else 0.0,
-        "compliance_controls": narration.get("compliance_controls", []) if 'narration' in dir() else [],
+        "confidence": narration.get("confidence", 0.0),
+        "compliance_controls": narration.get("compliance_controls", []),
         "proposed_actions": [
             {
                 "action_id": a.action_id,
@@ -223,7 +324,7 @@ async def run_investigation(
                 "enables_phase_id": kc.enables_phase_id,
                 "phase_id": kc.phase_id,
             }
-            for kc in (kill_chain if 'kill_chain' in dir() else [])
+            for kc in kill_chain
         ],
         "close_reason": close_reason,
         "total_cycles": len(all_cycles),
@@ -232,4 +333,128 @@ async def run_investigation(
         "total_queries_used": total_queries,
         "scope_pct": scope.pct,
         "elapsed_seconds": time.time() - context.created_ts,
+        "memory_artifacts": [
+            {
+                "artifact_type": a.artifact_type,
+                "content": a.content,
+                "confidence": a.confidence,
+                "cycle": a.cycle,
+                "actor": a.actor,
+                "mitre_techniques": a.mitre_techniques,
+            }
+            for a in memory.artifacts
+        ],
     }
+
+
+# ── Resume helpers ─────────────────────────────────────────────────────────────
+
+def _rebuild_verified_findings(raw_list: List[Dict]) -> List[Any]:
+    """Reconstruct VerifiedFinding objects from serialised dicts (best-effort)."""
+    from src.agents.types import RawFinding, VerifiedFinding, RejectionReason
+    out = []
+    for item in raw_list:
+        raw_data = item.get("raw", {})
+        raw = RawFinding(
+            step_index=raw_data.get("step_index", 0),
+            tool=raw_data.get("tool", ""),
+            summary=raw_data.get("summary", ""),
+            evidence=raw_data.get("evidence", {}),
+            source_count=raw_data.get("source_count", 1),
+            data_volume_bytes=raw_data.get("data_volume_bytes", 0),
+        )
+        rej_data = item.get("rejection_reason") or {}
+        vf = VerifiedFinding(
+            raw=raw,
+            confidence=item.get("confidence", 0.0),
+            dread_score=item.get("dread_score", 0.0),
+            compliance_controls=item.get("compliance_controls", []),
+            rejection_reason=RejectionReason(**rej_data) if rej_data else None,
+            weak=item.get("weak", False),
+            reverification=item.get("reverification", {}),
+        )
+        out.append(vf)
+    return out
+
+
+def _rebuild_gaps(raw_list: List[Dict]) -> List[Any]:
+    from src.agents.types import Gap
+    return [
+        Gap(
+            description=g.get("description", ""),
+            type=g.get("type", "unknown_source"),
+            source_type=g.get("source_type", ""),
+            confidence_cap=float(g.get("confidence_cap", 1.0)),
+            suggested_fields=g.get("suggested_fields", []),
+            impact=g.get("impact", ""),
+        )
+        for g in raw_list
+        if isinstance(g, dict)
+    ]
+
+
+def _rebuild_rejection_reasons(raw_list: List[Dict]) -> List[Any]:
+    from src.agents.types import RejectionReason
+    return [
+        RejectionReason(
+            type=r.get("type", ""),
+            actor=r.get("actor", ""),
+            ip=r.get("ip", ""),
+            phase=r.get("phase", ""),
+            detail=r.get("detail", ""),
+        )
+        for r in raw_list
+        if isinstance(r, dict)
+    ]
+
+
+async def resume_investigation(
+    session_id: str,
+    assessment_summary: Dict[str, Any],
+    *,
+    engagement_actors: Optional[Set[str]] = None,
+    engagement_ips: Optional[Set[str]] = None,
+    llm_client: Any = None,
+) -> Dict[str, Any]:
+    """Resume an interrupted investigation from its last persisted cycle.
+
+    Loads the session state from the store, reconstructs the agent loop state,
+    and continues from where it left off. Returns the same shape as run_investigation().
+    """
+    record = InvestigationSessionStore.load(session_id)
+    if not record:
+        return {"error": f"session {session_id!r} not found", "session_id": session_id}
+
+    if record["status"] == "complete":
+        return {
+            "error": "investigation already complete",
+            "session_id": session_id,
+            "close_reason": record.get("close_reason", ""),
+        }
+
+    state = record.get("state") or {}
+    completed_cycles = record.get("cycles_completed", 0)
+
+    LOGGER.info(
+        "Resuming investigation %s — %d cycles completed, picking up at cycle %d",
+        session_id, completed_cycles, completed_cycles + 1,
+    )
+
+    context = InvestigationContext(
+        assessment_id=record["assessment_id"],
+        tenant_id=record["tenant_id"],
+        investigation_id=session_id,
+    )
+    # Reduce the budget by what was already consumed; run at least 1 more cycle
+    remaining_budget = max(context.max_cycles - completed_cycles, 1)
+    context.max_cycles = remaining_budget
+
+    return await run_investigation(
+        context,
+        assessment_summary,
+        engagement_actors=engagement_actors,
+        engagement_ips=engagement_ips,
+        llm_client=llm_client,
+        cluster_id=record.get("cluster_id", ""),
+        _resume_state=state,
+    )

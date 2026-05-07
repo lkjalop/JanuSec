@@ -5051,7 +5051,11 @@
   }
 
   window.startStreamPolling = function (sessionId) {
-    if (_streamPollTimer) clearInterval(_streamPollTimer);
+    if (_streamPollTimer) {
+      if (window.JanuSecPollers) window.JanuSecPollers.clear('investigate.stream');
+      else clearInterval(_streamPollTimer);
+      _streamPollTimer = null;
+    }
     _streamLastClusterCount = 0;
     var panel = document.getElementById('streamFeedPanel');
     if (panel) panel.style.display = '';
@@ -5060,11 +5064,17 @@
     window._streamSessionId = sessionId;
     _streamLog('Streaming started');
     _streamPoll(sessionId);
-    _streamPollTimer = setInterval(function () { _streamPoll(sessionId); }, 2000);
+    _streamPollTimer = window.JanuSecPollers
+      ? window.JanuSecPollers.setInterval('investigate.stream', function () { _streamPoll(sessionId); }, 2000)
+      : setInterval(function () { _streamPoll(sessionId); }, 2000);
   };
 
   window.stopStreamPolling = function () {
-    if (_streamPollTimer) { clearInterval(_streamPollTimer); _streamPollTimer = null; }
+    if (_streamPollTimer) {
+      if (window.JanuSecPollers) window.JanuSecPollers.clear('investigate.stream');
+      else clearInterval(_streamPollTimer);
+      _streamPollTimer = null;
+    }
     var dot = document.getElementById('streamFeedDot');
     if (dot) { dot.style.animation = 'none'; dot.style.background = '#6b7280'; }
     _streamLog('Polling stopped');

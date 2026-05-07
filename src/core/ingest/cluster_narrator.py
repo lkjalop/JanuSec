@@ -15,8 +15,10 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import threading
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -182,7 +184,7 @@ def _parse_llm_output(raw: str, cluster_id: str) -> dict:
     }
 
 
-def _fallback_narrative(cluster_id: str, *, raw_text: str = "") -> dict:
+def _fallback_narrative(cluster_id: str, *, raw_text: str = "", reason: str = "") -> dict:
     return {
         "verdict": "REQUIRES_INVESTIGATION",
         "confidence": 0.3,
@@ -194,6 +196,7 @@ def _fallback_narrative(cluster_id: str, *, raw_text: str = "") -> dict:
         "fp_indicators": [],
         "next_steps": [{"priority": "P2", "action": "Manual analyst review required", "rationale": "Automated narrative generation failed", "tool": ""}],
         "_narrator_source": "fallback",
+        "_narrator_error": reason,
     }
 
 
@@ -265,7 +268,9 @@ def narrate_cluster(
     evidence = sorted(evidence, key=lambda r: float(r.get("triage_score") or 0), reverse=True)[:EVIDENCE_CAP]
 
     if not evidence:
-        return _fallback_narrative(str(cluster.get("cluster_id") or ""))
+        narrative = _fallback_narrative(str(cluster.get("cluster_id") or ""), reason="no_evidence")
+        _apply_narrative_to_cluster(cluster, narrative, upgrade_only=True)
+        return narrative
 
     prompt = _build_prompt(cluster, evidence)
     cluster_id = str(cluster.get("cluster_id") or "")
@@ -277,18 +282,35 @@ def narrate_cluster(
             from integrations.llm_client import DEFAULT_CLIENT as _client  # type: ignore
         except ImportError:
             logger.warning("LLM client unavailable — cluster %s gets fallback narrative", cluster_id)
-            return _fallback_narrative(cluster_id)
+            narrative = _fallback_narrative(cluster_id, reason="client_unavailable")
+            _apply_narrative_to_cluster(cluster, narrative, upgrade_only=True)
+            return narrative
 
     with _NARRATOR_LOCK:
         try:
-            result = _client.generate(prompt, max_tokens=800, tenant_id=assessment_id or "ingest")
+            call_timeout = float(os.getenv("JANUSEC_INGEST_LLM_TIMEOUT_S", "45"))
+            result = _client.generate(
+                prompt,
+                max_tokens=800,
+                tenant_id=assessment_id or "ingest",
+                overrides={"timeout": call_timeout, "retries": 0},
+            )
         except Exception as exc:
             logger.warning("LLM generate failed for cluster %s: %s", cluster_id, exc)
-            return _fallback_narrative(cluster_id)
+            reason = f"{type(exc).__name__}: {str(exc)[:180]}"
+            narrative = _fallback_narrative(cluster_id, reason=reason)
+            _apply_narrative_to_cluster(cluster, narrative, upgrade_only=True)
+            return narrative
 
+    if isinstance(result, dict) and result.get("error"):
+        narrative = _fallback_narrative(cluster_id, reason=str(result.get("error"))[:180])
+        _apply_narrative_to_cluster(cluster, narrative, upgrade_only=True)
+        return narrative
     raw = result.get("text") or ""
     if not raw.strip():
-        return _fallback_narrative(cluster_id)
+        narrative = _fallback_narrative(cluster_id, reason="empty_response")
+        _apply_narrative_to_cluster(cluster, narrative, upgrade_only=True)
+        return narrative
 
     narrative = _parse_llm_output(raw, cluster_id)
 
@@ -362,6 +384,17 @@ def narrate_top_clusters(
 
     Returns the list of narratives generated (length <= top_n).
     """
+    try:
+        configured_top_n = int(os.getenv("JANUSEC_INGEST_NARRATE_TOP_N", str(top_n)))
+        top_n = max(0, min(int(top_n), configured_top_n))
+    except Exception:
+        top_n = int(top_n)
+    try:
+        stage_budget_s = float(os.getenv("JANUSEC_INGEST_NARRATE_TIMEOUT_S", "50"))
+    except Exception:
+        stage_budget_s = 50.0
+    deadline = time.monotonic() + max(1.0, stage_budget_s)
+
     sorted_clusters = sorted(
         clusters,
         key=lambda c: (
@@ -371,10 +404,37 @@ def narrate_top_clusters(
         reverse=True,
     )
     narratives = []
-    for cluster in sorted_clusters[:top_n]:
+    selected = sorted_clusters[:top_n]
+    for idx, cluster in enumerate(selected):
+        if time.monotonic() >= deadline:
+            logger.warning("Narration budget exhausted for %s; falling back remaining top clusters", assessment_id)
+            for rest in selected[idx:]:
+                fallback = _fallback_narrative(str(rest.get("cluster_id") or ""), reason="stage_budget_exhausted")
+                _apply_narrative_to_cluster(rest, fallback, upgrade_only=True)
+                narratives.append(fallback)
+            break
         try:
             n = narrate_cluster(cluster, all_evidence_rows, assessment_id=assessment_id)
             narratives.append(n)
+            if n.get("_narrator_source") == "fallback" and n.get("_narrator_error"):
+                logger.warning(
+                    "Narration provider failed for %s cluster %s; falling back remaining top clusters",
+                    assessment_id,
+                    cluster.get("cluster_id"),
+                )
+                for rest in selected[idx + 1:]:
+                    fallback = _fallback_narrative(str(rest.get("cluster_id") or ""), reason="provider_failed_once")
+                    _apply_narrative_to_cluster(rest, fallback, upgrade_only=True)
+                    narratives.append(fallback)
+                break
         except Exception as exc:
             logger.warning("Narration failed for cluster %s: %s", cluster.get("cluster_id"), exc)
+            fallback = _fallback_narrative(str(cluster.get("cluster_id") or ""), reason=f"{type(exc).__name__}: {str(exc)[:180]}")
+            _apply_narrative_to_cluster(cluster, fallback, upgrade_only=True)
+            narratives.append(fallback)
+            for rest in selected[idx + 1:]:
+                rest_fallback = _fallback_narrative(str(rest.get("cluster_id") or ""), reason="provider_failed_once")
+                _apply_narrative_to_cluster(rest, rest_fallback, upgrade_only=True)
+                narratives.append(rest_fallback)
+            break
     return narratives

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import pathlib
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
@@ -51,7 +52,8 @@ class _OllamaClient:
     def _post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
         url = f"{self.host}{path}"
         try:
-            response = requests.post(url, json=payload, timeout=60)
+            timeout = float(os.getenv('OLLAMA_TIMEOUT_SECONDS') or os.getenv('LLM_TIMEOUT_SECONDS') or 45)
+            response = requests.post(url, json=payload, timeout=timeout)
             response.raise_for_status()
             return response.json()
         except requests.RequestException as exc:  # pragma: no cover - network error paths
@@ -105,7 +107,7 @@ class OpenSourceModelManager:
         self.health: dict[str, dict[str, Any]] = {}
 
         self.ollama_root = pathlib.Path(self.config.get('ollama_root') or 'D:/Ollama')
-        self.ollama_host = self.config.get('ollama_host') or 'http://127.0.0.1:11434'
+        self.ollama_host = self.config.get('ollama_host') or os.getenv('OLLAMA_HOST') or os.getenv('OLLAMA_URL') or 'http://localhost:11434'
         self.ollama_client = _OllamaClient(self.ollama_host, self.ollama_root, self.config.get('ollama_cmd'))
 
         if self.backend == 'transformers' and not TRANSFORMERS_AVAILABLE:

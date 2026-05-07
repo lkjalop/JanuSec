@@ -15,7 +15,7 @@ Schema (stored on disk):
   "tier_small_model":    "<model-id>",   # REFINE / low-medium severity
   "tier_large_model":    "<model-id>",   # ACCEPT / high severity
   "tier_critical_model": "<model-id>",   # ACCEPT + critical / escalation
-  "ollama_host":   "http://127.0.0.1:11434",
+  "ollama_host":   "http://localhost:11434",
   "api_key_enc":   "<fernet-ciphertext>",  # empty string = IAM-role / no key needed
   "endpoint":      "",   # Azure base URL, SageMaker endpoint ARN, etc.
   "region":        "",   # AWS region for Bedrock / SageMaker
@@ -83,7 +83,7 @@ class TenantLLMConfig:
     tier_small_model: str = ''
     tier_large_model: str = ''
     tier_critical_model: str = ''
-    ollama_host: str = 'http://127.0.0.1:11434'
+    ollama_host: str = 'http://localhost:11434'
     api_key_enc: str = ''           # Fernet-encrypted; empty = use IAM / no key
     endpoint: str = ''              # Azure base URL, SageMaker endpoint, etc.
     region: str = ''                # AWS region
@@ -163,7 +163,7 @@ def load_tenant_llm_config(tenant_id: str) -> Optional[TenantLLMConfig]:
             tier_small_model=data.get('tier_small_model', ''),
             tier_large_model=data.get('tier_large_model', ''),
             tier_critical_model=data.get('tier_critical_model', ''),
-            ollama_host=data.get('ollama_host', 'http://127.0.0.1:11434'),
+            ollama_host=data.get('ollama_host') or os.getenv('OLLAMA_HOST') or os.getenv('OLLAMA_URL') or 'http://localhost:11434',
             api_key_enc=data.get('api_key_enc', ''),
             endpoint=data.get('endpoint', ''),
             region=data.get('region', ''),

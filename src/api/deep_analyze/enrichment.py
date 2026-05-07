@@ -302,6 +302,11 @@ def _account_fallback_text(row: dict) -> str:
 
 def _extract_accounts_backend(row: dict) -> List[str]:
     values: List[str] = []
+    # Seed from any pre-extracted list (ingest pipeline output / test fixtures)
+    for v in (row.get('accounts') or []):
+        s = _safe_identity_text(v)
+        if s and s not in values:
+            values.append(s)
     for field in _ACCOUNT_FIELDS:
         value = _safe_identity_text(row.get(field))
         if value and value not in values:
@@ -333,6 +338,11 @@ def _extract_accounts_backend(row: dict) -> List[str]:
 
 def _extract_hosts_backend(row: dict) -> List[str]:
     values: List[str] = []
+    # Seed from pre-extracted list
+    for v in (row.get('hosts') or []):
+        s = _safe_text(v)
+        if s and s not in values:
+            values.append(s)
     for field in _HOST_FIELDS:
         value = _safe_text(row.get(field))
         if value and value not in values:
@@ -346,6 +356,11 @@ def _extract_hosts_backend(row: dict) -> List[str]:
 
 def _extract_ips_backend(row: dict) -> List[str]:
     values: List[str] = []
+    # Seed from pre-extracted lists
+    for v in (row.get('ips') or row.get('external_ips') or []):
+        s = _safe_text(v)
+        if s and s not in values:
+            values.append(s)
     for field in _IP_FIELDS:
         value = _safe_text(row.get(field))
         if value and value not in values:

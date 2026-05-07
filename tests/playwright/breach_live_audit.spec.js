@@ -41,7 +41,7 @@ const path = require('path');
 test.describe.configure({ mode: 'serial' });
 test.setTimeout(180_000);
 
-const BASE = process.env.PLAYWRIGHT_BASE_URL || 'http://127.0.0.1:8080';
+const BASE = process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:8080';
 const BREACH_URL = BASE + '/static/breach.html';
 
 const TEST_FILES_DIR = path.join(__dirname, '../../dump/investigate-upload/dump/test files');

@@ -172,3 +172,133 @@ class AgentAuditRecord:
     cumulative_scope_pct: float = 0.0
     approval_id: Optional[str] = None
     approval_status: Optional[str] = None
+
+
+# ── Context Engineering: Write primitive ─────────────────────────────────────
+
+@dataclass
+class MemoryArtifact:
+    """One structured discovery written by the Investigator during a cycle.
+
+    artifact_type values:
+      ioc             — confirmed indicator (IP, hash, domain, user, process)
+      ttp             — confirmed technique (maps to MITRE)
+      timeline_anchor — a time-anchored event in the attack sequence
+      attribution     — threat actor or campaign attribution claim
+    """
+    artifact_type: str           # "ioc" | "ttp" | "timeline_anchor" | "attribution"
+    content: str                 # human-readable description
+    confidence: float = 0.0
+    cycle: int = 0               # which cycle produced this
+    actor: str = ""
+    timestamp: str = ""          # ISO-8601 event timestamp if applicable
+    mitre_techniques: List[str] = field(default_factory=list)
+    sources: List[str] = field(default_factory=list)   # source telemetry types
+    evidence_row_ids: List[str] = field(default_factory=list)
+
+
+@dataclass
+class InvestigationMemory:
+    """Structured artifact store for the entire investigation.
+
+    Implements the Write and Compress context engineering primitives.
+    Write: agents call memory.write() to persist any discovery beyond the current cycle.
+    Compress: at cycle 4+, memory.compress() produces a structured digest that replaces
+              the raw all_verified[-20:] slice in the Planner prompt.
+    """
+    artifacts: List[MemoryArtifact] = field(default_factory=list)
+
+    def write(self, artifact: MemoryArtifact) -> None:
+        """Persist a structured discovery (the Write primitive)."""
+        self.artifacts.append(artifact)
+
+    def write_from_findings(self, findings: List[Any], cycle: int) -> None:
+        """Extract and write MemoryArtifacts from a list of VerifiedFindings."""
+        for vf in findings:
+            summary = getattr(getattr(vf, "raw", None), "summary", "") or ""
+            summary_lower = summary.lower()
+            actor = (vf.raw.evidence or {}).get("user") or (vf.raw.evidence or {}).get("actor") or "" if isinstance(getattr(vf.raw, "evidence", None), dict) else ""
+            mitre = [
+                t for t in (
+                    (vf.raw.evidence or {}).get("mitre_techniques", [])
+                    or [vf.raw.evidence.get("mitre_technique", "")]
+                    if isinstance(getattr(vf.raw, "evidence", None), dict) else []
+                )
+                if t
+            ]
+
+            # Classify artifact type from summary keywords
+            atype = "ttp"
+            if any(k in summary_lower for k in ["ip ", "hash", "domain", "user ", "process "]):
+                atype = "ioc"
+            elif any(k in summary_lower for k in ["at ", "utc", "2024", "2025", "2026", "timestamp"]):
+                atype = "timeline_anchor"
+            elif any(k in summary_lower for k in ["apt", "actor", "group", "campaign", "threat intel"]):
+                atype = "attribution"
+
+            self.write(MemoryArtifact(
+                artifact_type=atype,
+                content=summary[:300],
+                confidence=vf.confidence,
+                cycle=cycle,
+                actor=actor,
+                mitre_techniques=mitre,
+                sources=[getattr(vf.raw, "tool", "")],
+                evidence_row_ids=list(
+                    (vf.raw.evidence or {}).get("row_ids", [])
+                    or (vf.raw.evidence or {}).get("sample_row_ids", [])
+                    if isinstance(getattr(vf.raw, "evidence", None), dict) else []
+                ),
+            ))
+
+    def compress(self, up_to_cycle: int) -> str:
+        """Compress artifacts from cycles 1..up_to_cycle into a structured digest
+        (the Compress primitive). Frees LLM context window for new evidence."""
+        prior = [a for a in self.artifacts if a.cycle <= up_to_cycle]
+        if not prior:
+            return ""
+
+        iocs = [a for a in prior if a.artifact_type == "ioc"]
+        ttps = [a for a in prior if a.artifact_type == "ttp"]
+        anchors = sorted(
+            [a for a in prior if a.artifact_type == "timeline_anchor"],
+            key=lambda x: x.timestamp,
+        )
+        attributions = [a for a in prior if a.artifact_type == "attribution"]
+        actors = list({a.actor for a in prior if a.actor})
+
+        lines = [f"## Prior Investigation Summary (Cycles 1\u2013{up_to_cycle}; DO NOT RE-INVESTIGATE)"]
+
+        if actors:
+            lines.append(f"Confirmed actors: {', '.join(actors[:8])}")
+
+        if iocs:
+            lines.append(f"Confirmed IOCs ({len(iocs)}):")
+            for a in iocs[:12]:
+                lines.append(f"  [{a.confidence:.2f}] {a.content[:120]}")
+
+        if ttps:
+            lines.append(f"Confirmed TTPs ({len(ttps)}):")
+            for a in ttps[:10]:
+                mitre_str = ", ".join(a.mitre_techniques[:3]) if a.mitre_techniques else "N/A"
+                lines.append(f"  [{a.confidence:.2f}] {a.content[:120]} (MITRE: {mitre_str})")
+
+        if anchors:
+            lines.append("Attack timeline:")
+            for a in anchors[:8]:
+                lines.append(f"  {a.timestamp or 'unknown time'}: {a.content[:120]}")
+
+        if attributions:
+            lines.append(f"Attribution: {'; '.join(a.content[:100] for a in attributions[:3])}")
+
+        lines.append(
+            f"\nTotal artifacts: {len(prior)} across {up_to_cycle} cycles. "
+            f"Focus the next cycle on NEW leads only."
+        )
+        return "\n".join(lines)
+
+    def recent_snapshot(self, limit: int = 20) -> List[dict]:
+        """Return the most recent artifacts as dicts for prompt injection."""
+        import dataclasses as _dc
+        return [_dc.asdict(a) for a in self.artifacts[-limit:]]
+

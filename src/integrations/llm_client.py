@@ -18,6 +18,8 @@ import threading
 import re
 from typing import Any, Dict, Iterator, Optional
 
+from src.integrations.llm_concurrency import GLOBAL_LLM_LIMITER, llm_concurrency_status
+
 LOGGER = logging.getLogger(__name__)
 
 
@@ -315,7 +317,7 @@ class LLMClient(BaseLLMClient):
         # Runtime environment must win over persisted UI settings. In Docker,
         # config/llm_settings.json may contain a host-local 127.0.0.1 URL that
         # is valid on Windows but invalid inside the container.
-        raw_ollama_host = os.getenv('OLLAMA_HOST') or stored_settings.get('ollama_base_url') or 'http://127.0.0.1:11434'
+        raw_ollama_host = os.getenv('OLLAMA_HOST') or os.getenv('OLLAMA_URL') or stored_settings.get('ollama_base_url') or 'http://localhost:11434'
         self.ollama_host = raw_ollama_host.rstrip('/')
         self.ollama_model = os.getenv('OLLAMA_MODEL') or os.getenv('LLM_MODEL') or stored_settings.get('ollama_model') or 'qwen3:14b'
         try:
@@ -332,7 +334,7 @@ class LLMClient(BaseLLMClient):
             self.interactive_prompt_token_threshold = 200
         # Scale timeout based on model size: 30b+ → 300s, 14b+ → 180s, any :Nb → 120s
         try:
-            if isinstance(self.ollama_model, str):
+            if isinstance(self.ollama_model, str) and not (os.getenv('OLLAMA_TIMEOUT_SECONDS') or os.getenv('LLM_TIMEOUT_SECONDS')):
                 m = re.search(r':(\d+)b', self.ollama_model)
                 if m:
                     gb = int(m.group(1))
@@ -477,7 +479,14 @@ class LLMClient(BaseLLMClient):
             self.ollama_reachable = False
             return False
 
-    def _ollama_generate(self, prompt: str, max_tokens: Optional[int], model_override: Optional[str] = None) -> Dict[str, Any]:
+    def _ollama_generate(
+        self,
+        prompt: str,
+        max_tokens: Optional[int],
+        model_override: Optional[str] = None,
+        *,
+        timeout: Optional[float] = None,
+    ) -> Dict[str, Any]:
         if not self._ollama_session:
             raise RuntimeError('ollama_session_unavailable')
         # Disable thinking mode for qwen3/deepseek-r1 when prompt starts with /no_think.
@@ -499,7 +508,9 @@ class LLMClient(BaseLLMClient):
         # think=False must be at top level (not inside options) for qwen3/deepseek-r1.
         if prompt.lstrip().startswith('/no_think') or any(m in selected_model for m in ('qwen3', 'deepseek-r1')):
             payload['think'] = False
-        resp = self._ollama_session.post(f"{self.ollama_host}/api/generate", json=payload, timeout=self.ollama_timeout)
+        request_timeout = float(timeout if timeout is not None else self.ollama_timeout)
+        with GLOBAL_LLM_LIMITER.acquire(label='ollama_generate') as gate:
+            resp = self._ollama_session.post(f"{self.ollama_host}/api/generate", json=payload, timeout=request_timeout)
         resp.raise_for_status()
         data = resp.json()
         text = data.get('response') or data.get('output') or ''
@@ -511,6 +522,8 @@ class LLMClient(BaseLLMClient):
                 'requested_model': selected_model,
                 'eval_count': data.get('eval_count'),
                 'total_duration_ms': data.get('total_duration'),
+                'queue_wait_s': gate.get('wait_s'),
+                'llm_concurrency_limit': gate.get('limit'),
             },
         }
 
@@ -554,7 +567,8 @@ class LLMClient(BaseLLMClient):
                 try:
                     logger.info('Ollama override attempt %s -> %s (attempt %d)', prompt[:40].replace('\n',' '), url, attempt)
                     try:
-                        resp = sess.post(url, json=payload, timeout=attempt_timeout)
+                        with GLOBAL_LLM_LIMITER.acquire(label='ollama_override') as gate:
+                            resp = sess.post(url, json=payload, timeout=attempt_timeout)
                     except Exception as e:
                         # detect read timeout specifically for api/generate
                         if url.endswith('/api/generate'):
@@ -585,6 +599,8 @@ class LLMClient(BaseLLMClient):
                             'provider': 'ollama',
                             'eval_count': data.get('eval_count'),
                             'total_duration_ms': data.get('total_duration'),
+                            'queue_wait_s': gate.get('wait_s'),
+                            'llm_concurrency_limit': gate.get('limit'),
                         },
                     }
                 except Exception as exc:
@@ -619,7 +635,8 @@ class LLMClient(BaseLLMClient):
                         long_timeout = max(120, 60)
                     final_url = f"{host}/api/generate"
                     logger.info('Ollama override final retry to %s with timeout=%s', final_url, long_timeout)
-                    resp = sess.post(final_url, json=payload, timeout=long_timeout)
+                    with GLOBAL_LLM_LIMITER.acquire(label='ollama_override_final') as gate:
+                        resp = sess.post(final_url, json=payload, timeout=long_timeout)
                     resp.raise_for_status()
                     data = resp.json()
                     text = data.get('response') or data.get('output') or ''
@@ -630,6 +647,8 @@ class LLMClient(BaseLLMClient):
                             'provider': 'ollama',
                             'eval_count': data.get('eval_count'),
                             'total_duration_ms': data.get('total_duration'),
+                            'queue_wait_s': gate.get('wait_s'),
+                            'llm_concurrency_limit': gate.get('limit'),
                         },
                     }
             except Exception as exc:
@@ -651,6 +670,18 @@ class LLMClient(BaseLLMClient):
                 overrides_dict.update(raw_overrides)
         if overrides:
             overrides_dict.update(overrides)
+        request_timeout: Optional[float] = None
+        if "timeout" in overrides_dict or "ollama_timeout" in overrides_dict:
+            try:
+                request_timeout = float(overrides_dict.get("ollama_timeout") or overrides_dict.get("timeout"))
+            except Exception:
+                request_timeout = None
+        attempt_count = self.retries + 1
+        if "retries" in overrides_dict:
+            try:
+                attempt_count = max(1, int(overrides_dict.get("retries")) + 1)
+            except Exception:
+                attempt_count = self.retries + 1
         try:
             if overrides_dict:
                 logger.info('LLMClient.generate called with overrides=%s', {k: str(v)[:200] for k, v in overrides_dict.items()})
@@ -709,7 +740,7 @@ class LLMClient(BaseLLMClient):
                 return {'error': 'tenant_cost_threshold_exceeded', 'tenant_id': tenant_id}
 
         last_exc = None
-        for attempt in range(self.retries + 1):
+        for attempt in range(attempt_count):
             try:
                 if self.mock:
                     resp = self._mock_response(prompt)
@@ -771,13 +802,25 @@ class LLMClient(BaseLLMClient):
                         prompt_len = len(prompt.split())
                     except Exception:
                         prompt_len = 0
-                    if self.interactive_model and (prompt_len <= int(self.interactive_prompt_token_threshold)) and not requested_ollama_model and not overrides_dict.get('ollama_host'):
+                    if self.interactive_model and request_timeout is None and (prompt_len <= int(self.interactive_prompt_token_threshold)) and not requested_ollama_model and not overrides_dict.get('ollama_host'):
                         try:
                             resp = self._ollama_generate_with_host(self.ollama_host, self.interactive_model, prompt, max_tokens or self.max_tokens)
                         except Exception:
                             # fallback to default model if interactive model call fails
                             try:
-                                resp = self._ollama_generate(prompt, max_tokens or self.max_tokens, requested_ollama_model)
+                                if request_timeout is None:
+                                    resp = self._ollama_generate(
+                                        prompt,
+                                        max_tokens or self.max_tokens,
+                                        requested_ollama_model,
+                                    )
+                                else:
+                                    resp = self._ollama_generate(
+                                        prompt,
+                                        max_tokens or self.max_tokens,
+                                        requested_ollama_model,
+                                        timeout=request_timeout,
+                                    )
                             except Exception as exc_ollama:
                                 # Log and mark last exception, then attempt a graceful fallback to deterministic client
                                 logger.exception('Ollama generate failed, will attempt deterministic fallback: %s', exc_ollama)
@@ -791,7 +834,19 @@ class LLMClient(BaseLLMClient):
                                     # if fallback also fails, re-raise the original Ollama exception to be handled by outer retry
                                     raise
                     else:
-                        resp = self._ollama_generate(prompt, max_tokens or self.max_tokens, requested_ollama_model)
+                        if request_timeout is None:
+                            resp = self._ollama_generate(
+                                prompt,
+                                max_tokens or self.max_tokens,
+                                requested_ollama_model,
+                            )
+                        else:
+                            resp = self._ollama_generate(
+                                prompt,
+                                max_tokens or self.max_tokens,
+                                requested_ollama_model,
+                                timeout=request_timeout,
+                            )
                     elapsed = time.time() - start
                     meta = resp.get('meta') or {}
                     meta['elapsed_s'] = elapsed
@@ -942,7 +997,7 @@ class LLMClient(BaseLLMClient):
                 time.sleep(0.5 * (attempt + 1))
                 continue
 
-        raise RuntimeError(f'LLM generate failed after {self.retries+1} attempts') from last_exc
+        raise RuntimeError(f'LLM generate failed after {attempt_count} attempts') from last_exc
 
     def generate_batch(self, prompts: list, max_tokens: Optional[int] = None, tenant_id: str | None = None, overrides: Optional[Dict[str, Any]] = None, model: str = 'gpt-like') -> list:
         """Concurrent batch wrapper around `generate` for multiple prompts.
@@ -1047,6 +1102,7 @@ def get_client_status(client: BaseLLMClient | None = None) -> dict:
         'ollama_host': getattr(c, 'ollama_host', None),
         'ollama_model': getattr(c, 'ollama_model', None),
         'ollama_reachable': ollama_reachable,
+        'concurrency': llm_concurrency_status(),
         'openai_configured': openai_configured,
         'anthropic_configured': anthropic_configured,
     }

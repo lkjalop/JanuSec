@@ -27,9 +27,10 @@
 
   // ── API helpers ─────────────────────────────────────────────────────────────
 
-  function apiBase() { return window.JANUSEC_API_BASE || ''; }
+  function apiBase() { return (window.JanuSecBreachAPI && window.JanuSecBreachAPI.apiBase ? window.JanuSecBreachAPI.apiBase() : (window.JANUSEC_API_BASE || '')); }
 
   function authHeaders() {
+    if (window.JanuSecBreachAPI && window.JanuSecBreachAPI.authHeaders) return window.JanuSecBreachAPI.authHeaders();
     var k = '';
     try { k = localStorage.getItem('apiKey') || ''; } catch (_) {}
     if (!k) k = 'devkey123';
@@ -42,14 +43,17 @@
   }
 
   function getSelectedModel() {
+    if (window.JanuSecBreachAPI && window.JanuSecBreachAPI.getSelectedModel) return window.JanuSecBreachAPI.getSelectedModel();
     try { return localStorage.getItem('selectedModel') || 'qwen3.6:27b'; } catch (_) { return 'qwen3.6:27b'; }
   }
 
   function apiFetch(path, opts) {
+    if (window.JanuSecBreachAPI && window.JanuSecBreachAPI.apiFetch) return window.JanuSecBreachAPI.apiFetch(path, opts);
     return fetch(apiBase() + path, Object.assign({ headers: authHeaders() }, opts || {}));
   }
 
   function apiPost(path, body) {
+    if (window.JanuSecBreachAPI && window.JanuSecBreachAPI.apiPost) return window.JanuSecBreachAPI.apiPost(path, body);
     return apiFetch(path, {
       method: 'POST',
       body: JSON.stringify(body || {}),
@@ -57,6 +61,7 @@
   }
 
   function authQuery() {
+    if (window.JanuSecBreachAPI && window.JanuSecBreachAPI.authQuery) return window.JanuSecBreachAPI.authQuery();
     var params = new URLSearchParams();
     try {
       var k = localStorage.getItem('apiKey') || 'devkey123';
@@ -70,11 +75,13 @@
   }
 
   function authedUrl(path) {
+    if (window.JanuSecBreachAPI && window.JanuSecBreachAPI.authedUrl) return window.JanuSecBreachAPI.authedUrl(path);
     var sep = path.indexOf('?') === -1 ? '?' : '&';
     return apiBase() + path + sep + authQuery();
   }
 
   function openAuthed(path) {
+    if (window.JanuSecBreachAPI && window.JanuSecBreachAPI.openAuthed) return window.JanuSecBreachAPI.openAuthed(path);
     window.open(authedUrl(path), '_blank', 'noopener');
   }
 
@@ -84,6 +91,12 @@
   var AID   = _params.get('assessment') || '';
   var CID   = _params.get('cluster') || '';
   var TAB   = _params.get('tab') || '';
+  if (window.JanuSecBreachState) {
+    _params = window.JanuSecBreachState.params || _params;
+    AID = window.JanuSecBreachState.AID || AID;
+    CID = window.JanuSecBreachState.CID || CID;
+    TAB = window.JanuSecBreachState.TAB || TAB;
+  }
 
   // ── State ───────────────────────────────────────────────────────────────────
 
@@ -94,9 +107,16 @@
     prefillStatus: {},   // cluster_id → 'pending' | 'done' | 'error'
     execSummary: null,
   };
+  if (window.JanuSecBreachState && window.JanuSecBreachState.state) {
+    state = window.JanuSecBreachState.state;
+  }
 
   var _asyncRedirecting = {};
   var _asyncPollTimers = {};
+  if (window.JanuSecBreachState) {
+    _asyncRedirecting = window.JanuSecBreachState.asyncRedirecting || _asyncRedirecting;
+    _asyncPollTimers = window.JanuSecBreachState.asyncPollTimers || _asyncPollTimers;
+  }
 
   // ── Toast ───────────────────────────────────────────────────────────────────
 
@@ -812,7 +832,11 @@
   function _schedulePollJson(aid, delayMs) {
     if (!aid || _asyncRedirecting[aid]) return;
     if (_asyncPollTimers[aid]) return;
-    _asyncPollTimers[aid] = setTimeout(function () {
+    var progressTimers = window.JanuSecBreachProgress || null;
+    var schedule = progressTimers && progressTimers.scheduleIfMissing
+      ? progressTimers.scheduleIfMissing
+      : function (_scope, _aid, fn, ms) { return setTimeout(fn, ms || 0); };
+    _asyncPollTimers[aid] = schedule('progress', aid, function () {
       delete _asyncPollTimers[aid];
       _pollJson(aid);
     }, delayMs || 0);
@@ -876,11 +900,19 @@
     if (!aid || _asyncRedirecting[aid]) return;
     _asyncRedirecting[aid] = true;
     if (_asyncPollTimers[aid]) {
-      clearTimeout(_asyncPollTimers[aid]);
+      if (window.JanuSecBreachProgress && window.JanuSecBreachProgress.clear) {
+        window.JanuSecBreachProgress.clear('progress', aid);
+      } else {
+        clearTimeout(_asyncPollTimers[aid]);
+      }
       delete _asyncPollTimers[aid];
     }
     updateAsyncStatus('Assessment ready - redirecting...', 100);
-    setTimeout(function () {
+    var progressTimers = window.JanuSecBreachProgress || null;
+    var schedule = progressTimers && progressTimers.schedule
+      ? progressTimers.schedule
+      : function (_scope, _aid, fn, ms) { return setTimeout(fn, ms || 0); };
+    schedule('redirect', aid, function () {
       window.location.href = '/static/breach.html?assessment=' + encodeURIComponent(aid);
     }, 500);
   }
@@ -1173,8 +1205,8 @@
     _wireHomeEvents();
     _hydrateTopThreatCases(sorted, a);
 
-    // Build the CEO summary from the current deterministic verdict/wording.
-    _loadExecSummary(true);
+    // Build the CEO summary — use cached result on page load, only regenerate on explicit user action.
+    _loadExecSummary(false);
 
     // Fix 6 — Auto-generate DREAD threat summary for CRITICAL secondary clusters
     // so the most dangerous cases (esp. data exfiltration) aren't lazy-loaded.
@@ -1229,7 +1261,7 @@
           );
           var hero = document.querySelector('[data-role="breach-answer-hero"]');
           if (hero) hero.outerHTML = _renderBreachAnswerHero(resorted, assessment);
-          _loadExecSummary(true);
+          _loadExecSummary(false);
           _rerenderCard(c.cluster_id, resorted);
         });
       }, idx * 350);
@@ -5170,9 +5202,30 @@
             det.innerHTML = [
               data.headline ? '<div class="br-exec__headline">' + escHtml(data.headline) + '</div>' : '',
               data.subline ? '<div class="br-exec__subline">' + escHtml(data.subline) + '</div>' : '',
-              '<div class="br-exec__source">source: ' + escHtml(data.narrative_source || data.narrative_provenance || 'legacy') + (data.from_cache ? ' (cached)' : '') + '</div>',
+              (data.narrative_source && data.narrative_source !== 'attack_chain_narrative' && data.narrative_source !== 'attack_chain_narrative+enriched'
+                ? '<div class="br-exec__source">AI narrative: ' + escHtml(data.narrative_source) + (data.from_cache ? ' \u00b7 cached' : '') + '</div>'
+                : ''),
+              (data.attribution_confidence && data.attribution_confidence !== 'NONE'
+                ? '<div class="br-exec__confidence" title="Attribution is based on automated signals only. Human analyst review required before external disclosure or referral." style="display:inline-flex;align-items:center;gap:6px;margin-bottom:8px;padding:3px 10px;border-radius:4px;font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;background:rgba(245,158,11,0.12);color:#f59e0b;border:1px solid rgba(245,158,11,0.3);">'
+                  + '\u26a0 Attribution confidence: ' + escHtml(data.attribution_confidence) + ' \u2014 analyst review required'
+                  + (data.persona && data.persona !== 'ir' ? ' \u00b7 persona: ' + escHtml(data.persona) : '')
+                  + '</div>'
+                : ''),
               (function () {
-                var compact = _compactExecSummary(data, data.executive_summary || '');
+                // Prefer the full executive_summary when it exists and is substantive (>80 chars).
+                // dread_fragments are kept for the DREAD narrative section, not the main exec body.
+                var execText = data.executive_summary || '';
+                if (execText.length > 80) {
+                  // Show the full summary as wrapped paragraphs (split on sentence boundaries)
+                  var sentences = _sentenceList(execText);
+                  var mid = Math.ceil(sentences.length / 2);
+                  var bodyHtml = '<p>' + escHtml(sentences.slice(0, mid).join(' ')) + '</p>';
+                  if (sentences.length > mid) {
+                    bodyHtml += '<p>' + escHtml(sentences.slice(mid).join(' ')) + '</p>';
+                  }
+                  return '<div class="br-exec__body">' + bodyHtml + '</div>';
+                }
+                var compact = _compactExecSummary(data, execText);
                 return '<div class="br-exec__body"><p>' + escHtml(compact.p1) + '</p><p>' + escHtml(compact.p2) + '</p></div>';
               })(),
               (data.evidence_refs && data.evidence_refs.length)
@@ -5180,7 +5233,6 @@
                   + '<div class="br-exec__refs">Evidence refs: ' + data.evidence_refs.slice(0, 18).map(function (n) {
                       return '<a class="br-rowchip" href="/static/breach.html?assessment=' + encodeURIComponent(AID) + '&tab=evidence&row=' + encodeURIComponent(n) + '">[' + escHtml(n) + ']</a>';
                     }).join(' ') + '</div>'
-                  + (data.executive_summary ? '<div class="br-drilldown__body">' + escHtml(data.executive_summary) + '</div>' : '')
                   + '</details>'
                 : '',
               data.render_warning ? '<div class="br-exec__warn">' + escHtml(data.render_warning) + '</div>' : '',

@@ -84,6 +84,24 @@ models/registry/upload_tmp_*.json
 
 # Tenant and session runtime state
 data/tenants/
+
+# Connector runtime state (live poll cursors — regenerated on start)
+src/data/polling_state/
+src/data/cluster_enrich/
+src/data/tier2/
+
+# Scratch / debug / e2e one-off scripts at repo root
+_*.py
+_*.txt
+_*.json
+
+# Frontend vendored libraries (checked-in separately or CDN)
+frontend/static/js/vendors/
+d3.min.js
+xlsx.full.min.js
+
+# Playwright output
+test-results/
 data/sessions/
 data/file_batches/
 data/integrations/

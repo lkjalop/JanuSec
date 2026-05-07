@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
 from typing import Any, Optional
 
@@ -118,9 +119,7 @@ async def run_enriched_pipeline(
         # LLM calls are synchronous — offload to thread
         if llm_func:
             try:
-                # Phase 3 — high-quality CoT path gets a longer timeout
-                # because it makes two LLM calls.
-                _cot_timeout = 180 if quality_mode == 'high' else 60
+                _cot_timeout = float(os.getenv('EXEC_SUMMARY_CLUSTER_TIMEOUT_SECONDS') or os.getenv('OLLAMA_TIMEOUT_SECONDS') or os.getenv('LLM_TIMEOUT_SECONDS') or 45)
                 cn = await asyncio.wait_for(
                     asyncio.to_thread(
                         synthesize_cluster_narrative,
@@ -130,12 +129,12 @@ async def run_enriched_pipeline(
                     timeout=_cot_timeout,
                 )
             except asyncio.TimeoutError as exc:
-                logger.warning('cluster narrative LLM timeout for %s after 60s', cid)
+                logger.warning('cluster narrative LLM timeout for %s after %.0fs', cid, _cot_timeout)
                 pipeline_failures.append({
                     'stage':      'cluster_narrative',
                     'cluster_id': cid,
                     'reason':     'timeout',
-                    'detail':     '60s budget exceeded',
+                    'detail':     f'{_cot_timeout:.0f}s budget exceeded',
                     'fallback':   'deterministic',
                 })
                 cn = synthesize_cluster_narrative(
@@ -279,14 +278,14 @@ async def run_enriched_pipeline(
                     synthesize_rollup,
                     cluster_narratives, assessment_verdict, total_rows, llm_func, model,
                 ),
-                timeout=60,
+                timeout=float(os.getenv('EXEC_SUMMARY_ROLLUP_TIMEOUT_SECONDS') or os.getenv('OLLAMA_TIMEOUT_SECONDS') or os.getenv('LLM_TIMEOUT_SECONDS') or 45),
             )
         except asyncio.TimeoutError:
-            logger.warning('rollup LLM timeout after 60s')
+            logger.warning('rollup LLM timeout')
             pipeline_failures.append({
                 'stage':   'rollup',
                 'reason':  'timeout',
-                'detail':  '60s budget exceeded',
+                'detail':  'configured budget exceeded',
                 'fallback':'deterministic',
             })
             rollup_text, rollup_prov = synthesize_rollup(

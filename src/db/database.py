@@ -18,6 +18,7 @@ import logging
 import os
 import random
 import sqlite3
+import sys
 from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -40,6 +41,12 @@ except Exception:
 
 _logger = logging.getLogger(__name__)
 _struct_logger = structlog.get_logger(__name__) if structlog else None
+
+_this_module = sys.modules[__name__]
+if __name__ == 'src.db.database':
+    sys.modules['db.database'] = _this_module
+elif __name__ == 'db.database':
+    sys.modules['src.db.database'] = _this_module
 
 def _log(level: str, event: str, **kwargs: Any) -> None:
     """Emit log messages with optional structlog enrichment."""

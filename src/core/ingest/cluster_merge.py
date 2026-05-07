@@ -80,6 +80,7 @@ from __future__ import annotations
 
 import ipaddress
 import logging
+import os
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
@@ -1071,17 +1072,21 @@ def transitive_merge_clusters(
             pivot_keys_used=sorted(pivot_index.get(root, set()))[:pivot_keys_per_cluster_cap],
             pivot_key_total=len(pivot_index.get(root, set())),
         )
+        expanded = _expand_large_campaign_cluster(cluster, row_by_idx, ts_by_idx)
+        candidate_clusters = expanded or [cluster]
+
         # Unclassified single-source components are BAU activity groups, not
         # cross-domain intrusion signals. Bucket them as isolated telemetry so
         # they don't pad the cluster count with noise cards.
-        if (
-            cluster.get("cluster_kind") == "unclassified"
-            and len(cluster.get("sources", [])) < 2
-        ):
-            cluster["_isolated"] = True
-            isolated.append(cluster)
-        else:
-            out.append(cluster)
+        for candidate in candidate_clusters:
+            if (
+                candidate.get("cluster_kind") == "unclassified"
+                and len(candidate.get("sources", [])) < 2
+            ):
+                candidate["_isolated"] = True
+                isolated.append(candidate)
+            else:
+                out.append(candidate)
 
     out.sort(key=lambda c: (
         _SEV_ORDER.get(str(c.get("severity", "low")), 9),
@@ -1337,6 +1342,8 @@ def _classify_component(
         "shared_cidrs": cidrs[:8],
         "shared_hosts": hosts[:8],
         "sources": sources,
+        "source_types": sources,
+        "source_count": len(sources),
         "time_window": {
             "start": min(times) if times else None,
             "end":   max(times) if times else None,
@@ -1352,6 +1359,199 @@ def _classify_component(
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
+
+def _expand_large_campaign_cluster(
+    cluster: dict,
+    row_by_idx: dict[int, dict],
+    ts_by_idx: dict[int, float],
+) -> list[dict]:
+    """Split very large campaign components into phase-centered clusters."""
+    if os.getenv("JANUSEC_SPLIT_LARGE_CAMPAIGNS", "1").lower() in {"0", "false", "no"}:
+        return []
+    if cluster.get("cluster_kind") != "campaign":
+        return []
+    try:
+        row_count = int(cluster.get("row_count") or 0)
+    except (TypeError, ValueError):
+        row_count = 0
+    threshold = int(os.getenv("JANUSEC_LARGE_CAMPAIGN_ROWS", "500") or 500)
+    if row_count < threshold:
+        return []
+
+    parent_refs = {
+        idx for ref in (cluster.get("row_refs") or [])
+        if (idx := _int_or_none(ref)) is not None
+    }
+    if not parent_refs:
+        return []
+
+    context_window = float(os.getenv("JANUSEC_PHASE_CLUSTER_CONTEXT_SECONDS", str(6 * 3600)) or (6 * 3600))
+    bucket_seconds = float(os.getenv("JANUSEC_PHASE_CLUSTER_BUCKET_SECONDS", str(12 * 3600)) or (12 * 3600))
+    per_phase_cap = int(os.getenv("JANUSEC_PHASE_CLUSTER_MAX_PER_PHASE", "24") or 24)
+    context_cap = int(os.getenv("JANUSEC_PHASE_CLUSTER_CONTEXT_CAP", "120") or 120)
+    min_children = int(os.getenv("JANUSEC_PHASE_CLUSTER_MIN_CHILDREN", "8") or 8)
+
+    groups: dict[tuple[str, str, int], set[int]] = defaultdict(set)
+    phase_meta: dict[str, dict] = {}
+    for phase in cluster.get("phases") or []:
+        phase_id = str(phase.get("phase_id") or "")
+        if not phase_id:
+            continue
+        phase_meta[phase_id] = phase
+        for ref in phase.get("row_refs") or []:
+            idx = _int_or_none(ref)
+            if idx is None or idx not in parent_refs:
+                continue
+            row = row_by_idx.get(idx) or {}
+            ts = ts_by_idx.get(idx, 0.0)
+            bucket = int(ts // bucket_seconds) if ts > 0 and bucket_seconds > 0 else 0
+            groups[(phase_id, _row_group_anchor(row), bucket)].add(idx)
+
+    if not groups:
+        return []
+
+    selected_keys: list[tuple[str, str, int]] = []
+    by_phase: dict[str, list[tuple[tuple[str, str, int], set[int]]]] = defaultdict(list)
+    for key, refs in groups.items():
+        by_phase[key[0]].append((key, refs))
+    for _phase_id, items in by_phase.items():
+        items.sort(key=lambda item: (-len(item[1]), item[0][2], item[0][1]))
+        selected_keys.extend(key for key, _ in items[:per_phase_cap])
+    selected_keys.sort(key=lambda key: (key[2], key[0], key[1]))
+
+    children: list[dict] = []
+    for n, key in enumerate(selected_keys, start=1):
+        phase_id, anchor, _bucket = key
+        anchor_refs = groups[key]
+        child_refs = _phase_context_refs(anchor_refs, parent_refs, row_by_idx, ts_by_idx, context_window, context_cap)
+        if len(child_refs) < 2:
+            child_refs = set(anchor_refs)
+        if child_refs:
+            children.append(_make_phase_child_cluster(cluster, phase_meta.get(phase_id) or {}, phase_id, anchor, n, child_refs, row_by_idx, ts_by_idx))
+
+    if len(children) < min_children:
+        return []
+    return children
+
+
+def _phase_context_refs(
+    anchor_refs: set[int],
+    parent_refs: set[int],
+    row_by_idx: dict[int, dict],
+    ts_by_idx: dict[int, float],
+    context_window: float,
+    context_cap: int,
+) -> set[int]:
+    anchor_entities: set[str] = set()
+    anchor_times = [ts_by_idx.get(idx, 0.0) for idx in anchor_refs if ts_by_idx.get(idx, 0.0) > 0]
+    for idx in anchor_refs:
+        anchor_entities.update(_row_entities(row_by_idx.get(idx) or {}))
+    if not anchor_times:
+        return set(anchor_refs)
+    start = min(anchor_times) - context_window
+    end = max(anchor_times) + context_window
+    center = (min(anchor_times) + max(anchor_times)) / 2
+    candidates: list[tuple[float, int, bool]] = []
+    for idx in parent_refs:
+        ts = ts_by_idx.get(idx, 0.0)
+        if ts and (ts < start or ts > end):
+            continue
+        overlaps = bool(anchor_entities & _row_entities(row_by_idx.get(idx) or {}))
+        if idx in anchor_refs or overlaps:
+            candidates.append((abs((ts or center) - center), idx, overlaps))
+    candidates.sort(key=lambda item: (item[0], 0 if item[2] else 1, item[1]))
+    picked = {idx for _, idx, _ in candidates[:context_cap]}
+    picked.update(anchor_refs)
+    return picked
+
+
+def _make_phase_child_cluster(
+    parent: dict,
+    phase: dict,
+    phase_id: str,
+    anchor: str,
+    ordinal: int,
+    refs: set[int],
+    row_by_idx: dict[int, dict],
+    ts_by_idx: dict[int, float],
+) -> dict:
+    rows = [row_by_idx[i] for i in sorted(refs) if i in row_by_idx]
+    sources = sorted({
+        _str(r.get("_source_type") or r.get("source_type") or r.get("source_file") or "unknown")
+        for r in rows
+    })
+    users = sorted({_lower(r.get("user_canonical") or r.get("user") or r.get("username")) for r in rows})
+    users = [u for u in users if u]
+    ips = sorted({_str(r.get("src_ip") or r.get("dst_ip")) for r in rows if r.get("src_ip") or r.get("dst_ip")})
+    hosts = sorted({_lower(r.get("hostname") or r.get("host")) for r in rows if r.get("hostname") or r.get("host")})
+    times = [ts_by_idx.get(i, 0.0) for i in refs if ts_by_idx.get(i, 0.0) > 0]
+    phase_rows = sorted(i for i in refs if phase_id in detect_row_phase_tags(row_by_idx.get(i) or {}))
+    child_phase = dict(phase)
+    child_phase["row_refs"] = phase_rows or sorted(refs)
+    child_phase["row_count"] = len(child_phase["row_refs"])
+    lead = (
+        f"{phase.get('name') or phase_id.replace('_', ' ').title()} cluster "
+        f"around {anchor} - {len(refs)} rows - {len(sources)} telemetry source(s)"
+    )
+    return {
+        "cluster_id": f"{parent.get('cluster_id', 'analysis')}-{phase_id}-{ordinal:02d}",
+        "parent_cluster_id": parent.get("cluster_id"),
+        "expanded_from_large_campaign": True,
+        "cluster_kind": "campaign",
+        "verdict": parent.get("verdict", "VALIDATED_BREACH"),
+        "final_verdict": parent.get("final_verdict", "VALIDATED_BREACH"),
+        "analysis_classification": parent.get("analysis_classification", "confirmed_breach"),
+        "severity": phase.get("severity") or parent.get("severity", "high"),
+        "confidence": parent.get("confidence", 0.85),
+        "confidence_calibration": parent.get("confidence_calibration", "uncalibrated"),
+        "lead_description": lead,
+        "reason_summary": lead,
+        "phases": [child_phase],
+        "phase_count": 1,
+        "phase_anchor_row_count": len(child_phase["row_refs"]),
+        "engagement_refs": parent.get("engagement_refs") or [],
+        "change_refs": parent.get("change_refs") or [],
+        "pivot_keys_used": parent.get("pivot_keys_used") or [],
+        "pivot_key_count": parent.get("pivot_key_count") or 0,
+        "row_refs": sorted(refs),
+        "row_count": len(refs),
+        "shared_users": users[:8],
+        "shared_ips": ips[:8],
+        "shared_hosts": hosts[:8],
+        "sources": sources,
+        "source_types": sources,
+        "source_count": len(sources),
+        "time_window": {
+            "start": min(times) if times else None,
+            "end": max(times) if times else None,
+            "span_seconds": (max(times) - min(times)) if len(times) >= 2 else 0,
+        },
+    }
+
+
+def _row_group_anchor(row: dict) -> str:
+    for field in ("hostname", "host", "user_canonical", "user", "src_ip", "dst_ip", "dns_query", "event_signature"):
+        val = _lower(row.get(field))
+        if val:
+            return f"{field}:{val}"
+    return "event"
+
+
+def _row_entities(row: dict) -> set[str]:
+    out: set[str] = set()
+    for field in ("hostname", "host", "user_canonical", "user", "username", "src_ip", "dst_ip", "dns_query", "domain", "event_signature"):
+        val = _lower(row.get(field))
+        if val:
+            out.add(f"{field}:{val}")
+    return out
+
+
+def _int_or_none(value: Any) -> int | None:
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return None
+
 
 def _is_public_ip(ip: str) -> bool:
     """Return True only for routable public IPv4/IPv6 addresses."""

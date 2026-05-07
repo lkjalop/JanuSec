@@ -13,8 +13,8 @@ def _mock_summary(text: str, level: int = 1) -> str:
     return f"[Tier-2 Detailed Summary] {text[:300]}..."
 
 
-def _call_ollama(prompt: str, model: str = 'llama3.2:3b', timeout: int = 60) -> str:
-    host = os.getenv('OLLAMA_HOST') or os.getenv('OLLAMA_URL') or 'http://127.0.0.1:11434'
+def _call_ollama(prompt: str, model: str = 'llama3.2:3b', timeout: int = 45) -> str:
+    host = os.getenv('OLLAMA_HOST') or os.getenv('OLLAMA_URL') or 'http://localhost:11434'
     # Use the standard Ollama generate API
     payload = {'model': model, 'prompt': prompt, 'stream': False}
     r = requests.post(host.rstrip('/') + '/api/generate', json=payload, timeout=timeout)
@@ -45,6 +45,7 @@ def summarize_tier2(text: str) -> str:
         return _mock_summary(text, level=2)
     try:
         model = os.getenv('T2_MODEL') or os.getenv('OLLAMA_MODEL', 'llama3.2:3b')
-        return _call_ollama(text, model=model, timeout=int(os.getenv('OLLAMA_TIMEOUT_SECONDS', '120')))
+        timeout = int(os.getenv('OLLAMA_TIMEOUT_SECONDS') or os.getenv('LLM_TIMEOUT_SECONDS') or '45')
+        return _call_ollama(text, model=model, timeout=timeout)
     except Exception:
         return _mock_summary(text, level=2)

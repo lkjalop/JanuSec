@@ -24,6 +24,21 @@ from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from src.api.app_factory import build_fastapi_app
+from src.api.background_registry import background_status, get_background_manager
+from src.api.router_registry import ensure_add_event_handler, include_optional_router, include_router_specs
+from src.api.startup_checks import apply_config_profile, initialize_database, is_live_environment
+
+
+def managed_startup_task(app: FastAPI, name: str, coro_factory: Callable[[], Awaitable[object]]):
+    """Return a startup hook that registers a named coroutine with the background manager."""
+    def _starter():
+        try:
+            get_background_manager(app).start_once(name, coro_factory)
+        except Exception:
+            logger.exception('background scheduler %s failed to start', name)
+    return _starter
+
 try:
     from src.core.config import get_settings
 except Exception:
@@ -894,6 +909,7 @@ except Exception:  # pragma: no cover
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
+    background_manager = get_background_manager(app)
     try:
         # In introspect/test modes `get_settings` may be unavailable or
         # perform heavy work; skip retrieving settings to keep startup fast
@@ -903,53 +919,12 @@ async def lifespan(app: FastAPI):
     except Exception:
         # Settings failure is fatal; allow exception to bubble so orchestrator can catch
         raise
-    # Auto-apply configuration profile if CONFIG_PROFILE provided
-    try:
-        from src.config.profile_loader import apply_profile
-        prof = os.getenv('CONFIG_PROFILE')
-        if prof:
-            apply_profile(prof)
-    except Exception as _exc:
-        logger.debug('silent_swallow at %s:%d: %s', __file__, 892, _exc)
+    # Auto-apply configuration profile if CONFIG_PROFILE provided.
+    apply_config_profile(logger)
     # Initialize the primary DB pool during lifespan startup so staging/prod
     # does not depend on legacy startup event wiring that can be bypassed by
     # alternate app factories or test-oriented router flows.
-    try:
-        if os.getenv('USE_PLATFORM_DB','0').lower() in {'1','true','yes'} or os.getenv('APP_DB_DSN'):
-            live_mode = os.getenv('ENV','').lower() in {'staging', 'prod', 'production'} or os.getenv('APP_ENV','').lower() in {'staging', 'prod', 'production'}
-            try:
-                from src.db import database as _db
-            except Exception:
-                try:
-                    import db.database as _db
-                except Exception:
-                    _db = None
-            if _db is not None:
-                await _db.init_pool()
-                logger.info('lifespan: database pool initialized')
-                try:
-                    from src.db.migrations import apply_migrations_postgres, apply_migrations_sqlite  # type: ignore
-                except Exception:
-                    try:
-                        from db.migrations import apply_migrations_postgres, apply_migrations_sqlite  # type: ignore
-                    except Exception:
-                        apply_migrations_postgres = apply_migrations_sqlite = None  # type: ignore
-                try:
-                    pool = await _db.get_pool()
-                    if hasattr(_db, 'is_fallback_active') and _db.is_fallback_active():
-                        if apply_migrations_sqlite:
-                            async with pool.acquire() as conn:  # type: ignore[attr-defined]
-                                await apply_migrations_sqlite(conn)
-                    elif apply_migrations_postgres:
-                        await apply_migrations_postgres(pool)
-                except Exception:
-                    logger.exception('lifespan: database migrations failed')
-                    if live_mode:
-                        raise
-    except Exception:
-        logger.exception('lifespan: database initialization failed')
-        if os.getenv('ENV','').lower() in {'staging', 'prod', 'production'} or os.getenv('APP_ENV','').lower() in {'staging', 'prod', 'production'}:
-            raise
+    await initialize_database(logger)
     # Attach hopgraph (prefer an already-injected instance on app for tests)
     try:
         hg = None
@@ -993,7 +968,10 @@ async def lifespan(app: FastAPI):
                 except Exception as _exc:
                     logger.debug('silent_swallow at %s:%d: %s', __file__, 977, _exc)
             try:
-                app.state._hopgraph_restore_task = asyncio.create_task(_restore_hopgraph_state())
+                app.state._hopgraph_restore_task = background_manager.start_once(
+                    'hopgraph_restore',
+                    _restore_hopgraph_state,
+                )
             except Exception:
                 app.state._hopgraph_restore_task = None
     except Exception as _exc:
@@ -1081,7 +1059,10 @@ async def lifespan(app: FastAPI):
         except Exception as _exc:
             logger.debug('silent_swallow at %s:%d: %s', __file__, 1065, _exc)
     try:
-        app.state._deferred_post_startup = asyncio.create_task(_deferred_post_startup())
+        app.state._deferred_post_startup = background_manager.start_once(
+            'deferred_post_startup',
+            _deferred_post_startup,
+        )
     except Exception:
         app.state._deferred_post_startup = None
     # Optional one-time migration of any in-memory REPORT_STORE into configured backend
@@ -1120,22 +1101,22 @@ async def lifespan(app: FastAPI):
     except Exception:
         _snap_ttl = 0
     if _snap_ttl and _snap_ttl > 0:
-        async def _snap_cleanup_loop():
-            import asyncio
+        def _snap_cleanup_once():
             from src.core.graph.persistence.simple_snapshot import cleanup_old_snapshots
-            interval = int(os.getenv('HOPGRAPH_SNAPSHOT_CLEAN_INTERVAL_SECONDS', os.getenv('HOPGRAPH_PRUNE_INTERVAL_SECONDS', '3600')))
-            while True:
-                try:
-                    cleanup_old_snapshots(_snap_ttl)
-                except Exception as _exc:
-                    logger.debug('silent_swallow at %s:%d: %s', __file__, 1114, _exc)
-                await asyncio.sleep(interval)
+            cleanup_old_snapshots(_snap_ttl)
         try:
             if _is_test_mode():
                 logger.info('TEST MODE: skipping hopgraph snapshot cleanup task')
                 app.state._snapshot_cleanup_task = None
             else:
-                app.state._snapshot_cleanup_task = asyncio.create_task(_snap_cleanup_loop())
+                interval = int(os.getenv('HOPGRAPH_SNAPSHOT_CLEAN_INTERVAL_SECONDS', os.getenv('HOPGRAPH_PRUNE_INTERVAL_SECONDS', '3600')))
+                app.state._snapshot_cleanup_task = background_manager.start_periodic(
+                    'hopgraph_snapshot_cleanup',
+                    _snap_cleanup_once,
+                    interval_seconds=interval,
+                    backoff_seconds=min(interval, 300),
+                    jitter_seconds=min(interval * 0.1, 30),
+                )
         except Exception:
             app.state._snapshot_cleanup_task = None
     yield
@@ -1174,27 +1155,30 @@ async def lifespan(app: FastAPI):
             task.cancel()
     except Exception as _exc:
         logger.debug('silent_swallow at %s:%d: %s', __file__, 1159, _exc)
+    try:
+        await background_manager.shutdown(timeout_seconds=float(os.getenv('BACKGROUND_SHUTDOWN_TIMEOUT_SECONDS', '5') or 5))
+    except Exception:
+        logger.exception('lifespan: background task manager shutdown failed')
 
-app = FastAPI(title='Threat Platform API', version='4.1.0', lifespan=lifespan)
+app = build_fastapi_app(
+    title='Threat Platform API',
+    version='4.1.0',
+    lifespan=lifespan,
+)
 
 # Keep canonical console dependencies mounted on the module-level app as well as
 # factory-built variants so local startup and Playwright exercise the same routes.
 try:
-    app.include_router(abtests_router)
+    include_optional_router(app, abtests_router, logger, name='abtests_router')
 except Exception as _exc:
     logger.debug('silent_swallow at %s:%d: %s', __file__, 1168, _exc)
 try:
-    if hopgraph_stream_router is not None:
-        app.include_router(hopgraph_stream_router)
+    include_optional_router(app, hopgraph_stream_router, logger, name='hopgraph_stream_router')
 except Exception as _exc:
     logger.debug('silent_swallow at %s:%d: %s', __file__, 1173, _exc)
 
 # FastAPI/Starlette compatibility: newer versions may drop app.add_event_handler.
-if not hasattr(app, 'add_event_handler'):
-    def _compat_add_event_handler(event_type: str, func):
-        app.router.on_event(event_type)(func)
-        return func
-    app.add_event_handler = _compat_add_event_handler  # type: ignore[attr-defined]
+ensure_add_event_handler(app)
 
 # OpenAPI fallback: ensure /openapi.json works even if schema generation fails
 try:
@@ -1351,6 +1335,12 @@ try:
         app.include_router(_assessments_extra_router)
     except Exception as _exc:
         logger.debug('silent_swallow at %s:%d: %s', __file__, 1333, _exc)
+    # Investigation session management endpoints
+    try:
+        from src.api.routes.investigations import router as _investigations_router
+        app.include_router(_investigations_router)
+    except Exception as _exc:
+        logger.debug('silent_swallow at %s:%d: %s', __file__, 1365, _exc)
 except Exception as _exc:
     logger.debug('silent_swallow at %s:%d: %s', __file__, 1447, _exc)
 
@@ -2243,6 +2233,8 @@ def _register_background_schedulers():
     if os.getenv('FAST_TEST_MODE', '').lower() in {'1', 'true', 'yes'} or os.getenv('PYTEST_CURRENT_TEST'):
         logger.info('TEST MODE: skipping background schedulers')
         return
+    def _managed_startup_task(name, coro_factory):
+        return managed_startup_task(app, name, coro_factory)
     # Incident snapshots
     _INCIDENT_SNAPSHOT_INTERVAL = int(os.getenv('INCIDENT_SNAPSHOT_INTERVAL_SECONDS', '0') or 0)
     if _INCIDENT_SNAPSHOT_INTERVAL > 0 and GLOBAL_INCIDENTS:
@@ -2253,7 +2245,7 @@ def _register_background_schedulers():
                 except Exception as _exc:
                     logger.debug('silent_swallow at %s:%d: %s', __file__, 2345, _exc)
                 await asyncio.sleep(max(5, _INCIDENT_SNAPSHOT_INTERVAL))
-        app.add_event_handler('startup', lambda: asyncio.create_task(_incident_snapshot_loop()))
+        app.add_event_handler('startup', _managed_startup_task('incident_snapshot_loop', _incident_snapshot_loop))
     # HopGraph snapshot/prune
     _HOPGRAPH_SNAPSHOT_INTERVAL = int(os.getenv('HOPGRAPH_SNAPSHOT_INTERVAL_SECONDS','0') or 0)
     _HOPGRAPH_PRUNE_INTERVAL = int(os.getenv('HOPGRAPH_PRUNE_INTERVAL_SECONDS','0') or 0)
@@ -2280,7 +2272,7 @@ def _register_background_schedulers():
                 except Exception as _exc:
                     logger.debug('silent_swallow at %s:%d: %s', __file__, 2372, _exc)
                 await asyncio.sleep(2)
-        app.add_event_handler('startup', lambda: asyncio.create_task(_hopgraph_maintenance_loop()))
+        app.add_event_handler('startup', _managed_startup_task('hopgraph_maintenance_loop', _hopgraph_maintenance_loop))
 
     # Register session cleanup task if module available
     try:
@@ -2353,7 +2345,7 @@ def _register_background_schedulers():
                     except Exception as _exc:
                         logger.debug('silent_swallow at %s:%d: %s', __file__, 2445, _exc)
                     await asyncio.sleep(max(5, _SUB_RENEW_INTERVAL))
-            app.add_event_handler('startup', lambda: asyncio.create_task(_sub_renewer_loop()))
+            app.add_event_handler('startup', _managed_startup_task('email_subscription_renewer', _sub_renewer_loop))
     except Exception as _exc:
         logger.debug('silent_swallow at %s:%d: %s', __file__, 2449, _exc)
 
@@ -2378,12 +2370,21 @@ def _register_background_schedulers():
     try:
         from src.core.event_pipeline.pool_health_exporter import pool_health_loop
         if not _is_test_mode():
-            app.add_event_handler('startup', lambda: __import__('asyncio').get_event_loop().create_task(pool_health_loop(int(os.getenv('POOL_HEALTH_INTERVAL', '10') or 10))))
+            app.add_event_handler(
+                'startup',
+                _managed_startup_task(
+                    'pool_health_loop',
+                    lambda: pool_health_loop(int(os.getenv('POOL_HEALTH_INTERVAL', '10') or 10)),
+                ),
+            )
         else:
             # In test mode schedule a shorter loop for observability if desired
             try:
                 interval = int(os.getenv('POOL_HEALTH_INTERVAL_TEST', '2') or 2)
-                app.add_event_handler('startup', lambda: __import__('asyncio').get_event_loop().create_task(pool_health_loop(interval)))
+                app.add_event_handler(
+                    'startup',
+                    _managed_startup_task('pool_health_loop_test', lambda: pool_health_loop(interval)),
+                )
             except Exception as _exc:
                 logger.debug('silent_swallow at %s:%d: %s', __file__, 2479, _exc)
     except Exception as _exc:
@@ -2447,7 +2448,10 @@ def _register_background_schedulers():
                         logger.debug('silent_swallow at %s:%d: %s', __file__, 2538, _exc)
                     await asyncio.sleep(interval)
             try:
-                app.add_event_handler('startup', lambda: __import__('asyncio').get_event_loop().create_task(_periodic_temp_sweep()))
+                app.add_event_handler(
+                    'startup',
+                    _managed_startup_task('periodic_temp_sweep', _periodic_temp_sweep),
+                )
             except Exception:
                 try:
                     __import__('asyncio').get_event_loop().create_task(_periodic_temp_sweep())
@@ -2476,7 +2480,7 @@ def _register_background_schedulers():
                     except Exception as _exc:
                         logger.debug('silent_swallow at %s:%d: %s', __file__, 2568, _exc)
                     await _asyncio.sleep(max(60, int(os.getenv('DAILY_PRECISION_AGG_INTERVAL_SECONDS','86400') or 86400)))
-            app.add_event_handler('startup', lambda: asyncio.create_task(_precision_agg_loop()))
+            app.add_event_handler('startup', _managed_startup_task('daily_precision_aggregator', _precision_agg_loop))
     except Exception as _exc:
         logger.debug('silent_swallow at %s:%d: %s', __file__, 2572, _exc)
 
@@ -2496,7 +2500,7 @@ def _register_background_schedulers():
                     except Exception as _exc:
                         logger.debug('silent_swallow at %s:%d: %s', __file__, 2588, _exc)
                     await _asyncio.sleep(max(60, int(os.getenv('DAILY_LABEL_AGG_INTERVAL_SECONDS','86400') or 86400)))
-            app.add_event_handler('startup', lambda: asyncio.create_task(_label_agg_loop()))
+            app.add_event_handler('startup', _managed_startup_task('daily_label_aggregator', _label_agg_loop))
     except Exception as _exc:
         logger.debug('silent_swallow at %s:%d: %s', __file__, 2592, _exc)
 
@@ -2516,7 +2520,7 @@ def _register_background_schedulers():
             if _is_test_mode():
                 logger.info('TEST MODE: skipping decision metrics exporter loop')
             else:
-                app.add_event_handler('startup', lambda: asyncio.create_task(_decision_metrics_loop()))
+                app.add_event_handler('startup', _managed_startup_task('decision_metrics_exporter', _decision_metrics_loop))
     except Exception as _exc:
         logger.debug('silent_swallow at %s:%d: %s', __file__, 2612, _exc)
 
@@ -2599,7 +2603,7 @@ def _register_background_schedulers():
                     except Exception as _exc:
                         logger.debug('silent_swallow at %s:%d: %s', __file__, 2691, _exc)
                     await _asyncio.sleep(max(10, interval))
-            app.add_event_handler('startup', lambda: asyncio.create_task(_daily_learn_loop()))
+            app.add_event_handler('startup', _managed_startup_task('daily_learn_loop', _daily_learn_loop))
     except Exception as _exc:
         logger.debug('silent_swallow at %s:%d: %s', __file__, 2695, _exc)
 
@@ -2699,7 +2703,7 @@ def _register_background_schedulers():
                 except Exception as _exc:
                     logger.debug('silent_swallow at %s:%d: %s', __file__, 2792, _exc)
                 await asyncio.sleep(max(60, misp_interval))
-        app.add_event_handler('startup', lambda: asyncio.create_task(_misp_loop()))
+        app.add_event_handler('startup', _managed_startup_task('misp_refresh_loop', _misp_loop))
     # Abuse.ch recent URLs
     if abuse_interval > 0:
         async def _abuse_loop():  # pragma: no cover
@@ -2710,7 +2714,7 @@ def _register_background_schedulers():
                 except Exception as _exc:
                     logger.debug('silent_swallow at %s:%d: %s', __file__, 2803, _exc)
                 await asyncio.sleep(max(60, abuse_interval))
-        app.add_event_handler('startup', lambda: asyncio.create_task(_abuse_loop()))
+        app.add_event_handler('startup', _managed_startup_task('abusech_refresh_loop', _abuse_loop))
     # OpenCTI actor/technique map
     if opencti_interval > 0:
         async def _opencti_loop():  # pragma: no cover
@@ -2721,7 +2725,7 @@ def _register_background_schedulers():
                 except Exception as _exc:
                     logger.debug('silent_swallow at %s:%d: %s', __file__, 2814, _exc)
                 await asyncio.sleep(max(60, opencti_interval))
-        app.add_event_handler('startup', lambda: asyncio.create_task(_opencti_loop()))
+        app.add_event_handler('startup', _managed_startup_task('opencti_refresh_loop', _opencti_loop))
 
     # Outbox consumer
     try:
@@ -2888,16 +2892,10 @@ except Exception:
             app.include_router(hopgraph_health_router)
         except Exception as _exc:
             logger.debug('silent_swallow at %s:%d: %s', __file__, 2979, _exc)
-    if remote_access_router:
-        try:
-            app.include_router(remote_access_router)
-        except Exception as _exc:
-            logger.debug('silent_swallow at %s:%d: %s', __file__, 2984, _exc)
-    if csv_multi_router:
-        try:
-            app.include_router(csv_multi_router)
-        except Exception as _exc:
-            logger.debug('silent_swallow at %s:%d: %s', __file__, 2989, _exc)
+    include_router_specs(app, [
+        ('remote_access', remote_access_router),
+        ('csv_multi', csv_multi_router),
+    ], logger)
     if 'playbook_tenants_router' in globals() and globals().get('playbook_tenants_router') is not None:
         try:
             app.include_router(globals().get('playbook_tenants_router'))
@@ -3197,7 +3195,7 @@ except Exception:
                     except Exception as _exc:
                         logger.debug('silent_swallow at %s:%d: %s', __file__, 3287, _exc)
                     await asyncio.sleep(max(60, _KEV_INTERVAL))
-            app.add_event_handler('startup', lambda: asyncio.create_task(_kev_loop()))
+            app.add_event_handler('startup', managed_startup_task(app, 'kev_refresh_loop', _kev_loop))
     except Exception as _exc:
         logger.debug('silent_swallow at %s:%d: %s', __file__, 3291, _exc)
 
@@ -3319,7 +3317,7 @@ except Exception:
                     except Exception as _exc:
                         logger.debug('silent_swallow at %s:%d: %s', __file__, 3409, _exc)
                     await asyncio.sleep(interval)
-            app.add_event_handler('startup', lambda: asyncio.create_task(_dkim_compact_loop()))
+            app.add_event_handler('startup', managed_startup_task(app, 'dkim_history_compaction_loop', _dkim_compact_loop))
     except Exception as _exc:
         logger.debug('silent_swallow at %s:%d: %s', __file__, 3413, _exc)
 
@@ -3521,7 +3519,7 @@ except Exception:
                         except Exception as _exc:
                             logger.debug('silent_swallow at %s:%d: %s', __file__, 3611, _exc)
                         await asyncio.sleep(max(10, _CFG_INTERVAL))
-                app.add_event_handler('startup', lambda: asyncio.create_task(_cfg_loop()))
+                app.add_event_handler('startup', managed_startup_task(app, 'aws_config_directory_scheduler', _cfg_loop))
     except Exception as _exc:
         logger.debug('silent_swallow at %s:%d: %s', __file__, 3615, _exc)
     # Admin DB migrations endpoint (optional)
@@ -3559,7 +3557,7 @@ except Exception:
                     except Exception as _exc:
                         logger.debug('silent_swallow at %s:%d: %s', __file__, 3649, _exc)
                     await asyncio.sleep(max(10, _CT_INTERVAL))
-            app.add_event_handler('startup', lambda: asyncio.create_task(_ct_loop()))
+            app.add_event_handler('startup', managed_startup_task(app, 'aws_cloudtrail_directory_scheduler', _ct_loop))
     except Exception as _exc:
         logger.debug('silent_swallow at %s:%d: %s', __file__, 3653, _exc)
 
@@ -3603,7 +3601,7 @@ except Exception:
                         except Exception as _exc:
                             logger.debug('silent_swallow at %s:%d: %s', __file__, 3693, _exc)
                         await asyncio.sleep(max(10, _AZ_INTERVAL))
-                app.add_event_handler('startup', lambda: asyncio.create_task(_az_loop()))
+                app.add_event_handler('startup', managed_startup_task(app, 'azure_defender_directory_scheduler', _az_loop))
     except Exception as _exc:
         logger.debug('silent_swallow at %s:%d: %s', __file__, 3697, _exc)
 
@@ -3647,7 +3645,7 @@ except Exception:
                         except Exception as _exc:
                             logger.debug('silent_swallow at %s:%d: %s', __file__, 3737, _exc)
                         await asyncio.sleep(max(10, _GCP_INTERVAL))
-                app.add_event_handler('startup', lambda: asyncio.create_task(_gcp_loop()))
+                app.add_event_handler('startup', managed_startup_task(app, 'gcp_scc_directory_scheduler', _gcp_loop))
     except Exception as _exc:
         logger.debug('silent_swallow at %s:%d: %s', __file__, 3741, _exc)
 
@@ -3691,7 +3689,7 @@ except Exception:
                         except Exception as _exc:
                             logger.debug('silent_swallow at %s:%d: %s', __file__, 3781, _exc)
                         await asyncio.sleep(max(10, _OCI_INTERVAL))
-                app.add_event_handler('startup', lambda: asyncio.create_task(_oci_loop()))
+                app.add_event_handler('startup', managed_startup_task(app, 'oci_cloud_guard_directory_scheduler', _oci_loop))
     except Exception as _exc:
         logger.debug('silent_swallow at %s:%d: %s', __file__, 3785, _exc)
 
@@ -3784,7 +3782,7 @@ except Exception:
                     except Exception as _exc:
                         logger.debug('silent_swallow at %s:%d: %s', __file__, 3874, _exc)
                     await asyncio.sleep(max(5,_CLEAN_INTERVAL))
-            app.add_event_handler('startup', lambda: asyncio.create_task(_session_cleanup_loop()))
+            app.add_event_handler('startup', managed_startup_task(app, 'session_ewma_cleanup_loop', _session_cleanup_loop))
     except Exception:
         pass
 
@@ -4118,7 +4116,7 @@ if _RETENTION_PURGE_INTERVAL > 0:
     if _is_test_mode():
         logger.info('TEST MODE: skipping retention purge loop')
     else:
-        app.add_event_handler('startup', lambda: asyncio.create_task(_purge_loop()))
+        app.add_event_handler('startup', managed_startup_task(app, 'retention_purge_loop', _purge_loop))
 
 
 # CrowdStrike periodic sync (demo-friendly)
@@ -4210,7 +4208,7 @@ if _CS_SYNC_INTERVAL > 0:
             except Exception as _exc:
                 logger.debug('silent_swallow at %s:%d: %s', __file__, 4300, _exc)
             await asyncio.sleep(max(5, _CS_SYNC_INTERVAL))
-    app.add_event_handler('startup', lambda: asyncio.create_task(_crowdstrike_sync_loop()))
+    app.add_event_handler('startup', managed_startup_task(app, 'crowdstrike_sync_loop', _crowdstrike_sync_loop))
 
 _RATE_LIMIT_ENABLED = os.getenv('RATE_LIMIT_ENABLED', None)
 if _RATE_LIMIT_ENABLED is None:
@@ -7089,6 +7087,7 @@ async def _runtime_health_payload() -> dict[str, Any]:
         'frontend': {
             'default': os.getenv('DEFAULT_FRONTEND', 'react'),
         },
+        'background': background_status(app),
         'test_helpers_enabled': _bool_env('TEST_HELPERS_ENABLED', False),
     }
     if not db_connected or not redis_status.get('connected') or worker_status.get('connected') is False:
@@ -7119,6 +7118,17 @@ async def ready() -> dict:
         raise HTTPException(status_code=503, detail=payload)
     payload['status'] = 'ready'
     return payload
+
+
+@app.get('/api/v1/admin/runtime/background-tasks', include_in_schema=False)
+async def runtime_background_tasks(request: Request) -> dict:
+    try:
+        allowed = _admin_ok(request)
+    except Exception:
+        allowed = False
+    if not allowed and os.getenv('TEST_HELPERS_ENABLED', '0').lower() not in {'1', 'true', 'yes'}:
+        raise HTTPException(status_code=403, detail='forbidden')
+    return background_status(app)
 
 # Ensure HopGraph snapshot/restore endpoints exist in test/lite when persistence is enabled.
 # Guard against duplicate registration (fallback block above may have already added them).

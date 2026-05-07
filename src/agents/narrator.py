@@ -50,9 +50,17 @@ def build_narrator_prompt(
     gaps: List[Gap] | None = None,
     kill_chain: list | None = None,
     cycle: int = 1,
+    compressed_prior: str = "",
 ) -> str:
     """Build the Narrator's LLM prompt."""
     sections = [_NARRATOR_SYSTEM, ""]
+
+    # Inject compressed prior context (Compress primitive) so the Narrator has
+    # the full investigation history even if prior cycles dropped from LLM window
+    if compressed_prior:
+        sections.append("## Full Investigation History (compressed)")
+        sections.append(compressed_prior)
+        sections.append("")
 
     if previous_narrative:
         sections.append("## Previous Narrative (update, don't repeat)")
@@ -155,6 +163,7 @@ async def narrate(
     kill_chain: list | None = None,
     cycle: int = 1,
     llm_client: Any = None,
+    compressed_prior: str = "",
 ) -> Dict[str, Any]:
     """Run the Narrator agent: produce updated narrative + metadata.
 
@@ -171,6 +180,7 @@ async def narrate(
         gaps=gaps,
         kill_chain=kill_chain,
         cycle=cycle,
+        compressed_prior=compressed_prior,
     )
 
     if llm_client is None:

@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -83,7 +84,7 @@ class AIModelManager:
         self.oss_config['backend'] = backend
         self.oss_config['device'] = device
         self.oss_config.setdefault('ollama_root', 'D:/Ollama')
-        self.oss_config.setdefault('ollama_host', 'http://127.0.0.1:11434')
+        self.oss_config.setdefault('ollama_host', os.getenv('OLLAMA_HOST') or os.getenv('OLLAMA_URL') or 'http://localhost:11434')
         self.oss_config.setdefault('ollama_cmd', None)
         if 'enable' not in self.oss_config:
             self.oss_config['enable'] = bool(self.oss_config.get('enable') or self.oss_config.get('enable_oss_models'))

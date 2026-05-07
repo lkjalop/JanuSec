@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+import os
 import time
 from typing import Any
 
@@ -12,7 +13,7 @@ PREFILL_ENABLED = True
 PREFILL_DEFAULT_MODEL = 'qwen3:14b'
 PREFILL_TOP_N = 3
 PREFILL_MAX_TOKENS = 3000
-PREFILL_TIMEOUT_S = 90
+PREFILL_TIMEOUT_S = int(os.getenv('PREFILL_TIMEOUT_S') or os.getenv('OLLAMA_TIMEOUT_SECONDS') or os.getenv('LLM_TIMEOUT_SECONDS') or '45')
 
 _CONFIDENCE_FLOOR_CONFIRMED = 0.75
 _CONFIDENCE_FLOOR_LIKELY    = 0.55
