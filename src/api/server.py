@@ -410,66 +410,12 @@ def test_reset_and_drain():
     except Exception:
         return {'status': 'error', 'drained': 0}
 
-# --- HopGraph Test Helper Endpoints ---
-@app.get('/api/v1/test/hopgraph/nodes')
-def test_list_hopgraph_nodes(limit: int | None = 1000):
-    import os as _os
-    active = (_os.getenv('TEST_HELPERS_ENABLED','0').lower() in {'1','true','yes'})
-    if not active:
-        raise HTTPException(status_code=404, detail='not_available')
-    hg = getattr(app, 'GLOBAL_HOPGRAPH', None)
-    if hg is None:
-        # Fallbacks
-        try:
-            hg = getattr(getattr(app, 'state', object()), 'hopgraph', None)
-        except Exception:
-            hg = None
-        if hg is None:
-            try:
-                from src.graph.hopgraph import GLOBAL_HOPGRAPH as _HG  # type: ignore
-            except Exception:
-                _HG = None  # type: ignore
-            hg = _HG
-    if hg is None:
-        return {'status':'mock','nodes':[]}
-    try:
-        keys = list(getattr(hg, 'nodes', {}) or {})
-        if isinstance(limit, int) and limit > 0:
-            keys = keys[:limit]
-        return {'status':'ok','nodes': keys}
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
-
-
-@app.get('/api/v1/test/hopgraph/node/{node_id}')
-def test_get_hopgraph_node(node_id: str):
-    import os as _os
-    active = (_os.getenv('TEST_HELPERS_ENABLED','0').lower() in {'1','true','yes'})
-    if not active:
-        raise HTTPException(status_code=404, detail='not_available')
-    hg = getattr(app, 'GLOBAL_HOPGRAPH', None)
-    if hg is None:
-        try:
-            hg = getattr(getattr(app, 'state', object()), 'hopgraph', None)
-        except Exception:
-            hg = None
-        if hg is None:
-            try:
-                from src.graph.hopgraph import GLOBAL_HOPGRAPH as _HG  # type: ignore
-            except Exception:
-                _HG = None  # type: ignore
-            hg = _HG
-    if hg is None:
-        return {'status':'mock','node': node_id, 'attrs': {}, 'factors': []}
-    try:
-        attrs = dict(getattr(hg, 'nodes', {}).get(node_id, {}))
-        try:
-            factors = list(hg.get_node_factors(node_id)) if hasattr(hg, 'get_node_factors') else list(attrs.get('factors', []))
-        except Exception:
-            factors = list(attrs.get('factors', []))
-        return {'status':'ok','node': node_id, 'attrs': attrs, 'factors': factors}
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+# --- HopGraph Test Helper Endpoints (extracted to src/api/routes/hopgraph_test.py) ---
+try:
+    from src.api.routes.hopgraph_test import router as _hopgraph_test_router
+    app.include_router(_hopgraph_test_router)
+except Exception:
+    pass
 
 @app.post('/api/v1/test/decision_cache_clear', response_model=None)
 def test_decision_cache_clear():

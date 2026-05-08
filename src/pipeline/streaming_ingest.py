@@ -113,6 +113,9 @@ _SOURCE_ALIASES: Dict[str, str] = {
     'falco': SOURCE_ENDPOINT,                           # Falco runtime security
     'k8s': SOURCE_ENDPOINT, 'kubernetes': SOURCE_ENDPOINT,  # K8s audit logs
     'endpoint': SOURCE_ENDPOINT,                        # generic sheet/section/file name
+    # Windows Security / Kerberos (domain controller event logs)
+    'windows_security': SOURCE_IAM, 'winevent': SOURCE_IAM, 'winevt': SOURCE_IAM,
+    'kerberos': SOURCE_IAM, 'dc_events': SOURCE_IAM,
     # Remote / VPN / RDP
     'vpn': SOURCE_REMOTE, 'rdp': SOURCE_REMOTE, 'citrix': SOURCE_REMOTE,
     'anyconnect': SOURCE_REMOTE, 'globalprotect': SOURCE_REMOTE,
@@ -371,6 +374,8 @@ def _canonical_user(row: dict) -> str | None:
         row.get('user'),
         row.get('user_principal_name'),
         row.get('email'),
+        # Windows Security / Kerberos: account_name is the event requester (not machine account)
+        row.get('account_name') if not str(row.get('account_name', '')).endswith('$') else None,
     )
     for v in candidates:
         if not v:
@@ -446,7 +451,7 @@ def _derive_event_signature(row: dict) -> str | None:
 
 def normalize_row(row: dict, source_type: str | None = None) -> dict:
     """Apply source-specific normalization, then fill common fields."""
-    raw_src = _safe(row.get('_source') or row.get('source') or '')
+    raw_src = _safe(row.get('_source') or row.get('source') or row.get('source_type') or '')
     st = source_type or classify_source(raw_src)
 
     # K8s/Falco have their own normalizer; detect before generic dispatch.

@@ -93,7 +93,7 @@ logger = logging.getLogger(__name__)
 _CLUSTER_MERGE_VERSION = "1.6"
 
 # ── Time windows (seconds) per pivot type ────────────────────────────────────
-USER_WINDOW             = 6 * 3600          # 6h burst
+USER_WINDOW             = 6 * 3600          # 6h burst — deliberately tight to avoid BAU/campaign leakage
 USER_CAMPAIGN_WINDOW    = 30 * 86_400       # 30d — same user across multi-phase campaign
 IP_WINDOW               = 60 * 86_400       # ~unbounded within an assessment
 CIDR_WINDOW             = 24 * 3600         # 24h
@@ -352,21 +352,42 @@ def _det_dcsync(row: dict, text: str) -> bool:
 
 
 def _det_kerberoasting(row: dict, text: str) -> bool:
-    """T1558.003 / T1558.004 — Kerberoasting and AS-REP roasting.
-    RC4_HMAC_MD5 (etype 0x17) TGS requests; pre-auth disabled accounts.
-    Near-universal in targeted attacks: APT29, Fin6, many ransomware groups."""
-    event_id = str(row.get('event_id') or row.get('EventID') or '').strip()
+    """T1558.003 / T1558.004 / T1558.001 — Kerberoasting, AS-REP roasting, Golden Ticket.
+    RC4_HMAC_MD5 (etype 0x17) TGS requests; pre-auth disabled accounts; forged TGTs.
+    Near-universal in targeted attacks: APT29, Fin6, many ransomware groups.
+    Field aliases: windows_event_id (VESPER NDJSON), EventID (XML), event_id (normalised)."""
+    # Accept both Windows XML field names and VESPER NDJSON field names
+    event_id = str(
+        row.get('event_id') or row.get('EventID') or row.get('windows_event_id') or ''
+    ).strip()
     if event_id == '4769':
-        enc_type = str(row.get('TicketEncryptionType') or row.get('ticket_encryption_type') or '').strip()
+        enc_type = str(
+            row.get('TicketEncryptionType') or row.get('ticket_encryption_type')
+            or row.get('ticket_encryption') or ''
+        ).strip()
         if enc_type in ('0x17', '0x18', '23', '18', '0x17 rc4'):
+            # Kerberoasting: RC4-downgraded TGS request
+            return True
+        # Golden Ticket: forged TGT/TGS — anomalous ticket_options indicate forgery
+        # 0x60a10000 = forwardable+renewable+proxiable+renewable_ok (atypical combination)
+        ticket_opts = str(
+            row.get('ticket_options') or row.get('TicketOptions') or ''
+        ).strip()
+        if enc_type in ('0x17', '0x18', '23', '18') and ticket_opts in (
+            '0x60a10000', '0x40a10000', '0x60810000', '0x60a00000',
+        ):
             return True
     if event_id == '4768':
-        preauth = str(row.get('PreAuthType') or row.get('pre_auth_type') or '').strip()
+        preauth = str(
+            row.get('PreAuthType') or row.get('pre_auth_type') or ''
+        ).strip()
         if preauth in ('0', '0x0'):
+            # AS-REP roasting: pre-authentication disabled
             return True
     return any(t in text for t in (
         'kerberoasting', 'as-rep roasting', 'asreproasting', 'asrep roasting',
         'rc4_hmac_md5', 'rc4 downgrade', '0x17 ticket',
+        'golden ticket', 'silver ticket', 'pass-the-ticket', 'ptt attack',
         'spn enumeration', 'gmsapassword',
         'kerbrute', 'rubeus.exe', 'impacket getuserspns', 'getuserspns.py',
     ))
@@ -390,11 +411,18 @@ def _det_shadow_copy_deletion(row: dict, text: str) -> bool:
 def _det_wmi_dcom_lateral(row: dict, text: str) -> bool:
     """T1047 / T1021.003 — WMI and DCOM lateral movement.
     wmic /node: Win32_Process Create, DCOM via RPC port 135/593.
+    Also catches wmiprvse.exe spawning encoded PowerShell (sysmon event 1 pattern).
     APT29, Fin7, Sandworm lateral movement tradecraft."""
     proc = str(row.get('process_name') or row.get('process') or '').lower()
     cmdline = str(row.get('CommandLine') or row.get('command_line') or '').lower()
+    parent = str(row.get('parent_process') or row.get('ParentImage') or '').lower()
     if ('wmic' in proc or proc == 'wmiprvse.exe') and any(
         t in cmdline for t in ('/node:', 'win32_process', 'call create', 'process call')
+    ):
+        return True
+    # WMI lateral movement via spawned encoded PowerShell (sysmon process-create)
+    if 'wmiprvse.exe' in parent and any(
+        t in cmdline for t in ('-enc ', '-encodedcommand', ' iex ', 'invoke-expression', 'downloadstring')
     ):
         return True
     try:

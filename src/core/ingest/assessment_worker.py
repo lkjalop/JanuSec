@@ -369,9 +369,31 @@ def _normalize_ingest_row(raw: dict, row_index: int) -> dict:
     row["row_index"] = row_index
     row.setdefault("_source", raw.get("_source", ""))
     row.setdefault("source_file", raw.get("_source", ""))
-    row.setdefault("source_type", raw.get("_source_type", ""))
+    row.setdefault("source_type", raw.get("source_type") or raw.get("_source_type") or "")
 
     row["triage_score"] = _score_async_ingest_row(raw, row)
+
+    # Normalize windows_security (Kerberos/WinEvent) field names so cluster pivots can link
+    # these rows to endpoint and network sources by user and IP.
+    _src_type = row.get("source_type") or raw.get("source_type") or raw.get("_source_type") or ""
+    if _src_type == "windows_security":
+        # account_name is the Kerberos requester (TGT=user, TGS=user requesting service ticket)
+        # Machine accounts end with "$" — skip them for user pivot.
+        if not row.get("user_canonical") and not row.get("user"):
+            _acct = raw.get("account_name") or row.get("account_name", "")
+            if _acct and not str(_acct).endswith("$"):
+                row["user_canonical"] = str(_acct).strip().lower()
+        # client_address is the IP of the machine making the Kerberos request
+        if not row.get("src_ip"):
+            _ca = raw.get("client_address") or row.get("client_address", "")
+            if _ca and str(_ca) not in ("::1", "127.0.0.1", ""):
+                row["src_ip"] = str(_ca).strip()
+        # workstation is the client machine name (complement to client_address)
+        if not row.get("host"):
+            _ws = raw.get("workstation") or row.get("workstation", "")
+            if _ws:
+                row["host"] = str(_ws).strip()
+
     return row
 
 
@@ -488,6 +510,39 @@ def _score_async_ingest_row(raw: dict, normalized: dict) -> float:
     event_name = str(raw.get("event_simpleName") or raw.get("event_name") or raw.get("eventName") or "").lower()
     if raw.get("alert_signature") or raw.get("detect_id") or any(t in event_name for t in ("detect", "rtrexecuted", "alert")):
         score = max(score, 0.25)
+
+    # Elevate Windows Security (Kerberos/WinEvent) rows above triage threshold.
+    # These have no severity field so default to 0.05, but are always security-relevant
+    # in a breach assessment context. Filter high-volume BAU events (logon/logoff).
+    _raw_src_type = str(raw.get("source_type") or normalized.get("source_type") or "")
+    if _raw_src_type == "windows_security":
+        _win_eid = str(
+            raw.get("windows_event_id") or raw.get("event_id") or raw.get("EventID") or ""
+        ).strip()
+        # Security-relevant event IDs — exclude 4624/4634 (high-volume logon/logoff)
+        _WIN_SECURITY_EIDS = {
+            "4768", "4769", "4771",  # Kerberos TGT/TGS/failure
+            "4625", "4648", "4672",  # logon failure, explicit logon, special privileges
+            "4698", "4702",          # scheduled task created/modified
+            "4776", "4778", "4779",  # NTLM auth, session reconnect/disconnect
+            "4720", "4738", "4740",  # account create, change, lockout
+            "4728", "4732", "4756",  # group membership changes (domain/local/universal)
+        }
+        if _win_eid in _WIN_SECURITY_EIDS:
+            score = max(score, 0.20)
+        # Further elevate RC4 downgrade (kerberoasting indicator)
+        _enc = str(raw.get("ticket_encryption") or raw.get("ticket_encryption_type") or "").strip()
+        if _enc in ("0x17", "0x18") and _win_eid == "4769":
+            score = max(score, 0.75)
+    # Elevate sysmon endpoint rows for process-create events with suspicious parents/commands
+    _sysmon_eid = str(raw.get("sysmon_event_id") or "").strip()
+    if _sysmon_eid == "1" or raw.get("source_type") == "sysmon":
+        _cmdline = str(raw.get("command_line") or "").lower()
+        _parent = str(raw.get("parent_process") or "").lower()
+        if any(t in _cmdline for t in ("-enc", "-encodedcommand", "invoke-expression", "downloadstring", "iex(")):
+            score = max(score, 0.65)
+        elif "wmiprvse.exe" in _parent or "powershell" in _parent:
+            score = max(score, 0.20)
     try:
         # Only count bytes actually moved over the wire — not read-side scan metrics.
         # bytes_scanned / rows_produced are Snowflake query-plan stats, not exfil volume.
@@ -1310,6 +1365,85 @@ async def run_assessment_pipeline(
                 logger.info("Stage 5f: ingested %d rows into HopGraph for %s", _hg_count, assessment_id)
         except Exception as exc:
             logger.debug("HopGraph ingestion skipped for %s: %s", assessment_id, exc)
+
+        # ── Stage 5g: feed IdentityGraph ──────────────────────────────────────
+        # Populates GLOBAL_IDENTITY_GRAPH so the /api/v1/graph/identity/* endpoints
+        # return real lateral-movement paths for this assessment's actors.
+        try:
+            from src.core.graph.identity_hopgraph import GLOBAL_IDENTITY_GRAPH as _ig
+            _ig_count = 0
+            _ig_cap = int(os.getenv("JANUSEC_IDENTITY_GRAPH_CAP", "10000"))
+            for _row_ig in filtered_rows[:_ig_cap]:
+                if not isinstance(_row_ig, dict):
+                    continue
+                try:
+                    _ig.ingest_identity_event(_row_ig)
+                    _ig_count += 1
+                except Exception:
+                    continue
+            logger.info("Stage 5g: ingested %d rows into IdentityGraph for %s", _ig_count, assessment_id)
+        except Exception as exc:
+            logger.debug("IdentityGraph ingestion skipped for %s: %s", assessment_id, exc)
+
+        # ── Stage 5h: update BaselineService for user/host metrics ───────────
+        # Accumulates per-entity event rates and byte volumes across assessments
+        # so that TemporalRAG and DREAD scoring have a real historical baseline.
+        try:
+            from src.core.baseline_service import BASELINES as _bl
+            import asyncio as _asyncio
+            _bl_user_counts: dict[str, int] = {}
+            _bl_host_counts: dict[str, int] = {}
+            _bl_user_bytes: dict[str, float] = {}
+            for _row_bl in filtered_rows:
+                if not isinstance(_row_bl, dict):
+                    continue
+                _u = str(_row_bl.get("user_canonical") or _row_bl.get("user") or "").strip().lower()
+                _h = str(_row_bl.get("host") or _row_bl.get("hostname") or "").strip().lower()
+                if _u:
+                    _bl_user_counts[_u] = _bl_user_counts.get(_u, 0) + 1
+                    _bytes = float(_row_bl.get("bytes_out") or _row_bl.get("bytes_sent") or _row_bl.get("bytes") or 0)
+                    if _bytes > 0:
+                        _bl_user_bytes[_u] = _bl_user_bytes.get(_u, 0.0) + _bytes
+                if _h:
+                    _bl_host_counts[_h] = _bl_host_counts.get(_h, 0) + 1
+            # Push aggregated counts into BASELINES — one update per unique entity
+            _bl_loop = _asyncio.get_event_loop()
+            for _u, _cnt in _bl_user_counts.items():
+                _bl_loop.create_task(_bl.update("user", _u, "events_per_assessment", float(_cnt)))
+            for _u, _byt in _bl_user_bytes.items():
+                _bl_loop.create_task(_bl.update("user", _u, "bytes_per_assessment", _byt))
+            for _h, _cnt in _bl_host_counts.items():
+                _bl_loop.create_task(_bl.update("host", _h, "events_per_assessment", float(_cnt)))
+            logger.info(
+                "Stage 5h: queued baseline updates for %d users / %d hosts (assessment %s)",
+                len(_bl_user_counts), len(_bl_host_counts), assessment_id,
+            )
+        except Exception as exc:
+            logger.debug("BaselineService update skipped for %s: %s", assessment_id, exc)
+
+        # ── Stage 5i: ChronoGraph time-bucket accumulation ────────────────────
+        # Appends events into 1-hour buckets so long-horizon detections (cumulative
+        # bytes, sustained login bursts) survive across assessment boundaries.
+        try:
+            from src.core.chrono.sketch_store import CHRONO as _chrono
+            _ch_rows = 0
+            for _row_ch in filtered_rows:
+                if not isinstance(_row_ch, dict):
+                    continue
+                _ts_ch = float(_row_ch.get("_ts_epoch") or 0)
+                _u_ch = str(_row_ch.get("user_canonical") or _row_ch.get("user") or "").strip().lower()
+                _h_ch = str(_row_ch.get("host") or _row_ch.get("hostname") or "").strip().lower()
+                _b_ch = float(_row_ch.get("bytes_out") or _row_ch.get("bytes_sent") or _row_ch.get("bytes") or 0)
+                if _u_ch and _ts_ch:
+                    _chrono.increment("user", _u_ch, "events", 1.0, ts=_ts_ch)
+                    if _b_ch > 0:
+                        _chrono.increment("user", _u_ch, "bytes_out", _b_ch, ts=_ts_ch)
+                if _h_ch and _ts_ch:
+                    _chrono.increment("host", _h_ch, "events", 1.0, ts=_ts_ch)
+                _ch_rows += 1
+            logger.info("Stage 5i: ChronoGraph accumulated %d rows for %s", _ch_rows, assessment_id)
+        except Exception as exc:
+            logger.debug("ChronoGraph accumulation skipped for %s: %s", assessment_id, exc)
 
         # ── Stage 6: tier-1 prefill (top-10 cluster cards) ────────────────────
         _progress("reasoning", 85, "Tier-1 prefill for cluster cards")

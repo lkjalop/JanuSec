@@ -20,13 +20,45 @@ def detect_identity_phase3(payload: Dict[str, Any]) -> Tuple[List[str], List[Tup
         return [], []
     factors: List[str] = []
     attrs: List[Tuple[str, str]] = []
-    user = str(payload.get('user') or payload.get('actor') or '')
+    # Accept VESPER NDJSON field names (account_name, windows_event_id) alongside normalised names
+    user = str(
+        payload.get('user') or payload.get('user_canonical') or
+        payload.get('actor') or payload.get('account_name') or ''
+    )
     etype = str(payload.get('event_type') or payload.get('operation') or payload.get('action') or '').lower()
     obj = str(payload.get('object') or payload.get('dn') or payload.get('path') or '').lower()
 
-    # AS-REP roasting (pre-auth disabled or AS-REP requests)
-    if ('as-rep' in etype) or ('asrep' in etype) or ('preauth disabled' in obj):
+    # Windows Event ID field — accept both VESPER and XML/normalised names
+    win_eid = str(
+        payload.get('windows_event_id') or payload.get('event_id') or payload.get('EventID') or ''
+    ).strip()
+    pre_auth = str(payload.get('pre_auth_type') or payload.get('PreAuthType') or '').strip()
+    enc_type = str(
+        payload.get('ticket_encryption') or payload.get('ticket_encryption_type')
+        or payload.get('TicketEncryptionType') or ''
+    ).strip()
+    ticket_opts = str(payload.get('ticket_options') or payload.get('TicketOptions') or '').strip()
+
+    # AS-REP roasting: pre-authentication disabled (EventID 4768, PreAuthType 0)
+    if (('as-rep' in etype) or ('asrep' in etype) or ('preauth disabled' in obj)
+            or (win_eid == '4768' and pre_auth in ('0', '0x0'))):
         f = 'iam:as_rep_roasting'
+        factors.append(f)
+        if user:
+            attrs.append((f'user:{user}', f))
+
+    # Kerberoasting: RC4-downgraded TGS (EventID 4769, etype 0x17)
+    if win_eid == '4769' and enc_type in ('0x17', '0x18', '23', '18'):
+        f = 'iam:kerberoasting'
+        factors.append(f)
+        if user:
+            attrs.append((f'user:{user}', f))
+
+    # Golden Ticket: forged TGT with anomalous ticket options
+    if win_eid == '4769' and enc_type in ('0x17', '0x18') and ticket_opts in (
+        '0x60a10000', '0x40a10000', '0x60810000', '0x60a00000',
+    ):
+        f = 'iam:golden_ticket'
         factors.append(f)
         if user:
             attrs.append((f'user:{user}', f))

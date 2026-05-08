@@ -13,6 +13,7 @@ Outputs:
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -240,7 +241,8 @@ async def plan(
         llm_client = DEFAULT_CLIENT
 
     try:
-        resp = llm_client.generate(
+        resp = await asyncio.to_thread(
+            llm_client.generate,
             prompt,
             max_tokens=1024,
             tenant_id=context.tenant_id,

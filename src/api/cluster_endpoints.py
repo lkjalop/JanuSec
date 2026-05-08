@@ -76,6 +76,49 @@ async def trigger_tier1_prefill(
     })
 
 
+@router.get('/{assessment_id}/tier1-prefill/status')
+async def tier1_prefill_status(
+    assessment_id: str,
+    request: Request,
+) -> JSONResponse:
+    """Return per-cluster T1 prefill completion status for progress polling."""
+    assessment = _legacy_helper('_get_assessment', _get_assessment)(assessment_id)
+    if not assessment:
+        raise HTTPException(status_code=404, detail='assessment_not_found')
+
+    clusters = assessment.get('correlation_clusters') or assessment.get('analysis_clusters') or []
+    total = len(clusters)
+    done = 0
+    pending_ids: list[str] = []
+    cluster_statuses: list[dict] = []
+
+    for c in clusters:
+        cid = str(c.get('cluster_id') or '')
+        prefill = c.get('tier1_prefill') or {}
+        has_narrative = bool(prefill.get('short_narrative') or prefill.get('dread_narrative'))
+        has_dread = bool(prefill.get('dread_narrative') or prefill.get('dread_fragments'))
+        if has_narrative or has_dread:
+            done += 1
+        else:
+            pending_ids.append(cid)
+        cluster_statuses.append({
+            'cluster_id': cid,
+            'prefill_done': has_narrative or has_dread,
+            'has_narrative': has_narrative,
+            'has_dread': has_dread,
+        })
+
+    return JSONResponse({
+        'assessment_id': assessment_id,
+        'total_clusters': total,
+        'prefill_done': done,
+        'prefill_pending': total - done,
+        'percent_complete': round(done / total * 100, 1) if total else 100.0,
+        'pending_cluster_ids': pending_ids[:20],
+        'cluster_statuses': cluster_statuses,
+    })
+
+
 @router.post('/{assessment_id}/clusters/{cluster_id}/tier1-summary')
 async def tier1_single_summary(
     assessment_id: str,

@@ -30,7 +30,7 @@ Usage::
     # compatibility with existing callers.
 """
 from __future__ import annotations
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List, Optional, Set, Tuple
 
 
 # ---------------------------------------------------------------------------
@@ -239,4 +239,94 @@ def score_dread(factors: Dict[str, float]) -> Dict[str, Any]:
         '_affected_users_01':  aff['score_01'],
         '_discoverability_01': disc['score_01'],
     }
+
+
+def score_dread_with_blast_radius(
+    factors: Dict[str, float],
+    all_cluster_factors: Optional[List[Dict[str, float]]] = None,
+    shared_entities: Optional[Set[str]] = None,
+) -> Dict[str, Any]:
+    """DREAD score with cross-cluster blast-radius amplification.
+
+    When an attack spans multiple clusters sharing victim entities (lateral
+    movement, multi-stage compromise), the `affected_users` score is amplified
+    to reflect the true breadth of impact rather than a single-cluster view.
+
+    Args:
+        factors:             Factor dict for the cluster being scored.
+        all_cluster_factors: Factor dicts for every cluster in the same assessment.
+        shared_entities:     Entity names that appear in more than one cluster
+                             (users, hosts, IPs). Populated by the caller from
+                             assessment `shared_accounts` / `shared_external_ips`.
+
+    Returns:
+        Full DREAD breakdown with an additional `blast_radius` key:
+            {
+                'blast_radius': {
+                    'linked_clusters': int,        # other clusters sharing entities
+                    'amplification': float,        # multiplier applied (1.0–2.0)
+                    'amplified_affected_users': int,  # raw 1-10 after amplification
+                },
+                ... (all standard score_dread keys)
+            }
+    """
+    base = score_dread(factors)
+
+    linked = 0
+    if all_cluster_factors:
+        current_keys: Set[str] = set(factors.keys())
+        for other in all_cluster_factors:
+            if not other or other is factors:
+                continue
+            # Clusters share attack patterns when their factor key-sets overlap
+            if current_keys & set(other.keys()):
+                linked += 1
+
+    # Entity overlap is a stronger signal: amplify when known shared entities exist
+    entity_boost = min(2, len(shared_entities)) if shared_entities else 0
+
+    # Amplification: +0.15 per linked cluster (capped at 2×), +0.2 per shared entity
+    amplification = min(2.0, 1.0 + linked * 0.15 + entity_boost * 0.2)
+
+    raw_affected = base['affected_users']['score_10']
+    amplified = min(10, round(raw_affected * amplification))
+
+    result = dict(base)
+    result['blast_radius'] = {
+        'linked_clusters': linked,
+        'entity_overlap': entity_boost,
+        'amplification': round(amplification, 2),
+        'amplified_affected_users': amplified,
+    }
+    # Replace affected_users score with amplified value when it's higher
+    if amplified > raw_affected:
+        result['affected_users'] = dict(base['affected_users'])
+        result['affected_users']['score_10'] = amplified
+        result['affected_users']['score_01'] = round(amplified / 10.0, 3)
+        result['affected_users']['rationale'] = (
+            base['affected_users']['rationale']
+            + f' (blast-radius amplified: {linked} linked clusters, ×{amplification:.2f})'
+        )
+        result['_affected_users_01'] = result['affected_users']['score_01']
+        # Recompute composite with amplified score
+        dims_10 = [
+            result['damage']['score_10'],
+            result['reproducibility']['score_10'],
+            result['exploitability']['score_10'],
+            amplified,
+            result['discoverability']['score_10'],
+        ]
+        new_composite = round(sum(dims_10) / len(dims_10), 2)
+        result['composite'] = new_composite
+        result['composite_01'] = round(new_composite / 10.0, 3)
+        if new_composite >= 8.0:
+            result['risk_tier'] = 'CRITICAL'
+        elif new_composite >= 6.0:
+            result['risk_tier'] = 'HIGH'
+        elif new_composite >= 4.0:
+            result['risk_tier'] = 'MEDIUM'
+        else:
+            result['risk_tier'] = 'LOW'
+
+    return result
 

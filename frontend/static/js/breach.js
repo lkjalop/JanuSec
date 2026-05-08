@@ -2803,6 +2803,8 @@
       p.verdict_reasoning ? '<div class="br-card__verdict-reasoning"><span style="color:var(--text-muted);font-size:13px;">WHY:</span> ' + escHtml(p.verdict_reasoning) + '</div>' : '',
       _rowChipsFromText(fullNarrative, 12),
       _renderEvidenceGaps(p.evidence_gaps),
+      _renderLlmProvenanceRefs(cluster),
+      _renderCriticChallenge(cluster),
       '</details>',
       '  <div class="br-card__actions">',
       // LIKELY_BREACH / LIKELY_COMPROMISE without prefill — show Generate button prominently
@@ -2946,6 +2948,37 @@
     }).join('');
     return '<div class="br-card__section-head" style="font-size:12px;color:#ffaa00;margin-top:10px;margin-bottom:4px;">EVIDENCE GAPS</div>'
       + '<ul style="margin:0;padding-left:14px;font-size:12px;opacity:.85;">' + items + '</ul>';
+  }
+
+  function _renderLlmProvenanceRefs(cluster) {
+    var refs = cluster._llm_evidence_refs || [];
+    if (!refs.length) return '';
+    var chips = refs.slice(0, 20).map(function (n) {
+      return '<a class="br-rowchip" href="/static/breach.html?assessment=' + encodeURIComponent(AID)
+        + '&tab=evidence&row=' + encodeURIComponent(n) + '">[' + escHtml(String(n)) + ']</a>';
+    }).join(' ');
+    return '<div class="br-card__section-head" style="font-size:11px;color:var(--text-muted);margin-top:8px;margin-bottom:3px;">'
+      + 'LLM EVIDENCE BASIS (' + refs.length + ' rows fed to model)</div>'
+      + '<div class="br-exec__refs" style="font-size:11px;">' + chips + '</div>';
+  }
+
+  function _renderCriticChallenge(cluster) {
+    var critic = cluster._critic;
+    if (!critic || critic.skipped) return '';
+    var fp = Math.round((critic.fp_probability || 0) * 100);
+    var color = fp >= 60 ? '#ffaa00' : fp >= 30 ? 'var(--text-muted)' : '#4caf6e';
+    var verdict = critic.verdict || '';
+    return [
+      '<div class="br-card__section-head" style="font-size:11px;color:' + color + ';margin-top:8px;margin-bottom:3px;">',
+      '  ADVERSARIAL CRITIC  (FP probability: ' + fp + '%' + (verdict ? ' · critic verdict: ' + escHtml(verdict) : '') + ')',
+      '</div>',
+      '<div style="font-size:12px;opacity:.85;margin-bottom:4px;">' + escHtml(critic.challenge || '') + '</div>',
+      (critic.weakest_evidence && critic.weakest_evidence.length)
+        ? '<div style="font-size:11px;color:var(--text-muted);">Weakest evidence: '
+          + critic.weakest_evidence.slice(0, 3).map(function (s) { return escHtml(s); }).join(' | ')
+          + '</div>'
+        : '',
+    ].join('');
   }
 
   function _renderImmediateActions(actions, fallbackTopActions) {
