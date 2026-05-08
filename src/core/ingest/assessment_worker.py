@@ -1333,22 +1333,30 @@ async def run_assessment_pipeline(
             except Exception as exc:
                 logger.warning("cluster narration failed for %s: %s", assessment_id, exc)
 
-        # ── Stage 5g: feed IdentityGraph (MOVED before persona dispatch) ──────
+        # ── Stage 5g: feed IdentityGraph + MLSignalAggregator ───────────────
         # Populates GLOBAL_IDENTITY_GRAPH so retrieve_identity_context() in persona
         # dispatch has real lateral-movement paths for this assessment's actors.
+        # Simultaneously accumulates per-event iso_score/ensemble_score/EWMA residuals
+        # in ASSESSMENT_ML_SIGNALS for Stage 5g+ read-back below.
         try:
             from src.core.graph.identity_hopgraph import GLOBAL_IDENTITY_GRAPH as _ig
+            from src.ml.signal_aggregator import ASSESSMENT_ML_SIGNALS as _ml_agg
+            _ml_agg.clear()
             _ig_count = 0
             _ig_cap = int(os.getenv("JANUSEC_IDENTITY_GRAPH_CAP", "10000"))
             for _row_ig in filtered_rows[:_ig_cap]:
                 if not isinstance(_row_ig, dict):
                     continue
                 try:
-                    _ig.ingest_identity_event(_row_ig)
+                    _ig.ingest_identity_event(_row_ig, aggregator=_ml_agg)
                     _ig_count += 1
                 except Exception:
                     continue
-            logger.info("Stage 5g: ingested %d rows into IdentityGraph for %s", _ig_count, assessment_id)
+            logger.info(
+                "Stage 5g: ingested %d rows into IdentityGraph for %s "
+                "(%d users tracked by ML aggregator)",
+                _ig_count, assessment_id, len(_ml_agg),
+            )
         except Exception as exc:
             logger.debug("IdentityGraph ingestion skipped for %s: %s", assessment_id, exc)
 
@@ -1427,6 +1435,7 @@ async def run_assessment_pipeline(
                 _h_ch = str(_row_ch.get("host") or _row_ch.get("hostname") or "").strip().lower()
                 _b_ch = float(_row_ch.get("bytes_out") or _row_ch.get("bytes_sent") or _row_ch.get("bytes") or 0)
                 _dst_h_ch = str(_row_ch.get("dst_host") or _row_ch.get("resp_h") or "").strip().lower()
+                _src_type_ch = str(_row_ch.get("_source_type") or _row_ch.get("source_type") or "").lower()
 
                 if _u_ch:
                     _chrono.increment("user", _u_ch, "events", 1.0, ts=_ts_ch)
@@ -1453,6 +1462,55 @@ async def run_assessment_pipeline(
                         if _prior_access == 0.0:
                             _chrono_first_seen.setdefault(_u_ch, set()).add(_h_ch)
                         _chrono.increment("user", _u_ch, f"host_access:{_h_ch}", 1.0, ts=_ts_ch)
+
+                    # ── Source-type prefixed metrics (cross-source ISO feature vector) ──
+                    # IAM / Kerberos
+                    if _src_type_ch in ("windows_security", "identity_kerberos", "iam"):
+                        _enc_ch = str(_row_ch.get("ticket_encryption") or "").strip()
+                        _weid_ch = str(_row_ch.get("windows_event_id") or _row_ch.get("event_id") or "").strip()
+                        if _enc_ch in ("0x17", "0x18") and _weid_ch == "4769":
+                            _chrono.increment("user", _u_ch, "iam:rc4_count", 1.0, ts=_ts_ch)
+                        if _weid_ch in ("4768", "4769"):
+                            _chrono.increment("user", _u_ch, "iam:ticket_volume", 1.0, ts=_ts_ch)
+                        if _weid_ch in ("4771", "4625"):
+                            _chrono.increment("user", _u_ch, "iam:pre_auth_fail_count", 1.0, ts=_ts_ch)
+                    # Cloud / Azure AD
+                    if _src_type_ch in ("cloud_identity", "azure_ad", "entra", "cloud"):
+                        _asn_ch = str(_row_ch.get("asn") or _row_ch.get("src_asn") or "").strip()
+                        _src_ip_ch = str(_row_ch.get("src_ip") or _row_ch.get("source_ip") or "").strip()
+                        _is_foreign = _asn_ch and _src_ip_ch and not _src_ip_ch.startswith(
+                            ("10.", "172.", "192.168.", "127.")
+                        )
+                        if _is_foreign:
+                            _chrono.increment("user", _u_ch, "cloud:foreign_asn_count", 1.0, ts=_ts_ch)
+                        _etype_ch = str(_row_ch.get("event_type") or _row_ch.get("operation") or "").lower()
+                        if "ca_bypass" in _etype_ch or "conditional_access" in _etype_ch and "bypass" in _etype_ch:
+                            _chrono.increment("user", _u_ch, "cloud:ca_bypass_count", 1.0, ts=_ts_ch)
+                        if "consent" in _etype_ch or "grant" in _etype_ch:
+                            _chrono.increment("user", _u_ch, "cloud:consent_grant_count", 1.0, ts=_ts_ch)
+                    # Endpoint / Sysmon
+                    if _src_type_ch in ("sysmon", "endpoint_lolbins", "endpoint", "edr"):
+                        _cmd_ch = str(_row_ch.get("command_line") or _row_ch.get("cmdline") or "").lower()
+                        _par_ch = str(_row_ch.get("parent_process") or "").lower()
+                        _lolbins = ("certutil", "bitsadmin", "mshta", "regsvr32", "rundll32",
+                                    "wscript", "cscript", "msiexec", "wmic", "forfiles")
+                        if any(lb in _cmd_ch for lb in _lolbins):
+                            _chrono.increment("user", _u_ch, "endpoint:lolbin_count", 1.0, ts=_ts_ch)
+                        if "-enc" in _cmd_ch or "-encodedcommand" in _cmd_ch:
+                            _chrono.increment("user", _u_ch, "endpoint:encoded_ps_count", 1.0, ts=_ts_ch)
+                        if "wmiprvse.exe" in _par_ch or "wmic" in _cmd_ch:
+                            _chrono.increment("user", _u_ch, "endpoint:wmi_exec_count", 1.0, ts=_ts_ch)
+                    # Network
+                    if _src_type_ch in ("network", "zeek", "vpc_flow", "flow"):
+                        if _b_ch > 0:
+                            _chrono.increment("user", _u_ch, "network:unique_dest_count", 1.0, ts=_ts_ch)
+                    # Email
+                    if _src_type_ch in ("email", "mimecast", "proofpoint", "o365_mail"):
+                        _attach_b = float(_row_ch.get("attachment_size") or _row_ch.get("attachment_bytes") or 0)
+                        if _b_ch > 0:
+                            _chrono.increment("user", _u_ch, "email:external_send_count", 1.0, ts=_ts_ch)
+                        if _attach_b > 0:
+                            _chrono.increment("user", _u_ch, "email:attachment_bytes", _attach_b, ts=_ts_ch)
 
                 if _h_ch and _ts_ch:
                     _chrono.increment("host", _h_ch, "events", 1.0, ts=_ts_ch)
@@ -1508,6 +1566,117 @@ async def run_assessment_pipeline(
             logger.info("Stage 5j: ChronoGraph anomaly elevation done for %s", assessment_id)
         except Exception as exc:
             logger.debug("Stage 5j ChronoGraph elevation skipped for %s: %s", assessment_id, exc)
+
+        # ── Stage 5g+: ML signal read-back + cross-source ISO scoring ────────
+        # After Stage 5g populated IdentityGraph and 5i populated ChronoGraph,
+        # read identity_snapshot() risk/EWMA per cluster principal, build a
+        # cross-source feature vector (combining ChronoGraph z-scores with
+        # aggregated ISO/EWMA residuals), score it, and elevate cluster
+        # factor_tags + apply a capped triage_score boost.
+        try:
+            from src.core.graph.identity_hopgraph import GLOBAL_IDENTITY_GRAPH as _ig_gp
+            from src.core.chrono.sketch_store import CHRONO as _chrono_gp
+            from src.ml.signal_aggregator import ASSESSMENT_ML_SIGNALS as _ml_agg_gp
+            from src.ml.isolation_model import GLOBAL_ISO_MODEL as _iso_gp
+
+            # Write aggregated ML counts into ChronoGraph for cross-assessment tracking
+            import time as _time_gp
+            _ml_agg_gp.to_chrono_metrics(_chrono_gp, ts=_time_gp.time())
+
+            def _safe_z(chrono, etype, entity, metric, window=86400 * 7):
+                try:
+                    return float(chrono.z_score(etype, entity, metric,
+                                               window_seconds=window).get("z") or 0.0)
+                except Exception:
+                    return 0.0
+
+            def _build_user_feature_vector(user, chrono, agg_summary):
+                """8-dimensional cross-source feature vector per user."""
+                return [
+                    _safe_z(chrono, "user", user, "off_hours_recon_events"),
+                    _safe_z(chrono, "user", user, "bytes_out"),
+                    _safe_z(chrono, "user", user, "cloud_bytes_out"),
+                    _safe_z(chrono, "user", user, "iam:rc4_count"),
+                    _safe_z(chrono, "user", user, "cloud:foreign_asn_count"),
+                    _safe_z(chrono, "user", user, "endpoint:lolbin_count"),
+                    float(agg_summary.get("peak_iso") or 0.0),
+                    float(agg_summary.get("peak_ewma_residual") or 0.0),
+                ]
+
+            _BREACH_VERD_GP = {"VALIDATED_BREACH", "LIKELY_BREACH", "LIKELY_COMPROMISE", "INCIDENT"}
+            for _cl_gp in clusters:
+                _verd_gp = str(_cl_gp.get("final_verdict") or _cl_gp.get("verdict") or "").upper()
+                if _verd_gp not in _BREACH_VERD_GP:
+                    continue
+                _princ_gp = [
+                    str(u).strip().lower() for u in (
+                        _cl_gp.get("affected_principals") or _cl_gp.get("shared_accounts") or []
+                    ) if u
+                ][:4]
+                _ml_tags: list[str] = []
+                _triage_boost = 0.0
+
+                for _u_gp in _princ_gp:
+                    # Identity risk from IdentityGraph state machine + EWMA
+                    _snap = _ig_gp.identity_snapshot(f"user:{_u_gp}")
+                    _risk = float(_snap.get("risk") or 0.0)
+                    _ewma_d = _snap.get("ewma") or {}
+                    _ewma_res = abs(float(_ewma_d.get("residual_last") or 0.0))
+
+                    if _risk > 0.70:
+                        _ml_tags.append("identity:ml_risk_spike")
+                        _triage_boost = max(_triage_boost, min(0.08, (_risk - 0.5) * 0.1))
+                    if _ewma_res > 1.5:
+                        _ml_tags.append("identity:ewma_behavioral_spike")
+                        _triage_boost = max(_triage_boost, 0.04)
+
+                    # Cross-source isolation forest score
+                    _agg_sum = _ml_agg_gp.summary(_u_gp)
+                    _feats = _build_user_feature_vector(_u_gp, _chrono_gp, _agg_sum)
+                    try:
+                        _cross_iso = float(_iso_gp.score(_feats))
+                    except Exception:
+                        _cross_iso = 0.0
+                    if _cross_iso > 0.65:
+                        _ml_tags.append("identity:iso_cross_source_anomaly")
+                        _triage_boost = max(_triage_boost, min(0.10, _cross_iso * 0.12))
+
+                    # Persist cross-source scores onto cluster for LLM context
+                    _cl_gp.setdefault("_ml_scores", {})[_u_gp] = {
+                        "risk": round(_risk, 3),
+                        "ewma_residual": round(_ewma_res, 3),
+                        "cross_iso": round(_cross_iso, 3),
+                        "peak_iso": round(float(_agg_sum.get("peak_iso") or 0), 3),
+                        "anomaly_rate": round(float(_agg_sum.get("anomaly_rate") or 0), 3),
+                    }
+
+                # Apply tags and triage boost
+                if _ml_tags:
+                    _existing_gp = _cl_gp.setdefault("factor_tags", [])
+                    for _t in set(_ml_tags):
+                        if _t not in _existing_gp:
+                            _existing_gp.append(_t)
+                if _triage_boost > 0:
+                    _cl_gp["triage_score"] = min(
+                        1.0, float(_cl_gp.get("triage_score") or 0.5) + _triage_boost
+                    )
+            logger.info("Stage 5g+: ML signal read-back and cross-source ISO done for %s", assessment_id)
+        except Exception as exc:
+            logger.debug("Stage 5g+ ML read-back skipped for %s: %s", assessment_id, exc)
+
+        # ── Stage 5k: compliance control violation mapping ────────────────────
+        # Maps cluster factor_tags to NIST 800-53, ISO 27001, CIS v8, SOC 2.
+        # Sets cluster["compliance_violations"] consumed by breach.js, exec summary,
+        # and compliance persona LLM prompt.
+        try:
+            from src.explain.compliance_mapper import map_factors_to_controls as _map_controls
+            for _cl_k in clusters:
+                _ftags_k = _cl_k.get("factor_tags") or []
+                if _ftags_k:
+                    _cl_k["compliance_violations"] = _map_controls(_ftags_k)
+            logger.info("Stage 5k: compliance mapping done for %s", assessment_id)
+        except Exception as exc:
+            logger.debug("Stage 5k compliance mapping skipped for %s: %s", assessment_id, exc)
 
         # ── Stage 5d: persona dispatch + framework mapping + bitemporal trace ──
         # Enriches each breach cluster's narrative with structured data (affected

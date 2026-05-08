@@ -95,7 +95,7 @@ class IdentityHopGraph:
         self._high_value.add(node)
 
     # --- Ingest helpers from events ---
-    def ingest_identity_event(self, ev: Dict[str, Any]) -> None:
+    def ingest_identity_event(self, ev: Dict[str, Any], aggregator: Any = None) -> None:
         t0 = time.time()
         user = ev.get('user') or ev.get('username')
         action = (ev.get('action') or '').lower()
@@ -258,6 +258,24 @@ class IdentityHopGraph:
                 'role': role,
                 'cloud': cloud,
             })
+            # Emit ML signals to optional per-assessment aggregator so
+            # assessment_worker Stage 5g+ can read them back for cluster elevation.
+            if aggregator is not None:
+                try:
+                    _ewma_res = 0.0
+                    if ident in self._ewma:
+                        _ewma_res = float(self._ewma[ident].get('residual_last', 0.0))
+                    _is_anom = (iso_score > 0.6 or ensemble_score > 0.6)
+                    aggregator.record(
+                        user=str(user),
+                        iso_score=iso_score,
+                        ensemble_score=ensemble_score,
+                        rarity=rarity,
+                        ewma_residual=_ewma_res,
+                        is_anomaly=_is_anom,
+                    )
+                except Exception:
+                    pass
         identity_metrics.observe_latency('update', max(0.0, time.time()-t0))
 
     def identity_snapshot(self, identity: str) -> Dict[str, Any]:
