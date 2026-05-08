@@ -18,6 +18,17 @@ from src.explain.mapping import map_enrichments
 from src.explain.dread_aggregator_clean import aggregate as dread_aggregate
 
 
+def _is_private_ip(ip: str) -> bool:
+    try:
+        parts = str(ip or '').split('.')
+        if len(parts) != 4:
+            return False
+        a, b = int(parts[0]), int(parts[1])
+        return a == 10 or (a == 172 and 16 <= b <= 31) or (a == 192 and b == 168) or a == 127
+    except Exception:
+        return False
+
+
 class IdentityHopGraph:
     """Lightweight identity graph for lateral pivots and escalation.
 
@@ -110,6 +121,15 @@ class IdentityHopGraph:
             self.mark_high_value(f"role:{role}")
         if user and token:
             self.add_edge(n_user(user), f"token:{token}", 'token_issue', weight=0.4)  # type: ignore[arg-type]
+        # Token reuse / signin from unexpected foreign ASN (OAuth persistence indicator)
+        _ev_type = str(ev.get('event_type') or ev.get('action') or ev.get('operation') or '').lower()
+        _asn = str(ev.get('asn') or ev.get('src_asn') or ev.get('network_asn') or '').strip()
+        _src_ip = str(ev.get('src_ip') or ev.get('source_ip') or '').strip()
+        if user and _asn and any(k in _ev_type for k in ('signin', 'sign_in', 'oauth', 'token', 'refresh')):
+            if not _is_private_ip(_src_ip):
+                _tok_edge = 'token_reuse_foreign_asn' if token else 'token_foreign_signin'
+                self.add_edge(n_user(user), f"asn:{_asn}", _tok_edge, weight=0.7)  # type: ignore[arg-type]
+                self.mark_high_value(f"asn:{_asn}")
         if session and user:
             self.add_edge(n_user(user), f"session:{session}", 'session', weight=0.3)  # type: ignore[arg-type]
         if user and cloud:

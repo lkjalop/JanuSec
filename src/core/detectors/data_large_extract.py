@@ -19,6 +19,7 @@ ALPHA = float(os.getenv('DATA_EWMA_ALPHA', '0.3'))
 K_STD = float(os.getenv('DATA_EWMA_K', '2.0'))
 ABS_THRESHOLD = int(os.getenv('DATA_EWMA_ABS_THRESHOLD', str(5_000_000)))
 SAVE_INTERVAL = int(os.getenv('DATA_EWMA_SAVE_INTERVAL', '30') or 30)
+MIN_SAMPLES = int(os.getenv('DATA_EWMA_MIN_SAMPLES', '4'))
 
 _SAVE_THREAD = None
 _SAVE_THREAD_STARTED = False
@@ -147,6 +148,18 @@ def check_and_emit(hopgraph, source: str, bytes_out: int, now: Optional[float] =
                 _save_state()
             except Exception:
                 pass
+            return False
+
+        # Suppress detection until baseline is stable (avoids anna.kowalski-style FPs
+        # where first few events always exceed a zero-mean baseline)
+        if st['count'] < MIN_SAMPLES:
+            alpha = ALPHA
+            mean_new = alpha * float(bytes_out) + (1 - alpha) * prev_mean
+            var_new = alpha * ((float(bytes_out) - mean_new) ** 2) + (1 - alpha) * var_prev
+            st['ewma'] = mean_new
+            st['ewma_var'] = var_new
+            st['count'] += 1
+            st['last_ts'] = now
             return False
 
         std_prev = math.sqrt(max(0.0, var_prev))
