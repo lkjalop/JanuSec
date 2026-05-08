@@ -15,8 +15,9 @@ class LLMConcurrencyLimiter:
         self._semaphore: threading.BoundedSemaphore | None = None
         self._limit = 0
         self.active = 0
-        self.wait_count = 0
-        self.timeout_count = 0
+        self.queue_depth = 0    # currently waiting (live counter)
+        self.wait_count = 0     # cumulative total waits since start
+        self.timeout_count = 0  # cumulative total timeouts since start
 
     def _configured_limit(self) -> int:
         raw = os.getenv("LLM_MAX_CONCURRENT") or os.getenv("OLLAMA_MAX_CONCURRENT") or "4"
@@ -26,11 +27,11 @@ class LLMConcurrencyLimiter:
             return 4
 
     def _queue_timeout(self) -> float:
-        raw = os.getenv("LLM_QUEUE_TIMEOUT_SECONDS") or "20"
+        raw = os.getenv("LLM_QUEUE_TIMEOUT_SECONDS") or "120"
         try:
             return max(0.0, float(raw))
         except Exception:
-            return 20.0
+            return 120.0
 
     def _ensure(self) -> threading.BoundedSemaphore:
         limit = self._configured_limit()
@@ -48,8 +49,11 @@ class LLMConcurrencyLimiter:
         start = time.time()
         with self._lock:
             self.wait_count += 1
+            self.queue_depth += 1
         acquired = semaphore.acquire(timeout=timeout)
         wait_s = time.time() - start
+        with self._lock:
+            self.queue_depth = max(0, self.queue_depth - 1)
         if not acquired:
             with self._lock:
                 self.timeout_count += 1
@@ -71,6 +75,7 @@ class LLMConcurrencyLimiter:
             return {
                 "limit": self._limit,
                 "active": self.active,
+                "queue_depth": self.queue_depth,
                 "wait_count": self.wait_count,
                 "timeout_count": self.timeout_count,
             }

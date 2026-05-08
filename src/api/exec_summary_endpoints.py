@@ -1843,15 +1843,15 @@ def _verdict_bucket(verdict: str) -> str:
     v = str(verdict or '').upper()
     if v == 'VALIDATED_BREACH':
         return 'validated'
-    if v == 'CONFIRMED_INTRUSION' or 'CONFIRMED' in v:
+    if v in ('TRUE_POSITIVE', 'CONFIRMED_INTRUSION') or 'CONFIRMED' in v:
         return 'confirmed'
-    if v == 'LIKELY_COMPROMISE' or 'LIKELY' in v:
+    if v in ('LIKELY_COMPROMISE',) or 'LIKELY' in v:
         return 'likely'
-    if v == 'SUSPICIOUS_ACTIVITY':
+    if v in ('SUSPICIOUS_ACTIVITY', 'SUSPICIOUS') or 'SUSPICIOUS' in v:
         return 'suspicious'
-    if v == 'INSUFFICIENT_TELEMETRY' or 'UNCERTAIN' in v:
+    if v in ('INSUFFICIENT_TELEMETRY', 'UNCERTAIN') or 'UNCERTAIN' in v:
         return 'insufficient telemetry'
-    if v == 'BENIGN_EXPECTED':
+    if v in ('FALSE_POSITIVE', 'BENIGN_EXPECTED', 'BENIGN') or 'BENIGN' in v or 'FALSE_POSITIVE' in v:
         return 'benign'
     return 'unclassified'
 
@@ -1996,6 +1996,8 @@ _PHASE_ORDER = [
 
 def tag_kill_chain_phase(row: dict) -> str:
     """Return the kill-chain phase string for a row, or 'Unknown'."""
+    import re as _re
+    _T_RE = _re.compile(r'\bT\d{4}(?:\.\d{3})?\b', _re.IGNORECASE)
     for f in ('mitre_technique', 'mitre', 'technique_id', 'mitre_id'):
         val = row.get(f)
         if not val:
@@ -2003,8 +2005,13 @@ def tag_kill_chain_phase(row: dict) -> str:
         techs = val if isinstance(val, list) else [val]
         for t in techs:
             t_str = str(t).strip().upper()
-            # Match on base technique T1234 (strip sub-technique .001 etc.)
             base = t_str.split('.')[0]
+            if base in _MITRE_PHASE:
+                return _MITRE_PHASE[base]
+    # Also parse T-codes embedded in factor_tags like 'email:T1114.003_inbox_rule'
+    for tag in (row.get('factor_tags') or row.get('factors') or []):
+        for m in _T_RE.findall(str(tag)):
+            base = m.split('.')[0].upper()
             if base in _MITRE_PHASE:
                 return _MITRE_PHASE[base]
     text = ' '.join(
@@ -2311,6 +2318,19 @@ async def get_executive_summary(
         executive_summary = subline
         attack_chain_provenance = 'no_breach'
     deterministic = '\n'.join([headline, subline, executive_summary])
+
+    # Collect row refs for grounding — applied AFTER all executive_summary modifications below.
+    _ground_refs: list[int] = []
+    for _r in lead_cluster_rows[:12]:
+        _ri = _r.get('row_index')
+        if _ri is not None:
+            try:
+                _ground_refs.append(int(_ri))
+            except (TypeError, ValueError):
+                pass
+    if not _ground_refs:
+        _ground_refs = [int(r) for r in (lead.get('row_refs') or [])[:12]
+                        if isinstance(r, (int, float)) or (isinstance(r, str) and r.isdigit())]
 
     # Attempt LLM narrative for the executive_summary body.
     llm_color: Optional[str] = None
@@ -2696,11 +2716,45 @@ async def get_executive_summary(
         if _scope_footer.strip():
             executive_summary = executive_summary.rstrip() + '\n\n' + _scope_footer
 
+    # Cluster-level summary for the frontend verdict panel
+    import re as _re2
+    _T_RE2 = _re2.compile(r'\bT\d{4}(?:\.\d{3})?\b', _re2.IGNORECASE)
+
+    def _cluster_mitre(c: dict) -> list[str]:
+        techs: list[str] = list(c.get('mitre_techniques') or [])
+        for tag in (c.get('factor_tags') or c.get('factors') or []):
+            for m in _T_RE2.findall(str(tag)):
+                t = m.upper()
+                if t not in techs:
+                    techs.append(t)
+        return techs[:8]
+
+    top_clusters_out = [
+        {
+            'cluster_id': c.get('cluster_id', ''),
+            'verdict': str(c.get('verdict') or c.get('final_verdict') or 'UNCERTAIN').upper(),
+            'label': c.get('label') or c.get('lead_description') or c.get('cluster_id', ''),
+            'severity': c.get('severity', ''),
+            'evidence_count': len(c.get('row_refs') or []) or c.get('row_count') or 0,
+            'mitre_techniques': _cluster_mitre(c),
+            'confidence': c.get('confidence') or 0,
+        }
+        for c in sorted_clusters[:10]
+    ]
+
+    # Grounding: apply LAST so citations survive any LLM/postscript overwrites.
+    if _ground_refs and not _extract_row_refs_from_text(executive_summary):
+        _ref_str = ', '.join(str(r) for r in sorted(set(_ground_refs))[:10])
+        executive_summary = executive_summary.rstrip() + f' (Analysis basis: rows {_ref_str}.)'
+
     result = {
         'headline': headline,
         'subline': subline,
         'executive_summary': executive_summary,
         'grounded': bool(_extract_row_refs_from_text(executive_summary)),
+        'verdict_counts': verdict_counts,
+        'top_clusters': top_clusters_out,
+        'total_clusters': len(lead_pool),
         'deterministic': deterministic,
         'llm_color': llm_color,
         'model_used': body.model,

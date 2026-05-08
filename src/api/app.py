@@ -7060,6 +7060,23 @@ async def _runtime_health_payload() -> dict[str, Any]:
     except Exception as exc:
         db_status = {'available': False, 'backend': 'unknown', 'reason': str(exc)}
     db_connected = bool(db_status.get('available')) and not db_status.get('last_error')
+
+    # Probe DuckDB ingest store (Phase 2) independently — legacy PG may be absent in dev.
+    duckdb_ok = False
+    duckdb_row_count: int | None = None
+    try:
+        from src.core.ingest.store import _db as _ddb, _lock as _ddb_lock
+        with _ddb_lock:
+            _res = _ddb().execute("SELECT COUNT(*) FROM assessment_jobs").fetchone()
+            duckdb_row_count = int(_res[0]) if _res else 0
+        duckdb_ok = True
+    except Exception:
+        pass
+    db_status['duckdb'] = {'connected': duckdb_ok, 'job_count': duckdb_row_count}
+    # Don't mark as degraded solely because the legacy PG is absent; DuckDB alone is sufficient.
+    if not db_connected and duckdb_ok:
+        db_connected = True
+        db_status['connected'] = True
     try:
         from src.integrations.llm_client import get_client_status  # type: ignore
         llm_status = get_client_status()

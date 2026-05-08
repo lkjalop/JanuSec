@@ -754,7 +754,20 @@ def build_persona_dispatch(persona_key: str,
     payload = _build_persona_payload(persona_key, cluster_narrative,
                                      register or {}, cluster_id=cluster_id)
 
-    # Enrich with TemporalRAG if provider is available
+    # Enrich with TemporalRAG + IdentityGraph + ChronoGraph silos
+    principals = list({
+        str(a) for a in (
+            cluster_narrative.get('affected_principals') or
+            cluster_narrative.get('shared_accounts') or []
+        ) if a
+    })[:4]
+    hosts = list({
+        str(h) for h in (
+            cluster_narrative.get('shared_hosts') or
+            cluster_narrative.get('affected_hosts') or []
+        ) if h
+    })[:4]
+
     if rag_provider is not None:
         try:
             payload['prior_decisions'] = rag_provider.retrieve_prior_decisions(
@@ -772,9 +785,25 @@ def build_persona_dispatch(persona_key: str,
             )
         except Exception:
             payload['similar_incidents'] = []
+        # IdentityGraph — lateral movement paths for this cluster's principals
+        try:
+            payload['identity_paths'] = rag_provider.retrieve_identity_context(
+                principals, depth=3, path_limit=5,
+            )
+        except Exception:
+            payload['identity_paths'] = []
+        # ChronoGraph — long-horizon volume anomalies for principals and hosts
+        try:
+            payload['chrono_anomalies'] = rag_provider.retrieve_chrono_anomalies(
+                principals, hosts, window_seconds=86400 * 7,
+            )
+        except Exception:
+            payload['chrono_anomalies'] = []
     else:
         payload['prior_decisions'] = []
         payload['similar_incidents'] = []
+        payload['identity_paths'] = []
+        payload['chrono_anomalies'] = []
 
     return payload
 

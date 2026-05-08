@@ -162,6 +162,38 @@ def detect_lateral_movement(runtime: Any, threshold: int = 5) -> List[Dict[str, 
     return results
 
 
+def detect_wmi_process_lateral(event: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Detect WMI lateral movement from sysmon process-create events (event ID 1).
+    Fires when wmiprvse.exe spawns encoded PowerShell, indicating remote WMI command execution."""
+    results: List[Dict[str, Any]] = []
+    proc = str(event.get("process_name") or "").lower()
+    parent = str(event.get("parent_process") or "").lower()
+    cmdline = str(event.get("command_line") or "").lower()
+    host = str(event.get("host") or "")
+    user = str(event.get("user") or "")
+
+    if "wmiprvse.exe" not in parent:
+        return results
+
+    is_encoded_exec = any(t in cmdline for t in (
+        "-enc ", "-encodedcommand", " iex ", "invoke-expression", "downloadstring",
+    ))
+    is_suspicious_child = any(p in proc for p in ("powershell", "cmd", "wscript", "cscript", "mshta"))
+
+    if is_encoded_exec or is_suspicious_child:
+        results.append({
+            "factor": "wmi_encoded_ps_lateral",
+            "actor": user or "unknown",
+            "host": host,
+            "process": proc,
+            "parent": "wmiprvse.exe",
+            "score": 0.88,
+            "reason": f"wmiprvse.exe spawned {proc!r} with encoded/exec payload on {host!r}",
+            "metadata": {"mitre": ["T1047", "T1059.001"], "stride": ["tampering", "elevation"]},
+        })
+    return results
+
+
 def _detect_protocol_fusion(runtime: Any) -> List[Dict[str, Any]]:
     """Detect Kerberos->WinRM/SMB chains and Azure -> automation joins."""
     results: List[Dict[str, Any]] = []

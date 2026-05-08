@@ -3,10 +3,12 @@
 Grounds persona dispatch suggestions in prior decisions for similar
 incidents, time-filtered so audit replay doesn't leak future knowledge.
 
-Three retrieval modes:
+Five retrieval modes:
   - retrieve_similar_incidents: cosine on hashed-feature signature
   - retrieve_prior_decisions: technique+persona prior dispatches
   - retrieve_action_outcomes: prior action template outcomes
+  - retrieve_identity_context: lateral-movement paths from IdentityGraph
+  - retrieve_chrono_anomalies: long-horizon volume z-scores from ChronoGraph
 """
 from __future__ import annotations
 
@@ -288,6 +290,63 @@ class TemporalRAGProvider:
         # Stubbed — implement via a dedicated outcomes table indexed by template prefix
         return []
 
+    def retrieve_identity_context(
+        self,
+        principals: list[str],
+        depth: int = 3,
+        path_limit: int = 5,
+    ) -> list[dict]:
+        """Pull top lateral-movement paths for each principal from IdentityGraph."""
+        out: list[dict] = []
+        try:
+            from src.core.graph.identity_hopgraph import GLOBAL_IDENTITY_GRAPH as _ig
+            for principal in principals[:4]:
+                node = principal if principal.startswith("user:") else f"user:{principal}"
+                paths = _ig.find_top_paths(node, limit=path_limit, depth=depth)
+                for p in paths[:3]:
+                    explanation = _ig.explain_path(p.get("path") or [])
+                    out.append({
+                        "principal": principal,
+                        "path": " -> ".join(p.get("path") or []),
+                        "score": round(float(p.get("score") or 0), 3),
+                        "risk_label": explanation.get("risk_label") or "",
+                        "edge_types": explanation.get("edge_types") or [],
+                    })
+        except Exception as exc:
+            logger.debug("retrieve_identity_context failed: %s", exc)
+        return out
+
+    def retrieve_chrono_anomalies(
+        self,
+        principals: list[str],
+        hosts: list[str],
+        window_seconds: float = 86400 * 7,
+        z_threshold: float = 2.5,
+    ) -> list[dict]:
+        """Return ChronoGraph z-score anomalies for principals and hosts."""
+        out: list[dict] = []
+        try:
+            from src.core.chrono.sketch_store import CHRONO as _chrono
+            for entity_type, entities in (("user", principals[:4]), ("host", hosts[:4])):
+                for entity_id in entities:
+                    if not entity_id:
+                        continue
+                    metrics = _chrono.entity_metrics(entity_type, entity_id, window_seconds)
+                    for metric, data in metrics.items():
+                        if data.get("anomaly") or abs(float(data.get("z") or 0)) >= z_threshold:
+                            out.append({
+                                "entity_type": entity_type,
+                                "entity_id": entity_id,
+                                "metric": metric,
+                                "z": data.get("z"),
+                                "current": data.get("current"),
+                                "mean": data.get("mean"),
+                                "window_days": round(window_seconds / 86400, 1),
+                            })
+        except Exception as exc:
+            logger.debug("retrieve_chrono_anomalies failed: %s", exc)
+        return out
+
 
 def _summarise_outcomes(outcomes: Optional[list[dict]]) -> str:
     if not outcomes:
@@ -300,9 +359,23 @@ def _summarise_outcomes(outcomes: Optional[list[dict]]) -> str:
 #  Helper: render TemporalRAG context for persona LLM prompt
 # ─────────────────────────────────────────────────────────────────────────────
 
-def render_rag_context_for_prompt(prior_decisions: list[dict],
-                                  similar_incidents: list[dict]) -> str:
+def render_rag_context_for_prompt(
+    prior_decisions: list[dict],
+    similar_incidents: list[dict],
+    identity_paths: list[dict] | None = None,
+    chrono_anomalies: list[dict] | None = None,
+) -> str:
+    """Render all four retrieval silos into a single LLM-prompt context block.
+
+    Parameters
+    ----------
+    prior_decisions:    from TemporalRAGProvider.retrieve_prior_decisions()
+    similar_incidents:  from TemporalRAGProvider.retrieve_similar_incidents()
+    identity_paths:     from TemporalRAGProvider.retrieve_identity_context()
+    chrono_anomalies:   from TemporalRAGProvider.retrieve_chrono_anomalies()
+    """
     lines: list[str] = []
+
     if prior_decisions:
         lines.append('PRIOR DECISIONS (this tenant, similar techniques):')
         for d in prior_decisions[:5]:
@@ -314,6 +387,7 @@ def render_rag_context_for_prompt(prior_decisions: list[dict],
                 f"actions={d.get('action_count',0)}, "
                 f"outcomes={outcomes})"
             )
+
     if similar_incidents:
         if lines:
             lines.append('')
@@ -326,8 +400,34 @@ def render_rag_context_for_prompt(prior_decisions: list[dict],
                 f"[similarity={inc.get('similarity', 0):.2f}, "
                 f"techniques={','.join(inc.get('techniques', [])[:4])}]"
             )
+
+    if identity_paths:
+        if lines:
+            lines.append('')
+        lines.append('IDENTITY LATERAL-MOVEMENT PATHS (IdentityGraph, this assessment):')
+        for p in identity_paths[:6]:
+            edge_str = ', '.join((p.get('edge_types') or [])[:3])
+            lines.append(
+                f"  - {p.get('principal','?')}: {p.get('path','?')} "
+                f"[score={p.get('score',0):.2f}, edges={edge_str or 'n/a'}, "
+                f"risk={p.get('risk_label') or 'unknown'}]"
+            )
+
+    if chrono_anomalies:
+        if lines:
+            lines.append('')
+        lines.append('LONG-HORIZON VOLUME ANOMALIES (ChronoGraph, z>=2.5):')
+        for a in chrono_anomalies[:6]:
+            lines.append(
+                f"  - {a.get('entity_type','?')}:{a.get('entity_id','?')} "
+                f"{a.get('metric','?')} z={a.get('z',0):.2f} "
+                f"(current={a.get('current',0):.1f}, "
+                f"hist_mean={a.get('mean',0):.1f}, "
+                f"window={a.get('window_days',7)}d)"
+            )
+
     if not lines:
-        return '(no prior decisions or similar incidents on file)'
+        return '(no prior decisions, similar incidents, identity paths, or volume anomalies on file)'
     lines.append('')
     lines.append('Use these to anchor your suggestions in actual prior practice.')
     lines.append('Note any divergence from prior pattern explicitly.')

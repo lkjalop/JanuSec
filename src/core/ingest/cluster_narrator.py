@@ -238,6 +238,13 @@ def _apply_narrative_to_cluster(cluster: dict, narrative: dict, *, upgrade_only:
     cluster["next_steps"] = narrative.get("next_steps") or []
     cluster["fp_indicators"] = narrative.get("fp_indicators") or []
     cluster["evidence_refs_llm"] = narrative.get("evidence_refs") or []
+    # _llm_evidence_refs: absolute row_index values fed to the LLM (provenance)
+    # Preserved here so callers who set it before _apply_narrative_to_cluster
+    # don't lose it.  narrative may carry _critic_fp_probability too.
+    if "_llm_evidence_refs" not in cluster:
+        cluster["_llm_evidence_refs"] = []
+    if "_critic_fp_probability" in narrative:
+        cluster["_critic_fp_probability"] = narrative["_critic_fp_probability"]
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
@@ -266,6 +273,17 @@ def narrate_cluster(
         evidence = list(all_evidence_rows)
 
     evidence = sorted(evidence, key=lambda r: float(r.get("triage_score") or 0), reverse=True)[:EVIDENCE_CAP]
+
+    # Provenance: record which row_index values were fed to the LLM
+    _llm_evidence_refs: list[int] = []
+    for _r in evidence:
+        _ri = _r.get("row_index")
+        if _ri is not None:
+            try:
+                _llm_evidence_refs.append(int(float(_ri)))
+            except (TypeError, ValueError):
+                pass
+    cluster["_llm_evidence_refs"] = _llm_evidence_refs
 
     if not evidence:
         narrative = _fallback_narrative(str(cluster.get("cluster_id") or ""), reason="no_evidence")
@@ -313,6 +331,25 @@ def narrate_cluster(
         return narrative
 
     narrative = _parse_llm_output(raw, cluster_id)
+
+    # ── Adversarial critic second pass ────────────────────────────────────────
+    # Runs a second LLM call to challenge the narrator verdict.
+    # Result stored on the cluster dict; never blocks or raises.
+    try:
+        from src.agents.critic import CRITIC as _critic
+        _critique = _critic.critique(cluster, narrative, evidence, assessment_id=assessment_id)
+        cluster["_critic"] = _critique
+        # If critic is confident this is a FP, pull confidence down slightly
+        if not _critique.get("skipped"):
+            _fp_prob = float(_critique.get("fp_probability") or 0)
+            _c_delta = float(_critique.get("confidence_delta") or 0)
+            if _fp_prob > 0.60 or _c_delta < -0.15:
+                current_conf = float(narrative.get("confidence") or cluster.get("confidence") or 0.5)
+                narrative["confidence"] = max(0.0, min(1.0, current_conf + _c_delta))
+                narrative["_critic_fp_probability"] = _fp_prob
+    except Exception as _ce:
+        logger.debug("AdversarialCritic skipped for %s: %s", cluster_id, _ce)
+        cluster["_critic"] = {"skipped": True, "skip_reason": f"import_error:{_ce}"}
 
     # Enrich the cluster object with the structured output
     _apply_narrative_to_cluster(cluster, narrative, upgrade_only=True)

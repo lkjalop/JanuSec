@@ -44,15 +44,14 @@ def tool_duckdb_query(params: Dict[str, Any]) -> Dict[str, Any]:
         sql_filter (str): WHERE clause fragment (sanitised)
         limit (int): max rows, default 500
     """
-    # Lazy import to avoid circular deps at module level
-    from src.core.ingest.store import get_assessment_events  # type: ignore[attr-defined]
+    from src.core.ingest.store import load_rows
 
     assessment_id = params.get("assessment_id", "")
-    sql_filter = params.get("sql_filter", "")
     limit = min(int(params.get("limit", 500)), 2000)
+    min_triage = float(params.get("min_triage", 0.0))
 
     try:
-        rows = get_assessment_events(assessment_id, extra_where=sql_filter, limit=limit)
+        rows = load_rows(assessment_id, min_triage=min_triage, limit=limit)
         return {
             "summary": f"Returned {len(rows)} events (limit={limit})",
             "evidence": {"row_count": len(rows), "sample": rows[:5]},

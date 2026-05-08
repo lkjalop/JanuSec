@@ -92,11 +92,16 @@ async def investigate(
         # Zone 1: execute the tool
         tool_fn = get_tool(step.tool)
         if tool_fn is None:
-            LOGGER.warning("unknown tool %r in step %d", step.tool, idx)
+            LOGGER.error(
+                "investigator: unknown tool %r at step %d — investigation step produced no output; "
+                "check tool registry registration",
+                step.tool, idx,
+            )
             findings.append(RawFinding(
                 step_index=idx,
                 tool=step.tool,
-                summary=f"Tool not found: {step.tool}",
+                summary=f"[ERROR] Tool not found: {step.tool!r}. Step skipped — results are incomplete.",
+                evidence={"error": "tool_not_registered", "tool": step.tool},
             ))
             continue
 
