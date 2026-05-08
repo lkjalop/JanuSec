@@ -49,10 +49,19 @@ def detect_identity_phase3(payload: Dict[str, Any]) -> Tuple[List[str], List[Tup
 
     # Kerberoasting: RC4-downgraded TGS (EventID 4769, etype 0x17)
     if win_eid == '4769' and enc_type in ('0x17', '0x18', '23', '18'):
-        f = 'iam:kerberoasting'
-        factors.append(f)
-        if user:
-            attrs.append((f'user:{user}', f))
+        _target_svc = str(
+            payload.get('service_name') or payload.get('target_service_name') or
+            payload.get('target_user_name') or payload.get('ServiceName') or ''
+        ).strip().lower()
+        _exclude_svcs = {
+            s.strip().lower() for s in
+            os.getenv('KERBEROAST_EXCLUDE_SERVICES', '').split(',') if s.strip()
+        }
+        if not (_exclude_svcs and _target_svc and _target_svc in _exclude_svcs):
+            f = 'iam:kerberoasting'
+            factors.append(f)
+            if user:
+                attrs.append((f'user:{user}', f))
 
     # Golden Ticket: forged TGT with anomalous ticket options
     if win_eid == '4769' and enc_type in ('0x17', '0x18') and ticket_opts in (
@@ -180,6 +189,15 @@ def detect_cloud_identity_phase4(payload: Dict[str, Any]) -> Tuple[List[str], Li
     if ('risky_sign_in' in etype) or signals.get('risky_sign_in') is True or payload.get('risky') is True:
         f = 'iam:entra_id_risky_sign_in'
         factors.append(f)
+        if user:
+            attrs.append((f'user:{user}', f))
+
+    # Service principal credential add (AAD addKey/addPassword — persistence indicator)
+    if any(k in etype for k in ('addkey', 'addpassword', 'add key credential', 'add password credential')):
+        f = 'iam:service_principal_credential_add'
+        factors.append(f)
+        if app:
+            attrs.append((f'app:{app}', f))
         if user:
             attrs.append((f'user:{user}', f))
 

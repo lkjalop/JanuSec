@@ -530,10 +530,21 @@ def _score_async_ingest_row(raw: dict, normalized: dict) -> float:
         }
         if _win_eid in _WIN_SECURITY_EIDS:
             score = max(score, 0.20)
-        # Further elevate RC4 downgrade (kerberoasting indicator)
+        # Further elevate RC4 downgrade (kerberoasting indicator).
+        # KERBEROAST_EXCLUDE_SERVICES: comma-separated service names that legitimately
+        # use RC4 (e.g. svc_jenkins) — suppresses false positives.
         _enc = str(raw.get("ticket_encryption") or raw.get("ticket_encryption_type") or "").strip()
         if _enc in ("0x17", "0x18") and _win_eid == "4769":
-            score = max(score, 0.75)
+            _target_svc = str(
+                raw.get("service_name") or raw.get("target_service_name") or
+                raw.get("target_user_name") or raw.get("ServiceName") or ""
+            ).strip().lower()
+            _exclude_svcs = {
+                s.strip().lower() for s in
+                os.getenv("KERBEROAST_EXCLUDE_SERVICES", "").split(",") if s.strip()
+            }
+            if not (_exclude_svcs and _target_svc and _target_svc in _exclude_svcs):
+                score = max(score, 0.75)
     # Elevate sysmon endpoint rows for process-create events with suspicious parents/commands
     _sysmon_eid = str(raw.get("sysmon_event_id") or "").strip()
     if _sysmon_eid == "1" or raw.get("source_type") == "sysmon":
@@ -554,6 +565,21 @@ def _score_async_ingest_row(raw: dict, normalized: dict) -> float:
         )
         if bytes_moved > 100_000_000:
             score = max(score, 0.55)
+    except Exception:
+        pass
+    # P4 — SharePoint lookalike subdomain: martin-chen.sharepoint.com vs org tenant.
+    # JANUSEC_ORG_TENANT_NAME env var identifies the org's legitimate tenant prefix.
+    try:
+        _org_tenant = os.getenv("JANUSEC_ORG_TENANT_NAME", "").strip().lower()
+        _dst_h = str(
+            raw.get("dst_host") or raw.get("resp_h") or raw.get("destination_host") or
+            normalized.get("dst_ip") or ""
+        ).strip().lower()
+        if _org_tenant and ".sharepoint.com" in _dst_h:
+            _sp_prefix = _dst_h.split(".sharepoint.com")[0].rsplit(".", 1)[-1]
+            if _sp_prefix and _sp_prefix != _org_tenant:
+                score = max(score, 0.55)
+                normalized["_sharepoint_subdomain_mismatch"] = _sp_prefix
     except Exception:
         pass
     return float(max(0.0, min(1.0, score)))
@@ -1307,11 +1333,188 @@ async def run_assessment_pipeline(
             except Exception as exc:
                 logger.warning("cluster narration failed for %s: %s", assessment_id, exc)
 
+        # ── Stage 5g: feed IdentityGraph (MOVED before persona dispatch) ──────
+        # Populates GLOBAL_IDENTITY_GRAPH so retrieve_identity_context() in persona
+        # dispatch has real lateral-movement paths for this assessment's actors.
+        try:
+            from src.core.graph.identity_hopgraph import GLOBAL_IDENTITY_GRAPH as _ig
+            _ig_count = 0
+            _ig_cap = int(os.getenv("JANUSEC_IDENTITY_GRAPH_CAP", "10000"))
+            for _row_ig in filtered_rows[:_ig_cap]:
+                if not isinstance(_row_ig, dict):
+                    continue
+                try:
+                    _ig.ingest_identity_event(_row_ig)
+                    _ig_count += 1
+                except Exception:
+                    continue
+            logger.info("Stage 5g: ingested %d rows into IdentityGraph for %s", _ig_count, assessment_id)
+        except Exception as exc:
+            logger.debug("IdentityGraph ingestion skipped for %s: %s", assessment_id, exc)
+
+        # ── Stage 5h: update BaselineService (MOVED before persona dispatch) ──
+        try:
+            from src.core.baseline_service import BASELINES as _bl
+            import asyncio as _asyncio
+            _bl_user_counts: dict[str, int] = {}
+            _bl_host_counts: dict[str, int] = {}
+            _bl_user_bytes: dict[str, float] = {}
+            for _row_bl in filtered_rows:
+                if not isinstance(_row_bl, dict):
+                    continue
+                _u = str(_row_bl.get("user_canonical") or _row_bl.get("user") or "").strip().lower()
+                _h = str(_row_bl.get("host") or _row_bl.get("hostname") or "").strip().lower()
+                if _u:
+                    _bl_user_counts[_u] = _bl_user_counts.get(_u, 0) + 1
+                    _bytes = float(_row_bl.get("bytes_out") or _row_bl.get("bytes_sent") or _row_bl.get("bytes") or 0)
+                    if _bytes > 0:
+                        _bl_user_bytes[_u] = _bl_user_bytes.get(_u, 0.0) + _bytes
+                if _h:
+                    _bl_host_counts[_h] = _bl_host_counts.get(_h, 0) + 1
+            _bl_loop = _asyncio.get_event_loop()
+            for _u, _cnt in _bl_user_counts.items():
+                _bl_loop.create_task(_bl.update("user", _u, "events_per_assessment", float(_cnt)))
+            for _u, _byt in _bl_user_bytes.items():
+                _bl_loop.create_task(_bl.update("user", _u, "bytes_per_assessment", _byt))
+            for _h, _cnt in _bl_host_counts.items():
+                _bl_loop.create_task(_bl.update("host", _h, "events_per_assessment", float(_cnt)))
+            logger.info(
+                "Stage 5h: queued baseline updates for %d users / %d hosts (assessment %s)",
+                len(_bl_user_counts), len(_bl_host_counts), assessment_id,
+            )
+        except Exception as exc:
+            logger.debug("BaselineService update skipped for %s: %s", assessment_id, exc)
+
+        # ── Stage 5i: ChronoGraph accumulation (MOVED + EXTENDED) ───────────
+        # Moved before persona dispatch so retrieve_chrono_anomalies() sees current data.
+        # Extended with: off-hours recon sequence, cloud bytes exfil, first-seen host.
+        _chrono_first_seen: dict[str, set] = {}  # user -> new hosts seen this assessment
+        try:
+            from src.core.chrono.sketch_store import CHRONO as _chrono
+            _ch_rows = 0
+            _tz_offset_h = int(os.getenv("JANUSEC_ORG_TZ_OFFSET_H", "0"))
+            _ORG_TENANT_5I = os.getenv("JANUSEC_ORG_TENANT_NAME", "").strip().lower()
+            _RECON_KEYWORDS = (
+                "net group", "net user", "dsquery", "setspn", "get-aduser",
+                "get-adcomputer", "get-adgroup", "nltest", "invoke-sharphound",
+                "sharphound", "get-domainuser", "get-domaincomputer", "get-domaingroupmember",
+            )
+
+            def _is_recon_cmd_5i(row: dict) -> bool:
+                _seid = str(row.get("sysmon_event_id") or "").strip()
+                _eid = str(row.get("event_id") or row.get("windows_event_id") or "").strip()
+                if _seid != "1" and _eid not in ("1", "4688"):
+                    return False
+                _cmd = str(row.get("command_line") or row.get("cmdline") or "").lower()
+                return any(k in _cmd for k in _RECON_KEYWORDS)
+
+            def _is_off_hours_5i(ts_epoch: float) -> bool:
+                try:
+                    import datetime as _dt
+                    _utc_h = _dt.datetime.utcfromtimestamp(ts_epoch).hour
+                    _local_h = (_utc_h + _tz_offset_h) % 24
+                    return _local_h < 8 or _local_h >= 18
+                except Exception:
+                    return False
+
+            for _row_ch in filtered_rows:
+                if not isinstance(_row_ch, dict):
+                    continue
+                _ts_ch = float(_row_ch.get("_ts_epoch") or 0)
+                if not _ts_ch:
+                    continue
+                _u_ch = str(_row_ch.get("user_canonical") or _row_ch.get("user") or "").strip().lower()
+                _h_ch = str(_row_ch.get("host") or _row_ch.get("hostname") or "").strip().lower()
+                _b_ch = float(_row_ch.get("bytes_out") or _row_ch.get("bytes_sent") or _row_ch.get("bytes") or 0)
+                _dst_h_ch = str(_row_ch.get("dst_host") or _row_ch.get("resp_h") or "").strip().lower()
+
+                if _u_ch:
+                    _chrono.increment("user", _u_ch, "events", 1.0, ts=_ts_ch)
+                    if _b_ch > 0:
+                        _chrono.increment("user", _u_ch, "bytes_out", _b_ch, ts=_ts_ch)
+                        # Cloud bytes: separate metric for non-RFC1918 destinations
+                        _is_cloud_dst = _dst_h_ch and not _dst_h_ch.startswith(
+                            ("10.", "172.", "192.168.", "127.")
+                        )
+                        if _is_cloud_dst:
+                            _chrono.increment("user", _u_ch, "cloud_bytes_out", _b_ch, ts=_ts_ch)
+                    # Recon event tracking (Gap 1 fix)
+                    if _is_recon_cmd_5i(_row_ch):
+                        _chrono.increment("user", _u_ch, "recon_events", 1.0, ts=_ts_ch)
+                        if _is_off_hours_5i(_ts_ch):
+                            _chrono.increment("user", _u_ch, "off_hours_recon_events", 1.0, ts=_ts_ch)
+                    elif _is_off_hours_5i(_ts_ch):
+                        _chrono.increment("user", _u_ch, "off_hours_events", 1.0, ts=_ts_ch)
+                    # First-seen host tracking (Gap 5 fix): query BEFORE incrementing
+                    if _h_ch:
+                        _prior_access = _chrono.window_sum(
+                            "user", _u_ch, f"host_access:{_h_ch}", 0, _ts_ch - 1
+                        )
+                        if _prior_access == 0.0:
+                            _chrono_first_seen.setdefault(_u_ch, set()).add(_h_ch)
+                        _chrono.increment("user", _u_ch, f"host_access:{_h_ch}", 1.0, ts=_ts_ch)
+
+                if _h_ch and _ts_ch:
+                    _chrono.increment("host", _h_ch, "events", 1.0, ts=_ts_ch)
+                _ch_rows += 1
+            logger.info("Stage 5i: ChronoGraph accumulated %d rows for %s", _ch_rows, assessment_id)
+        except Exception as exc:
+            logger.debug("ChronoGraph accumulation skipped for %s: %s", assessment_id, exc)
+
+        # ── Stage 5j: ChronoGraph anomaly → cluster factor elevation ─────────
+        # Reads z-scores from CHRONO for each breach cluster's principals and
+        # appends long-horizon factors (recon sequence, cumulative bytes, first-seen
+        # host) to factor_tags so narrators and breach UI surface these signals.
+        try:
+            from src.core.chrono.sketch_store import CHRONO as _chrono_j
+            _BREACH_VERD_5J = {"VALIDATED_BREACH", "LIKELY_BREACH", "LIKELY_COMPROMISE", "INCIDENT"}
+            for _cl_j in clusters:
+                _verd_j = str(_cl_j.get("final_verdict") or _cl_j.get("verdict") or "").upper()
+                if _verd_j not in _BREACH_VERD_5J:
+                    continue
+                _princ_j = list(
+                    _cl_j.get("affected_principals") or
+                    _cl_j.get("shared_accounts") or []
+                )
+                _new_f: list[str] = []
+                for _u_j in _princ_j[:4]:
+                    if not _u_j:
+                        continue
+                    _u_j = str(_u_j).strip().lower()
+                    # Gap 1: off-hours recon sequence
+                    _rz = _chrono_j.z_score("user", _u_j, "off_hours_recon_events",
+                                            window_seconds=86400 * 7)
+                    if _rz.get("anomaly") or abs(float(_rz.get("z") or 0)) >= 2.5:
+                        _new_f.append("recon:sustained_offhours_sequence")
+                    # Gap 2: cumulative bytes anomaly
+                    _bz = _chrono_j.z_score("user", _u_j, "bytes_out",
+                                            window_seconds=86400 * 7)
+                    if _bz.get("anomaly") or abs(float(_bz.get("z") or 0)) >= 2.5:
+                        _new_f.append("exfil:cumulative_bytes_anomaly")
+                    _cbz = _chrono_j.z_score("user", _u_j, "cloud_bytes_out",
+                                             window_seconds=86400 * 7)
+                    if (_cbz.get("anomaly") or abs(float(_cbz.get("z") or 0)) >= 2.5
+                            and "exfil:cumulative_bytes_anomaly" not in _new_f):
+                        _new_f.append("exfil:cumulative_cloud_bytes_anomaly")
+                    # Gap 5: first-seen host access
+                    if _chrono_first_seen.get(_u_j):
+                        _new_f.append("endpoint:first_seen_host_access")
+                if _new_f:
+                    _existing_f = _cl_j.setdefault("factor_tags", [])
+                    for _ff in set(_new_f):
+                        if _ff not in _existing_f:
+                            _existing_f.append(_ff)
+                    _cl_j["_chrono_factors"] = list(set(_new_f))
+            logger.info("Stage 5j: ChronoGraph anomaly elevation done for %s", assessment_id)
+        except Exception as exc:
+            logger.debug("Stage 5j ChronoGraph elevation skipped for %s: %s", assessment_id, exc)
+
         # ── Stage 5d: persona dispatch + framework mapping + bitemporal trace ──
         # Enriches each breach cluster's narrative with structured data (affected
         # principals, data sensitivity, attacker infra), builds the control
         # failure register, generates per-persona dispatch payloads, and wraps
         # each in a bitemporal decision trace for audit replay.
+        # NOTE: Runs AFTER 5g/5h/5i/5j so IdentityGraph and ChronoGraph are populated.
         _progress("reasoning", 78, "Building persona dispatch payloads")
         try:
             _enrich_and_dispatch_personas(assessment, clusters, filtered_rows, org)
@@ -1319,8 +1522,6 @@ async def run_assessment_pipeline(
             logger.warning("persona dispatch stage failed for %s: %s", assessment_id, exc, exc_info=True)
 
         # ── Stage 5e: index evidence rows into TemporalRAG ───────────────────
-        # This ensures the exec summary's evidence_frame module can retrieve
-        # time-windowed neighbours per cluster from the TemporalRAG engine.
         try:
             from src.ai.temporal_rag import get_engine as _get_rag_engine
             _rag = _get_rag_engine()
@@ -1330,10 +1531,7 @@ async def run_assessment_pipeline(
                 _rag_count = _rag.index_rows(_rag_rows, tenant=org) if _rag_rows else 0
                 logger.info(
                     "Stage 5e: indexed %d/%d rows into TemporalRAG for %s (cap=%d)",
-                    _rag_count,
-                    len(filtered_rows),
-                    assessment_id,
-                    _rag_cap,
+                    _rag_count, len(filtered_rows), assessment_id, _rag_cap,
                 )
         except Exception as exc:
             logger.debug("TemporalRAG row indexing skipped for %s: %s", assessment_id, exc)
@@ -1365,85 +1563,6 @@ async def run_assessment_pipeline(
                 logger.info("Stage 5f: ingested %d rows into HopGraph for %s", _hg_count, assessment_id)
         except Exception as exc:
             logger.debug("HopGraph ingestion skipped for %s: %s", assessment_id, exc)
-
-        # ── Stage 5g: feed IdentityGraph ──────────────────────────────────────
-        # Populates GLOBAL_IDENTITY_GRAPH so the /api/v1/graph/identity/* endpoints
-        # return real lateral-movement paths for this assessment's actors.
-        try:
-            from src.core.graph.identity_hopgraph import GLOBAL_IDENTITY_GRAPH as _ig
-            _ig_count = 0
-            _ig_cap = int(os.getenv("JANUSEC_IDENTITY_GRAPH_CAP", "10000"))
-            for _row_ig in filtered_rows[:_ig_cap]:
-                if not isinstance(_row_ig, dict):
-                    continue
-                try:
-                    _ig.ingest_identity_event(_row_ig)
-                    _ig_count += 1
-                except Exception:
-                    continue
-            logger.info("Stage 5g: ingested %d rows into IdentityGraph for %s", _ig_count, assessment_id)
-        except Exception as exc:
-            logger.debug("IdentityGraph ingestion skipped for %s: %s", assessment_id, exc)
-
-        # ── Stage 5h: update BaselineService for user/host metrics ───────────
-        # Accumulates per-entity event rates and byte volumes across assessments
-        # so that TemporalRAG and DREAD scoring have a real historical baseline.
-        try:
-            from src.core.baseline_service import BASELINES as _bl
-            import asyncio as _asyncio
-            _bl_user_counts: dict[str, int] = {}
-            _bl_host_counts: dict[str, int] = {}
-            _bl_user_bytes: dict[str, float] = {}
-            for _row_bl in filtered_rows:
-                if not isinstance(_row_bl, dict):
-                    continue
-                _u = str(_row_bl.get("user_canonical") or _row_bl.get("user") or "").strip().lower()
-                _h = str(_row_bl.get("host") or _row_bl.get("hostname") or "").strip().lower()
-                if _u:
-                    _bl_user_counts[_u] = _bl_user_counts.get(_u, 0) + 1
-                    _bytes = float(_row_bl.get("bytes_out") or _row_bl.get("bytes_sent") or _row_bl.get("bytes") or 0)
-                    if _bytes > 0:
-                        _bl_user_bytes[_u] = _bl_user_bytes.get(_u, 0.0) + _bytes
-                if _h:
-                    _bl_host_counts[_h] = _bl_host_counts.get(_h, 0) + 1
-            # Push aggregated counts into BASELINES — one update per unique entity
-            _bl_loop = _asyncio.get_event_loop()
-            for _u, _cnt in _bl_user_counts.items():
-                _bl_loop.create_task(_bl.update("user", _u, "events_per_assessment", float(_cnt)))
-            for _u, _byt in _bl_user_bytes.items():
-                _bl_loop.create_task(_bl.update("user", _u, "bytes_per_assessment", _byt))
-            for _h, _cnt in _bl_host_counts.items():
-                _bl_loop.create_task(_bl.update("host", _h, "events_per_assessment", float(_cnt)))
-            logger.info(
-                "Stage 5h: queued baseline updates for %d users / %d hosts (assessment %s)",
-                len(_bl_user_counts), len(_bl_host_counts), assessment_id,
-            )
-        except Exception as exc:
-            logger.debug("BaselineService update skipped for %s: %s", assessment_id, exc)
-
-        # ── Stage 5i: ChronoGraph time-bucket accumulation ────────────────────
-        # Appends events into 1-hour buckets so long-horizon detections (cumulative
-        # bytes, sustained login bursts) survive across assessment boundaries.
-        try:
-            from src.core.chrono.sketch_store import CHRONO as _chrono
-            _ch_rows = 0
-            for _row_ch in filtered_rows:
-                if not isinstance(_row_ch, dict):
-                    continue
-                _ts_ch = float(_row_ch.get("_ts_epoch") or 0)
-                _u_ch = str(_row_ch.get("user_canonical") or _row_ch.get("user") or "").strip().lower()
-                _h_ch = str(_row_ch.get("host") or _row_ch.get("hostname") or "").strip().lower()
-                _b_ch = float(_row_ch.get("bytes_out") or _row_ch.get("bytes_sent") or _row_ch.get("bytes") or 0)
-                if _u_ch and _ts_ch:
-                    _chrono.increment("user", _u_ch, "events", 1.0, ts=_ts_ch)
-                    if _b_ch > 0:
-                        _chrono.increment("user", _u_ch, "bytes_out", _b_ch, ts=_ts_ch)
-                if _h_ch and _ts_ch:
-                    _chrono.increment("host", _h_ch, "events", 1.0, ts=_ts_ch)
-                _ch_rows += 1
-            logger.info("Stage 5i: ChronoGraph accumulated %d rows for %s", _ch_rows, assessment_id)
-        except Exception as exc:
-            logger.debug("ChronoGraph accumulation skipped for %s: %s", assessment_id, exc)
 
         # ── Stage 6: tier-1 prefill (top-10 cluster cards) ────────────────────
         _progress("reasoning", 85, "Tier-1 prefill for cluster cards")
