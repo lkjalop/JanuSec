@@ -544,6 +544,88 @@
     ].join('');
   }
 
+  function _renderComplianceViolations(cluster) {
+    var cv = cluster.compliance_violations;
+    if (!cv || !cv.mapped_factor_count) return '';
+    var SEV_CLR = { critical: '#E54848', high: '#FF8A3C', medium: '#E0C446', low: '#3FA860', none: '#555' };
+    var sevColor = SEV_CLR[cv.max_severity] || '#888';
+    var frameworks = [
+      { key: 'nist_800_53', label: 'NIST 800-53' },
+      { key: 'iso_27001',   label: 'ISO 27001'   },
+      { key: 'cis_v8',      label: 'CIS v8'      },
+      { key: 'soc2_cc',     label: 'SOC 2'       },
+    ];
+    var fwHtml = frameworks.map(function (fw) {
+      var controls = cv[fw.key];
+      if (!Array.isArray(controls) || !controls.length) return '';
+      return '<div class="bct-compliance-fw" style="margin:4px 0;display:flex;flex-wrap:wrap;gap:4px;align-items:center;">'
+        + '<span style="font-size:10px;color:var(--text-muted);width:80px;flex-shrink:0;">' + _esc(fw.label) + '</span>'
+        + controls.map(function (c) {
+            return '<span style="font-size:10px;padding:1px 5px;border:1px solid var(--border-subtle);border-radius:4px;color:#9db7ff;">' + _esc(c) + '</span>';
+          }).join('')
+        + '</div>';
+    }).filter(Boolean).join('');
+    var violHtml = '';
+    if (Array.isArray(cv.violations) && cv.violations.length) {
+      var rows = cv.violations.slice(0, 20).map(function (v) {
+        var sc = SEV_CLR[v.severity] || '#888';
+        var mitre = Array.isArray(v.mitre) ? v.mitre.join(', ') : (v.mitre || '');
+        return '<tr>'
+          + '<td style="padding:2px 6px;border-bottom:1px solid var(--border-subtle);">' + _esc(v.label || v.factor) + '</td>'
+          + '<td style="padding:2px 6px;border-bottom:1px solid var(--border-subtle);color:' + sc + ';font-weight:600;">' + _esc(v.severity || '') + '</td>'
+          + '<td style="padding:2px 6px;border-bottom:1px solid var(--border-subtle);color:#9db7ff;">' + _esc(mitre) + '</td>'
+          + '</tr>';
+      }).join('');
+      violHtml = '<details style="margin-top:6px;">'
+        + '<summary style="font-size:11px;cursor:pointer;color:var(--text-muted);">' + cv.violations.length + ' violation details</summary>'
+        + '<table style="width:100%;font-size:10px;margin-top:4px;border-collapse:collapse;">'
+        + '<thead><tr>'
+        + '<th style="text-align:left;padding:2px 6px;color:var(--text-muted);">Factor</th>'
+        + '<th style="text-align:left;padding:2px 6px;color:var(--text-muted);">Severity</th>'
+        + '<th style="text-align:left;padding:2px 6px;color:var(--text-muted);">MITRE</th>'
+        + '</tr></thead><tbody>' + rows + '</tbody></table></details>';
+    }
+    return '<div class="bct-section bct-compliance" data-testid="bct-compliance">'
+      + '<div class="bct-section-head">COMPLIANCE CONTROL VIOLATIONS'
+      + ' <span style="color:' + sevColor + ';font-size:10px;font-weight:600;margin-left:8px;">' + _esc((cv.max_severity || '').toUpperCase()) + '</span>'
+      + ' <span style="color:var(--text-muted);font-size:10px;margin-left:4px;">' + cv.control_count + ' controls · ' + cv.mapped_factor_count + ' factors</span>'
+      + '</div>'
+      + fwHtml + violHtml
+      + '</div>';
+  }
+
+  function _renderMlScores(cluster) {
+    var ml = cluster._ml_scores;
+    if (!ml || !Object.keys(ml).length) return '';
+    var rows = Object.keys(ml).map(function (user) {
+      var s = ml[user];
+      var risk = typeof s.risk === 'number' ? s.risk : null;
+      var crossIso = typeof s.cross_iso === 'number' ? s.cross_iso : null;
+      var ewmaRes = typeof s.ewma_residual === 'number' ? s.ewma_residual : null;
+      var anomRate = typeof s.anomaly_rate === 'number' ? s.anomaly_rate : null;
+      var rc = risk !== null ? (risk > 0.8 ? '#E54848' : risk > 0.6 ? '#FF8A3C' : '#E0C446') : '#888';
+      return '<tr>'
+        + '<td style="padding:3px 6px;border-bottom:1px solid var(--border-subtle);">' + _esc(user) + '</td>'
+        + '<td style="padding:3px 6px;border-bottom:1px solid var(--border-subtle);color:' + rc + ';font-weight:600;">' + (risk !== null ? risk.toFixed(2) : '—') + '</td>'
+        + '<td style="padding:3px 6px;border-bottom:1px solid var(--border-subtle);">' + (crossIso !== null ? crossIso.toFixed(2) : '—') + '</td>'
+        + '<td style="padding:3px 6px;border-bottom:1px solid var(--border-subtle);">' + (ewmaRes !== null ? ewmaRes.toFixed(2) : '—') + '</td>'
+        + '<td style="padding:3px 6px;border-bottom:1px solid var(--border-subtle);">' + (anomRate !== null ? (anomRate * 100).toFixed(0) + '%' : '—') + '</td>'
+        + '</tr>';
+    }).join('');
+    return '<div class="bct-section bct-ml-scores" data-testid="bct-ml-scores">'
+      + '<div class="bct-section-head">ML BEHAVIORAL SIGNALS</div>'
+      + '<table style="width:100%;border-collapse:collapse;font-size:10px;">'
+      + '<thead><tr>'
+      + '<th style="text-align:left;padding:2px 6px;color:var(--text-muted);">User</th>'
+      + '<th style="text-align:left;padding:2px 6px;color:var(--text-muted);">Risk</th>'
+      + '<th style="text-align:left;padding:2px 6px;color:var(--text-muted);">ISO Cross-Src</th>'
+      + '<th style="text-align:left;padding:2px 6px;color:var(--text-muted);">EWMA Residual</th>'
+      + '<th style="text-align:left;padding:2px 6px;color:var(--text-muted);">Anomaly Rate</th>'
+      + '</tr></thead>'
+      + '<tbody>' + rows + '</tbody>'
+      + '</table></div>';
+  }
+
   function _buildSkeleton(cluster, assessmentId) {
     var p = cluster.tier1_prefill || {};
     var verdict = (cluster.verdict || cluster.final_verdict || 'UNCERTAIN').toUpperCase();
@@ -659,6 +741,11 @@
       // Crown jewels review panel (filled async)
       '<div id="bct-cj-review">' + _buildCjEvidenceSeed(cluster) + '</div>',
       '</div>',
+
+      // ── Compliance control violations (B3)
+      _renderComplianceViolations(cluster),
+      // ── ML behavioral signals (B3)
+      _renderMlScores(cluster),
 
       // ── Persona tabs
       '<div class="bct-persona-tabs" id="bct-persona-tabs">',

@@ -60,6 +60,26 @@ class IncidentSignature:
         return [x / norm for x in v]
 
 
+# Compact factor_tag → MITRE technique mapping for ML anomaly indexing
+_FACTOR_MITRE_MAP: dict[str, list[str]] = {
+    "iam:kerberoasting":                    ["T1558.003"],
+    "iam:golden_ticket":                    ["T1558.001"],
+    "iam:as_rep_roasting":                  ["T1558.004"],
+    "iam:service_principal_credential_add": ["T1098.001"],
+    "iam:oauth_consent_grant_suspicious_app": ["T1528"],
+    "iam:azure_device_code_phishing":       ["T1528"],
+    "recon:sustained_offhours_sequence":    ["T1087.002", "T1069.002"],
+    "exfil:cumulative_bytes_anomaly":       ["T1048", "T1567"],
+    "exfil:cumulative_cloud_bytes_anomaly": ["T1567", "T1048.002"],
+    "token_reuse_foreign_asn":              ["T1550.001", "T1078.004"],
+    "endpoint:first_seen_host_access":      ["T1021"],
+    "endpoint:wmi_lateral_exec":            ["T1047"],
+    "identity:iso_cross_source_anomaly":    [],
+    "identity:ml_risk_spike":               [],
+    "identity:ewma_behavioral_spike":       [],
+}
+
+
 def _signature_from_narrative(narrative: dict) -> IncidentSignature:
     affected_data = narrative.get('affected_data') or {}
     principals = narrative.get('affected_principals') or {}
@@ -316,6 +336,102 @@ class TemporalRAGProvider:
             logger.debug("retrieve_identity_context failed: %s", exc)
         return out
 
+    def index_ml_anomaly(
+        self,
+        user: str,
+        iso_score: float,
+        z_scores: dict,
+        factor_tags: list[str],
+        assessment_id: str,
+        ts: float,
+    ) -> None:
+        """Index an ML-detected anomaly as a synthetic incident for future RAG retrieval.
+
+        Stores the anomaly so that future assessments' retrieve_prior_ml_anomalies()
+        returns this user's historical ML signals — grounding LLM prompts in actual
+        observed anomaly history, not just rule-based incidents.
+        """
+        try:
+            import json as _json
+            from datetime import datetime, timezone
+            _ts_str = datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
+            sig = IncidentSignature(
+                mitre_techniques=tuple(sorted(
+                    t for f in (factor_tags or [])
+                    for t in (_FACTOR_MITRE_MAP.get(f) or [])
+                )),
+                kill_chain_stage="ml_detected",
+                sensitivity="unknown",
+                data_classes=tuple(sorted(factor_tags or [])),
+                principal_types=("human_user",),
+                verdict="ml_anomaly",
+            )
+            self._incidents.index_incident(
+                tenant_id=self._tenant,
+                cluster_id=f"ml:{user}:{assessment_id}",
+                signature=sig,
+                valid_time_start=_ts_str,
+                valid_time_end=_ts_str,
+                transaction_time=datetime.now(timezone.utc).isoformat(),
+                narrative_summary=(
+                    f"ML anomaly: user={user} iso={iso_score:.3f} "
+                    f"factors={','.join(factor_tags[:4])} "
+                    f"z_offhours={z_scores.get('off_hours_recon_events', 0):.1f} "
+                    f"z_bytes={z_scores.get('bytes_out', 0):.1f}"
+                ),
+                outcome_summary="ml_anomaly",
+            )
+        except Exception as exc:
+            logger.debug("index_ml_anomaly failed for %s: %s", user, exc)
+
+    def retrieve_prior_ml_anomalies(
+        self,
+        principals: list[str],
+        k: int = 5,
+        lookback_days: int = 90,
+        as_of: Optional[str] = None,
+    ) -> list[dict]:
+        """Return previously indexed ML anomalies for these principals.
+
+        Gives the LLM a fifth retrieval silo: historical ML-detected anomalies
+        for the same users, distinct from rule-based incident history.
+        """
+        out: list[dict] = []
+        try:
+            from datetime import datetime, timezone, timedelta
+            as_of_tt = as_of or datetime.now(timezone.utc).isoformat()
+            valid_after = (datetime.now(timezone.utc) - timedelta(days=lookback_days)).isoformat()
+            for principal in principals[:4]:
+                dummy_sig = IncidentSignature(
+                    mitre_techniques=(),
+                    kill_chain_stage="ml_detected",
+                    sensitivity="unknown",
+                    data_classes=(),
+                    principal_types=("human_user",),
+                    verdict="ml_anomaly",
+                )
+                results = self._incidents.query(
+                    tenant_id=self._tenant,
+                    query_signature=dummy_sig,
+                    k=k * 2,
+                    valid_time_after=valid_after,
+                    as_of_transaction_time=as_of_tt,
+                )
+                for r in results:
+                    cid = r.get("cluster_id") or ""
+                    if f"ml:{principal}" in cid or f"ml:{principal.lower()}" in cid:
+                        out.append({
+                            "principal": principal,
+                            "date": (r.get("valid_time_start") or "?")[:10],
+                            "summary": r.get("narrative_summary") or "",
+                            "factors": r.get("techniques") or [],
+                        })
+                if len(out) >= k:
+                    break
+        except Exception as exc:
+            logger.debug("retrieve_prior_ml_anomalies failed: %s", exc)
+        return out[:k]
+
     def retrieve_chrono_anomalies(
         self,
         principals: list[str],
@@ -364,15 +480,19 @@ def render_rag_context_for_prompt(
     similar_incidents: list[dict],
     identity_paths: list[dict] | None = None,
     chrono_anomalies: list[dict] | None = None,
+    prior_ml_anomalies: list[dict] | None = None,
+    compliance_violations: dict | None = None,
 ) -> str:
-    """Render all four retrieval silos into a single LLM-prompt context block.
+    """Render all five retrieval silos + compliance block into an LLM-prompt context block.
 
     Parameters
     ----------
-    prior_decisions:    from TemporalRAGProvider.retrieve_prior_decisions()
-    similar_incidents:  from TemporalRAGProvider.retrieve_similar_incidents()
-    identity_paths:     from TemporalRAGProvider.retrieve_identity_context()
-    chrono_anomalies:   from TemporalRAGProvider.retrieve_chrono_anomalies()
+    prior_decisions:      from TemporalRAGProvider.retrieve_prior_decisions()
+    similar_incidents:    from TemporalRAGProvider.retrieve_similar_incidents()
+    identity_paths:       from TemporalRAGProvider.retrieve_identity_context()
+    chrono_anomalies:     from TemporalRAGProvider.retrieve_chrono_anomalies()
+    prior_ml_anomalies:   from TemporalRAGProvider.retrieve_prior_ml_anomalies()
+    compliance_violations: from compliance_mapper.map_factors_to_controls()
     """
     lines: list[str] = []
 
@@ -426,8 +546,29 @@ def render_rag_context_for_prompt(
                 f"window={a.get('window_days',7)}d)"
             )
 
+    if prior_ml_anomalies:
+        if lines:
+            lines.append('')
+        lines.append('PRIOR ML ANOMALIES (historical ISO/EWMA signals for these users):')
+        for a in prior_ml_anomalies[:5]:
+            lines.append(
+                f"  - {a.get('date','?')}: {a.get('principal','?')} — "
+                f"{a.get('summary','')[:120]}"
+            )
+
+    if compliance_violations and compliance_violations.get('violations'):
+        if lines:
+            lines.append('')
+        lines.append('COMPLIANCE CONTROLS VIOLATED (from factor analysis):')
+        for v in compliance_violations['violations'][:6]:
+            nist = ', '.join(v.get('nist_800_53') or [])
+            lines.append(f"  [{v.get('severity','?').upper()}] {v.get('label','?')} — NIST: {nist or 'N/A'}")
+        soc2 = ', '.join(compliance_violations.get('soc2_cc') or [])
+        if soc2:
+            lines.append(f"  SOC 2: {soc2}")
+
     if not lines:
-        return '(no prior decisions, similar incidents, identity paths, or volume anomalies on file)'
+        return '(no prior decisions, similar incidents, identity paths, volume anomalies, or ML signals on file)'
     lines.append('')
     lines.append('Use these to anchor your suggestions in actual prior practice.')
     lines.append('Note any divergence from prior pattern explicitly.')
@@ -440,4 +581,5 @@ __all__ = [
     'IncidentIndexStore',
     'SQLiteIncidentIndexStore',
     'render_rag_context_for_prompt',
+    '_FACTOR_MITRE_MAP',
 ]

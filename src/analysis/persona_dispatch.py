@@ -799,11 +799,22 @@ def build_persona_dispatch(persona_key: str,
             )
         except Exception:
             payload['chrono_anomalies'] = []
+        # ML anomaly history — prior ISO/EWMA signals for these principals
+        try:
+            payload['prior_ml_anomalies'] = rag_provider.retrieve_prior_ml_anomalies(
+                principals, k=5,
+            )
+        except Exception:
+            payload['prior_ml_anomalies'] = []
     else:
         payload['prior_decisions'] = []
         payload['similar_incidents'] = []
         payload['identity_paths'] = []
         payload['chrono_anomalies'] = []
+        payload['prior_ml_anomalies'] = []
+
+    # Compliance violations — pass through from cluster if pre-computed by Stage 5k
+    payload['compliance_violations'] = cluster_narrative.get('compliance_violations') or {}
 
     return payload
 
