@@ -2903,7 +2903,7 @@
       (meter
         ? '    <span class="br-conf-chip" title="Evidence chain confidence: measures completeness of corroborating sources, kill chain ordering, and cross-source factor validation. '
           + 'Lower confidence = evidence gap, not a false positive. '
-          + 'Zero false positives confirmed across adversarial test packs. Santos demonstrates the engine correctly clearing one cluster where evidence fell below the multi-source validation gate. '
+          + 'The engine correctly identifies and clears low-confidence clusters where corroborating evidence falls below the multi-source validation threshold. '
           + 'SOC technical confidence and Compliance materiality confidence measure different questions — they are expected to differ.">'
           + Math.round(meter.total) + '% confidence'
           + '<span class="br-conf-chip__icon">ⓘ</span>'
@@ -4203,7 +4203,7 @@
           '<div style="background:linear-gradient(135deg,rgba(224,90,90,.12),rgba(167,139,250,.08));border:1px solid rgba(224,90,90,.3);border-radius:6px;padding:10px 14px;margin-bottom:10px">'
           +'<div style="font-size:14px;font-weight:700;color:#e05a5a;letter-spacing:.04em">TECHNICAL INTRUSION CONFIRMED</div>'
           +'<div style="font-size:11px;color:#bbb;margin-top:4px">'
-          +'<span title="Confidence measures completeness of corroborating evidence chains across sources — not the inverse false-positive rate. Zero false positives were detected in adversarial test packs. The Santos pack demonstrates the engine correctly clearing one cluster where evidence fell below the multi-source validation gate.">'+execConf+'% confidence</span> &nbsp;|&nbsp; '+escHtml(execSev||'CRITICAL')+' severity &nbsp;|&nbsp; '+(execNPh||'multiple')+' attack phases'
+          +'<span title="Confidence measures completeness of corroborating evidence chains across sources — not the inverse false-positive rate. Low-confidence clusters are automatically cleared when corroborating evidence falls below the multi-source validation threshold.">'+execConf+'% confidence</span> &nbsp;|&nbsp; '+escHtml(execSev||'CRITICAL')+' severity &nbsp;|&nbsp; '+(execNPh||'multiple')+' attack phases'
           +(execUsers.length?'<br>'+execUsers.length+' account'+(execUsers.length===1?'':'s')+' compromised: <strong>'+escHtml(execUsers.slice(0,3).join(', '))+(execUsers.length>3?' +more':'')+'</strong>':'')
           +'</div></div>'
         );

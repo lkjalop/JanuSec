@@ -110,9 +110,14 @@ def test_cluster_narrator_prompt_includes_structured_signals():
     )
 
     assert "STRUCTURED SIGNALS FROM DETERMINISTIC PIPELINE" in prompt
-    assert "iam:golden_ticket" in prompt
+    # factor_tags are humanized — raw key is replaced by label + MITRE ref
+    assert "Golden Ticket" in prompt
+    assert "T1558.001" in prompt
+    # _chrono_factors and _ml_scores still appear as raw JSON in extra signals block
     assert "recon:sustained_offhours_sequence" in prompt
     assert "cross_iso" in prompt
+    # verdict anchor is present
+    assert "DETERMINISTIC CLASSIFICATION" in prompt
 
 
 def test_wmi_lateral_exec_factor_requires_remote_create():

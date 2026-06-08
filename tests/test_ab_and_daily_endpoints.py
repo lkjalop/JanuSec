@@ -30,22 +30,21 @@ def seed_daily_series_via_api(client: TestClient, tenant: str, start_day: date):
 
 
 def test_ab_analysis_endpoint_returns_comparison():
-    client = TestClient(app)
-    seed_ab_results_via_api(client, tenant='t1', test_id='t42')
-    # Ensure route exists
-    o = client.get('/openapi.json')
-    assert o.status_code == 200
-    assert '/api/v1/metrics/ab/analysis' in o.json().get('paths', {})
-    r = client.get('/api/v1/metrics/ab/analysis', params={'tenant_id': 't1', 'test_id': 't42'}, headers=API_HEADERS)
-    assert r.status_code == 200
-    j = r.json()
-    assert j['tenant_id'] == 't1'
-    assert j['test_id'] == 't42'
-    assert isinstance(j['stats'], list) and len(j['stats']) >= 2
-    # comparison should exist and include uplift/p_value
-    assert j['comparison'] is not None
-    comp = j['comparison']
-    assert 'uplift' in comp and 'p_value' in comp
+    # Use context manager so lifespan/startup events fire and all routers are mounted
+    with TestClient(app) as client:
+        seed_ab_results_via_api(client, tenant='t1', test_id='t42_cmp')
+        r = client.get('/api/v1/metrics/ab/analysis',
+                       params={'tenant_id': 't1', 'test_id': 't42_cmp'},
+                       headers=API_HEADERS)
+        assert r.status_code == 200, f"Expected 200, got {r.status_code}: {r.text[:200]}"
+        j = r.json()
+        assert j['tenant_id'] == 't1'
+        assert j['test_id'] == 't42_cmp'
+        assert isinstance(j['stats'], list) and len(j['stats']) >= 2
+        # comparison should exist and include uplift/p_value
+        assert j['comparison'] is not None, f"comparison was None; stats={j.get('stats')}"
+        comp = j['comparison']
+        assert 'uplift' in comp and 'p_value' in comp
 
 
 def test_daily_precision_endpoint_series():
