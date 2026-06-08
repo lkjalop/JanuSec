@@ -22,8 +22,10 @@ echo [2/4] Configuring environment...
 set PYTHONPATH=%cd%
 set EVENT_QUEUE_MAX=2000
 set ACCESS_LOG_SAMPLE_RATE=0.5
-REM Local dev API key. Override any inherited malformed value so strict auth works.
-if not defined API_KEY set API_KEY=devkey123
+REM Local dev API key — auto-generate per session; pre-set API_KEY to override.
+if not defined API_KEY (
+    for /f "usebackq delims=" %%A in (`python -c "import secrets; print('dev-' + secrets.token_urlsafe(16))"`) do set API_KEY=%%A
+)
 set API_KEYS_JSON=[{^"key^":^"%API_KEY%^",^"scopes^":[^"*^"]}]
 echo INFO: Using local dev API key for this session: %API_KEY%
 REM CB-2: Auto-generate secrets if not set — never use hard-coded dev defaults in production
@@ -60,8 +62,13 @@ set ADAPTIVE_EWMA_BASE_ALPHA=0.6
 set ADAPTIVE_EWMA_MIN_ALPHA=0.3
 set ADAPTIVE_EWMA_MAX_ALPHA=0.85
 set PLAYBOOK_TENANT_ALLOW=
-REM Ollama model — qwen3.6:27b for better narration quality; fallback to qwen2.5:14b if not pulled
+REM Ollama models — narration vs interactive are different workloads
+REM T1 narrator (batch, non-thinking): qwen2.5:14b — completes in ~15s/cluster
+REM T2 narrator (best prose): qwen3.6:27b — pull first: ollama pull qwen3.6:27b
 set OLLAMA_MODEL=qwen3.6:27b
+REM Interactive/reasoning model: deepseek-r1:14b for analyst chat
+REM Pull first: ollama pull deepseek-r1:14b
+if not defined INTERACTIVE_MODEL set INTERACTIVE_MODEL=deepseek-r1:14b
 REM Anthropic API (optional) — set ANTHROPIC_API_KEY to enable Claude narration
 REM Activation: set ANTHROPIC_API_KEY=sk-ant-... && set LLM_PROVIDER=anthropic && set ANTHROPIC_MODEL=claude-sonnet-4-6
 REM Enable HopGraph persistence + TTL prune loop for demo reliability

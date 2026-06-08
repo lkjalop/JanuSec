@@ -92,6 +92,7 @@ src/data/tier2/
 
 # Scratch / debug / e2e one-off scripts at repo root
 _*.py
+!**/__init__.py
 _*.txt
 _*.json
 
