@@ -5,7 +5,7 @@ preview pane. Replaces the static roleDef.desc/actions strings.
 
 PERSONA KEYS (match breach.js _STAKEHOLDER_ROLES):
    soc_analyst | ciso | executive | threat_hunter | forensics |
-   compliance | mssp
+   compliance | mssp | audit
 """
 from __future__ import annotations
 
@@ -518,6 +518,32 @@ def _build_persona_payload(persona_key: str,
         payload['sla_status'] = _evaluate_sla(narrative)
         payload['tenant_tuning_recommendations'] = _tuning_recommendations(narrative)
 
+    elif persona_key == 'audit':
+        cf = register.get('control_failures_by_framework') or {}
+        n_failed = register.get('failed_control_count', 0)
+        n_critical = register.get('critical_control_count', 0)
+        ev_refs = narrative.get('evidence_refs') or []
+        payload['headline'] = (
+            f"{n_failed} nonconformities identified ({n_critical} critical). "
+            f"Chain-of-custody: {len(ev_refs)} evidence items logged."
+        )
+        payload['nonconformity_register'] = cf
+        payload['evidence_completeness'] = _evidence_completeness_check(narrative, register)
+        payload['required_actions'] = _build_audit_actions(narrative, register)
+        payload['evidence_pinned'] = ev_refs
+        payload['context_blocks'] = [
+            {'label': 'Control frameworks breached', 'value': [fw for fw in cf if fw != 'unmapped_techniques']},
+            {'label': 'Critical nonconformities', 'value': [
+                f"{c.get('control_id', '')} — {c.get('control_name', '')}"
+                for fw_recs in cf.values() if isinstance(fw_recs, list)
+                for c in fw_recs if isinstance(c, dict) and c.get('severity') == 'critical'
+            ][:6]},
+            {'label': 'Evidence items logged', 'value': [str(r) for r in ev_refs[:10]]},
+        ]
+        # ISO 19011 audit standard references
+        payload['audit_standard'] = 'ISO 19011:2018'
+        payload['audit_opinion'] = _build_audit_opinion(narrative, register)
+
     else:
         logger.warning('Unknown persona key: %s', persona_key)
         payload['headline'] = 'Unknown persona'
@@ -529,6 +555,96 @@ def _build_persona_payload(persona_key: str,
 # ─────────────────────────────────────────────────────────────────────────────
 #  Helpers
 # ─────────────────────────────────────────────────────────────────────────────
+
+def _evidence_completeness_check(narrative: dict, register: dict) -> dict:
+    """ISO 19011 evidence completeness check for the audit persona."""
+    ev_refs = narrative.get('evidence_refs') or []
+    mitre = narrative.get('mitre_techniques') or []
+    cf = register.get('control_failures_by_framework') or {}
+    total_controls = sum(
+        len(recs) for fw, recs in cf.items()
+        if fw != 'unmapped_techniques' and isinstance(recs, list)
+    )
+    linked_controls = register.get('evidence_link_count', 0)
+    completeness_pct = round(linked_controls / total_controls * 100, 1) if total_controls else 0.0
+    return {
+        'evidence_items': len(ev_refs),
+        'techniques_documented': len(mitre),
+        'controls_with_evidence': linked_controls,
+        'total_controls_failed': total_controls,
+        'completeness_percent': completeness_pct,
+        'gaps': [] if completeness_pct >= 80 else [
+            'Some failed controls lack linked evidence rows — auditor must request supplementary evidence'
+        ],
+    }
+
+
+def _build_audit_actions(narrative: dict, register: dict) -> list[dict]:
+    """ISO 19011 audit actions: evidence preservation, nonconformity records, corrective actions."""
+    actions: list[dict] = []
+    cf = register.get('control_failures_by_framework') or {}
+    principals = (narrative.get('affected_principals') or {}).get('users') or []
+    p1_controls = [
+        c for fw_recs in cf.values() if isinstance(fw_recs, list)
+        for c in fw_recs if isinstance(c, dict) and c.get('remediation_priority') == 'P1'
+    ]
+    if p1_controls:
+        actions.append({
+            'action_id': 'audit::raise_ncr_p1',
+            'description': f"Raise Nonconformity Report for {len(p1_controls)} critical control failures",
+            'tier': 3,
+            'tool_command': 'Create NCR in GRC system; reference cluster_id and evidence_pinned row indices',
+            'cab_required': False,
+            'auto_executable': False,
+        })
+    if narrative.get('evidence_refs'):
+        actions.append({
+            'action_id': 'audit::preserve_evidence_chain',
+            'description': 'Lock evidence rows against modification; start chain-of-custody log',
+            'tier': 2,
+            'tool_command': 'Tag assessment as audit_hold=true via /api/v1/assessments/{aid}/hold',
+            'cab_required': False,
+            'auto_executable': False,
+        })
+    if principals:
+        actions.append({
+            'action_id': 'audit::schedule_corrective_interviews',
+            'description': f"Schedule corrective-action interviews with {', '.join(principals[:3])}",
+            'tier': 4,
+            'tool_command': '(Human action — coordinate with HR and legal)',
+            'cab_required': False,
+            'auto_executable': False,
+        })
+    actions.append({
+        'action_id': 'audit::corrective_action_plan',
+        'description': 'Issue Corrective Action Plan (CAP) with 30-day remediation deadline for P1 controls',
+        'tier': 3,
+        'tool_command': 'Reference ISO 19011 §6.6 for CAP template; distribute to control owners',
+        'cab_required': False,
+        'auto_executable': False,
+    })
+    return actions
+
+
+def _build_audit_opinion(narrative: dict, register: dict) -> str:
+    """Single-sentence ISO 19011 audit opinion."""
+    verdict = str(narrative.get('verdict') or 'REQUIRES_INVESTIGATION').upper()
+    n_critical = register.get('critical_control_count', 0)
+    if verdict in {'VALIDATED_BREACH', 'CONFIRMED_BREACH'}:
+        return (
+            f"Adverse opinion: evidence substantiates a confirmed security breach with "
+            f"{n_critical} critical control failures — material nonconformity against applicable frameworks."
+        )
+    if verdict in {'SUSPECTED_BREACH', 'LIKELY_BREACH'}:
+        return (
+            f"Qualified opinion: evidence indicates probable compromise with "
+            f"{n_critical} critical control failures — further investigation required before closure."
+        )
+    return (
+        "Unqualified opinion: no confirmed breach; "
+        f"{n_critical} control deficiencies identified requiring corrective action."
+    )
+
 
 def _retention_warning(narrative: dict) -> str:
     sources = set()
@@ -755,12 +871,14 @@ def build_persona_dispatch(persona_key: str,
                                      register or {}, cluster_id=cluster_id)
 
     # Enrich with TemporalRAG + IdentityGraph + ChronoGraph silos
-    principals = list({
-        str(a) for a in (
-            cluster_narrative.get('affected_principals') or
-            cluster_narrative.get('shared_accounts') or []
-        ) if a
-    })[:4]
+    _principal_src = cluster_narrative.get('affected_principals') or cluster_narrative.get('shared_accounts') or []
+    if isinstance(_principal_src, dict):
+        _principal_src = (
+            _principal_src.get('users') or
+            _principal_src.get('accounts') or
+            _principal_src.get('service_accounts') or []
+        )
+    principals = list({str(a) for a in _principal_src if a})[:4]
     hosts = list({
         str(h) for h in (
             cluster_narrative.get('shared_hosts') or
@@ -830,7 +948,7 @@ def build_all_personas(cluster_narrative: dict,
                                   evidence_rows, cluster_id,
                                   rag_provider=rag_provider)
         for p in ('soc_analyst', 'ciso', 'executive', 'threat_hunter',
-                  'forensics', 'compliance', 'mssp')
+                  'forensics', 'compliance', 'mssp', 'audit')
     }
 
 

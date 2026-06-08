@@ -223,6 +223,11 @@ class LLMClient(BaseLLMClient):
         if not self.anthropic_key and stored_settings.get('anthropic_api_key'):
             self.anthropic_key = stored_settings['anthropic_api_key']
             os.environ.setdefault('ANTHROPIC_API_KEY', self.anthropic_key)
+        self.anthropic_model = (
+            os.getenv('ANTHROPIC_MODEL') or
+            stored_settings.get('anthropic_model') or
+            'claude-sonnet-4-6'
+        )
         
         # Attempt to import provider SDKs (optional)
         try:
@@ -865,7 +870,7 @@ class LLMClient(BaseLLMClient):
 
                 # Real client path placeholder: implement provider-specific calls here
                 # Provider-specific implementation
-                if self.provider != 'ollama' and self._openai and self.openai_key and model.startswith('gpt'):
+                if self.provider not in ('ollama', 'anthropic') and self._openai and self.openai_key and model.startswith('gpt'):
                     try:
                         self._openai.api_key = self.openai_key
                         resp = self._openai.ChatCompletion.create(model=model, messages=[{"role":"user","content":prompt}], max_tokens=max_tokens or 256, timeout=self.timeout)
@@ -947,15 +952,27 @@ class LLMClient(BaseLLMClient):
                     except Exception as e:
                         logger.warning('OpenAI call failed: %s', e)
                         raise
-                if self._anthropic and self.anthropic_key and model.startswith('claude'):
+                if self._anthropic and self.anthropic_key and (
+                    model.startswith('claude') or self.provider == 'anthropic'
+                ):
                     try:
-                        client = self._anthropic.Client(self.anthropic_key)
-                        resp = client.completions.create(model=model, prompt=prompt, max_tokens_to_sample=max_tokens or 256)
-                        text = getattr(resp, 'completion', str(resp))
+                        _ant_model = (
+                            model if model.startswith('claude')
+                            else (self.anthropic_model or 'claude-sonnet-4-6')
+                        )
+                        _ant_client = self._anthropic.Anthropic(api_key=self.anthropic_key)
+                        _ant_resp = _ant_client.messages.create(
+                            model=_ant_model,
+                            max_tokens=max_tokens or 800,
+                            messages=[{"role": "user", "content": prompt}],
+                        )
+                        text = _ant_resp.content[0].text if _ant_resp.content else ''
                         elapsed = time.time() - start
                         if self._cost_ledger:
                             try:
-                                est_cost = (len(prompt.split()) + (max_tokens or 0)) * 0.000001
+                                _in_tok = getattr(_ant_resp.usage, 'input_tokens', len(prompt.split()) * 4 // 3)
+                                _out_tok = getattr(_ant_resp.usage, 'output_tokens', max_tokens or 200)
+                                est_cost = _in_tok * 3e-6 + _out_tok * 15e-6
                                 if hasattr(self._cost_ledger, 'add_cost'):
                                     self._cost_ledger.add_cost('llm_anthropic', est_cost)
                                 if tenant_id:
@@ -982,7 +999,7 @@ class LLMClient(BaseLLMClient):
                         if tenant_id:
                             with self._breaker_lock:
                                 self._breaker_state.pop(tenant_id, None)
-                        return {'text': text, 'model': model, 'meta': {'elapsed_s': elapsed, 'prompt_len': len(prompt.split())}}
+                        return {'text': text, 'model': _ant_model, 'meta': {'elapsed_s': elapsed, 'prompt_len': len(prompt.split())}}
                     except Exception as e:
                         logger.warning('Anthropic call failed: %s', e)
                         raise
@@ -993,7 +1010,10 @@ class LLMClient(BaseLLMClient):
                 return {'text': f'Response for prompt (len {len(prompt)}).', 'model': model, 'meta': {'elapsed_s': elapsed, 'prompt_len': len(prompt.split())}}
             except Exception as exc:
                 last_exc = exc
-                logger.warning('LLM generate attempt %d failed: %s', attempt, exc)
+                logger.warning('LLM generate attempt %d failed: %s: %s (tenant=%s provider=%s model=%s ollama_enabled=%s)',
+                    attempt, type(exc).__name__, exc, tenant_id, self.provider,
+                    getattr(self, 'ollama_model', '?'), getattr(self, 'ollama_enabled', '?'),
+                    exc_info=True)
                 time.sleep(0.5 * (attempt + 1))
                 continue
 

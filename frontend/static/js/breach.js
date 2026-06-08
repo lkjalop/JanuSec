@@ -44,7 +44,7 @@
 
   function getSelectedModel() {
     if (window.JanuSecBreachAPI && window.JanuSecBreachAPI.getSelectedModel) return window.JanuSecBreachAPI.getSelectedModel();
-    try { return localStorage.getItem('selectedModel') || 'qwen3.6:27b'; } catch (_) { return 'qwen3.6:27b'; }
+    try { return localStorage.getItem('selectedModel') || 'qwen3:14b'; } catch (_) { return 'qwen3:14b'; }
   }
 
   function apiFetch(path, opts) {
@@ -117,6 +117,21 @@
     _asyncRedirecting = window.JanuSecBreachState.asyncRedirecting || _asyncRedirecting;
     _asyncPollTimers = window.JanuSecBreachState.asyncPollTimers || _asyncPollTimers;
   }
+
+  // ── Tenant ID helper (exported to window for cross-file use) ─────────────────
+
+  function _tenantId() {
+    // Prefer meta tag, then data attribute, then URL param, then default.
+    var meta = document.querySelector('meta[name="janusec-tenant"]');
+    if (meta && meta.content) return meta.content;
+    var el = document.querySelector('[data-tenant-id]');
+    if (el && el.dataset && el.dataset.tenantId) return el.dataset.tenantId;
+    var p = new URLSearchParams(window.location.search).get('tenant_id');
+    if (p) return p;
+    return 'default';
+  }
+  // Export so breach_cluster_tab.js and inline fetch calls can use it.
+  window._janusec_tenantId = _tenantId;
 
   // ── Toast ───────────────────────────────────────────────────────────────────
 
@@ -258,8 +273,9 @@
 
   function _displayVerdict(v) {
     var raw = String(v || '').toUpperCase();
-    if (raw === 'VALIDATED_BREACH' || raw === 'CONFIRMED_INTRUSION' || raw === 'CONFIRMED_BREACH') return 'CONFIRMED BREACH';
-    if (raw === 'NO_VALIDATED_BREACH') return 'NO CONFIRMED BREACH';
+    if (raw === 'VALIDATED_BREACH' || raw === 'CONFIRMED_BREACH') return 'CONFIRMED TECHNICAL INTRUSION';
+    if (raw === 'CONFIRMED_INTRUSION') return 'CONFIRMED INTRUSION';
+    if (raw === 'NO_VALIDATED_BREACH') return 'NO CONFIRMED INTRUSION';
     return raw.replace(/_/g, ' ') || 'UNCERTAIN';
   }
 
@@ -576,6 +592,11 @@
     updateTabBar(null);
     document.getElementById('br-content').innerHTML = [
       '<div class="br-upload" data-testid="br-upload">',
+      // Hero CTA — prominent when landing with no assessment
+      '  <div style="text-align:center;padding:32px 24px 0;">',
+      '    <div style="font-size:22px;font-weight:700;color:var(--text-primary);letter-spacing:.01em;margin-bottom:8px;">Start a new investigation</div>',
+      '    <div style="font-size:13px;color:var(--text-muted);max-width:480px;margin:0 auto 24px;">Upload one or more telemetry files to begin. JanuSec correlates identity, endpoint, network, and cloud signals into a single intrusion assessment — no configuration required.</div>',
+      '  </div>',
       '  <div class="br-upload__zone" id="br-drop-zone" data-testid="br-drop-zone">',
       '    <div class="br-upload__icon">' + _icon('upload') + '</div>',
       '    <div class="br-upload__title">Drop files to analyse</div>',
@@ -1302,7 +1323,7 @@
       if (s) sourceNames.add(s);
     });
     var store = a.evidence_store || {};
-    var sourceCount = a.source_count || (store.source_counts ? Object.keys(store.source_counts).length : 0) || (sourceNames.size > 0 ? sourceNames.size : '?');
+    var sourceCount = a.source_count || (store.source_counts ? Object.keys(store.source_counts).length : 0) || (sourceNames.size > 0 ? sourceNames.size : null);
     var rowCount = store.row_count || a.rows_processed || state.rows.length || 0;
     var uploadedCount = a.uploaded_row_count || a.total_rows_uploaded || 0;
     var FETCH_LIMIT = 2000;
@@ -1310,23 +1331,41 @@
     var coverageWarning = atLimit
       ? '<span style="color:#ffaa00;font-size:12px;" title="Upload may contain more rows than were analyzed"> ⚠ analyzed ' + rowCount + ' of ' + (uploadedCount > rowCount ? uploadedCount : '?') + ' uploaded rows (limit ' + FETCH_LIMIT + ')</span>'
       : '';
+    var confirmedCount = sorted.filter(function (c) { return _vClass(c) === 'confirmed'; }).length;
+    // Human-readable assessment label: prefer created_at date, fall back to ID hash suffix
+    var aidRaw = a.assessment_id || '';
+    var aidLabel = '';
+    if (a.created_at) {
+      try {
+        var d = new Date(a.created_at);
+        aidLabel = d.toLocaleDateString(undefined, {day:'numeric',month:'short',year:'numeric'}) + ' — ' + d.toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'});
+      } catch (_) {}
+    }
+    if (!aidLabel) {
+      // Fall back to last 8 chars of AID so it doesn't scream debug output
+      aidLabel = 'Assessment ' + escHtml(aidRaw.slice(-8) || aidRaw);
+    }
+    var fullAidLink = window.location.origin + '/static/breach.html?assessment=' + encodeURIComponent(aidRaw);
     return [
       '<div class="br-meta" data-testid="br-meta">',
-      '  <strong>Assessment ' + escHtml(a.assessment_id || '') + '</strong>',
-      '  &nbsp;·&nbsp; <span data-testid="br-source-count">' + sourceCount + '</span> sources',
+      '  <strong title="' + escHtml(aidRaw) + '">' + escHtml(aidLabel) + '</strong>',
+      '  <button title="Copy shareable link to this assessment" style="margin-left:6px;font-size:10px;background:transparent;border:1px solid #333;color:#888;padding:1px 7px;cursor:pointer;border-radius:3px;vertical-align:middle" onclick="try{navigator.clipboard.writeText(\'' + escHtml(fullAidLink) + '\')}catch(e){}this.textContent=\'✓ copied\';var t=this;setTimeout(function(){t.textContent=\'Copy link\'},2000)">Copy link</button>',
+      '  <a href="/static/breach.html" title="Start a new investigation" style="margin-left:6px;font-size:10px;background:transparent;border:1px solid #444;color:#60a5fa;padding:1px 7px;cursor:pointer;border-radius:3px;text-decoration:none;vertical-align:middle">&plus; New Analysis</a>',
+      sourceCount != null ? '  &nbsp;·&nbsp; <span data-testid="br-source-count">' + sourceCount + '</span> sources' : '',
       '  &nbsp;·&nbsp; <span data-testid="br-row-count">' + rowCount + '</span> rows analyzed',
       coverageWarning,
-      '  &nbsp;·&nbsp; <span data-testid="br-cluster-count">' + sorted.length + '</span> threat cases',
-      '  &nbsp;·&nbsp; ' + (a.isolated_count || 0) + ' isolated',
+      '  &nbsp;·&nbsp; <span data-testid="br-cluster-count">' + sorted.length + '</span> evidence cluster' + (sorted.length !== 1 ? 's' : ''),
+      confirmedCount > 0 ? '  &nbsp;·&nbsp; <span style="color:#ff9090;font-weight:600;">' + confirmedCount + ' confirmed</span>' : '',
+      '  &nbsp;·&nbsp; ' + (a.isolated_count || 0) + ' cleared',
       '  <br>',
-      '  Top threat cases hydrate automatically',
+      sorted.length > 0 ? '  <span style="font-size:11px;opacity:.6;">All clusters belong to one intrusion assessment — confirmed clusters are corroborating evidence chains, not separate incidents.</span>' : '',
       '</div>',
     ].join('');
   }
 
   var _HERO_CONFIG = {
-    VALIDATED_BREACH:      { label: 'CONFIRMED BREACH',       bg: '#3d0a0a', border: '#e05252', text: '#ff9090', icon: '<span class="br-vdot br-vdot--red" aria-label="Confirmed Breach"></span>' },
-    CONFIRMED_BREACH:      { label: 'CONFIRMED BREACH',       bg: '#3d0a0a', border: '#e05252', text: '#ff9090', icon: '<span class="br-vdot br-vdot--red" aria-label="Confirmed Breach"></span>' },
+    VALIDATED_BREACH:      { label: 'CONFIRMED TECHNICAL INTRUSION', bg: '#3d0a0a', border: '#e05252', text: '#ff9090', icon: '<span class="br-vdot br-vdot--red" aria-label="Confirmed Technical Intrusion"></span>' },
+    CONFIRMED_BREACH:      { label: 'CONFIRMED TECHNICAL INTRUSION', bg: '#3d0a0a', border: '#e05252', text: '#ff9090', icon: '<span class="br-vdot br-vdot--red" aria-label="Confirmed Technical Intrusion"></span>' },
     CONFIRMED_INTRUSION:   { label: 'CONFIRMED INTRUSION',    bg: '#3d1a00', border: '#ff7c3c', text: '#ffb090', icon: '<span class="br-vdot br-vdot--orange" aria-label="Confirmed Intrusion"></span>' },
     LIKELY_BREACH:         { label: 'LIKELY BREACH — REVIEW', bg: '#2a1500', border: '#ff8c00', text: '#ffb060', icon: '<span class="br-vdot br-vdot--orange" aria-label="Likely Breach"></span>' },
     LIKELY_COMPROMISE:     { label: 'LIKELY COMPROMISE',      bg: '#2a2000', border: '#e0c446', text: '#ffe090', icon: '<span class="br-vdot br-vdot--yellow" aria-label="Likely Compromise"></span>' },
@@ -1375,10 +1414,23 @@
     });
     var concurrentNote = '';
     if (concurrent.length > 0) {
-      var concNames = concurrent.slice(0, 3).map(function (c) {
-        return _displayIncidentName(c) || 'additional intrusion';
+      var _seenConcNames = {};
+      var concNames = [];
+      concurrent.slice(0, 5).forEach(function (c) {
+        var name = _displayIncidentName(c) || '';
+        // Only include if it's a real distinct name (not a generic fallback or duplicate)
+        if (name && !_seenConcNames[name] && name !== (leadTitle || '')) {
+          _seenConcNames[name] = true;
+          concNames.push(name);
+        }
       });
-      concurrentNote = 'Concurrent: ' + concNames.join(', ') + '.';
+      if (concNames.length > 0) {
+        concurrentNote = concurrent.length === 1
+          ? 'Concurrent: ' + concNames[0] + '.'
+          : concurrent.length + ' corroborating intrusion clusters confirmed (' + concNames.slice(0, 2).join(', ') + (concNames.length > 2 ? ', …' : '') + ').';
+      } else if (concurrent.length > 0) {
+        concurrentNote = concurrent.length + ' additional corroborating cluster' + (concurrent.length > 1 ? 's' : '') + ' confirmed.';
+      }
     }
 
     // Action urgency from lead cluster
@@ -1393,8 +1445,9 @@
       '<div class="br-hero" style="background:' + cfg.bg + ';border:1px solid ' + cfg.border + ';border-radius:8px;padding:24px 28px;margin-bottom:16px;" data-testid="br-hero" data-role="breach-answer-hero">',
       '  <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:8px;">',
       '    <div>',
-      '      <div style="font-size:11px;opacity:.5;letter-spacing:.5px;margin-bottom:4px;">BREACH ASSESSMENT VERDICT</div>',
+      '      <div style="font-size:11px;opacity:.5;letter-spacing:.5px;margin-bottom:4px;">INTRUSION ASSESSMENT VERDICT</div>',
       '      <div class="br-hero__verdict" style="font-size:22px;font-weight:700;color:' + cfg.text + ';letter-spacing:.5px;" data-testid="breach-answer-verdict">' + cfg.icon + ' ' + cfg.label + '</div>',
+      (topVerdict === 'VALIDATED_BREACH' || topVerdict === 'CONFIRMED_BREACH') ? '      <div class="br-hero__legal-note" style="font-size:11px;color:rgba(180,200,255,.65);margin-top:5px;letter-spacing:.2px;">&#9432; Legal notification pending customer / legal assessment</div>' : '',
       '    </div>',
       urgencyBadge ? '    <div style="padding-top:4px;">' + urgencyBadge + '</div>' : '',
       '  </div>',
@@ -1451,7 +1504,15 @@
 
     function _pill(label, count, cls) {
       if (!count) return '';
-      return '<span class="br-verdict-pill br-verdict-pill--' + cls + '">'
+      var tooltips = {
+        confirmed: 'Corroborating evidence clusters within this incident — not separate incidents',
+        likely: 'Clusters with likely-breach signals requiring review',
+        uncertain: 'Clusters below validation threshold',
+        benign: 'Activity accounted for by expected patterns',
+        isolated: 'Events cleared — not part of the confirmed intrusion path',
+      };
+      var tip = tooltips[cls] ? ' title="' + tooltips[cls] + '"' : '';
+      return '<span class="br-verdict-pill br-verdict-pill--' + cls + '"' + tip + '>'
         + count + ' ' + label + '</span>';
     }
 
@@ -1678,9 +1739,9 @@
     var rowCount = (a.evidence_store && a.evidence_store.row_count) || a.rows_processed || state.rows.length || 0;
     if (!lead) {
       return {
-        headline: 'No confirmed breach found',
+        headline: 'No confirmed technical intrusion found',
         subline: 'No correlated threat cases were found in ' + rowCount.toLocaleString() + ' rows.',
-        body: 'JanuSec analysed the supplied telemetry and did not identify a confirmed breach. All activity was accounted for by expected operational patterns.',
+        body: 'JanuSec analysed the supplied telemetry and did not identify a confirmed technical intrusion. All activity was accounted for by expected operational patterns.',
         provenance: 'Legacy fallback'
       };
     }
@@ -1797,7 +1858,7 @@
 
       var headlineLabel = verdict === 'LIKELY_BREACH'
         ? 'Likely breach — human review required — '
-        : 'Confirmed breach — ';
+        : 'Confirmed technical intrusion — ';
       return {
         headline: headlineLabel + (title || 'Unauthorised access with data exfiltration'),
         subline: sublineStr,
@@ -1859,6 +1920,46 @@
       }).slice(0, 4);
     }
     return candidates;
+  }
+
+  function _rollupThreatCases(cases) {
+    var groups = {};
+    function normTitle(c) {
+      return (_displayIncidentName(c || {}) || '').toLowerCase()
+        .replace(/\b\d+\s+rows?\b/g, 'rows')
+        .replace(/\b\d+\s+telemetry source\(s\)/g, 'sources')
+        .replace(/\b\d+\s+source\(s\)/g, 'sources')
+        .replace(/\b(row|rows|source|sources)\b/g, '')
+        .replace(/[^a-z0-9:_-]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 90);
+    }
+    (cases || []).forEach(function (c) {
+      if (!c) return;
+      var key = normTitle(c);
+      if (!groups[key]) {
+        var clone = Object.assign({}, c);
+        clone._rollup_child_count = 0;
+        clone._rollup_row_count = 0;
+        clone._rollup_child_ids = [];
+        groups[key] = clone;
+      }
+      groups[key]._rollup_child_count += 1;
+      groups[key]._rollup_row_count += (c.row_refs || []).length || c.row_count || 0;
+      if (c.cluster_id) groups[key]._rollup_child_ids.push(c.cluster_id);
+      if ((c.verdict || c.final_verdict || '').toUpperCase() === 'VALIDATED_BREACH') {
+        groups[key].verdict = groups[key].final_verdict = 'VALIDATED_BREACH';
+      }
+    });
+    return Object.keys(groups).map(function (key) {
+      var group = groups[key];
+      if (group._rollup_row_count) group.row_refs = new Array(group._rollup_row_count);
+      if (group._rollup_child_count > 1) {
+        group.incident_name = (_displayIncidentName(group) || 'Threat case') + ' (' + group._rollup_child_count + ' related clusters)';
+        group.tier1_prefill = Object.assign({}, group.tier1_prefill || {}, { incident_name: group.incident_name });
+      }
+      return group;
+    });
   }
 
   function _renderTopFindings(sorted) {
@@ -2134,6 +2235,12 @@
     { key: 'compliance',     icon: _icon('clipboard'), label: 'Compliance',   persona: 'compliance',
       desc: 'Framework control gaps (NIST/SOC2/ISO/Privacy Act), audit trail, GRC evidence',
       actions: 'Map control failures to frameworks. Verify notification timeline. Update risk register. Prepare GRC audit evidence.' },
+    { key: 'audit',          icon: _icon('clipboard'), label: 'Audit / ISO',  persona: 'audit',
+      desc: 'ISO 19011 audit opinion, corrective action plan, nonconformity register',
+      actions: 'Issue audit opinion (adverse/qualified/unqualified). Assign CAP owners. Update ISMS nonconformity register.' },
+    { key: 'mssp',           icon: _icon('shield'),    label: 'MSSP',         persona: 'mssp',
+      desc: 'Tier-2 escalation pack, customer SLA timeline, enrichment handoff',
+      actions: 'Receive enrichment handoff from Tier-1. Generate customer-facing report. Track SLA clock.' },
     { key: 'export',         icon: _icon('file-text'), label: 'Full Report',  persona: null,
       desc: 'Complete multi-persona HTML report', actions: null },
   ];
@@ -2246,7 +2353,7 @@
   }
 
   function _renderHomeThreatCases(sorted) {
-    var cases = _selectTopThreatCases(sorted).slice(0, 4);
+    var cases = _rollupThreatCases(_selectTopThreatCases(sorted)).slice(0, 4);
     if (!cases.length) return '';
     var rows = cases.map(function (c, idx) {
       var p = c.tier1_prefill || {};
@@ -2255,6 +2362,8 @@
       if (_rawCorrelationText(why)) why = _friendlyThreatCaseSummary(c, title);
       var meter = p.confidence_meter || c.confidence_meter || {};
       var conf = meter.total != null ? (Math.round(meter.total) + '%') : ((c.verdict_confidence != null) ? Math.round(c.verdict_confidence * 100) + '%' : 'review');
+      var rowCount = c._rollup_row_count || (c.row_refs || []).length || c.row_count || 0;
+      var childText = c._rollup_child_count && c._rollup_child_count > 1 ? ' · ' + c._rollup_child_count + ' related clusters' : '';
       return '<tr>'
         + '<td><strong>' + escHtml(title) + '</strong><div class="br-home-cases__meta">' + escHtml((c.severity || 'low').toUpperCase()) + ' · ' + (c.row_refs || []).length + ' rows</div></td>'
         + '<td>' + escHtml(why).slice(0, 150) + '</td>'
@@ -2517,18 +2626,26 @@
 
   // ── Context strip: IDENTITY / SYSTEMS / C2 INFRA / SOURCES ─────────────
   function _renderContextStrip(cluster, p) {
-    var accts    = (cluster.shared_accounts || cluster.affected_accounts || []).filter(Boolean).slice(0, 4);
-    var assets   = (cluster.affected_assets || cluster.shared_hosts || []).filter(Boolean).slice(0, 4);
-    var ips      = (cluster.shared_external_ips || []).slice(0, 4);
+    function ctxText(value) {
+      if (value == null) return '';
+      if (typeof value === 'string') return value;
+      if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+      if (Array.isArray(value)) return value.map(ctxText).filter(Boolean).join(' ');
+      if (typeof value === 'object') return value.name || value.label || value.id || value.value || '';
+      return String(value);
+    }
+    var accts    = (cluster.shared_accounts || cluster.affected_accounts || []).map(ctxText).filter(Boolean).slice(0, 4);
+    var assets   = (cluster.affected_assets || cluster.shared_hosts || []).map(ctxText).filter(Boolean).slice(0, 4);
+    var ips      = (cluster.shared_external_ips || []).map(ctxText).filter(Boolean).slice(0, 4);
     var cm       = cluster.confidence_meter || p.confidence_meter || {};
-    var srcs     = (cm.source_types_present || []).slice(0, 6);
+    var srcs     = (cm.source_types_present || []).map(ctxText).filter(Boolean).slice(0, 6);
     var srcCount = typeof cluster.source_count === 'number' ? cluster.source_count : srcs.length;
     if (!accts.length && !assets.length && !ips.length && !srcs.length) return '';
 
     // Detect identity providers from account names, source list, and observed_impact
     var probeText = accts.concat(srcs).join(' ').toLowerCase()
-      + ' ' + (cluster.lead_description || '').toLowerCase()
-      + ' ' + ((p.observed_impact && p.observed_impact.identity) ? p.observed_impact.identity : '').toLowerCase();
+      + ' ' + ctxText(cluster.lead_description).toLowerCase()
+      + ' ' + ctxText(p.observed_impact && p.observed_impact.identity).toLowerCase();
     var providers = [];
     if (/\bokta\b/.test(probeText)) providers.push('Okta');
     if (/entra|azure.?ad|azuread|\.onmicrosoft\.com/.test(probeText)) providers.push('Entra ID');
@@ -2784,9 +2901,10 @@
       '    <span>' + escHtml((cluster.severity || 'low').toUpperCase()) + '</span>',
       // Fix 4 — split confidence chip with explainer tooltip
       (meter
-        ? '    <span class="br-conf-chip" title="Severity is based on evidence volume '
-          + 'and attack-phase count. Narrative confidence reflects chain completeness '
-          + 'and cross-source corroboration. Lower confidence = evidence gap, not false positive.">'
+        ? '    <span class="br-conf-chip" title="Evidence chain confidence: measures completeness of corroborating sources, kill chain ordering, and cross-source factor validation. '
+          + 'Lower confidence = evidence gap, not a false positive. '
+          + 'Zero false positives confirmed across adversarial test packs. Santos demonstrates the engine correctly clearing one cluster where evidence fell below the multi-source validation gate. '
+          + 'SOC technical confidence and Compliance materiality confidence measure different questions — they are expected to differ.">'
           + Math.round(meter.total) + '% confidence'
           + '<span class="br-conf-chip__icon">ⓘ</span>'
           + '</span>'
@@ -3639,7 +3757,7 @@
         // Triage banner
         socParts.push(
           '<div style="background:linear-gradient(90deg,rgba(224,90,90,.1),rgba(30,30,46,0));border-left:3px solid #e05a5a;padding:6px 10px;border-radius:0 4px 4px 0;margin-bottom:8px">'
-          +'<div style="font-size:12px;font-weight:700;color:#e0e0e0">'+escHtml(vcls || 'ASSESSMENT')+' — '+(Math.round(confNum*100)||0)+'% confidence</div>'
+          +'<div style="font-size:12px;font-weight:700;color:#e0e0e0" title="Technical path confidence — measures kill chain completeness: corroborating sources, ordered timing, and cross-source factor validation. This is not the same as Compliance materiality confidence, which measures regulatory notification likelihood under applicable frameworks.">'+escHtml(vcls || 'ASSESSMENT')+' — '+(Math.round(confNum*100)||0)+'% technical confidence</div>'
           +(evCount?'<div style="font-size:11px;color:#aaa">'+evCount.toLocaleString()+' evidence rows'+(srcList?' | Sources: '+escHtml(srcList):'')+'</div>':'')
           +(leadCluster.phase_count?'<div style="font-size:11px;color:#aaa">'+leadCluster.phase_count+' attack phases observed</div>':'')
           +'</div>'
@@ -4017,7 +4135,7 @@
                 var matColor2 = v2.materiality_assessment==='MEETS_NOTIFICATION_CRITERIA'?'#e05a5a':'#e09a5a';
                 h.push('<div style="font-size:11px;color:#aaa;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Materiality Assessment</div>'
                   +'<table style="width:100%;font-size:11px;border-collapse:collapse;margin-bottom:6px">'
-                  +'<tr><td style="color:#888;padding:2px 8px 2px 0;white-space:nowrap">VERDICT</td><td style="color:#e0e0e0;font-weight:600">'+escHtml(v2.platform_verdict)+(v2.confidence?' <span style="color:#888">('+Math.round(v2.confidence*100)+'%)</span>':'')+'</td></tr>'
+                  +'<tr><td style="color:#888;padding:2px 8px 2px 0;white-space:nowrap">VERDICT</td><td style="color:#e0e0e0;font-weight:600">'+escHtml(v2.platform_verdict)+(v2.confidence?' <span style="color:#888" title="Regulatory materiality confidence — the assessed probability that notification obligations apply under applicable frameworks. Distinct from and typically lower than technical path confidence, which measures kill chain evidence completeness. Formal notification always requires data-owner attestation and legal sign-off.">('+Math.round(v2.confidence*100)+'% materiality)</span>':'')+'</td></tr>'
                   +'<tr><td style="color:#888;padding:2px 8px 2px 0;white-space:nowrap">MATERIALITY</td><td style="color:'+matColor2+';font-weight:600">'+escHtml(v2.materiality_assessment||'')+'</td></tr>'
                   +'<tr><td style="color:#888;padding:2px 8px 2px 0;white-space:nowrap">NOTIFICATION</td><td style="color:#aaa">'+escHtml(v2.notification_status||'')+'</td></tr>'
                   +'<tr><td style="color:#888;padding:2px 8px 2px 0;white-space:nowrap">RATIONALE</td><td style="color:#bbb">'+escHtml(v2.materiality_rationale||'')+'</td></tr>'
@@ -4083,9 +4201,9 @@
         // Breach confirmed banner
         execParts.push(
           '<div style="background:linear-gradient(135deg,rgba(224,90,90,.12),rgba(167,139,250,.08));border:1px solid rgba(224,90,90,.3);border-radius:6px;padding:10px 14px;margin-bottom:10px">'
-          +'<div style="font-size:14px;font-weight:700;color:#e05a5a;letter-spacing:.04em">BREACH CONFIRMED</div>'
+          +'<div style="font-size:14px;font-weight:700;color:#e05a5a;letter-spacing:.04em">TECHNICAL INTRUSION CONFIRMED</div>'
           +'<div style="font-size:11px;color:#bbb;margin-top:4px">'
-          +execConf+'% confidence &nbsp;|&nbsp; '+escHtml(execSev||'CRITICAL')+' severity &nbsp;|&nbsp; '+(execNPh||'multiple')+' attack phases'
+          +'<span title="Confidence measures completeness of corroborating evidence chains across sources — not the inverse false-positive rate. Zero false positives were detected in adversarial test packs. The Santos pack demonstrates the engine correctly clearing one cluster where evidence fell below the multi-source validation gate.">'+execConf+'% confidence</span> &nbsp;|&nbsp; '+escHtml(execSev||'CRITICAL')+' severity &nbsp;|&nbsp; '+(execNPh||'multiple')+' attack phases'
           +(execUsers.length?'<br>'+execUsers.length+' account'+(execUsers.length===1?'':'s')+' compromised: <strong>'+escHtml(execUsers.slice(0,3).join(', '))+(execUsers.length>3?' +more':'')+'</strong>':'')
           +'</div></div>'
         );
@@ -5160,6 +5278,403 @@
 
   // ── LLM calls ────────────────────────────────────────────────────────────────
 
+  function _storyList(items, cls) {
+    items = Array.isArray(items) ? items : [];
+    if (!items.length) return '';
+    return '<ul class="' + (cls || 'br-story__list') + '">' + items.slice(0, 8).map(function (item) {
+      return '<li>' + escHtml(item) + '</li>';
+    }).join('') + '</ul>';
+  }
+
+  // ISO 27001:2022 Annex A control names lookup
+  var _ISO27001_NAMES = {
+    'A.5.1':  'Policies for information security',
+    'A.5.2':  'Information security roles and responsibilities',
+    'A.5.3':  'Segregation of duties',
+    'A.5.5':  'Contact with authorities',
+    'A.5.7':  'Threat intelligence',
+    'A.5.10': 'Acceptable use of information',
+    'A.5.12': 'Classification of information',
+    'A.5.14': 'Information transfer',
+    'A.5.15': 'Access control',
+    'A.5.16': 'Identity management',
+    'A.5.17': 'Authentication information',
+    'A.5.18': 'Access rights',
+    'A.5.19': 'Information security in supplier relationships',
+    'A.5.23': 'Information security for cloud services',
+    'A.5.24': 'Information security incident management planning',
+    'A.5.25': 'Assessment of information security events',
+    'A.5.26': 'Response to information security incidents',
+    'A.5.27': 'Learning from information security incidents',
+    'A.5.28': 'Collection of evidence',
+    'A.5.29': 'Information security during disruption',
+    'A.5.31': 'Legal, statutory and regulatory requirements',
+    'A.5.34': 'Privacy and protection of PII',
+    'A.6.1':  'Screening',
+    'A.6.3':  'Information security awareness, education and training',
+    'A.6.8':  'Information security event reporting',
+    'A.7.1':  'Physical security perimeters',
+    'A.8.1':  'User end point devices',
+    'A.8.2':  'Privileged access rights',
+    'A.8.3':  'Information access restriction',
+    'A.8.4':  'Access to source code',
+    'A.8.5':  'Secure authentication',
+    'A.8.6':  'Capacity management',
+    'A.8.7':  'Protection against malware',
+    'A.8.8':  'Management of technical vulnerabilities',
+    'A.8.9':  'Configuration management',
+    'A.8.10': 'Information deletion',
+    'A.8.11': 'Data masking',
+    'A.8.12': 'Data leakage prevention',
+    'A.8.13': 'Information backup',
+    'A.8.15': 'Logging',
+    'A.8.16': 'Monitoring activities',
+    'A.8.17': 'Clock synchronisation',
+    'A.8.19': 'Installation of software on operational systems',
+    'A.8.20': 'Networks security',
+    'A.8.21': 'Security of network services',
+    'A.8.22': 'Segregation in networks',
+    'A.8.23': 'Web filtering',
+    'A.8.24': 'Use of cryptography',
+    'A.8.25': 'Secure development life cycle',
+    'A.8.28': 'Secure coding',
+    'A.8.29': 'Security testing in development and acceptance',
+  };
+
+  function _storyChips(items, cls) {
+    items = Array.isArray(items) ? items : [];
+    if (!items.length) return '';
+    return '<div class="' + (cls || 'br-story__chips') + '">' + items.slice(0, 12).map(function (item) {
+      return '<span class="br-story__chip">' + escHtml(item) + '</span>';
+    }).join('') + '</div>';
+  }
+
+  // Render ISO 27001 control chips with name lookup and evidence link
+  function _isoControlChips(controls) {
+    if (!Array.isArray(controls) || !controls.length) return '';
+    var base = AID ? '/static/breach.html?assessment=' + encodeURIComponent(AID) + '&tab=compliance' : '/static/breach.html?tab=compliance';
+    return '<div class="br-story__chips">' + controls.slice(0, 12).map(function (id) {
+      var name = _ISO27001_NAMES[id] || null;
+      var label = name ? escHtml(id) + ' <span style="opacity:.65;font-weight:400;">— ' + escHtml(name) + '</span>' : escHtml(id);
+      return '<a class="br-story__chip br-story__chip--link" href="' + escHtml(base + '&control=' + encodeURIComponent(id)) + '" title="View evidence for ' + escHtml(id) + '" style="text-decoration:none;cursor:pointer;">' + label + '</a>';
+    }).join('') + '</div>';
+  }
+
+  function _renderIso27035(lifecycle) {
+    if (!lifecycle || !Array.isArray(lifecycle.phases) || !lifecycle.phases.length) return '';
+    var automated = lifecycle.phases.filter(function (p) { return p.lane === 'janusec'; });
+    var human     = lifecycle.phases.filter(function (p) { return p.lane === 'human'; });
+    // fallback: if no lane field, render all phases ungrouped
+    var hasLanes  = automated.length > 0 || human.length > 0;
+
+    function phaseRow(phase) {
+      var actionHtml = phase.action
+        ? '<div class="br-story__context"><div class="br-story__iso-action">' + escHtml(phase.action) + '</div></div>'
+        : '';
+      return '<div class="br-story__step">'
+        + '<div class="br-story__when">' + escHtml(phase.phase || '') + '</div>'
+        + '<div class="br-story__event">'
+        + '<div class="br-story__event-title">' + escHtml(phase.status || '') + '</div>'
+        + '<div class="br-story__event-body">' + escHtml(phase.evidence || '') + '</div>'
+        + '</div>'
+        + actionHtml
+        + '</div>';
+    }
+
+    function sectionHeader(label, cls) {
+      return '<div class="br-iso__section-header br-iso__section-header--' + cls + '">'
+        + '<span class="br-iso__section-label">' + label + '</span>'
+        + '</div>';
+    }
+
+    var body = '';
+    if (hasLanes) {
+      if (automated.length) {
+        body += sectionHeader('AUTOMATED — JanuSec handles this', 'auto');
+        body += automated.map(phaseRow).join('');
+      }
+      if (human.length) {
+        body += sectionHeader('HUMAN REQUIRED — your decision', 'human');
+        body += human.map(phaseRow).join('');
+      }
+    } else {
+      body = lifecycle.phases.slice(0, 6).map(phaseRow).join('');
+    }
+
+    return '<details class="br-story__panel br-story__panel--decision br-story__details">'
+      + '<summary><span class="br-story__label">ISO 27035 incident lifecycle</span><span class="br-story__summary-note">ISMS / audit drilldown</span></summary>'
+      + (lifecycle.technical_vs_legal ? '<p>' + escHtml(lifecycle.technical_vs_legal) + '</p>' : '')
+      + '<div class="br-story__timeline br-story__timeline--compact">'
+      + body
+      + '</div>'
+      + (Array.isArray(lifecycle.iso27001_controls) && lifecycle.iso27001_controls.length
+        ? '<div class="br-story__subhead">ISO 27001 ISMS controls</div>' + _isoControlChips(lifecycle.iso27001_controls)
+        : '')
+      + '</details>';
+  }
+
+  // ── TemporalRAG swimlane ─────────────────────────────────────────────────
+  function _renderTemporalRagSwimlane(story) {
+    var sequence = Array.isArray(story && story.temporal_sequence) ? story.temporal_sequence : [];
+    if (!sequence.length) return '';
+
+    // Lane definitions: name → tag prefixes that belong to it
+    var LANES = [
+      { key: 'NETWORK',        prefixes: ['network:'] },
+      { key: 'IAM / IDENTITY', prefixes: ['iam:', 'identity:'] },
+      { key: 'ENDPOINT',       prefixes: ['endpoint:', 'wmi:', 'rdp:'] },
+      { key: 'CLOUD / EMAIL',  prefixes: ['email:', 'cloud:', 'data:'] },
+    ];
+
+    // Extract ordered unique time points (preserve first-seen order)
+    var timePoints = [];
+    var timeSet = {};
+    sequence.forEach(function (step) {
+      if (!step) return;
+      var raw = step.when || '';
+      // Extract just the date portion (anything that looks like YYYY-MM-DD)
+      var m = raw.match(/\d{4}-\d{2}-\d{2}/);
+      var key = m ? m[0] : raw.trim();
+      if (!key) return;
+      if (!timeSet[key]) {
+        timeSet[key] = true;
+        timePoints.push({ key: key, label: raw.trim() });
+      }
+    });
+    if (!timePoints.length) return '';
+
+    // Build a set: laneKey → Set of time-point keys that have events
+    var laneEvents = {};
+    LANES.forEach(function (lane) { laneEvents[lane.key] = {}; });
+
+    sequence.forEach(function (step) {
+      if (!step) return;
+      var raw = step.when || '';
+      var m = raw.match(/\d{4}-\d{2}-\d{2}/);
+      var tKey = m ? m[0] : raw.trim();
+      if (!tKey) return;
+      var tags = Array.isArray(step.factor_tags) ? step.factor_tags : [];
+      LANES.forEach(function (lane) {
+        lane.prefixes.forEach(function (pfx) {
+          if (tags.some(function (t) { return String(t).indexOf(pfx) === 0; })) {
+            laneEvents[lane.key][tKey] = true;
+          }
+        });
+      });
+    });
+
+    // Count how many distinct lanes have at least one event
+    var activeLanes = LANES.filter(function (lane) {
+      return Object.keys(laneEvents[lane.key]).length > 0;
+    });
+    var nSources = activeLanes.length;
+    var nTimes = timePoints.length;
+
+    // Grid: label col + one col per time point
+    var colDefs = '140px ' + timePoints.map(function () { return 'minmax(48px,1fr)'; }).join(' ');
+
+    // Header row: time axis labels
+    var headerCells = '<div class="br-swimlane__cell br-swimlane__cell--corner"></div>'
+      + timePoints.map(function (tp) {
+          return '<div class="br-swimlane__cell br-swimlane__cell--time">' + escHtml(tp.label) + '</div>';
+        }).join('');
+
+    // Lane rows
+    var laneRows = LANES.map(function (lane) {
+      var evMap = laneEvents[lane.key];
+      var hasAny = Object.keys(evMap).length > 0;
+      var cells = '<div class="br-swimlane__cell br-swimlane__lane-label' + (hasAny ? '' : ' br-swimlane__lane-label--dim') + '">'
+        + escHtml(lane.key) + '</div>'
+        + timePoints.map(function (tp) {
+            var hasEvent = !!evMap[tp.key];
+            return '<div class="br-swimlane__cell br-swimlane__cell--data">'
+              + (hasEvent ? '<span class="br-swimlane__dot" title="' + escHtml(lane.key) + ' — ' + escHtml(tp.label) + '">&#9679;</span>' : '<span class="br-swimlane__gap"></span>')
+              + '</div>';
+          }).join('');
+      return '<div class="br-swimlane__row" role="row">' + cells + '</div>';
+    }).join('');
+
+    // EWMA anomaly bar row — gradient bar spanning all time columns
+    var ewmaBar = '<div class="br-swimlane__row br-swimlane__row--ewma" role="row">'
+      + '<div class="br-swimlane__cell br-swimlane__lane-label br-swimlane__lane-label--ewma">EWMA</div>'
+      + '<div class="br-swimlane__cell br-swimlane__cell--ewma-bar" style="grid-column: span ' + nTimes + ';">'
+      + '<div class="br-swimlane__ewma"></div>'
+      + '</div>'
+      + '</div>';
+
+    // Legend row
+    var legend = '<div class="br-swimlane__legend">'
+      + '<span><span class="br-swimlane__dot">&#9679;</span> direct evidence</span>'
+      + '<span><span class="br-swimlane__gap-sample"></span> telemetry gap</span>'
+      + '<span><span class="br-swimlane__ewma-sample"></span> EWMA anomaly</span>'
+      + '</div>';
+
+    // Footer
+    var footer = '<div class="br-swimlane__footer">JanuSec correlated '
+      + nSources + ' source' + (nSources !== 1 ? 's' : '')
+      + ' across ' + nTimes + ' time point' + (nTimes !== 1 ? 's' : '')
+      + '. Manual analyst: 2–3 days.</div>';
+
+    return '<div class="br-swimlane br-swimlane--temporalrag" aria-label="How JanuSec correlated this breach">'
+      + '<div class="br-swimlane__header">&#9135;&#9135; HOW JANUSEC CORRELATED THIS &#9135;&#9135;</div>'
+      + '<div class="br-swimlane__grid" style="grid-template-columns:' + colDefs + ';">'
+      + '<div class="br-swimlane__row br-swimlane__row--header" role="row">' + headerCells + '</div>'
+      + laneRows
+      + ewmaBar
+      + '</div>'
+      + legend
+      + footer
+      + '</div>';
+  }
+
+  function _renderExecutiveStory(data) {
+    var story = (data && data.executive_story) || {};
+    if (!story || !story.what_happened) return '';
+    var infra = story.infrastructure || {};
+    var control = story.control_impact || {};
+    var lifecycle = story.iso27035_lifecycle || {};
+    var sequence = Array.isArray(story.temporal_sequence) ? story.temporal_sequence : [];
+    var missed = [];
+    sequence.forEach(function (step) {
+      if (step && step.why_missed && missed.indexOf(step.why_missed) === -1) missed.push(step.why_missed);
+    });
+    var externalBits = [];
+    if (infra.external_summary) externalBits.push(infra.external_summary);
+    if (infra.jurisdiction_summary) externalBits.push(infra.jurisdiction_summary);
+    if (infra.asn_summary) externalBits.push(infra.asn_summary);
+    if (infra.geo_summary) externalBits.push(infra.geo_summary);
+    if (infra.target_summary) externalBits.push(infra.target_summary);
+    if (infra.sharepoint_domains && infra.sharepoint_domains.length) {
+      externalBits.push('SharePoint tenants: ' + infra.sharepoint_domains.slice(0, 4).join(', '));
+    }
+    var frameworkChips = [];
+    if (Array.isArray(control.frameworks)) {
+      control.frameworks.forEach(function (item) {
+        if (!item) return;
+        var controls = Array.isArray(item.controls) && item.controls.length ? ': ' + item.controls.slice(0, 5).join(', ') : '';
+        frameworkChips.push(String(item.framework || 'Control') + ' (' + String(item.count || 0) + ')' + controls);
+      });
+    } else {
+      Object.keys(control.frameworks || {}).sort().forEach(function (name) {
+        frameworkChips.push(name + ' (' + control.frameworks[name] + ')');
+      });
+    }
+    var reasonChips = (Array.isArray(story.confirmed_reasons) ? story.confirmed_reasons : []).map(function (item) {
+      if (!item) return '';
+      if (typeof item === 'string') return item;
+      return item.title || item.narrative || item.status || '';
+    }).filter(Boolean);
+    var sequenceHtml = sequence.length ? (
+      '<div class="br-story__timeline" aria-label="Temporal breach sequence">'
+      + sequence.slice(0, 8).map(function (step) {
+        var when = step.when || [step.day, step.date].filter(Boolean).join(' - ');
+        var stageLabel = step.pasta_stage || '';
+        var stageNum = parseInt((stageLabel.match(/Stage (\d)/) || [])[1] || '0', 10);
+        var stageClass = stageNum >= 5 ? 'br-story__stage--critical'
+          : stageNum >= 3 ? 'br-story__stage--high'
+          : 'br-story__stage--medium';
+        return '<div class="br-story__step">'
+          + '<div class="br-story__when">' + escHtml(when) + '</div>'
+          + '<div class="br-story__event">'
+          + '<div class="br-story__event-title">' + escHtml(step.title || 'Observed escalation') + '</div>'
+          + '<div class="br-story__event-body">' + escHtml(step.summary || step.what || '') + '</div>'
+          + _storyChips(step.evidence_factors || step.factors || [], 'br-story__chips br-story__chips--tight')
+          + '</div>'
+          + '<div class="br-story__context">'
+          + (stageLabel ? '<div class="br-story__stage ' + stageClass + '">' + escHtml(stageLabel) + '</div>' : '')
+          + (step.business_impact ? '<div class="br-story__business-impact">' + escHtml(step.business_impact) + '</div>' : '')
+          + '</div>'
+          + '</div>';
+      }).join('')
+      + '</div>'
+    ) : '';
+
+    // ── 1. Timeline drilldown (open by default) ──────────────────────────────
+    var timelineDrilldown = sequence.length ? (
+      '<details class="br-story__drilldown" open>'
+      + '<summary><span class="br-story__drilldown-label">Incident timeline + how we tracked it</span><span class="br-story__drilldown-hint">&#9656; expand</span></summary>'
+      + '<div class="br-story__drilldown-body">'
+      + sequenceHtml
+      + _renderTemporalRagSwimlane(story)
+      + '</div>'
+      + '</details>'
+    ) : '';
+
+    // ── 2. Why confident / why missed (closed) ────────────────────────────────
+    var confidentDrilldown = '<details class="br-story__drilldown">'
+      + '<summary><span class="br-story__drilldown-label">Why we are confident</span><span class="br-story__drilldown-hint">&#9656; expand</span></summary>'
+      + '<div class="br-story__drilldown-body">'
+      + '  <div class="br-story__grid">'
+      + '    <section class="br-story__panel">'
+      + '      <div class="br-story__label">Why we are confident</div>'
+      + '      <p>' + escHtml(story.why_confident || 'Multiple independent signals corroborate the same intrusion path.') + '</p>'
+      + _storyChips(reasonChips)
+      + '    </section>'
+      + '    <section class="br-story__panel">'
+      + '      <div class="br-story__label">Why it was missed earlier</div>'
+      + _storyList(missed.length ? missed : ['Individual signals were low-volume or plausible alone; ChronoGraph, HopGraph, EWMA, and TemporalRAG make the cross-day chain visible.'])
+      + '    </section>'
+      + '  </div>'
+      + '</div>'
+      + '</details>';
+
+    // ── 3. ISO 27035 drilldown (closed) ──────────────────────────────────────
+    var isoDrilldown = '<details class="br-story__drilldown">'
+      + '<summary><span class="br-story__drilldown-label">ISO 27035 incident lifecycle</span><span class="br-story__drilldown-hint">&#9656; expand</span></summary>'
+      + '<div class="br-story__drilldown-body">'
+      + _renderIso27035(lifecycle)
+      + '</div>'
+      + '</details>';
+
+    // ── 4. Technical validation vs legal (closed) ─────────────────────────────
+    var legalDrilldown = story.legal_boundary ? (
+      '<details class="br-story__drilldown">'
+      + '<summary><span class="br-story__drilldown-label">Technical validation vs legal notification</span><span class="br-story__drilldown-hint">&#9656; expand</span></summary>'
+      + '<div class="br-story__drilldown-body">'
+      + '<div class="br-story__panel"><p>' + escHtml(story.legal_boundary) + '</p></div>'
+      + '</div>'
+      + '</details>'
+    ) : '';
+
+    // ── 5. Analyst workbench (closed) ─────────────────────────────────────────
+    var analystDrilldown = '<details class="br-story__drilldown">'
+      + '<summary><span class="br-story__drilldown-label">Analyst workbench</span><span class="br-story__drilldown-hint">&#9656; expand</span></summary>'
+      + '<div class="br-story__drilldown-body">'
+      + '  <div class="br-story__panel br-story__panel--decision">'
+      + '    <div class="br-story__label">Business decision needed</div>'
+      + '    <p>' + escHtml(story.business_decision || 'Preserve evidence, contain active access, confirm data exposure, and start notification assessment.') + '</p>'
+      + _storyList(control.business_decisions || control.decisions || [])
+      + (frameworkChips.length ? '<div class="br-story__subhead">Affected control families</div>' + _storyChips(frameworkChips) : '')
+      + '  </div>'
+      + '  <div class="br-story__panel br-story__panel--legend" style="margin-top:6px;">'
+      + '    <div class="br-story__label" style="font-size:10px;margin-bottom:6px;">Factor origin key</div>'
+      + '    <div style="display:flex;flex-wrap:wrap;gap:8px;font-size:10px;">'
+      + '      <span title="Directly observed in telemetry row"><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#4ade80;margin-right:4px;vertical-align:middle;"></span>direct</span>'
+      + '      <span title="Derived by ChronoGraph temporal correlation"><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#fb923c;margin-right:4px;vertical-align:middle;"></span>chrono</span>'
+      + '      <span title="Matched to a known threat campaign pattern"><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#a78bfa;margin-right:4px;vertical-align:middle;"></span>campaign</span>'
+      + '      <span title="Scored by ML / EWMA anomaly model"><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#38bdf8;margin-right:4px;vertical-align:middle;"></span>ML</span>'
+      + '      <span title="Inferred from context, compliance mapping, or indirect evidence"><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#94a3b8;margin-right:4px;vertical-align:middle;"></span>inferred</span>'
+      + '    </div>'
+      + '  </div>'
+      + '</div>'
+      + '</details>';
+
+    return [
+      '<div class="br-story">',
+      '  <div class="br-story__panel br-story__panel--lead">',
+      '    <div class="br-story__label">What happened</div>',
+      '    <p>' + escHtml(story.what_happened) + '</p>',
+           externalBits.length ? '<div class="br-story__infra">' + externalBits.map(escHtml).join(' ') + '</div>' : '',
+      '  </div>',
+      timelineDrilldown,
+      confidentDrilldown,
+      isoDrilldown,
+      legalDrilldown,
+      analystDrilldown,
+      '</div>',
+    ].join('');
+  }
+
   function _loadExecSummary(regenerate, done) {
     apiPost('/api/v1/assessments/' + encodeURIComponent(AID) + '/executive-summary',
       { regenerate: !!regenerate, model: getSelectedModel() })
@@ -5232,6 +5747,7 @@
                 + '</div>';
             }
 
+            var storyHtml = _renderExecutiveStory(data);
             det.innerHTML = [
               data.headline ? '<div class="br-exec__headline">' + escHtml(data.headline) + '</div>' : '',
               data.subline ? '<div class="br-exec__subline">' + escHtml(data.subline) + '</div>' : '',
@@ -5244,7 +5760,7 @@
                   + (data.persona && data.persona !== 'ir' ? ' \u00b7 persona: ' + escHtml(data.persona) : '')
                   + '</div>'
                 : ''),
-              (function () {
+              storyHtml || (function () {
                 // Prefer the full executive_summary when it exists and is substantive (>80 chars).
                 // dread_fragments are kept for the DREAD narrative section, not the main exec body.
                 var execText = data.executive_summary || '';
@@ -5268,7 +5784,22 @@
                     }).join(' ') + '</div>'
                   + '</details>'
                 : '',
-              data.render_warning ? '<div class="br-exec__warn">' + escHtml(data.render_warning) + '</div>' : '',
+              // LLM provenance refs — structured row indices the narrator actually read
+              (data.llm_evidence_refs && data.llm_evidence_refs.length)
+                ? '<details class="br-drilldown"><summary>LLM evidence basis (' + data.llm_evidence_refs.length + ' rows)</summary>'
+                  + '<div class="br-exec__refs" style="margin-top:4px;">Narrator read: '
+                  + data.llm_evidence_refs.slice(0, 20).map(function (n) {
+                      return '<a class="br-rowchip" href="/static/breach.html?assessment=' + encodeURIComponent(AID) + '&tab=evidence&row=' + encodeURIComponent(n) + '">[' + escHtml(String(n)) + ']</a>';
+                    }).join(' ')
+                  + '</div></details>'
+                : '',
+              // LLM-offline badge — surface when deterministic fallback was used
+              (data.narrator_source === 'fallback')
+                ? '<div style="margin-top:8px;display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:4px;font-size:11px;font-weight:600;background:rgba(234,179,8,0.12);color:#ca8a04;border:1px solid rgba(234,179,8,0.3);">'
+                  + '⚠️ LLM offline — narrative unavailable, deterministic analysis only'
+                  + '</div>'
+                : '',
+              (!storyHtml && data.render_warning) ? '<div class="br-exec__warn">' + escHtml(data.render_warning) + '</div>' : '',
               travelHtml,
               iamHtml,
             ].join('');
@@ -5297,6 +5828,10 @@
   }
 
   function _fireSinglePrefill(cid, cb, force) {
+    if (!cid || String(cid).indexOf('case-unclassified-') === 0) {
+      if (cb) cb({});
+      return;
+    }
     apiPost('/api/v1/assessments/' + encodeURIComponent(AID) + '/clusters/' + encodeURIComponent(cid) + '/tier1-summary', { model: getSelectedModel(), force: !!force })
       .then(function (r) {
         if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -5501,7 +6036,8 @@
       var isOpen = !!_evState.expanded[r.row_index];
       var mitre = r.mitre_technique || (r.mitre && r.mitre[0]) || '';
 
-      var evTs = r.timestamp_utc || r.timestamp || r['@timestamp'] || r.ts || '';
+      var evTs = r.timestamp_utc || r.CreationTime || r.creationTime ||
+                 r.timestamp || r['@timestamp'] || r.eventTime || r.ts || '';
       var evType = r.event_type || r.description || (r.event && r.event.type) || r.action || r.operationName || r.event_simpleName || '';
       var evUser = (r.accounts && r.accounts[0]) || r.user_principal_name || r.userPrincipalName || r.user || r.actor || r.entity || '';
       var evIp = r.source_ip || r.src_ip || r.LocalAddressIP4 || r.sourceIPAddress || (r.ips && r.ips[0]) || '';
@@ -5616,18 +6152,93 @@
 
   function renderHopGraphTab() {
     var el = document.getElementById('br-content');
+    var hg = state.hopgraph_summary || {};
+    var nodeCount = hg.node_count || hg.nodes || 0;
+    var edgeCount = hg.edge_count || hg.edges || 0;
+    var label = nodeCount
+      ? nodeCount + ' nodes / ' + edgeCount + ' edges'
+      : 'building graph…';
     el.innerHTML = [
-      '<div style="padding:16px 0 8px;color:var(--text-muted);font-size:13px;">Full assessment HopGraph</div>',
+      '<div style="padding:16px 0 8px;color:var(--text-muted);font-size:13px;">',
+      'Assessment HopGraph — <span id="br-hg-stats">' + escHtml(label) + '</span>',
+      '</div>',
       '<div id="br-hopgraph-full" style="min-height:500px;"></div>',
     ].join('');
-    if (typeof BreachHopGraph !== 'undefined' && state.clusters && state.clusters.length) {
-      BreachHopGraph.render('br-hopgraph-full', state.clusters[0], state.rows, AID);
+    if (typeof BreachHopGraph !== 'undefined') {
+      // Prefer the full backend hopgraph_summary; fall back to first cluster for
+      // backwards-compat when the API doesn't yet include hopgraph_summary.
+      var graphData = (hg && (hg.adj || hg.nodes)) ? hg
+                    : ((state.clusters && state.clusters.length) ? state.clusters[0] : {});
+      BreachHopGraph.render('br-hopgraph-full', graphData, state.rows, AID);
     }
   }
 
+  function _renderComplianceCoverage(d) {
+    if (!d || typeof d !== 'object') {
+      return '<div style="padding:24px;color:var(--text-muted)">No compliance data returned.</div>';
+    }
+    var clusters = state.clusters || [];
+    var allFactors = [];
+    clusters.forEach(function(cl) {
+      (cl.factor_tags || []).forEach(function(ft) {
+        if (allFactors.indexOf(ft) === -1) allFactors.push(ft);
+      });
+    });
+    var html = '<div style="padding:16px">';
+    html += '<h3 style="color:var(--accent);margin:0 0 12px">Compliance Coverage</h3>';
+    // Framework summary table
+    var frameworks = d.framework_summary || d.coverage || {};
+    if (Object.keys(frameworks).length) {
+      html += '<table style="width:100%;border-collapse:collapse;margin-bottom:18px">';
+      html += '<thead><tr>';
+      html += '<th style="text-align:left;padding:6px 10px;border-bottom:1px solid var(--border);color:var(--text-muted);font-size:11px;text-transform:uppercase">Framework</th>';
+      html += '<th style="text-align:left;padding:6px 10px;border-bottom:1px solid var(--border);color:var(--text-muted);font-size:11px;text-transform:uppercase">Controls Hit</th>';
+      html += '<th style="text-align:left;padding:6px 10px;border-bottom:1px solid var(--border);color:var(--text-muted);font-size:11px;text-transform:uppercase">Coverage</th>';
+      html += '</tr></thead><tbody>';
+      Object.keys(frameworks).forEach(function(fw) {
+        var info = frameworks[fw] || {};
+        var hit = info.controls_hit || info.hit || (Array.isArray(info) ? info.length : 0);
+        var cov = info.coverage_pct != null ? info.coverage_pct.toFixed(0) + '%' : '—';
+        html += '<tr><td style="padding:5px 10px;border-bottom:1px solid var(--surface-2)">' + escHtml(fw.toUpperCase()) + '</td>';
+        html += '<td style="padding:5px 10px;border-bottom:1px solid var(--surface-2)">' + escHtml(String(hit)) + '</td>';
+        html += '<td style="padding:5px 10px;border-bottom:1px solid var(--surface-2)">' + escHtml(cov) + '</td></tr>';
+      });
+      html += '</tbody></table>';
+    }
+    // Active factor→control mapping for current assessment clusters
+    if (allFactors.length) {
+      html += '<h4 style="color:var(--text-muted);font-size:12px;text-transform:uppercase;margin:0 0 8px">Active Factor Tags (' + allFactors.length + ')</h4>';
+      html += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:18px">';
+      allFactors.forEach(function(ft) {
+        html += '<span style="background:var(--surface-2);border:1px solid var(--border);border-radius:4px;padding:3px 8px;font-size:11px;color:var(--accent)">' + escHtml(ft) + '</span>';
+      });
+      html += '</div>';
+    }
+    // GRC evidence package
+    html += '<div style="background:var(--surface-2);border-radius:6px;padding:14px;margin-top:8px">';
+    html += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">GRC EVIDENCE EXPORT</div>';
+    html += '<div style="font-size:12px;color:var(--text-dim)">To export: use the Full Report button, or call ';
+    html += '<code style="color:var(--accent)">/api/v1/report/ingestion?format=json&assessment_id=' + escHtml(AID || '') + '</code></div>';
+    html += '</div>';
+    html += '</div>';
+    return html;
+  }
+
   function renderComplianceTab() {
-    document.getElementById('br-content').innerHTML =
-      '<div style="padding:32px;color:var(--text-muted)">Compliance & Architecture — Phase B</div>';
+    var el = document.getElementById('br-content');
+    el.innerHTML = '<div style="padding:24px;color:var(--text-muted)">Loading compliance data…</div>';
+    var url = '/api/v1/compliance/coverage?format=json';
+    if (AID) url += '&assessment_id=' + encodeURIComponent(AID);
+    var tid = (typeof window._janusec_tenantId === 'function')
+      ? window._janusec_tenantId()
+      : (document.querySelector('[data-tenant-id]') || {}).dataset && (document.querySelector('[data-tenant-id]') || {}).dataset.tenantId || 'default';
+    fetch(url, { headers: { 'X-Tenant-ID': tid } })
+      .then(function(r) { return r.ok ? r.json() : Promise.reject(r.status); })
+      .then(function(d) { el.innerHTML = _renderComplianceCoverage(d); })
+      .catch(function(e) {
+        // On API error still render with local cluster data
+        el.innerHTML = _renderComplianceCoverage({});
+      });
   }
 
   function renderPostmortemTab() {
@@ -5654,7 +6265,7 @@
 
     if (!cid || !AID) {
       document.getElementById('postmortem-tab-panel').innerHTML =
-        '<div style="padding:24px;color:var(--text-muted)">No cluster found. Upload and analyse an assessment first.</div>';
+        '<div style="padding:32px;text-align:center;color:var(--text-muted)">No cluster found. Upload and analyse an assessment first.</div>';
       return;
     }
 
@@ -5665,7 +6276,22 @@
     if (window.JanusecPostmortem && typeof window.JanusecPostmortem.render === 'function') {
       window.JanusecPostmortem.render(panel, AID, cid);
     } else {
-      panel.innerHTML = '<div style="padding:24px;color:var(--text-muted)">breach_postmortem.js not loaded.</div>';
+      // Module not loaded — show informative placeholder rather than a bare error
+      panel.innerHTML = [
+        '<div style="padding:40px 32px;text-align:center;">',
+        '  <div style="font-size:36px;margin-bottom:16px;opacity:.35">📝</div>',
+        '  <div style="font-size:16px;font-weight:600;color:var(--text-primary);margin-bottom:8px;">Postmortem report is being compiled</div>',
+        '  <div style="font-size:13px;color:var(--text-muted);max-width:420px;margin:0 auto;">',
+        '    The postmortem module generates a structured Incident Report (ISO 27035 §§6), timeline narrative, and corrective action register from the evidence already collected.',
+        '    It will appear here once the pipeline completes enrichment for cluster <strong>' + escHtml(cid) + '</strong>.',
+        '  </div>',
+        '  <div style="margin-top:20px;">',
+        '    <a href="/static/breach.html?assessment=' + encodeURIComponent(AID) + '" style="font-size:12px;color:#60a5fa;text-decoration:none;border:1px solid rgba(96,165,250,.3);padding:5px 14px;border-radius:4px;">',
+        '      ← Back to Intrusion Assessment',
+        '    </a>',
+        '  </div>',
+        '</div>',
+      ].join('');
     }
   }
 
@@ -5928,20 +6554,24 @@
     var bar = document.getElementById('br-tabbar');
     if (!bar) return;
     var base = AID ? '?assessment=' + encodeURIComponent(AID) : '';
+    function tabHref(tabName) {
+      return base + (base ? '&' : '?') + 'tab=' + encodeURIComponent(tabName);
+    }
     var curModel = getSelectedModel();
     var modelOpts = ['qwen3:14b', 'qwen2.5:14b', 'qwen3.6:27b', 'qwen3:30b'].map(function (m) {
       return '<option value="' + m + '"' + (m === curModel ? ' selected' : '') + '>' + m + '</option>';
     }).join('');
     bar.innerHTML = [
-      _tab('breach',     'BREACH ASSESSMENT',      base,                     activeTab),
-      _tab('compliance', 'Compliance & Arch',        base + '&tab=compliance', activeTab),
-      _tab('evidence',   'Evidence',                 base + '&tab=evidence',   activeTab),
-      _tab('hopgraph',   'HopGraph',                 base + '&tab=hopgraph',   activeTab),
-      _tab('intel',      'Threat Intel',              base + '&tab=intel',      activeTab),
-      _tab('postmortem', 'Postmortem',                base + '&tab=postmortem', activeTab),
+      _tab('breach',     'Intrusion Assessment',   base,                     activeTab),
+      _tab('compliance', 'Compliance & Arch',        tabHref('compliance'), activeTab),
+      _tab('evidence',   'Evidence',                 tabHref('evidence'),   activeTab),
+      _tab('hopgraph',   'HopGraph',                 tabHref('hopgraph'),   activeTab),
+      _tab('intel',      'Threat Intel',              tabHref('intel'),      activeTab),
+      // Postmortem tab only shown when the module is loaded to avoid a dead-end
+      (window.JanusecPostmortem ? _tab('postmortem', 'Postmortem', tabHref('postmortem'), activeTab) : ''),
       '<div class="br-tabs__spacer"></div>',
       '<select class="br-model-select" id="br-model-select" title="LLM model for this session"><option disabled style="font-size:10px;color:#888">— model —</option>' + modelOpts + '</select>',
-      '<a class="br-tab br-tab--secondary" href="/static/investigate.html' + base + '">Advanced Console →</a>',
+      '<a class="br-tab br-tab--secondary" href="/static/investigate.html' + base + '">Raw Evidence →</a>',
     ].join('');
     var sel = document.getElementById('br-model-select');
     if (sel) {

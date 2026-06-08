@@ -25,7 +25,10 @@ def detect_identity_phase3(payload: Dict[str, Any]) -> Tuple[List[str], List[Tup
         payload.get('user') or payload.get('user_canonical') or
         payload.get('actor') or payload.get('account_name') or ''
     )
-    etype = str(payload.get('event_type') or payload.get('operation') or payload.get('action') or '').lower()
+    etype = str(
+        payload.get('event_type') or payload.get('operation') or payload.get('action') or
+        payload.get('event_name') or payload.get('activityDisplayName') or ''
+    ).lower()
     obj = str(payload.get('object') or payload.get('dn') or payload.get('path') or '').lower()
 
     # Windows Event ID field — accept both VESPER and XML/normalised names
@@ -53,11 +56,12 @@ def detect_identity_phase3(payload: Dict[str, Any]) -> Tuple[List[str], List[Tup
             payload.get('service_name') or payload.get('target_service_name') or
             payload.get('target_user_name') or payload.get('ServiceName') or ''
         ).strip().lower()
+        _requester = str(payload.get('account_name') or payload.get('user') or payload.get('user_canonical') or '').strip().lower()
         _exclude_svcs = {
             s.strip().lower() for s in
             os.getenv('KERBEROAST_EXCLUDE_SERVICES', '').split(',') if s.strip()
         }
-        if not (_exclude_svcs and _target_svc and _target_svc in _exclude_svcs):
+        if not (_exclude_svcs and (_target_svc in _exclude_svcs or _requester in _exclude_svcs)):
             f = 'iam:kerberoasting'
             factors.append(f)
             if user:
@@ -136,9 +140,18 @@ def detect_cloud_identity_phase4(payload: Dict[str, Any]) -> Tuple[List[str], Li
         return [], []
     factors: List[str] = []
     attrs: List[Tuple[str, str]] = []
-    user = str(payload.get('user') or payload.get('actor') or '')
-    etype = str(payload.get('event_type') or payload.get('operation') or payload.get('action') or '').lower()
-    app = str(payload.get('app') or payload.get('application') or '')
+    user = str(
+        payload.get('user') or payload.get('user_canonical') or payload.get('actor') or
+        payload.get('userPrincipalName') or payload.get('user_principal_name') or ''
+    )
+    etype = str(
+        payload.get('event_type') or payload.get('operation') or payload.get('action') or
+        payload.get('event_name') or payload.get('activityDisplayName') or ''
+    ).lower()
+    app = str(
+        payload.get('app') or payload.get('application') or payload.get('appId') or
+        payload.get('app_id') or payload.get('client_id') or payload.get('service_principal') or ''
+    )
     raw = dict(payload.get('raw') or {})
     signals = dict(raw.get('signals') or {})
 
@@ -154,9 +167,21 @@ def detect_cloud_identity_phase4(payload: Dict[str, Any]) -> Tuple[List[str], Li
             attrs.append((f'user:{user}', f))
 
     # OAuth consent to suspicious app
-    publisher = str(raw.get('app_publisher') or '')
-    verified = str(raw.get('app_verified') or '').lower() in {'1','true','yes'}
-    if ('oauth_consent' in etype or 'grant' in etype) and (not verified or 'unknown' in publisher.lower()):
+    publisher = str(raw.get('app_publisher') or payload.get('app_publisher') or payload.get('publisher') or '')
+    verified = str(raw.get('app_verified') or payload.get('app_verified') or payload.get('verifiedPublisher') or '').lower() in {'1','true','yes'}
+    scopes = str(payload.get('scopes') or payload.get('oauth_scope') or payload.get('consent_scopes') or raw.get('scopes') or '').lower()
+    if not scopes:
+        for target in payload.get('targetResources') or []:
+            if not isinstance(target, dict):
+                continue
+            for prop in target.get('modifiedProperties') or []:
+                if not isinstance(prop, dict):
+                    continue
+                name = str(prop.get('displayName') or '').lower()
+                if 'permission' in name or 'scope' in name:
+                    scopes += ' ' + str(prop.get('newValue') or '').lower()
+    excessive = any(scope in scopes for scope in ('mail.read', 'files.read.all', 'user.read.all', 'offline_access'))
+    if ('oauth_consent' in etype or 'consent' in etype or 'grant' in etype) and (not verified or 'unknown' in publisher.lower() or excessive):
         f = 'iam:oauth_consent_grant_suspicious_app'
         factors.append(f)
         if app:
@@ -193,7 +218,8 @@ def detect_cloud_identity_phase4(payload: Dict[str, Any]) -> Tuple[List[str], Li
             attrs.append((f'user:{user}', f))
 
     # Service principal credential add (AAD addKey/addPassword — persistence indicator)
-    if any(k in etype for k in ('addkey', 'addpassword', 'add key credential', 'add password credential')):
+    target_text = str(payload.get('targetResources') or '').lower()
+    if any(k in etype for k in ('addkey', 'addpassword', 'add key credential', 'add password credential', 'certificate', 'secret')) or any(k in target_text for k in ('asymmetricx509cert', 'keydescription', 'keyidentifier')):
         f = 'iam:service_principal_credential_add'
         factors.append(f)
         if app:

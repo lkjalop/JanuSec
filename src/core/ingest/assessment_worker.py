@@ -70,6 +70,52 @@ _VERDICT_RANK = {
 }
 
 
+def _calibrate_cluster_confidence(cluster: dict) -> None:
+    """Post-hoc evidence-weight confidence floor for fallback narratives.
+
+    When the LLM is unavailable, cluster_narrator._fallback_narrative() hard-codes
+    confidence=0.3 regardless of evidence volume.  This function raises the floor
+    using a simple sigmoid over evidence count × triage score so that a 49-row
+    VALIDATED_BREACH cluster is not presented with the same confidence as a 2-row
+    REQUIRES_INVESTIGATION cluster.
+
+    LLM-generated confidence is left untouched.
+    """
+    if cluster.get("_narrator_source") != "fallback":
+        return  # LLM-generated confidence stands as-is
+
+    verdict = str(cluster.get("final_verdict") or cluster.get("verdict") or "").upper()
+    evidence_count = int(
+        cluster.get("row_count")
+        or len(cluster.get("row_refs") or [])
+        or 0
+    )
+    triage_score = float(
+        cluster.get("triage_score")
+        or cluster.get("max_triage_score")
+        or 0.0
+    )
+
+    # Calibration weight: scales from 0 (no evidence, no triage signal) → 1.0
+    # Evidence term: 0→1 over 20 rows;  triage term: 0→1 over the score range.
+    # Combined max = 0.625 + 0.375 = 1.0 so the floor ranges hit their stated ceilings.
+    weight = min(1.0, evidence_count / 20.0) * 0.625 + min(1.0, triage_score) * 0.375
+
+    if verdict in {"VALIDATED_BREACH", "CONFIRMED_BREACH", "CONFIRMED_INTRUSION"}:
+        floor = 0.55 + weight * 0.25   # 0.55 → 0.80 (at weight=1.0)
+    elif verdict in {"SUSPECTED_BREACH", "LIKELY_BREACH", "LIKELY_COMPROMISE"}:
+        floor = 0.40 + weight * 0.20   # 0.40 → 0.60 (at weight=1.0)
+    elif verdict == "REQUIRES_INVESTIGATION":
+        floor = 0.30 + weight * 0.10   # 0.30 → 0.40 (at weight=1.0)
+    else:
+        floor = 0.20                    # benign/insufficient: stay low
+
+    current = float(cluster.get("confidence") or 0.0)
+    if floor > current:
+        cluster["confidence"] = round(min(1.0, floor), 3)
+        cluster["_confidence_calibrated"] = True
+
+
 def _cluster_source_count(cluster: dict) -> int:
     sources = cluster.get("sources") or cluster.get("shared_sources") or []
     if isinstance(sources, dict):
@@ -369,7 +415,8 @@ def _normalize_ingest_row(raw: dict, row_index: int) -> dict:
     row["row_index"] = row_index
     row.setdefault("_source", raw.get("_source", ""))
     row.setdefault("source_file", raw.get("_source", ""))
-    row.setdefault("source_type", raw.get("source_type") or raw.get("_source_type") or "")
+    if not row.get("source_type"):
+        row["source_type"] = raw.get("source_type") or raw.get("_source_type") or row.get("_source_type") or ""
 
     row["triage_score"] = _score_async_ingest_row(raw, row)
 
@@ -463,8 +510,40 @@ _CLOUD_SECURITY_EVENT_NAMES = frozenset({
 _LOW_NOISE_SOURCE_TYPES = frozenset({"cloud", "iam", "email", "remote"})
 
 
+_HIGH_SEVERITY_FACTORS = frozenset({
+    'email:inbox_rule_external_forward',
+    'email:T1114.003_inbox_rule',
+    'data:sensitive_file_access',
+    'endpoint:T1003.001_lsass_dump',
+    'endpoint:T1021.001_rdp_lateral',
+    'identity:priv_escalation',
+    'exfil:cumulative_bytes_anomaly',
+    'exfil:cumulative_cloud_bytes_anomaly',
+    'endpoint:wmi_lateral_exec',
+    'storyline:mstsc_suspicious_parent',
+    'endpoint:T1021.001_rdp_lateral',
+})
+
+_CRITICAL_SEVERITY_FACTORS = frozenset({
+    'endpoint:ebpf_rootkit',
+    'iam:golden_ticket',
+    'iam:kerberoasting',
+    'exfil:bulk_download_finance',
+    'endpoint:T1003.001_lsass_dump',
+    'data_exfiltration_rclone',
+    'data_exfiltration_snowflake',
+})
+
+
 def _score_async_ingest_row(raw: dict, normalized: dict) -> float:
-    sev = str(raw.get("severity") or raw.get("risk_level") or raw.get("alert_severity") or "").lower()
+    # Read severity from normalized _severity first (post-normalization field),
+    # then fall back to raw source fields.  Capitalized 'Severity' covers M365.
+    sev = str(
+        normalized.get("_severity") or
+        raw.get("severity") or raw.get("Severity") or
+        raw.get("risk_level") or raw.get("alert_severity") or
+        ""
+    ).lower()
     score = {
         "critical": 0.95,
         "high": 0.75,
@@ -477,7 +556,7 @@ def _score_async_ingest_row(raw: dict, normalized: dict) -> float:
     # Elevate security-relevant cloud/IAM events above the triage threshold.
     # BAU events (SELECT queries, ListBuckets, routine file access) are NOT
     # elevated — they form single-source noise clusters at scale.
-    source_type = str(normalized.get("_source_type") or "").lower()
+    source_type = str(normalized.get("_source_type") or normalized.get("source_type") or "").lower()
     if source_type in _LOW_NOISE_SOURCE_TYPES:
         event_name_lower = str(
             normalized.get("event_name") or raw.get("eventName") or
@@ -539,11 +618,14 @@ def _score_async_ingest_row(raw: dict, normalized: dict) -> float:
                 raw.get("service_name") or raw.get("target_service_name") or
                 raw.get("target_user_name") or raw.get("ServiceName") or ""
             ).strip().lower()
+            _requester = str(
+                raw.get("account_name") or raw.get("user") or raw.get("user_canonical") or ""
+            ).strip().lower()
             _exclude_svcs = {
                 s.strip().lower() for s in
                 os.getenv("KERBEROAST_EXCLUDE_SERVICES", "").split(",") if s.strip()
             }
-            if not (_exclude_svcs and _target_svc and _target_svc in _exclude_svcs):
+            if not (_exclude_svcs and (_target_svc in _exclude_svcs or _requester in _exclude_svcs)):
                 score = max(score, 0.75)
     # Elevate sysmon endpoint rows for process-create events with suspicious parents/commands
     _sysmon_eid = str(raw.get("sysmon_event_id") or "").strip()
@@ -573,7 +655,9 @@ def _score_async_ingest_row(raw: dict, normalized: dict) -> float:
         _org_tenant = os.getenv("JANUSEC_ORG_TENANT_NAME", "").strip().lower()
         _dst_h = str(
             raw.get("dst_host") or raw.get("resp_h") or raw.get("destination_host") or
-            normalized.get("dst_ip") or ""
+            raw.get("domain") or raw.get("tls_sni") or
+            normalized.get("dst_host") or normalized.get("resp_h") or
+            normalized.get("domain") or normalized.get("tls_sni") or normalized.get("dst_ip") or ""
         ).strip().lower()
         if _org_tenant and ".sharepoint.com" in _dst_h:
             _sp_prefix = _dst_h.split(".sharepoint.com")[0].rsplit(".", 1)[-1]
@@ -582,6 +666,72 @@ def _score_async_ingest_row(raw: dict, normalized: dict) -> float:
                 normalized["_sharepoint_subdomain_mismatch"] = _sp_prefix
     except Exception:
         pass
+    # ── Kerberos / Windows Security EventID fast-path ─────────────────────────
+    # factor_tags are NOT available at Stage 1 (they're computed in Stage 5x).
+    # Use raw event fields directly for known attack event patterns so the
+    # triage_score and _severity are correct before DuckDB storage.
+    _eid_s1 = str(
+        normalized.get('windows_event_id') or raw.get('windows_event_id') or
+        raw.get('WindowsEventId') or raw.get('EventID') or raw.get('event_id') or ''
+    ).strip()
+    _enc_s1 = str(normalized.get('ticket_encryption') or raw.get('ticket_encryption') or '').strip()
+    _svc_s1 = str(normalized.get('service_name') or raw.get('service_name') or '').strip().lower()
+    _pauth_s1 = str(normalized.get('pre_auth_type') or raw.get('pre_auth_type') or '').strip()
+    _cmd_s1 = str(normalized.get('command_line') or raw.get('command_line') or '').lower()
+    _proc_s1 = str(normalized.get('process_name') or raw.get('process_name') or '').lower()
+
+    if _eid_s1 in ('4769', '4768'):
+        # 4769 + RC4 encryption (0x17/0x18) = kerberoasting
+        if _eid_s1 == '4769' and _enc_s1 in ('0x17', '0x18', '23', '24'):
+            score = max(score, 0.92)
+            normalized.setdefault('_severity', 'critical')
+        # 4769 targeting krbtgt = golden ticket
+        elif _eid_s1 == '4769' and _svc_s1 == 'krbtgt':
+            score = max(score, 0.92)
+            normalized.setdefault('_severity', 'critical')
+        # 4768 + pre-auth disabled = AS-REP roasting
+        elif _eid_s1 == '4768' and _pauth_s1 in ('0', '0x0'):
+            score = max(score, 0.92)
+            normalized.setdefault('_severity', 'critical')
+        else:
+            score = max(score, 0.70)
+            normalized.setdefault('_severity', 'high')
+    elif _eid_s1 in ('4771', '4776', '4648'):
+        score = max(score, 0.70)
+        normalized.setdefault('_severity', 'high')
+    elif _eid_s1 in ('7045', '4104'):
+        # Service install / PowerShell script block logging
+        score = max(score, 0.70)
+        normalized.setdefault('_severity', 'high')
+
+    # LOLbin / suspicious process detection from command_line / process_name
+    _LOLBIN_PROCS = frozenset({
+        'mshta.exe', 'certutil.exe', 'bitsadmin.exe', 'regsvr32.exe',
+        'msiexec.exe', 'wmic.exe', 'cscript.exe', 'wscript.exe',
+        'installutil.exe', 'msbuild.exe', 'cmstp.exe', 'odbcconf.exe',
+    })
+    _LOLBIN_CMD_PATTERNS = (
+        'invoke-expression', 'iex ', 'downloadstring', 'downloadfile',
+        'net.webclient', 'encodedcommand', '-enc ', 'frombase64string',
+        'comsvcs', 'rundll32', 'powershell -', '/c whoami', 'cmd /c',
+    )
+    if _proc_s1 in _LOLBIN_PROCS or any(p in _cmd_s1 for p in _LOLBIN_CMD_PATTERNS):
+        score = max(score, 0.70)
+        normalized.setdefault('_severity', 'high')
+
+    # ── Factor-tag based severity elevation ───────────────────────────────────
+    # NOTE: factor_tags are set in Stage 5x, AFTER this function runs, so this
+    # check is only effective for rows that were pre-tagged by an earlier pass.
+    _row_factors = set(normalized.get('factor_tags') or [])
+    if _row_factors & _CRITICAL_SEVERITY_FACTORS:
+        score = max(score, 0.90)
+        if not normalized.get('_severity'):
+            normalized['_severity'] = 'critical'
+    elif _row_factors & _HIGH_SEVERITY_FACTORS:
+        score = max(score, 0.70)
+        if not normalized.get('_severity'):
+            normalized['_severity'] = 'high'
+
     return float(max(0.0, min(1.0, score)))
 
 
@@ -704,6 +854,10 @@ def _collect_lane_factor_tags(rows: list[dict]) -> dict[int, list[str]]:
             continue
 
         # ── MITRE technique direct mapping ───────────────────────────────────
+        if row.get("_sharepoint_subdomain_mismatch"):
+            result[ridx].append("network:sharepoint_subdomain_mismatch")
+            result[ridx].append("cloud:sharepoint_lookalike")
+
         mitre_id = str(row.get("mitre_technique") or "").strip()
         if mitre_id:
             # Try full match first, then prefix (T1003.001 → also add T1003)
@@ -752,6 +906,14 @@ def _collect_lane_factor_tags(rows: list[dict]) -> dict[int, list[str]]:
             result[ridx].append("endpoint:T1021.001_rdp_lateral")
 
         # ── user_session_fusion: collect for impossible-travel check ────────
+        cmdline = str(row.get("command_line") or row.get("CommandLine") or row.get("cmdline") or "").lower()
+        if (
+            ("wmic" in proc or "wmic" in cmdline)
+            and "/node:" in cmdline
+            and "process call create" in cmdline
+        ) or ("wmiprvse.exe" in parent and ("-enc" in cmdline or "encodedcommand" in cmdline)):
+            result[ridx].append("endpoint:wmi_lateral_exec")
+
         user = str(row.get("user") or row.get("user_canonical") or "").strip()
         country = str(row.get("src_country") or "").strip()
         if user and len(country) == 2 and country.isalpha():
@@ -1255,10 +1417,181 @@ async def run_assessment_pipeline(
         # all see inbox_rule / fusion / storyline signals without requiring the
         # full async live-event lane infrastructure.
         try:
-            _lane_factors_by_row = _collect_lane_factor_tags(filtered_rows)
+            try:
+                _factor_scan_rows = await asyncio.to_thread(_store.load_all_rows, assessment_id)
+            except Exception:
+                _factor_scan_rows = filtered_rows
+            _lane_factors_by_row = _collect_lane_factor_tags(_factor_scan_rows)
+            _lane_factors_by_user: dict[str, set[str]] = {}
+            _lane_factors_by_host: dict[str, set[str]] = {}
+            _host_users_5x: dict[str, set[str]] = {}
+            _global_high_signal_factors_5x: set[str] = set()
+            _recon_counts_by_user_5x: dict[str, int] = {}
+            _RECON_KEYWORDS_5X = (
+                "net group", "net user", "dsquery", "setspn", "get-aduser",
+                "get-adcomputer", "get-adgroup", "nltest", "invoke-sharphound",
+                "sharphound", "get-domainuser", "get-domaincomputer", "get-domaingroupmember",
+            )
+
+            def _row_user_5x(row: dict) -> str:
+                return str(
+                    row.get("user_canonical") or row.get("user") or
+                    row.get("account_name") or row.get("userPrincipalName") or
+                    row.get("user_principal_name") or ""
+                ).strip().lower()
+
+            def _row_host_5x(row: dict) -> str:
+                return str(
+                    row.get("host") or row.get("hostname") or row.get("src_host") or
+                    row.get("source_host") or row.get("workstation") or ""
+                ).strip().lower()
+
+            for _row_hu_5x in _factor_scan_rows:
+                if not isinstance(_row_hu_5x, dict):
+                    continue
+                _u_hu_5x = _row_user_5x(_row_hu_5x)
+                _h_hu_5x = _row_host_5x(_row_hu_5x)
+                if _u_hu_5x and _h_hu_5x:
+                    _host_users_5x.setdefault(_h_hu_5x, set()).add(_u_hu_5x)
+
+            # Augment lane factors with IAM phase-3 kerberos / persistence detections
+            try:
+                from src.core.detectors.iam_phase3_4 import detect_identity_phase3 as _det_iam3
+                _IAM_SRC_5X = {"windows_security", "identity_kerberos", "windows_event", "kerberos", "winevent", "iam"}
+                _IAM_EIDS_5X = {"4768", "4769", "4770", "4771", "4624", "4625", "4720", "4728", "4732", "4756"}
+                _iam3_hit_count = 0
+                for _row_iam in _factor_scan_rows:
+                    if not isinstance(_row_iam, dict):
+                        continue
+                    _src_iam = str(
+                        _row_iam.get("source_type") or _row_iam.get("_source_type") or
+                        _row_iam.get("log_source") or ""
+                    ).lower()
+                    _eid_iam = str(_row_iam.get("windows_event_id") or _row_iam.get("event_id") or "").strip()
+                    if _src_iam not in _IAM_SRC_5X and _eid_iam not in _IAM_EIDS_5X:
+                        continue
+                    _ri_iam = _row_iam.get("row_index")
+                    if _ri_iam is None:
+                        continue
+                    try:
+                        _ri_key = int(float(_ri_iam))
+                    except (TypeError, ValueError):
+                        continue
+                    _iam_factors, _ = _det_iam3(_row_iam)
+                    if _iam_factors:
+                        _existing_iam = _lane_factors_by_row.get(_ri_key) or []
+                        _lane_factors_by_row[_ri_key] = list(set(_existing_iam) | set(_iam_factors))
+                        _global_high_signal_factors_5x.update(
+                            f for f in _iam_factors
+                            if f in {"iam:as_rep_roasting", "iam:kerberoasting", "iam:golden_ticket"}
+                        )
+                        _iam3_hit_count += 1
+                logger.info("Stage 5x: IAM phase-3 augmented %d rows for %s", _iam3_hit_count, assessment_id)
+            except Exception as _iam_exc:
+                logger.debug("IAM phase-3 augmentation in Stage 5x failed: %s", _iam_exc)
+
+            # Augment cloud identity rows with OAuth consent / service-principal persistence factors.
+            try:
+                from src.core.detectors.iam_phase3_4 import detect_cloud_identity_phase4 as _det_cloud4
+                _CLOUD_SRC_5X = {"cloud_identity", "azure_ad", "entra", "aad", "iam", "cloud"}
+                _cloud4_hit_count = 0
+                for _row_cloud in _factor_scan_rows:
+                    if not isinstance(_row_cloud, dict):
+                        continue
+                    _src_cloud = str(
+                        _row_cloud.get("source_type") or _row_cloud.get("_source_type") or
+                        _row_cloud.get("log_source") or ""
+                    ).lower()
+                    _event_cloud = str(
+                        _row_cloud.get("event_type") or _row_cloud.get("operation") or
+                        _row_cloud.get("event_name") or _row_cloud.get("activityDisplayName") or ""
+                    ).lower()
+                    if _src_cloud not in _CLOUD_SRC_5X and not any(
+                        k in _event_cloud for k in ("oauth", "consent", "addkey", "addpassword")
+                    ):
+                        continue
+                    _ri_cloud = _row_cloud.get("row_index")
+                    if _ri_cloud is None:
+                        continue
+                    try:
+                        _ri_key = int(float(_ri_cloud))
+                    except (TypeError, ValueError):
+                        continue
+                    _cloud_factors, _ = _det_cloud4(_row_cloud)
+                    if _cloud_factors:
+                        _existing_cloud = _lane_factors_by_row.get(_ri_key) or []
+                        _lane_factors_by_row[_ri_key] = list(set(_existing_cloud) | set(_cloud_factors))
+                        _cloud4_hit_count += 1
+                logger.info("Stage 5x: cloud IAM phase-4 augmented %d rows for %s", _cloud4_hit_count, assessment_id)
+            except Exception as _cloud_exc:
+                logger.debug("Cloud IAM phase-4 augmentation in Stage 5x failed: %s", _cloud_exc)
+
+            for _row_fx in _factor_scan_rows:
+                if not isinstance(_row_fx, dict):
+                    continue
+                _ri_fx = _row_fx.get("row_index")
+                if _ri_fx is None:
+                    continue
+                try:
+                    _row_factors_fx = set(_lane_factors_by_row.get(int(float(_ri_fx))) or [])
+                except (TypeError, ValueError):
+                    _row_factors_fx = set()
+                _u_fx = _row_user_5x(_row_fx)
+                _h_fx = _row_host_5x(_row_fx)
+                if not _u_fx and _h_fx:
+                    _mapped_users_fx = _host_users_5x.get(_h_fx) or set()
+                    if len(_mapped_users_fx) == 1:
+                        _u_fx = next(iter(_mapped_users_fx))
+                if _u_fx:
+                    _cmd_fx = str(_row_fx.get("command_line") or _row_fx.get("cmdline") or "").lower()
+                    if any(_kw_fx in _cmd_fx for _kw_fx in _RECON_KEYWORDS_5X):
+                        _recon_counts_by_user_5x[_u_fx] = _recon_counts_by_user_5x.get(_u_fx, 0) + 1
+                    if _row_factors_fx:
+                        _lane_factors_by_user.setdefault(_u_fx, set()).update(_row_factors_fx)
+                if _h_fx:
+                    if _row_factors_fx:
+                        _lane_factors_by_host.setdefault(_h_fx, set()).update(_row_factors_fx)
+
+            _RECON_SEQ_MIN_5X = int(os.getenv("JANUSEC_RECON_SEQUENCE_EVENT_MIN", "4"))
+            for _u_recon_5x, _cnt_recon_5x in _recon_counts_by_user_5x.items():
+                if _cnt_recon_5x >= _RECON_SEQ_MIN_5X:
+                    _lane_factors_by_user.setdefault(_u_recon_5x, set()).add("recon:sustained_offhours_sequence")
+
+            def _cluster_principals_5x(cluster: dict) -> set[str]:
+                _vals: set[str] = set()
+                for _key in ("shared_users", "shared_accounts"):
+                    for _v in cluster.get(_key) or []:
+                        if _v:
+                            _vals.add(str(_v).strip().lower())
+                _ap = cluster.get("affected_principals") or {}
+                if isinstance(_ap, dict):
+                    for _key in ("users", "accounts", "service_accounts"):
+                        for _v in _ap.get(_key) or []:
+                            if _v:
+                                _vals.add(str(_v).strip().lower())
+                elif isinstance(_ap, (list, tuple, set)):
+                    for _v in _ap:
+                        if _v:
+                            _vals.add(str(_v).strip().lower())
+                return _vals
+
+            def _cluster_hosts_5x(cluster: dict) -> set[str]:
+                _vals: set[str] = set()
+                for _key in ("shared_hosts", "hosts"):
+                    for _v in cluster.get(_key) or []:
+                        if _v:
+                            _vals.add(str(_v).strip().lower())
+                _ap = cluster.get("affected_principals") or {}
+                if isinstance(_ap, dict):
+                    for _v in _ap.get("hosts") or []:
+                        if _v:
+                            _vals.add(str(_v).strip().lower())
+                return _vals
+
             _fx_count = 0
             for _cl in clusters:
                 _cl_factor_set: set[str] = set(_cl.get("factor_tags") or [])
+                _campaign_factor_set: set[str] = set(_cl.get("_campaign_factor_tags") or [])
                 for _ref in (_cl.get("row_refs") or []):
                     try:
                         _rk = int(float(_ref))
@@ -1267,10 +1600,61 @@ async def run_assessment_pipeline(
                             _cl_factor_set.update(_row_factors)
                     except (TypeError, ValueError):
                         pass
+                for _u_fx in _cluster_principals_5x(_cl):
+                    _campaign_factor_set.update(_lane_factors_by_user.get(_u_fx) or set())
+                for _h_fx in _cluster_hosts_5x(_cl):
+                    _campaign_factor_set.update(_lane_factors_by_host.get(_h_fx) or set())
+                _srcs_fx = {
+                    str(s).strip().lower()
+                    for s in ((_cl.get("sources") or []) + (_cl.get("source_types") or []))
+                    if s
+                }
+                if _global_high_signal_factors_5x and (
+                    "iam" in _srcs_fx
+                    or "identity_kerberos" in _srcs_fx
+                ):
+                    _cl_factor_set.update(_global_high_signal_factors_5x)
+                elif _global_high_signal_factors_5x:
+                    _campaign_factor_set.update(_global_high_signal_factors_5x)
                 if _cl_factor_set:
                     _cl["factor_tags"] = sorted(_cl_factor_set)
                     _fx_count += 1
+                if _campaign_factor_set:
+                    _cl["_campaign_factor_tags"] = sorted(_campaign_factor_set - _cl_factor_set)
             logger.info("Stage 5x: factor tags aggregated into %d clusters for %s", _fx_count, assessment_id)
+
+            # ── Severity retrofix ───────────────────────────────────────────────
+            # Stage 1 (_score_async_ingest_row) runs BEFORE factor_tags exist, so
+            # Kerberos / LOLbin / IAM rows always score medium.  Now that
+            # _lane_factors_by_row is populated, push severity back to both
+            # _factor_scan_rows and filtered_rows so the API returns the right value.
+            _retro_pairs: list[tuple[int, str]] = []
+            for _rk_rt, _rft_rt in _lane_factors_by_row.items():
+                _fts_rt = set(_rft_rt)
+                if _fts_rt & _CRITICAL_SEVERITY_FACTORS:
+                    _retro_pairs.append((_rk_rt, 'critical'))
+                elif _fts_rt & _HIGH_SEVERITY_FACTORS:
+                    _retro_pairs.append((_rk_rt, 'high'))
+            if _retro_pairs:
+                _retro_map: dict[int, str] = dict(_retro_pairs)
+                for _r_rt in (*_factor_scan_rows, *filtered_rows):
+                    _ri_rt = _r_rt.get('row_index')
+                    if _ri_rt is None:
+                        continue
+                    try:
+                        _rk_rt2 = int(float(_ri_rt))
+                    except (TypeError, ValueError):
+                        continue
+                    _new_sev_rt = _retro_map.get(_rk_rt2)
+                    if not _new_sev_rt:
+                        continue
+                    if str(_r_rt.get('_severity') or '').lower() in ('critical', 'high'):
+                        continue
+                    _r_rt['_severity'] = _new_sev_rt
+                    if not _r_rt.get('factor_tags'):
+                        _r_rt['factor_tags'] = sorted(_lane_factors_by_row.get(_rk_rt2) or [])
+                logger.info("Stage 5x: severity retrofix elevated %d rows for %s",
+                            len(_retro_pairs), assessment_id)
         except Exception as exc:
             logger.debug("Lane factor tag aggregation failed for %s: %s", assessment_id, exc)
 
@@ -1308,31 +1692,6 @@ async def run_assessment_pipeline(
         except Exception as exc:
             logger.debug("evidence_preview population failed for %s: %s", assessment_id, exc)
 
-        if clusters:
-            _progress("reasoning", 72, "Generating LLM narratives for top clusters")
-            # Cap narration at 90s for background ingest — avoids blocking the queue
-            # for many minutes when Ollama is under load. Deterministic enrichments
-            # (DREAD, SABSA, cluster intelligence) already ran above and are preserved.
-            _narrate_timeout = float(os.getenv("JANUSEC_INGEST_NARRATE_TIMEOUT_S", "50"))
-            try:
-                from src.core.ingest.cluster_narrator import narrate_top_clusters
-                await asyncio.wait_for(
-                    asyncio.to_thread(
-                        narrate_top_clusters,
-                        clusters,
-                        filtered_rows,
-                        assessment_id=assessment_id,
-                    ),
-                    timeout=_narrate_timeout,
-                )
-            except asyncio.TimeoutError:
-                logger.warning(
-                    "cluster narration timed out (>%.0fs) for %s — using fallback narratives",
-                    _narrate_timeout, assessment_id,
-                )
-            except Exception as exc:
-                logger.warning("cluster narration failed for %s: %s", assessment_id, exc)
-
         # ── Stage 5g: feed IdentityGraph + MLSignalAggregator ───────────────
         # Populates GLOBAL_IDENTITY_GRAPH so retrieve_identity_context() in persona
         # dispatch has real lateral-movement paths for this assessment's actors.
@@ -1357,6 +1716,15 @@ async def run_assessment_pipeline(
                 "(%d users tracked by ML aggregator)",
                 _ig_count, assessment_id, len(_ml_agg),
             )
+            # Flush to SQLite so TemporalRAG.retrieve_identity_context() can read
+            # the lateral-movement paths built above during persona dispatch.
+            try:
+                from src.core.graph.global_identity_graph import flush_global_identity_graph
+                flush_global_identity_graph()
+                logger.info("Stage 5g: identity graph flushed for %s", assessment_id)
+            except Exception as _flush_exc:
+                logger.debug("Stage 5g: identity graph flush failed for %s: %s",
+                             assessment_id, _flush_exc)
         except Exception as exc:
             logger.debug("IdentityGraph ingestion skipped for %s: %s", assessment_id, exc)
 
@@ -1367,11 +1735,29 @@ async def run_assessment_pipeline(
             _bl_user_counts: dict[str, int] = {}
             _bl_host_counts: dict[str, int] = {}
             _bl_user_bytes: dict[str, float] = {}
+            _host_users_bl: dict[str, set[str]] = {}
             for _row_bl in filtered_rows:
                 if not isinstance(_row_bl, dict):
                     continue
                 _u = str(_row_bl.get("user_canonical") or _row_bl.get("user") or "").strip().lower()
-                _h = str(_row_bl.get("host") or _row_bl.get("hostname") or "").strip().lower()
+                _h = str(
+                    _row_bl.get("host") or _row_bl.get("hostname") or
+                    _row_bl.get("src_host") or _row_bl.get("source_host") or ""
+                ).strip().lower()
+                if _u and _h:
+                    _host_users_bl.setdefault(_h, set()).add(_u)
+            for _row_bl in filtered_rows:
+                if not isinstance(_row_bl, dict):
+                    continue
+                _u = str(_row_bl.get("user_canonical") or _row_bl.get("user") or "").strip().lower()
+                _h = str(
+                    _row_bl.get("host") or _row_bl.get("hostname") or
+                    _row_bl.get("src_host") or _row_bl.get("source_host") or ""
+                ).strip().lower()
+                if not _u and _h:
+                    _mapped_users = _host_users_bl.get(_h) or set()
+                    if len(_mapped_users) == 1:
+                        _u = next(iter(_mapped_users))
                 if _u:
                     _bl_user_counts[_u] = _bl_user_counts.get(_u, 0) + 1
                     _bytes = float(_row_bl.get("bytes_out") or _row_bl.get("bytes_sent") or _row_bl.get("bytes") or 0)
@@ -1397,6 +1783,8 @@ async def run_assessment_pipeline(
         # Moved before persona dispatch so retrieve_chrono_anomalies() sees current data.
         # Extended with: off-hours recon sequence, cloud bytes exfil, first-seen host.
         _chrono_first_seen: dict[str, set] = {}  # user -> new hosts seen this assessment
+        _chrono_offhours_recon_counts: dict[str, int] = {}
+        _chrono_recon_days: dict[str, set[str]] = {}
         try:
             from src.core.chrono.sketch_store import CHRONO as _chrono
             _ch_rows = 0
@@ -1425,6 +1813,25 @@ async def run_assessment_pipeline(
                 except Exception:
                     return False
 
+            def _local_day_5i(ts_epoch: float) -> str:
+                try:
+                    import datetime as _dt
+                    return _dt.datetime.utcfromtimestamp(ts_epoch + (_tz_offset_h * 3600)).strftime("%Y-%m-%d")
+                except Exception:
+                    return ""
+
+            _host_users_5i: dict[str, set[str]] = {}
+            for _row_hu in filtered_rows:
+                if not isinstance(_row_hu, dict):
+                    continue
+                _u_hu = str(_row_hu.get("user_canonical") or _row_hu.get("user") or "").strip().lower()
+                _h_hu = str(
+                    _row_hu.get("host") or _row_hu.get("hostname") or
+                    _row_hu.get("src_host") or _row_hu.get("source_host") or ""
+                ).strip().lower()
+                if _u_hu and _h_hu:
+                    _host_users_5i.setdefault(_h_hu, set()).add(_u_hu)
+
             for _row_ch in filtered_rows:
                 if not isinstance(_row_ch, dict):
                     continue
@@ -1432,9 +1839,20 @@ async def run_assessment_pipeline(
                 if not _ts_ch:
                     continue
                 _u_ch = str(_row_ch.get("user_canonical") or _row_ch.get("user") or "").strip().lower()
-                _h_ch = str(_row_ch.get("host") or _row_ch.get("hostname") or "").strip().lower()
+                _h_ch = str(
+                    _row_ch.get("host") or _row_ch.get("hostname") or
+                    _row_ch.get("src_host") or _row_ch.get("source_host") or ""
+                ).strip().lower()
+                if not _u_ch and _h_ch:
+                    _mapped_users_ch = _host_users_5i.get(_h_ch) or set()
+                    if len(_mapped_users_ch) == 1:
+                        _u_ch = next(iter(_mapped_users_ch))
+                        _row_ch["_chrono_inferred_user"] = _u_ch
                 _b_ch = float(_row_ch.get("bytes_out") or _row_ch.get("bytes_sent") or _row_ch.get("bytes") or 0)
-                _dst_h_ch = str(_row_ch.get("dst_host") or _row_ch.get("resp_h") or "").strip().lower()
+                _dst_h_ch = str(
+                    _row_ch.get("dst_host") or _row_ch.get("resp_h") or
+                    _row_ch.get("domain") or _row_ch.get("tls_sni") or ""
+                ).strip().lower()
                 _src_type_ch = str(_row_ch.get("_source_type") or _row_ch.get("source_type") or "").lower()
 
                 if _u_ch:
@@ -1450,8 +1868,12 @@ async def run_assessment_pipeline(
                     # Recon event tracking (Gap 1 fix)
                     if _is_recon_cmd_5i(_row_ch):
                         _chrono.increment("user", _u_ch, "recon_events", 1.0, ts=_ts_ch)
+                        _day_ch = _local_day_5i(_ts_ch)
+                        if _day_ch:
+                            _chrono_recon_days.setdefault(_u_ch, set()).add(_day_ch)
                         if _is_off_hours_5i(_ts_ch):
                             _chrono.increment("user", _u_ch, "off_hours_recon_events", 1.0, ts=_ts_ch)
+                            _chrono_offhours_recon_counts[_u_ch] = _chrono_offhours_recon_counts.get(_u_ch, 0) + 1
                     elif _is_off_hours_5i(_ts_ch):
                         _chrono.increment("user", _u_ch, "off_hours_events", 1.0, ts=_ts_ch)
                     # First-seen host tracking (Gap 5 fix): query BEFORE incrementing
@@ -1526,13 +1948,16 @@ async def run_assessment_pipeline(
         try:
             from src.core.chrono.sketch_store import CHRONO as _chrono_j
             _BREACH_VERD_5J = {"VALIDATED_BREACH", "LIKELY_BREACH", "LIKELY_COMPROMISE", "INCIDENT"}
+            _RECON_SEQ_MIN_5J = int(os.getenv("JANUSEC_OFFHOURS_RECON_SEQUENCE_MIN", "4"))
+            _RECON_SEQ_DAYS_5J = int(os.getenv("JANUSEC_RECON_SEQUENCE_DAYS_MIN", "4"))
             for _cl_j in clusters:
                 _verd_j = str(_cl_j.get("final_verdict") or _cl_j.get("verdict") or "").upper()
                 if _verd_j not in _BREACH_VERD_5J:
                     continue
                 _princ_j = list(
                     _cl_j.get("affected_principals") or
-                    _cl_j.get("shared_accounts") or []
+                    _cl_j.get("shared_accounts") or
+                    _cl_j.get("shared_users") or []
                 )
                 _new_f: list[str] = []
                 for _u_j in _princ_j[:4]:
@@ -1542,7 +1967,12 @@ async def run_assessment_pipeline(
                     # Gap 1: off-hours recon sequence
                     _rz = _chrono_j.z_score("user", _u_j, "off_hours_recon_events",
                                             window_seconds=86400 * 7)
-                    if _rz.get("anomaly") or abs(float(_rz.get("z") or 0)) >= 2.5:
+                    if (
+                        _rz.get("anomaly")
+                        or abs(float(_rz.get("z") or 0)) >= 2.5
+                        or _chrono_offhours_recon_counts.get(_u_j, 0) >= _RECON_SEQ_MIN_5J
+                        or len(_chrono_recon_days.get(_u_j) or set()) >= _RECON_SEQ_DAYS_5J
+                    ):
                         _new_f.append("recon:sustained_offhours_sequence")
                     # Gap 2: cumulative bytes anomaly
                     _bz = _chrono_j.z_score("user", _u_j, "bytes_out",
@@ -1563,6 +1993,10 @@ async def run_assessment_pipeline(
                         if _ff not in _existing_f:
                             _existing_f.append(_ff)
                     _cl_j["_chrono_factors"] = list(set(_new_f))
+                    _cl_j["_chrono_first_seen"] = {
+                        _u: sorted(_hosts) for _u, _hosts in _chrono_first_seen.items()
+                        if _u in {str(p).strip().lower() for p in _princ_j if p}
+                    }
             logger.info("Stage 5j: ChronoGraph anomaly elevation done for %s", assessment_id)
         except Exception as exc:
             logger.debug("Stage 5j ChronoGraph elevation skipped for %s: %s", assessment_id, exc)
@@ -1603,6 +2037,22 @@ async def run_assessment_pipeline(
                     float(agg_summary.get("peak_ewma_residual") or 0.0),
                 ]
 
+            # Bootstrap ISO model from this assessment's user feature vectors before scoring
+            _iso_boot_vecs: list[list[float]] = []
+            for _u_boot in _ml_agg_gp.all_users():
+                try:
+                    _boot_sum = _ml_agg_gp.summary(_u_boot)
+                    _boot_vec = _build_user_feature_vector(_u_boot, _chrono_gp, _boot_sum)
+                    _iso_boot_vecs.append(_boot_vec)
+                except Exception:
+                    continue
+            if len(_iso_boot_vecs) >= 5:
+                try:
+                    _iso_gp.fit_partial(_iso_boot_vecs)
+                    logger.info("Stage 5g+: ISO bootstrap trained on %d user vectors for %s", len(_iso_boot_vecs), assessment_id)
+                except Exception as _iso_boot_exc:
+                    logger.debug("Stage 5g+ ISO bootstrap failed for %s: %s", assessment_id, _iso_boot_exc)
+
             _BREACH_VERD_GP = {"VALIDATED_BREACH", "LIKELY_BREACH", "LIKELY_COMPROMISE", "INCIDENT"}
             for _cl_gp in clusters:
                 _verd_gp = str(_cl_gp.get("final_verdict") or _cl_gp.get("verdict") or "").upper()
@@ -1610,7 +2060,8 @@ async def run_assessment_pipeline(
                     continue
                 _princ_gp = [
                     str(u).strip().lower() for u in (
-                        _cl_gp.get("affected_principals") or _cl_gp.get("shared_accounts") or []
+                        _cl_gp.get("affected_principals") or _cl_gp.get("shared_accounts") or
+                        _cl_gp.get("shared_users") or []
                     ) if u
                 ][:4]
                 _ml_tags: list[str] = []
@@ -1650,6 +2101,32 @@ async def run_assessment_pipeline(
                         "anomaly_rate": round(float(_agg_sum.get("anomaly_rate") or 0), 3),
                     }
 
+                    # Index into TemporalRAG so future assessments can retrieve
+                    # prior ML anomalies for this user (fifth RAG silo)
+                    if _ml_tags or _cross_iso > 0.50 or _risk > 0.50:
+                        try:
+                            from src.analysis.temporal_rag_dispatch import TemporalRAGProvider as _TRP_gp
+                            _rag_idx = _TRP_gp(
+                                incident_store=_get_incident_index(),
+                                decision_store=_get_trace_store(),
+                                tenant_id=org,
+                            )
+                            _z_snap = {
+                                "off_hours_recon_events": _safe_z(_chrono_gp, "user", _u_gp, "off_hours_recon_events"),
+                                "bytes_out": _safe_z(_chrono_gp, "user", _u_gp, "bytes_out"),
+                                "iam:rc4_count": _safe_z(_chrono_gp, "user", _u_gp, "iam:rc4_count"),
+                            }
+                            _rag_idx.index_ml_anomaly(
+                                user=_u_gp,
+                                iso_score=max(_cross_iso, float(_agg_sum.get("peak_iso") or 0)),
+                                z_scores=_z_snap,
+                                factor_tags=_ml_tags or list(_cl_gp.get("factor_tags") or [])[:6],
+                                assessment_id=assessment_id,
+                                ts=_time_gp.time(),
+                            )
+                        except Exception:
+                            pass
+
                 # Apply tags and triage boost
                 if _ml_tags:
                     _existing_gp = _cl_gp.setdefault("factor_tags", [])
@@ -1678,12 +2155,89 @@ async def run_assessment_pipeline(
         except Exception as exc:
             logger.debug("Stage 5k compliance mapping skipped for %s: %s", assessment_id, exc)
 
+        # ── Stage 5l: cross-engine Pattern Synthesis ──────────────────────────
+        # Depends on Stage 5g (IdentityGraph), 5i (ChronoGraph accumulation),
+        # 5j (z-score elevation), and 5g+ (ML signals) completing first.
+        # Produces a unified per-principal anomaly multiplier that boosts cluster
+        # confidence when BOTH temporal anomaly AND graph risk are elevated.
+        try:
+            from src.core.synthesis.pattern_synthesizer import synthesize_cluster_signals
+            from src.core.chrono.sketch_store import CHRONO as _CHRONO_5l
+            from src.core.graph.identity_hopgraph import GLOBAL_IDENTITY_GRAPH as _IG_5l
+            # ASSESSMENT_ML_SIGNALS is populated by Stage 5g — each event's iso/ensemble
+            # scores are recorded there.  We query per principal below.
+            from src.ml.signal_aggregator import ASSESSMENT_ML_SIGNALS as _ML_5l
+            _synth_boosted = 0
+            for _cl_5l in clusters:
+                if not _is_breach_cluster(_cl_5l):
+                    continue
+                try:
+                    # Build a per-cluster ml_signals dict: best peak across all principals
+                    _princ_5l = list(dict.fromkeys(
+                        (_cl_5l.get('shared_accounts') or []) +
+                        (_cl_5l.get('shared_users') or [])
+                    ))[:5]
+                    _best_ml: dict = {}
+                    for _p5l in _princ_5l:
+                        _s5l = _ML_5l.summary(str(_p5l).strip().lower())
+                        if float(_s5l.get('peak_iso') or 0) > float(_best_ml.get('peak_iso') or 0):
+                            _best_ml = _s5l
+                    _syn = synthesize_cluster_signals(_cl_5l, _CHRONO_5l, _IG_5l, _best_ml)
+                    _cl_5l['_synthesis'] = _syn
+                    if _syn.get('triggered'):
+                        _cl_5l['confidence'] = min(
+                            1.0,
+                            float(_cl_5l.get('confidence') or 0.0) + _syn['confidence_boost'],
+                        )
+                        _ftags_5l = list(_cl_5l.get('factor_tags') or [])
+                        if 'identity:cross_engine_anomaly' not in _ftags_5l:
+                            _ftags_5l.append('identity:cross_engine_anomaly')
+                            _cl_5l['factor_tags'] = _ftags_5l
+                        _synth_boosted += 1
+                except Exception as _syn_err:
+                    logger.debug('Pattern Synthesizer failed for cluster %s: %s',
+                                 _cl_5l.get('cluster_id'), _syn_err)
+            logger.info(
+                'Stage 5l: Pattern Synthesis done for %s — %d clusters boosted',
+                assessment_id, _synth_boosted,
+            )
+        except Exception as exc:
+            logger.debug('Stage 5l Pattern Synthesis skipped for %s: %s', assessment_id, exc)
+
         # ── Stage 5d: persona dispatch + framework mapping + bitemporal trace ──
         # Enriches each breach cluster's narrative with structured data (affected
         # principals, data sensitivity, attacker infra), builds the control
         # failure register, generates per-persona dispatch payloads, and wraps
         # each in a bitemporal decision trace for audit replay.
         # NOTE: Runs AFTER 5g/5h/5i/5j so IdentityGraph and ChronoGraph are populated.
+        if clusters:
+            _progress("reasoning", 76, "Generating grounded LLM narratives for top clusters")
+            _narrate_timeout = float(os.getenv("JANUSEC_INGEST_NARRATE_TIMEOUT_S", "50"))
+            try:
+                from src.core.ingest.cluster_narrator import narrate_top_clusters
+                await asyncio.wait_for(
+                    asyncio.to_thread(
+                        narrate_top_clusters,
+                        clusters,
+                        filtered_rows,
+                        assessment_id=assessment_id,
+                    ),
+                    timeout=_narrate_timeout,
+                )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "cluster narration timed out (>%.0fs) for %s - using fallback narratives",
+                    _narrate_timeout, assessment_id,
+                )
+            except Exception as exc:
+                logger.warning("cluster narration failed for %s: %s", assessment_id, exc)
+
+            # Post-hoc confidence calibration: when LLM is unavailable the fallback
+            # hard-codes 0.3. Evidence-weight floor prevents a 49-row VALIDATED_BREACH
+            # cluster from showing the same confidence as a 2-row REQUIRES_INVESTIGATION.
+            for _cl_cal in clusters:
+                _calibrate_cluster_confidence(_cl_cal)
+
         _progress("reasoning", 78, "Building persona dispatch payloads")
         try:
             _enrich_and_dispatch_personas(assessment, clusters, filtered_rows, org)
@@ -1692,15 +2246,41 @@ async def run_assessment_pipeline(
 
         # ── Stage 5e: index evidence rows into TemporalRAG ───────────────────
         try:
-            from src.ai.temporal_rag import get_engine as _get_rag_engine
-            _rag = _get_rag_engine()
-            if _rag is not None:
-                _rag_cap = int(os.getenv("JANUSEC_TEMPORAL_RAG_INDEX_CAP", "200"))
-                _rag_rows = filtered_rows[:_rag_cap] if _rag_cap > 0 else []
-                _rag_count = _rag.index_rows(_rag_rows, tenant=org) if _rag_rows else 0
+            _rag_cap = int(os.getenv("JANUSEC_TEMPORAL_RAG_INDEX_CAP", "25"))
+            _rag_async = os.getenv("JANUSEC_TEMPORAL_RAG_INDEX_ASYNC", "1").strip().lower() not in {"0", "false", "no"}
+            _rag_rows = [dict(r) for r in (filtered_rows[:_rag_cap] if _rag_cap > 0 else []) if isinstance(r, dict)]
+
+            def _index_temporal_rag_rows(rows_snapshot: list[dict]) -> int:
+                from src.ai.temporal_rag import get_engine as _get_rag_engine
+                _rag = _get_rag_engine()
+                return _rag.index_rows(rows_snapshot, tenant=org, assessment_id=assessment_id) if _rag and rows_snapshot else 0
+
+            if _rag_rows and _rag_async:
+                async def _run_temporal_rag_index() -> None:
+                    try:
+                        _rag_count = await asyncio.to_thread(_index_temporal_rag_rows, _rag_rows)
+                        logger.info(
+                            "Stage 5e: background indexed %d/%d rows into TemporalRAG for %s (cap=%d)",
+                            _rag_count, len(filtered_rows), assessment_id, _rag_cap,
+                        )
+                    except Exception as exc:
+                        logger.debug("TemporalRAG background row indexing skipped for %s: %s", assessment_id, exc)
+
+                asyncio.create_task(_run_temporal_rag_index())
+                logger.info(
+                    "Stage 5e: queued TemporalRAG background indexing for %s (%d/%d rows, cap=%d)",
+                    assessment_id, len(_rag_rows), len(filtered_rows), _rag_cap,
+                )
+            elif _rag_rows:
+                _rag_count = await asyncio.to_thread(_index_temporal_rag_rows, _rag_rows)
                 logger.info(
                     "Stage 5e: indexed %d/%d rows into TemporalRAG for %s (cap=%d)",
                     _rag_count, len(filtered_rows), assessment_id, _rag_cap,
+                )
+            else:
+                logger.info(
+                    "Stage 5e: TemporalRAG row indexing disabled for %s (cap=%d)",
+                    assessment_id, _rag_cap,
                 )
         except Exception as exc:
             logger.debug("TemporalRAG row indexing skipped for %s: %s", assessment_id, exc)
@@ -1912,8 +2492,18 @@ _INCIDENT_INDEX = None
 def _get_trace_store():
     global _TRACE_STORE
     if _TRACE_STORE is None:
-        from src.analysis.bitemporal_dispatch_trace import InMemoryDecisionTraceStore
-        _TRACE_STORE = InMemoryDecisionTraceStore()
+        db_path = os.path.join(
+            os.getenv('SESSION_PERSIST_DIR', 'data/sessions'),
+            'decision_trace.db',
+        )
+        try:
+            from src.analysis.bitemporal_dispatch_trace import SQLiteDecisionTraceStore
+            _TRACE_STORE = SQLiteDecisionTraceStore(db_path)
+            logger.info('Bitemporal decision trace: SQLite at %s', db_path)
+        except Exception as _exc:
+            logger.warning('SQLiteDecisionTraceStore unavailable (%s) — falling back to in-memory', _exc)
+            from src.analysis.bitemporal_dispatch_trace import InMemoryDecisionTraceStore
+            _TRACE_STORE = InMemoryDecisionTraceStore()
     return _TRACE_STORE
 
 
@@ -2003,10 +2593,51 @@ def _enrich_and_dispatch_personas(
             tenant_classification=tenant_class,
         )
         # Carry forward MITRE techniques from cluster if not in narrative,
-        # then fall back to inference from Diamond/kill-chain/DREAD fragments.
+        # then run inference from factor_tags / Diamond / kill-chain / DREAD fragments.
         if not narrative.get('mitre_techniques'):
             explicit = cl.get('mitre_techniques') or cl.get('mitre_tags') or []
             narrative['mitre_techniques'] = explicit
+        # Always run inference when list is still empty (cluster.mitre_techniques is
+        # often [] because it's set by the LLM narrator which may have been skipped).
+        if not narrative.get('mitre_techniques'):
+            try:
+                from src.analysis.framework_mapper import _infer_mitre_from_cluster
+                inferred = _infer_mitre_from_cluster(cl)
+                if inferred:
+                    narrative['mitre_techniques'] = inferred
+                    # Write back so report endpoints and hopgraph can read it
+                    cl['mitre_techniques'] = inferred
+            except Exception as _mitre_err:
+                logger.debug("MITRE inference failed for cluster %s: %s",
+                             cl.get('cluster_id'), _mitre_err)
+
+        # Stamp MITRE and cluster_id onto each evidence row so the Evidence UI
+        # can display MITRE per-row and filter by cluster.
+        cl_mitre = narrative.get('mitre_techniques') or cl.get('mitre_techniques') or []
+        cluster_id_stamp = cl.get('cluster_id') or ''
+        if cl_mitre or cluster_id_stamp:
+            for ref in (cl.get('row_refs') or []):
+                try:
+                    k = int(float(ref))
+                    if k in row_lookup:
+                        row = row_lookup[k]
+                        if cl_mitre and not row.get('mitre_technique'):
+                            row['mitre_technique'] = cl_mitre[0]
+                        if cl_mitre and not row.get('mitre_techniques'):
+                            row['mitre_techniques'] = cl_mitre
+                        if cluster_id_stamp and not row.get('correlation_cluster_id'):
+                            row['correlation_cluster_id'] = cluster_id_stamp
+                except (TypeError, ValueError):
+                    pass
+
+        # Carry forward Stage 5k compliance violations + Stage 5g+ ML scores
+        # so build_persona_dispatch can inject them into LLM prompts.
+        if cl.get('compliance_violations'):
+            narrative.setdefault('compliance_violations', cl['compliance_violations'])
+        if cl.get('_ml_scores'):
+            narrative.setdefault('_ml_scores', cl['_ml_scores'])
+        if cl.get('factor_tags'):
+            narrative.setdefault('factor_tags', cl['factor_tags'])
 
         # Step 3: Build control failure register — pass cluster for MITRE inference
         register = build_control_failure_register(
@@ -2025,6 +2656,19 @@ def _enrich_and_dispatch_personas(
             )
         except Exception:
             pass
+
+        # Assert cluster deterministic verdict into narrative when it ranks higher
+        # than the LLM narrative verdict (which defaults to REQUIRES_INVESTIGATION
+        # when the narrator falls back or is skipped).  Without this, audit persona
+        # always says "Unqualified opinion" even for VALIDATED_BREACH clusters.
+        cl_verdict = str(cl.get('verdict') or '')
+        narrative_verdict = str(narrative.get('verdict') or '')
+        if _VERDICT_RANK.get(cl_verdict, 0) > _VERDICT_RANK.get(narrative_verdict, 0):
+            narrative['verdict'] = cl_verdict
+            narrative['confidence'] = max(
+                float(narrative.get('confidence') or 0.5),
+                float(cl.get('confidence') or 0.7),
+            )
 
         cluster_id = cl.get('cluster_id') or '?'
         payloads = build_all_personas(
@@ -2291,6 +2935,7 @@ def _generate_deterministic_executive_summary(
     _asn_counter: _Counter = _Counter()
     _high_risk_users: set[str] = set()
     _top_evidence_rows: list[dict] = []
+    _breach_factor_counter: _Counter = _Counter()
 
     for _r in (rows or []):
         if not isinstance(_r, dict):
@@ -2298,7 +2943,10 @@ def _generate_deterministic_executive_summary(
         _u = str(_r.get("user_canonical") or _r.get("user") or "").strip().lower()
         if _u and _u not in ("-", "n/a", "system", "root", ""):
             _user_counter[_u] += 1
-        _dom = str(_r.get("external_recipient_domain") or "").strip().lower()
+        _dom = str(
+            _r.get("external_recipient_domain") or _r.get("dst_host") or
+            _r.get("resp_h") or _r.get("destination_host") or ""
+        ).strip().lower()
         if _dom and "." in _dom:
             _ext_domain_counter[_dom] += 1
         _ctry = str(_r.get("country") or _r.get("src_country") or "").strip().upper()
@@ -2324,6 +2972,11 @@ def _generate_deterministic_executive_summary(
     _top_domains = [d for d, _ in _ext_domain_counter.most_common(3)]
     _top_countries = [c for c, _ in _country_counter.most_common(3)]
     _top_asns = [a for a, _ in _asn_counter.most_common(3)]
+    for _bc in breach_clusters:
+        for _f in (_bc.get("factor_tags") or []) + (_bc.get("_chrono_factors") or []):
+            if _f:
+                _breach_factor_counter[str(_f)] += 1
+    _top_factors = [f for f, _ in _breach_factor_counter.most_common(12)]
 
     # Aggregate compliance violations across breach clusters → top-level field.
     _compliance_lines: list[str] = []
@@ -2386,6 +3039,8 @@ def _generate_deterministic_executive_summary(
         _narrative_parts.append(
             f"External destinations: {', '.join(_top_domains)}."
         )
+    if _top_factors:
+        _narrative_parts.append("Material signals: " + ", ".join(_top_factors) + ".")
     if _top_evidence_rows:
         _ev_bits = []
         for _ev in _top_evidence_rows:
@@ -2421,6 +3076,7 @@ def _generate_deterministic_executive_summary(
             "source_countries": _top_countries,
             "source_asns": _top_asns,
             "high_risk_users": sorted(_high_risk_users),
+            "top_factors": _top_factors,
         },
         "verdict_counts": verdict_counts,
         "compliance_violations": _compliance_violations,

@@ -1226,6 +1226,41 @@ async def upload_multiple_files(
 
     total_processing_time = (time.time() - start_time) * 1000
 
+    # ── MITRE enrichment: replace hardcoded technique stubs with file-aware IDs ─
+    # Processors return generic ['T1005','T1074'] regardless of content. Use the
+    # filename + detected severity counts to set more accurate technique IDs.
+    _FNAME_MITRE: dict[str, list[str]] = {
+        'kerberos':    ['T1558.003', 'T1558.004', 'T1558', 'T1078'],
+        'identity':    ['T1078', 'T1078.004', 'T1110'],
+        'cloud':       ['T1078.004', 'T1530', 'T1537'],
+        'lolbin':      ['T1059.003', 'T1047', 'T1218', 'T1053.005'],
+        'endpoint':    ['T1059', 'T1055', 'T1021.001'],
+        'network':     ['T1071.001', 'T1041', 'T1571'],
+        'email':       ['T1114.003', 'T1114', 'T1566.001'],
+        'exchange':    ['T1114.003', 'T1114', 'T1566.001'],
+        'gmail':       ['T1114', 'T1566.001'],
+        'dns':         ['T1071.004', 'T1568'],
+        'vpc':         ['T1071.001', 'T1041'],
+        'cloudtrail':  ['T1078.004', 'T1530', 'T1537'],
+    }
+    for _r_mitre in results:
+        _fname_lc = (_r_mitre.get('filename') or '').lower()
+        _mitre_from_name: list[str] = []
+        for _hint, _tids in _FNAME_MITRE.items():
+            if _hint in _fname_lc:
+                _mitre_from_name.extend(_tids)
+        if _mitre_from_name:
+            _analysis = _r_mitre.get('analysis')
+            if isinstance(_analysis, dict):
+                # Merge with any techniques already set, deduplicate
+                _existing = list(_analysis.get('mitre_techniques') or [])
+                _seen_t: set[str] = set(_existing)
+                for _t in _mitre_from_name:
+                    if _t not in _seen_t:
+                        _existing.append(_t)
+                        _seen_t.add(_t)
+                _analysis['mitre_techniques'] = _existing[:10]
+
     # Prometheus: observe aggregate payload size in bytes
     try:
         if _upload_bytes_hist is not None:
@@ -1489,19 +1524,35 @@ _REVIEW_COLS: tuple[str, ...] = (
 _INDICATOR_COLS: tuple[str, ...] = (
     'event_type', 'action', 'alert_type', 'process', 'threat_indicator',
     'technique', 'sub_technique', 'kill_chain_phase', 'mitre_tactic',
+    # Kerberos / Windows event fields
+    'windows_event_id', 'ticket_encryption', 'service_name',
+    # Endpoint / Sysmon fields
+    'command_line', 'process_name', 'parent_process', 'sysmon_event_id',
 )
 
 # Full-word (or phrase-boundary) patterns used only on _INDICATOR_COLS values.
 _CRIT_RE = _re.compile(
     r'\b(lsass|mimikatz|ransomware|exfiltrat(?:ion|ed)?|reflective[\s_-]dll|'
-    r'shellcode|credential[\s_-]dump|pass[\s_-]the[\s_-]hash|golden[\s_-]ticket)\b',
+    r'shellcode|credential[\s_-]dump|pass[\s_-]the[\s_-]hash|golden[\s_-]ticket|'
+    r'kerberoast(?:ing)?|as[\s_-]rep[\s_-]roast|asrep|dcsync|skeleton[\s_-]key|'
+    r'overpass[\s_-]the[\s_-]hash|silver[\s_-]ticket|diamond[\s_-]ticket|'
+    r'secretsdump|ntds\.dit)\b'
+    r'|0x17|0x18',  # RC4 Kerberos encryption = kerberoasting
     _re.I,
 )
 _HIGH_RE = _re.compile(
     r'\b(lateral[\s_-]movement|privilege[\s_-]escal|psexec|beaconing|'
-    r'process[\s_-]inject|wmi[\s_-]exec|hollow(?:ing)?|token[\s_-]impersonate)\b',
+    r'process[\s_-]inject|wmi[\s_-]exec|hollow(?:ing)?|token[\s_-]impersonate|'
+    r'lolbin|living[\s_-]off[\s_-]the[\s_-]land|scheduled[\s_-]task|'
+    r'certutil|mshta|bitsadmin|regsvr32|rundll32[\s_-]comsvcs|'
+    r'invoke[\s_-]expression|iex\b|downloadstring|net[\s_-]use\b|'
+    r'shadow[\s_-]cop|vssadmin|bcdedit|wbadmin)\b',
     _re.I,
 )
+
+# Kerberos Windows EventIDs that indicate attack techniques
+_KERB_CRIT_EIDS = frozenset({'4769', '4768', '4771', '4776'})  # ticket requests / pre-auth fail
+_KERB_HIGH_EIDS = frozenset({'4624', '4625', '4648', '4720', '4728', '4732', '4756', '7045', '4104'})
 
 # Explicit severity string normalisation map.
 _SEV_CANONICAL: dict[str, str] = {
@@ -1554,7 +1605,21 @@ def _classify_row_severity(row: dict[str, Any]) -> str:
         if any(t in val for t in ('benign', 'false_positive', 'cleared', 'closed')):
             return 'low'
 
-    # 3. Targeted indicator-column heuristic (word-boundary patterns only)
+    # 3. Windows EventID fast-path (Kerberos / Windows Security events)
+    _eid = str(row.get('windows_event_id') or row.get('EventID') or '').strip()
+    if _eid in _KERB_CRIT_EIDS:
+        # EventID 4769 with RC4 encryption (0x17/0x18) = kerberoasting
+        _enc = str(row.get('ticket_encryption') or '').strip()
+        if _eid == '4769' and _enc in ('0x17', '0x18', '23', '24'):
+            return 'critical'
+        # EventID 4768 with pre-auth disabled = AS-REP roasting
+        if _eid == '4768' and str(row.get('pre_auth_type') or '').strip() in ('0', '0x0'):
+            return 'critical'
+        return 'high'
+    if _eid in _KERB_HIGH_EIDS:
+        return 'high'
+
+    # 4. Targeted indicator-column heuristic (word-boundary patterns only)
     for col in _INDICATOR_COLS:
         val = str(row.get(col) or '')
         if not val:

@@ -23,6 +23,12 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from src.analysis.persona_quality_gate import (
+    output_grounding_score as _output_grounding_score,
+    summary_sections_complete_for_elevated as _summary_sections_complete_for_elevated,
+    summary_sections_useful as _summary_sections_useful,
+)
+
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix='/api/v1/assessments', tags=['tier2-canvas'])
 _LLM = None
@@ -655,6 +661,37 @@ def _get_assessment(assessment_id: str) -> Optional[dict]:
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 
+def _assessment_clusters(assessment: dict) -> list[dict]:
+    return (
+        assessment.get('correlation_clusters')
+        or assessment.get('analysis_clusters')
+        or assessment.get('raw_correlation_clusters')
+        or assessment.get('clusters')
+        or []
+    )
+
+
+def _assessment_rows_for_cluster(assessment: dict, cluster: dict, *, limit: int | None = None) -> List[dict]:
+    """Return cluster evidence rows for both live and disk-backed assessment shapes."""
+    rr_set = set(cluster.get('row_refs') or [])
+    candidate_rows = (
+        assessment.get('normalized_rows')
+        or assessment.get('rows')
+        or assessment.get('evidence_rows')
+        or []
+    )
+    rows = [
+        r for r in candidate_rows
+        if isinstance(r, dict) and (
+            r.get('row_number') in rr_set
+            or r.get('row_index') in rr_set
+        )
+    ]
+    if not rows:
+        rows = [r for r in (cluster.get('evidence_preview') or []) if isinstance(r, dict)]
+    return rows[:limit] if limit else rows
+
+
 @router.get('/{assessment_id}/clusters/{cluster_id}/tier2')
 async def get_tier2_steps(assessment_id: str, cluster_id: str, request: Request) -> dict:
     tenant_id = _get_tenant(request)
@@ -674,12 +711,10 @@ async def get_tier2_steps(assessment_id: str, cluster_id: str, request: Request)
     cluster: dict = {}
     rows: List[dict] = []
     if assessment:
-        for c in (assessment.get('correlation_clusters') or []):
+        for c in _assessment_clusters(assessment):
             if c.get('cluster_id') == cluster_id:
                 cluster = c
-                rr_set = set(c.get('row_refs') or [])
-                rows = [r for r in (assessment.get('normalized_rows') or assessment.get('rows') or [])
-                        if r.get('row_number') in rr_set or r.get('row_index') in rr_set]
+                rows = _assessment_rows_for_cluster(assessment, c)
                 break
 
     steps = _generate_steps(cluster, rows)
@@ -1686,12 +1721,18 @@ def _build_persona_fallback_summary(persona: str, cluster: dict, rows: list[dict
         (entities['accounts'] or entities['hosts'] or entities['ips'] or entities['domains'] or [cluster.get('cluster_id') or 'selected cluster'])[0]
     )
     severity = str(cluster.get('severity') or 'unknown').upper()
+    cluster_verdict = str(cluster.get('verdict') or cluster.get('final_verdict') or '').upper()
     confidence = cluster.get('confidence')
     try:
         confidence_text = f"{float(confidence) * 100:.0f}%"
     except Exception:
         confidence_text = 'unknown'
     reason = cluster.get('reason_summary') or cluster.get('business_significance') or 'shared evidence across uploaded sources'
+    factors = [
+        str(f) for f in ((cluster.get('factor_tags') or []) + (cluster.get('_chrono_factors') or []))
+        if f
+    ][:8]
+    factor_text = ', '.join(factors) if factors else 'no named factors persisted'
     owner = meta['label'].replace(' briefing', '')
 
     if key in ('soc_analyst', 'mssp'):
@@ -1782,17 +1823,27 @@ def _build_persona_fallback_summary(persona: str, cluster: dict, rows: list[dict
         investigate = 'Confirm ownership, collect missing telemetry, and document the evidence that would change the verdict.'
 
     what_to_do = _render_persona_steps(steps)
+    verdict_label = 'LIKELY REAL' if (
+        'BREACH' in cluster_verdict or 'COMPROMISE' in cluster_verdict or severity in {'CRITICAL', 'HIGH'}
+    ) else 'UNCERTAIN'
+    verdict_reason = (
+        f"{cluster_verdict or severity} cluster with factors {factor_text}; strongest evidence is {_refs_text(refs)}."
+        if verdict_label == 'LIKELY REAL'
+        else f"strongest evidence is {_refs_text(refs)}; benign authorization still requires owner confirmation."
+    )
+
     sections = {
         'what_is_happening': (
             f"Cluster {cluster.get('cluster_id') or '?'} groups evidence around {pivot}. "
-            f"The current reason is {reason}; strongest cited evidence: {_refs_text(refs)}."
+            f"The current reason is {reason}. Key factors: {factor_text}. "
+            f"Strongest cited evidence: {_refs_text(refs)}."
         ),
         'why_it_matters': why,
         'what_to_do': what_to_do,
         'investigate_next': investigate,
-        'verdict_line': f"UNCERTAIN - strongest evidence is {_refs_text(refs)}; benign authorization still requires owner confirmation.",
-        'is_this_real': f"UNCERTAIN - strongest evidence is {_refs_text(refs)}; benign authorization still requires owner confirmation.",
-        'reality_verdict': 'UNCERTAIN',
+        'verdict_line': f"{verdict_label} - {verdict_reason}",
+        'is_this_real': f"{verdict_label} - {verdict_reason}",
+        'reality_verdict': verdict_label,
         'entities': [],
         'persona_notes': {key: what_to_do},
         'persona_questions': {
@@ -1802,9 +1853,14 @@ def _build_persona_fallback_summary(persona: str, cluster: dict, rows: list[dict
     return sections, steps
 
 
-def _summary_sections_useful(sections: dict) -> bool:
+def _legacy_summary_sections_useful(sections: dict) -> bool:
     useful_keys = ('what_is_happening', 'why_it_matters', 'what_to_do', 'investigate_next', 'verdict_line')
     return any(str(sections.get(key) or '').strip() for key in useful_keys)
+
+
+def _legacy_summary_sections_complete_for_elevated(sections: dict) -> bool:
+    required = ('what_is_happening', 'why_it_matters', 'investigate_next', 'verdict_line')
+    return all(str(sections.get(key) or '').strip() for key in required)
 
 
 _ACTION_VERBS = re.compile(
@@ -1821,7 +1877,7 @@ _ENTITY_PAT  = re.compile(
 )
 
 
-def _output_grounding_score(sections: dict) -> int:
+def _legacy_output_grounding_score(sections: dict) -> int:
     """Score LLM output on three axes; returns 0-3.
 
     1 point for ≥1 cited row ref (row[N], R12, #34, [56])
@@ -1925,12 +1981,10 @@ async def get_llm_cluster_summary(
     cluster: dict = {}
     rows: List[dict] = []
     if assessment:
-        for c in (assessment.get('correlation_clusters') or []):
+        for c in _assessment_clusters(assessment):
             if c.get('cluster_id') == cluster_id:
                 cluster = c
-                rr_set = set(c.get('row_refs') or [])
-                rows = [r for r in (assessment.get('normalized_rows') or assessment.get('rows') or [])
-                        if r.get('row_number') in rr_set or r.get('row_index') in rr_set]
+                rows = _assessment_rows_for_cluster(assessment, c)
                 break
 
     if not cluster:
@@ -2034,10 +2088,20 @@ async def get_llm_cluster_summary(
         fallback_reason = None
         elevated_cluster = str(cluster.get('severity') or '').lower() in {'critical', 'crit', 'high'}
         sections_useful = _summary_sections_useful(parsed)
-        if not sections_useful or (rows and elevated_cluster and _output_grounding_score(parsed) < 2):
+        sections_complete = _summary_sections_complete_for_elevated(parsed)
+        if (
+            not sections_useful
+            or (elevated_cluster and not sections_complete)
+            or (rows and elevated_cluster and _output_grounding_score(parsed) < 2)
+        ):
             parsed, persona_steps = _build_persona_fallback_summary(persona, cluster, rows)
             fallback_generated = True
-            fallback_reason = 'llm_output_unparseable' if not sections_useful else 'llm_output_under_grounded'
+            if not sections_useful:
+                fallback_reason = 'llm_output_unparseable'
+            elif elevated_cluster and not sections_complete:
+                fallback_reason = 'llm_output_incomplete'
+            else:
+                fallback_reason = 'llm_output_under_grounded'
         else:
             persona_steps = _parse_what_to_do_steps(parsed.get('what_to_do', ''), persona)
             # Safety net: if parse yielded nothing, use structured fallback steps
@@ -2704,12 +2768,10 @@ async def entity_deepen(
     cluster: dict = {}
     rows: List[dict] = []
     if assessment:
-        for c in (assessment.get('correlation_clusters') or []):
+        for c in _assessment_clusters(assessment):
             if c.get('cluster_id') == cluster_id:
                 cluster = c
-                rr_set = set(c.get('row_refs') or [])
-                rows = [r for r in (assessment.get('normalized_rows') or assessment.get('rows') or [])
-                        if r.get('row_number') in rr_set or r.get('row_index') in rr_set]
+                rows = _assessment_rows_for_cluster(assessment, c)
                 break
 
     if not cluster:
@@ -2875,12 +2937,10 @@ async def refine_persona_notes(
     cluster: dict = {}
     rows: List[dict] = []
     if assessment:
-        for c in (assessment.get('correlation_clusters') or []):
+        for c in _assessment_clusters(assessment):
             if c.get('cluster_id') == cluster_id:
                 cluster = c
-                rr_set = set(c.get('row_refs') or [])
-                rows = [r for r in (assessment.get('normalized_rows') or assessment.get('rows') or [])
-                        if r.get('row_number') in rr_set or r.get('row_index') in rr_set]
+                rows = _assessment_rows_for_cluster(assessment, c)
                 break
 
     if not cluster:
@@ -3401,12 +3461,10 @@ async def expand_cluster_step(assessment_id: str, cluster_id: str, request: Requ
     cluster: dict = {}
     all_rows: list[dict] = []
     if assessment:
-        for c in (assessment.get('correlation_clusters') or []):
+        for c in _assessment_clusters(assessment):
             if c.get('cluster_id') == cluster_id:
                 cluster = c
-                rr_set = set(c.get('row_refs') or [])
-                all_rows = [r for r in (assessment.get('normalized_rows') or assessment.get('rows') or [])
-                            if r.get('row_number') in rr_set or r.get('row_index') in rr_set]
+                all_rows = _assessment_rows_for_cluster(assessment, c)
                 break
 
     rows = [r for r in all_rows if r.get('row_index') in set(row_refs) or r.get('row_number') in set(row_refs)] if row_refs else all_rows[:8]
@@ -3869,12 +3927,10 @@ async def get_compliance_map(assessment_id: str, cluster_id: str, request: Reque
     cluster: dict = {}
     rows: list[dict] = []
     if assessment:
-        for c in (assessment.get('correlation_clusters') or []):
+        for c in _assessment_clusters(assessment):
             if c.get('cluster_id') == cluster_id:
                 cluster = c
-                rr = set(c.get('row_refs') or [])
-                rows = [r for r in (assessment.get('normalized_rows') or assessment.get('rows') or [])
-                        if r.get('row_number') in rr or r.get('row_index') in rr]
+                rows = _assessment_rows_for_cluster(assessment, c)
                 break
 
     mitre_tags = cluster.get('top_mitre') or []
@@ -3919,12 +3975,10 @@ async def run_threat_model(assessment_id: str, cluster_id: str, request: Request
     cluster: dict = {}
     rows: list[dict] = []
     if assessment:
-        for c in (assessment.get('correlation_clusters') or []):
+        for c in _assessment_clusters(assessment):
             if c.get('cluster_id') == cluster_id:
                 cluster = c
-                rr_set = set(c.get('row_refs') or [])
-                rows = [r for r in (assessment.get('normalized_rows') or [])
-                        if r.get('row_number') in rr_set or r.get('row_index') in rr_set]
+                rows = _assessment_rows_for_cluster(assessment, c)
                 break
     if not cluster:
         # Use minimal cluster stub so threat model still runs against model_type + cluster_id

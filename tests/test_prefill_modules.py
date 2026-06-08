@@ -148,7 +148,12 @@ def test_compute_confidence_meter_returns_dict_with_total_and_segments(rows, clu
     assert 'total' in result
     assert 'segments' in result
     segs = result['segments']
-    assert set(segs.keys()) == {'source_diversity', 'evidence_quality', 'corroboration', 'pattern_match'}
+    assert set(segs.keys()) == {
+        'source_corroboration',
+        'evidence_cluster_strength',
+        'technique_confidence',
+        'temporal_consistency',
+    }
     assert 0 <= result['total'] <= 100
 
 
@@ -164,7 +169,7 @@ def test_compute_confidence_meter_multi_source_boosts_corroboration(cluster):
         {'row_index': 2, 'severity': 'high', '_source': 'azure_network_flow'},
     ]
     result = _compute_confidence_meter(cluster, multi_rows)
-    assert result['segments']['corroboration'] > 0
+    assert result['segments']['source_corroboration'] > 0
 
 
 def test_compute_pasta_summary_data_exfil_flags_regulatory_impact(rows):

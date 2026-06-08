@@ -38,6 +38,14 @@ def _i(name: str, default: int) -> int:
         return default
 
 
+def _profile() -> str:
+    return str(os.getenv('JANUSEC_PROFILE') or os.getenv('APP_ENV') or os.getenv('ENV') or 'prod').strip().lower()
+
+
+def _default_enabled_for(*profiles: str) -> bool:
+    return _profile() in {p.lower() for p in profiles}
+
+
 _overrides: Dict[str, Any] = {}
 
 
@@ -74,7 +82,10 @@ def _save_overrides() -> None:
 
 
 def flags_snapshot() -> Dict[str, Any]:
+    profile = _profile()
+    demo_default = _default_enabled_for('demo', 'dev', 'local')
     base = {
+        'JANUSEC_PROFILE': profile,
         # SLO display/enforcement
         'FEATURE_SLO_ENFORCE_DISPLAY': _b('FEATURE_SLO_ENFORCE_DISPLAY', False),
         'SLO_EWMA_ALPHA': _f('SLO_EWMA_ALPHA', 0.3),
@@ -93,9 +104,10 @@ def flags_snapshot() -> Dict[str, Any]:
         'OUTBOX_ENABLED': _b('OUTBOX_ENABLED', False),
         'OUTBOX_BACKEND': os.getenv('OUTBOX_BACKEND', ''),
         # Identity/ML/Privacy feature toggles
-        'ENABLE_ISO_ML': _b('ENABLE_ISO_ML', False),
+        'ENABLE_ISO_ML': _b('ENABLE_ISO_ML', demo_default),
         'ENABLE_LS_TEMPORAL': _b('ENABLE_LS_TEMPORAL', False),
-        'ENABLE_EWMA_IDENTITY': _b('ENABLE_EWMA_IDENTITY', False),
+        'ENABLE_EWMA_IDENTITY': _b('ENABLE_EWMA_IDENTITY', demo_default),
+        'ENABLE_IAM_FACTORS': _b('ENABLE_IAM_FACTORS', demo_default),
         'PRIVACY_DEFAULT_MODE': os.getenv('PRIVACY_DEFAULT_MODE', ''),
     }
     # Apply overrides last (runtime wins)

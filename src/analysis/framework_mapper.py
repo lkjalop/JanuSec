@@ -907,6 +907,53 @@ def _infer_mitre_from_cluster(cluster: dict) -> list[str]:
 
     found: list[str] = []
     seen: set[str] = set()
+
+    # ── Priority path: direct factor_tag → MITRE mapping ─────────────────────
+    # factor_tags like 'email:T1114.003_inbox_rule' encode the technique ID directly.
+    # Consume the canonical maps before text inference so these are highest-priority.
+    _all_factor_mitre: dict[str, list[str]] = {}
+    try:
+        from src.analysis.temporal_rag_dispatch import _FACTOR_MITRE_MAP
+        _all_factor_mitre.update(_FACTOR_MITRE_MAP)
+    except Exception:
+        pass
+    try:
+        from src.core.mappings.factor_to_mitre import get_all_mappings as _get_factor_mitre
+        _all_factor_mitre.update(_get_factor_mitre())
+    except Exception:
+        pass
+
+    def _add_tid(tid: str) -> None:
+        t = str(tid).strip()
+        if not t or not t.startswith('T'):
+            return
+        if t not in seen:
+            found.append(t)
+            seen.add(t)
+        parent_t = t.split('.')[0]
+        if parent_t != t and parent_t not in seen:
+            found.append(parent_t)
+            seen.add(parent_t)
+
+    for ft in (cluster.get('factor_tags') or []):
+        ft_str = str(ft)
+        # Many factor tags encode technique IDs directly: 'email:T1114.003_inbox_rule'
+        # Extract the technique ID segment after any prefix
+        for part in ft_str.split(':'):
+            for segment in part.split('_'):
+                if segment.startswith('T') and len(segment) >= 5:
+                    _add_tid(segment)
+        # Also look up in the canonical factor→MITRE maps
+        for tid in _all_factor_mitre.get(ft_str, []):
+            _add_tid(tid)
+
+    # Also scan compliance_violations.mitre_techniques if pre-computed
+    for cv in (cluster.get('compliance_violations') or {}).values():
+        if isinstance(cv, dict):
+            for tid in (cv.get('mitre_techniques') or []):
+                _add_tid(str(tid))
+
+    # ── Text inference: keyword scan of narrative/Diamond/DREAD text ──────────
     for keyword, technique_id in _CAP_TO_MITRE:
         if keyword in combined_text and technique_id not in seen:
             found.append(technique_id)

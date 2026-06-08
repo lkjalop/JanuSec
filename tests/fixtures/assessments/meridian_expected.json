@@ -1,0 +1,26 @@
+{
+  "_comment": "Meridian Infrastructure Group — expected quality bar after roadmap fixes",
+  "source_files": 5,
+  "expected_row_count_min": 24000,
+  "expected_source_types": [
+    "crowdstrike.endpoint",
+    "m365.unified_audit",
+    "m365.exchange",
+    "aws.cloudtrail",
+    "azure.ad.signin",
+    "network.zeek",
+    "email.gmail"
+  ],
+  "max_cluster_count": 8,
+  "min_validated_breach_clusters": 1,
+  "expected_actors": ["wei.zhang", "james.hargreaves"],
+  "expected_mitre_min_count": 3,
+  "evidence_severity_must_have_high": true,
+  "audit_opinion_must_not_all_unqualified": true,
+  "expected_campaigns": [
+    "wei_zhang_exfil",
+    "james_hargreaves_supplier_chain",
+    "c2_dns_beaconing",
+    "s3_crawler"
+  ]
+}

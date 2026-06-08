@@ -248,6 +248,8 @@ def _normalize_network(row: dict) -> dict:
     r = dict(row)
     r.setdefault('src_ip', _safe(row.get('id.orig_h') or row.get('src_ip') or row.get('sourceAddress')))
     r.setdefault('dst_ip', _safe(row.get('id.resp_h') or row.get('dst_ip') or row.get('destinationAddress')))
+    r.setdefault('hostname', _safe(row.get('src_host') or row.get('source_host') or row.get('orig_host') or ''))
+    r.setdefault('dst_host', _safe(row.get('domain') or row.get('tls_sni') or row.get('host') or ''))
     r.setdefault('src_port', row.get('id.orig_p') or row.get('src_port') or row.get('sourcePort'))
     r.setdefault('dst_port', row.get('id.resp_p') or row.get('dst_port') or row.get('destinationPort'))
     r.setdefault('proto', _safe(row.get('proto') or row.get('transport_protocol') or ''))
@@ -467,6 +469,21 @@ def normalize_row(row: dict, source_type: str | None = None) -> dict:
             section_st = classify_source(hint)
             if section_st != SOURCE_UNKNOWN:
                 st = section_st
+        if st == SOURCE_UNKNOWN:
+            keys = {str(k).lower() for k in row.keys()}
+            if {"windows_event_id", "account_name"} & keys or {"eventcode", "subjectusername"} <= keys:
+                st = SOURCE_IAM
+            elif {"userprincipalname", "createddatetime"} <= keys or "activitydisplayname" in keys:
+                st = SOURCE_CLOUD
+            elif {"process_name", "command_line"} <= keys or "sysmon_event_id" in keys:
+                st = SOURCE_ENDPOINT
+            elif (
+                {"src_ip", "dst_ip"} <= keys
+                or {"id.orig_h", "id.resp_h"} <= keys
+                or {"src_host", "domain"} <= keys
+                or {"tls_sni", "bytes_sent"} <= keys
+            ):
+                st = SOURCE_NETWORK
         normalizer = _NORMALIZERS.get(st)
         r = normalizer(row) if normalizer else dict(row)
 

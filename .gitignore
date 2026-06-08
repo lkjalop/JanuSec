@@ -130,3 +130,27 @@ audits/
 models/registry/index.json
 models/registry/model-*.json
 
+# Runtime process / server session artifacts
+.server.pid
+*.pid
+start_server_session.err
+start_server_session.out
+
+# Debug scratch dumps at repo root
+tmp_*
+
+# Root-level screenshots (test captures, demo screenshots)
+/*.png
+/meridian-*.png
+/breach-*.png
+
+# Full data directory — DuckDB, hopgraph, uploads, job queues (2GB+, not for git)
+data/
+
+# Unrelated packages / analysis artefacts
+gridverdict_prd_package/
+ewma_roc_summary.csv
+
+# MCP and Playwright runner artifacts
+.playwright-mcp/
+

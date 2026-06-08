@@ -455,7 +455,7 @@ def persist_row_batch(assessment_id: str, rows: list[dict]) -> None:
 def count_rows(assessment_id: str) -> int:
     with _lock:
         r = _db().execute(
-            "SELECT COUNT(*) FROM normalized_rows WHERE assessment_id = ?",
+            "SELECT COUNT(DISTINCT row_index) FROM normalized_rows WHERE assessment_id = ?",
             [assessment_id],
         ).fetchone()
     return int(r[0]) if r else 0
@@ -475,15 +475,18 @@ def load_rows(
     exclude noise rows from the clustering stage, avoiding O(n²) blowup.
     """
     sql = (
-        "SELECT row_json FROM normalized_rows "
-        "WHERE assessment_id = ? AND triage_score >= ? "
+        "SELECT row_json FROM ("
+        "  SELECT row_json, triage_score, row_index, "
+        "         ROW_NUMBER() OVER (PARTITION BY row_index ORDER BY triage_score DESC) AS rn "
+        "  FROM normalized_rows "
+        "  WHERE assessment_id = ? AND triage_score >= ? "
     )
     params: list = [assessment_id, min_triage]
     if row_indices:
         placeholders = ", ".join(["?"] * len(row_indices))
         sql += f"AND row_index IN ({placeholders}) "
         params.extend(int(i) for i in row_indices)
-    sql += "ORDER BY triage_score DESC "
+    sql += ") WHERE rn = 1 ORDER BY triage_score DESC "
     if limit:
         sql += " LIMIT ?"
         params.append(limit)
@@ -513,7 +516,7 @@ def count_evidence_rows(
     row_indices: list[int] | None = None,
 ) -> int:
     sql = (
-        "SELECT COUNT(*) FROM normalized_rows "
+        "SELECT COUNT(DISTINCT row_index) FROM normalized_rows "
         "WHERE assessment_id = ? AND triage_score >= ? "
     )
     params: list = [assessment_id, min_triage]
@@ -529,9 +532,9 @@ def count_evidence_rows(
 def source_counts(assessment_id: str) -> dict[str, int]:
     with _lock:
         rows = _db().execute(
-            "SELECT COALESCE(source_file, ''), COUNT(*) "
+            "SELECT COALESCE(source_file, ''), COUNT(DISTINCT row_index) "
             "FROM normalized_rows WHERE assessment_id = ? "
-            "GROUP BY source_file ORDER BY COUNT(*) DESC",
+            "GROUP BY source_file ORDER BY COUNT(DISTINCT row_index) DESC",
             [assessment_id],
         ).fetchall()
     return {str(src or "unknown"): int(count) for src, count in rows}

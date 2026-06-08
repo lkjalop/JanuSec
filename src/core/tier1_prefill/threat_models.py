@@ -61,29 +61,49 @@ _RFC1918 = ('10.', '172.16.', '172.17.', '172.18.', '172.19.', '172.20.',
 def _compute_confidence_meter(cluster: dict, rows: list[dict]) -> dict:
     """Compute a 0-100 confidence score broken into 4 named segments.
 
-    Re-uses the same factors as _cluster_routing_snapshot in deep_analyze_endpoints
-    but computed locally so prefill_engine has no circular import.
-
     Segments (weights sum to 100):
-      source_diversity  — 25: how many distinct source types are present
-      evidence_quality  — 30: severity distribution of rows
-      corroboration     — 25: multi-source coverage (identity + network + endpoint)
-      pattern_match     — 20: cluster confidence field or row-count heuristic
+      source_corroboration      — 25: distinct telemetry sources corroborating the verdict
+      evidence_cluster_strength — 30: severity distribution + MITRE technique richness
+      technique_confidence      — 25: multi-domain coverage (identity + network + endpoint)
+      temporal_consistency      — 20: time-spread pattern vs expected campaign duration
+
+    None of these fall back to the uncalibrated row-count formula. The
+    temporal_consistency segment uses actual timestamps from the evidence rows.
+    Future: fit isotonic regression / Platt scaling on Santos+VESPER ground truth
+    to replace the bucket thresholds below with calibrated probability estimates.
     """
+    import datetime as _dt
+
     _SEV_WEIGHTS = {'critical': 1.0, 'high': 0.75, 'medium': 0.5, 'low': 0.25}
 
-    # Source diversity (25 pts): unique source types / expected 3
+    # ── Source corroboration (25 pts): distinct file/feed sources / expected 3 ──
     sources = {str(r.get('_source') or r.get('source') or '') for r in rows if r}
     source_score = min(1.0, len(sources) / 3.0)
 
-    # Evidence quality (30 pts): avg severity weight
+    # ── Evidence cluster strength (30 pts): avg severity weight + MITRE richness ──
     sev_scores = [
         _SEV_WEIGHTS.get(str(r.get('severity') or r.get('risk_level') or '').lower(), 0.1)
         for r in rows
     ]
     quality_score = sum(sev_scores) / max(1, len(sev_scores))
 
-    # Corroboration (25 pts): identity + network + endpoint presence
+    # MITRE richness bonus: each unique T-ID beyond the first adds 0.05, capped at +0.20
+    mitre_ids: set[str] = set()
+    for r in rows:
+        for fld in ('mitre_technique', 'mitre_id', 'technique_id'):
+            v = r.get(fld)
+            if isinstance(v, str) and v.startswith('T'):
+                mitre_ids.add(v.split('.')[0])
+        for v in (r.get('mitre_techniques') or []):
+            if isinstance(v, str) and v.startswith('T'):
+                mitre_ids.add(v.split('.')[0])
+    for v in (cluster.get('mitre_techniques') or []):
+        if isinstance(v, str) and v.startswith('T'):
+            mitre_ids.add(v.split('.')[0])
+    mitre_bonus = min(0.20, max(0, len(mitre_ids) - 1) * 0.05)
+    quality_score = min(1.0, quality_score + mitre_bonus)
+
+    # ── Technique confidence (25 pts): identity + network + endpoint presence ──
     source_types: set[str] = set()
     for r in rows:
         src = str(r.get('_source') or r.get('source') or '').lower()
@@ -95,36 +115,145 @@ def _compute_confidence_meter(cluster: dict, rows: list[dict]) -> dict:
             source_types.add('endpoint')
         if any(x in src for x in ('email', 'mail', 'mimecast', 'proofpoint', 'o365')):
             source_types.add('email')
-    corroboration_score = min(1.0, len(source_types) / 3.0)
+    technique_score = min(1.0, len(source_types) / 3.0)
 
-    # Pattern match (20 pts): existing cluster confidence or row-count heuristic
-    existing_conf = cluster.get('confidence') or cluster.get('routing_score') or 0.0
-    try:
-        existing_conf = float(existing_conf)
-    except (TypeError, ValueError):
-        existing_conf = 0.0
-    if existing_conf <= 0:
-        row_count = len(rows)
-        existing_conf = min(1.0, row_count / 10.0)
-    pattern_score = min(1.0, existing_conf)
+    # ── Temporal consistency (20 pts): time-spread + off-hours pattern ──────────
+    # Grounded entirely in row timestamps — no fallback to row-count heuristics.
+    epochs: list[float] = []
+    for r in rows:
+        ts = r.get('_ts_epoch')
+        if ts is None:
+            for fld in ('timestamp_utc', 'timestamp', '@timestamp', 'event_time', 'eventTime', 'time', 'ts'):
+                v = r.get(fld)
+                if not v:
+                    continue
+                try:
+                    if isinstance(v, (int, float)):
+                        ts = float(v) / 1000.0 if float(v) > 1e12 else float(v)
+                    else:
+                        ts = _dt.datetime.fromisoformat(str(v).replace('Z', '+00:00')).timestamp()
+                    break
+                except Exception:
+                    continue
+        if ts:
+            try:
+                epochs.append(float(ts))
+            except (TypeError, ValueError):
+                pass
+
+    _span = (max(epochs) - min(epochs)) if len(epochs) >= 2 else 0.0
+
+    # Off-hours ratio: events outside 08:00–18:00 UTC signal attacker operational rhythm
+    _off_count = 0
+    for ep in epochs:
+        try:
+            if _dt.datetime.utcfromtimestamp(ep).hour not in range(8, 18):
+                _off_count += 1
+        except Exception:
+            pass
+    _off_ratio = _off_count / max(1, len(epochs))
+
+    if _span >= 7 * 86400:
+        temp_score = 1.0        # 7+ days: sustained APT campaign
+    elif _span >= 86400:
+        temp_score = 0.85       # 1–7 days: multi-day intrusion
+    elif _span >= 6 * 3600:
+        temp_score = 0.65       # 6h–24h: fast-moving incident
+    elif _span > 0:
+        temp_score = 0.50       # <6h burst (fast attack or noise)
+    else:
+        # No row-level timestamps — fall back to cluster time_window metadata
+        _cspan = 0.0
+        _tw = cluster.get('time_window') or {}
+        if isinstance(_tw, dict):
+            try:
+                _cspan = float(_tw.get('span_seconds') or 0)
+            except (TypeError, ValueError):
+                pass
+        if _cspan >= 7 * 86400:
+            temp_score = 1.0
+        elif _cspan >= 86400:
+            temp_score = 0.85
+        elif _cspan >= 6 * 3600:
+            temp_score = 0.65
+        elif _cspan > 0:
+            temp_score = 0.50
+        else:
+            temp_score = 0.30   # no temporal signal
+
+    # Off-hours bonus: capped at +0.10
+    temp_score = min(1.0, temp_score + _off_ratio * 0.10)
 
     total = round(
         (source_score * 25)
         + (quality_score * 30)
-        + (corroboration_score * 25)
-        + (pattern_score * 20),
+        + (technique_score * 25)
+        + (temp_score * 20),
         1,
     )
 
+    # ── Verdict-based floor: VALIDATED_BREACH cannot present as LOW confidence ──
+    # Without MITRE data the evidence_cluster_strength segment scores near-zero,
+    # dragging total below 20. This floor prevents misleading LOW on real breaches
+    # and will self-correct upward once MITRE propagation is wired (Track 1).
+    _verdict_floor = str(cluster.get('verdict') or '').upper()
+    if _verdict_floor in {'VALIDATED_BREACH', 'CONFIRMED_BREACH', 'CONFIRMED_INTRUSION'}:
+        total = max(total, 35.0)   # 35/100 = MEDIUM floor
+    elif _verdict_floor in {'LIKELY_BREACH', 'LIKELY_COMPROMISE', 'SUSPECTED_BREACH'}:
+        total = max(total, 22.0)   # MEDIUM-LOW floor
+
+    # ── Factor-tag damage boost ───────────────────────────────────────────────
+    _HIGH_DAMAGE_FACTORS = frozenset({
+        'data:sensitive_file_access',
+        'email:inbox_rule_external_forward',
+        'email:T1114.003_inbox_rule',
+        'exfil:cumulative_bytes_anomaly',
+        'exfil:cumulative_cloud_bytes_anomaly',
+        'data_exfiltration_rclone',
+        'data_exfiltration_snowflake',
+    })
+    if set(cluster.get('factor_tags') or []) & _HIGH_DAMAGE_FACTORS:
+        total = min(100.0, total + 8.0)
+
+    try:
+        from src.core.calibration.confidence_calibration import apply_calibration
+        dataset_hint = cluster.get("org") or cluster.get("tenant_id") or cluster.get("assessment_id")
+        calibrated = apply_calibration(total / 100.0, dataset=dataset_hint)
+    except Exception:
+        calibrated = {
+            "probability": total / 100.0,
+            "applied": False,
+            "method": "none",
+            "artifact": None,
+            "family": "default",
+        }
+
     return {
         'total': total,
+        'max': 100,
+        'calibrated_probability': round(float(calibrated.get('probability', total / 100.0)), 4),
+        'calibrated_total': round(float(calibrated.get('probability', total / 100.0)) * 100.0, 1),
         'segments': {
-            'source_diversity': round(source_score * 25, 1),
-            'evidence_quality': round(quality_score * 30, 1),
-            'corroboration': round(corroboration_score * 25, 1),
-            'pattern_match': round(pattern_score * 20, 1),
+            'source_corroboration':       round(source_score * 25, 1),
+            'evidence_cluster_strength':  round(quality_score * 30, 1),
+            'technique_confidence':       round(technique_score * 25, 1),
+            'temporal_consistency':       round(temp_score * 20, 1),
+        },
+        'segment_max': {
+            'source_corroboration': 25,
+            'evidence_cluster_strength': 30,
+            'technique_confidence': 25,
+            'temporal_consistency': 20,
         },
         'source_types_present': sorted(source_types),
+        'mitre_ids_present': sorted(mitre_ids),
+        'calibration': 'decomposed_v1',
+        'statistical_calibration': {
+            'applied': bool(calibrated.get('applied')),
+            'method': calibrated.get('method'),
+            'artifact': calibrated.get('artifact'),
+            'family': calibrated.get('family'),
+        },
     }
 
 

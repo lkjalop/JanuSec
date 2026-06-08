@@ -13,6 +13,8 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
+import sqlite3
 import threading
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -242,7 +244,7 @@ def record_action_outcome(*,
                           executed_by: Optional[str] = None,
                           executed_at: Optional[str] = None,
                           tool_response: Optional[dict] = None) -> bool:
-    """Attach an outcome record to a stored decision."""
+    """Attach an outcome record to a stored decision and re-persist it."""
     decision = store.get(decision_id)
     if not decision:
         logger.warning('record_action_outcome: decision %s not found', decision_id)
@@ -256,13 +258,131 @@ def record_action_outcome(*,
         'executed_at': executed_at or datetime.now(timezone.utc).isoformat(),
         'tool_response': tool_response or {},
     })
+    # Re-persist so SQLiteDecisionTraceStore reflects the updated outcomes.
+    # InMemoryDecisionTraceStore already holds a reference to the same object,
+    # so put() is a no-op for the in-memory case (idempotent).
+    try:
+        store.put(decision)
+    except Exception as exc:
+        logger.warning('record_action_outcome: put() failed for %s: %s', decision_id, exc)
     return True
+
+
+class SQLiteDecisionTraceStore:
+    """File-persisted bitemporal decision trace backed by SQLite.
+
+    Survives server restarts; required for TemporalRAG.retrieve_prior_decisions()
+    to return anything on a fresh boot.  Schema mirrors InMemoryDecisionTraceStore
+    but serialises DispatchDecision to JSON rows.
+
+    Path: configured via JANUSEC_TRACE_DB env var or passed explicitly.
+    """
+
+    def __init__(self, path: str | None = None) -> None:
+        self._path = path or os.getenv('JANUSEC_TRACE_DB', 'data/sessions/decision_trace.db')
+        os.makedirs(os.path.dirname(self._path), exist_ok=True)
+        self._lock = threading.RLock()
+        self._conn = sqlite3.connect(self._path, check_same_thread=False)
+        # WAL mode: readers don't block writers; 5s busy timeout avoids SQLITE_BUSY
+        self._conn.execute('PRAGMA journal_mode=WAL')
+        self._conn.execute('PRAGMA busy_timeout=5000')
+        self._conn.execute('''
+            CREATE TABLE IF NOT EXISTS decisions (
+                decision_id        TEXT PRIMARY KEY,
+                tenant_id          TEXT NOT NULL,
+                cluster_id         TEXT NOT NULL,
+                persona            TEXT NOT NULL,
+                transaction_time   TEXT NOT NULL,
+                superseded_by      TEXT,
+                payload_json       TEXT NOT NULL
+            )
+        ''')
+        self._conn.execute(
+            'CREATE INDEX IF NOT EXISTS ix_dec_cluster_persona '
+            'ON decisions (tenant_id, cluster_id, persona, transaction_time)'
+        )
+        self._conn.commit()
+
+    def _deserialise(self, row: tuple) -> DispatchDecision:
+        d = json.loads(row[6])
+        return DispatchDecision(
+            decision_id=d['decision_id'],
+            cluster_id=d['cluster_id'],
+            persona=d['persona'],
+            tenant_id=d['tenant_id'],
+            valid_time_start=d.get('valid_time_start'),
+            valid_time_end=d.get('valid_time_end'),
+            transaction_time=d['transaction_time'],
+            framework_version=d.get('framework_version', 'unknown'),
+            evidence_row_indices=d.get('evidence_row_indices', []),
+            evidence_content_hash=d.get('evidence_content_hash', ''),
+            verdict=d.get('verdict'),
+            confidence=d.get('confidence'),
+            supersedes=d.get('supersedes', []),
+            superseded_by=row[5],
+            payload=d.get('payload', {}),
+            action_outcomes=d.get('action_outcomes'),
+        )
+
+    def put(self, decision: DispatchDecision) -> None:
+        blob = json.dumps(asdict(decision), default=str)
+        with self._lock:
+            self._conn.execute(
+                'INSERT OR REPLACE INTO decisions '
+                '(decision_id, tenant_id, cluster_id, persona, transaction_time, superseded_by, payload_json) '
+                'VALUES (?, ?, ?, ?, ?, ?, ?)',
+                (decision.decision_id, decision.tenant_id, decision.cluster_id,
+                 decision.persona, decision.transaction_time, decision.superseded_by, blob),
+            )
+            for sid in decision.supersedes:
+                self._conn.execute(
+                    'UPDATE decisions SET superseded_by = ? WHERE decision_id = ?',
+                    (decision.decision_id, sid),
+                )
+            self._conn.commit()
+
+    def get(self, decision_id: str) -> Optional[DispatchDecision]:
+        with self._lock:
+            row = self._conn.execute(
+                'SELECT * FROM decisions WHERE decision_id = ?', (decision_id,)
+            ).fetchone()
+        return self._deserialise(row) if row else None
+
+    def find_active(self, cluster_id: str, persona: str, tenant_id: str) -> list[DispatchDecision]:
+        with self._lock:
+            rows = self._conn.execute(
+                'SELECT * FROM decisions WHERE tenant_id=? AND cluster_id=? AND persona=? AND superseded_by IS NULL',
+                (tenant_id, cluster_id, persona),
+            ).fetchall()
+        return [self._deserialise(r) for r in rows]
+
+    def find_at_transaction_time(self, cluster_id: str, persona: str,
+                                 tenant_id: str, as_of: str) -> list[DispatchDecision]:
+        with self._lock:
+            rows = self._conn.execute(
+                'SELECT * FROM decisions WHERE tenant_id=? AND cluster_id=? AND persona=? '
+                'AND transaction_time <= ?',
+                (tenant_id, cluster_id, persona, as_of),
+            ).fetchall()
+        out: list[DispatchDecision] = []
+        for r in rows:
+            d = self._deserialise(r)
+            if d.superseded_by is None:
+                out.append(d)
+            else:
+                succ_row = self._conn.execute(
+                    'SELECT transaction_time FROM decisions WHERE decision_id=?', (d.superseded_by,)
+                ).fetchone()
+                if succ_row and succ_row[0] > as_of:
+                    out.append(d)
+        return out
 
 
 __all__ = [
     'DispatchDecision',
     'DecisionTraceStore',
     'InMemoryDecisionTraceStore',
+    'SQLiteDecisionTraceStore',
     'trace_persona_dispatch',
     'find_superseded_decisions',
     'replay_state_at',

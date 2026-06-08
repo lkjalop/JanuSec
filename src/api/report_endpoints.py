@@ -51,6 +51,10 @@ try:
 except Exception:
     from ..reporting.llm_prompts import build_summary_prompt, parse_structured_summary
 try:
+    from src.reporting.assessment_view_model import build_assessment_report_view
+except Exception:
+    from ..reporting.assessment_view_model import build_assessment_report_view  # type: ignore
+try:
     from src.reporting.prompt_templates import build_incident_prompt as _build_incident_prompt
 except Exception:
     try:
@@ -328,8 +332,10 @@ def _build_html_payload(report: dict[str, Any], session_ids: list[str], recipien
     meta = dict(report.get('meta') or {})
     if recipients:
         meta['recipients'] = recipients
+    assessment_view = report.get('assessment_view') or {}
+    title = assessment_view.get('title') or report.get('title') or 'Investigation Report'
     payload = {
-        'title': 'Investigation Report',
+        'title': title,
         'session_id': ', '.join(session_ids) if session_ids else '',
         'rows': report.get('flagged_events', []),
         'summary': {
@@ -338,6 +344,9 @@ def _build_html_payload(report: dict[str, Any], session_ids: list[str], recipien
             'finops': report.get('finops'),
         },
         'correlation': report.get('network_highlights'),
+        'clusters': report.get('clusters') or [],
+        'assessment_view': assessment_view,
+        'executive_summary': report.get('executive_summary') or report.get('summary_text') or '',
         'meta': meta,
         'network_highlights': report.get('network_highlights'),
         'top_mitre': report.get('top_mitre_techniques') or report.get('top_mitre'),
@@ -410,6 +419,62 @@ def _build_html_payload(report: dict[str, Any], session_ids: list[str], recipien
     return payload
 
 
+def _load_persisted_assessment_report_data(assessment_id: str | None, tenant_id: str | None = None) -> tuple[str | None, dict]:
+    """Load an assessment snapshot by id, or the latest snapshot when id is omitted."""
+    bases = []
+    if os.getenv("SESSION_PERSIST_DIR"):
+        bases.append(os.getenv("SESSION_PERSIST_DIR") or "")
+    bases.append(os.path.abspath(os.path.join(os.getcwd(), "data", "assessments")))
+    bases = [b for b in dict.fromkeys(bases) if b and os.path.isdir(b)]
+    if not bases:
+        return assessment_id, {}
+    candidates: list[str] = []
+    for base in bases:
+        for dirpath, _dirnames, filenames in os.walk(base):
+            if tenant_id and tenant_id not in dirpath:
+                continue
+            for name in filenames:
+                if not name.endswith(".json"):
+                    continue
+                if assessment_id and name != f"{assessment_id}.json":
+                    continue
+                candidates.append(os.path.join(dirpath, name))
+    if assessment_id and tenant_id and not candidates:
+        for base in bases:
+            for dirpath, _dirnames, filenames in os.walk(base):
+                for name in filenames:
+                    if name == f"{assessment_id}.json":
+                        candidates.append(os.path.join(dirpath, name))
+    loaded: list[tuple[str, float, str, dict]] = []
+    for path in candidates:
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+            if not isinstance(data, dict):
+                continue
+            aid = str(data.get("assessment_id") or os.path.splitext(os.path.basename(path))[0])
+            if assessment_id and aid != assessment_id:
+                continue
+            created = str(data.get("created_at") or "")
+            # Assessment ids include an epoch-like component; use it as a
+            # deterministic fallback when filesystem mtimes collide.
+            aid_epoch = 0.0
+            try:
+                parts = aid.split("-")
+                if len(parts) >= 2:
+                    aid_epoch = float(parts[1])
+            except Exception:
+                aid_epoch = 0.0
+            sort_token = created or aid
+            loaded.append((sort_token, aid_epoch, aid, data))
+        except Exception:
+            continue
+    if loaded:
+        loaded.sort(key=lambda item: (item[0], item[1]), reverse=True)
+        return loaded[0][2], loaded[0][3]
+    return assessment_id, {}
+
+
 @router.get('/api/v1/report/ingestion')
 async def report_ingestion(
     request: Request,
@@ -435,7 +500,8 @@ async def report_ingestion(
     tenant_id = resolve_tenant_id(request, tenant or request.headers.get('X-Tenant-ID') or request.headers.get('x-tenant-id'))
     state = get_platform_state()
 
-    # When assessment_id is provided, enrich the report with assessment-specific data
+    # When assessment_id is omitted, default to the latest persisted assessment
+    # so LIVE console exports are assessment-backed instead of generic zero-event reports.
     assessment_data: dict = {}
     if assessment_id:
         try:
@@ -449,6 +515,8 @@ async def report_ingestion(
                 assessment_data = assessment_store.get(assessment_id) or {}
             except Exception:
                 pass
+    if not assessment_data:
+        assessment_id, assessment_data = _load_persisted_assessment_report_data(assessment_id, tenant_id)
 
     report = build_ingestion_report(
         session_ids,
@@ -469,19 +537,82 @@ async def report_ingestion(
         rows = (assessment_data.get('normalized_rows')
                 or assessment_data.get('evidence_rows')
                 or assessment_data.get('rows') or [])
-        if rows and not report.get('flagged_events'):
+        clusters = (
+            assessment_data.get('clusters')
+            or assessment_data.get('raw_correlation_clusters')
+            or assessment_data.get('correlation_clusters')
+            or []
+        )
+        if not rows and clusters:
+            rows = []
+            for cluster in clusters:
+                for row in cluster.get('evidence_preview') or []:
+                    if isinstance(row, dict):
+                        rows.append(row)
+                    if len(rows) >= 500:
+                        break
+                if len(rows) >= 500:
+                    break
+        if rows:
             report['flagged_events'] = rows[:500]
         # Carry verdict and cluster metadata
-        if assessment_data.get('verdict') and not report.get('verdict'):
+        if assessment_data.get('verdict'):
             report['verdict'] = assessment_data['verdict']
-        if assessment_data.get('clusters') and not report.get('clusters'):
-            report['clusters'] = assessment_data['clusters']
+        if clusters:
+            report['clusters'] = clusters
+        if assessment_data.get('executive_summary'):
+            report['executive_summary'] = assessment_data.get('executive_summary')
         meta_a = report.setdefault('meta', {})
         meta_a['assessment_id'] = assessment_id
-        meta_a['source_count'] = assessment_data.get('source_count', 1)
-        meta_a['total_rows'] = assessment_data.get('total_rows') or len(rows)
+        total_rows_for_report = (
+            assessment_data.get('total_rows')
+            or assessment_data.get('rows_processed')
+            or assessment_data.get('uploaded_row_count')
+            or len(rows)
+        )
+        source_counts_for_report = assessment_data.get('source_counts') or {}
+        try:
+            if (
+                assessment_id
+                and source_counts_for_report
+                and total_rows_for_report
+                and sum(int(v or 0) for v in source_counts_for_report.values()) != int(total_rows_for_report)
+            ):
+                from src.core.ingest import store as _ingest_store  # type: ignore
+                corrected = _ingest_store.source_counts(assessment_id)
+                if corrected and sum(corrected.values()) == int(total_rows_for_report):
+                    source_counts_for_report = corrected
+        except Exception:
+            pass
+        meta_a['source_count'] = len(source_counts_for_report) or assessment_data.get('source_count', 1)
+        meta_a['source_counts'] = source_counts_for_report
+        meta_a['total_rows'] = total_rows_for_report
+        try:
+            assessment_view = build_assessment_report_view(
+                assessment_data,
+                assessment_id=assessment_id,
+                corrected_source_counts=source_counts_for_report,
+            )
+            report['assessment_view'] = assessment_view
+            report['title'] = assessment_view.get('title') or report.get('title')
+            # Use view-model as canonical source for key aggregate fields so all
+            # report endpoints (ingestion, exec-summary, dispatch) agree on counts.
+            if assessment_view.get('verdict'):
+                report['verdict'] = assessment_view['verdict']
+            if assessment_view.get('top_mitre_techniques'):
+                report['top_mitre_techniques'] = assessment_view['top_mitre_techniques']
+            if assessment_view.get('validated_breach_count') is not None:
+                report.setdefault('meta', {})['validated_breach_count'] = (
+                    assessment_view['validated_breach_count']
+                )
+            if assessment_view.get('evidence_rows'):
+                report['flagged_events'] = assessment_view['evidence_rows'][:500]
+            if assessment_view.get('severity_distribution'):
+                report['severity_distribution'] = assessment_view['severity_distribution']
+        except Exception:
+            pass
         # Build GRC compliance pre-fill for compliance persona
-        if persona_selected in ('compliance', 'ciso') and assessment_data.get('clusters'):
+        if persona_selected in ('compliance', 'ciso') and clusters:
             report['_grc_prefill'] = _build_grc_prefill(assessment_data)
 
     recipients_list = _parse_recipients(recipients)
@@ -511,12 +642,20 @@ async def report_ingestion(
         return PlainTextResponse(content=csv_text, media_type='text/csv')
     if fmt == 'html':
         payload = _build_html_payload(report, session_ids, recipients_list)
+        # Ensure persona propagates into payload.meta so build_report_html can dispatch
+        if persona_selected:
+            payload.setdefault('meta', {})['persona'] = persona_selected
         # Inject GRC pre-fill into payload for compliance/ciso personas
         if report.get('_grc_prefill'):
             payload['_grc_prefill'] = report['_grc_prefill']
         html = build_report_html(payload)
         # Optionally include model summary into HTML (sanitized)
-        if include_model:
+        # Assessment-backed exports already render validated metrics, factors,
+        # clusters, and persona sections. The generic model prompt is based on
+        # platform aggregate counters and can produce a misleading "zero events"
+        # preface for persisted assessment reports, so only use it for generic
+        # ingestion/status reports.
+        if include_model and not payload.get('assessment_view'):
             try:
                 try:
                     if _build_incident_prompt is not None:
@@ -674,6 +813,8 @@ async def report_ingestion(
         return HTMLResponse(content=html, headers=headers)
     if fmt == 'pdf':
         payload = _build_html_payload(report, session_ids, recipients_list)
+        if persona_selected:
+            payload.setdefault('meta', {})['persona'] = persona_selected
         html = build_report_html(payload)
         try:
             from src.reporting.export import export_pdf_bytes_from_html as _epdf
@@ -794,6 +935,44 @@ async def generate_report(req: Request, format: str = Query('html'), include_mod
         resolve_tenant_id(req, payload.get('tenant_id') or payload.get('tenant'))
     except Exception:
         raise
+
+    # If assessment_id is supplied but rows/summary are absent, hydrate from the store.
+    # This lets the frontend call /report/generate with just {"assessment_id": "..."} and
+    # get a real data-backed report rather than a static template.
+    _gen_aid = payload.get('assessment_id') or payload.get('session_id')
+    if _gen_aid and not (payload.get('rows') or payload.get('summary')):
+        _gen_data: dict = {}
+        try:
+            from src.api.breach_endpoints import REPORT_STORE  # type: ignore
+            _gen_data = REPORT_STORE.get(_gen_aid) or {}
+        except Exception:
+            pass
+        if not _gen_data:
+            try:
+                from src.core.ingest import assessment_store  # type: ignore
+                _gen_data = assessment_store.get(_gen_aid) or {}
+            except Exception:
+                pass
+        if not _gen_data:
+            _, _gen_data = _load_persisted_assessment_report_data(
+                _gen_aid, payload.get('tenant_id') or payload.get('tenant')
+            )
+        if _gen_data:
+            payload.setdefault('rows', (
+                _gen_data.get('normalized_rows') or
+                _gen_data.get('evidence_rows') or
+                _gen_data.get('flagged_events') or []
+            ))
+            payload.setdefault('summary', {
+                'verdict': _gen_data.get('verdict'),
+                'cluster_count': len(_gen_data.get('correlation_clusters') or []),
+                'top_mitre': _gen_data.get('top_mitre_techniques') or [],
+                'severity_distribution': _gen_data.get('severity_distribution') or {},
+                'clusters': _gen_data.get('correlation_clusters') or [],
+            })
+            payload.setdefault('clusters', _gen_data.get('correlation_clusters') or [])
+            payload.setdefault('assessment_id', _gen_aid)
+
     # payload may include: session_id, rows (list), summary
     # Build the HTML or JSON output
     html = build_report_html(payload)
@@ -1771,4 +1950,3 @@ async def regulatory_draft(
     if draft.get('error'):
         raise HTTPException(status_code=400, detail=draft['error'])
     return JSONResponse(draft)
-

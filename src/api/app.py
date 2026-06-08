@@ -1040,6 +1040,57 @@ async def lifespan(app: FastAPI):
             logger.info('lifespan: ingest worker started')
         except Exception:
             logger.debug('lifespan: ingest worker start failed', exc_info=True)
+        # Seed TemporalRAG from existing on-disk assessments (cold-start bootstrap).
+        # On a fresh install the incident index is empty; scanning data/sessions/
+        # assessments/ and indexing each completed cluster takes < 2s for ~10 files
+        # and runs in a background thread so startup isn't blocked.
+        try:
+            async def _bootstrap_temporal_rag() -> None:
+                def _bootstrap_sync() -> None:
+                    try:
+                        import glob as _glob
+                        from src.core.ingest.assessment_worker import _get_incident_index
+                        from src.analysis.temporal_rag_dispatch import (
+                            SQLiteIncidentIndexStore, _signature_from_narrative,
+                        )
+                        _idx = _get_incident_index()
+                        session_dir = os.getenv('SESSION_PERSIST_DIR', 'data/sessions')
+                        pattern = os.path.join(session_dir, 'assessments', '*.json')
+                        files = sorted(_glob.glob(pattern))
+                        seeded = 0
+                        for fpath in files[:50]:  # cap at 50 to bound startup time
+                            try:
+                                import json as _json
+                                with open(fpath, 'r', encoding='utf-8') as _f:
+                                    _a = _json.load(_f)
+                                for cl in (_a.get('correlation_clusters') or []):
+                                    narr = cl.get('llm_narrative') or {}
+                                    if not narr.get('verdict'):
+                                        continue
+                                    sig = _signature_from_narrative(narr)
+                                    now = datetime.now(timezone.utc).isoformat()
+                                    _idx.index_incident(
+                                        tenant_id=_a.get('tenant_id') or 'default',
+                                        cluster_id=cl.get('cluster_id') or '',
+                                        signature=sig,
+                                        valid_time_start=cl.get('_first_seen') or now,
+                                        valid_time_end=now,
+                                        transaction_time=now,
+                                        narrative_summary=(narr.get('attack_narrative') or '')[:500],
+                                        outcome_summary=narr.get('verdict') or '',
+                                    )
+                                    seeded += 1
+                            except Exception:
+                                pass
+                        if seeded:
+                            logger.info('TemporalRAG bootstrap: indexed %d clusters from %d assessments', seeded, len(files))
+                    except Exception as _exc:
+                        logger.debug('TemporalRAG bootstrap failed: %s', _exc)
+                await asyncio.to_thread(_bootstrap_sync)
+            background_manager.start_once('temporalrag_bootstrap', _bootstrap_temporal_rag)
+        except Exception as _exc:
+            logger.debug('TemporalRAG bootstrap schedule failed: %s', _exc)
+
         # Run slow sync initialisation (scheduler registration, csv rehydration,
         # LLM prewarm) in a background thread — worker is already running above.
         try:
@@ -6347,7 +6398,10 @@ else:
 # Mount static assets
 static_path = os.path.join(frontend_root, 'static')
 if os.path.exists(static_path):
+    logger.info(f"Mounting static frontend assets at /static from {static_path}")
     app.mount("/static", StaticFiles(directory=static_path), name="static")
+else:
+    logger.warning(f"Static frontend path does not exist: {static_path}")
 
 # Mount root frontend
 if os.path.exists(frontend_root):
@@ -7802,33 +7856,43 @@ async def incident_add_comment(iid: str, payload: dict, request: Request):
         raise HTTPException(status_code=404, detail='incident_not_found')
     return record
 
-DEFAULT_FRONTEND = os.getenv('DEFAULT_FRONTEND', 'react').lower()  # 'react', 'console', 'investigate', or 'breach'
+DEFAULT_FRONTEND = os.getenv('DEFAULT_FRONTEND', 'console').lower()  # 'react', 'console', 'investigate', or 'breach'
+
+
+def _frontend_file(name: str) -> str:
+    return os.path.join(static_path, name)
+
+
+def _serve_static_frontend(name: str, label: str):
+    path = _frontend_file(name)
+    if os.path.exists(path):
+        logger.info("Serving %s frontend from %s", label, path)
+        return FileResponse(path)
+    logger.warning("%s frontend not found at %s", label, path)
+    return None
 
 # Serve frontend at root based on DEFAULT_FRONTEND toggle
 @app.get("/", include_in_schema=False)
 async def serve_root():
-    # Prefer explicitly requested frontend
-    if DEFAULT_FRONTEND == 'breach':
-        breach_path = os.path.join(static_path, 'breach.html')
-        if os.path.exists(breach_path):
-            logger.info("Serving Breach Assessment frontend at root")
-            return FileResponse(breach_path)
-    if DEFAULT_FRONTEND == 'investigate':
-        investigate_path = os.path.join(static_path, 'investigate.html')
-        if os.path.exists(investigate_path):
-            logger.info("Serving Investigation Console frontend at root")
-            return FileResponse(investigate_path)
-    if DEFAULT_FRONTEND == 'console':
-        # Prefer the LIVE design page if present
-        live_path = os.path.join(static_path, 'janusec-platform-complete-LIVE.html')
-        if os.path.exists(live_path):
-            logger.info("Serving LIVE Console frontend at root")
-            return FileResponse(live_path)
-        static_index = os.path.join(static_path, 'index.html')
-        if os.path.exists(static_index):
-            logger.info("Serving Console frontend at root")
-            return FileResponse(static_index)
-        # fallback to React if console missing
+    if DEFAULT_FRONTEND in {"console", "live"}:
+        resp = _serve_static_frontend('janusec-platform-complete-LIVE.html', 'LIVE Console')
+        if resp is not None:
+            return resp
+    elif DEFAULT_FRONTEND == "breach":
+        resp = _serve_static_frontend('breach.html', 'Breach Assessment')
+        if resp is not None:
+            return resp
+    elif DEFAULT_FRONTEND == "investigate":
+        resp = _serve_static_frontend('investigate.html', 'Unified Investigation Console')
+        if resp is not None:
+            return resp
+
+    # breach.html is the primary home — all other frontends are legacy fallbacks
+    breach_path = os.path.join(static_path, 'breach.html')
+    if os.path.exists(breach_path):
+        logger.info("Serving Breach Assessment frontend at root")
+        return FileResponse(breach_path)
+    # Legacy fallbacks only if breach.html is missing
     # Default to React
     react_index = os.path.join(react_path, 'index.html')
     logger.info(f"Checking React index at: {react_index}")
@@ -7914,10 +7978,9 @@ async def serve_root():
 @app.get("/console", include_in_schema=False, operation_id="serve_console_console")
 @app.get("/dashboard", include_in_schema=False, operation_id="serve_console_dashboard")
 async def serve_console():
-    # Prefer LIVE design if available
-    live_path = os.path.join(static_path, 'janusec-platform-complete-LIVE.html')
-    if os.path.exists(live_path):
-        return FileResponse(live_path)
+    live = _serve_static_frontend('janusec-platform-complete-LIVE.html', 'LIVE Console')
+    if live is not None:
+        return live
     static_index = os.path.join(static_path, 'index.html')
     if os.path.exists(static_index):
         return FileResponse(static_index)
@@ -7939,15 +8002,14 @@ async def serve_sidepanel():
 
 @app.get("/live", include_in_schema=False)
 async def serve_live_console():
-    """Direct route to the LIVE design page under static frontend."""
-    live_path = os.path.join(static_path, 'janusec-platform-complete-LIVE.html')
-    if os.path.exists(live_path):
-        return FileResponse(live_path)
-    # fallback to console index
+    """Serve the canonical LIVE Console."""
+    live = _serve_static_frontend('janusec-platform-complete-LIVE.html', 'LIVE Console')
+    if live is not None:
+        return live
     static_index = os.path.join(static_path, 'index.html')
     if os.path.exists(static_index):
         return FileResponse(static_index)
-    return {"message": "LIVE console not found", "redirect": "/static/"}
+    return {"message": "LIVE console not found", "redirect": "/static/janusec-platform-complete-LIVE.html"}
 
 # ---------------- Lite-mode Decision/Incident helpers -----------------
 from fastapi import Body

@@ -49,7 +49,15 @@ async function mockLlmRoutes(page) {
           incident_name: 'MOCK-INCIDENT',
           headline_subtitle: 'Mock subtitle for Playwright test',
           short_narrative: 'Playwright mock narrative — deterministic test.',
-          confidence_meter: { total: 72, segments: { source_diversity: 18, evidence_quality: 18, corroboration: 18, pattern_match: 18 } },
+          confidence_meter: {
+            total: 72,
+            segments: {
+              source_corroboration: 18,
+              evidence_cluster_strength: 18,
+              technique_confidence: 18,
+              temporal_consistency: 18,
+            },
+          },
           top_actions: ['Isolate host', 'Reset credentials', 'Enable MFA'],
           mitre_techniques: ['T1071.004', 'T1048'],
           verdict_reasoning: 'Mock: timing + beacon + JA3 correlation.',
@@ -199,8 +207,8 @@ test('6. Clicking "Open in tab" navigates to cluster detail', async ({ page }) =
   const analystDetail = page.locator('[data-testid="br-analyst-detail"] > summary');
   if (await analystDetail.count() > 0) await analystDetail.click();
 
-  // Find and click the first "Open threat case" button (opens new tab)
-  const openBtn = page.locator('.br-card__open', { hasText: /Open|threat case|↗/ }).first();
+  // Find and click the first visible threat-case action button (opens new tab)
+  const openBtn = page.locator('.br-home-cases__table .br-card__open').first();
   await expect(openBtn).toBeVisible({ timeout: 10000 });
 
   const [newPage] = await Promise.all([

@@ -22,6 +22,11 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
+try:
+    from src.reporting.assessment_view_model import build_assessment_report_view
+except Exception:  # pragma: no cover - optional during partial imports
+    build_assessment_report_view = None
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix='/api/v1/assessments', tags=['breach'])
@@ -141,27 +146,59 @@ def _has_dread_fragments(prefill: dict | None) -> bool:
 
 
 def _resolve_full_cluster(cluster: dict, assessment: dict) -> dict:
-    """
-    Return the full correlation_cluster entry that corresponds to *cluster*.
-    threat_cases are shallow copies without tier1_prefill; cross-reference using cluster_id so
-    we always build the exec summary from the version that was fully enriched during ingest.
+    """Return the most complete version of *cluster* for exec-summary building.
+
+    threat_cases are shallow copies that lack tier1_prefill and LLM narrator
+    fields (_llm_evidence_refs, _narrator_source, _critic).  We resolve against
+    correlation_clusters and:
+
+      1. Prefer the persisted full cluster when it has DREAD fragments that the
+         shallow copy lacks (existing logic).
+      2. Always merge LLM narrator provenance fields from the persisted cluster
+         into whatever dict is returned, so the exec-summary API response always
+         carries _llm_evidence_refs and _narrator_source.
     """
     cid = cluster.get('cluster_id') or cluster.get('id')
     if not cid:
         return cluster
-    # Build O(1) lookup instead of re-iterating
+    # Check all cluster key variants — assessment_worker may store under any of these
+    _all_clusters = (
+        assessment.get('correlation_clusters')
+        or assessment.get('clusters')
+        or assessment.get('raw_correlation_clusters')
+        or assessment.get('analysis_clusters')
+        or []
+    )
     cluster_map = {
         (c.get('cluster_id') or c.get('id')): c
-        for c in (assessment.get('correlation_clusters') or [])
+        for c in _all_clusters
     }
     c = cluster_map.get(cid)
     if c is None:
         return cluster
+
     cluster_has_frags = _has_dread_fragments(cluster.get('tier1_prefill'))
     c_has_frags = _has_dread_fragments(c.get('tier1_prefill'))
-    if c_has_frags and not cluster_has_frags:
-        return c
-    return cluster
+
+    # Pick the richer base dict
+    base = c if (c_has_frags and not cluster_has_frags) else cluster
+
+    # Always forward LLM narrator provenance from the persisted full cluster —
+    # these fields are set by cluster_narrator.narrate_cluster() and are not
+    # present on the shallow threat_cases copy.
+    _LLM_NARRATOR_FIELDS = ('_llm_evidence_refs', '_narrator_source', '_critic',
+                            '_critic_fp_probability', '_confidence_calibrated',
+                            '_synthesis', 'evidence_refs_llm')
+    merged = False
+    for field in _LLM_NARRATOR_FIELDS:
+        val = c.get(field)
+        if val is not None and base.get(field) is None:
+            if not merged:
+                base = dict(base)  # shallow copy so we don't mutate the original
+                merged = True
+            base[field] = val
+
+    return base
 
 
 # Keys that indicate the exec summary was generated with the legacy generic template.
@@ -2078,6 +2115,14 @@ async def get_executive_summary(
     if not assessment:
         raise HTTPException(status_code=404, detail='assessment_not_found')
 
+    executive_story: dict[str, Any] = {}
+    if callable(build_assessment_report_view):
+        try:
+            view = build_assessment_report_view(assessment, assessment_id=assessment_id)
+            executive_story = view.get('executive_story') or {}
+        except Exception as _story_err:
+            logger.debug('exec_summary story build failed for %s: %s', assessment_id, _story_err)
+
     cached = assessment.get('exec_summary_llm')
 
     # Prefer presentation-layer threat_cases for lead selection (they have real verdicts).
@@ -2122,11 +2167,18 @@ async def get_executive_summary(
     sorted_clusters = sorted(lead_pool, key=_cluster_rank, reverse=True)
     lead = sorted_clusters[0] if sorted_clusters else {}
     if cached and not body.regenerate and not _cached_summary_is_stale(cached, lead):
-        return JSONResponse({
+        response = {
             'assessment_id': assessment_id,
             **cached,
             'from_cache': True,
-        })
+        }
+        if executive_story:
+            response['executive_story'] = executive_story
+            # The UI renders executive_story as the primary executive surface.
+            # Keep the cached prose for drilldown/fallback, but suppress stale
+            # "LLM unavailable" warnings when the evidence-backed story exists.
+            response['render_warning'] = ''
+        return JSONResponse(response)
     lead_verdict = str(lead.get('verdict') or lead.get('final_verdict') or 'UNCERTAIN').upper()
     lead_name = _cluster_name(lead) if lead else 'No lead incident'
     lead_subtitle = _cluster_subtitle(lead) if lead else ''
@@ -2742,6 +2794,16 @@ async def get_executive_summary(
         for c in sorted_clusters[:10]
     ]
 
+    # Resolve the full lead cluster to access LLM narrator fields (_llm_evidence_refs,
+    # _narrator_source) — the shallow lead dict from threat_cases lacks these.
+    _full_lead = _resolve_full_cluster(lead, assessment) if lead else {}
+    _lead_llm_evidence_refs = _full_lead.get('_llm_evidence_refs') or []
+    _lead_narrator_source = (
+        _full_lead.get('_narrator_source')
+        or (_full_lead.get('llm_narrative') or {}).get('_narrator_source')
+        or 'unknown'
+    )
+
     # Grounding: apply LAST so citations survive any LLM/postscript overwrites.
     if _ground_refs and not _extract_row_refs_from_text(executive_summary):
         _ref_str = ', '.join(str(r) for r in sorted(set(_ground_refs))[:10])
@@ -2767,6 +2829,8 @@ async def get_executive_summary(
         'narrative_source': (body.model if _llm_ran else attack_chain_provenance),
         'render_warning': (dread_summary or {}).get('render_warning') or '',
         'evidence_refs': (dread_summary or {}).get('evidence_refs') or [],
+        'llm_evidence_refs': _lead_llm_evidence_refs,
+        'narrator_source': _lead_narrator_source,
         'dread_fragments': (dread_summary or {}).get('dread_fragments') or {},
         'sabsa_attributes': (dread_summary or {}).get('sabsa_attributes') or [],
         'sabsa_coda_draft': (dread_summary or {}).get('sabsa_coda_draft') or '',
@@ -2795,6 +2859,7 @@ async def get_executive_summary(
         'rollup_provenance': enriched.get('rollup_provenance', ''),
         'persona_summaries': enriched.get('persona_summaries', {}),
         'pipeline_ran': enriched.get('pipeline_ran', False),
+        'executive_story': executive_story,
     }
     assessment['exec_summary_llm'] = result
     _legacy_helper('_persist', _persist)(assessment_id, assessment)

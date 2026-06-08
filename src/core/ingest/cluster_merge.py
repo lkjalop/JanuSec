@@ -90,7 +90,7 @@ logger = logging.getLogger(__name__)
 
 
 # Bump when merge logic changes so assessment_worker can detect stale cluster outputs.
-_CLUSTER_MERGE_VERSION = "1.6"
+_CLUSTER_MERGE_VERSION = "1.8"  # +dedup+jaccard+campaign_rollup
 
 # ── Time windows (seconds) per pivot type ────────────────────────────────────
 USER_WINDOW             = 6 * 3600          # 6h burst — deliberately tight to avoid BAU/campaign leakage
@@ -98,11 +98,38 @@ USER_CAMPAIGN_WINDOW    = 30 * 86_400       # 30d — same user across multi-pha
 IP_WINDOW               = 60 * 86_400       # ~unbounded within an assessment
 CIDR_WINDOW             = 24 * 3600         # 24h
 CROSS_DOMAIN_IP_WINDOW  = 2 * 3600          # 2h (cloud/k8s/sf shared-IP burst)
+CIDR16_WINDOW           = 48 * 3600         # 48h loose — /16 is a weak signal; only bridges tight bursts
 HOST_WINDOW             = 14 * 86_400       # 14d (compromised host stays compromised)
 SIG_WINDOW              = 14 * 86_400       # 14d (DNS beacon campaign span)
 ENG_WINDOW              = 365 * 86_400      # unbounded — engagements own their boundary
 CHG_WINDOW              = 365 * 86_400      # unbounded — change tickets own their boundary
 SESSION_WINDOW          = 6 * 3600          # 6h
+
+# ── Verdict rank for dedup/rollup ordering ────────────────────────────────────
+# Mirrors assessment_worker._VERDICT_RANK — kept in sync by convention.
+_VERDICT_RANK: dict[str, int] = {
+    "INSUFFICIENT_EVIDENCE": 0,
+    "BENIGN_EXPECTED": 1,
+    "REQUIRES_INVESTIGATION": 2,
+    "SUSPECTED_BREACH": 3,
+    "SUSPICIOUS_ACTIVITY": 3,
+    "LIKELY_COMPROMISE": 3,
+    "LIKELY_BREACH": 3,
+    "VALIDATED_BREACH": 4,
+    "CONFIRMED_INTRUSION": 4,
+    "CONFIRMED_BREACH": 4,
+}
+
+_BREACH_VERDICT_SET = frozenset({
+    "VALIDATED_BREACH", "CONFIRMED_BREACH", "CONFIRMED_INTRUSION",
+    "LIKELY_BREACH", "LIKELY_COMPROMISE", "SUSPECTED_BREACH",
+})
+
+# ── RFC-1918 prefixes for campaign rollup IP filtering ───────────────────────
+_PRIVATE_PREFIXES = ("10.", "172.16.", "172.17.", "172.18.", "172.19.", "172.20.",
+                     "172.21.", "172.22.", "172.23.", "172.24.", "172.25.", "172.26.",
+                     "172.27.", "172.28.", "172.29.", "172.30.", "172.31.", "192.168.",
+                     "127.", "169.254.", "::1", "fc", "fd")
 
 
 # ── Phase detectors ──────────────────────────────────────────────────────────
@@ -712,14 +739,20 @@ def build_scope_qualified_pivots(rows: list[dict]) -> dict[str, list[int]]:
         canon_user:<user_canonical>
         ip:<src_ip>
         ip:<dst_ip>            (outbound-attacker IP exposure)
-        cidr24:<src_ip_cidr24>
-        cidr24:<dst_ip_cidr24>
+        cidr24:<src_ip_cidr24> (pre-computed /24 field)
+        cidr28:<src/dst /28>   (Phase 0b: definitive same-VPC signal, 24h)
+        cidr16:<src/dst /16>   (Phase 0b: loose burst-only bridge, 48h)
         host:<hostname>
         sig:<event_signature>
+        ja3:<ja3_hash>         (Phase 0b R8a: TLS fingerprint beacon-chain merge, 14d)
+        ja4:<ja4_hash>         (Phase 0b R8a: TLS fingerprint beacon-chain merge, 14d)
 
-    Plus unsuffixed scope-anchor pivots:
+    Plus unsuffixed scope-anchor and identity-bridge pivots:
         engagement:<ref>       (only emitted by pentest-scope rows)
         change:<ref>           (only emitted by ops-scope rows)
+        session:<session_id>   (Phase 0b R8b: cross-actor session token, 6h)
+        device:<device_id>     (Phase 0b R8b: cross-user device bridge, 14d)
+        oauth_token:<token_id> (Phase 0b R8b: shared OAuth token burst, 6h)
     """
     out: dict[str, list[int]] = defaultdict(list)
     for r in rows:
@@ -751,6 +784,22 @@ def build_scope_qualified_pivots(rows: list[dict]) -> dict[str, list[int]]:
             if cidr and _is_public_ip(cidr):
                 out[f"cidr24:{cidr}{suffix}"].append(idx)
 
+        # ── Weighted CIDR specificity: /28 (definitive) and /16 (loose) ────────
+        # /28 = 16-address block: two IPs in the same /28 are almost certainly
+        #   the same machine or a tightly clustered C2 VPC — use CIDR_WINDOW (24h).
+        # /16 = 65536-address block: weak signal (could be a large CGN or cloud
+        #   provider range) — use a wider CIDR16_WINDOW (48h) so it only bridges
+        #   within a tight burst.
+        for _raw_ip_fld in ("src_ip", "dst_ip"):
+            _raw_ip = _str(r.get(_raw_ip_fld))
+            if _raw_ip and _raw_ip not in ("-", "0.0.0.0") and _is_public_ip(_raw_ip):
+                _c28 = _cidr_prefix(_raw_ip, 28)
+                if _c28:
+                    out[f"cidr28:{_c28}{suffix}"].append(idx)
+                _c16 = _cidr_prefix(_raw_ip, 16)
+                if _c16:
+                    out[f"cidr16:{_c16}{suffix}"].append(idx)
+
         host = _lower(r.get("hostname") or r.get("host"))
         if host:
             out[f"host:{host}{suffix}"].append(idx)
@@ -758,6 +807,22 @@ def build_scope_qualified_pivots(rows: list[dict]) -> dict[str, list[int]]:
         sig = _str(r.get("event_signature"))
         if sig:
             out[f"sig:{sig}{suffix}"].append(idx)
+
+        # ── R8a: JA3/JA4 TLS fingerprint pivot (beacon-chain merging) ──────────
+        # Collapses beacon chains whose event_signature strings differ by minor
+        # variation (e.g. different NRD domain each day) but share the same
+        # JA3/JA4 fingerprint, proving the same C2 implant is responsible.
+        # Uses SIG_WINDOW (14d) — same as the event_signature pivot.
+        for _ja3_fld in ('ja3', 'ja3_hash', 'ssl_ja3', 'tls_ja3', 'ja3_fingerprint'):
+            _ja3 = _str(r.get(_ja3_fld))
+            if _ja3 and len(_ja3) >= 16:   # reject noise shorter than an MD5 fragment
+                out[f"ja3:{_ja3}{suffix}"].append(idx)
+                break
+        for _ja4_fld in ('ja4', 'ja4_hash', 'tls_ja4', 'ja4_fingerprint'):
+            _ja4 = _str(r.get(_ja4_fld))
+            if _ja4 and len(_ja4) >= 16:
+                out[f"ja4:{_ja4}{suffix}"].append(idx)
+                break
 
         # Attacker-zone pivot: network rows classified as attacker infrastructure
         # (e.g. zone_dst: "attacker_c2") share a pivot so that C2 rotation across
@@ -849,6 +914,29 @@ def build_scope_qualified_pivots(rows: list[dict]) -> dict[str, list[int]]:
                     _norm = _local
             if len(_norm) >= 3:
                 out[f"cloud_identity:{_norm}"].append(idx)
+
+        # ── R8b: Transitive identity join via shared session/device/token ──────
+        # Bridges actor pivots the user-based canon_user rule misses: a stolen
+        # session token or shared device links row A (user alice) → row C (user
+        # svc-account) even if they share no user_canonical string.
+        # session: already has SESSION_WINDOW (6h) in _PREFIX_WINDOW.
+        # device: uses HOST_WINDOW (14d) — a compromised device stays compromised.
+        # oauth_token: uses SESSION_WINDOW (6h) — token reuse is a tight burst.
+        for _sid_fld in ('session_id', 'SessionId', 'session_key', 'sessionId'):
+            _sid = _str(r.get(_sid_fld))
+            if _sid and len(_sid) >= 8 and _sid.lower() not in ('n/a', 'none', 'null', '-'):
+                out[f"session:{_sid}"].append(idx)   # no scope suffix — tokens cross actors
+                break
+        for _did_fld in ('device_id', 'DeviceId', 'device_key', 'device_object_id', 'deviceId'):
+            _did = _str(r.get(_did_fld))
+            if _did and len(_did) >= 8 and _did.lower() not in ('n/a', 'none', 'null', '-'):
+                out[f"device:{_did}"].append(idx)    # no scope suffix — devices cross users
+                break
+        for _tok_fld in ('oauth_token_id', 'token_id', 'access_token_hash', 'refresh_token_hash'):
+            _tok = _str(r.get(_tok_fld))
+            if _tok and len(_tok) >= 8 and _tok.lower() not in ('n/a', 'none', 'null', '-'):
+                out[f"oauth_token:{_tok}"].append(idx)
+                break
 
         # ── Pre-tagged seed pivot (7d campaign window) ─────────────────────
         # Ground-truth labels (_cluster / _anomaly) from test fixtures or SIEM
@@ -956,6 +1044,13 @@ _PREFIX_WINDOW: list[tuple[str, float]] = [
     ("iam_op:",      24 * 3600),         # 24h: burst of same IAM operation
     ("cloud_identity:", 7 * 86_400),     # 7d: cross-cloud principal lateral movement
     ("seed:",        7 * 86_400),        # 7d: pre-tagged _cluster/_anomaly ground truth
+    # Phase 0b: fragmentation fixes (R8a/R8b/CIDR)
+    ("cidr28:",      CIDR_WINDOW),       # 24h: /28 block — definitive same-host/VPC signal
+    ("cidr16:",      CIDR16_WINDOW),     # 48h: /16 block — loose burst-only bridge
+    ("ja3:",         SIG_WINDOW),        # 14d: same JA3 TLS fingerprint = same C2 implant
+    ("ja4:",         SIG_WINDOW),        # 14d: same JA4 TLS fingerprint = same C2 implant
+    ("device:",      HOST_WINDOW),       # 14d: shared device bridges cross-account pivots
+    ("oauth_token:", SESSION_WINDOW),    # 6h: shared OAuth token = same actor burst
 ]
 
 
@@ -964,6 +1059,190 @@ def _window_for(pivot_key: str) -> float:
         if pivot_key.startswith(prefix):
             return window
     return IP_WINDOW   # default permissive
+
+
+# ── Post-merge deduplication and campaign rollup ─────────────────────────────
+
+def _deduplicate_by_rowset(clusters: list[dict]) -> list[dict]:
+    """Collapse clusters with identical row_ref sets. Keeps highest-verdict cluster.
+
+    Eliminates Jaccard=1.0 duplicates that arise when phase decomposition creates
+    multiple children from the same evidence rows.
+    """
+    seen: dict[frozenset, int] = {}   # frozenset(row_refs) → index in out
+    out: list[dict] = []
+    for cl in clusters:
+        refs = cl.get('row_refs') or []
+        key: frozenset[int] = frozenset(int(r) for r in refs if r is not None)
+        if not key:
+            out.append(cl)
+            continue
+        if key in seen:
+            existing = out[seen[key]]
+            if (_VERDICT_RANK.get(str(cl.get('verdict', '')), 0) >
+                    _VERDICT_RANK.get(str(existing.get('verdict', '')), 0)):
+                out[seen[key]] = cl
+        else:
+            seen[key] = len(out)
+            out.append(cl)
+    return out
+
+
+def _merge_high_jaccard(clusters: list[dict], threshold: float = 0.65) -> list[dict]:
+    """Merge clusters whose row-set Jaccard overlap ≥ threshold into the higher-verdict parent.
+
+    Handles near-duplicate phase-children (e.g. email_exfil phase1 vs phase2 with 80% overlap).
+    Uses path-compressed union-find so the O(n²) pair scan only runs once.
+    """
+    if len(clusters) < 2:
+        return clusters
+
+    sets: list[frozenset[int]] = [
+        frozenset(int(r) for r in (cl.get('row_refs') or []) if r is not None)
+        for cl in clusters
+    ]
+    n = len(clusters)
+    parent = list(range(n))
+
+    def _find(x: int) -> int:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    for i in range(n):
+        if not sets[i]:
+            continue
+        for j in range(i + 1, n):
+            if not sets[j]:
+                continue
+            inter = len(sets[i] & sets[j])
+            if inter == 0:
+                continue
+            union = len(sets[i] | sets[j])
+            if union and inter / union >= threshold:
+                ri, rj = _find(i), _find(j)
+                if ri != rj:
+                    vi = _VERDICT_RANK.get(str(clusters[ri].get('verdict', '')), 0)
+                    vj = _VERDICT_RANK.get(str(clusters[rj].get('verdict', '')), 0)
+                    survivor, absorbed = (ri, rj) if vi >= vj else (rj, ri)
+                    parent[absorbed] = survivor
+                    # Merge row refs and factor_tags into survivor
+                    merged_refs = sets[survivor] | sets[absorbed]
+                    clusters[survivor]['row_refs'] = sorted(merged_refs)
+                    clusters[survivor]['row_count'] = len(merged_refs)
+                    sets[survivor] = merged_refs
+                    for ft in (clusters[absorbed].get('factor_tags') or []):
+                        existing_tags = clusters[survivor].setdefault('factor_tags', [])
+                        if ft not in existing_tags:
+                            existing_tags.append(ft)
+
+    seen_roots: set[int] = set()
+    out: list[dict] = []
+    for i in range(n):
+        root = _find(i)
+        if root not in seen_roots:
+            seen_roots.add(root)
+            out.append(clusters[root])
+    return out
+
+
+def _campaign_rollup(clusters: list[dict], max_campaigns: int = 8) -> list[dict]:
+    """Group breach clusters that share actors or external IPs into a single campaign case.
+
+    Non-breach clusters (pentest, ops, unclassified) pass through unchanged.
+    Merges sub-cases into a primary cluster and appends them as 'sub_cases' metadata.
+    Caps total breach cases to max_campaigns to prevent proliferation.
+    """
+    campaign_clusters = [c for c in clusters if c.get('verdict') in _BREACH_VERDICT_SET]
+    other_clusters = [c for c in clusters if c.get('verdict') not in _BREACH_VERDICT_SET]
+
+    if len(campaign_clusters) <= 1:
+        return clusters
+
+    # Build actor → cluster-index and external-ip → cluster-index maps
+    actor_idx: dict[str, list[int]] = defaultdict(list)
+    ip_idx: dict[str, list[int]] = defaultdict(list)
+    for i, cl in enumerate(campaign_clusters):
+        for u in (cl.get('shared_users') or cl.get('shared_accounts') or []):
+            u_key = str(u).lower().strip()
+            if u_key and u_key not in ('-', 'n/a', 'system', 'root', ''):
+                actor_idx[u_key].append(i)
+        for ip in (cl.get('shared_ips') or []):
+            ip_str = str(ip or '').strip()
+            if ip_str and not any(ip_str.startswith(p) for p in _PRIVATE_PREFIXES):
+                ip_idx[ip_str].append(i)
+
+    # Union-find over campaign clusters
+    parent = list(range(len(campaign_clusters)))
+
+    def _find(x: int) -> int:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def _union(a: int, b: int) -> None:
+        ra, rb = _find(a), _find(b)
+        if ra != rb:
+            parent[rb] = ra
+
+    for indices in actor_idx.values():
+        for j in range(1, len(indices)):
+            _union(indices[0], indices[j])
+    for indices in ip_idx.values():
+        for j in range(1, len(indices)):
+            _union(indices[0], indices[j])
+
+    # Collect groups
+    groups: dict[int, list[int]] = defaultdict(list)
+    for i in range(len(campaign_clusters)):
+        groups[_find(i)].append(i)
+
+    merged: list[dict] = []
+    for root, members in groups.items():
+        if len(members) == 1:
+            merged.append(campaign_clusters[members[0]])
+            continue
+        # Merge all members: primary is the root cluster
+        primary = campaign_clusters[root]
+        all_row_refs: set[int] = set(
+            int(r) for r in (primary.get('row_refs') or []) if r is not None
+        )
+        all_factors: list[str] = list(primary.get('factor_tags') or [])
+        sub_cases: list[dict] = []
+        for idx in members:
+            if idx == root:
+                continue
+            absorbed = campaign_clusters[idx]
+            for r in (absorbed.get('row_refs') or []):
+                if r is not None:
+                    all_row_refs.add(int(r))
+            for ft in (absorbed.get('factor_tags') or []):
+                if ft not in all_factors:
+                    all_factors.append(ft)
+            sub_cases.append({
+                'cluster_id': absorbed.get('cluster_id'),
+                'lead_description': absorbed.get('lead_description'),
+                'verdict': absorbed.get('verdict'),
+                'row_count': absorbed.get('row_count'),
+                'factor_tags': absorbed.get('factor_tags'),
+                'shared_users': absorbed.get('shared_users') or absorbed.get('shared_accounts'),
+                'shared_ips': absorbed.get('shared_ips'),
+            })
+        primary['row_refs'] = sorted(all_row_refs)
+        primary['row_count'] = len(all_row_refs)
+        primary['factor_tags'] = all_factors
+        primary['sub_cases'] = sub_cases
+        primary['_merged_cluster_count'] = len(members)
+        merged.append(primary)
+
+    # Sort by verdict rank desc, then row_count desc; cap to max_campaigns
+    merged.sort(
+        key=lambda c: (_VERDICT_RANK.get(str(c.get('verdict', '')), 0), int(c.get('row_count') or 0)),
+        reverse=True,
+    )
+    return merged[:max_campaigns] + other_clusters
 
 
 # ── Public entrypoint ────────────────────────────────────────────────────────
@@ -1121,6 +1400,24 @@ def transitive_merge_clusters(
         -int(c.get("row_count", 0)),
     ))
 
+    # Cap expanded sub-clusters: after sort (largest first), keep at most
+    # JANUSEC_PHASE_SUB_CLUSTER_CAP per (parent_cluster_id, phase_id) pair
+    # so a single mega-campaign doesn't produce 40+ near-duplicate cards.
+    _sub_cap = int(os.getenv("JANUSEC_PHASE_SUB_CLUSTER_CAP", "4") or 4)
+    _phase_sub_seen: dict[tuple[str, str], int] = {}
+    _out_deduped: list[dict] = []
+    for _c_dd in out:
+        if not _c_dd.get("expanded_from_large_campaign"):
+            _out_deduped.append(_c_dd)
+            continue
+        _ph_id_dd = str((_c_dd.get("phases") or [{}])[0].get("phase_id") or "unknown")
+        _par_id_dd = str(_c_dd.get("parent_cluster_id") or "")
+        _key_dd = (_par_id_dd, _ph_id_dd)
+        _phase_sub_seen[_key_dd] = _phase_sub_seen.get(_key_dd, 0) + 1
+        if _phase_sub_seen[_key_dd] <= _sub_cap:
+            _out_deduped.append(_c_dd)
+    out = _out_deduped
+
     if diagnostics_out is not None:
         singleton_drops = sum(1 for members in comp_members.values() if len(members) < min_component_size)
         phase_hits = sum(1 for c in out if c.get("phases"))
@@ -1133,6 +1430,20 @@ def transitive_merge_clusters(
             "stale_rows": stale_row_count,
             "cluster_merge_version": _CLUSTER_MERGE_VERSION,
         })
+
+    # ── Post-merge deduplication and campaign rollup ─────────────────────────
+    # Layer 1: collapse identical row-sets (Jaccard=1.0 from phase decomposition)
+    out = _deduplicate_by_rowset(out)
+    # Layer 2: merge near-duplicates above the Jaccard threshold
+    _jaccard_threshold = float(os.getenv("JANUSEC_JACCARD_MERGE_THRESHOLD", "0.65"))
+    out = _merge_high_jaccard(out, threshold=_jaccard_threshold)
+    # Layer 3: roll multi-cluster actor/IP campaigns into single cases
+    _max_campaigns = int(os.getenv("JANUSEC_MAX_CAMPAIGNS", "8"))
+    out = _campaign_rollup(out, max_campaigns=_max_campaigns)
+
+    if diagnostics_out is not None:
+        diagnostics_out["post_merge_cluster_count"] = len(out)
+        diagnostics_out["post_merge_jaccard_threshold"] = _jaccard_threshold
 
     # Append isolated clusters at the end with a sentinel so callers can
     # split them out for the isolated_count header without losing audit data.
@@ -1273,11 +1584,76 @@ def _classify_component(
     else:
         lead = f"Unclassified component · {n} rows · {len(sources)} source(s)"
 
-    confidence = min(0.95, 0.40 + (n / 200.0))
-    if kind == "campaign":
-        confidence = max(confidence, 0.85)
-    elif kind in ("pentest", "ops"):
-        confidence = 0.92   # high — explicit ref attestation
+    # ── Phase 0a: Structured confidence breakdown ────────────────────────────────
+    # Replaces the uncalibrated `0.40 + n/200` row-count formula.  Weights match
+    # the segment_max values in threat_models._compute_confidence_meter so that
+    # the cluster-level scalar and the prefill-level meter are computed on the
+    # same conceptual basis (prefill refines with per-row MITRE + off-hours data).
+
+    # Source corroboration (25 pts weight): distinct source types vs expected 3
+    _src_corr = min(1.0, len(sources) / 3.0)
+
+    # Evidence cluster strength (30 pts weight): phase count signals evidence richness
+    if phases:
+        _evid = min(1.0, 0.40 + len(phases) * 0.15)
+    else:
+        _evid = min(1.0, 0.25 + n / 500.0)
+
+    # Technique confidence (25 pts weight): critical/high detectors that fired
+    _crit = sum(1 for d in PHASE_DETECTORS if d.phase_id in phase_hits and d.severity == "critical")
+    _high = sum(1 for d in PHASE_DETECTORS if d.phase_id in phase_hits and d.severity == "high")
+    _tech = min(1.0, _crit * 0.35 + _high * 0.20) if phase_hits else 0.30
+
+    # Temporal consistency (20 pts weight): attack span vs known campaign durations
+    _span_c = (max(times) - min(times)) if len(times) >= 2 else 0.0
+    if _span_c >= 7 * 86400:
+        _temp = 1.0
+    elif _span_c >= 86400:
+        _temp = 0.85
+    elif _span_c >= 6 * 3600:
+        _temp = 0.65
+    elif _span_c > 0:
+        _temp = 0.50
+    else:
+        _temp = 0.30
+
+    confidence = round(
+        _src_corr * 0.25
+        + _evid * 0.30
+        + _tech * 0.25
+        + _temp * 0.20,
+        3,
+    )
+
+    # Attestation floors
+    if kind in ("pentest", "ops"):
+        confidence = max(confidence, 0.85)    # explicit ref attestation
+    elif kind == "campaign" and phase_hits:
+        confidence = max(confidence, 0.60)    # at least one detector fired
+
+    confidence_breakdown = {
+        "source_corroboration":      round(_src_corr * 25, 1),
+        "evidence_cluster_strength": round(_evid * 30, 1),
+        "technique_confidence":      round(_tech * 25, 1),
+        "temporal_consistency":      round(_temp * 20, 1),
+    }
+    try:
+        from src.core.calibration.confidence_calibration import apply_calibration
+        _dataset_hint = (
+            member_rows[0].get("org")
+            or member_rows[0].get("tenant_id")
+            or member_rows[0].get("_source")
+            if member_rows else None
+        )
+        _calibrated = apply_calibration(confidence, dataset=_dataset_hint)
+    except Exception:
+        _calibrated = {
+            "probability": confidence,
+            "applied": False,
+            "method": "none",
+            "artifact": None,
+            "family": "default",
+        }
 
     # ── APT attribution (best-effort TTP pattern match) ───────────────────
     # Only run for campaign clusters where phase_tags carry weight. Returns
@@ -1353,7 +1729,15 @@ def _classify_component(
         "analysis_classification": analysis_classification,
         "severity": severity_label,
         "confidence": round(confidence, 3),
-        "confidence_calibration": "uncalibrated",
+        "calibrated_confidence": round(float(_calibrated.get("probability", confidence)), 4),
+        "confidence_calibration": "decomposed_v1",
+        "statistical_calibration": {
+            "applied": bool(_calibrated.get("applied")),
+            "method": _calibrated.get("method"),
+            "artifact": _calibrated.get("artifact"),
+            "family": _calibrated.get("family"),
+        },
+        "confidence_breakdown": confidence_breakdown,
         "lead_description": lead,
         "reason_summary": lead,
         "phases": phases,
@@ -1531,7 +1915,8 @@ def _make_phase_child_cluster(
         "analysis_classification": parent.get("analysis_classification", "confirmed_breach"),
         "severity": phase.get("severity") or parent.get("severity", "high"),
         "confidence": parent.get("confidence", 0.85),
-        "confidence_calibration": parent.get("confidence_calibration", "uncalibrated"),
+        "confidence_calibration": parent.get("confidence_calibration", "decomposed_v1"),
+        "confidence_breakdown": parent.get("confidence_breakdown"),
         "lead_description": lead,
         "reason_summary": lead,
         "phases": [child_phase],
@@ -1589,6 +1974,23 @@ def _is_public_ip(ip: str) -> bool:
         return not ipaddress.ip_address(ip).is_private
     except ValueError:
         return False
+
+
+def _cidr_prefix(ip: str, prefix_len: int) -> str:
+    """Return the network address string for *ip* masked to *prefix_len*.
+
+    Returns '' on any parse failure so callers can safely skip empty strings.
+    Only works on IPv4; IPv6 CIDR pivots are intentionally excluded because
+    most IPv6 prefixes are /48 or shorter and the address space is enormous.
+    """
+    try:
+        addr = ipaddress.ip_address(ip)
+        if addr.version != 4:
+            return ''
+        net = ipaddress.ip_network(f"{ip}/{prefix_len}", strict=False)
+        return str(net.network_address)
+    except ValueError:
+        return ''
 
 
 def _row_text(row: dict) -> str:
