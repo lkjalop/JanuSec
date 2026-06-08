@@ -1662,7 +1662,11 @@ async def run_assessment_pipeline(
         # Clusters only store row_ref indices; the breach.html cluster card
         # needs a sample of actual row dicts to render the in-cluster evidence
         # table without a second API round-trip.  Populate evidence_preview
-        # (up to 20 rows) from filtered_rows via the row_lookup built in 5b.
+        # (up to 20 rows, ranked by triage_score desc, source-balanced).
+        # IMPORTANT: We sort by triage_score before slicing, not by row order —
+        # ingestion order biases toward whichever file is processed first, which
+        # causes high-signal attack rows (Kerberos EventID 4769, LOLBins cmd lines)
+        # from later files to be excluded in favour of low-score cloud rows.
         try:
             _row_lookup_ep: dict[int, dict] = {}
             for _r in filtered_rows:
@@ -1673,17 +1677,46 @@ async def run_assessment_pipeline(
                     except (TypeError, ValueError):
                         pass
             _ep_count = 0
+            _EP_CAP = 20
             for _cl in clusters:
                 if _cl.get("evidence_preview"):
                     continue  # already populated upstream
-                _preview: list[dict] = []
-                for _ref in (_cl.get("row_refs") or [])[:20]:
+                # Collect all matching rows first, then rank
+                _candidate_rows: list[dict] = []
+                for _ref in (_cl.get("row_refs") or []):
                     try:
                         _r = _row_lookup_ep.get(int(float(_ref)))
                         if _r:
-                            _preview.append(_r)
+                            _candidate_rows.append(_r)
                     except (TypeError, ValueError):
                         pass
+                # Sort by triage_score desc so high-signal attack rows surface first
+                _candidate_rows.sort(
+                    key=lambda r: float(r.get("triage_score") or 0), reverse=True
+                )
+                # Source-balance: ensure at most ceil(EP_CAP/unique_sources) per source,
+                # then fill remaining slots from the ranked list.
+                _seen_sources: dict[str, int] = {}
+                _preview: list[dict] = []
+                _source_cap = max(4, _EP_CAP // max(1, len({
+                    r.get("_source") or r.get("source_file", "") for r in _candidate_rows
+                })))
+                for _r in _candidate_rows:
+                    _src = str(_r.get("_source") or _r.get("source_file") or "")
+                    if _seen_sources.get(_src, 0) >= _source_cap and len(_preview) < _EP_CAP:
+                        continue  # skip over-represented source; fill from others first
+                    _seen_sources[_src] = _seen_sources.get(_src, 0) + 1
+                    _preview.append(_r)
+                    if len(_preview) >= _EP_CAP:
+                        break
+                # If source balancing left slots, fill with any remaining rows
+                if len(_preview) < _EP_CAP:
+                    _added = set(id(r) for r in _preview)
+                    for _r in _candidate_rows:
+                        if id(_r) not in _added:
+                            _preview.append(_r)
+                            if len(_preview) >= _EP_CAP:
+                                break
                 if _preview:
                     _cl["evidence_preview"] = _preview
                     _ep_count += 1

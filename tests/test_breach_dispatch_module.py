@@ -81,14 +81,14 @@ def test_module_exposes_globals():
 
 def test_roles_count():
     count = _node_json('console.log(window.BreachDispatch.roles.length);')
-    assert count == 7, f"Expected 7 ROLES, got {count}"
+    assert count == 9, f"Expected 9 ROLES, got {count}"
 
 
 def test_roles_keys():
     keys = _node_json(
         'console.log(JSON.stringify(window.BreachDispatch.roles.map(function(r){return r.key;})));'
     )
-    expected = ['soc_analyst', 'ciso', 'executive', 'threat_hunter', 'forensics', 'compliance', 'export']
+    expected = ['soc_analyst', 'ciso', 'executive', 'threat_hunter', 'forensics', 'compliance', 'audit', 'mssp', 'export']
     assert keys == expected, f"ROLES keys mismatch: {keys}"
 
 
@@ -192,12 +192,12 @@ def test_render_bar_preview_panel_present():
 
 
 def test_render_bar_drawer_role_buttons():
-    """The full drawer (inside br-dispatch__drawer) should have all 7 role buttons."""
+    """The full drawer (inside br-dispatch__drawer) should have all 9 role buttons."""
     html = _node(
         "var html = window.BreachDispatch.renderBar({});",
         "console.log(html);"
     )
     drawer_tids = re.findall(r'data-testid="(br-dispatch-drawer-[^"]+)"', html)
-    expected_keys = ['soc_analyst', 'ciso', 'executive', 'threat_hunter', 'forensics', 'compliance', 'export']
+    expected_keys = ['soc_analyst', 'ciso', 'executive', 'threat_hunter', 'forensics', 'compliance', 'audit', 'mssp', 'export']
     found_keys = [t.replace('br-dispatch-drawer-', '') for t in drawer_tids]
     assert sorted(found_keys) == sorted(expected_keys), f"Drawer buttons mismatch: {found_keys}"

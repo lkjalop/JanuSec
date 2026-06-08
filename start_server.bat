@@ -62,12 +62,12 @@ set ADAPTIVE_EWMA_BASE_ALPHA=0.6
 set ADAPTIVE_EWMA_MIN_ALPHA=0.3
 set ADAPTIVE_EWMA_MAX_ALPHA=0.85
 set PLAYBOOK_TENANT_ALLOW=
-REM Ollama models — narration vs interactive are different workloads
-REM T1 narrator (batch, non-thinking): qwen2.5:14b — completes in ~15s/cluster
-REM T2 narrator (best prose): qwen3.6:27b — pull first: ollama pull qwen3.6:27b
-set OLLAMA_MODEL=qwen3.6:27b
-REM Interactive/reasoning model: deepseek-r1:14b for analyst chat
-REM Pull first: ollama pull deepseek-r1:14b
+REM Ollama models — benchmark 2026-06-08 results:
+REM T1 narrator (fast, ~20s/cluster): deepseek-r1:14b — perfect entity recall, precise kill-chain
+REM T2 narrator (best prose, ~25s): qwen3:14b — MITRE inline, 2xP1 steps, always specific tools
+REM Pull: ollama pull deepseek-r1:14b && ollama pull qwen3:14b
+set OLLAMA_MODEL=deepseek-r1:14b
+REM Interactive/reasoning model: same as T1 narrator (deepseek-r1:14b)
 if not defined INTERACTIVE_MODEL set INTERACTIVE_MODEL=deepseek-r1:14b
 REM Anthropic API (optional) — set ANTHROPIC_API_KEY to enable Claude narration
 REM Activation: set ANTHROPIC_API_KEY=sk-ant-... && set LLM_PROVIDER=anthropic && set ANTHROPIC_MODEL=claude-sonnet-4-6
