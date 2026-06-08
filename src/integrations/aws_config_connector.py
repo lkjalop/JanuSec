@@ -20,10 +20,15 @@ try:
     from botocore.exceptions import ClientError
 except Exception:
     boto3 = None
+    logger.warning(
+        'AWS connector: boto3 not installed — AWS live connector is non-functional. '
+        'Install with: pip install boto3 botocore'
+    )
 
 
 def assume_role(account_id: str, role_name: str, session_name: str = 'janusec-assume') -> Optional[Dict[str, Any]]:
     if boto3 is None:
+        logger.warning('assume_role: boto3 unavailable — install boto3 to enable AWS live connector')
         return None
     sts = boto3.client('sts')
     role_arn = f"arn:aws:iam::{account_id}:role/{role_name}"

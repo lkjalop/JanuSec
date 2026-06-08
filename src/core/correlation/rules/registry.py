@@ -83,16 +83,9 @@ class RuleRegistry:
         if prev is not None:
             prev_src = getattr(prev, 'source_module', '<unknown>')
             new_src = getattr(rule, 'source_module', '<unknown>')
-            logger.warning('Duplicate registration for rule %s detected; replacing %s with %s', rule.name, prev_src, new_src)
-            # audit duplicate to disk (append JSON line)
-            try:
-                import json, os
-                p = os.path.join('data', 'duplicate_rule_registrations.log')
-                os.makedirs(os.path.dirname(p), exist_ok=True)
-                with open(p, 'a', encoding='utf-8') as f:
-                    f.write(json.dumps({'rule': rule.name, 'previous': prev_src, 'current': new_src}) + '\n')
-            except Exception:
-                pass
+            # Later-loaded modules intentionally override earlier ones (batch priority system).
+            # Log at DEBUG only — these replacements are expected, not errors.
+            logger.debug('Rule %s: %s replaced by %s', rule.name, prev_src, new_src)
         # prefer later registration (overwrite)
         self._rules[rule.name] = rule
     def list(self):

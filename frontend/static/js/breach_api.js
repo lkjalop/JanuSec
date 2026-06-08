@@ -20,7 +20,7 @@
   }
 
   function getSelectedModel() {
-    try { return localStorage.getItem('selectedModel') || 'qwen3.6:27b'; } catch (_) { return 'qwen3.6:27b'; }
+    try { return localStorage.getItem('selectedModel') || 'qwen3:14b'; } catch (_) { return 'qwen3:14b'; }
   }
 
   function apiFetch(path, opts) {

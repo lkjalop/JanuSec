@@ -347,12 +347,20 @@ try:
     from datasketch import MinHash  # type: ignore
 except Exception:
     MinHash = None  # type: ignore
-from core.factor_attribution_store import FACTOR_ATTRIBUTIONS
-from core.factor_stats_manager import FACTOR_STATS
-from core.labels_store import LABELS, VALID_LABELS
-from core.audit import emit as audit_emit, canonical_user as audit_user
-from core.flags import get_flag as _get_flag, set_flag as _set_flag, clear_flag as _clear_flag, flags_snapshot as _flags_snapshot, list_overrides as _list_overrides
-from core.threat_modeling.reload_watcher import ensure_watcher
+try:
+    from src.core.factor_attribution_store import FACTOR_ATTRIBUTIONS
+    from src.core.factor_stats_manager import FACTOR_STATS
+    from src.core.labels_store import LABELS, VALID_LABELS
+    from src.core.audit import emit as audit_emit, canonical_user as audit_user
+    from src.core.flags import get_flag as _get_flag, set_flag as _set_flag, clear_flag as _clear_flag, flags_snapshot as _flags_snapshot, list_overrides as _list_overrides
+    from src.core.threat_modeling.reload_watcher import ensure_watcher
+except Exception:
+    from core.factor_attribution_store import FACTOR_ATTRIBUTIONS
+    from core.factor_stats_manager import FACTOR_STATS
+    from core.labels_store import LABELS, VALID_LABELS
+    from core.audit import emit as audit_emit, canonical_user as audit_user
+    from core.flags import get_flag as _get_flag, set_flag as _set_flag, clear_flag as _clear_flag, flags_snapshot as _flags_snapshot, list_overrides as _list_overrides
+    from core.threat_modeling.reload_watcher import ensure_watcher
 
 from . import runtime_state as _rt
 from .alerts_endpoints import (

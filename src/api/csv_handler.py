@@ -824,7 +824,22 @@ class CSVProcessor:
             col_lower = str(col).lower().strip()
             normalized = col_lower.replace(' ', '_').replace('-', '_')
 
-            if 'process' in col_lower or 'name' in col_lower:
+            # Kerberos / Windows Event fields — must precede generic 'name' catch-all
+            if normalized in {'windows_event_id', 'event_id', 'eventid',
+                              'winlog_event_id', 'event_code', 'eventcode'}:
+                artifact['event_id'] = value.strip()
+            elif normalized in {'ticket_encryption', 'encryption_type',
+                                'ticket_encryption_type', 'kerberos_encryption',
+                                'ticket_encryption_type_name'}:
+                artifact['ticket_encryption'] = value.strip()
+            elif normalized in {'pre_auth_type', 'preauthtype',
+                                'pre_authentication_type', 'preauthentication_type'}:
+                artifact['pre_auth_type'] = value.strip()
+            elif normalized in {'service_name', 'kerberos_service',
+                                'target_service_name', 'kerberos_target',
+                                'spn', 'service_principal_name'}:
+                artifact['event_service_name'] = value.strip()
+            elif 'process' in col_lower or 'name' in col_lower:
                 artifact['process_name'] = value.strip()
             elif 'path' in col_lower or 'file' in col_lower:
                 artifact['file_path'] = value.strip()
@@ -907,6 +922,36 @@ class CSVProcessor:
             'windows_update':            0.00,  # benign
         }
         risk = sum(_FACTOR_WEIGHTS.get(f, 0.10) for f in factors)
+
+        # Windows Event ID scoring — supplement factor-based score with EventID context
+        _EVENTID_RISK = {
+            1102: 0.70,  # Security audit log cleared — critical evasion signal
+            4697: 0.55,  # Service installed via SCM
+            7045: 0.60,  # New service installed in system
+            4698: 0.45,  # Scheduled task created
+            4699: 0.40,  # Scheduled task deleted
+            4769: 0.50,  # Kerberos TGS request (check encryption type below)
+            4768: 0.40,  # Kerberos AS (TGT) request
+            4771: 0.35,  # Kerberos pre-auth failed
+            4625: 0.20,  # Failed logon
+            4776: 0.25,  # NTLM auth attempt
+        }
+        raw_eid = artifact.get('event_id') or artifact.get('meta_windows_event_id') or ''
+        try:
+            eid = int(str(raw_eid).strip())
+            eid_risk = _EVENTID_RISK.get(eid, 0.0)
+            risk += eid_risk
+            # RC4/DES encryption on Kerberos ticket is weak — AS-REP roasting indicator
+            if eid in (4769, 4768):
+                enc = str(artifact.get('ticket_encryption', '')).strip().lower()
+                if enc in ('0x17', '0x18', '23', '24', 'rc4', 'rc4-hmac', 'des'):
+                    risk += 0.30
+                pre_auth = str(artifact.get('pre_auth_type', '1')).strip()
+                if pre_auth in ('0', 'false', 'none'):  # no pre-auth = AS-REP roast
+                    risk += 0.25
+        except (ValueError, TypeError):
+            pass
+
         return min(risk, 1.0)
 
     def _classify_verdict(self, risk_score: float) -> str:

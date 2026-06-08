@@ -897,7 +897,7 @@
                 <button class="btn btn-primary" style="width: 100%; justify-content: center; margin-bottom: 8px;">
                     Create Security Incident
                 </button>
-                <button class="btn" style="width: 100%; justify-content: center; margin-bottom: 8px;">
+                <button class="btn" onclick="exportInvestigationReport()" style="width: 100%; justify-content: center; margin-bottom: 8px;">
                     Export Investigation Report
                 </button>
                 <button class="btn" style="width: 100%; justify-content: center;">
@@ -930,6 +930,35 @@
                 'x-api-key': apiKey,
                 'x-tenant-id': tenant
             }, extra || {});
+        }
+
+        function currentAssessmentId() {
+            const keys = [
+                'last_assessment_id',
+                'csv_last_parent_assessment',
+                'janusec_last_assessment_id',
+                'current_assessment_id'
+            ];
+            for (const key of keys) {
+                try {
+                    const value = localStorage.getItem(key);
+                    if (value) return value;
+                } catch (_) {}
+            }
+            try {
+                return (window._lastAssessment && window._lastAssessment.assessment_id) || '';
+            } catch (_) {
+                return '';
+            }
+        }
+
+        function exportInvestigationReport() {
+            const apiKey = (localStorage.getItem && localStorage.getItem('apiKey')) || 'devkey123';
+            const aid = currentAssessmentId();
+            let url = '/api/v1/report/ingestion?format=html&include_model=true&include_scenarios=true';
+            if (aid) url += '&assessment_id=' + encodeURIComponent(aid);
+            if (apiKey) url += '&api_key=' + encodeURIComponent(apiKey);
+            window.open(url, '_blank', 'noopener');
         }
 
         function connectorStatusClass(entry) {

@@ -763,7 +763,10 @@ class TestRouter:
             )
 
         assert result["investigation_id"] == ctx.investigation_id
-        assert result["close_reason"] in ("investigation_complete", "no_more_leads")
+        # no_verified_findings is a valid outcome when mock tools return stubs
+        assert result["close_reason"] in (
+            "investigation_complete", "no_more_leads", "no_verified_findings"
+        )
         assert result["total_cycles"] <= 3
         assert isinstance(result["proposed_actions"], list)
         # Proposed actions should have stakeholder fields

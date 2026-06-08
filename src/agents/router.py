@@ -264,6 +264,23 @@ async def run_investigation(
             break
     # ── CLOSE SESSION STORE ─────────────────────────────────────────────────────
     session.close(close_reason, {"narrative": narrative, "cycle_count": len(all_cycles)})
+
+    # ── PERSIST INVESTIGATION TO MEMORY LAYERS ───────────────────────────────
+    # Write investigation outcome back to TemporalRAG (Layer 2) and flush the
+    # Global IdentityGraph (Layer 3) so future assessments benefit from findings.
+    # Fire-and-forget — never block the return on persistence failures.
+    try:
+        import asyncio as _asyncio
+        _asyncio.create_task(_persist_investigation_to_memory(
+            context=context,
+            close_reason=close_reason,
+            all_verified=all_verified,
+            kill_chain=kill_chain,
+            narrative=narrative,
+        ))
+    except Exception as _pm_exc:
+        LOGGER.debug('persist_investigation_to_memory scheduling failed: %s', _pm_exc)
+
     # ── FINAL AUDIT ──────────────────────────────────────────────────────
     audit("investigation_close",
           investigation_id=context.investigation_id,
@@ -345,6 +362,84 @@ async def run_investigation(
             for a in memory.artifacts
         ],
     }
+
+
+async def _persist_investigation_to_memory(
+    *,
+    context: InvestigationContext,
+    close_reason: str,
+    all_verified: list,
+    kill_chain: list,
+    narrative: str,
+) -> None:
+    """Write investigation outcome to TemporalRAG (incident index) and flush the
+    Global IdentityGraph.  Called as a fire-and-forget task after the main loop."""
+    import asyncio
+
+    # Only index completed or no-more-leads investigations — skip budget/error cases
+    if close_reason not in ('investigation_complete', 'no_more_leads', 'no_verified_findings'):
+        return
+
+    def _sync_persist() -> None:
+        try:
+            from src.core.ingest.assessment_worker import _get_incident_index, _get_trace_store
+            from src.analysis.temporal_rag_dispatch import (
+                TemporalRAGProvider, _signature_from_narrative,
+            )
+            from datetime import datetime, timezone
+
+            incident_index = _get_incident_index()
+
+            # Build a lightweight narrative dict from verified findings
+            techniques: list = []
+            phases: list = []
+            for f in all_verified:
+                for t in (getattr(f, 'mitre_techniques', None) or []):
+                    if t and t not in techniques:
+                        techniques.append(t)
+                phase = getattr(f, 'kill_chain_phase', None) or ''
+                if phase and phase not in phases:
+                    phases.append(phase)
+
+            synthetic_narrative = {
+                'verdict': 'VALIDATED_BREACH' if all_verified else 'REQUIRES_INVESTIGATION',
+                'mitre_techniques': techniques,
+                'kill_chain_stage': phases[0] if phases else 'unknown',
+                'affected_data': {},
+                'affected_principals': {},
+            }
+            sig = _signature_from_narrative(synthetic_narrative)
+            now = datetime.now(timezone.utc).isoformat()
+
+            incident_index.index_incident(
+                tenant_id=context.tenant_id,
+                cluster_id=context.cluster_id or context.assessment_id,
+                signature=sig,
+                valid_time_start=now,
+                valid_time_end=now,
+                transaction_time=now,
+                narrative_summary=narrative[:500] if narrative else '',
+                outcome_summary=(
+                    f"close_reason:{close_reason},findings:{len(all_verified)}"
+                ),
+            )
+            LOGGER.info(
+                'TemporalRAG indexed investigation result for %s (%d findings)',
+                context.assessment_id, len(all_verified),
+            )
+        except Exception as exc:
+            LOGGER.debug('persist investigation to TemporalRAG failed: %s', exc)
+
+        try:
+            from src.core.graph.global_identity_graph import flush_global_identity_graph
+            flush_global_identity_graph()
+        except Exception as exc:
+            LOGGER.debug('global_identity_graph flush failed: %s', exc)
+
+    try:
+        await asyncio.to_thread(_sync_persist)
+    except Exception as exc:
+        LOGGER.debug('_persist_investigation_to_memory failed: %s', exc)
 
 
 # ── Resume helpers ─────────────────────────────────────────────────────────────

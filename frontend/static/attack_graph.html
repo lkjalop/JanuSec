@@ -23,7 +23,9 @@ svg{width:100%;height:520px;background:#10141C;border:1px solid #2A3142;border-r
 .domain-cloud{background:#666DFF}
 .code{font-family:Consolas,monospace;font-size:11px}
 @media(max-width:960px){svg{height:640px}}
-</style></head>
+</style>
+<script src="https://d3js.org/d3.v7.min.js"></script>
+</head>
 <body>
 <div class="wrap">
   <div class="row">
@@ -125,39 +127,117 @@ function nodeColor(domain){
   }
 }
 function drawGraph(j){
-  const svg = document.getElementById('graphSvg');
-  while(svg.firstChild) svg.removeChild(svg.firstChild);
-  const width = 1200, height = 520; const padding = 40;
-  const domains = DOMAIN_ORDER.slice();
-  // Layout horizontally
-  const gap = (width - padding*2) / (domains.length-1);
-  const yBase = height/2;
-  const nodes = domains.map((d,i)=>({ id:d, x: padding + i*gap, y: yBase + ( (i%2? -60:60) ) }));
-  // Edges from email → endpoint → network → data (demo path)
-  const path = ['email','endpoint','network','data'];
-  const edges = path.slice(1).map((target,idx)=>({ source: path[idx], target }));
-  // Draw edges
-  edges.forEach(e=>{
-    const s = nodes.find(n=>n.id===e.source); const t = nodes.find(n=>n.id===e.target);
-    if(!s||!t) return; const line = document.createElementNS('http://www.w3.org/2000/svg','line');
-    line.setAttribute('x1',s.x); line.setAttribute('y1',s.y); line.setAttribute('x2',t.x); line.setAttribute('y2',t.y);
-    line.setAttribute('stroke','#2A3142'); line.setAttribute('stroke-width','2'); line.setAttribute('marker-end','url(#arrow)'); svg.appendChild(line);
-  });
-  // Arrow marker
-  const defs = document.createElementNS('http://www.w3.org/2000/svg','defs');
-  const marker = document.createElementNS('http://www.w3.org/2000/svg','marker'); marker.setAttribute('id','arrow'); marker.setAttribute('viewBox','0 0 10 10'); marker.setAttribute('refX','7'); marker.setAttribute('refY','5'); marker.setAttribute('markerWidth','6'); marker.setAttribute('markerHeight','6'); marker.setAttribute('orient','auto');
-  const poly = document.createElementNS('http://www.w3.org/2000/svg','path'); poly.setAttribute('d','M0 0 L10 5 L0 10 Z'); poly.setAttribute('fill','#2A3142'); marker.appendChild(poly); defs.appendChild(marker); svg.appendChild(defs);
-  // Draw nodes
-  nodes.forEach(n=>{
-    const g = document.createElementNS('http://www.w3.org/2000/svg','g'); g.setAttribute('class','node');
-    const circle = document.createElementNS('http://www.w3.org/2000/svg','circle'); circle.setAttribute('cx',n.x); circle.setAttribute('cy',n.y); circle.setAttribute('r',34); circle.setAttribute('fill',nodeColor(n.id)); circle.setAttribute('stroke','#0B0E14'); circle.setAttribute('stroke-width','2');
-    const text = document.createElementNS('http://www.w3.org/2000/svg','text'); text.setAttribute('x',n.x); text.setAttribute('y',n.y+4); text.setAttribute('text-anchor','middle'); text.setAttribute('class','label'); text.textContent=n.id;
-    g.appendChild(circle); g.appendChild(text); svg.appendChild(g);
-  });
-  // Annotate phases for path nodes
-  path.forEach((d,i)=>{
-    const node = nodes.find(n=>n.id===d); if(!node) return; const phase = PHASES[i]||'Phase';
-    const text = document.createElementNS('http://www.w3.org/2000/svg','text'); text.setAttribute('x',node.x); text.setAttribute('y',node.y-46); text.setAttribute('text-anchor','middle'); text.setAttribute('class','label'); text.textContent=phase; text.style.fontSize='10px'; text.style.fill='#A8B2C3'; svg.appendChild(text);
+  const svgEl = document.getElementById('graphSvg');
+  while(svgEl.firstChild) svgEl.removeChild(svgEl.firstChild);
+  const W = 1200, H = 520;
+
+  // Build nodes from actual correlation data; fall back to demo domains
+  const corr = j.correlation || {};
+  const corrKeys = Object.keys(corr).filter(k => k && DOMAIN_ORDER.includes(k));
+  const activeIds = corrKeys.length >= 2 ? corrKeys : ['email','endpoint','network','data'];
+  const maxCount = activeIds.reduce((m,k) => Math.max(m, corr[k]||1), 1);
+
+  const nodes = activeIds.map(id => ({
+    id,
+    count: corr[id] || 1,
+    r: 24 + Math.round(22 * Math.sqrt((corr[id]||1) / maxCount)),
+  }));
+
+  // Build edges: use hopgraph overlay if available, else connect domains in DOMAIN_ORDER sequence
+  let links = [];
+  const hopEdges = (j.hopgraph_overlay && j.hopgraph_overlay.snapshot && j.hopgraph_overlay.snapshot.edges) || [];
+  if (hopEdges.length > 0) {
+    hopEdges.forEach(e => {
+      const s = e.from || e.source, t = e.to || e.target;
+      if (activeIds.includes(s) && activeIds.includes(t)) {
+        links.push({ source: s, target: t, weight: e.count || 1 });
+      }
+    });
+  }
+  if (links.length === 0) {
+    // Sequential connection following DOMAIN_ORDER through active domains
+    const ordered = DOMAIN_ORDER.filter(d => activeIds.includes(d));
+    ordered.slice(1).forEach((d, i) => links.push({ source: ordered[i], target: d, weight: corr[ordered[i]] || 1 }));
+  }
+  const maxWeight = links.reduce((m, l) => Math.max(m, l.weight), 1);
+
+  // Add arrow marker
+  const svg = d3.select(svgEl);
+  svg.append('defs').append('marker')
+    .attr('id','hopArrow').attr('viewBox','0 0 10 10').attr('refX',8).attr('refY',5)
+    .attr('markerWidth',6).attr('markerHeight',6).attr('orient','auto')
+    .append('path').attr('d','M0 0 L10 5 L0 10 Z').attr('fill','#4A63E7').attr('opacity',0.8);
+
+  // D3 force simulation
+  const sim = d3.forceSimulation(nodes)
+    .force('link', d3.forceLink(links).id(d => d.id).distance(d => 160 + 60*(1 - d.weight/maxWeight)).strength(0.8))
+    .force('charge', d3.forceManyBody().strength(-600))
+    .force('center', d3.forceCenter(W/2, H/2))
+    .force('collide', d3.forceCollide().radius(d => d.r + 18))
+    .force('x', d3.forceX(W/2).strength(0.04))
+    .force('y', d3.forceY(H/2).strength(0.06));
+
+  // Edges
+  const link = svg.append('g').selectAll('line').data(links).enter().append('line')
+    .attr('stroke','#2A3142')
+    .attr('stroke-width', d => 1.5 + 3.5 * (d.weight / maxWeight))
+    .attr('stroke-opacity', 0.85)
+    .attr('marker-end','url(#hopArrow)');
+
+  // Edge weight labels
+  const edgeLabel = svg.append('g').selectAll('text').data(links).enter().append('text')
+    .attr('text-anchor','middle').attr('fill','#6B7A9A').attr('font-size','9px')
+    .attr('font-family','Consolas,monospace')
+    .text(d => d.weight > 1 ? d.weight + ' hops' : '');
+
+  // Node groups
+  const node = svg.append('g').selectAll('g').data(nodes).enter().append('g')
+    .attr('class','node')
+    .call(d3.drag()
+      .on('start', (event,d) => { if(!event.active) sim.alphaTarget(0.3).restart(); d.fx=d.x; d.fy=d.y; })
+      .on('drag',  (event,d) => { d.fx=event.x; d.fy=event.y; })
+      .on('end',   (event,d) => { if(!event.active) sim.alphaTarget(0); d.fx=null; d.fy=null; })
+    );
+
+  node.append('circle')
+    .attr('r', d => d.r)
+    .attr('fill', d => nodeColor(d.id))
+    .attr('stroke','#0B0E14').attr('stroke-width',2);
+
+  node.append('text')
+    .attr('text-anchor','middle').attr('dy','0.35em')
+    .attr('class','label').attr('font-size','11px')
+    .text(d => d.id);
+
+  // Event count badge below node
+  node.append('text')
+    .attr('text-anchor','middle').attr('dy', d => d.r + 14)
+    .attr('fill','#A8B2C3').attr('font-size','9px').attr('font-family','Consolas,monospace')
+    .text(d => d.count > 1 ? d.count + ' evts' : '');
+
+  // MITRE phase labels above node (map domain → closest MITRE phase)
+  const _phaseMap = { email:'Initial Access', endpoint:'Execution', iam:'Credential Access',
+    network:'Lateral Movement', data:'Exfiltration', api:'Command & Control',
+    cloud:'Persistence', remote:'Initial Access' };
+  node.append('text')
+    .attr('text-anchor','middle').attr('dy', d => -(d.r + 10))
+    .attr('fill','#8892A4').attr('font-size','8.5px').attr('font-family','Consolas,monospace')
+    .text(d => _phaseMap[d.id] || '');
+
+  sim.on('tick', () => {
+    const pad = 50;
+    nodes.forEach(d => {
+      d.x = Math.max(pad + d.r, Math.min(W - pad - d.r, d.x));
+      d.y = Math.max(pad + d.r, Math.min(H - pad - d.r, d.y));
+    });
+    link
+      .attr('x1', d => d.source.x).attr('y1', d => d.source.y)
+      .attr('x2', d => { const dx=d.target.x-d.source.x, dy=d.target.y-d.source.y, dist=Math.sqrt(dx*dx+dy*dy)||1; return d.target.x - (dx/dist)*d.target.r; })
+      .attr('y2', d => { const dx=d.target.x-d.source.x, dy=d.target.y-d.source.y, dist=Math.sqrt(dx*dx+dy*dy)||1; return d.target.y - (dy/dist)*d.target.r; });
+    edgeLabel
+      .attr('x', d => (d.source.x + d.target.x)/2)
+      .attr('y', d => (d.source.y + d.target.y)/2 - 6);
+    node.attr('transform', d => `translate(${d.x},${d.y})`);
   });
 }
 function explainGraph(){

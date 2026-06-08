@@ -119,8 +119,8 @@ def test_confidence_meter_returns_required_fields():
     assert 'segments' in meter
     assert 'source_types_present' in meter
     segs = meter['segments']
-    assert set(segs.keys()) == {'source_diversity', 'evidence_quality',
-                                'corroboration', 'pattern_match'}
+    assert set(segs.keys()) == {'source_corroboration', 'evidence_cluster_strength',
+                                'technique_confidence', 'temporal_consistency'}
 
 
 def test_confidence_meter_total_within_range():
@@ -147,7 +147,7 @@ def test_confidence_meter_multi_source_boosts_corroboration():
     ]
     multi = _compute_confidence_meter(CLUSTER_1, multi_source_rows)
     single = _compute_confidence_meter(CLUSTER_1, single_source_rows)
-    assert multi['segments']['corroboration'] > single['segments']['corroboration']
+    assert multi['segments']['source_corroboration'] > single['segments']['source_corroboration']
 
 
 def test_confidence_meter_empty_rows_does_not_crash():

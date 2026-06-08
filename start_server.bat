@@ -44,6 +44,7 @@ python -c "import os,sys; bad=[k for k,v in os.environ.items() if k in ('AUDIT_C
 set ENABLE_CSV_UPLOAD=true
 set ENV=dev
 set APP_ENV=dev
+set JANUSEC_PROFILE=demo
 set DEFAULT_FRONTEND=console
 set STRICT_API_KEY_ENFORCEMENT=1
 set DISABLE_CSP=0
@@ -59,6 +60,10 @@ set ADAPTIVE_EWMA_BASE_ALPHA=0.6
 set ADAPTIVE_EWMA_MIN_ALPHA=0.3
 set ADAPTIVE_EWMA_MAX_ALPHA=0.85
 set PLAYBOOK_TENANT_ALLOW=
+REM Ollama model — qwen3.6:27b for better narration quality; fallback to qwen2.5:14b if not pulled
+set OLLAMA_MODEL=qwen3.6:27b
+REM Anthropic API (optional) — set ANTHROPIC_API_KEY to enable Claude narration
+REM Activation: set ANTHROPIC_API_KEY=sk-ant-... && set LLM_PROVIDER=anthropic && set ANTHROPIC_MODEL=claude-sonnet-4-6
 REM Enable HopGraph persistence + TTL prune loop for demo reliability
 set HOPGRAPH_PERSISTENCE_ENABLED=1
 set HOPGRAPH_DB_PATH=%cd%\data\hopgraph.db

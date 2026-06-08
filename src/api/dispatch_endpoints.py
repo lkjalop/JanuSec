@@ -32,7 +32,7 @@ from datetime import datetime, timezone, timedelta
 from typing import List
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from .exec_summary_endpoints import (  # noqa: F401
@@ -158,6 +158,18 @@ async def regenerate_persona_dispatch(
         if not narrative.get('mitre_techniques'):
             explicit = cluster.get('mitre_techniques') or cluster.get('mitre_tags') or []
             narrative['mitre_techniques'] = explicit
+        # Promote narrative verdict to the cluster's authoritative deterministic verdict
+        # when the LLM underclaimed (e.g. fallback returns REQUIRES_INVESTIGATION but
+        # the rule engine confirmed VALIDATED_BREACH).
+        _BREACH_VERDICTS = {'VALIDATED_BREACH', 'CONFIRMED_BREACH', 'CONFIRMED_INTRUSION'}
+        _cluster_verdict = str(cluster.get('final_verdict') or cluster.get('verdict') or '').upper()
+        _narr_verdict = str(narrative.get('verdict') or '').upper()
+        if _cluster_verdict in _BREACH_VERDICTS and _narr_verdict not in _BREACH_VERDICTS:
+            narrative['verdict'] = _cluster_verdict
+            narrative['confidence'] = max(
+                float(narrative.get('confidence') or 0.0),
+                float(cluster.get('confidence') or 0.0),
+            )
         cluster['llm_narrative'] = narrative
     except Exception as enrich_err:
         logger.warning('enrich_narrative failed in persona dispatch regen: %s', enrich_err)
@@ -189,6 +201,108 @@ async def regenerate_persona_dispatch(
         'persona': body.persona,
         'payload': payload,
     })
+
+
+_PERSONA_KEYS = [
+    'soc_analyst', 'ciso', 'executive', 'threat_hunter',
+    'forensics', 'compliance', 'mssp', 'audit',
+]
+
+
+@router.get('/{assessment_id}/clusters/{cluster_id}/persona-dispatch/stream')
+async def stream_persona_dispatch(
+    assessment_id: str,
+    cluster_id: str,
+    request: Request,
+) -> StreamingResponse:
+    """SSE endpoint — emits one event per persona as it completes.
+
+    Consumes via:
+        const es = new EventSource('/api/v1/assessments/{aid}/clusters/{cid}/persona-dispatch/stream')
+        es.onmessage = e => { const {persona, payload} = JSON.parse(e.data); ... }
+    """
+    assessment = _legacy_helper('_get_assessment', _get_assessment)(assessment_id)
+    if not assessment:
+        raise HTTPException(status_code=404, detail='assessment_not_found')
+
+    tenant_id = _get_tenant(request)
+    clusters = assessment.get('correlation_clusters') or []
+    cluster = next(
+        (c for c in clusters if (c.get('cluster_id') or c.get('id')) == cluster_id),
+        None,
+    )
+    if not cluster:
+        raise HTTPException(status_code=404, detail='cluster_not_found')
+
+    try:
+        from src.analysis.framework_mapper import build_control_failure_register
+        from src.analysis.persona_dispatch import build_persona_dispatch
+        from src.llm.cluster_narrator_v2_schema import enrich_narrative
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f'dispatch_modules_unavailable: {exc}')
+
+    narrative = cluster.get('llm_narrative') or cluster.get('tier1_prefill') or {}
+    if not isinstance(narrative, dict):
+        narrative = {}
+
+    # Collect rows for this cluster (same logic as regenerate_persona_dispatch)
+    all_rows = (assessment.get('normalized_rows') or
+                assessment.get('evidence_rows') or
+                assessment.get('rows') or [])
+    row_lookup: dict[int, dict] = {}
+    for r in all_rows:
+        ri = r.get('row_index') or r.get('row_number') or r.get('id')
+        if ri is not None:
+            try:
+                row_lookup[int(float(ri))] = r
+            except (TypeError, ValueError):
+                pass
+    cl_rows = []
+    for ref in (cluster.get('row_refs') or []):
+        try:
+            k = int(float(ref))
+            if k in row_lookup:
+                cl_rows.append(row_lookup[k])
+        except (TypeError, ValueError):
+            pass
+
+    try:
+        tenant_class = None
+        try:
+            from src.config.tenant_data_classification import load_for_tenant
+            tenant_class = load_for_tenant(tenant_id)
+        except Exception:
+            pass
+        narrative = enrich_narrative(narrative, cluster, cl_rows, tenant_classification=tenant_class)
+        _BREACH_VERDICTS = {'VALIDATED_BREACH', 'CONFIRMED_BREACH', 'CONFIRMED_INTRUSION'}
+        _cluster_verdict = str(cluster.get('final_verdict') or cluster.get('verdict') or '').upper()
+        _narr_verdict = str(narrative.get('verdict') or '').upper()
+        if _cluster_verdict in _BREACH_VERDICTS and _narr_verdict not in _BREACH_VERDICTS:
+            narrative['verdict'] = _cluster_verdict
+        cluster['llm_narrative'] = narrative
+    except Exception as enrich_err:
+        logger.warning('stream_persona_dispatch: enrich_narrative failed: %s', enrich_err)
+
+    entity_context = assessment.get('entity_context') or {}
+    register = build_control_failure_register(
+        narrative, evidence_rows=cl_rows, entity_context=entity_context, cluster=cluster,
+    )
+
+    async def _event_gen():
+        for pkey in _PERSONA_KEYS:
+            try:
+                payload = build_persona_dispatch(
+                    pkey, narrative, register=register,
+                    evidence_rows=cl_rows, cluster_id=cluster_id,
+                )
+            except Exception as pe:
+                logger.warning('stream_persona_dispatch: build failed for %s: %s', pkey, pe)
+                payload = {'error': str(pe)}
+            yield f"data: {json.dumps({'persona': pkey, 'payload': payload})}\n\n"
+        yield 'data: {"done": true}\n\n'
+
+    return StreamingResponse(_event_gen(), media_type='text/event-stream',
+                             headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
 
 
 @router.post('/{assessment_id}/clusters/{cluster_id}/sign-off')

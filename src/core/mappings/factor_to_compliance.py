@@ -44,6 +44,38 @@ FACTOR_TO_COMPLIANCE: Dict[str, Dict[str, List[str]]] = {
     # EMAIL THREAT FACTORS
     # =========================================================================
 
+    'email:T1114.003_inbox_rule': {
+        'cis':          ['CIS-8.5', 'CIS-8.11'],
+        'nist_csf':     ['DE.CM-3', 'PR.AA-1'],
+        'iso27001':     ['A.5.15', 'A.8.15', 'A.8.16'],
+        'soc2':         ['CC6.1', 'CC7.2', 'CC7.3'],
+        'nist_800_53':  ['AC-2', 'AU-6', 'SI-4'],
+    },
+
+    'email:inbox_rule_external_forward': {
+        'cis':          ['CIS-8.5', 'CIS-13.1'],
+        'nist_csf':     ['DE.CM-3', 'PR.DS-5'],
+        'iso27001':     ['A.5.15', 'A.8.12', 'A.8.15', 'A.8.16'],
+        'soc2':         ['CC6.1', 'CC7.2', 'CC7.3'],
+        'nist_800_53':  ['AC-2', 'AU-6', 'SI-4'],
+    },
+
+    'data:sensitive_file_access': {
+        'cis':          ['CIS-3.3', 'CIS-3.7', 'CIS-13.1'],
+        'nist_csf':     ['PR.DS-1', 'PR.DS-5', 'DE.CM-1'],
+        'iso27001':     ['A.5.12', 'A.5.13', 'A.8.12', 'A.8.15'],
+        'soc2':         ['CC6.1', 'CC6.7', 'CC7.2'],
+        'nist_800_53':  ['AC-4', 'AU-6', 'SI-4'],
+    },
+
+    'identity:ml_risk_spike': {
+        'cis':          ['CIS-5.2', 'CIS-6.5', 'CIS-8.11'],
+        'nist_csf':     ['DE.CM-1', 'DE.CM-3', 'PR.AA-1'],
+        'iso27001':     ['A.5.15', 'A.5.16', 'A.8.15', 'A.8.16'],
+        'soc2':         ['CC6.1', 'CC7.2', 'CC7.3'],
+        'nist_800_53':  ['AC-2', 'AU-6', 'SI-4'],
+    },
+
     'email:url_entropy_high': {
         'cis':          ['CIS-9.6', 'CIS-13.4'],
         'nist_csf':     ['DE.CM-1', 'PR.PT-3'],

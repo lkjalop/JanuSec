@@ -65,6 +65,12 @@
     { key: 'compliance',    icon: _dicon('clipboard'),  label: 'Compliance',    persona: 'compliance',
       desc: 'Framework control gaps (NIST/SOC2/ISO/Privacy Act), audit trail, GRC evidence',
       actions: 'Map control failures to frameworks. Verify notification timeline. Update risk register. Prepare GRC audit evidence.' },
+    { key: 'audit',         icon: _dicon('clipboard'),  label: 'Audit / ISO',   persona: 'audit',
+      desc: 'ISO 19011 audit opinion, corrective action plan, nonconformity register',
+      actions: 'Issue audit opinion (adverse/qualified/unqualified). Assign CAP owners. Update ISMS nonconformity register.' },
+    { key: 'mssp',          icon: _dicon('shield'),     label: 'MSSP',          persona: 'mssp',
+      desc: 'Tier-2 escalation pack, customer SLA timeline, enrichment handoff',
+      actions: 'Receive enrichment handoff from Tier-1. Generate customer-facing report. Track SLA clock.' },
     { key: 'export',        icon: _dicon('file-text'),  label: 'Full Report',   persona: null,
       desc: 'Complete multi-persona HTML report', actions: null },
   ];

@@ -23,7 +23,7 @@ import time
 logger = logging.getLogger(__name__)
 
 EVIDENCE_CAP = 20       # max evidence rows fed to a single LLM call
-TOP_N_CLUSTERS = 5      # only the top-N clusters get LLM narratives
+TOP_N_CLUSTERS = int(os.getenv('JANUSEC_NARRATOR_TOP_N', '11'))
 _NARRATOR_LOCK = threading.Lock()
 
 
@@ -32,7 +32,7 @@ _NARRATOR_LOCK = threading.Lock()
 def _evidence_snippet(row: dict) -> str:
     """Single-line representation of one evidence row for the prompt."""
     ts = str(row.get("timestamp") or "")[:19]
-    user = str(row.get("user") or row.get("actor") or row.get("user_entity") or "-")
+    user = str(row.get("user") or row.get("user_canonical") or row.get("actor") or row.get("user_entity") or "-")
     src = str(row.get("src_ip") or row.get("ip") or "-")
     event = str(row.get("event_name") or row.get("eventName") or row.get("action") or row.get("description") or "-")[:120]
     sev = str(row.get("severity") or "").upper()[:8]
@@ -41,11 +41,41 @@ def _evidence_snippet(row: dict) -> str:
     return f"[{ts}] {sev:8s} | {user:30s} | {src:17s} | {event} (from:{sheet}, score:{score:.2f})"
 
 
+def _compact_json(value: object, *, max_chars: int = 1600) -> str:
+    try:
+        text = json.dumps(value, default=str, sort_keys=True)
+    except Exception:
+        text = str(value)
+    if len(text) > max_chars:
+        return text[: max_chars - 3] + "..."
+    return text
+
+
+def _cluster_signal_block(cluster: dict) -> str:
+    signals: dict[str, object] = {}
+    for key in (
+        "factor_tags",
+        "_chrono_factors",
+        "_chrono_first_seen",
+        "_ml_scores",
+        "compliance_violations",
+        "phases",
+        "apt_attribution",
+    ):
+        val = cluster.get(key)
+        if val:
+            signals[key] = val
+    if not signals:
+        return "  (no structured enrichment attached)"
+    return _compact_json(signals)
+
+
 def _build_prompt(cluster: dict, evidence_rows: list[dict]) -> str:
     cluster_id = cluster.get("cluster_id") or "unknown"
     entity_summary = []
-    if cluster.get("shared_accounts"):
-        entity_summary.append("Users: " + ", ".join(cluster["shared_accounts"][:5]))
+    _accounts = cluster.get("shared_accounts") or cluster.get("shared_users") or []
+    if _accounts:
+        entity_summary.append("Users: " + ", ".join(str(u) for u in _accounts[:5]))
     if cluster.get("shared_ips"):
         entity_summary.append("IPs: " + ", ".join(cluster["shared_ips"][:5]))
     if cluster.get("shared_hosts"):
@@ -65,6 +95,9 @@ ENTITIES:
 
 TOP {len(evidence_rows)} EVIDENCE ROWS (ranked by triage score):
 {evidence_lines}
+
+STRUCTURED SIGNALS FROM DETERMINISTIC PIPELINE:
+{_cluster_signal_block(cluster)}
 
 Respond ONLY with valid JSON matching this exact schema — no prose, no markdown:
 {{
@@ -245,6 +278,9 @@ def _apply_narrative_to_cluster(cluster: dict, narrative: dict, *, upgrade_only:
         cluster["_llm_evidence_refs"] = []
     if "_critic_fp_probability" in narrative:
         cluster["_critic_fp_probability"] = narrative["_critic_fp_probability"]
+    # Hoist narrator source to cluster top-level so exec summary can find it
+    # without walking into llm_narrative (which shallow threat_cases copies lack)
+    cluster["_narrator_source"] = narrative.get("_narrator_source", "fallback")
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
@@ -314,8 +350,11 @@ def narrate_cluster(
                 overrides={"timeout": call_timeout, "retries": 0},
             )
         except Exception as exc:
-            logger.warning("LLM generate failed for cluster %s: %s", cluster_id, exc)
-            reason = f"{type(exc).__name__}: {str(exc)[:180]}"
+            cause = getattr(exc, '__cause__', None)
+            cause_str = f" [cause: {type(cause).__name__}: {str(cause)[:120]}]" if cause else " [no_cause]"
+            client_info = f"[client:{type(_client).__name__}]"
+            reason = f"v3_{type(exc).__name__}: {str(exc)[:180]}{cause_str} {client_info}"
+            logger.warning("LLM generate failed for cluster %s: %s%s", cluster_id, exc, cause_str, exc_info=True)
             narrative = _fallback_narrative(cluster_id, reason=reason)
             _apply_narrative_to_cluster(cluster, narrative, upgrade_only=True)
             return narrative

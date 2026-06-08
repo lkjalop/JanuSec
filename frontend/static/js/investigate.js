@@ -2229,8 +2229,9 @@
   });
 
   $('btnExportPDF').addEventListener('click', function () {
-    // Trigger server-side PDF generation
-    window.open('/api/v1/report/ingestion?format=html&include_model=true&include_scenarios=true', '_blank');
+    var url = '/api/v1/report/ingestion?format=html&include_model=true&include_scenarios=true';
+    if (state.assessmentId) url += '&assessment_id=' + encodeURIComponent(state.assessmentId);
+    window.open(url, '_blank');
   });
 
   // ── Send to SIEM (B4 fix: was unwired) ──────────────────────────────────

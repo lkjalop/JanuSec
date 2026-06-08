@@ -448,6 +448,14 @@ def _compute_dread_score(cluster: dict, rows: list[dict]) -> dict:
             discov_note = f'activity ran {span_days:.0f} days undetected'
 
     total = base_damage + repro + exploit + affected + discov
+
+    # Verdict-based floor: VALIDATED_BREACH with thin evidence still scores ≥MEDIUM.
+    _vf = str(cluster.get('verdict') or '').upper()
+    if _vf in {'VALIDATED_BREACH', 'CONFIRMED_BREACH', 'CONFIRMED_INTRUSION'}:
+        total = max(total, 25)
+    elif _vf in {'LIKELY_BREACH', 'LIKELY_COMPROMISE', 'SUSPECTED_BREACH'}:
+        total = max(total, 21)
+
     if total >= 40:
         risk_tier = 'CRITICAL'
     elif total >= 30:

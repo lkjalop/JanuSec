@@ -307,8 +307,51 @@ class TemporalRAGProvider:
                                  action_template_id: str,
                                  k: int = 10,
                                  as_of: Optional[str] = None) -> list[dict]:
-        # Stubbed — implement via a dedicated outcomes table indexed by template prefix
-        return []
+        """Return historical outcomes for actions matching action_template_id prefix.
+
+        Queries the bitemporal decision trace for decisions whose action_outcomes
+        contain actions whose action_id starts with action_template_id.  Falls back
+        gracefully if the trace store has no entries.
+        """
+        try:
+            # Retrieve similar past incidents whose outcomes are recorded in the trace
+            similar = self.retrieve_similar_incidents(
+                narrative={'mitre_techniques': [], 'kill_chain_stage': 'unknown'},
+                k=k * 4,
+                lookback_days=180,
+                as_of=as_of,
+            )
+            outcomes: list[dict] = []
+            seen_ids: set[str] = set()
+            for inc in similar:
+                cid = inc.get('cluster_id', '')
+                if cid in seen_ids:
+                    continue
+                seen_ids.add(cid)
+                # Look up any persona decision recorded for this cluster
+                decisions = self._decisions.find_at_transaction_time(
+                    cluster_id=cid,
+                    persona='soc_analyst',
+                    tenant_id=self._tenant,
+                    as_of=as_of or datetime.now(timezone.utc).isoformat(),
+                )
+                for d in decisions:
+                    for act in (d.action_outcomes or []):
+                        act_id = str(act.get('action_id') or '')
+                        if act_id.startswith(action_template_id):
+                            outcomes.append({
+                                'action_id': act_id,
+                                'outcome': act.get('outcome') or '',
+                                'executed_at': act.get('executed_at') or '',
+                                'similarity': inc.get('similarity', 0.0),
+                                'cluster_id': cid,
+                            })
+                if len(outcomes) >= k:
+                    break
+            return sorted(outcomes, key=lambda x: x['similarity'], reverse=True)[:k]
+        except Exception as exc:
+            logger.debug('retrieve_action_outcomes failed: %s', exc)
+            return []
 
     def retrieve_identity_context(
         self,

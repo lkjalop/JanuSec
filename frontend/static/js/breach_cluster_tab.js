@@ -3,6 +3,10 @@
  * Exposed global:
  *   BreachClusterTab.mount(containerId, cluster, allRows, assessmentId, allClusters)
  *
+ * Note: _tenantId() is defined here as a module-level fallback so this file can
+ * operate without breach.js being loaded first.  breach.js exports the canonical
+ * version to window._janusec_tenantId when available; we prefer that.
+ *
  * Features:
  *   - Header with verdict/confidence/incident_name (T1 prefill)
  *   - E8: verdict_reasoning block (removed — duplicated root_cause after prefill normalisation)
@@ -23,6 +27,17 @@
 
   var BreachClusterTab = {};
 
+  // ── Tenant ID helper ──────────────────────────────────────────────────────────
+  // Prefer the canonical version exported by breach.js; fall back gracefully
+  // so this file works standalone in tests and when load order varies.
+  function _tenantId() {
+    if (typeof window._janusec_tenantId === 'function') {
+      return window._janusec_tenantId();
+    }
+    var el = document.querySelector('[data-tenant-id]');
+    return (el && el.dataset && el.dataset.tenantId) || 'default';
+  }
+
   // ── Helpers ──────────────────────────────────────────────────────────────────
 
   function _esc(s) {
@@ -31,6 +46,81 @@
   }
 
   function _apiBase() { return window.JANUSEC_API_BASE || ''; }
+
+  // ── Persona SSE streaming cache ──────────────────────────────────────────────
+  // Keyed by "<assessmentId>_<clusterId>_<personaKey>" → normalized step array
+  var _ssePersonaCache = {};
+  // Guard: prevents duplicate streams for same cluster
+  var _sseInFlight = {};
+
+  function _kickPersonaStream(cluster, assessmentId) {
+    var flightKey = assessmentId + '_' + cluster.cluster_id;
+    if (_sseInFlight[flightKey]) return;
+    _sseInFlight[flightKey] = true;
+
+    var url = _apiBase() + '/api/v1/assessments/' + encodeURIComponent(assessmentId)
+      + '/clusters/' + encodeURIComponent(cluster.cluster_id)
+      + '/persona-dispatch/stream';
+
+    fetch(url, { headers: _authHdrs({}) })
+      .then(function (resp) {
+        if (!resp.ok || !resp.body) throw new Error('stream unavailable');
+        var reader = resp.body.getReader();
+        var decoder = new TextDecoder();
+        var buf = '';
+
+        function _pump() {
+          return reader.read().then(function (chunk) {
+            if (chunk.done) { _sseInFlight[flightKey] = false; return; }
+            buf += decoder.decode(chunk.value, { stream: true });
+            var lines = buf.split('\n');
+            buf = lines.pop(); // hold incomplete trailing line
+            lines.forEach(function (line) {
+              if (!line.startsWith('data: ')) return;
+              try {
+                var evt = JSON.parse(line.slice(6));
+                if (evt.done) return;
+                var persona = evt.persona;
+                var payload = evt.payload || {};
+                var rawSteps = payload.persona_steps || payload.steps || [];
+                if (!rawSteps.length) return;
+                var steps = rawSteps.map(function (s) {
+                  if (typeof s === 'string') return { title: s, subtasks: [] };
+                  return {
+                    title: s.title || s.label || s.action || s.name || 'Step',
+                    priority: s.priority || '',
+                    evidence_refs: s.evidence_refs || s.row_refs || [],
+                    instructions: s.instructions || '',
+                    why_flagged: s.why_flagged || '',
+                    evidence_pins: s.evidence_pins || {},
+                    subtasks: (s.subtasks || s.sub_tasks || []).map(function (sub) {
+                      return typeof sub === 'string' ? { label: sub } : sub;
+                    }),
+                  };
+                });
+                var cacheKey = assessmentId + '_' + cluster.cluster_id + '_' + persona;
+                _ssePersonaCache[cacheKey] = steps;
+
+                // If this persona tab is currently showing a spinner, update it live
+                var activeTab = document.querySelector('.bct-persona-tab.bct-tab-active');
+                var activePersona = activeTab && activeTab.getAttribute('data-persona');
+                if (activePersona === persona) {
+                  var body = document.getElementById('bct-persona-body');
+                  if (body && body.querySelector('.bct-loading')) {
+                    body.innerHTML = _buildPersonaSteps(steps, persona, cluster, assessmentId, false);
+                    _wireStepExpand(cluster, assessmentId);
+                    _wireFurtherTasksBtn(cluster, assessmentId);
+                  }
+                }
+              } catch (e) {}
+            });
+            return _pump();
+          });
+        }
+        return _pump();
+      })
+      .catch(function () { _sseInFlight[flightKey] = false; });
+  }
 
   function _authHdrs(extra) {
     var k = '';
@@ -125,7 +215,7 @@
   var _ctx = {};
 
   function _selectedModel() {
-    try { return localStorage.getItem('selectedModel') || 'qwen3:30b'; } catch (_) { return 'qwen3:30b'; }
+    try { return localStorage.getItem('selectedModel') || 'qwen3:14b'; } catch (_) { return 'qwen3:14b'; }
   }
 
   function _caseTitle(cluster, p) {
@@ -208,8 +298,9 @@
 
   function _displayVerdict(verdict) {
     var raw = String(verdict || '').toUpperCase();
-    if (raw === 'VALIDATED_BREACH' || raw === 'CONFIRMED_INTRUSION' || raw === 'CONFIRMED_BREACH') return 'CONFIRMED BREACH';
-    if (raw === 'NO_VALIDATED_BREACH') return 'NO CONFIRMED BREACH';
+    if (raw === 'VALIDATED_BREACH' || raw === 'CONFIRMED_BREACH') return 'CONFIRMED TECHNICAL INTRUSION';
+    if (raw === 'CONFIRMED_INTRUSION') return 'CONFIRMED INTRUSION';
+    if (raw === 'NO_VALIDATED_BREACH') return 'NO CONFIRMED INTRUSION';
     if (raw === 'ANALYSIS_INCOMPLETE') return 'ANALYSIS INCOMPLETE';
     return raw.replace(/_/g, ' ') || 'UNCERTAIN';
   }
@@ -626,6 +717,69 @@
       + '</table></div>';
   }
 
+  // ── Confidence breakdown rendering ───────────────────────────────────────────
+
+  var _SEGMENT_LABELS = {
+    source_corroboration:      'Source corroboration',
+    evidence_cluster_strength: 'Evidence strength',
+    technique_confidence:      'Technique confidence',
+    temporal_consistency:      'Temporal consistency',
+  };
+  var _SEGMENT_MAX = {
+    source_corroboration: 25,
+    evidence_cluster_strength: 30,
+    technique_confidence: 25,
+    temporal_consistency: 20,
+  };
+
+  function _renderConfidenceBadge(meter) {
+    var total = Math.round(meter.total || 0);
+    var segs = meter.segments || {};
+    var segMax = meter.segment_max || _SEGMENT_MAX;
+    var cal = meter.calibration || 'decomposed_v1';
+    var calLabel = cal === 'decomposed_v1' ? 'Decomposed score' : 'Score';
+
+    var rows = Object.keys(_SEGMENT_LABELS).map(function(k) {
+      var got = typeof segs[k] === 'number' ? segs[k].toFixed(1) : '—';
+      var max = segMax[k] || 0;
+      return '<tr>'
+        + '<td style="padding:2px 8px 2px 0;color:var(--text-muted);white-space:nowrap;">' + _SEGMENT_LABELS[k] + '</td>'
+        + '<td style="padding:2px 0;text-align:right;font-variant-numeric:tabular-nums;">' + got + '</td>'
+        + '<td style="padding:2px 0 2px 4px;color:var(--text-muted);">/' + max + '</td>'
+        + '</tr>';
+    }).join('');
+
+    var tooltip = '<table style="border-collapse:collapse;font-size:11px;line-height:1.5;">'
+      + rows
+      + '<tr><td colspan="3" style="padding:4px 0 0;border-top:1px solid var(--border-subtle);color:var(--text-muted);font-size:10px;">'
+      + calLabel + ' · future: calibrated vs ground truth'
+      + '</td></tr>'
+      + '</table>';
+
+    return '<span class="bct-header__conf bct-conf-badge" style="cursor:default;"'
+      + ' title="' + tooltip.replace(/"/g, '&quot;').replace(/\n/g, '') + '"'
+      + ' data-conf-breakdown="1">'
+      + total + '% confidence'
+      + '<span class="bct-conf-expand">▾</span>'
+      + '<span class="bct-conf-popover">'
+      + '<strong>' + total + '%</strong> confidence<br>'
+      + '<table style="margin-top:6px;border-collapse:collapse;font-size:11px;line-height:1.6;">' + rows + '</table>'
+      + '<div style="margin-top:6px;font-size:10px;color:var(--text-muted);">' + calLabel + '</div>'
+      + '</span>'
+      + '</span>';
+  }
+
+  function _renderConfidenceBreakdownInline(meter) {
+    var segs = meter.segments || {};
+    var segMax = meter.segment_max || _SEGMENT_MAX;
+    var parts = Object.keys(_SEGMENT_LABELS).map(function(k) {
+      var got = typeof segs[k] === 'number' ? segs[k].toFixed(1) : '—';
+      var max = segMax[k] || 0;
+      return _SEGMENT_LABELS[k] + ': ' + got + '/' + max;
+    }).join(' · ');
+    return ' <span style="font-size:10px;color:var(--text-muted);font-weight:400;">(' + parts + ')</span>';
+  }
+
   function _buildSkeleton(cluster, assessmentId) {
     var p = cluster.tier1_prefill || {};
     var verdict = (cluster.verdict || cluster.final_verdict || 'UNCERTAIN').toUpperCase();
@@ -655,7 +809,7 @@
       '    <span class="bct-header__verdict-pill" style="background:' + vc + '22;color:' + vc + '">' + _esc(_displayVerdict(verdict)) + '</span>' + _staleClusterBadge(cluster),
       '    <span class="bct-header__sev" style="color:' + sc + '">' + _esc(sev.toUpperCase()) + '</span>',
       '    <span class="bct-header__rows">' + (cluster.row_refs || []).length + ' rows</span>',
-      meter ? '<span class="bct-header__conf">' + Math.round(meter.total) + '% confidence</span>' : '',
+      meter ? _renderConfidenceBadge(meter) : '',
       _dreadScoreBadge(cluster),
       '  </div>',
       '  <div class="bct-header__title">' + _esc(caseTitle) + '</div>',
@@ -676,7 +830,7 @@
       '  <div class="bct-label">VALIDATION BASIS</div>',
       '  <div class="bct-vb-row">',
       '    <span>Verdict: <strong>' + _esc(verdict) + '</strong></span>',
-      meter ? '    <span>Confidence: <strong>' + Math.round(meter.total) + '%</strong></span>' : '',
+      meter ? '    <span>Confidence: <strong>' + Math.round(meter.total) + '%</strong>' + _renderConfidenceBreakdownInline(meter) + '</span>' : '',
       '    <span>Evidence rows: <strong>' + (cluster.row_refs || []).length + '</strong></span>',
       '    <span>Sources: <strong>' + _esc((cluster.source_sheets || []).join(', ') || '—') + '</strong></span>',
       p.model_used ? '    <span>Model: <strong>' + _esc(p.model_used) + '</strong></span>' : '',
@@ -814,6 +968,17 @@
   function _loadPersonaTab(persona, cluster, assessmentId, forceLlm) {
     var body = document.getElementById('bct-persona-body');
     if (!body) return;
+
+    // Check SSE stream cache first — populated progressively by background stream
+    var cacheKey = assessmentId + '_' + cluster.cluster_id + '_' + persona;
+    if (!forceLlm && _ssePersonaCache[cacheKey]) {
+      var cachedSteps = _ssePersonaCache[cacheKey];
+      body.innerHTML = _buildPersonaSteps(cachedSteps, persona, cluster, assessmentId, false);
+      _wireStepExpand(cluster, assessmentId);
+      _wireFurtherTasksBtn(cluster, assessmentId);
+      return;
+    }
+
     body.innerHTML = '<div class="bct-loading">Loading ' + PERSONA_META[persona].label + ' steps…</div>';
 
     // Try tier2 cache endpoint — no LLM call (force=false means cache-only)
@@ -853,6 +1018,8 @@
         } else {
           body.innerHTML = _buildPersonaSteps(_deterministicPersonaSteps(persona, cluster), persona, cluster, assessmentId, false)
             + _buildPersonaGeneratePrompt(persona, cluster, assessmentId);
+          // No LLM steps in tier2 cache — start background SSE stream to fill all persona tabs
+          _kickPersonaStream(cluster, assessmentId);
         }
         _wireStepExpand(cluster, assessmentId);
         _wireFurtherTasksBtn(cluster, assessmentId);
@@ -860,6 +1027,8 @@
       .catch(function () {
         body.innerHTML = _buildPersonaSteps(_deterministicPersonaSteps(persona, cluster), persona, cluster, assessmentId, false)
           + _buildPersonaGeneratePrompt(persona, cluster, assessmentId);
+        // Tier2 fetch failed — start background SSE stream
+        _kickPersonaStream(cluster, assessmentId);
       });
   }
 

@@ -457,7 +457,9 @@
         var recipientsRaw = (document.getElementById('reportRecipients') && document.getElementById('reportRecipients').value) ? document.getElementById('reportRecipients').value : '';
         var recipients = recipientsRaw.split(/[;,]+/).map(s=>s.trim()).filter(Boolean);
         var includeModel = (document.getElementById('reportIncludeModel') && document.getElementById('reportIncludeModel').checked) ? true : false;
+        var _aid = window.LAST_ASSESSMENT_ID || (localStorage.getItem && localStorage.getItem('lastAssessmentId')) || null;
         var payload = { title: 'CSV Analysis Report', rows: rows, summary: { total_rows: rows.length }, correlation: (window.LAST_CORR_SUMMARY || null), meta: { company_name: company, recipients: recipients } };
+        if (_aid) { payload.assessment_id = _aid; }
         var url = '/api/v1/report/generate' + (includeModel ? '?include_model=true' : '');
         var resp = await fetch(url, { method: 'POST', headers: { 'Content-Type':'application/json', 'x-api-key': (localStorage.getItem('apiKey')||'devkey123') }, body: JSON.stringify(payload) });
         if(!resp.ok){ if(window.notifications && notifications.toast) notifications.toast('Report generation failed','error'); return; }

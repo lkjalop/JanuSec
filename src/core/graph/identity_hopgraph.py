@@ -97,14 +97,21 @@ class IdentityHopGraph:
     # --- Ingest helpers from events ---
     def ingest_identity_event(self, ev: Dict[str, Any], aggregator: Any = None) -> None:
         t0 = time.time()
-        user = ev.get('user') or ev.get('username')
-        action = (ev.get('action') or '').lower()
+        user = (
+            ev.get('user') or ev.get('user_canonical') or ev.get('username') or
+            ev.get('userPrincipalName') or ev.get('user_principal_name') or
+            ev.get('actor') or ev.get('account_name')
+        )
+        action = (ev.get('action') or ev.get('event_type') or ev.get('operation') or ev.get('event_name') or '').lower()
         src_h = ev.get('src_host') or ev.get('source_host')
         dst_h = ev.get('dest_host') or ev.get('host') or ev.get('hostname')
         role = ev.get('new_role') or ev.get('target_role')
-        token = ev.get('token_id') or ev.get('token')
+        token = (
+            ev.get('token_id') or ev.get('token') or ev.get('refresh_token_id') or
+            ev.get('refreshTokenId') or ev.get('session_id')
+        )
         session = ev.get('session') or ev.get('session_id')
-        cloud = ev.get('cloud_resource') or ev.get('resource_arn')
+        cloud = ev.get('cloud_resource') or ev.get('resource_arn') or ev.get('resource')
 
         def n_user(u: Any) -> str | None:
             return f"user:{u}" if u else None
