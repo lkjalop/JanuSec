@@ -137,82 +137,74 @@ def parse_ipfix_stream(stream: Iterable[bytes]) -> Iterable[Dict[str, any]]:
         }
 
         try:
-            # Create a collector that yields records. pyfixbuf's API varies
-            # across versions; we rely on the record iterator interface.
+            # Create ONE collector for the entire stream so record indices are
+            # global across all messages (each message is a PDU in the same
+            # session). Creating a new Collector per message resets the
+            # enumeration counter and produces duplicate index values.
+            col = pyfixbuf.Collector()
             for msg in stream:
-                # If the stream yields raw UDP packets, pyfixbuf can parse
-                # them via Collector or Record structure. Here we assume
-                # `msg` is bytes representing one or more records and use
-                # pyfixbuf's TemplateRecord parsing where available.
-                recs = []
                 try:
-                    # Prefer Collector which can accept packets/messages
-                    col = pyfixbuf.Collector()
-                    # Collector.addMsg may accept bytes or a list of bytes
-                    try:
-                        col.addMsg(msg)
-                    except Exception:
-                        # some pyfixbuf versions require addMsg to be called
-                        # with raw PDUs differently; try alternative call
-                        try:
-                            col.add(msg)
-                        except Exception:
-                            pass
-                    # iterate records produced by the collector
-                    for rec in col:
-                        recs.append(rec)
+                    col.addMsg(msg)
                 except Exception:
-                    # As an additional fallback, try a convenience decode
                     try:
-                        recs = pyfixbuf.decode(msg)
-                    except Exception:
-                        recs = []
-
-                for r in recs:
-                    out = {'type': 'ipfix.record', 'raw': r}
-                    # r might be a mapping-like object; ensure attribute access
-                    for k, v in FIELD_MAP.items():
-                        try:
-                            if k in r:
-                                out[v] = r.get(k)
-                        except Exception:
-                            try:
-                                out[v] = getattr(r, k)
-                            except Exception:
-                                continue
-
-                    # numeric coercions
-                    for p in ('src_port', 'dst_port', 'packets', 'bytes'):
-                        if p in out and out[p] is not None:
-                            try:
-                                out[p] = int(out[p])
-                            except Exception:
-                                pass
-                    # timestamp normalization if present
-                    if 'timestamp' in out and out['timestamp'] is not None:
-                        try:
-                            out['timestamp'] = float(out['timestamp']) / 1000.0
-                        except Exception:
-                            try:
-                                out['timestamp'] = float(out['timestamp'])
-                            except Exception:
-                                pass
-
-                    # best-effort: persist template info per-exporter if present
-                    try:
-                        exporter = r.get('exporter') if isinstance(r, dict) else None
-                        if exporter and isinstance(exporter, dict):
-                            # pyfixbuf may expose template metadata; try to persist if present
-                            templates = r.get('_templates') or r.get('templates')
-                            if templates:
-                                try:
-                                    # merge templates into per-exporter registry
-                                    merge_templates_for_exporter(exporter, templates)
-                                except Exception:
-                                    pass
+                        col.add(msg)
                     except Exception:
                         pass
-                    yield out
+
+            recs = []
+            try:
+                for rec in col:
+                    recs.append(rec)
+            except Exception:
+                # Fallback: try convenience decode per accumulated messages
+                try:
+                    recs = pyfixbuf.decode(col)
+                except Exception:
+                    recs = []
+
+            for r in recs:
+                out = {'type': 'ipfix.record', 'raw': r}
+                # r might be a mapping-like object; ensure attribute access
+                for k, v in FIELD_MAP.items():
+                    try:
+                        if k in r:
+                            out[v] = r.get(k)
+                    except Exception:
+                        try:
+                            out[v] = getattr(r, k)
+                        except Exception:
+                            continue
+
+                # numeric coercions
+                for p in ('src_port', 'dst_port', 'packets', 'bytes'):
+                    if p in out and out[p] is not None:
+                        try:
+                            out[p] = int(out[p])
+                        except Exception:
+                            pass
+                # timestamp normalization if present
+                if 'timestamp' in out and out['timestamp'] is not None:
+                    try:
+                        out['timestamp'] = float(out['timestamp']) / 1000.0
+                    except Exception:
+                        try:
+                            out['timestamp'] = float(out['timestamp'])
+                        except Exception:
+                            pass
+
+                # best-effort: persist template info per-exporter if present
+                try:
+                    exporter = r.get('exporter') if isinstance(r, dict) else None
+                    if exporter and isinstance(exporter, dict):
+                        templates = r.get('_templates') or r.get('templates')
+                        if templates:
+                            try:
+                                merge_templates_for_exporter(exporter, templates)
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
+                yield out
         except Exception:
             # If anything fails, fall back to CSV parsing below
             pass

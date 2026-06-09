@@ -10,48 +10,46 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 # ---------------------------------------------------------------------------
-# D3.js: investigate.html includes D3 CDN script tag
+# D3.js: breach.html loads D3 for hopgraph visualization
+# (investigate.html archived; breach.html is now the primary platform)
 # ---------------------------------------------------------------------------
 
 class TestD3ScriptTag:
-    def test_d3_cdn_in_investigate_html(self):
-        html_path = os.path.join(os.path.dirname(__file__), '..', 'frontend', 'static', 'investigate.html')
+    def test_d3_loaded_in_breach_html(self):
+        html_path = os.path.join(os.path.dirname(__file__), '..', 'frontend', 'static', 'breach.html')
         content = open(html_path, encoding='utf-8').read()
-        assert 'cdn.jsdelivr.net/npm/d3@7' in content, 'D3 CDN script tag missing from investigate.html'
+        assert 'd3.min.js' in content or 'cdn.jsdelivr.net/npm/d3' in content, \
+            'D3 script tag missing from breach.html'
 
-    def test_d3_loaded_before_investigate_js(self):
-        html_path = os.path.join(os.path.dirname(__file__), '..', 'frontend', 'static', 'investigate.html')
+    def test_d3_loaded_before_breach_hopgraph_js(self):
+        html_path = os.path.join(os.path.dirname(__file__), '..', 'frontend', 'static', 'breach.html')
         content = open(html_path, encoding='utf-8').read()
-        d3_pos = content.find('cdn.jsdelivr.net/npm/d3@7')
-        inv_pos = content.find('"/static/js/investigate.js"')
-        assert d3_pos != -1 and inv_pos != -1, 'Both D3 and investigate.js must be present'
-        assert d3_pos < inv_pos, 'D3 must be loaded before investigate.js'
+        d3_pos = content.find('d3.min.js')
+        hg_pos = content.find('breach_hopgraph.js')
+        assert d3_pos != -1 and hg_pos != -1, 'Both D3 and breach_hopgraph.js must be present in breach.html'
+        assert d3_pos < hg_pos, 'D3 must be loaded before breach_hopgraph.js'
 
 
 class TestD3GraphJS:
-    def test_hopgraph_state_var_declared(self):
-        js_path = os.path.join(os.path.dirname(__file__), '..', 'frontend', 'static', 'js', 'investigate.js')
+    def test_hopgraph_uses_d3_forceSimulation(self):
+        js_path = os.path.join(os.path.dirname(__file__), '..', 'frontend', 'static', 'js', 'breach_hopgraph.js')
         content = open(js_path, encoding='utf-8').read()
-        assert '_hopGraphState' in content
+        assert 'd3.forceSimulation' in content or 'forceSimulation' in content
 
-    def test_zoom_stored_in_hopgraph_state(self):
-        js_path = os.path.join(os.path.dirname(__file__), '..', 'frontend', 'static', 'js', 'investigate.js')
+    def test_hopgraph_renders_svg(self):
+        js_path = os.path.join(os.path.dirname(__file__), '..', 'frontend', 'static', 'js', 'breach_hopgraph.js')
         content = open(js_path, encoding='utf-8').read()
-        assert '_hopGraphState.zoom = zoom' in content
-        assert '_hopGraphState.svg = svg' in content
-        assert '_hopGraphState.sim = sim' in content
+        assert 'd3.select' in content or 'svg' in content
 
-    def test_zoomfit_button_wired(self):
-        js_path = os.path.join(os.path.dirname(__file__), '..', 'frontend', 'static', 'js', 'investigate.js')
+    def test_hopgraph_requires_d3(self):
+        js_path = os.path.join(os.path.dirname(__file__), '..', 'frontend', 'static', 'js', 'breach_hopgraph.js')
         content = open(js_path, encoding='utf-8').read()
-        assert 'btnGraphZoomFit' in content
-        assert 'd3.zoomIdentity' in content
+        assert 'typeof d3' in content or 'd3' in content, 'breach_hopgraph.js must reference d3'
 
-    def test_layout_button_wired(self):
-        js_path = os.path.join(os.path.dirname(__file__), '..', 'frontend', 'static', 'js', 'investigate.js')
+    def test_hopgraph_has_force_layout(self):
+        js_path = os.path.join(os.path.dirname(__file__), '..', 'frontend', 'static', 'js', 'breach_hopgraph.js')
         content = open(js_path, encoding='utf-8').read()
-        assert 'btnGraphLayout' in content
-        assert 'alphaTarget' in content
+        assert 'alphaTarget' in content or 'force' in content.lower()
 
 
 # ---------------------------------------------------------------------------

@@ -1,7 +1,9 @@
-from graph.hopgraph import HopGraph
+import pytest
+from src.graph.hopgraph import HopGraph
 
-def test_hopgraph_add_and_query():
-    hg = HopGraph(wal_path='data/test_hg_wal.log', snapshot_path='data/test_hg_snapshot.json')
+def test_hopgraph_add_and_query(monkeypatch, tmp_path):
+    monkeypatch.setenv('HOPGRAPH_PERSISTENCE_ENABLED', '0')
+    hg = HopGraph(wal_path=str(tmp_path / 'wal.log'), snapshot_path=str(tmp_path / 'snap.json'))
     hg.add_edge('host:A','ip:1.2.3.4','conn','sensor')
     hg.add_edge('ip:1.2.3.4','domain:evil.test','dns','sensor')
     res = hg.k_hops('host:A', k=2)

@@ -10,10 +10,17 @@ from fastapi import APIRouter, HTTPException, Request, Depends
 from src.artifact.memory_repository import MEMORY_JOB_STORE, record_memory_job, MemoryJobStore
 from src.integrations.sandbox.cuckoo_provider import CuckooProvider
 from src.security.crypto_utils import encrypt_secret, decrypt_secret
-from src.security.roles import require_roles
+from src.security.roles import get_request_roles
 
 router = APIRouter()
 LOG = logging.getLogger(__name__)
+
+
+async def _admin_dep(request: Request) -> None:
+    """FastAPI-compatible dependency: raises 403 if caller does not have admin role."""
+    roles = get_request_roles(request)
+    if 'admin' not in roles:
+        raise HTTPException(status_code=403, detail='forbidden_role')
 
 
 class IntegrationsConfigPayload(dict):
@@ -21,7 +28,7 @@ class IntegrationsConfigPayload(dict):
 
 
 @router.post('/api/v1/integrations/{name}/config')
-async def set_integration_config(name: str, request: Request, auth=Depends(require_roles('admin'))):
+async def set_integration_config(name: str, request: Request, auth=Depends(_admin_dep)):
     """Accepts a JSON payload and stores it in a local file under data/integrations/{name}.json for demo/admin use."""
     try:
         payload = await request.json()
@@ -51,7 +58,7 @@ async def set_integration_config(name: str, request: Request, auth=Depends(requi
 
 
 @router.get('/api/v1/admin/sandbox/tasks')
-async def list_sandbox_tasks(limit: int = 50, auth=Depends(require_roles('admin'))):
+async def list_sandbox_tasks(limit: int = 50, auth=Depends(_admin_dep)):
     """List recent memory jobs with sandbox submissions (reads from MEMORY_JOB_STORE)."""
     try:
         store = MemoryJobStore()
@@ -65,7 +72,7 @@ async def list_sandbox_tasks(limit: int = 50, auth=Depends(require_roles('admin'
 
 
 @router.post('/api/v1/admin/sandbox/refresh')
-async def refresh_sandbox_task(task_id: str, auth=Depends(require_roles('admin'))):
+async def refresh_sandbox_task(task_id: str, auth=Depends(_admin_dep)):
     """Force-refresh a sandbox task by calling the provider's result() and persisting the result."""
     store = MemoryJobStore()
     job = store.recent(limit=200)

@@ -22,7 +22,7 @@ from src.analysis.auto_llm import (
     _build_threat_intel_context,
 )
 from src.services.network_highlights import get_network_highlights_snapshot
-from src.services.network_highlights import get_network_highlights_snapshot
+import sys as _sys_insights
 from src.analysis.persona_format import render_persona_prompt
 from src.analysis.triage import compute_triage_score
 try:
@@ -417,6 +417,25 @@ def _resolve_playbook_template(alert_type: str) -> Dict[str, Any]:
     return PLAYBOOK_LIBRARY.get(alert_type) or PLAYBOOK_LIBRARY.get('generic_anomaly', {})
 
 
+def _resolve_network_highlights_fn():
+    # Dynamic lookup ensures monkeypatching works even when this module is
+    # loaded under both 'src.api.insights_endpoints' and 'api.insights_endpoints'
+    # (dual-import via different sys.path roots). Always prefer the canonical path.
+    # Check BOTH module paths so monkeypatch can land on either one
+    for _key in ('src.api.insights_endpoints', 'api.insights_endpoints'):
+        _mod = _sys_insights.modules.get(_key)
+        if _mod is not None:
+            _fn = getattr(_mod, 'get_network_highlights_snapshot', None)
+            if callable(_fn) and _fn is not get_network_highlights_snapshot:
+                return _fn
+    mod = _sys_insights.modules.get('src.api.insights_endpoints')
+    if mod is not None:
+        fn = getattr(mod, 'get_network_highlights_snapshot', None)
+        if callable(fn):
+            return fn
+    return get_network_highlights_snapshot
+
+
 def _compose_tier1_payload(row: Dict[str, Any], domain: str, ctx: Dict[str, Any], model: str, summary_text: str) -> Dict[str, Any]:
     dread = row.get('_dread') or row.get('dread') or {}
     if isinstance(dread, (int, float)):
@@ -520,7 +539,7 @@ def _compose_tier1_payload(row: Dict[str, Any], domain: str, ctx: Dict[str, Any]
     if row.get('llm_skipped_reason'):
         payload['llm_skipped_reason'] = row.get('llm_skipped_reason')
     try:
-        highlights = get_network_highlights_snapshot(ctx.get('tenant') or os.getenv('DEFAULT_TENANT', 'default'))
+        highlights = _resolve_network_highlights_fn()(ctx.get('tenant') or os.getenv('DEFAULT_TENANT', 'default'))
     except Exception:
         highlights = None
     if highlights:
@@ -627,7 +646,7 @@ def _compose_tier2_payload(row: Dict[str, Any], ctx: Dict[str, Any], raw_text: A
     except Exception:
         payload.setdefault('threat_intel', {'note': 'Threat intel context unavailable.'})
     try:
-        highlights = get_network_highlights_snapshot(ctx.get('tenant') or os.getenv('DEFAULT_TENANT', 'default'))
+        highlights = _resolve_network_highlights_fn()(ctx.get('tenant') or os.getenv('DEFAULT_TENANT', 'default'))
     except Exception:
         highlights = None
     if highlights:

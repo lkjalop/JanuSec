@@ -76,8 +76,11 @@ class WebhookGuardMiddleware(BaseHTTPMiddleware):
             self._stats = {'checks': 0, 'missing_headers': 0, 'stale_ts': 0, 'no_secret': 0, 'too_large': 0, 'bad_sig': 0, 'replay': 0, 'passed': 0}
 
         # Optional persistent replay DB (SQLite). If set, use as source-of-truth.
-        # Default to on-disk path to ensure deterministic behavior across requests/tests.
+        # Under pytest, default to :memory: so test runs never pollute each other
+        # with replay entries from previous sessions.
         env_db = os.getenv('WEBHOOK_REPLAY_DB_PATH')
+        if not env_db and os.getenv('PYTEST_CURRENT_TEST'):
+            env_db = ':memory:'
         self._db_path = env_db or os.path.join('data', 'webhook_replay.db')
         self._db_conn: Optional[sqlite3.Connection] = None
         try:

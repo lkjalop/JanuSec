@@ -824,63 +824,18 @@ async def xdr_webhook(request: Request) -> dict[str, Any]:
     # need to rely on background scheduling semantics.
     try:
         if os.getenv('PYTEST_CURRENT_TEST'):
-            try:
-                # Best-effort: ingest directly into GLOBAL_HOPGRAPH and append recent ids
-                for ev in events:
-                    try:
-                        if GLOBAL_HOPGRAPH is not None:
-                            try:
-                                from src.core.graph.hopgraph_utils import safe_upsert_node
-                                fh = ev.get('file_hash') or ev.get('hash') or None
-                                if fh:
-                                    safe_upsert_node(GLOBAL_HOPGRAPH, 'file_hash', fh, attrs=ev.get('attrs') or {}, source='xdr')
-                                else:
-                                    try:
-                                        from src.core.graph.hopgraph_utils import safe_upsert_node
-                                    except Exception:
-                                        safe_upsert_node = None
-                                    try:
-                                        if safe_upsert_node is not None and ev.get('type') == 'file_hash' and ev.get('id'):
-                                            safe_upsert_node(GLOBAL_HOPGRAPH, 'file_hash', ev.get('id'), attrs=ev.get('attrs') or {}, source='xdr')
-                                            res = {'status': 'ok'}
-                                        else:
-                                            res = GLOBAL_HOPGRAPH.ingest_event(ev, source='xdr')
-                                    except Exception:
-                                        try:
-                                            res = GLOBAL_HOPGRAPH.ingest_event(ev, source='xdr')
-                                        except Exception:
-                                            res = {'status': 'error'}
-                                    if asyncio.iscoroutine(res):
-                                        import asyncio as _a; _a.get_event_loop().run_until_complete(res)
-                            except Exception:
-                                try:
-                                    try:
-                                        from src.core.graph.hopgraph_utils import safe_upsert_node
-                                    except Exception:
-                                        safe_upsert_node = None
-                                    try:
-                                        if safe_upsert_node is not None and ev.get('type') == 'file_hash' and ev.get('id'):
-                                            safe_upsert_node(GLOBAL_HOPGRAPH, 'file_hash', ev.get('id'), attrs=ev.get('attrs') or {}, source='xdr')
-                                            res = {'status': 'ok'}
-                                        else:
-                                            res = GLOBAL_HOPGRAPH.ingest_event(ev, source='xdr')
-                                    except Exception:
-                                        try:
-                                            res = GLOBAL_HOPGRAPH.ingest_event(ev, source='xdr')
-                                        except Exception:
-                                            res = {'status': 'error'}
-                                    if asyncio.iscoroutine(res):
-                                        import asyncio as _a; _a.get_event_loop().run_until_complete(res)
-                                except Exception:
-                                    pass
-                            try:
-                                _RECENT_INGEST.append(ev.get('id') or f"xdr-{int(time.time()*1000)}")
-                            except Exception:
-                                pass
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+            # Synchronous test-mode path: ingest events directly into GLOBAL_HOPGRAPH
+            # so tests can assert graph state without async scheduling delays.
+            for ev in events:
+                try:
+                    if GLOBAL_HOPGRAPH is not None:
+                        GLOBAL_HOPGRAPH.ingest_event(ev, source='xdr')
+                except Exception:
+                    pass
+                try:
+                    _RECENT_INGEST.append(ev.get('id') or f"xdr-{int(time.time()*1000)}")
+                except Exception:
+                    pass
     except Exception:
         pass
     return {'accepted': accepted, 'integrator_id': integrator_id, 'received': True, 'queued': queued}

@@ -14,8 +14,10 @@ client = TestClient(app)
 def sign(secret: str, body: bytes, ts: str) -> str:
     return hmac.new(secret.encode(), msg=ts.encode()+b'.'+body, digestmod=hashlib.sha256).hexdigest()
 
+_TEST_HDRS = {'X-Api-Key': 'testkey123'}
+
 def register(integrator_id: str, secret: str):
-    r = client.post(f'/api/v1/integrations/xdr/register?integrator_id={integrator_id}&secret={secret}')
+    r = client.post(f'/api/v1/integrations/xdr/register?integrator_id={integrator_id}&secret={secret}', headers=_TEST_HDRS)
     assert r.status_code == 200
 
 
