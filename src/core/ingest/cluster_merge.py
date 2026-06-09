@@ -90,7 +90,7 @@ logger = logging.getLogger(__name__)
 
 
 # Bump when merge logic changes so assessment_worker can detect stale cluster outputs.
-_CLUSTER_MERGE_VERSION = "1.8"  # +dedup+jaccard+campaign_rollup
+_CLUSTER_MERGE_VERSION = "1.9"  # +dedup+jaccard+campaign_rollup+singleton_filter+oversized_cap
 
 # ── Time windows (seconds) per pivot type ────────────────────────────────────
 USER_WINDOW             = 6 * 3600          # 6h burst — deliberately tight to avoid BAU/campaign leakage
@@ -823,6 +823,13 @@ def build_scope_qualified_pivots(rows: list[dict]) -> dict[str, list[int]]:
             if _ja4 and len(_ja4) >= 16:
                 out[f"ja4:{_ja4}{suffix}"].append(idx)
                 break
+        # JA3S (server-side TLS fingerprint — Zeek ja3s column): cluster on same server cert.
+        # Merges events talking to the same C2 server infrastructure even via different clients.
+        for _ja3s_fld in ('ja3s', 'ja3_server', 'ssl_ja3s', 'tls_ja3s'):
+            _ja3s = _str(r.get(_ja3s_fld))
+            if _ja3s and len(_ja3s) >= 16:
+                out[f"ja3s:{_ja3s}{suffix}"].append(idx)
+                break
 
         # Attacker-zone pivot: network rows classified as attacker infrastructure
         # (e.g. zone_dst: "attacker_c2") share a pivot so that C2 rotation across
@@ -1049,6 +1056,7 @@ _PREFIX_WINDOW: list[tuple[str, float]] = [
     ("cidr16:",      CIDR16_WINDOW),     # 48h: /16 block — loose burst-only bridge
     ("ja3:",         SIG_WINDOW),        # 14d: same JA3 TLS fingerprint = same C2 implant
     ("ja4:",         SIG_WINDOW),        # 14d: same JA4 TLS fingerprint = same C2 implant
+    ("ja3s:",        SIG_WINDOW),        # 14d: same server JA3 fingerprint = same C2 server cert
     ("device:",      HOST_WINDOW),       # 14d: shared device bridges cross-account pivots
     ("oauth_token:", SESSION_WINDOW),    # 6h: shared OAuth token = same actor burst
 ]
@@ -1062,6 +1070,92 @@ def _window_for(pivot_key: str) -> float:
 
 
 # ── Post-merge deduplication and campaign rollup ─────────────────────────────
+
+_SINGLETON_KEEP_VERDICTS = frozenset({
+    "VALIDATED_BREACH", "SUSPECTED_BREACH", "LIKELY_BREACH",
+    "LIKELY_COMPROMISE", "CONFIRMED_INTRUSION",
+})
+# Factor tags that are high-value enough to keep even a single-row cluster.
+_SINGLETON_KEEP_FACTORS = frozenset({
+    "iam:golden_ticket", "iam:dcsync", "iam:kerberoasting", "iam:pass_the_hash",
+    "iam:pass_the_ticket", "iam:asrep_roasting", "iam:adcs_cert_request_abuse",
+    "endpoint:lolbin_execution", "endpoint:process_injection", "endpoint:ransomware",
+    "cloud:privilege_escalation", "cloud:ssm_run_command_unusual",
+    "exfil:large_upload", "exfil:dns_tunnel",
+})
+_SINGLETON_MAX_ROW_COUNT = int(os.getenv("JANUSEC_SINGLETON_MAX_ROWS", "1"))
+_OVERSIZED_CAP = int(os.getenv("JANUSEC_OVERSIZED_CLUSTER_CAP", "500"))
+
+
+def _filter_low_signal_singletons(clusters: list[dict]) -> list[dict]:
+    """Drop singleton clusters that carry no actionable signal.
+
+    A cluster is considered low-signal if ALL of:
+      - row_count <= JANUSEC_SINGLETON_MAX_ROWS (default 1)
+      - verdict not in a breach/compromise family
+      - no attack phases detected (not a campaign)
+      - no high-value factor tags
+      - no MITRE techniques tagged
+
+    Such clusters are noise: a single generic event that didn't pivot to anything.
+    High-triage singletons (e.g. a lone golden ticket event) are kept because they
+    carry high-value factor_tags.
+    """
+    out: list[dict] = []
+    for cl in clusters:
+        refs = cl.get("row_refs") or []
+        row_count = len(refs) if isinstance(refs, list) else int(cl.get("row_count") or 1)
+        if row_count > _SINGLETON_MAX_ROW_COUNT:
+            out.append(cl)
+            continue
+        # Check if any keep condition applies
+        verdict = str(cl.get("verdict") or "").upper()
+        if verdict in _SINGLETON_KEEP_VERDICTS:
+            out.append(cl)
+            continue
+        phases = cl.get("phases")
+        if phases:
+            out.append(cl)
+            continue
+        ft = cl.get("factor_tags") or []
+        ft_set = set(ft) if isinstance(ft, list) else set((ft or {}).keys())
+        if ft_set & _SINGLETON_KEEP_FACTORS:
+            out.append(cl)
+            continue
+        if cl.get("mitre_techniques"):
+            out.append(cl)
+            continue
+        # All conditions met for drop — tag and skip
+        logger.debug(
+            "cluster_merge: dropping low-signal singleton cluster %s (verdict=%s)",
+            cl.get("cluster_id"), verdict,
+        )
+    return out
+
+
+def _cap_oversized_clusters(clusters: list[dict]) -> list[dict]:
+    """Cap excessively large clusters to prevent narration/LLM overload.
+
+    Clusters with more than JANUSEC_OVERSIZED_CLUSTER_CAP rows (default 500) have
+    their row_refs capped and are tagged with _oversized=True so downstream code
+    can display a warning. The original total is preserved as _total_row_count.
+    """
+    out: list[dict] = []
+    for cl in clusters:
+        refs = cl.get("row_refs") or []
+        if isinstance(refs, list) and len(refs) > _OVERSIZED_CAP:
+            cl = dict(cl)  # shallow copy — don't mutate the original
+            cl["_total_row_count"] = len(refs)
+            cl["_oversized"] = True
+            cl["row_refs"] = refs[:_OVERSIZED_CAP]
+            cl["row_count"] = _OVERSIZED_CAP
+            logger.warning(
+                "cluster_merge: cluster %s oversized (%d rows) — capping to %d for narration",
+                cl.get("cluster_id"), len(refs), _OVERSIZED_CAP,
+            )
+        out.append(cl)
+    return out
+
 
 def _deduplicate_by_rowset(clusters: list[dict]) -> list[dict]:
     """Collapse clusters with identical row_ref sets. Keeps highest-verdict cluster.
@@ -1440,10 +1534,17 @@ def transitive_merge_clusters(
     # Layer 3: roll multi-cluster actor/IP campaigns into single cases
     _max_campaigns = int(os.getenv("JANUSEC_MAX_CAMPAIGNS", "8"))
     out = _campaign_rollup(out, max_campaigns=_max_campaigns)
+    # Layer 4: drop no-signal singleton clusters (single generic event, no indicators)
+    _pre_singleton_count = len(out)
+    out = _filter_low_signal_singletons(out)
+    # Layer 5: cap oversized clusters so narration stays within LLM context limits
+    out = _cap_oversized_clusters(out)
 
     if diagnostics_out is not None:
         diagnostics_out["post_merge_cluster_count"] = len(out)
         diagnostics_out["post_merge_jaccard_threshold"] = _jaccard_threshold
+        diagnostics_out["singleton_filter_dropped"] = _pre_singleton_count - len(out)
+        diagnostics_out["oversized_clusters"] = sum(1 for c in out if c.get("_oversized"))
 
     # Append isolated clusters at the end with a sentinel so callers can
     # split them out for the isolated_count header without losing audit data.

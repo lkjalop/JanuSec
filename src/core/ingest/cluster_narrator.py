@@ -44,6 +44,10 @@ _CRITIC_ENABLED = os.getenv('JANUSEC_CRITIC_ENABLED', '1') not in ('0', 'false',
 _CRITIC_MIN_CONFIDENCE = float(os.getenv('JANUSEC_CRITIC_MIN_CONFIDENCE', '0.0'))
 _CRITIC_T1_SKIP = os.getenv('JANUSEC_CRITIC_T1_SKIP', '0') in ('1', 'true', 'True')
 
+# Scatter-gather: fan out 4 specialist mini-agents before synthesis.
+# Enabled when T2 path fires AND JANUSEC_SCATTER_GATHER_ENABLED=1.
+_SCATTER_GATHER_ENABLED = os.getenv('JANUSEC_SCATTER_GATHER_ENABLED', '0') in ('1', 'true', 'True')
+
 
 # ── Prompt construction ───────────────────────────────────────────────────────
 
@@ -208,22 +212,23 @@ def _fmt_network(row: dict, ts: str, sev: str, score: float) -> str:
     proto = str(row.get("protocol") or "").upper()
     domain = str(row.get("domain") or row.get("tls_sni") or row.get("sni") or "")
     sni = str(row.get("tls_sni") or "")
-    ja3 = str(row.get("ja3_hash") or "")[:16]
+    ja3 = str(row.get("ja3_hash") or row.get("ja3") or "")[:16]
+    ja4 = str(row.get("ja4") or "")[:20]
     try:
-        bytes_s = int(row.get("bytes_sent") or 0)
-        bytes_r = int(row.get("bytes_received") or 0)
+        bytes_s = int(row.get("bytes_sent") or row.get("orig_bytes") or 0)
+        bytes_r = int(row.get("bytes_received") or row.get("resp_bytes") or 0)
         bytes_str = f"sent={bytes_s/1024:.0f}KB recv={bytes_r/1024:.0f}KB"
         if bytes_s > 10_000_000:
             bytes_str = f"[LARGE EXFIL] sent={bytes_s/1024/1024:.1f}MB recv={bytes_r/1024/1024:.1f}MB"
     except Exception:
         bytes_str = ""
 
-    ja3_str = f" ja3={ja3}" if ja3 else ""
+    fp_str = (f" ja4={ja4}" if ja4 else (f" ja3={ja3}" if ja3 else ""))
     sni_str = f" sni={sni}" if sni and sni != domain else ""
     dom_str = f" domain={domain}" if domain else ""
     port_str = f":{dst_port}" if dst_port else ""
     return (f"[{ts}] {sev:8s} | -                         | {src_ip:17s} | "
-            f"Net:{proto} {src_ip}→{dst_ip}{port_str}{dom_str}{sni_str}{ja3_str} {bytes_str} score={score:.2f}")
+            f"Net:{proto} {src_ip}→{dst_ip}{port_str}{dom_str}{sni_str}{fp_str} {bytes_str} score={score:.2f}")
 
 
 def _fmt_cloud(row: dict, ts: str, sev: str, score: float) -> str:
@@ -435,6 +440,68 @@ def _cluster_signal_block(cluster: dict) -> str:
     return _compact_json(signals)
 
 
+def _format_dread_block(cluster: dict) -> str:
+    """Format DREAD score into a readable block for the LLM prompt."""
+    dread = cluster.get("dread_score")
+    if not dread or not isinstance(dread, dict):
+        return ""
+    dims = {
+        "D": ("Damage", dread.get("damage")),
+        "R": ("Reproducibility", dread.get("reproducibility")),
+        "E": ("Exploitability", dread.get("exploitability")),
+        "A": ("Affected users", dread.get("affected_users")),
+        "D2": ("Discoverability", dread.get("discoverability")),
+    }
+    total = dread.get("total") or dread.get("score")
+    lines = ["RISK SCORING (DREAD — 1-10 per dimension):"]
+    for code, (name, val) in dims.items():
+        if val is not None:
+            lines.append(f"  {name}: {val}/10")
+    if total is not None:
+        lines.append(f"  Overall DREAD score: {total:.1f}/10")
+    return "\n".join(lines)
+
+
+def _uncertainty_language_guidance(det_verdict: str, det_conf: float) -> str:
+    """Return language calibration rules for the LLM based on confidence level."""
+    if det_conf >= 0.85 and det_verdict == "VALIDATED_BREACH":
+        return (
+            "LANGUAGE CALIBRATION: Confidence is high (>= 0.85). "
+            "Use assertive language: 'the attacker', 'exfiltrated', 'established persistence'. "
+            "Reserve hedging ('likely', 'may have') for inferred steps not directly evidenced."
+        )
+    elif det_conf >= 0.65:
+        return (
+            "LANGUAGE CALIBRATION: Confidence is moderate (0.65–0.84). "
+            "Use hedged language for inferred steps: 'likely', 'consistent with', 'suggests'. "
+            "Use assertive language only for directly observed actions in the evidence rows. "
+            "Example: 'The user likely used Kerberoasting (T1558.003) — RC4 tickets observed — "
+            "and may have proceeded to lateral movement, though no subsequent host activity was detected.'"
+        )
+    else:
+        return (
+            "LANGUAGE CALIBRATION: Confidence is low (< 0.65). "
+            "Use explicitly uncertain language throughout: 'may indicate', 'could suggest', "
+            "'insufficient evidence to confirm'. State what IS known from evidence vs. what "
+            "is inferred. Example: 'Evidence suggests potential credential abuse (T1078), "
+            "however the observed pattern could also reflect a misconfigured service account.'"
+        )
+
+
+def _prior_cycle_block(cluster: dict) -> str:
+    """Include prior-cycle narrative reference if available."""
+    prior = cluster.get("_prior_narrative")
+    if not prior or not isinstance(prior, str):
+        return ""
+    excerpt = prior[:300].replace("\n", " ")
+    return (
+        f"PRIOR ASSESSMENT CONTEXT: This cluster was seen in a previous assessment cycle. "
+        f"Prior narrative excerpt: '{excerpt}...' "
+        "If the current evidence shows the SAME pattern, explicitly state 'pattern recurs from prior cycle'. "
+        "If the pattern has evolved (new hosts, extended timeline), state what changed."
+    )
+
+
 def _build_prompt(cluster: dict, evidence_rows: list[dict]) -> str:
     cluster_id = cluster.get("cluster_id") or "unknown"
 
@@ -461,6 +528,9 @@ def _build_prompt(cluster: dict, evidence_rows: list[dict]) -> str:
     entity_block = "\n".join(f"  {e}" for e in entity_summary) or "  (no shared entities extracted)"
     attack_patterns = _humanize_factor_tags(cluster)
     extra_signals = _cluster_signal_block(cluster)
+    dread_block = _format_dread_block(cluster)
+    uncertainty_guidance = _uncertainty_language_guidance(det_verdict, det_conf)
+    prior_block = _prior_cycle_block(cluster)
 
     # Verdict guidance block
     if det_verdict == "VALIDATED_BREACH":
@@ -468,29 +538,47 @@ def _build_prompt(cluster: dict, evidence_rows: list[dict]) -> str:
             f"DETERMINISTIC CLASSIFICATION: {det_verdict} (confidence {det_conf:.2f})\n"
             "Your role is to EXPLAIN and NARRATE this confirmed breach — do not downgrade to "
             "REQUIRES_INVESTIGATION unless you can identify a specific, concrete false-positive "
-            "reason. Set confidence >= 0.85 unless you have strong FP evidence."
+            "reason. Set confidence >= 0.85 unless you have strong FP evidence.\n"
+            "CONFIDENCE CALIBRATION: Start at 0.90. Reduce by 0.05 for each of these missing: "
+            "(1) no attacker lateral movement evidence, (2) no data staging/exfil evidence, "
+            "(3) fewer than 3 corroborating sources. Minimum 0.85 for this verdict."
         )
     elif det_verdict == "SUSPECTED_BREACH":
         verdict_guidance = (
             f"DETERMINISTIC CLASSIFICATION: {det_verdict} (confidence {det_conf:.2f})\n"
             "The deterministic pipeline found high-confidence breach indicators. Confirm or "
             "upgrade to VALIDATED_BREACH if the evidence clearly shows attacker actions. "
-            "Set confidence >= 0.70."
+            "Set confidence >= 0.70.\n"
+            "CONFIDENCE CALIBRATION: Start at 0.75. Add 0.05 if lateral movement is confirmed. "
+            "Add 0.05 if data exfiltration is confirmed. Subtract 0.10 if the primary indicator "
+            "has a known benign explanation."
         )
     else:
         verdict_guidance = (
             f"DETERMINISTIC CLASSIFICATION: {det_verdict} (confidence {det_conf:.2f})\n"
-            "Classify this cluster based on the evidence and signals below."
+            "Classify this cluster based on the evidence and signals below.\n"
+            "CONFIDENCE CALIBRATION: Assign confidence proportional to evidence quality. "
+            "0.90+ requires direct attacker actions. 0.70–0.89 for strong circumstantial evidence. "
+            "0.50–0.69 for pattern-only signals with plausible benign alternatives."
         )
+
+    # Build optional context sections (only include non-empty blocks)
+    optional_sections = ""
+    if dread_block:
+        optional_sections += f"\n{dread_block}\n"
+    if prior_block:
+        optional_sections += f"\n{prior_block}\n"
 
     return f"""You are a senior threat analyst. The deterministic detection pipeline has pre-classified this cluster.
 
 {verdict_guidance}
 
+{uncertainty_guidance}
+
 CLUSTER ID: {cluster_id}
 ROW COUNT: {cluster.get('row_count') or len(cluster.get('row_refs') or [])}
 SEVERITY: {det_severity or 'UNKNOWN'}
-
+{optional_sections}
 ENTITIES INVOLVED:
 {entity_block}
 
@@ -503,6 +591,12 @@ TOP {len(evidence_rows)} EVIDENCE ROWS (ranked by triage score):
 STRUCTURED SIGNALS FROM DETERMINISTIC PIPELINE:
 {extra_signals}
 
+EVIDENCE CITATION REQUIREMENT: You MUST cite at least 3 row numbers in evidence_refs.
+Only cite rows whose content directly supports your verdict. Do NOT cite rows with generic
+or benign events to pad the count — each citation must correspond to a specific indicator.
+IOC GROUNDING REQUIREMENT: Every IP address, username, and hostname named in attack_narrative
+MUST appear in the evidence rows above. Do not infer or construct entity names.
+
 Respond ONLY with valid JSON — no prose, no markdown fences:
 {{
   "verdict": "<VALIDATED_BREACH | SUSPECTED_BREACH | BENIGN_EXPECTED | REQUIRES_INVESTIGATION | INSUFFICIENT_EVIDENCE>",
@@ -510,8 +604,8 @@ Respond ONLY with valid JSON — no prose, no markdown fences:
   "kill_chain_stages": ["<1-3 MOST PROMINENT from: recon, delivery, exploitation, installation, c2, lateral_movement, collection, exfiltration, impact — derive from DETECTED ATTACK PATTERNS if evidence rows are generic — NEVER 'unknown' if any evidence present>"],
   "kill_chain_stage": "<dominant phase from kill_chain_stages>",
   "ioc_summary": "<1-2 sentences: specific users, IPs, hosts, MITRE techniques as IoCs — cite T-number if known>",
-  "attack_narrative": "<REQUIRED 3-5 sentences: attack timeline with specific actors and techniques. Include MITRE technique IDs inline (e.g., T1047, T1558.003) where applicable. Name real users, IPs, hosts, timestamps from the evidence rows. Example: 'At 02:14 UTC, martin.chen@acme.com (10.42.4.91) requested Kerberos TGS tickets with RC4 encryption (T1558.003 Kerberoasting), indicating offline hash cracking. WMI was used to execute processes remotely on ws-martin-01 (T1047), staging the attacker for domain controller access.'>",
-  "evidence_refs": [<1-based row numbers most strongly supporting verdict; include at least 3>],
+  "attack_narrative": "<REQUIRED 3-5 sentences: attack timeline with specific actors and techniques. Include MITRE technique IDs inline (e.g., T1047, T1558.003) where applicable. Name real users, IPs, hosts, timestamps from the evidence rows. Calibrate language per LANGUAGE CALIBRATION above. Example: 'At 02:14 UTC, martin.chen@acme.com (10.42.4.91) requested Kerberos TGS tickets with RC4 encryption (T1558.003 Kerberoasting), indicating offline hash cracking. WMI was used to execute processes remotely on ws-martin-01 (T1047), staging the attacker for domain controller access.'>",
+  "evidence_refs": [<1-based row numbers most strongly supporting verdict; include at least 3 — each must be a direct indicator, not generic activity>],
   "fp_indicators": ["<specific verifiable reason this COULD be a false positive — or empty list []>"],
   "next_steps": [
     {{"priority": "P1|P2|P3", "action": "<imperative action verb phrase>", "rationale": "<why now, not later>", "tool": "<REQUIRED: exact PowerShell cmdlet, KQL query, or SPL search — never leave blank>"}}
@@ -785,13 +879,59 @@ def narrate_cluster(
 
     # ── Select model: caller override → T2 env var (if cluster qualifies) → default
     selected_model: str | None = model_override
+    cluster_conf = float(cluster.get("confidence") or 0.0)
+    _is_t2 = False
     if not selected_model and _T2_MODEL:
-        cluster_conf = float(cluster.get("confidence") or 0.0)
         if cluster_conf >= _T2_CONFIDENCE_THRESHOLD:
             selected_model = _T2_MODEL
             cluster["_narrator_tier"] = "T2"
+            _is_t2 = True
     if not selected_model:
         cluster.setdefault("_narrator_tier", "T1")
+
+    # ── Scatter-gather path: 4 specialist mini-agents + synthesis (T2 + env flag)
+    if _is_t2 and _SCATTER_GATHER_ENABLED:
+        try:
+            from src.agents.narrator import (
+                narrate_scatter_gather as _sg_narrate,
+                InvestigationContext,
+            )
+            import asyncio as _asyncio
+
+            _ctx = InvestigationContext(
+                tenant_id=assessment_id or "ingest",
+                cluster_id=cluster_id,
+                source_files=list({str(r.get("_source") or "") for r in evidence}),
+            )
+            # Build minimal VerifiedFinding stubs from evidence rows
+            _verified = []
+            for _r in evidence:
+                _vf = type('_VF', (), {
+                    'raw': type('_R', (), {
+                        'summary': str(_r.get('event_text') or _r.get('event_name') or '')[:200],
+                        'mitre_techniques': _r.get('mitre_techniques') or [],
+                        'confidence': float(_r.get('triage_score') or 0),
+                    })(),
+                    'confidence': float(_r.get('triage_score') or 0),
+                    'dread_score': 5.0,
+                })()
+                _verified.append(_vf)
+
+            try:
+                _loop = _asyncio.new_event_loop()
+                _sg_result = _loop.run_until_complete(
+                    _sg_narrate(_ctx, _verified, llm_client=_client)
+                )
+                _loop.close()
+            except Exception:
+                _sg_result = None
+
+            if _sg_result and _sg_result.get("narrative"):
+                cluster["_scatter_gather_result"] = _sg_result
+                cluster["_narrator_tier"] = "T2_scatter"
+                logger.info("narrator: scatter-gather used for cluster %s", cluster_id)
+        except Exception as _sg_exc:
+            logger.debug("narrator: scatter-gather unavailable for %s: %s", cluster_id, _sg_exc)
 
     call_timeout = float(os.getenv("JANUSEC_INGEST_LLM_TIMEOUT_S", "45"))
     t_start = time.monotonic()
@@ -1016,5 +1156,41 @@ def narrate_top_clusters(
                 _apply_narrative_to_cluster(rest, rest_fallback, upgrade_only=True)
                 narratives.append(rest_fallback)
             break
+
+    # ── Campaign arc: stitch cluster narratives into a kill-chain chapter ────
+    # Enabled via JANUSEC_CAMPAIGN_ARC_ENABLED=1. Runs after all clusters narrated.
+    if os.getenv('JANUSEC_CAMPAIGN_ARC_ENABLED', '0') in ('1', 'true', 'True') and len(narratives) >= 2:
+        try:
+            from src.agents.narrator import narrate_campaign_arc as _arc
+            from src.integrations.llm_client import DEFAULT_CLIENT as _arc_client
+            import asyncio as _asyncio
+
+            # Build cluster_narrative dicts from clusters + their narratives
+            _cluster_map = {str(c.get('cluster_id') or ''): c for c in clusters}
+            _arc_inputs = []
+            for n in narratives:
+                cid = str(n.get('cluster_id') or '')
+                c = _cluster_map.get(cid, {})
+                _arc_inputs.append({
+                    'cluster_id': cid,
+                    'narrative': n.get('narrative') or '',
+                    'kill_chain_phases': c.get('attack_phases') or [],
+                    'iocs': list(c.get('iocs') or []),
+                    'mitre_techniques': list(c.get('mitre_techniques') or []),
+                    'dread_score': c.get('dread_score') or {},
+                    'verdict': c.get('verdict') or n.get('verdict') or '',
+                })
+
+            _loop = _asyncio.new_event_loop()
+            _arc_text = _loop.run_until_complete(
+                _arc(_arc_inputs, llm_client=_arc_client, tenant_id=assessment_id or 'ingest')
+            )
+            _loop.close()
+            if _arc_text:
+                for n in narratives:
+                    n['_campaign_arc'] = _arc_text
+                logger.info("narrator: campaign arc generated (%d chars) for %s", len(_arc_text), assessment_id)
+        except Exception as _arc_exc:
+            logger.debug("narrator: campaign arc skipped for %s: %s", assessment_id, _arc_exc)
 
     return narratives

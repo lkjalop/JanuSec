@@ -36,6 +36,17 @@ class IdentityHopGraph:
     Edges are directed and typed; we store last-seen timestamp for decay if needed.
     """
 
+    # OAuth/token lifecycle action classifiers
+    _TOKEN_ISSUE_ACTIONS = frozenset({
+        'token_issue', 'authorization_code', 'access_token_issued', 'consent_granted',
+        'oauth2.0', 'authorize', 'grant', 'token_grant', 'add_service_principal',
+        'issue', 'app_access_token',
+    })
+    _TOKEN_REDEEM_ACTIONS = frozenset({
+        'token_refresh', 'refresh', 'redeem', 'sign_in', 'signin', 'use_token',
+        'token_use', 'token_redeemed', 'interactive_signin', 'noninteractive_signin',
+    })
+
     def __init__(self, window_seconds: int = 24 * 3600, edge_cap: int = 100_000):
         self.window_seconds = window_seconds
         self.edge_cap = edge_cap
@@ -50,6 +61,9 @@ class IdentityHopGraph:
         self._recent_edges: Dict[str, deque] = defaultdict(lambda: deque(maxlen=200))
         # EWMA tracking: identity -> {count, ewma, mean, m2 (variance approx for normalization)}
         self._ewma: Dict[str, Dict[str, float]] = {}
+        # Token lifecycle registry: token_id -> {user, asn, src_ip, ts, action}
+        # Used to detect cross-ASN reuse and token user swaps (stolen token indicators)
+        self._token_registry: Dict[str, Dict[str, Any]] = {}
 
     @property
     def adj(self) -> Dict[str, List[Tuple[str, str, float, float]]]:
@@ -128,10 +142,57 @@ class IdentityHopGraph:
             self.mark_high_value(f"role:{role}")
         if user and token:
             self.add_edge(n_user(user), f"token:{token}", 'token_issue', weight=0.4)  # type: ignore[arg-type]
-        # Token reuse / signin from unexpected foreign ASN (OAuth persistence indicator)
+        # Token lifecycle tracking — OAuth token issuance and cross-location reuse detection
         _ev_type = str(ev.get('event_type') or ev.get('action') or ev.get('operation') or '').lower()
         _asn = str(ev.get('asn') or ev.get('src_asn') or ev.get('network_asn') or '').strip()
         _src_ip = str(ev.get('src_ip') or ev.get('source_ip') or '').strip()
+        _ts_ev = float(ev.get('_ts_epoch') or ev.get('timestamp_epoch') or time.time())
+
+        if token:
+            _is_issue = any(k in _ev_type for k in self._TOKEN_ISSUE_ACTIONS)
+            _is_redeem = any(k in _ev_type for k in self._TOKEN_REDEEM_ACTIONS)
+            _tok_key = str(token)
+
+            if _is_issue and user:
+                # Record initial token issuance context
+                if _tok_key not in self._token_registry:
+                    self._token_registry[_tok_key] = {
+                        'user': str(user),
+                        'asn': _asn or 'unknown',
+                        'src_ip': _src_ip,
+                        'ts': _ts_ev,
+                        'action': _ev_type,
+                    }
+                    # Connect token node to issuance context
+                    if _asn:
+                        self.add_edge(f"token:{_tok_key}", f"asn:{_asn}", 'token_issued_from', weight=0.5)  # type: ignore[arg-type]
+
+            elif _is_redeem and user and _tok_key in self._token_registry:
+                _prior = self._token_registry[_tok_key]
+                _prior_asn = _prior.get('asn', 'unknown')
+                _prior_user = _prior.get('user', '')
+                # Cross-ASN reuse: token used from different ASN than issued → stolen token indicator
+                if _asn and _asn != _prior_asn and _prior_asn not in ('unknown', ''):
+                    self.add_edge(
+                        n_user(user), f"token:{_tok_key}", 'token_cross_asn_reuse', weight=0.95,  # type: ignore[arg-type]
+                    )
+                    self.mark_high_value(f"token:{_tok_key}")
+                    logger.debug(
+                        "IdentityHopGraph: cross-ASN token reuse — token %s issued from asn=%s, redeemed from asn=%s by user=%s",
+                        _tok_key[:16], _prior_asn, _asn, user,
+                    )
+                # User swap: same token used by different user than who received it
+                if _prior_user and str(user) != _prior_user:
+                    self.add_edge(
+                        n_user(user), f"token:{_tok_key}", 'token_user_swap', weight=0.98,  # type: ignore[arg-type]
+                    )
+                    self.mark_high_value(f"token:{_tok_key}")
+                # Update registry with latest use context
+                self._token_registry[_tok_key]['last_redeem_asn'] = _asn
+                self._token_registry[_tok_key]['last_redeem_user'] = str(user)
+                self._token_registry[_tok_key]['last_redeem_ts'] = _ts_ev
+
+        # Token reuse / signin from unexpected foreign ASN (OAuth persistence indicator)
         if user and _asn and any(k in _ev_type for k in ('signin', 'sign_in', 'oauth', 'token', 'refresh')):
             if not _is_private_ip(_src_ip):
                 _tok_edge = 'token_reuse_foreign_asn' if token else 'token_foreign_signin'
