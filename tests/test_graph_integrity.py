@@ -1,10 +1,15 @@
+import pytest
 from src.graph.hopgraph import HopGraph
 from src.core.graph.integrity import find_orphan_nodes, find_invalid_edges
 
 
-def test_graph_integrity_helpers():
-    # Use a fresh isolated HopGraph so test is not affected by global graph state
-    hg = HopGraph()
+def test_graph_integrity_helpers(monkeypatch, tmp_path):
+    # Disable persistence + use temp paths so HopGraph() starts completely empty
+    monkeypatch.setenv('HOPGRAPH_PERSISTENCE_ENABLED', '0')
+    hg = HopGraph(
+        wal_path=str(tmp_path / 'test_wal.log'),
+        snapshot_path=str(tmp_path / 'test_snapshot.json'),
+    )
     hg.add_node_attr('host:A', type='host', name='A')
     hg.add_node_attr('process:P', type='process', name='P')
     hg.add_edge('host:A', 'process:P', 'runs')

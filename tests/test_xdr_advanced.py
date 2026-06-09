@@ -13,11 +13,13 @@ client = TestClient(app)
 def sign(secret: str, body: bytes, ts: str) -> str:
     return hmac.new(secret.encode(), msg=ts.encode()+b'.'+body, digestmod=hashlib.sha256).hexdigest()
 
+_TEST_HDRS = {'X-Api-Key': 'testkey123'}
+
 def register(id_: str, secret: str|None=None):
     url = f'/api/v1/integrations/xdr/register?integrator_id={id_}'
     if secret:
         url += f'&secret={secret}'
-    r = client.post(url)
+    r = client.post(url, headers=_TEST_HDRS)
     assert r.status_code == 200
     js = r.json()
     return js['secret'] if 'secret' in js else secret
@@ -26,7 +28,7 @@ def test_rotation_and_grace():
     integrator_id = 'rotor'
     s1 = register(integrator_id, 'firstsecretrotationxxxxx')
     # rotate to new secret
-    r = client.post(f'/api/v1/integrations/xdr/rotate?integrator_id={integrator_id}')
+    r = client.post(f'/api/v1/integrations/xdr/rotate?integrator_id={integrator_id}', headers=_TEST_HDRS)
     assert r.status_code == 200
     body = json.dumps({'events':[{'id':'grace1'}]}).encode()
     ts = str(int(time.time()))

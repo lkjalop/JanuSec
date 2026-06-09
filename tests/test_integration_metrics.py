@@ -18,7 +18,7 @@ def test_reconstruct_and_temporal_metrics(monkeypatch):
     assert r.status_code in (200, 500)
 
     # Call reconstruct with missing seed -> should be 400
-    r2 = client.post('/api/v1/graph/reconstruct', json={})
+    r2 = client.post('/api/v1/graph/reconstruct', json={}, headers={'X-Api-Key': 'testkey123'})
     assert r2.status_code == 400
 
     # If metrics are registered, verify metrics endpoint presence

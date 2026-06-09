@@ -42,6 +42,19 @@ async def intel_status() -> Dict[str, Any]:
     base['confidence_stats'] = {
         k: sum(1 for _v,_c in v.items()) for k,v in getattr(TI_CLIENT, '_confidence', {}).items()
     }
+    # Expose per-bucket IoC counts (required by intel status tests and UI)
+    try:
+        base['counts'] = {
+            'ips':     len(getattr(TI_CLIENT, 'ip_set',     set()) or set()),
+            'domains': len(getattr(TI_CLIENT, 'domain_set', set()) or set()),
+            'urls':    len(getattr(TI_CLIENT, 'url_set',    set()) or set()),
+            'hashes':  len(getattr(TI_CLIENT, 'hash_set',   set()) or set()),
+            'ja3':     len(getattr(TI_CLIENT, 'ja3_set',    set()) or set()),
+            'certfps': len(getattr(TI_CLIENT, 'certfp_set', set()) or set()),
+        }
+    except Exception:
+        base['counts'] = {k: 0 for k in ('ips', 'domains', 'urls', 'hashes', 'ja3', 'certfps')}
+    base.setdefault('last_sync', {})
     # Compute per-source item counts by scanning origins
     try:
         source_counts: Dict[str, int] = {}
