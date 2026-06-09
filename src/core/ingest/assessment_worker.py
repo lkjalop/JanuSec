@@ -679,23 +679,66 @@ def _score_async_ingest_row(raw: dict, normalized: dict) -> float:
     _pauth_s1 = str(normalized.get('pre_auth_type') or raw.get('pre_auth_type') or '').strip()
     _cmd_s1 = str(normalized.get('command_line') or raw.get('command_line') or '').lower()
     _proc_s1 = str(normalized.get('process_name') or raw.get('process_name') or '').lower()
+    # Ticket options bitmask (4769/4770 field). Mimikatz golden ticket default = 0x60a10000.
+    # PROXIABLE (0x20000000) is never legitimately set on service ticket requests from endpoints.
+    _topts_s1_raw = str(
+        normalized.get('ticket_options') or raw.get('ticket_options') or
+        raw.get('TicketOptions') or raw.get('ticket_flags') or '0x0'
+    ).strip().lower()
+    try:
+        _topts_s1 = int(_topts_s1_raw, 16) if _topts_s1_raw.startswith('0x') else int(_topts_s1_raw, 0)
+    except (ValueError, TypeError):
+        _topts_s1 = 0
+    # Ticket lifetime field (hours). Mimikatz forges 10-year TGTs (87600 h). Legitimate max ~10 h.
+    _tlife_s1_raw = str(
+        normalized.get('ticket_lifetime_hours') or raw.get('ticket_lifetime_hours') or
+        raw.get('TicketLifetimeHours') or raw.get('ticket_lifetime') or '0'
+    ).strip()
+    try:
+        _tlife_s1 = float(_tlife_s1_raw)
+    except (ValueError, TypeError):
+        _tlife_s1 = 0.0
+    # PROXIABLE + FORWARDABLE bits simultaneously = strong golden ticket indicator
+    _GT_PROXIABLE_FLAG = 0x20000000
+    _GT_FORWARDABLE_FLAG = 0x40000000
+    _topts_gt_suspicious = bool(
+        (_topts_s1 & _GT_PROXIABLE_FLAG) and (_topts_s1 & _GT_FORWARDABLE_FLAG)
+    )
+    # 10-year lifetime: > 86400 h (10 years = 87600 h, add small margin)
+    _tlife_forged = _tlife_s1 > 86400
 
     if _eid_s1 in ('4769', '4768'):
         # 4769 + RC4 encryption (0x17/0x18) = kerberoasting
         if _eid_s1 == '4769' and _enc_s1 in ('0x17', '0x18', '23', '24'):
             score = max(score, 0.92)
             normalized.setdefault('_severity', 'critical')
-        # 4769 targeting krbtgt = golden ticket
+        # 4769 targeting krbtgt = golden ticket (use-phase)
         elif _eid_s1 == '4769' and _svc_s1 == 'krbtgt':
             score = max(score, 0.92)
             normalized.setdefault('_severity', 'critical')
+            # Sub-indicators that confirm forgery vs. legitimate krbtgt TGS
+            _gt_subs: list[str] = []
+            if _topts_gt_suspicious:
+                _gt_subs.append(f"proxiable+forwardable_flags=0x{_topts_s1:08x}")
+            if _tlife_forged:
+                _gt_subs.append(f"forged_lifetime={_tlife_s1:.0f}h")
+            if _gt_subs:
+                normalized['_golden_ticket_subindicators'] = _gt_subs
+                # Confirmed forged TGT — push toward 0.97
+                score = max(score, 0.97)
         # 4768 + pre-auth disabled = AS-REP roasting
         elif _eid_s1 == '4768' and _pauth_s1 in ('0', '0x0'):
             score = max(score, 0.92)
             normalized.setdefault('_severity', 'critical')
         else:
-            score = max(score, 0.70)
-            normalized.setdefault('_severity', 'high')
+            # Elevated ticket options still suspicious even without krbtgt target
+            if _topts_gt_suspicious:
+                score = max(score, 0.85)
+                normalized.setdefault('_severity', 'high')
+                normalized['_golden_ticket_subindicators'] = [f"proxiable+forwardable_flags=0x{_topts_s1:08x}"]
+            else:
+                score = max(score, 0.70)
+                normalized.setdefault('_severity', 'high')
     elif _eid_s1 in ('4771', '4776', '4648'):
         score = max(score, 0.70)
         normalized.setdefault('_severity', 'high')
@@ -1793,7 +1836,7 @@ async def run_assessment_pipeline(
                         _u = next(iter(_mapped_users))
                 if _u:
                     _bl_user_counts[_u] = _bl_user_counts.get(_u, 0) + 1
-                    _bytes = float(_row_bl.get("bytes_out") or _row_bl.get("bytes_sent") or _row_bl.get("bytes") or 0)
+                    _bytes = float(_row_bl.get("bytes_out") or _row_bl.get("bytes_sent") or _row_bl.get("orig_bytes") or _row_bl.get("bytes") or 0)
                     if _bytes > 0:
                         _bl_user_bytes[_u] = _bl_user_bytes.get(_u, 0.0) + _bytes
                 if _h:
@@ -1881,7 +1924,7 @@ async def run_assessment_pipeline(
                     if len(_mapped_users_ch) == 1:
                         _u_ch = next(iter(_mapped_users_ch))
                         _row_ch["_chrono_inferred_user"] = _u_ch
-                _b_ch = float(_row_ch.get("bytes_out") or _row_ch.get("bytes_sent") or _row_ch.get("bytes") or 0)
+                _b_ch = float(_row_ch.get("bytes_out") or _row_ch.get("bytes_sent") or _row_ch.get("orig_bytes") or _row_ch.get("bytes") or 0)
                 _dst_h_ch = str(
                     _row_ch.get("dst_host") or _row_ch.get("resp_h") or
                     _row_ch.get("domain") or _row_ch.get("tls_sni") or ""
