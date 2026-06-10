@@ -37,7 +37,11 @@ def _text(row: dict) -> str:
 # ── Version guard ─────────────────────────────────────────────────────────────
 
 def test_version_bumped_to_1_6():
-    assert _CLUSTER_MERGE_VERSION == "1.6"
+    # Monotonic floor, not an exact pin: this guard previously broke on every
+    # version bump (asserted "1.6" while the constant had advanced to 1.9+).
+    # Assert the merge engine is at least the phase-detector release (1.6).
+    parts = tuple(int(p) for p in _CLUSTER_MERGE_VERSION.split("."))
+    assert parts >= (1, 6), f"cluster_merge version regressed below 1.6: {_CLUSTER_MERGE_VERSION}"
 
 
 def test_phase_detector_count():

@@ -286,6 +286,37 @@ async def dev_seed_decisions(payload: dict, request: Request):
         raise HTTPException(status_code=500, detail=f'seed_failed:{e}')
 
 
+@router.post('/reinit_llm')
+async def dev_reinit_llm(request: Request = None):
+    """Dev-only: clear TEST_HELPERS_ENABLED from process env and reinitialize the DEFAULT_CLIENT.
+
+    Useful when the server was started with TEST_HELPERS_ENABLED=1 accidentally; calling this
+    endpoint forces a fresh _select_default_client() call which will pick up LLM_PROVIDER from
+    the .env-loaded environment. Only available when APP_ENV=dev or ENV=dev.
+    """
+    if os.getenv('APP_ENV','prod').lower() not in {'dev','local','test'} and os.getenv('ENV','prod').lower() not in {'dev','local','test'}:
+        raise HTTPException(status_code=404, detail='not_found')
+    # Unset the test-mode flags so _select_default_client() picks the real provider
+    for _var in ('TEST_HELPERS_ENABLED', 'FAST_TEST_MODE', 'PYTEST_CURRENT_TEST'):
+        os.environ.pop(_var, None)
+    # Re-initialize the module-level DEFAULT_CLIENT
+    try:
+        import src.integrations.llm_client as _llm_mod
+        new_client = _llm_mod._select_default_client()
+        _llm_mod.DEFAULT_CLIENT = new_client
+        client_class = type(new_client).__name__
+        ollama_reachable = getattr(new_client, 'ollama_reachable', None)
+        ollama_model = getattr(new_client, 'ollama_model', None)
+        return {
+            'reinit': 'ok',
+            'client_class': client_class,
+            'ollama_reachable': ollama_reachable,
+            'ollama_model': ollama_model,
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
 @router.post('/llm_explain')
 async def dev_llm_explain(payload: dict = None, request: Request = None):
     """Test-only: deterministic LLM explain response for UI/E2E tests.

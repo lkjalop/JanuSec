@@ -33,7 +33,11 @@ logger = logging.getLogger(__name__)
 
 EVIDENCE_CAP = 20       # max evidence rows fed to a single LLM call
 TOP_N_CLUSTERS = int(os.getenv('JANUSEC_NARRATOR_TOP_N', '11'))
-_NARRATOR_LOCK = threading.Lock()
+# Narrator LLM concurrency. Default 1 == serial (a Semaphore(1) is a Lock), which is
+# correct for a single local GPU where parallel inference shares compute and risks OOM.
+# Multi-GPU / remote-API backends can raise JANUSEC_NARRATOR_CONCURRENCY to overlap calls.
+_NARRATOR_CONCURRENCY = max(1, int(os.getenv('JANUSEC_NARRATOR_CONCURRENCY', '1')))
+_NARRATOR_LOCK = threading.Semaphore(_NARRATOR_CONCURRENCY)
 
 # T2 quality narrator — used for top clusters that feed the CEO exec summary
 _T2_MODEL = os.getenv('JANUSEC_T2_NARRATOR_MODEL', '')
@@ -731,6 +735,75 @@ def _fallback_narrative(cluster_id: str, *, raw_text: str = "", reason: str = ""
     }
 
 
+# MITRE technique IDs (T1047, T1558.003) are legitimately injected by the model and must
+# never be flagged as hallucinated entities.
+_MITRE_ID_RE = re.compile(r"^t\d{4}(?:\.\d{3})?$", re.IGNORECASE)
+
+
+def _validate_ioc_grounding(narrative: dict, evidence_rows: list[dict]) -> dict:
+    """Deterministic guardrail: flag IPs/hostnames/FQDNs named in the narrative that do
+    NOT appear anywhere in the cluster's evidence rows.
+
+    The LLM is *instructed* to ground every IOC (see _build_prompt), but 14B models still
+    invent plausible host/domain names (offline benchmarks show several fabricated hostnames
+    and FQDNs per multi-source cluster). This check is a non-LLM backstop: it does not rewrite
+    prose (which risks breaking sentences), it annotates the narrative with a grounding report
+    so the UI/critic can surface "verify before action" and so quality regressions are
+    observable. Detection mirrors scripts/llm_compare.py so the runtime guardrail and the
+    offline scorer agree.
+    """
+    text = (str(narrative.get("attack_narrative") or "") + " "
+            + str(narrative.get("ioc_summary") or ""))
+    if not text.strip():
+        return {"candidates": 0, "grounded": 0, "hallucinated_iocs": [], "grounding_rate": 1.0}
+
+    # Build the grounding haystack from every value across the evidence rows. Semantics:
+    # "is this entity true to the underlying evidence", not "was it in the truncated prompt".
+    haystack_parts: list[str] = []
+    for row in evidence_rows:
+        if not isinstance(row, dict):
+            continue
+        for v in row.values():
+            if isinstance(v, str):
+                haystack_parts.append(v.lower())
+            elif isinstance(v, (int, float, bool)):
+                haystack_parts.append(str(v).lower())
+            elif isinstance(v, (list, dict)):
+                try:
+                    haystack_parts.append(json.dumps(v).lower())
+                except (TypeError, ValueError):
+                    pass
+    haystack = " ".join(haystack_parts)
+
+    candidates: set[str] = set()
+    for ip in re.findall(r"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b", text):
+        candidates.add(ip.lower())
+    # word.word FQDN/username patterns (acme.com, martin.chen, vesper.local)
+    for token in re.findall(r"\b[A-Za-z][A-Za-z0-9]{2,}\.[A-Za-z][A-Za-z0-9]{2,}\b", text):
+        candidates.add(token.lower())
+    # dashed hostnames (SVR-DB-01, ws-martin-01) — case-insensitive to catch both forms
+    for token in re.findall(r"\b[A-Za-z]{2,3}-[A-Za-z0-9]{2,}-\d+\b", text):
+        candidates.add(token.lower())
+
+    hallucinated: list[str] = []
+    for c in candidates:
+        if _MITRE_ID_RE.match(c):
+            continue  # MITRE IDs are model-injected, not evidence entities
+        short = c.split(".")[0]
+        if c in haystack or (len(short) > 3 and short in haystack):
+            continue
+        hallucinated.append(c)
+
+    total = len(candidates)
+    grounded = total - len(hallucinated)
+    return {
+        "candidates": total,
+        "grounded": grounded,
+        "hallucinated_iocs": sorted(hallucinated)[:10],
+        "grounding_rate": round(grounded / total, 2) if total else 1.0,
+    }
+
+
 def _apply_narrative_to_cluster(cluster: dict, narrative: dict, *, upgrade_only: bool) -> None:
     """Attach narrative fields while preserving stronger deterministic verdicts."""
     cluster["llm_narrative"] = narrative
@@ -781,6 +854,107 @@ def _apply_narrative_to_cluster(cluster: dict, narrative: dict, *, upgrade_only:
     cluster["_narrator_source"] = narrative.get("_narrator_source", "fallback")
 
 
+# ── Entity-coverage evidence selection ────────────────────────────────────────
+_ENTITY_ROW_FIELDS = (
+    "user_canonical", "user", "username", "account_name", "userPrincipalName",
+    "src_ip", "dst_ip", "ip", "client_address",
+    "hostname", "host", "src_host", "dst_host", "computer_name",
+)
+_ENTITY_STOPWORDS = frozenset({
+    "-", "n/a", "none", "null", "0.0.0.0", "system", "root", "unknown", "localhost", "",
+})
+
+
+def _row_entities(row: dict) -> set[str]:
+    """Normalized entity tokens (users/IPs/hosts) in a row, for coverage checks.
+
+    Mirrors the normalization used when clusters store shared_users/ips/hosts so the
+    two sides compare cleanly. FQDNs also contribute their short hostname.
+    """
+    out: set[str] = set()
+    for fld in _ENTITY_ROW_FIELDS:
+        v = row.get(fld)
+        if v is None:
+            continue
+        s = str(v).strip().lower()
+        if s in _ENTITY_STOPWORDS or len(s) <= 2:
+            continue
+        out.add(s)
+        if "." in s and not s.replace(".", "").isdigit():  # FQDN, not an IP
+            short = s.split(".")[0]
+            if len(short) > 2:
+                out.add(short)
+    return out
+
+
+def _cluster_key_entities(cluster: dict) -> set[str]:
+    """The shared users/IPs/hosts the narrative should name (normalized)."""
+    out: set[str] = set()
+    for vals in (
+        cluster.get("shared_users") or cluster.get("shared_accounts") or [],
+        cluster.get("shared_ips") or [],
+        cluster.get("shared_hosts") or [],
+    ):
+        for v in vals:
+            s = str(v).strip().lower()
+            if s not in _ENTITY_STOPWORDS and len(s) > 2:
+                out.add(s)
+    return out
+
+
+def _ensure_entity_coverage(
+    selected: list[dict],
+    candidates: list[dict],
+    cluster: dict,
+    cap: int,
+) -> list[dict]:
+    """Raise entity recall: ensure the selected evidence covers every key cluster entity.
+
+    The LLM can only name entities it sees. After the source-balanced top-`cap`
+    selection, any shared_user/ip/host absent from the selected rows is swapped in by
+    reserving up to cap//4 slots for the highest-triage rows that carry uncovered
+    entities. The strongest (cap - reserve) rows are always preserved, so this never
+    sacrifices core evidence. Result is triage-sorted and capped. Idempotent when
+    coverage is already complete.
+    """
+    key_entities = _cluster_key_entities(cluster)
+    if not key_entities or not selected:
+        return selected
+    covered: set[str] = set()
+    for r in selected:
+        covered |= _row_entities(r)
+    uncovered = key_entities - covered
+    if not uncovered:
+        return selected
+
+    selected_ids = {id(r) for r in selected}
+    coverage_rows: list[dict] = []
+    remaining = set(uncovered)
+    for r in sorted(candidates, key=lambda r: float(r.get("triage_score") or 0), reverse=True):
+        if id(r) in selected_ids:
+            continue
+        hit = _row_entities(r) & remaining
+        if hit:
+            coverage_rows.append(r)
+            remaining -= hit
+            if not remaining:
+                break
+    if not coverage_rows:
+        return selected  # uncovered entities have no carrier row available
+
+    reserve = min(len(coverage_rows), max(1, cap // 4))
+    coverage_rows = coverage_rows[:reserve]
+    keep = sorted(selected, key=lambda r: float(r.get("triage_score") or 0), reverse=True)[: cap - reserve]
+
+    out: list[dict] = []
+    seen: set[int] = set()
+    for r in keep + coverage_rows:
+        if id(r) not in seen:
+            out.append(r)
+            seen.add(id(r))
+    return sorted(out, key=lambda r: float(r.get("triage_score") or 0), reverse=True)[:cap]
+
+
 # ── Public API ────────────────────────────────────────────────────────────────
 
 def narrate_cluster(
@@ -819,6 +993,7 @@ def narrate_cluster(
 
     # Sort by triage_score then apply source-balanced cap
     evidence = sorted(evidence, key=lambda r: float(r.get("triage_score") or 0), reverse=True)
+    _full_candidates = evidence  # full cluster row set, before the cap (for entity coverage)
     if len(evidence) > EVIDENCE_CAP:
         # Balance: ensure attack-signal rows and all source types are represented
         attack_rows = [r for r in evidence if _detect_source_category(r) != "generic"
@@ -842,6 +1017,9 @@ def narrate_cluster(
             if len(balanced) >= EVIDENCE_CAP:
                 break
         evidence = balanced[:EVIDENCE_CAP]
+        # Entity-coverage pass: guarantee every shared_user/ip/host is represented so
+        # the narrative can name all actors/assets (raises measured entity recall).
+        evidence = _ensure_entity_coverage(evidence, _full_candidates, cluster, EVIDENCE_CAP)
     else:
         evidence = evidence[:EVIDENCE_CAP]
 
@@ -971,6 +1149,27 @@ def narrate_cluster(
     narrative = _parse_llm_output(raw, cluster_id)
     narrative["_narrator_model"] = selected_model or getattr(_client, "ollama_model", "default")
     narrative["_narrator_elapsed_s"] = round(narrator_elapsed, 2)
+
+    # ── Deterministic IOC grounding guardrail ─────────────────────────────────
+    # Backstop the prompt's "IOC GROUNDING REQUIREMENT" with a non-LLM check that
+    # flags fabricated host/IP/domain names. Non-destructive: annotates only.
+    try:
+        _grounding = _validate_ioc_grounding(narrative, evidence)
+        narrative["_ioc_grounding"] = _grounding
+        cluster["_ioc_grounding"] = _grounding
+        if _grounding["hallucinated_iocs"]:
+            narrative["_ioc_grounding_warning"] = (
+                f"{len(_grounding['hallucinated_iocs'])} entity name(s) in the narrative "
+                f"are not present in the evidence — verify before action: "
+                f"{', '.join(_grounding['hallucinated_iocs'])}"
+            )
+            logger.info(
+                "narrator: %d ungrounded IOC(s) in cluster %s: %s",
+                len(_grounding["hallucinated_iocs"]), cluster_id,
+                _grounding["hallucinated_iocs"],
+            )
+    except Exception as _ge:
+        logger.debug("narrator: IOC grounding check failed for %s: %s", cluster_id, _ge)
 
     # ── Adversarial critic second pass ────────────────────────────────────────
     # Controlled by: JANUSEC_CRITIC_ENABLED, JANUSEC_CRITIC_MIN_CONFIDENCE,
