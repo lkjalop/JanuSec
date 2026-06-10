@@ -185,8 +185,29 @@ def _normalize_cloud(row: dict) -> dict:
     return r
 
 
+def _principal_from_arn(arn: str) -> str:
+    """Extract a human principal from an AWS ARN.
+
+    arn:aws:iam::123:user/sophie.reid                 -> sophie.reid
+    arn:aws:sts::123:assumed-role/AdminRole/session   -> AdminRole (the role)
+    arn:aws:iam::123:role/eks-integration-probe       -> eks-integration-probe
+    """
+    if not arn or ':' not in arn:
+        return ''
+    tail = arn.rsplit(':', 1)[-1]  # e.g. "user/sophie.reid" or "assumed-role/Admin/sess"
+    parts = tail.split('/')
+    if not parts:
+        return ''
+    kind = parts[0]
+    if kind == 'assumed-role' and len(parts) >= 2:
+        return parts[1]            # the role name (the acting identity)
+    if len(parts) >= 2:
+        return parts[1]            # user/<name> or role/<name>
+    return parts[0]
+
+
 def _normalize_iam(row: dict) -> dict:
-    """Okta / Entra sign-in+audit / SailPoint → canonical."""
+    """Okta / Entra sign-in+audit / SailPoint / AWS CloudTrail IAM → canonical."""
     r = dict(row)
 
     # Build user from all possible IAM sources, taking first non-empty
@@ -211,6 +232,18 @@ def _normalize_iam(row: dict) -> dict:
     # Janusec Okta/M365 export: snake_case user_principal_name
     if not user:
         user = _safe(row.get('user_principal_name') or '')
+    # AWS CloudTrail IAM: userIdentity.userName, else parse the ARN. Without this,
+    # CloudTrail rows arrive entity-less and (a) fail per-user clustering — fusing
+    # every actor's API calls into one mega-component via the generic iam_op pivot —
+    # and (b) produce empty shared_* so narration cannot name the principal.
+    if not user:
+        uid = row.get('userIdentity') or {}
+        if isinstance(uid, dict):
+            user = _safe(uid.get('userName')) or _principal_from_arn(_safe(uid.get('arn')))
+            if not user:
+                user = _safe(uid.get('principalId'))
+            r.setdefault('user_type', _safe(uid.get('type')))
+            r.setdefault('account_id', _safe(uid.get('accountId')))
     r['user'] = user
 
     # IP address
@@ -219,14 +252,18 @@ def _normalize_iam(row: dict) -> dict:
     if isinstance(client, dict):
         src_ip = _safe(client.get('ipAddress') or client.get('ip'))
     if not src_ip:
-        # Entra sign-in and SailPoint both put IP at top level
-        src_ip = _safe(row.get('ipAddress') or row.get('clientIpAddress') or row.get('callerIpAddress') or '')
+        # Entra sign-in / SailPoint top-level, plus AWS CloudTrail sourceIPAddress.
+        src_ip = _safe(
+            row.get('ipAddress') or row.get('clientIpAddress')
+            or row.get('callerIpAddress') or row.get('sourceIPAddress') or ''
+        )
     r['src_ip'] = src_ip
 
-    # Event name
+    # Event name — include AWS CloudTrail eventName so the iam_op pivot is specific
+    # (e.g. iam_op:GetObject) instead of a generic catch-all that bridges everything.
     r.setdefault('event_name', _safe(
         row.get('eventType') or row.get('activityDisplayName') or row.get('displayName') or
-        row.get('action') or row.get('Operation') or ''
+        row.get('action') or row.get('Operation') or row.get('eventName') or ''
     ))
     r['_source_type'] = SOURCE_IAM
     return r
@@ -279,8 +316,12 @@ def _normalize_endpoint(row: dict) -> dict:
         row.get('UserName') or row.get('user_name') or row.get('username')
         or row.get('user') or row.get('SubjectUserName') or ''
     ))
-    # src_ip: CrowdStrike uses remote_address for outbound connections
-    r.setdefault('src_ip', _safe(row.get('remote_address') or row.get('src_ip') or ''))
+    # CrowdStrike NetworkConnectIP4: remote_address = destination (server), local_address = source (agent).
+    # Mapping remote_address → src_ip was inverted — fixed: remote→dst, local→src.
+    r.setdefault('dst_ip', _safe(row.get('remote_address') or row.get('dst_ip') or row.get('destination_ip') or ''))
+    r.setdefault('src_ip', _safe(row.get('local_address') or row.get('src_ip') or row.get('source_ip') or ''))
+    r.setdefault('dst_port', row.get('remote_port') or row.get('dst_port'))
+    r.setdefault('src_port', row.get('local_port') or row.get('src_port'))
     r.setdefault('process', _safe(row.get('Image') or row.get('process_name') or row.get('image_file_name') or row.get('TargetProcessName') or ''))
     r.setdefault('parent_process', _safe(row.get('ParentImage') or row.get('parent_name') or ''))
     # event_name: add event_simpleName fallback (CrowdStrike-specific field)
