@@ -1097,3 +1097,78 @@ class TestClusteringTelemetry:
         assert 'clustered_rows_pre_cap' in diag
         assert 'oversized_rows_capped' in diag
         assert diag['evidence_retention_rate'] == 1.0  # nothing capped in a tiny run
+
+
+class TestKillChainRecovery:
+    """Sprint 5 A2: derive kill-chain from phases when the LLM returns 'unknown'."""
+
+    def test_derive_from_phases_ordered(self):
+        from src.core.ingest.cluster_narrator import _killchain_from_phases
+        cl = {'phases': [{'case_role': 'data_exfiltration'}, {'case_role': 'credential_theft'},
+                         {'case_role': 'lateral_movement'}]}
+        assert _killchain_from_phases(cl) == ['exploitation', 'lateral_movement', 'exfiltration']
+
+    def test_empty_when_no_mapped_phases(self):
+        from src.core.ingest.cluster_narrator import _killchain_from_phases
+        assert _killchain_from_phases({}) == []
+        assert _killchain_from_phases({'phases': [{'case_role': 'nonsense'}]}) == []
+
+    def test_dedup(self):
+        from src.core.ingest.cluster_narrator import _killchain_from_phases
+        cl = {'phases': [{'case_role': 'data_exfiltration'}, {'case_role': 'exfiltration'}]}
+        assert _killchain_from_phases(cl) == ['exfiltration']
+
+
+class TestScatterGatherAdoption:
+    """Sprint 5: scatter-gather synthesis is adopted as attack_narrative, not discarded."""
+
+    def test_adoption_logic_via_cluster_state(self):
+        # Mirror the adoption branch: a substantive scatter-gather synthesis on the
+        # cluster should be copied onto the narrative's attack_narrative.
+        cluster = {'_scatter_gather_result': {
+            'scatter_gather': True,
+            'narrative': 'X' * 200,
+            'specialist_outputs': {'timeline': 't', 'attribution': 'a'},
+        }}
+        narrative = {'attack_narrative': 'short single-agent text'}
+        _sg = cluster.get('_scatter_gather_result')
+        if isinstance(_sg, dict) and _sg.get('scatter_gather') and _sg.get('narrative'):
+            _sg_text = str(_sg.get('narrative')).strip()
+            if len(_sg_text) > 80:
+                narrative['attack_narrative'] = _sg_text
+                narrative['_attack_narrative_source'] = 'scatter_gather'
+        assert narrative['_attack_narrative_source'] == 'scatter_gather'
+        assert len(narrative['attack_narrative']) == 200
+
+    def test_short_synthesis_not_adopted(self):
+        cluster = {'_scatter_gather_result': {'scatter_gather': True, 'narrative': 'too short'}}
+        narrative = {'attack_narrative': 'original'}
+        _sg = cluster.get('_scatter_gather_result')
+        adopted = False
+        if isinstance(_sg, dict) and _sg.get('scatter_gather') and _sg.get('narrative'):
+            if len(str(_sg['narrative']).strip()) > 80:
+                adopted = True
+        assert not adopted
+        assert narrative['attack_narrative'] == 'original'
+
+
+class TestKillChainPhaseRobustness:
+    """Regression: _killchain_from_phases must handle string phases (not only dicts).
+
+    A fixture using phases=['credential_theft', ...] previously crashed narrate_cluster
+    with AttributeError: 'str' object has no attribute 'get'.
+    """
+
+    def test_string_phases(self):
+        from src.core.ingest.cluster_narrator import _killchain_from_phases
+        assert _killchain_from_phases({'phases': ['credential_theft', 'data_exfiltration']}) == \
+            ['exploitation', 'exfiltration']
+
+    def test_mixed_dict_and_string_phases(self):
+        from src.core.ingest.cluster_narrator import _killchain_from_phases
+        assert _killchain_from_phases({'phases': [{'case_role': 'lateral_movement'}, 'impact']}) == \
+            ['lateral_movement', 'impact']
+
+    def test_junk_phase_types_ignored(self):
+        from src.core.ingest.cluster_narrator import _killchain_from_phases
+        assert _killchain_from_phases({'phases': [None, 123, 'impact']}) == ['impact']

@@ -854,6 +854,50 @@ def _apply_narrative_to_cluster(cluster: dict, narrative: dict, *, upgrade_only:
     cluster["_narrator_source"] = narrative.get("_narrator_source", "fallback")
 
 
+# Map deterministic phase case_roles (cluster_merge) → narrator kill-chain vocabulary,
+# with a coarse ordinal so derived stages come out in kill-chain order. Used to recover
+# a real stage when the LLM returns "unknown" — the pipeline already detected the phase.
+_CASE_ROLE_TO_KILLCHAIN: dict[str, tuple[int, str]] = {
+    "initial_access":        (1, "delivery"),
+    "execution":             (2, "exploitation"),
+    "persistence":           (3, "installation"),
+    "privilege_escalation":  (4, "exploitation"),
+    "escalation_bridge":     (4, "exploitation"),
+    "credential_access":     (5, "exploitation"),
+    "credential_theft":      (5, "exploitation"),
+    "c2_communication":      (6, "c2"),
+    "lateral_movement":      (7, "lateral_movement"),
+    "collection":            (8, "collection"),
+    "data_exfiltration":     (9, "exfiltration"),
+    "exfiltration":          (9, "exfiltration"),
+    "impact":                (10, "impact"),
+}
+
+
+def _killchain_from_phases(cluster: dict) -> list[str]:
+    """Derive ordered narrator-vocab kill-chain stages from a cluster's phases.
+
+    Returns [] when the cluster has no mapped phases. Deduplicated, kill-chain-ordered.
+    """
+    ranked: list[tuple[int, str]] = []
+    seen: set[str] = set()
+    for ph in cluster.get("phases") or []:
+        # Phases may be dicts ({"case_role": ...}, from cluster_merge) or bare strings
+        # (a case_role / phase label, used by some callers and fixtures). Handle both.
+        if isinstance(ph, dict):
+            role = str(ph.get("case_role") or "")
+        elif isinstance(ph, str):
+            role = ph
+        else:
+            continue
+        mapped = _CASE_ROLE_TO_KILLCHAIN.get(role)
+        if mapped and mapped[1] not in seen:
+            ranked.append(mapped)
+            seen.add(mapped[1])
+    ranked.sort(key=lambda t: t[0])
+    return [stage for _, stage in ranked]
+
+
 # ── Entity-coverage evidence selection ────────────────────────────────────────
 _ENTITY_ROW_FIELDS = (
     "user_canonical", "user", "username", "account_name", "userPrincipalName",
@@ -1076,12 +1120,18 @@ def narrate_cluster(
             )
             import asyncio as _asyncio
 
+            # InvestigationContext requires assessment_id and accepts tenant_id only —
+            # passing cluster_id/source_files raised TypeError on every call, which the
+            # outer except silently swallowed (scatter-gather never actually ran).
             _ctx = InvestigationContext(
+                assessment_id=assessment_id or "ingest",
                 tenant_id=assessment_id or "ingest",
-                cluster_id=cluster_id,
-                source_files=list({str(r.get("_source") or "") for r in evidence}),
+                initial_hypothesis=f"cluster {cluster_id}",
             )
-            # Build minimal VerifiedFinding stubs from evidence rows
+            # Build minimal VerifiedFinding stubs from evidence rows. Must carry every
+            # attribute the scatter-gather aggregation reads (raw.summary,
+            # raw.mitre_techniques, confidence, compliance_controls) — a missing
+            # attribute previously failed the whole call after the agents had run.
             _verified = []
             for _r in evidence:
                 _vf = type('_VF', (), {
@@ -1092,6 +1142,7 @@ def narrate_cluster(
                     })(),
                     'confidence': float(_r.get('triage_score') or 0),
                     'dread_score': 5.0,
+                    'compliance_controls': [],
                 })()
                 _verified.append(_vf)
 
@@ -1101,7 +1152,9 @@ def narrate_cluster(
                     _sg_narrate(_ctx, _verified, llm_client=_client)
                 )
                 _loop.close()
-            except Exception:
+            except Exception as _sg_run_exc:
+                logger.warning("narrator: scatter-gather run failed for %s: %s",
+                               cluster_id, _sg_run_exc)
                 _sg_result = None
 
             if _sg_result and _sg_result.get("narrative"):
@@ -1109,10 +1162,26 @@ def narrate_cluster(
                 cluster["_narrator_tier"] = "T2_scatter"
                 logger.info("narrator: scatter-gather used for cluster %s", cluster_id)
         except Exception as _sg_exc:
-            logger.debug("narrator: scatter-gather unavailable for %s: %s", cluster_id, _sg_exc)
+            # Visible (not debug) — a swallowed TypeError here hid a total scatter-gather
+            # outage for the entire feature's lifetime.
+            logger.warning("narrator: scatter-gather unavailable for %s: %s", cluster_id, _sg_exc)
 
     call_timeout = float(os.getenv("JANUSEC_INGEST_LLM_TIMEOUT_S", "45"))
     t_start = time.monotonic()
+
+    # ── Optional sovereignty redaction ────────────────────────────────────────
+    # When routing to a remote/API model, tokenize sensitive IOCs out of the prompt
+    # and restore them in the response so raw telemetry never leaves the host.
+    # Default OFF (no-op on the local path where data stays on-prem anyway).
+    _redactor = None
+    if os.getenv("JANUSEC_REDACT_BEFORE_LLM", "0").lower() in {"1", "true", "yes"}:
+        try:
+            from src.security.ioc_redaction import IocRedactor
+            _redactor = IocRedactor()
+            prompt = _redactor.redact(prompt)
+        except Exception as _re:
+            logger.warning("narrator: IOC redaction unavailable for %s: %s", cluster_id, _re)
+            _redactor = None
 
     with _NARRATOR_LOCK:
         try:
@@ -1141,6 +1210,9 @@ def narrate_cluster(
         _apply_narrative_to_cluster(cluster, narrative, upgrade_only=True)
         return narrative
     raw = result.get("text") or ""
+    # Restore real IOCs into the model's tokenized response before parsing.
+    if _redactor is not None and raw:
+        raw = _redactor.restore(raw)
     if not raw.strip():
         narrative = _fallback_narrative(cluster_id, reason="empty_response")
         _apply_narrative_to_cluster(cluster, narrative, upgrade_only=True)
@@ -1149,6 +1221,32 @@ def narrate_cluster(
     narrative = _parse_llm_output(raw, cluster_id)
     narrative["_narrator_model"] = selected_model or getattr(_client, "ollama_model", "default")
     narrative["_narrator_elapsed_s"] = round(narrator_elapsed, 2)
+
+    # ── Scatter-gather adoption ───────────────────────────────────────────────
+    # If the T2 scatter-gather path ran (4 lens-agents → synthesis), adopt its richer
+    # multi-perspective synthesis as the attack_narrative instead of discarding it
+    # (the prior behavior computed it then dropped it). Structured fields stay from the
+    # single-agent JSON; only the prose narrative is upgraded. IOC grounding below then
+    # validates the adopted prose, so a verbose synthesis cannot smuggle in fabrications.
+    _sg = cluster.get("_scatter_gather_result")
+    if isinstance(_sg, dict) and _sg.get("scatter_gather") and _sg.get("narrative"):
+        _sg_text = str(_sg.get("narrative")).strip()
+        if len(_sg_text) > 80:  # only adopt a substantive synthesis
+            narrative["attack_narrative"] = _sg_text
+            narrative["_attack_narrative_source"] = "scatter_gather"
+            narrative["_specialist_outputs"] = _sg.get("specialist_outputs")
+
+    # ── Kill-chain recovery ───────────────────────────────────────────────────
+    # When the LLM returns no usable stage ("unknown"), fall back to the stages the
+    # deterministic pipeline already detected from this cluster's phases. A breach
+    # cluster should never surface "unknown" if it carries phase tags.
+    _kc = narrative.get("kill_chain_stages") or []
+    if not _kc or _kc == ["unknown"]:
+        _derived = _killchain_from_phases(cluster)
+        if _derived:
+            narrative["kill_chain_stages"] = _derived
+            narrative["kill_chain_stage"] = _derived[0]
+            narrative["_kill_chain_source"] = "deterministic_phases"
 
     # ── Deterministic IOC grounding guardrail ─────────────────────────────────
     # Backstop the prompt's "IOC GROUNDING REQUIREMENT" with a non-LLM check that
