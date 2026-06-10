@@ -48,7 +48,12 @@ def _extract_json_from_text(text: str) -> Dict[str, Any] | None:
 
 
 def _repair_json_like(text: str) -> str | None:
-    """Attempt basic repairs on common LLM JSON mistakes and return a repaired string or None."""
+    """Attempt basic repairs on common LLM JSON mistakes and return a repaired string or None.
+
+    Handles unquoted keys, unquoted scalar values, unquoted array string elements,
+    trailing commas, and single quotes — the typical failure modes of small models
+    emitting JSON5-ish output. Applied in order so each step sees the prior repair.
+    """
     try:
         s = text.strip()
         # extract likely JSON substring
@@ -56,13 +61,39 @@ def _repair_json_like(text: str) -> str | None:
         end = s.rfind('}')
         if start == -1 or end == -1 or end <= start:
             return None
-        s = s[start:end+1]
-        # remove trailing commas before closing braces/brackets
-        s = s.replace(',}', '}').replace(',]', ']')
+        s = s[start:end + 1]
+        # remove trailing commas before closing braces/brackets (allow whitespace)
+        s = re.sub(r',\s*([}\]])', r'\1', s)
         # replace single quotes with double where safe (heuristic)
         s = re.sub(r"(?<=[:\[,\s])'([^']*)'(?=[,}\]])", r'"\1"', s)
         # ensure keys are double-quoted
-        s = re.sub(r'([\{,\s])(\w+)\s*:', r'\1"\2":', s)
+        s = re.sub(r'([\{,]\s*)([A-Za-z_]\w*)\s*:', r'\1"\2":', s)
+
+        # quote unquoted scalar object values: "key": Block suspicious IP -> "key": "Block ..."
+        # (skips values that start with a quote/brace/bracket/digit/sign, and true/false/null)
+        def _q_val(m: "re.Match[str]") -> str:
+            val = m.group(2).strip()
+            if val in ("true", "false", "null"):
+                return m.group(0)
+            return f'{m.group(1)}"{val}"{m.group(3)}'
+
+        s = re.sub(r'(:\s*)([A-Za-z][^,}\]\[\{"]*?)(\s*[,}\]])', _q_val, s)
+
+        # quote unquoted string elements inside scalar arrays: [evt_abc] -> ["evt_abc"]
+        # (only arrays with no nested braces/brackets, so object arrays are left intact)
+        def _q_arr(m: "re.Match[str]") -> str:
+            parts = [p.strip() for p in m.group(1).split(',')]
+            fixed = []
+            for p in parts:
+                if not p:
+                    continue
+                if p[0] in '"\'{[' or p in ("true", "false", "null") or re.match(r'^-?\d', p):
+                    fixed.append(p)
+                else:
+                    fixed.append(f'"{p}"')
+            return '[' + ', '.join(fixed) + ']'
+
+        s = re.sub(r'\[([^\[\]{}]*)\]', _q_arr, s)
         return s
     except Exception:
         return None
