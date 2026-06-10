@@ -1064,8 +1064,27 @@ def _select_default_client() -> BaseLLMClient:
         prov = os.getenv('LLM_PROVIDER', 'ollama').lower()
     except Exception:
         prov = 'local'
-    # If test helpers are enabled or running under pytest, prefer deterministic local client
-    test_mode = os.getenv('TEST_HELPERS_ENABLED','0').lower() in {'1','true','yes'} or bool(os.getenv('PYTEST_CURRENT_TEST')) or os.getenv('FAST_TEST_MODE','0').lower() in {'1','true','yes'}
+    # If test helpers are enabled or running under pytest, prefer deterministic local client.
+    # Exception: when an operator EXPLICITLY sets a real LLM provider (ollama/openai/anthropic)
+    # via the LLM_PROVIDER env var AND we are not actually executing under pytest, respect that
+    # intent. This prevents a TEST_HELPERS_ENABLED flag leaked into a dev/server shell from
+    # silently forcing LocalDeterministicClient (empty narration), while keeping pytest runs
+    # fully deterministic regardless of LLM_PROVIDER.
+    under_pytest = bool(os.getenv('PYTEST_CURRENT_TEST'))
+    test_flags = (
+        os.getenv('TEST_HELPERS_ENABLED', '0').lower() in {'1', 'true', 'yes'}
+        or os.getenv('FAST_TEST_MODE', '0').lower() in {'1', 'true', 'yes'}
+    )
+    test_mode = under_pytest or test_flags
+    # Only honor an EXPLICITLY-set provider (raw env present), never the defaulted 'ollama'.
+    _raw_provider = (os.getenv('LLM_PROVIDER') or '').strip().lower()
+    explicit_real_provider = _raw_provider in {'ollama', 'openai', 'anthropic'}
+    if test_mode and not under_pytest and explicit_real_provider:
+        logger.info(
+            'LLM: test_mode suppressed — explicit LLM_PROVIDER=%s overrides LocalDeterministicClient (not under pytest)',
+            _raw_provider,
+        )
+        test_mode = False
     if test_mode:
         logger.info('LLM: test mode active; using LocalDeterministicClient')
         return LocalDeterministicClient()

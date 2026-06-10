@@ -197,6 +197,24 @@ def _build_pre_validation(
     raw["evidence_entity_count"] = len(ev_entities)
     lines.append(f"  EVIDENCE_ENTITIES: {len(ev_entities)} distinct user/IP/host values in evidence rows")
 
+    # Authoritative IOC grounding: prefer the narrator's deterministic _ioc_grounding
+    # (cluster_narrator._validate_ioc_grounding) over re-deriving here with a narrower
+    # field list. Single source of truth — the critic LLM is handed the confirmed
+    # ungrounded entities instead of guessing.
+    grounding = narrative.get("_ioc_grounding") if isinstance(narrative, dict) else None
+    if isinstance(grounding, dict):
+        det_hallucinated = list(grounding.get("hallucinated_iocs") or [])
+        raw["hallucinated_iocs_deterministic"] = det_hallucinated
+        raw["ioc_grounding_rate"] = grounding.get("grounding_rate")
+        if det_hallucinated:
+            lines.append(
+                f"  DETERMINISTIC_HALLUCINATION: {len(det_hallucinated)} entit(ies) named in the "
+                f"narrative are ABSENT from evidence — treat as confirmed hallucinations: "
+                f"{', '.join(str(h) for h in det_hallucinated[:10])}"
+            )
+        else:
+            lines.append("  IOC_GROUNDING_OK: deterministic check found no ungrounded entities")
+
     return "\n".join(lines), raw
 
 
@@ -279,6 +297,19 @@ class AdversarialCritic:
         }
         parsed["citation_count"] = citation_count
         parsed["low_citation"] = pre_val_raw.get("low_citation", False)
+        # Authoritative hallucination set = deterministic grounding ∪ LLM-reported.
+        # The deterministic list (from the narrator's _ioc_grounding) is never dropped
+        # even if the critic LLM overlooks an entity — single source of truth.
+        _det_hall = pre_val_raw.get("hallucinated_iocs_deterministic") or []
+        _llm_hall = parsed.get("hallucinated_iocs") or []
+        _union: list[str] = []
+        for h in [*_det_hall, *_llm_hall]:
+            hs = str(h)
+            if hs and hs not in _union:
+                _union.append(hs)
+        parsed["hallucinated_iocs"] = _union[:10]
+        parsed["hallucinated_iocs_deterministic"] = list(_det_hall)
+        parsed["ioc_grounding_rate"] = pre_val_raw.get("ioc_grounding_rate")
         parsed["model"] = str(
             (result or {}).get("model") if isinstance(result, dict) else ""
         ) or os.getenv("OLLAMA_MODEL", "unknown")

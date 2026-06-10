@@ -2288,7 +2288,13 @@ async def run_assessment_pipeline(
         # NOTE: Runs AFTER 5g/5h/5i/5j so IdentityGraph and ChronoGraph are populated.
         if clusters:
             _progress("reasoning", 76, "Generating grounded LLM narratives for top clusters")
-            _narrate_timeout = float(os.getenv("JANUSEC_INGEST_NARRATE_TIMEOUT_S", "50"))
+            # narrate_top_clusters self-budgets via the SAME env var (default 600s) and
+            # degrades gracefully per-cluster. This outer asyncio.wait_for is only a safety
+            # net against a total hang, so it MUST exceed the inner budget — otherwise it
+            # cancels narration mid-stage (a single 14b cluster takes ~30s + ~40s critic,
+            # so the old hard-coded 50s axed multi-cluster runs after 1-2 clusters).
+            _narrate_inner_budget = float(os.getenv("JANUSEC_INGEST_NARRATE_TIMEOUT_S", "600"))
+            _narrate_timeout = _narrate_inner_budget + 60.0
             try:
                 from src.core.ingest.cluster_narrator import narrate_top_clusters
                 await asyncio.wait_for(

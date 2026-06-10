@@ -90,7 +90,7 @@ logger = logging.getLogger(__name__)
 
 
 # Bump when merge logic changes so assessment_worker can detect stale cluster outputs.
-_CLUSTER_MERGE_VERSION = "1.9"  # +dedup+jaccard+campaign_rollup+singleton_filter+oversized_cap
+_CLUSTER_MERGE_VERSION = "1.10"  # +dedup+jaccard+campaign_rollup+singleton_filter+triage_ranked_oversized_cap
 
 # ── Time windows (seconds) per pivot type ────────────────────────────────────
 USER_WINDOW             = 6 * 3600          # 6h burst — deliberately tight to avoid BAU/campaign leakage
@@ -1133,12 +1133,23 @@ def _filter_low_signal_singletons(clusters: list[dict]) -> list[dict]:
     return out
 
 
-def _cap_oversized_clusters(clusters: list[dict]) -> list[dict]:
+def _cap_oversized_clusters(
+    clusters: list[dict],
+    row_by_idx: dict[int, dict] | None = None,
+) -> list[dict]:
     """Cap excessively large clusters to prevent narration/LLM overload.
 
     Clusters with more than JANUSEC_OVERSIZED_CLUSTER_CAP rows (default 500) have
     their row_refs capped and are tagged with _oversized=True so downstream code
     can display a warning. The original total is preserved as _total_row_count.
+
+    Triage-aware retention: when ``row_by_idx`` is supplied, the surviving rows are
+    the HIGHEST-triage_score rows — not the lowest-indexed. This is critical for
+    long APT campaigns where the actual breach actions arrive late in the log (high
+    row_index): a naive refs[:CAP] keeps early benign recon and discards the attack
+    evidence (measured ~67% breach-evidence loss on a realistic 600-row cluster).
+    The kept set is re-sorted by index afterwards so display/provenance order is
+    stable and downstream row_index→row_refs matching is unaffected.
     """
     out: list[dict] = []
     for cl in clusters:
@@ -1147,14 +1158,187 @@ def _cap_oversized_clusters(clusters: list[dict]) -> list[dict]:
             cl = dict(cl)  # shallow copy — don't mutate the original
             cl["_total_row_count"] = len(refs)
             cl["_oversized"] = True
-            cl["row_refs"] = refs[:_OVERSIZED_CAP]
+            if row_by_idx:
+                # Keep the highest-triage rows; ties fall back to row_index order.
+                refs_by_triage = sorted(
+                    refs,
+                    key=lambda i: (
+                        float((row_by_idx.get(i) or {}).get("triage_score") or 0.0),
+                        -int(i) if isinstance(i, (int, float)) else 0,
+                    ),
+                    reverse=True,
+                )
+                kept = refs_by_triage[:_OVERSIZED_CAP]
+                cl["row_refs"] = sorted(kept)  # restore index order for stable display
+                cl["_oversized_retention"] = "triage_ranked"
+            else:
+                # Legacy fallback when triage data is unavailable.
+                cl["row_refs"] = refs[:_OVERSIZED_CAP]
+                cl["_oversized_retention"] = "index_truncated"
             cl["row_count"] = _OVERSIZED_CAP
             logger.warning(
-                "cluster_merge: cluster %s oversized (%d rows) — capping to %d for narration",
-                cl.get("cluster_id"), len(refs), _OVERSIZED_CAP,
+                "cluster_merge: cluster %s oversized (%d rows) — capping to %d for narration (%s)",
+                cl.get("cluster_id"), len(refs), _OVERSIZED_CAP, cl["_oversized_retention"],
             )
         out.append(cl)
     return out
+
+
+# Kill-chain stage ordering derived from PhaseDetector.case_role values. Powers the
+# behavioral linkage pass that relates clusters which share no pivot key but form a
+# campaign progression (attacker rotated IPs/accounts).
+_KILL_CHAIN_RANK: dict[str, int] = {
+    "initial_access": 0,
+    "execution": 1,
+    "persistence": 2,
+    "privilege_escalation": 3,
+    "escalation_bridge": 3,
+    "credential_access": 4,
+    "credential_theft": 4,
+    "collection": 5,
+    "lateral_movement": 6,
+    "c2_communication": 7,
+    "data_exfiltration": 8,
+    "exfiltration": 8,
+    "impact": 9,
+}
+
+
+# phase_id → case_role, for adaptive-window high-value anchoring (built from registry).
+_PHASE_ID_TO_ROLE: dict[str, str] = {d.phase_id: d.case_role for d in PHASE_DETECTORS}
+# Roles whose presence justifies a wider merge window (confirmed-attack anchors that
+# legitimately span a longer dwell than the default per-pivot window).
+_HIGH_VALUE_PHASE_ROLES = frozenset({
+    "credential_access", "credential_theft", "privilege_escalation",
+    "exfiltration", "data_exfiltration", "impact",
+})
+# Window multiplier for pivots that touch a high-value attack row. Default 1.0 == OFF
+# (identical to legacy behavior). Raising it lets long-dwell campaigns bridge wider
+# WITHOUT loosening windows for ordinary/benign pivots.
+_ADAPTIVE_WINDOW_MULT = float(os.getenv("JANUSEC_ADAPTIVE_WINDOW_MULT", "1.0"))
+
+
+def _cluster_kc_ranks(cluster: dict) -> list[int]:
+    """Kill-chain ordinal positions present in a cluster's phases (empty if none)."""
+    ranks: list[int] = []
+    for ph in cluster.get("phases") or []:
+        role = str(ph.get("case_role") or "")
+        if role in _KILL_CHAIN_RANK:
+            ranks.append(_KILL_CHAIN_RANK[role])
+    return ranks
+
+
+def _cluster_time_bounds(cluster: dict, ts_by_idx: dict[int, float]) -> tuple[float, float]:
+    ts = [
+        ts_by_idx.get(int(i), 0.0)
+        for i in (cluster.get("row_refs") or [])
+        if ts_by_idx.get(int(i), 0.0) > 0
+    ]
+    return (min(ts), max(ts)) if ts else (0.0, 0.0)
+
+
+def _cluster_cidr16s(cluster: dict) -> set[str]:
+    out: set[str] = set()
+    for ip in (cluster.get("shared_ips") or []):
+        s = str(ip)
+        if _is_public_ip(s):
+            p = _cidr_prefix(s, 16)
+            if p:
+                out.add(p)
+    return out
+
+
+def _behavioral_link(
+    clusters: list[dict],
+    ts_by_idx: dict[int, float],
+    diagnostics_out: dict | None = None,
+) -> list[dict]:
+    """Non-destructive campaign linkage across clusters that share no pivot key.
+
+    Adds a ``_campaign_links`` annotation to clusters that form a kill-chain
+    progression within a dwell window with a weak affinity signal. This catches
+    sophisticated attacks that rotate IPs/accounts (so the pivot-based merge keeps
+    them separate) WITHOUT merging — row_refs, phases, verdicts, and evidence are
+    untouched, so nothing can be lost. The UI/exec-summary can present the linked
+    clusters as one campaign while each retains its clean per-cluster narrative.
+
+    Gated by JANUSEC_BEHAVIORAL_LINK (default 1 — safe because it only annotates).
+    Conditions for an A→B "precedes" link (ALL required):
+      * both clusters carry kill-chain phases;
+      * B opens at a later-or-equal kill-chain stage AND extends the chain
+        (genuine progression, not two clusters at the same stage);
+      * A's activity precedes B's within JANUSEC_BEHAVIORAL_DWELL_S (default 72h);
+      * weak affinity: shared /16, shared tenant, or a tight (<6h) handoff — guards
+        against linking unrelated intrusions that merely both contain attack phases.
+    """
+    if os.getenv("JANUSEC_BEHAVIORAL_LINK", "1").lower() not in {"1", "true", "yes"}:
+        return clusters
+    dwell_s = float(os.getenv("JANUSEC_BEHAVIORAL_DWELL_S", str(72 * 3600)))
+    tight_s = float(os.getenv("JANUSEC_BEHAVIORAL_TIGHT_S", str(6 * 3600)))
+    max_links = int(os.getenv("JANUSEC_BEHAVIORAL_MAX_LINKS", "12"))
+
+    indexed = [(i, c) for i, c in enumerate(clusters) if _cluster_kc_ranks(c)]
+    if len(indexed) < 2:
+        return clusters
+
+    link_count = 0
+    for a in range(len(indexed)):
+        for b in range(a + 1, len(indexed)):
+            if link_count >= max_links:
+                break
+            ia, ca = indexed[a]
+            ib, cb = indexed[b]
+            ka, kb = _cluster_kc_ranks(ca), _cluster_kc_ranks(cb)
+            ta0, ta1 = _cluster_time_bounds(ca, ts_by_idx)
+            tb0, tb1 = _cluster_time_bounds(cb, ts_by_idx)
+            if not (ta1 and tb1):
+                continue
+            # Orient so `early` precedes `late` in time.
+            if tb0 < ta0:
+                ia, ib, ca, cb, ka, kb = ib, ia, cb, ca, kb, ka
+                ta0, ta1, tb0, tb1 = tb0, tb1, ta0, ta1
+            lo_e, hi_e = min(ka), max(ka)
+            lo_l, hi_l = min(kb), max(kb)
+            gap = max(0.0, tb0 - ta1)
+            if gap > dwell_s:
+                continue
+            # Genuine kill-chain progression: the later cluster opens no earlier than
+            # the earlier one and extends the chain further.
+            progresses = lo_l >= lo_e and hi_l >= hi_e and (hi_l > hi_e or lo_l > lo_e)
+            if not progresses:
+                continue
+            shared_cidr = bool(_cluster_cidr16s(ca) & _cluster_cidr16s(cb))
+            shared_tenant = bool(ca.get("tenant_id") and ca.get("tenant_id") == cb.get("tenant_id"))
+            tight = gap <= tight_s
+            if not (shared_cidr or shared_tenant or tight):
+                continue
+            affinity = (
+                "shared_cidr16" if shared_cidr
+                else "shared_tenant" if shared_tenant
+                else "tight_handoff"
+            )
+            ca.setdefault("_campaign_links", []).append({
+                "cluster_id": cb.get("cluster_id"),
+                "relationship": "precedes",
+                "kc_from": hi_e, "kc_to": hi_l,
+                "gap_s": round(gap, 1), "affinity": affinity,
+            })
+            cb.setdefault("_campaign_links", []).append({
+                "cluster_id": ca.get("cluster_id"),
+                "relationship": "follows",
+                "kc_from": hi_e, "kc_to": hi_l,
+                "gap_s": round(gap, 1), "affinity": affinity,
+            })
+            link_count += 1
+        if link_count >= max_links:
+            break
+
+    if diagnostics_out is not None:
+        diagnostics_out["behavioral_links"] = link_count
+        diagnostics_out["behaviorally_linked_clusters"] = sum(
+            1 for c in clusters if c.get("_campaign_links")
+        )
+    return clusters
 
 
 def _deduplicate_by_rowset(clusters: list[dict]) -> list[dict]:
@@ -1420,6 +1604,19 @@ def transitive_merge_clusters(
     for idx in row_by_idx:
         uf.find(idx)
 
+    # Adaptive windows: precompute high-value attack rows ONCE so the per-pivot
+    # window can widen for confirmed-attack chains (long-dwell campaigns). Skipped
+    # entirely when the multiplier is at its default 1.0 (no behavior change).
+    high_value_idxs: set[int] = set()
+    if _ADAPTIVE_WINDOW_MULT > 1.0:
+        for _idx, _r in row_by_idx.items():
+            try:
+                _tags = detect_row_phase_tags(_r)
+            except Exception:
+                _tags = set()
+            if any(_PHASE_ID_TO_ROLE.get(t) in _HIGH_VALUE_PHASE_ROLES for t in _tags):
+                high_value_idxs.add(_idx)
+
     # ── Pass 1: window-bounded chain unioning per pivot key ──────────────────
     # For each pivot key, sort members by timestamp and walk a sliding-window
     # chain. Two members union iff they are within the pivot's window of *each
@@ -1429,6 +1626,9 @@ def transitive_merge_clusters(
         members = [i for i in member_idxs if i in row_by_idx]
         if len(members) < 2:
             continue
+        # Widen the window only when this pivot anchors a high-value attack row.
+        if high_value_idxs and any(i in high_value_idxs for i in members):
+            window *= _ADAPTIVE_WINDOW_MULT
         members.sort(key=lambda i: ts_by_idx.get(i, 0.0))
         # Sliding-window: union each member with the previous one if within
         # window; otherwise, this member starts a new sub-chain. The chain
@@ -1537,14 +1737,43 @@ def transitive_merge_clusters(
     # Layer 4: drop no-signal singleton clusters (single generic event, no indicators)
     _pre_singleton_count = len(out)
     out = _filter_low_signal_singletons(out)
-    # Layer 5: cap oversized clusters so narration stays within LLM context limits
-    out = _cap_oversized_clusters(out)
+    # Layer 5: cap oversized clusters so narration stays within LLM context limits.
+    # Pass row_by_idx so retention is triage-ranked (keep attack evidence, not just
+    # the earliest rows) rather than a naive index truncation.
+    out = _cap_oversized_clusters(out, row_by_idx)
+    # Layer 6: non-destructive behavioral linkage — relate clusters that form a
+    # kill-chain progression but share no pivot key (rotated IPs/accounts). Adds a
+    # _campaign_links annotation only; never merges or drops rows.
+    out = _behavioral_link(out, ts_by_idx, diagnostics_out=diagnostics_out)
 
     if diagnostics_out is not None:
         diagnostics_out["post_merge_cluster_count"] = len(out)
         diagnostics_out["post_merge_jaccard_threshold"] = _jaccard_threshold
         diagnostics_out["singleton_filter_dropped"] = _pre_singleton_count - len(out)
         diagnostics_out["oversized_clusters"] = sum(1 for c in out if c.get("_oversized"))
+
+        # ── Evidence-retention telemetry ─────────────────────────────────────
+        # Quantifies how much clustered evidence survives the oversized cap, so
+        # silent evidence loss is observable (regression guard). retention_rate
+        # of 1.0 == no rows dropped; < 1.0 == the cap shed rows (now triage-ranked
+        # so what's shed is the lowest-value evidence, not arbitrary early rows).
+        _pre_cap_rows = 0
+        _post_cap_rows = 0
+        for c in out:
+            _refs = c.get("row_refs") or []
+            _post = len(_refs) if isinstance(_refs, list) else 0
+            _pre = int(c.get("_total_row_count") or _post)  # _total_row_count set only when capped
+            _pre_cap_rows += _pre
+            _post_cap_rows += _post
+        diagnostics_out["clustered_rows_pre_cap"] = _pre_cap_rows
+        diagnostics_out["clustered_rows_post_cap"] = _post_cap_rows
+        diagnostics_out["oversized_rows_capped"] = _pre_cap_rows - _post_cap_rows
+        diagnostics_out["evidence_retention_rate"] = (
+            round(_post_cap_rows / _pre_cap_rows, 4) if _pre_cap_rows else 1.0
+        )
+        diagnostics_out["oversized_retention_mode"] = next(
+            (c.get("_oversized_retention") for c in out if c.get("_oversized")), None
+        )
 
     # Append isolated clusters at the end with a sentinel so callers can
     # split them out for the isolated_count header without losing audit data.
