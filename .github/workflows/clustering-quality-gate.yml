@@ -1,0 +1,47 @@
+name: Clustering & Narration Quality Gate
+
+# Fast structural gate for the correlation/narration core. These tests assert the
+# invariants that unit tests alone missed before (the over-merge, the IOC-grounding
+# divergence, evidence retention). They run without the large sample datasets — the
+# full-dataset e2e gate (test_e2e_clustering_gate) skips automatically when the data
+# and golden baseline are absent, so this job is green on a clean checkout.
+
+on:
+  push:
+    paths:
+      - 'src/core/ingest/**'
+      - 'src/core/entities.py'
+      - 'src/agents/critic.py'
+      - 'src/pipeline/streaming_ingest.py'
+      - 'scripts/e2e_assess.py'
+      - 'tests/test_entities.py'
+      - 'tests/test_cloudtrail_normalization.py'
+      - 'tests/test_ioc_redaction.py'
+      - 'tests/test_intelligence_improvements.py'
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  quality-gate:
+    name: Structural quality gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-dev.txt
+      - name: Run clustering / narration quality gate
+        env:
+          PLATFORM_LITE_INIT: '1'
+          TEST_HELPERS_ENABLED: '1'
+        run: |
+          pytest tests/test_entities.py \
+                 tests/test_cloudtrail_normalization.py \
+                 tests/test_ioc_redaction.py \
+                 tests/test_intelligence_improvements.py \
+                 tests/test_e2e_clustering_gate.py \
+                 tests/test_phase_detectors_apt.py \
+                 -q -o addopts="" --timeout=120
