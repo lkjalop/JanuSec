@@ -4,19 +4,20 @@ from src.integrations.llm_client import LLMClient
 
 
 def test_persona_in_kwargs_injected_and_token_cap(monkeypatch, tmp_path):
-    client = LLMClient()
-    # short token cap for test
-    client.max_tokens = 10
-
-    # persona and prompt that combined exceed max_tokens
+    # The enforced cap is on PROMPT size (MAX_PROMPT_WORDS), not the output max_tokens —
+    # _enforce_token_cap deliberately does not reject based on output length. persona_prompt
+    # is prepended to the prompt (so it counts toward the word cap).
     persona = 'You are a concise security analyst.'
     prompt = 'Summarize the incident.'
 
-    # Should raise ValueError because persona + prompt tokens > cap
+    # With a tiny prompt-word cap, persona + prompt exceed it → ValueError.
+    monkeypatch.setenv('MAX_PROMPT_WORDS', '5')
+    client = LLMClient()
     with pytest.raises(ValueError):
-        client.generate(prompt, max_tokens=5, persona_prompt=persona)
+        client.generate(prompt, max_tokens=100, persona_prompt=persona)
 
-    # Now provide larger cap - should succeed (using mock mode)
+    # With a generous cap it succeeds (mock mode).
+    monkeypatch.setenv('MAX_PROMPT_WORDS', '6000')
     monkeypatch.setenv('LLM_MOCK', '1')
     client = LLMClient()
     resp = client.generate(prompt, max_tokens=100, persona_prompt=persona)
