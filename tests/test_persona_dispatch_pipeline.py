@@ -145,9 +145,11 @@ class TestPersonaDispatch:
     def test_all_personas_built(self):
         from src.analysis.persona_dispatch import build_all_personas
         payloads = build_all_personas(self._sample_narrative())
+        # 'audit' persona added in the audit-persona sprint; keep this in sync with
+        # the persona registry in src/analysis/persona_dispatch.build_all_personas.
         assert set(payloads.keys()) == {
             'soc_analyst', 'ciso', 'executive', 'threat_hunter',
-            'forensics', 'compliance', 'mssp',
+            'forensics', 'compliance', 'mssp', 'audit',
         }
         for k, v in payloads.items():
             assert v['persona'] == k
