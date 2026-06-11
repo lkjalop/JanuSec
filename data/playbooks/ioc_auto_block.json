@@ -1,0 +1,11 @@
+{
+  "name": "ioc-auto-block",
+  "description": "Automated IOC containment: enrich, open a case, block the IP, notify the channel.",
+  "dry_run": true,
+  "steps": [
+    {"type": "enrich", "params": {"source": "ti"}},
+    {"type": "open_case", "params": {"title": "IOC auto-block"}},
+    {"type": "block_ip", "params": {"ip": "1.2.3.4"}},
+    {"type": "notify", "params": {"channel": "slack", "msg": "blocked 1.2.3.4"}}
+  ]
+}
