@@ -1317,7 +1317,9 @@ class HopGraph:
           process -> domain (resolves / contacts)
           process -> hash (executes / loads)
           ip -> domain (dns_a)
-          process -> ja3 (tls_client_fingerprint)
+          process -> ja3 (tls_client_fingerprint_v1, MD5-based)
+          process -> ja4 (tls_client_fingerprint_v4, FoxIO JA4+)
+          ip -> jarm (tls_server_fingerprint, active scan result)
           process -> certfp (tls_server_cert)
         """
         ts = event.get('timestamp', time.time())
@@ -1329,6 +1331,8 @@ class HopGraph:
         domain = event.get('domain')
         file_hash = event.get('file_hash')
         ja3 = event.get('ja3')
+        ja4 = event.get('ja4')
+        jarm = event.get('jarm')
         certfp = event.get('cert_fp') or event.get('certfp')
 
         def fmt(ntype: str, val: Any) -> Optional[str]:
@@ -1400,6 +1404,17 @@ class HopGraph:
             jn = fmt('ja3', ja3)
             if jn:
                 self.add_edge(proc_stub, jn, 'tls_ja3', source=source, ts=ts)
+        if proc_stub and ja4:
+            j4n = fmt('ja4', ja4)
+            if j4n:
+                self.add_edge(proc_stub, j4n, 'tls_ja4', source=source, ts=ts)
+        # JARM is a server-side active fingerprint; attach to destination IP node
+        if jarm and dst_ip:
+            dip = fmt('ip', dst_ip)
+            jarmn = fmt('jarm', jarm)
+            if dip and jarmn:
+                self.add_node_attr(jarmn, type='jarm')
+                self.add_edge(dip, jarmn, 'jarm_fingerprint', source=source, ts=ts)
         if proc_stub and certfp:
             cf = fmt('certfp', certfp)
             if cf:

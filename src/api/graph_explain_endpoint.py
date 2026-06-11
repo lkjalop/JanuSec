@@ -1,24 +1,36 @@
-"""Deterministic HopGraph explain endpoint for visualization tests.
+"""HopGraph explain endpoint for visualization and integration tests.
 
 Route: GET /api/v1/graph/explain
 
-Returns a stable canned chain of nodes + links to support Playwright tests.
-In future this should proxy real identity_hopgraph path explain queries.
+When called with ?node=<id>, runs a real beam-search explain_chain query against
+GLOBAL_HOPGRAPH and returns {start, chains}.  Without a node parameter, returns
+a stable canned chain for Playwright/visual tests.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter
-from typing import Dict, Any
+from fastapi import APIRouter, Query
+from typing import Dict, Any, Optional
 
 router = APIRouter(prefix='/api/v1/graph', tags=['HopGraph'])
 
 try:
-    # optional integration with real HopGraph explain
-    from src.graph.hopgraph import HopGraph  # type: ignore
+    import src.graph.hopgraph as _hopgraph_mod  # type: ignore; validates module exists at startup
     from src.graph.cooccurrence import get_top as coocc_get_top  # type: ignore
     _HOPGRAPH_AVAILABLE = True
 except Exception:
+    _hopgraph_mod = None  # type: ignore
     _HOPGRAPH_AVAILABLE = False
+
+
+def _get_hopgraph():
+    """Resolve GLOBAL_HOPGRAPH dynamically — always re-reads sys.modules so test fixtures
+    that replace src.graph.hopgraph (and the conftest cleanup that restores it) don't leave
+    a stale reference in this module's namespace."""
+    import sys as _sys
+    mod = _sys.modules.get('src.graph.hopgraph')
+    if mod is None:
+        return None
+    return getattr(mod, 'GLOBAL_HOPGRAPH', None)
 
 _NODES = [
     {'id': 'user:alice', 'label': 'Alice', 'type': 'user', 'risk': 0.12},
@@ -58,26 +70,27 @@ def _make_chain():
     return {'hops': hops, 'nodes': _NODES, 'links': _LINKS}
 
 @router.get('/explain')
-async def explain_chain() -> Dict[str, Any]:
+async def explain_chain(node: Optional[str] = Query(default=None, description='Start node ID for hopgraph chain query')) -> Dict[str, Any]:
+    # Real hopgraph query when node param provided
+    hg = _get_hopgraph() if _HOPGRAPH_AVAILABLE else None
+    if node and hg is not None:
+        try:
+            result = hg.explain_chain(node)
+            if 'start' not in result:
+                result['start'] = node
+            return result
+        except Exception:
+            pass
+        return {'start': node, 'chains': [], 'subgraph': {'nodes': {}, 'edges': []}}
+
+    # Deterministic canned chain for Playwright/visual tests (no node param)
     chain = _make_chain()
     result = {'chains': [chain], 'meta': {'deterministic': True, 'total_nodes': len(_NODES), 'total_links': len(_LINKS), 'version': 1}}
     if _HOPGRAPH_AVAILABLE:
         try:
-            hg = HopGraph.get_instance()
-            # call a lightweight explain example (no args -> last snapshot deterministic)
-            real = hg.explain_chain()  # assume signature exists in real HopGraph
-            # annotate each hop with factors if present
-            for ch in result['chains']:
-                for hop in ch.get('hops',[]):
-                    # try to find matching hop in real explain by src/dst
-                    matches = [rh for rh in (real.get('hops') or []) if rh.get('src')==hop.get('src') and rh.get('dst')==hop.get('dst')]
-                    if matches:
-                        hop['factors'] = matches[0].get('factors', hop.get('factors'))
-            # attach recent top co-occurrence pairs for context
             top = coocc_get_top(20)
-            result['meta']['cooccurrence_top'] = [{'pair': list(k), 'count': c} for k,c,ts in top]
+            result['meta']['cooccurrence_top'] = [{'pair': list(k), 'count': c} for k, c, ts in top]
         except Exception:
-            # fall back silently to deterministic chain
             pass
     return result
 
