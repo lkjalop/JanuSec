@@ -65,3 +65,22 @@ ci-model-smoke:
 .PHONY: promote-model
 promote-model:
 	python -m ml.cli.promote_model --src models/baseline_sigmoid.json --name sigmoid-`date +%Y%m%d-%H%M` --alias current || echo Promote failed
+
+# ── Clustering / narration quality gates (added 2026-06) ─────────────────────
+.PHONY: quality-gate
+quality-gate:  ## Fast structural gate: entities + clustering + narrator + redaction units
+	PYTHONPATH=./src python -m pytest tests/test_entities.py tests/test_cloudtrail_normalization.py \
+		tests/test_ioc_redaction.py tests/test_intelligence_improvements.py \
+		tests/test_e2e_clustering_gate.py tests/test_phase_detectors_apt.py -q -o addopts=""
+
+.PHONY: e2e-gate
+e2e-gate:  ## Full-dataset clustering regression gate vs golden baseline (needs dump/test files/)
+	PYTHONPATH=./src python scripts/e2e_assess.py
+
+.PHONY: e2e-baseline
+e2e-baseline:  ## Regenerate the e2e golden baseline (after an intentional clustering change)
+	PYTHONPATH=./src python scripts/e2e_assess.py --update-baseline
+
+.PHONY: benchmark
+benchmark:  ## LLM narrator quality benchmark on real fixtures (needs local Ollama)
+	PYTHONPATH=./src python scripts/llm_compare.py --models qwen2.5:14b
