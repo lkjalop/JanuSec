@@ -899,36 +899,11 @@ def _killchain_from_phases(cluster: dict) -> list[str]:
 
 
 # ── Entity-coverage evidence selection ────────────────────────────────────────
-_ENTITY_ROW_FIELDS = (
-    "user_canonical", "user", "username", "account_name", "userPrincipalName",
-    "src_ip", "dst_ip", "ip", "client_address",
-    "hostname", "host", "src_host", "dst_host", "computer_name",
-)
-_ENTITY_STOPWORDS = frozenset({
-    "-", "n/a", "none", "null", "0.0.0.0", "system", "root", "unknown", "localhost", "",
-})
-
-
-def _row_entities(row: dict) -> set[str]:
-    """Normalized entity tokens (users/IPs/hosts) in a row, for coverage checks.
-
-    Mirrors the normalization used when clusters store shared_users/ips/hosts so the
-    two sides compare cleanly. FQDNs also contribute their short hostname.
-    """
-    out: set[str] = set()
-    for fld in _ENTITY_ROW_FIELDS:
-        v = row.get(fld)
-        if v is None:
-            continue
-        s = str(v).strip().lower()
-        if s in _ENTITY_STOPWORDS or len(s) <= 2:
-            continue
-        out.add(s)
-        if "." in s and not s.replace(".", "").isdigit():  # FQDN, not an IP
-            short = s.split(".")[0]
-            if len(short) > 2:
-                out.add(short)
-    return out
+# Entity extraction is delegated to the canonical src/core/entities module so the
+# narrator and the critic agree on what counts as a grounded entity (they used to
+# disagree — different field lists — which broke hallucination detection).
+from src.core.entities import extract_entities as _row_entities  # noqa: E402
+from src.core.entities import STOPWORDS as _ENTITY_STOPWORDS  # noqa: E402
 
 
 def _cluster_key_entities(cluster: dict) -> set[str]:

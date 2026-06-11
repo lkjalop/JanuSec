@@ -545,7 +545,7 @@ class AIModelManager:
                 dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
                 features.append(dt.hour)  # Hour of day
                 features.append(dt.weekday())  # Day of week
-            except:
+            except (ValueError, TypeError, AttributeError):
                 features.extend([12, 3])  # Default values
         else:
             features.extend([12, 3])

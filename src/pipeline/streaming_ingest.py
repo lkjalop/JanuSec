@@ -71,7 +71,7 @@ BUCKET_CAP = 200          # max rows per inverted-index key (super-node protecti
 MAX_CLUSTERS_RENDERED = 50  # cap clusters returned to frontend to avoid serialization explosion
 
 # Bump when field derivation logic changes so assessment_worker can detect stale stored rows.
-_NORMALIZER_VERSION = "1.3"
+_NORMALIZER_VERSION = "1.4"  # 1.4: AWS CloudTrail IAM principal/IP extraction in _normalize_iam
 
 # ── Source type constants ──────────────────────────────────────────────────────
 

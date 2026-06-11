@@ -51,7 +51,7 @@ def normalize(raw: dict[str, Any]) -> ArtifactObservation:
             vs = v.strip()
             if mapped in ('size',):
                 try: norm[mapped] = int(vs)
-                except: pass
+                except (ValueError, TypeError): pass
             else:
                 norm[mapped] = vs
         else:
