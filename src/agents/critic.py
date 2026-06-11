@@ -114,14 +114,16 @@ def _evidence_block(evidence_rows: list[dict], cap: int = 15) -> str:
 
 
 def _extract_evidence_entities(evidence_rows: list[dict]) -> Set[str]:
-    """Extract all user/IP/host values from evidence for hallucination checking."""
+    """Extract all user/IP/host values from evidence for hallucination checking.
+
+    Delegates to the canonical extractor so the critic and the narrator use the SAME
+    field list and normalization — previously the critic's list was narrower, so the
+    two hallucination checks could disagree on the same evidence.
+    """
+    from src.core.entities import extract_entities
     entities: Set[str] = set()
     for r in evidence_rows:
-        for field in ("user_canonical", "user", "src_ip", "dst_ip", "ip", "hostname",
-                      "dst_host", "src_host", "computer_name"):
-            v = str(r.get(field) or "").strip().lower()
-            if v and v not in ("-", "unknown", "none", "null"):
-                entities.add(v)
+        entities |= extract_entities(r)
     return entities
 
 

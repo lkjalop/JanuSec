@@ -1853,14 +1853,10 @@ def _classify_component(
         analysis_classification = "unclassified"
         severity_label = "info"
 
-    # ── Entity rollups ──
-    users   = sorted({_lower(r.get("user_canonical") or r.get("user")) for r in member_rows})
-    users   = [u for u in users if u]
-    ips     = sorted({_str(r.get("src_ip"))       for r in member_rows if r.get("src_ip")})
+    # ── Entity rollups (canonical extractor — single source of truth) ──
+    from src.core.entities import extract_typed
+    users, ips, hosts = extract_typed(member_rows)
     cidrs   = sorted({_str(r.get("src_ip_cidr24"))for r in member_rows if r.get("src_ip_cidr24")})
-    hosts   = sorted({_lower(r.get("hostname") or r.get("host")) for r in member_rows
-                      if r.get("hostname") or r.get("host")})
-    hosts   = [h for h in hosts if h]
     sources = sorted({_str(r.get("_source_type") or r.get("source_type") or "unknown")
                       for r in member_rows})
 
