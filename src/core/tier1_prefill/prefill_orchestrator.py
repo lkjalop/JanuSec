@@ -882,9 +882,18 @@ def _enrich_cluster_intelligence(data: dict, cluster: dict, rows: list[dict]) ->
                          cluster.get('cluster_id'), _e)
 
     # ── 3.1 DREAD numeric score ───────────────────────────────────────────────
-    if not data.get('dread_score') and rows:
+    # Recompute when: (a) not yet computed, or (b) cluster has grown by ≥25%
+    # since the score was last calculated (stored as dread_score._row_count).
+    _existing_dread = data.get('dread_score')
+    _dread_stale = False
+    if _existing_dread and rows:
+        _prior_count = _existing_dread.get('_row_count', 0) if isinstance(_existing_dread, dict) else 0
+        _dread_stale = _prior_count > 0 and len(rows) >= _prior_count * 1.25
+    if (not _existing_dread or _dread_stale) and rows:
         try:
-            data['dread_score'] = _compute_dread_score(cluster, rows)
+            _new_score = _compute_dread_score(cluster, rows)
+            _new_score['_row_count'] = len(rows)
+            data['dread_score'] = _new_score
         except Exception as _e:
             logger.debug('_enrich_cluster_intelligence: dread_score failed for %s: %s',
                          cluster.get('cluster_id'), _e)

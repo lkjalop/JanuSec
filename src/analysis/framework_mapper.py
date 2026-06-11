@@ -351,6 +351,86 @@ _TECHNIQUE_TO_CONTROLS: dict[str, list[dict]] = {
         {'framework': 'asd_ism', 'control_id': 'ISM-1815', 'control_name': 'Network egress filtering (block DNS tunnelling)',
          'failure_type': 'CONTROL_ABSENT', 'severity': 'high', 'remediation_priority': 'P1'},
     ],
+
+    # ── MITRE ATT&CK v14 / v15 new techniques ────────────────────────────────
+
+    # T1649 — Steal or Forge Authentication Certificates (ADCS)
+    'T1649': [
+        {'framework': 'iso27001', 'control_id': 'A.5.15', 'control_name': 'Access control',
+         'failure_type': 'PREVENTIVE_FAILED', 'severity': 'critical', 'remediation_priority': 'P1'},
+        {'framework': 'iso27001', 'control_id': 'A.8.5', 'control_name': 'Secure authentication',
+         'failure_type': 'PREVENTIVE_FAILED', 'severity': 'critical', 'remediation_priority': 'P1'},
+        {'framework': 'nist_csf', 'control_id': 'PR.AC-01', 'control_name': 'Identities and credentials are managed',
+         'failure_type': 'PREVENTIVE_FAILED', 'severity': 'critical', 'remediation_priority': 'P1'},
+        {'framework': 'nist_800_53', 'control_id': 'SC-17', 'control_name': 'Public Key Infrastructure Certificates',
+         'failure_type': 'CONTROL_ABSENT', 'severity': 'critical', 'remediation_priority': 'P1'},
+        {'framework': 'nist_800_53', 'control_id': 'IA-5', 'control_name': 'Authenticator Management',
+         'failure_type': 'PREVENTIVE_FAILED', 'severity': 'critical', 'remediation_priority': 'P1'},
+    ],
+
+    # T1651 — Cloud Administration Command (SSM, Run Command, Azure VM extensions)
+    'T1651': [
+        {'framework': 'iso27001', 'control_id': 'A.8.9', 'control_name': 'Configuration management',
+         'failure_type': 'CONTROL_ABSENT', 'severity': 'high', 'remediation_priority': 'P1'},
+        {'framework': 'iso27001', 'control_id': 'A.8.15', 'control_name': 'Logging',
+         'failure_type': 'DETECTIVE_FAILED', 'severity': 'high', 'remediation_priority': 'P1'},
+        {'framework': 'nist_csf', 'control_id': 'DE.CM-01', 'control_name': 'Networks and network services are monitored',
+         'failure_type': 'DETECTIVE_FAILED', 'severity': 'high', 'remediation_priority': 'P1'},
+        {'framework': 'nist_800_53', 'control_id': 'CM-6', 'control_name': 'Configuration Settings',
+         'failure_type': 'PREVENTIVE_FAILED', 'severity': 'high', 'remediation_priority': 'P2'},
+    ],
+
+    # T1654 — Log Enumeration
+    'T1654': [
+        {'framework': 'iso27001', 'control_id': 'A.8.15', 'control_name': 'Logging',
+         'failure_type': 'CONTROL_ABSENT', 'severity': 'high', 'remediation_priority': 'P1'},
+        {'framework': 'iso27001', 'control_id': 'A.8.16', 'control_name': 'Monitoring activities',
+         'failure_type': 'DETECTIVE_FAILED', 'severity': 'high', 'remediation_priority': 'P1'},
+        {'framework': 'nist_csf', 'control_id': 'DE.AE-03', 'control_name': 'Event data are collected and correlated',
+         'failure_type': 'DETECTIVE_FAILED', 'severity': 'moderate', 'remediation_priority': 'P2'},
+        {'framework': 'nist_800_53', 'control_id': 'AU-6', 'control_name': 'Audit Record Review, Analysis, and Reporting',
+         'failure_type': 'DETECTIVE_FAILED', 'severity': 'moderate', 'remediation_priority': 'P2'},
+    ],
+
+    # T1657 — Financial Theft (BEC wire fraud, crypto theft)
+    'T1657': [
+        {'framework': 'iso27001', 'control_id': 'A.5.25', 'control_name': 'Assessment and decision on information security events',
+         'failure_type': 'DETECTIVE_FAILED', 'severity': 'critical', 'remediation_priority': 'P1'},
+        {'framework': 'iso27001', 'control_id': 'A.8.16', 'control_name': 'Monitoring activities',
+         'failure_type': 'DETECTIVE_FAILED', 'severity': 'critical', 'remediation_priority': 'P1'},
+        {'framework': 'nist_csf', 'control_id': 'RS.RP-01', 'control_name': 'Response plan executed during or after incident',
+         'failure_type': 'DETECTIVE_FAILED', 'severity': 'critical', 'remediation_priority': 'P1'},
+        {'framework': 'nist_800_53', 'control_id': 'IR-4', 'control_name': 'Incident Handling',
+         'failure_type': 'DETECTIVE_FAILED', 'severity': 'critical', 'remediation_priority': 'P1'},
+        {'framework': 'soc2', 'control_id': 'CC7.4', 'control_name': 'Security incidents are responded to',
+         'failure_type': 'DETECTIVE_FAILED', 'severity': 'critical', 'remediation_priority': 'P1'},
+    ],
+
+    # T1659 — Content Injection (adversary-in-the-middle content modification)
+    'T1659': [
+        {'framework': 'iso27001', 'control_id': 'A.8.24', 'control_name': 'Use of cryptography',
+         'failure_type': 'PREVENTIVE_FAILED', 'severity': 'high', 'remediation_priority': 'P1'},
+        {'framework': 'iso27001', 'control_id': 'A.8.22', 'control_name': 'Filtering of web services',
+         'failure_type': 'PREVENTIVE_FAILED', 'severity': 'high', 'remediation_priority': 'P2'},
+        {'framework': 'nist_csf', 'control_id': 'PR.DS-02', 'control_name': 'Data-in-transit is protected',
+         'failure_type': 'PREVENTIVE_FAILED', 'severity': 'high', 'remediation_priority': 'P1'},
+        {'framework': 'nist_800_53', 'control_id': 'SC-8', 'control_name': 'Transmission Confidentiality and Integrity',
+         'failure_type': 'PREVENTIVE_FAILED', 'severity': 'high', 'remediation_priority': 'P1'},
+    ],
+
+    # T1666 — Modify Cloud Compute Configuration (EC2 userdata, VM extensions)
+    'T1666': [
+        {'framework': 'iso27001', 'control_id': 'A.8.9', 'control_name': 'Configuration management',
+         'failure_type': 'PREVENTIVE_FAILED', 'severity': 'critical', 'remediation_priority': 'P1'},
+        {'framework': 'iso27001', 'control_id': 'A.8.15', 'control_name': 'Logging',
+         'failure_type': 'DETECTIVE_FAILED', 'severity': 'critical', 'remediation_priority': 'P1'},
+        {'framework': 'nist_csf', 'control_id': 'PR.IP-01', 'control_name': 'Baseline configuration established and maintained',
+         'failure_type': 'PREVENTIVE_FAILED', 'severity': 'critical', 'remediation_priority': 'P1'},
+        {'framework': 'nist_800_53', 'control_id': 'CM-3', 'control_name': 'Configuration Change Control',
+         'failure_type': 'PREVENTIVE_FAILED', 'severity': 'critical', 'remediation_priority': 'P1'},
+        {'framework': 'essential_eight', 'control_id': 'E2', 'control_name': 'Restrict admin privileges',
+         'failure_type': 'PREVENTIVE_FAILED', 'severity': 'critical', 'remediation_priority': 'P1'},
+    ],
 }
 
 
@@ -537,6 +617,110 @@ _TECHNIQUE_CVE_CONTEXT: dict[str, dict] = {
             'P1_48h': 'Alert on any global admin or privileged role assignment in Azure AD / Okta',
             'P2_30d': 'Enforce PIM (Privileged Identity Management) with just-in-time role activation',
             'P3_90d': 'Deploy UEBA baseline for privileged account behaviour; auto-suspend anomalies',
+        },
+    },
+
+    # ── MITRE ATT&CK v14 / v15 CVE context ───────────────────────────────────
+
+    'T1649': {
+        'cves': ['CVE-2022-26923', 'CVE-2021-42278', 'CVE-2021-42287'],
+        'breach_analogues': ['ADCS ESC1 domain takeover (2022)', 'noPac / sAMAccountName spoofing (2021)'],
+        'control_ids_implicated': ['SC-17', 'IA-5', 'A.5.15', 'A.8.5'],
+        'business_impact_usd': 11_000_000,
+        'business_impact_note': 'ADCS abuse (Certifried/ESC1): attacker obtains domain-admin cert in minutes; avg $11M incident cost',
+        'auditor_asks': [
+            'Have you run Certify/Certipy to assess your ADCS template permissions?',
+            'Is the ENROLLEE_SUPPLIES_SUBJECT flag disabled on all certificate templates?',
+        ],
+        'remediation_roadmap': {
+            'P1_48h': 'Audit ADCS templates with Certipy; disable ENROLLEE_SUPPLIES_SUBJECT on all non-admin templates',
+            'P2_30d': 'Enforce CA manager approval for all SAN-capable certificate requests',
+            'P3_90d': 'Deploy ADCS-specific detection rules (4886/4887 event IDs) in SIEM',
+        },
+    },
+
+    'T1651': {
+        'cves': ['CVE-2023-38545'],
+        'breach_analogues': ['TeamTNT SSM Run Command abuse (2023)', 'AWS Systems Manager lateral movement'],
+        'control_ids_implicated': ['CM-6', 'A.8.9', 'A.8.15'],
+        'business_impact_usd': 2_400_000,
+        'business_impact_note': 'Cloud admin command abuse enables stealthy code execution without SSH; avg $2.4M cloud incident',
+        'auditor_asks': [
+            'Is SSM Send-Command restricted to approved maintenance IAM roles?',
+            'Do CloudTrail alerts fire on SSM commands from non-standard source IPs?',
+        ],
+        'remediation_roadmap': {
+            'P1_48h': 'Restrict ssm:SendCommand to approved IAM roles via SCP; alert on all invocations',
+            'P2_30d': 'Enable SSM Session Manager with CloudTrail logging; disable direct SSH where possible',
+            'P3_90d': 'Deploy cloud SOAR playbook for automated SSM command investigation',
+        },
+    },
+
+    'T1654': {
+        'cves': [],
+        'breach_analogues': ['UNC3944 CloudTrail disable before lateral movement (2023)', 'LAPSUS$ log deletion pattern'],
+        'control_ids_implicated': ['AU-6', 'A.8.15', 'A.8.16'],
+        'business_impact_usd': 3_100_000,
+        'business_impact_note': 'Log enumeration precedes 89% of privilege escalation chains (CrowdStrike 2024); avg $3.1M detection-delay cost',
+        'auditor_asks': [
+            'Are CloudTrail / Audit Log reads by non-SIEM service accounts alerted?',
+            'Is your log storage immutable (S3 Object Lock / Azure Immutable Blob)?',
+        ],
+        'remediation_roadmap': {
+            'P1_48h': 'Alert on any GetObject or ListObjects against CloudTrail S3 bucket from non-approved principals',
+            'P2_30d': 'Enable S3 Object Lock (WORM) on all audit log buckets',
+            'P3_90d': 'Implement honeypot log entries that trigger on access (canary tokens in log files)',
+        },
+    },
+
+    'T1657': {
+        'cves': [],
+        'breach_analogues': ['BEC wire fraud: $43B lost 2016-2023 (FBI IC3)', 'Axie Infinity Ronin bridge $625M crypto theft (2022)'],
+        'control_ids_implicated': ['IR-4', 'A.5.25', 'CC7.4'],
+        'business_impact_usd': 43_000_000_000,
+        'business_impact_note': 'FBI IC3: BEC losses totalled $2.9B in 2023 alone; Ronin bridge: $625M in single incident',
+        'auditor_asks': [
+            'Does your payment-change workflow require out-of-band verification (phone callback)?',
+            'Are wire-transfer requests above threshold auto-held for dual approval?',
+        ],
+        'remediation_roadmap': {
+            'P1_48h': 'Implement callback verification for all payment account change requests',
+            'P2_30d': 'Deploy email thread-hijacking detection with sender-domain verification (DMARC reject)',
+            'P3_90d': 'Train finance staff on BEC TTPs; run quarterly simulated BEC attacks',
+        },
+    },
+
+    'T1659': {
+        'cves': ['CVE-2023-44487'],
+        'breach_analogues': ['HTTP/2 Rapid Reset MITM injection (2023)', 'BGP hijack-based content injection'],
+        'control_ids_implicated': ['SC-8', 'A.8.24', 'PR.DS-02'],
+        'business_impact_usd': 5_800_000,
+        'business_impact_note': 'HTTP/2 Rapid Reset (CVE-2023-44487) weaponised for MITM; avg $5.8M content-injection incident',
+        'auditor_asks': [
+            'Is TLS 1.3 enforced with HSTS preload on all public endpoints?',
+            'Does your WAF detect and block response-splitting attacks?',
+        ],
+        'remediation_roadmap': {
+            'P1_48h': 'Enforce HTTPS Strict Transport Security (HSTS) with max-age≥31536000 and preload',
+            'P2_30d': 'Deploy TLS certificate transparency monitoring; alert on unexpected cert issuance',
+            'P3_90d': 'Implement DNSSEC + RPKI on all outbound DNS/BGP paths',
+        },
+    },
+
+    'T1666': {
+        'cves': ['CVE-2024-21338'],
+        'breach_analogues': ['EC2 userdata persistence (Rhysida 2024)', 'Azure VM extension backdoor (Midnight Blizzard)'],
+        'control_ids_implicated': ['CM-3', 'A.8.9', 'A.8.15'],
+        'business_impact_usd': 4_200_000,
+        'business_impact_note': 'Cloud compute config modification enables stealthy persistence surviving instance reboots; avg $4.2M',
+        'auditor_asks': [
+            'Are EC2 userdata and VM extension changes logged and alerted in real time?',
+            'Is there a drift-detection policy that alerts when compute config deviates from golden image?',
+        ],
+        'remediation_roadmap': {
+            'P1_48h': 'Alert on ec2:ModifyInstanceAttribute and Microsoft.Compute/virtualMachines/extensions/write',
+            'P2_30d': 'Enforce SCP / Azure Policy denying userdata/extension modifications except from approved CI/CD roles',
+            'P3_90d': 'Implement immutable infrastructure pattern: terminate-and-replace on any config change',
         },
     },
 }

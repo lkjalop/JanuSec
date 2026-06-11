@@ -594,6 +594,212 @@ FACTOR_TO_COMPLIANCE: Dict[str, Dict[str, List[str]]] = {
         'hipaa':        ['164.308(a)(7)'],
         'nist_800_53':  ['CP-9', 'SI-7'],
     },
+
+    # =========================================================================
+    # AI / ML THREAT FACTORS — ISO 42001, OWASP LLM 2025, NIST AI RMF
+    # =========================================================================
+
+    'prompt_injection': {
+        'iso27001':     ['A.8.25', 'A.8.26'],
+        'nist_800_53':  ['SI-10', 'SI-3'],
+        'iso42001':     ['6.1.2', '8.4', '9.1'],
+        'owasp_llm':    ['LLM01:2025'],
+        'nist_ai_rmf':  ['GOVERN-1.2', 'MAP-5.1', 'MEASURE-2.5'],
+        'maestro':      ['L3-AgentFramework-InputValidation'],
+    },
+
+    'tool_abuse': {
+        'iso27001':     ['A.8.26', 'A.5.10'],
+        'nist_800_53':  ['AC-3', 'CM-7'],
+        'iso42001':     ['8.4', '8.6'],
+        'owasp_llm':    ['LLM06:2025', 'LLM07:2025'],
+        'nist_ai_rmf':  ['GOVERN-1.4', 'MAP-5.2'],
+        'maestro':      ['L4-AgentOrchestrator-ToolPermissions'],
+    },
+
+    'sensitive_output_leak': {
+        'iso27001':     ['A.5.34', 'A.8.11'],
+        'nist_800_53':  ['AC-3', 'AC-4', 'SI-12'],
+        'gdpr':         ['Art.5', 'Art.32'],
+        'iso42001':     ['8.4', '9.1'],
+        'owasp_llm':    ['LLM02:2025'],
+        'nist_ai_rmf':  ['MEASURE-2.6', 'MANAGE-2.2'],
+    },
+
+    'training_data_poisoning': {
+        'iso27001':     ['A.8.8', 'A.5.23'],
+        'nist_800_53':  ['SI-7', 'RA-5'],
+        'iso42001':     ['8.3', '8.4', '6.1.1'],
+        'owasp_llm':    ['LLM04:2025'],
+        'nist_ai_rmf':  ['MAP-1.6', 'MEASURE-2.7'],
+    },
+
+    'model_evasion_adversarial': {
+        'iso27001':     ['A.8.25', 'A.8.29'],
+        'nist_800_53':  ['SI-10', 'RA-5'],
+        'iso42001':     ['8.4', '8.5', '9.1'],
+        'owasp_llm':    ['LLM05:2025'],
+        'nist_ai_rmf':  ['MEASURE-2.5', 'MANAGE-4.1'],
+    },
+
+    'vector_db_poisoning': {
+        'iso27001':     ['A.8.8', 'A.8.25'],
+        'nist_800_53':  ['SI-7', 'SI-10'],
+        'iso42001':     ['8.3', '8.4'],
+        'owasp_llm':    ['LLM08:2025'],
+        'nist_ai_rmf':  ['MAP-1.6', 'MEASURE-2.7'],
+    },
+
+    'rag_context_injection': {
+        'iso27001':     ['A.8.25', 'A.8.26'],
+        'nist_800_53':  ['SI-10'],
+        'iso42001':     ['8.4'],
+        'owasp_llm':    ['LLM08:2025', 'LLM01:2025'],
+        'nist_ai_rmf':  ['MAP-5.1'],
+        'maestro':      ['L2-DataOrchestration-RAGPipeline'],
+    },
+
+    'system_prompt_exfil': {
+        'iso27001':     ['A.8.12', 'A.5.34'],
+        'nist_800_53':  ['AC-4', 'SI-12'],
+        'iso42001':     ['8.4', '9.1'],
+        'owasp_llm':    ['LLM07:2025'],
+        'nist_ai_rmf':  ['GOVERN-1.2', 'MEASURE-2.6'],
+    },
+
+    'mcp_tool_injection': {
+        'iso27001':     ['A.8.26', 'A.5.10'],
+        'nist_800_53':  ['CM-7', 'AC-3'],
+        'iso42001':     ['8.4', '8.6'],
+        'owasp_llm':    ['LLM01:2025', 'LLM06:2025'],
+        'nist_ai_rmf':  ['MAP-5.2'],
+        'maestro':      ['L5-MCPLayer-ToolCallValidation'],
+    },
+
+    'model_dos_token_flood': {
+        'iso27001':     ['A.8.6'],
+        'nist_800_53':  ['SC-5', 'AU-11'],
+        'iso42001':     ['8.4', '9.1'],
+        'owasp_llm':    ['LLM10:2025'],
+        'nist_ai_rmf':  ['MANAGE-2.4'],
+    },
+
+    'model_supply_chain_tamper': {
+        'iso27001':     ['A.5.19', 'A.5.20', 'A.8.8'],
+        'nist_800_53':  ['SR-4', 'SR-6', 'SI-7'],
+        'iso42001':     ['8.3', '6.1.1'],
+        'owasp_llm':    ['LLM03:2025'],
+        'nist_ai_rmf':  ['MAP-1.6', 'GOVERN-1.7'],
+    },
+
+    # =========================================================================
+    # OWASP API TOP 10:2023 FACTORS
+    # =========================================================================
+
+    'api:broken_object_level_auth': {
+        'iso27001':     ['A.5.15', 'A.8.3'],
+        'nist_800_53':  ['AC-3', 'AC-6'],
+        'owasp_api':    ['API1:2023 - BOLA'],
+        'nist_csf':     ['PR.AC-3'],
+    },
+
+    'api:broken_authentication': {
+        'iso27001':     ['A.5.17', 'A.8.5'],
+        'nist_800_53':  ['IA-2', 'IA-5'],
+        'owasp_api':    ['API2:2023 - Broken Authentication'],
+        'nist_csf':     ['PR.AC-1'],
+    },
+
+    'api:broken_object_property_auth': {
+        'iso27001':     ['A.5.15', 'A.8.3'],
+        'nist_800_53':  ['AC-3', 'AC-6'],
+        'owasp_api':    ['API3:2023 - BOPLA'],
+    },
+
+    'api:unrestricted_resource_consumption': {
+        'iso27001':     ['A.8.6'],
+        'nist_800_53':  ['SC-5'],
+        'owasp_api':    ['API4:2023 - Unrestricted Resource Consumption'],
+    },
+
+    'api:function_level_auth_broken': {
+        'iso27001':     ['A.5.15', 'A.5.18'],
+        'nist_800_53':  ['AC-3', 'AC-6'],
+        'owasp_api':    ['API5:2023 - BFLA'],
+    },
+
+    'api:unrestricted_access_sensitive_flows': {
+        'iso27001':     ['A.5.15', 'A.8.3'],
+        'nist_800_53':  ['AC-3', 'AC-21'],
+        'owasp_api':    ['API6:2023 - Unrestricted Access to Sensitive Business Flows'],
+        'nist_csf':     ['PR.AC-4'],
+    },
+
+    'api:ssrf_detected': {
+        'iso27001':     ['A.8.22', 'A.8.26'],
+        'nist_800_53':  ['SC-7', 'SI-10'],
+        'owasp_api':    ['API7:2023 - SSRF'],
+        'nist_csf':     ['DE.CM-1'],
+    },
+
+    'api:security_misconfiguration': {
+        'iso27001':     ['A.8.8', 'A.8.9'],
+        'nist_800_53':  ['CM-6', 'CM-7'],
+        'owasp_api':    ['API8:2023 - Security Misconfiguration'],
+        'nist_csf':     ['PR.IP-1'],
+    },
+
+    'api:improper_inventory_management': {
+        'iso27001':     ['A.5.9', 'A.8.8'],
+        'nist_800_53':  ['CM-8'],
+        'owasp_api':    ['API9:2023 - Improper Inventory Management'],
+    },
+
+    'api:unsafe_consumption_third_party': {
+        'iso27001':     ['A.5.19', 'A.5.20'],
+        'nist_800_53':  ['SR-4', 'SI-7'],
+        'owasp_api':    ['API10:2023 - Unsafe Consumption of APIs'],
+    },
+
+    # MITRE v14/v15 new technique compliance mappings
+    'iam:adcs_cert_request_abuse': {
+        'iso27001':     ['A.5.15', 'A.8.3', 'A.8.5'],
+        'nist_800_53':  ['IA-5', 'SC-17', 'AC-6'],
+        'nist_csf':     ['PR.AC-1', 'PR.AC-6'],
+        'soc2':         ['CC6.1', 'CC6.3'],
+    },
+
+    'cloud:ssm_run_command_unusual': {
+        'iso27001':     ['A.8.9', 'A.8.15'],
+        'nist_800_53':  ['AU-2', 'CM-6', 'SI-4'],
+        'nist_csf':     ['DE.CM-1', 'DE.AE-3'],
+    },
+
+    'cloud:cloudtrail_enumeration': {
+        'iso27001':     ['A.8.15', 'A.8.16'],
+        'nist_800_53':  ['AU-6', 'SI-4'],
+        'nist_csf':     ['DE.AE-3'],
+    },
+
+    'email:bec_wire_transfer_redirect': {
+        'iso27001':     ['A.5.25', 'A.8.15'],
+        'nist_800_53':  ['IR-4', 'SI-4'],
+        'nist_csf':     ['RS.RP-1', 'DE.AE-2'],
+        'soc2':         ['CC7.3', 'CC7.4'],
+    },
+
+    'endpoint:ebpf_rootkit_persist': {
+        'iso27001':     ['A.8.7', 'A.8.15', 'A.8.16'],
+        'nist_800_53':  ['SI-3', 'SI-7', 'AU-6'],
+        'nist_csf':     ['DE.CM-4', 'DE.AE-5'],
+        'cis':          ['CIS-10.1', 'CIS-10.5'],
+    },
+
+    'net:jarm_c2_match': {
+        'iso27001':     ['A.8.22', 'A.8.15'],
+        'nist_800_53':  ['SC-7', 'SI-4'],
+        'nist_csf':     ['DE.CM-1', 'PR.PT-4'],
+    },
 }
 
 # ---------------------------------------------------------------------------
@@ -608,6 +814,12 @@ FRAMEWORK_LABELS: Dict[str, str] = {
     'hipaa':       'HIPAA Security Rule',
     'gdpr':        'GDPR',
     'nist_800_53': 'NIST SP 800-53 Rev 5',
+    # AI / emerging frameworks
+    'iso42001':    'ISO/IEC 42001:2023 AI Management',
+    'owasp_llm':   'OWASP LLM Top 10:2025',
+    'owasp_api':   'OWASP API Top 10:2023',
+    'nist_ai_rmf': 'NIST AI RMF 1.0',
+    'maestro':     'MAESTRO AI Agent Threat Model',
 }
 
 # ---------------------------------------------------------------------------
@@ -626,7 +838,7 @@ def get_compliance_hits(factors: List[str]) -> Dict[str, List[str]]:
     Example:
         {'cis': ['CIS-9.5', 'CIS-10.1'], 'nist_csf': ['DE.CM-1'], ...}
     """
-    hits: Dict[str, set] = {fw: set() for fw in FRAMEWORK_LABELS}
+    hits: Dict[str, set] = {fw: set() for fw in FRAMEWORK_LABELS}  # auto-expands with FRAMEWORK_LABELS
 
     for factor in factors:
         mapping = FACTOR_TO_COMPLIANCE.get(factor)

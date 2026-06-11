@@ -489,25 +489,115 @@ FACTOR_TO_MITRE.update({
 # Optional, non-breaking: ATLAS and OWASP LLM Top 10 tags for factors.
 # These are string tags intended for UI/report enrichment and do not alter ATT&CK mapping.
 FACTOR_TO_ATLAS = {
-    'prompt_injection': ['ATLAS:Prompt Injection'],
-    'tool_abuse': ['ATLAS:Insecure Tool/Plugin Use', 'ATLAS:Model Spec Violation'],
-    'sensitive_output_leak': ['ATLAS:Sensitive Information Disclosure'],
-    'model_evasion_adversarial': ['ATLAS:Evasion/Adversarial Examples'],
-    'training_data_poisoning': ['ATLAS:Poisoning']
+    # Existing AI attack factors → MITRE ATLAS AML.T00xx categories
+    'prompt_injection':             ['ATLAS:AML.T0051 - LLM Prompt Injection'],
+    'tool_abuse':                   ['ATLAS:AML.T0054 - LLM Jailbreak', 'ATLAS:AML.T0057 - LLM Plugin Compromise'],
+    'sensitive_output_leak':        ['ATLAS:AML.T0043 - Craft Adversarial Data'],
+    'model_evasion_adversarial':    ['ATLAS:AML.T0015 - Evade ML Model', 'ATLAS:AML.T0048 - Backdoor ML Model'],
+    'training_data_poisoning':      ['ATLAS:AML.T0020 - Poison Training Data'],
+    # AI supply chain / model integrity
+    'model_supply_chain_tamper':    ['ATLAS:AML.T0010 - ML Supply Chain Compromise'],
+    'model_inversion_attack':       ['ATLAS:AML.T0024 - Infer Training Data Membership'],
+    'model_extraction':             ['ATLAS:AML.T0030 - Model API Enumeration'],
+    # Agent / agentic AI threats
+    'agent_goal_hijack':            ['ATLAS:AML.T0051 - LLM Prompt Injection', 'ATLAS:AML.T0054 - LLM Jailbreak'],
+    'agent_memory_poisoning':       ['ATLAS:AML.T0020 - Poison Training Data'],
+    'agent_tool_misuse':            ['ATLAS:AML.T0057 - LLM Plugin Compromise'],
+    # Infrastructure eBPF → ML pipeline attack surface
+    'endpoint:ebpf_kprobe_on_secfn': ['ATLAS:AML.T0010 - ML Supply Chain Compromise'],
+    # Network fingerprinting aids model server targeting
+    'net:jarm_c2_match':            ['ATLAS:AML.T0030 - Model API Enumeration'],
 }
 
 FACTOR_TO_OWASP_LLM = {
-    'prompt_injection': ['LLM01: Prompt Injection'],
-    'sensitive_output_leak': ['LLM02: Insecure Output Handling','LLM04: Data Leakage','LLM05: Excessive Data Exposure'],
-    'tool_abuse': ['LLM06: Excessive Agency'],
-    'model_evasion_adversarial': ['LLM08: Model Theft/Abuse'],
-    'training_data_poisoning': ['LLM09: Training Data Poisoning']
+    # LLM Top 10 2025 (updated from 2023 edition)
+    'prompt_injection':             ['LLM01:2025 - Prompt Injection'],
+    'sensitive_output_leak':        ['LLM02:2025 - Sensitive Information Disclosure',
+                                     'LLM06:2025 - Excessive Agency'],
+    'tool_abuse':                   ['LLM06:2025 - Excessive Agency',
+                                     'LLM07:2025 - System Prompt Leakage'],
+    'model_evasion_adversarial':    ['LLM05:2025 - Improper Output Handling'],
+    'training_data_poisoning':      ['LLM04:2025 - Data and Model Poisoning'],
+    'model_extraction':             ['LLM10:2025 - Unbounded Consumption'],
+    'agent_memory_poisoning':       ['LLM04:2025 - Data and Model Poisoning'],
+    'agent_goal_hijack':            ['LLM01:2025 - Prompt Injection'],
+    'model_supply_chain_tamper':    ['LLM03:2025 - Supply Chain Vulnerabilities'],
+    # NEW 2025 entries not in 2023
+    'vector_db_poisoning':          ['LLM08:2025 - Vector and Embedding Weaknesses'],
+    'rag_context_injection':        ['LLM08:2025 - Vector and Embedding Weaknesses',
+                                     'LLM01:2025 - Prompt Injection'],
+    'model_dos_token_flood':        ['LLM10:2025 - Unbounded Consumption'],
+    'system_prompt_exfil':          ['LLM07:2025 - System Prompt Leakage'],
+    'mcp_tool_injection':           ['LLM01:2025 - Prompt Injection',
+                                     'LLM06:2025 - Excessive Agency'],
 }
 
 # CASB / DLP factor mappings
 FACTOR_TO_MITRE.update({
     'dlp:casb_policy_match':   ['T1213', 'T1530'],
     'dlp:crowdstrike_fp_match': ['T1565', 'T1213'],
+})
+
+# ── MITRE ATT&CK v14 / v15 new techniques (2023-2024) ────────────────────────
+FACTOR_TO_MITRE.update({
+    # T1649 — Steal or Forge Authentication Certificates (ADCS abuse)
+    'iam:adcs_cert_request_abuse':        ['T1649'],
+    'iam:adcs_esc1_misconfiguration':     ['T1649'],
+    'iam:adcs_esc4_template_write':       ['T1649', 'T1484.001'],
+    'iam:adcs_golden_cert_forge':         ['T1649', 'T1558'],
+    # T1651 — Cloud Administration Command
+    'cloud:ssm_run_command_unusual':      ['T1651'],
+    'cloud:aws_ssm_command_burst':        ['T1651', 'T1059'],
+    'cloud:azure_run_command_privilege':  ['T1651', 'T1098'],
+    # T1654 — Log Enumeration
+    'cloud:cloudtrail_enumeration':       ['T1654', 'T1087'],
+    'cloud:log_analytics_query_burst':    ['T1654'],
+    'endpoint:event_log_read_programmatic': ['T1654', 'T1083'],
+    # T1657 — Financial Theft (BEC wire fraud, crypto theft)
+    'email:bec_wire_transfer_redirect':   ['T1657', 'T1566.003'],
+    'cloud:crypto_wallet_api_access':     ['T1657', 'T1552'],
+    # T1659 — Content Injection (MITM / adversary-in-the-middle content mod)
+    'net:content_injection_mitm':         ['T1659', 'T1557'],
+    'net:tls_stripping_inject':           ['T1659', 'T1553'],
+    # T1666 — Modify Cloud Compute Configuration
+    'cloud:ec2_userdata_modification':    ['T1666'],
+    'cloud:vm_extension_script_inject':   ['T1666', 'T1059'],
+    'cloud:lambda_env_var_modification':  ['T1666', 'T1552'],
+})
+
+# ── Extended eBPF / kernel threat factors ─────────────────────────────────────
+FACTOR_TO_MITRE.update({
+    'endpoint:ebpf_rootkit_persist':      ['T1014', 'T1547.006', 'T1562.001'],
+    'endpoint:ebpf_map_read_large':       ['T1083', 'T1005'],
+    'endpoint:ebpf_packet_rewrite':       ['T1565.002', 'T1659'],
+    'endpoint:ebpf_perf_buffer_flood':    ['T1499', 'T1562'],
+    'endpoint:ebpf_kprobe_on_secfn':      ['T1014', 'T1562.001'],
+    'endpoint:ebpf_uprobe_libc':          ['T1055', 'T1014'],
+    'endpoint:ebpf_prog_persistent':      ['T1014', 'T1547.006'],
+    'endpoint:ebpf_map_pin_suspicious':   ['T1014'],
+    'endpoint:bpf_filter_on_socket':      ['T1040', 'T1014'],
+})
+
+# ── DKIM / DMARC / ARC email authentication depth factors ────────────────────
+FACTOR_TO_MITRE.update({
+    'email:dkim_fail_aligned':            ['T1566', 'T1036'],
+    'email:dmarc_fail_quarantine':        ['T1566', 'T1036.005'],
+    'email:arc_chain_break':              ['T1566', 'T1565'],
+    'email:spf_softfail_dmarc_none':      ['T1566'],
+    'email:dkim_replay_attack':           ['T1550', 'T1566'],
+    'email:dmarc_reject_policy_absent':   ['T1566'],
+    'email:bimi_spoof_attempt':           ['T1566', 'T1036'],
+})
+
+# ── Network fingerprinting: JARM, JA4+ ───────────────────────────────────────
+FACTOR_TO_MITRE.update({
+    'net:jarm_c2_match':                  ['T1071.001', 'T1090.001', 'T1573'],
+    'net:jarm_novel_server_fp':           ['T1090', 'T1571'],
+    'net:ja4_novel_fingerprint':          ['T1071.001', 'T1571'],
+    'net:ja4h_suspicious_http':           ['T1071.001'],
+    'net:ja4s_server_impersonation':      ['T1557', 'T1573'],
+    'net:ja4l_low_latency_c2':            ['T1071.001', 'T1573'],
+    'net:ja4_ja3_mismatch':               ['T1036', 'T1565'],
 })
 
 def get_all_mappings(factors: list[str]) -> dict[str, list[str]]:
