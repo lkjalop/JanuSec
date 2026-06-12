@@ -96,10 +96,20 @@ def _calibrate_cluster_confidence(cluster: dict) -> None:
         or 0.0
     )
 
-    # Calibration weight: scales from 0 (no evidence, no triage signal) → 1.0
-    # Evidence term: 0→1 over 20 rows;  triage term: 0→1 over the score range.
-    # Combined max = 0.625 + 0.375 = 1.0 so the floor ranges hit their stated ceilings.
-    weight = min(1.0, evidence_count / 20.0) * 0.625 + min(1.0, triage_score) * 0.375
+    # Corroboration signals — a fallback verdict backed by MULTIPLE telemetry sources
+    # and/or a cross-cluster kill-chain progression is more trustworthy than a single-
+    # source one. (LLM-narrated clusters already factor these via the prompt, so this
+    # boost applies only on the fallback path and cannot double-count.)
+    _sources = cluster.get("sources") or cluster.get("source_types") or []
+    source_count = len(set(_sources)) if isinstance(_sources, (list, set, tuple)) else 0
+    has_campaign_link = bool(cluster.get("_campaign_links"))
+
+    # Calibration weight: evidence + triage (base) + corroboration (sources + linkage).
+    # Base terms scale 0→1 over 20 rows and the triage range; corroboration adds up to
+    # 0.20 (≈3+ sources) and 0.10 (linked) so strongly-corroborated fallbacks floor higher.
+    base = min(1.0, evidence_count / 20.0) * 0.625 + min(1.0, triage_score) * 0.375
+    corroboration = min(0.20, max(0, source_count - 1) * 0.10) + (0.10 if has_campaign_link else 0.0)
+    weight = min(1.0, base + corroboration)
 
     if verdict in {"VALIDATED_BREACH", "CONFIRMED_BREACH", "CONFIRMED_INTRUSION"}:
         floor = 0.55 + weight * 0.25   # 0.55 → 0.80 (at weight=1.0)

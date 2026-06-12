@@ -1200,3 +1200,42 @@ class TestCampaignLinkSurfacing:
         narrative = {'verdict': 'VALIDATED_BREACH', 'confidence': 0.9}
         _apply_narrative_to_cluster(cluster, narrative, upgrade_only=True)
         assert narrative.get('campaign_links') == cluster['_campaign_links']
+
+
+class TestConfidenceCorroboration:
+    """Sprint 7: fallback confidence calibration factors source diversity + campaign linkage."""
+
+    def test_corroboration_raises_partial_fallback(self):
+        from src.core.ingest.assessment_worker import _calibrate_cluster_confidence
+        single = {'_narrator_source': 'fallback', 'final_verdict': 'VALIDATED_BREACH',
+                  'row_count': 5, 'triage_score': 0.5, 'sources': ['iam'], 'confidence': 0.0}
+        multi = {'_narrator_source': 'fallback', 'final_verdict': 'VALIDATED_BREACH',
+                 'row_count': 5, 'triage_score': 0.5,
+                 'sources': ['iam', 'endpoint', 'network', 'cloud'],
+                 '_campaign_links': [{'relationship': 'precedes'}], 'confidence': 0.0}
+        _calibrate_cluster_confidence(single)
+        _calibrate_cluster_confidence(multi)
+        assert multi['confidence'] > single['confidence']
+
+    def test_llm_confidence_untouched(self):
+        from src.core.ingest.assessment_worker import _calibrate_cluster_confidence
+        c = {'_narrator_source': 'llm_structured', 'confidence': 0.7, 'sources': ['a', 'b', 'c']}
+        _calibrate_cluster_confidence(c)
+        assert c['confidence'] == 0.7
+
+
+class TestCampaignOverflowRetention:
+    """Sprint 7: breach campaigns beyond MAX_CAMPAIGNS are demoted to isolated, not dropped."""
+
+    def test_overflow_demoted_not_dropped(self, monkeypatch):
+        from src.core.ingest import cluster_merge as cm
+        # 10 breach campaign primaries, cap 8 → 2 overflow retained as isolated
+        clusters = [{'cluster_id': f'b{i}', 'verdict': 'VALIDATED_BREACH', 'cluster_kind': 'campaign',
+                     'row_count': 100 - i, 'row_refs': list(range(i, i + 3)),
+                     'shared_users': [f'u{i}'], 'shared_ips': [f'10.0.0.{i}']} for i in range(10)]
+        out = cm._campaign_rollup(clusters, max_campaigns=8)
+        # nothing dropped — all 10 still present
+        assert len(out) == 10
+        overflow = [c for c in out if c.get('_campaign_overflow')]
+        assert len(overflow) == 2
+        assert all(c.get('_isolated') for c in overflow)

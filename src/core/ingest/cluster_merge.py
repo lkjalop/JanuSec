@@ -1515,12 +1515,26 @@ def _campaign_rollup(clusters: list[dict], max_campaigns: int = 8) -> list[dict]
         primary['_merged_cluster_count'] = len(members)
         merged.append(primary)
 
-    # Sort by verdict rank desc, then row_count desc; cap to max_campaigns
+    # Sort by verdict rank desc, then row_count desc; cap to max_campaigns.
     merged.sort(
         key=lambda c: (_VERDICT_RANK.get(str(c.get('verdict', '')), 0), int(c.get('row_count') or 0)),
         reverse=True,
     )
-    return merged[:max_campaigns] + other_clusters
+    # The cap prevents UI proliferation, but truncating DELETED real breach campaigns
+    # silently. Instead, demote the overflow to ISOLATED (retained for audit, not
+    # headlined as actionable) so nothing is lost and the actionable set stays clean.
+    kept = merged[:max_campaigns]
+    overflow = merged[max_campaigns:]
+    if overflow:
+        for c in overflow:
+            c["_campaign_overflow"] = True
+            c["_isolated"] = True  # routed to the isolated/audit bucket, not dropped
+        logger.warning(
+            "cluster_merge: %d breach campaign(s) beyond MAX_CAMPAIGNS=%d demoted to "
+            "isolated (retained, not dropped) — raise JANUSEC_MAX_CAMPAIGNS to roll them up",
+            len(overflow), max_campaigns,
+        )
+    return kept + overflow + other_clusters
 
 
 # ── Public entrypoint ────────────────────────────────────────────────────────
