@@ -506,6 +506,42 @@ def _prior_cycle_block(cluster: dict) -> str:
     )
 
 
+_KC_STAGE_NAMES = {
+    0: "initial access", 1: "execution", 2: "persistence", 3: "privilege escalation",
+    4: "credential access", 5: "collection", 6: "lateral movement", 7: "C2",
+    8: "exfiltration", 9: "impact",
+}
+
+
+def _campaign_link_block(cluster: dict) -> str:
+    """Tell the LLM this cluster is one stage of a larger campaign (from the
+    behavioral linkage in cluster_merge), so the narrative is framed as part of a
+    progression rather than an isolated event."""
+    links = cluster.get("_campaign_links")
+    if not links or not isinstance(links, list):
+        return ""
+    precedes = [l for l in links if l.get("relationship") == "precedes"]
+    follows = [l for l in links if l.get("relationship") == "follows"]
+    parts: list[str] = []
+    if follows:
+        f = follows[0]
+        stage = _KC_STAGE_NAMES.get(f.get("kc_from"), "an earlier stage")
+        parts.append(f"this activity FOLLOWS earlier {stage} activity in the same campaign")
+    if precedes:
+        p = precedes[0]
+        stage = _KC_STAGE_NAMES.get(p.get("kc_to"), "a later stage")
+        parts.append(f"this activity PRECEDES later {stage} activity in the same campaign")
+    if not parts:
+        return ""
+    return (
+        "CAMPAIGN CONTEXT: This cluster is one stage of a multi-stage campaign — "
+        + "; ".join(parts)
+        + ". Frame the narrative as part of an ongoing intrusion (the attacker progressed "
+        "through the kill chain), and calibrate confidence upward given the corroborating "
+        "cross-cluster progression."
+    )
+
+
 def _build_prompt(cluster: dict, evidence_rows: list[dict]) -> str:
     cluster_id = cluster.get("cluster_id") or "unknown"
 
@@ -572,6 +608,9 @@ def _build_prompt(cluster: dict, evidence_rows: list[dict]) -> str:
         optional_sections += f"\n{dread_block}\n"
     if prior_block:
         optional_sections += f"\n{prior_block}\n"
+    campaign_block = _campaign_link_block(cluster)
+    if campaign_block:
+        optional_sections += f"\n{campaign_block}\n"
 
     return f"""You are a senior threat analyst. The deterministic detection pipeline has pre-classified this cluster.
 
@@ -852,6 +891,11 @@ def _apply_narrative_to_cluster(cluster: dict, narrative: dict, *, upgrade_only:
     # Hoist narrator source to cluster top-level so exec summary can find it
     # without walking into llm_narrative (which shallow threat_cases copies lack)
     cluster["_narrator_source"] = narrative.get("_narrator_source", "fallback")
+    # Surface behavioral campaign linkage on the narrative so the exec summary / UI can
+    # render the cross-cluster progression (it was computed in cluster_merge but read
+    # nowhere). Each link: {cluster_id, relationship, kc_from, kc_to, gap_s, affinity}.
+    if cluster.get("_campaign_links"):
+        narrative["campaign_links"] = cluster["_campaign_links"]
 
 
 # Map deterministic phase case_roles (cluster_merge) → narrator kill-chain vocabulary,
@@ -1445,13 +1489,23 @@ def narrate_top_clusters(
                 c = _cluster_map.get(cid, {})
                 _arc_inputs.append({
                     'cluster_id': cid,
-                    'narrative': n.get('narrative') or '',
-                    'kill_chain_phases': c.get('attack_phases') or [],
+                    'narrative': n.get('narrative') or n.get('attack_narrative') or '',
+                    'kill_chain_phases': c.get('attack_phases') or c.get('kill_chain_stages') or [],
                     'iocs': list(c.get('iocs') or []),
                     'mitre_techniques': list(c.get('mitre_techniques') or []),
                     'dread_score': c.get('dread_score') or {},
                     'verdict': c.get('verdict') or n.get('verdict') or '',
+                    'campaign_links': c.get('_campaign_links') or [],
                 })
+            # Order by kill-chain progression so the arc reads as a coherent timeline:
+            # clusters that PRECEDE others come first. Linked clusters sort by their
+            # earliest kill-chain stage; unlinked keep relative order at the end.
+            def _arc_sort_key(item):
+                links = item.get('campaign_links') or []
+                kc = min((l.get('kc_from', 99) for l in links), default=99)
+                has_link = 1 if links else 0
+                return (-has_link, kc)
+            _arc_inputs.sort(key=_arc_sort_key)
 
             _loop = _asyncio.new_event_loop()
             _arc_text = _loop.run_until_complete(
