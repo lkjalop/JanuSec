@@ -1861,6 +1861,9 @@ async def run_assessment_pipeline(
         _chrono_first_seen: dict[str, set] = {}  # user -> new hosts seen this assessment
         _chrono_offhours_recon_counts: dict[str, int] = {}
         _chrono_recon_days: dict[str, set[str]] = {}
+        # Max event timestamp across the data — anchors ChronoGraph z-score windows to the
+        # DATA's time range, not wall-clock now (these are historical logs).
+        _chrono_ref_ts: float = 0.0
         try:
             from src.core.chrono.sketch_store import CHRONO as _chrono
             _ch_rows = 0
@@ -1914,6 +1917,8 @@ async def run_assessment_pipeline(
                 _ts_ch = float(_row_ch.get("_ts_epoch") or 0)
                 if not _ts_ch:
                     continue
+                if _ts_ch > _chrono_ref_ts:
+                    _chrono_ref_ts = _ts_ch
                 _u_ch = str(_row_ch.get("user_canonical") or _row_ch.get("user") or "").strip().lower()
                 _h_ch = str(
                     _row_ch.get("host") or _row_ch.get("hostname") or
@@ -2040,9 +2045,10 @@ async def run_assessment_pipeline(
                     if not _u_j:
                         continue
                     _u_j = str(_u_j).strip().lower()
+                    _ref_j = _chrono_ref_ts or None  # anchor windows to the data's time range
                     # Gap 1: off-hours recon sequence
                     _rz = _chrono_j.z_score("user", _u_j, "off_hours_recon_events",
-                                            window_seconds=86400 * 7)
+                                            window_seconds=86400 * 7, reference_ts=_ref_j)
                     if (
                         _rz.get("anomaly")
                         or abs(float(_rz.get("z") or 0)) >= 2.5
@@ -2052,11 +2058,11 @@ async def run_assessment_pipeline(
                         _new_f.append("recon:sustained_offhours_sequence")
                     # Gap 2: cumulative bytes anomaly
                     _bz = _chrono_j.z_score("user", _u_j, "bytes_out",
-                                            window_seconds=86400 * 7)
+                                            window_seconds=86400 * 7, reference_ts=_ref_j)
                     if _bz.get("anomaly") or abs(float(_bz.get("z") or 0)) >= 2.5:
                         _new_f.append("exfil:cumulative_bytes_anomaly")
                     _cbz = _chrono_j.z_score("user", _u_j, "cloud_bytes_out",
-                                             window_seconds=86400 * 7)
+                                             window_seconds=86400 * 7, reference_ts=_ref_j)
                     if (_cbz.get("anomaly") or abs(float(_cbz.get("z") or 0)) >= 2.5
                             and "exfil:cumulative_bytes_anomaly" not in _new_f):
                         _new_f.append("exfil:cumulative_cloud_bytes_anomaly")
@@ -2096,7 +2102,8 @@ async def run_assessment_pipeline(
             def _safe_z(chrono, etype, entity, metric, window=86400 * 7):
                 try:
                     return float(chrono.z_score(etype, entity, metric,
-                                               window_seconds=window).get("z") or 0.0)
+                                               window_seconds=window,
+                                               reference_ts=(_chrono_ref_ts or None)).get("z") or 0.0)
                 except Exception:
                     return 0.0
 
