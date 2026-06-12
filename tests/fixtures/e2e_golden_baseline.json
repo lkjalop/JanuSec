@@ -12,7 +12,7 @@
       "behavioral_links": 4,
       "empty_entity_clusters": 0,
       "validated_breaches": 6,
-      "_elapsed_s": 21.8
+      "_elapsed_s": 32.5
     },
     "meridian": {
       "rows": 24438,
@@ -25,12 +25,12 @@
       "behavioral_links": 2,
       "empty_entity_clusters": 0,
       "validated_breaches": 8,
-      "_elapsed_s": 6.9
+      "_elapsed_s": 5.9
     },
     "santos": {
       "rows": 43834,
       "actionable_clusters": 10,
-      "isolated_clusters": 1,
+      "isolated_clusters": 3,
       "cluster_merge_version": "1.10",
       "evidence_retention_rate": 1.0,
       "oversized_clusters": 0,
@@ -38,7 +38,7 @@
       "behavioral_links": 1,
       "empty_entity_clusters": 0,
       "validated_breaches": 8,
-      "_elapsed_s": 11.8
+      "_elapsed_s": 10.3
     }
   }
 }
