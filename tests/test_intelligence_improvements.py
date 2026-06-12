@@ -1172,3 +1172,31 @@ class TestKillChainPhaseRobustness:
     def test_junk_phase_types_ignored(self):
         from src.core.ingest.cluster_narrator import _killchain_from_phases
         assert _killchain_from_phases({'phases': [None, 123, 'impact']}) == ['impact']
+
+
+class TestCampaignLinkSurfacing:
+    """Sprint 7: behavioral _campaign_links are surfaced to narrative + prompt (was discarded)."""
+
+    def test_campaign_block_renders_for_linked_cluster(self):
+        from src.core.ingest.cluster_narrator import _campaign_link_block
+        cl = {'cluster_id': 'c1', '_campaign_links': [
+            {'cluster_id': 'c2', 'relationship': 'precedes', 'kc_from': 4, 'kc_to': 8,
+             'gap_s': 3600, 'affinity': 'shared_cidr16'}]}
+        block = _campaign_link_block(cl)
+        assert 'CAMPAIGN CONTEXT' in block and 'PRECEDES' in block and 'exfiltration' in block
+
+    def test_no_block_without_links(self):
+        from src.core.ingest.cluster_narrator import _campaign_link_block
+        assert _campaign_link_block({'cluster_id': 'x'}) == ''
+
+    def test_follows_relationship(self):
+        from src.core.ingest.cluster_narrator import _campaign_link_block
+        cl = {'_campaign_links': [{'relationship': 'follows', 'kc_from': 3, 'kc_to': 6}]}
+        assert 'FOLLOWS' in _campaign_link_block(cl)
+
+    def test_links_hoisted_to_narrative(self):
+        from src.core.ingest.cluster_narrator import _apply_narrative_to_cluster
+        cluster = {'cluster_id': 'c1', '_campaign_links': [{'cluster_id': 'c2', 'relationship': 'precedes'}]}
+        narrative = {'verdict': 'VALIDATED_BREACH', 'confidence': 0.9}
+        _apply_narrative_to_cluster(cluster, narrative, upgrade_only=True)
+        assert narrative.get('campaign_links') == cluster['_campaign_links']
