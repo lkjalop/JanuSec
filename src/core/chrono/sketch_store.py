@@ -81,18 +81,25 @@ class _EntityMetricBuckets:
         self,
         window_seconds: float,
         current_value: Optional[float] = None,
+        reference_ts: Optional[float] = None,
     ) -> Dict[str, Any]:
-        now = time.time()
-        window_start = now - window_seconds
-        # Historical buckets are those *outside* the current window
+        # reference_ts anchors the window. For HISTORICAL log analysis it must be the
+        # data's max event time, not wall-clock now — otherwise the "current window" is
+        # empty (all buckets are months in the past) and every z-score is meaningless.
+        ref = reference_ts if reference_ts is not None else time.time()
+        window_start = ref - window_seconds
+        ref_bk = _bucket_epoch(ref)
+        start_bk = _bucket_epoch(window_start)
+        # Historical buckets are those *before* the current window; current buckets are
+        # within [window_start, ref] (bounded at ref so future-relative data isn't counted).
         with self._lock:
             current_sum = sum(
                 v for bk, v in self._buckets.items()
-                if bk >= _bucket_epoch(window_start)
+                if start_bk <= bk <= ref_bk
             )
             hist_values = [
                 v for bk, v in self._buckets.items()
-                if bk < _bucket_epoch(window_start)
+                if bk < start_bk
             ]
 
         if current_value is None:
@@ -103,6 +110,7 @@ class _EntityMetricBuckets:
             return {
                 "z": 0.0, "mean": 0.0, "stddev": 0.0,
                 "samples": n, "current": current_value, "anomaly": False,
+                "source": "temporal_sparse",
             }
 
         mean = sum(hist_values) / n
@@ -117,6 +125,7 @@ class _EntityMetricBuckets:
             "samples": n,
             "current": round(current_value, 3),
             "anomaly": abs(z) >= 2.5,
+            "source": "temporal",
         }
 
     def snapshot(self) -> Dict[int, float]:
@@ -140,6 +149,7 @@ class ChronoSketchStore:
         # _store[(entity_type, entity_id, metric)] -> _EntityMetricBuckets
         self._store: Dict[Tuple[str, str, str], _EntityMetricBuckets] = {}
         self._lock = threading.Lock()
+        self._cap_warned = False
 
     # ── Write ─────────────────────────────────────────────────────────────────
 
@@ -160,6 +170,13 @@ class ChronoSketchStore:
         with self._lock:
             if key not in self._store:
                 if len(self._store) >= MAX_ENTITIES:
+                    if not self._cap_warned:
+                        import logging
+                        logging.getLogger(__name__).warning(
+                            "ChronoGraph at MAX_ENTITIES=%d — dropping new entities from "
+                            "anomaly detection (raise JANUSEC_CHRONO_MAX_ENTITIES)", MAX_ENTITIES,
+                        )
+                        self._cap_warned = True
                     return  # cap — don't blow up memory
                 self._store[key] = _EntityMetricBuckets()
             emb = self._store[key]
@@ -199,6 +216,8 @@ class ChronoSketchStore:
         metric: str,
         window_seconds: float = 86400 * 7,
         current_value: Optional[float] = None,
+        reference_ts: Optional[float] = None,
+        allow_population: bool = True,
     ) -> Dict[str, Any]:
         key = (entity_type, entity_id, metric)
         with self._lock:
@@ -207,8 +226,59 @@ class ChronoSketchStore:
             return {
                 "z": 0.0, "mean": 0.0, "stddev": 0.0,
                 "samples": 0, "current": current_value or 0.0, "anomaly": False,
+                "source": "absent",
             }
-        return emb.z_score(window_seconds, current_value)
+        result = emb.z_score(window_seconds, current_value, reference_ts=reference_ts)
+        # Cold-start / single-assessment fallback: when this entity has too little
+        # temporal history to score against itself, score it against the POPULATION —
+        # how far this entity's window value sits from the distribution of all entities
+        # of the same type+metric in the current data. This yields anomalies on the very
+        # first assessment, where temporal z-scores cannot.
+        if allow_population and result.get("samples", 0) < 2:
+            pop = self._population_z(
+                entity_type, entity_id, metric, window_seconds,
+                target_value=result.get("current", current_value or 0.0),
+                reference_ts=reference_ts,
+            )
+            if pop is not None:
+                return pop
+        return result
+
+    def _population_z(
+        self,
+        entity_type: str,
+        entity_id: str,
+        metric: str,
+        window_seconds: float,
+        target_value: float,
+        reference_ts: Optional[float] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Z-score of *target_value* against the window-sum distribution of the entity's
+        PEERS (same type+metric, excluding itself — leave-one-out so a dominant outlier
+        doesn't inflate its own baseline). Returns None if fewer than 3 peers exist."""
+        ref = reference_ts if reference_ts is not None else time.time()
+        start = ref - window_seconds
+        with self._lock:
+            peer_embs = [self._store[k] for k in self._store
+                         if k[0] == entity_type and k[2] == metric and k[1] != entity_id]
+        sums = [e.sum_window(start, ref) for e in peer_embs]
+        sums = [s for s in sums if s > 0]
+        n = len(sums)
+        if n < 3:
+            return None
+        mean = sum(sums) / n
+        variance = sum((x - mean) ** 2 for x in sums) / n
+        stddev = math.sqrt(variance)
+        z = (target_value - mean) / stddev if stddev > 0 else 0.0
+        return {
+            "z": round(z, 3),
+            "mean": round(mean, 3),
+            "stddev": round(stddev, 3),
+            "samples": n,
+            "current": round(target_value, 3),
+            "anomaly": z >= 2.5,  # only HIGH outliers are anomalies in population mode
+            "source": "population",
+        }
 
     def top_entities(
         self,
