@@ -43,6 +43,16 @@ TRIAGE_MIN_FOR_CLUSTER = float(os.getenv("JANUSEC_TRIAGE_MIN_CLUSTER", "0.15"))
 # How many rows max to pass to the clustering engine even after triage filter.
 # Prevents the bucket-cap heuristic from running over enormous datasets.
 CLUSTER_ROW_CAP = int(os.getenv("JANUSEC_CLUSTER_ROW_CAP", "25000"))
+# ChronoGraph must see the FULL telemetry, not the triage-filtered subset — its whole
+# job is to aggregate individually-benign events (recon commands, small uploads) into a
+# pattern. Feeding it only triage-passing rows is why the VESPER recon/exfil blindspots
+# never fired. Generous cap; accumulation is cheap (counter increments).
+CHRONO_ROW_CAP = int(os.getenv("JANUSEC_CHRONO_ROW_CAP", "200000"))
+# Absolute cumulative-bytes floor (per user, per destination, over the window) that flags
+# exfil even when the z-baseline is too thin to score a slow multi-day drip. Default 2 GB
+# catches a 7 GB SharePoint exfil; legitimate high-volume uploaders to allowlisted
+# destinations are suppressed via the operator context channel (Phase 4).
+_EXFIL_DST_BYTES_FLOOR = float(os.getenv("JANUSEC_EXFIL_DST_BYTES_FLOOR", "2000000000"))
 
 PARSE_BATCH_SIZE = int(os.getenv("JANUSEC_PARSE_BATCH_SIZE", "5000"))
 ASSESSMENT_EVIDENCE_PREVIEW_CAP = int(os.getenv("JANUSEC_ASSESSMENT_EVIDENCE_PREVIEW_CAP", "500"))
@@ -1876,6 +1886,18 @@ async def run_assessment_pipeline(
         _chrono_ref_ts: float = 0.0
         try:
             from src.core.chrono.sketch_store import CHRONO as _chrono
+            # Full-telemetry row set for ChronoGraph (min_triage=0 — see CHRONO_ROW_CAP).
+            # Falls back to filtered_rows if the unfiltered load is empty/fails.
+            try:
+                _chrono_rows = await asyncio.to_thread(
+                    _store.load_rows, assessment_id, min_triage=0.0, limit=CHRONO_ROW_CAP,
+                )
+            except Exception:
+                _chrono_rows = None
+            if not _chrono_rows:
+                _chrono_rows = filtered_rows
+            logger.info("Stage 5i: ChronoGraph over %d rows (vs %d clustered) for %s",
+                        len(_chrono_rows), len(filtered_rows), assessment_id)
             _ch_rows = 0
             _tz_offset_h = int(os.getenv("JANUSEC_ORG_TZ_OFFSET_H", "0"))
             _ORG_TENANT_5I = os.getenv("JANUSEC_ORG_TENANT_NAME", "").strip().lower()
@@ -1910,7 +1932,7 @@ async def run_assessment_pipeline(
                     return ""
 
             _host_users_5i: dict[str, set[str]] = {}
-            for _row_hu in filtered_rows:
+            for _row_hu in _chrono_rows:
                 if not isinstance(_row_hu, dict):
                     continue
                 _u_hu = str(_row_hu.get("user_canonical") or _row_hu.get("user") or "").strip().lower()
@@ -1921,7 +1943,7 @@ async def run_assessment_pipeline(
                 if _u_hu and _h_hu:
                     _host_users_5i.setdefault(_h_hu, set()).add(_u_hu)
 
-            for _row_ch in filtered_rows:
+            for _row_ch in _chrono_rows:
                 if not isinstance(_row_ch, dict):
                     continue
                 _ts_ch = float(_row_ch.get("_ts_epoch") or 0)
@@ -1956,6 +1978,13 @@ async def run_assessment_pipeline(
                         )
                         if _is_cloud_dst:
                             _chrono.increment("user", _u_ch, "cloud_bytes_out", _b_ch, ts=_ts_ch)
+                            # Per-destination cumulative bytes — lets exfil to a single
+                            # (often lookalike) destination stand out from diffuse browsing.
+                            # martin-chen.sharepoint.com accumulates separately from the
+                            # legit acmevesper.sharepoint.com.
+                            if _dst_h_ch:
+                                _chrono.increment("user", _u_ch, f"bytes_out_dst:{_dst_h_ch}",
+                                                  _b_ch, ts=_ts_ch)
                     # Recon event tracking (Gap 1 fix)
                     if _is_recon_cmd_5i(_row_ch):
                         _chrono.increment("user", _u_ch, "recon_events", 1.0, ts=_ts_ch)
@@ -2076,6 +2105,27 @@ async def run_assessment_pipeline(
                     if (_cbz.get("anomaly") or abs(float(_cbz.get("z") or 0)) >= 2.5
                             and "exfil:cumulative_bytes_anomaly" not in _new_f):
                         _new_f.append("exfil:cumulative_cloud_bytes_anomaly")
+                    # Gap 2b: per-destination cumulative exfil with an ABSOLUTE floor.
+                    # z-scores need a baseline; a multi-day drip to one destination may not
+                    # produce one. An absolute cumulative volume to a SINGLE destination is
+                    # the exfil signature regardless — and it names the (often lookalike) host.
+                    try:
+                        _emets = _chrono_j.entity_metrics("user", _u_j, window_seconds=86400 * 30)
+                        _dst_sums = {
+                            k.split("bytes_out_dst:", 1)[1]: float(v.get("window_sum") or 0)
+                            for k, v in _emets.items() if k.startswith("bytes_out_dst:")
+                        }
+                        if _dst_sums:
+                            _top_dst, _top_bytes = max(_dst_sums.items(), key=lambda kv: kv[1])
+                            if _top_bytes >= _EXFIL_DST_BYTES_FLOOR:
+                                if "exfil:cumulative_bytes_anomaly" not in _new_f:
+                                    _new_f.append("exfil:cumulative_bytes_anomaly")
+                                _cl_j.setdefault("_exfil_destinations", {})[_u_j] = {
+                                    "destination": _top_dst,
+                                    "cumulative_bytes": int(_top_bytes),
+                                }
+                    except Exception:
+                        pass
                     # Gap 5: first-seen host access
                     if _chrono_first_seen.get(_u_j):
                         _new_f.append("endpoint:first_seen_host_access")

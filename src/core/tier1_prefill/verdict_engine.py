@@ -98,10 +98,12 @@ def _validate_entity_pins(prefill: dict, allowed: set[str]) -> dict:
         ' '.join(prefill.get('top_actions', [])),
     ])
 
-    # Extract proper-noun-like tokens: CamelCase, ALL_CAPS, or email-like strings
+    # Identifier-shaped tokens only. The final all-caps branch REQUIRES a digit
+    # (AKIA1234EXAMPLE, host SVR01) — plain all-caps English words (RULES, MODE, STYLIST,
+    # MITRE section headers) are NOT entities and must not force a narration fallback.
     candidate_tokens = re.findall(
         r'\b([A-Z][a-z]{2,}\.[A-Za-z]{2,}|[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}'
-        r'|[A-Z]{2,}[-_][A-Z0-9]{2,}|[A-Z][A-Z0-9]{3,})\b',
+        r'|[A-Z]{2,}[-_][A-Z0-9]{2,}|[A-Z]{2,}[0-9][A-Z0-9]{2,})\b',
         text_to_scan,
     )
 
@@ -109,6 +111,11 @@ def _validate_entity_pins(prefill: dict, allowed: set[str]) -> dict:
     for token in candidate_tokens:
         tl = token.lower()
         if tl in _GENERIC_OK:
+            continue
+        # Pure-hex tokens (hash fragments, cluster-id suffixes like BADD91DA) are not
+        # proper-noun entities — a real IOC hash is validated as evidence elsewhere, not
+        # pinned here. Skip them so they don't force a narration fallback.
+        if len(tl) >= 8 and all(c in "0123456789abcdef" for c in tl):
             continue
         # Check if this token (or a substring) is in the allowed entity set
         matched = any(
