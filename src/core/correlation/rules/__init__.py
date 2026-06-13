@@ -48,6 +48,11 @@ if _FAST or _UNDER_PYTEST:
 		importlib.import_module('src.core.correlation.rules.email.bec_supplier_portal_free_reply_enriched')
 		importlib.import_module('src.core.correlation.rules.email.bec_payment_change_dkim_flip_enriched')
 		importlib.import_module('src.core.correlation.rules.batch_more.additional_30')
+		# Cross-platform LOLBin detection rules (have dedicated tests). These were
+		# omitted from the curated test-mode list, so under pytest the rules never
+		# registered and every linux/macos lolbin test failed (fired == []).
+		importlib.import_module('src.core.correlation.rules.linux_lolbins')
+		importlib.import_module('src.core.correlation.rules.macos_lolbins')
 		# Import curated tranche packs last so tranche-specific definitions win
 		# when duplicate rule ids exist across broader packs.
 		importlib.import_module('src.core.correlation.rules.top20_priority')
