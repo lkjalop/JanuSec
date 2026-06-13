@@ -1018,6 +1018,38 @@ def _ensure_entity_coverage(
     return sorted(out, key=lambda r: float(r.get("triage_score") or 0), reverse=True)[:cap]
 
 
+def _build_verified_findings(evidence_rows: list[dict]) -> list:
+    """Construct real VerifiedFinding objects from evidence rows for the scatter-gather
+    narrator. Uses the canonical dataclasses (src.agents.types) rather than an ad-hoc
+    stub, so a new attribute access inside the narrator can't silently break the whole
+    call (which is exactly what happened when the stub lacked compliance_controls)."""
+    from src.agents.types import VerifiedFinding, RawFinding
+    out: list = []
+    for i, r in enumerate(evidence_rows):
+        if not isinstance(r, dict):
+            continue
+        raw = RawFinding(
+            step_index=i,
+            tool=str(r.get("_source_type") or r.get("source_type") or "evidence"),
+            summary=str(r.get("event_text") or r.get("event_name") or "")[:200],
+            evidence=dict(r),
+            source_count=1,
+        )
+        # mitre_techniques is not a RawFinding field, but the narrator reads it via
+        # getattr(..., []) — attach it so MITRE context reaches the lens agents.
+        try:
+            raw.mitre_techniques = list(r.get("mitre_techniques") or [])
+        except Exception:
+            pass
+        out.append(VerifiedFinding(
+            raw=raw,
+            confidence=float(r.get("triage_score") or 0.0),
+            dread_score=5.0,
+            compliance_controls=[],
+        ))
+    return out
+
+
 # ── Public API ────────────────────────────────────────────────────────────────
 
 def narrate_cluster(
@@ -1147,23 +1179,9 @@ def narrate_cluster(
                 tenant_id=assessment_id or "ingest",
                 initial_hypothesis=f"cluster {cluster_id}",
             )
-            # Build minimal VerifiedFinding stubs from evidence rows. Must carry every
-            # attribute the scatter-gather aggregation reads (raw.summary,
-            # raw.mitre_techniques, confidence, compliance_controls) — a missing
-            # attribute previously failed the whole call after the agents had run.
-            _verified = []
-            for _r in evidence:
-                _vf = type('_VF', (), {
-                    'raw': type('_R', (), {
-                        'summary': str(_r.get('event_text') or _r.get('event_name') or '')[:200],
-                        'mitre_techniques': _r.get('mitre_techniques') or [],
-                        'confidence': float(_r.get('triage_score') or 0),
-                    })(),
-                    'confidence': float(_r.get('triage_score') or 0),
-                    'dread_score': 5.0,
-                    'compliance_controls': [],
-                })()
-                _verified.append(_vf)
+            # Real VerifiedFinding objects (canonical dataclasses) — robust against
+            # future attribute accesses, unlike the prior ad-hoc stub.
+            _verified = _build_verified_findings(evidence)
 
             try:
                 _loop = _asyncio.new_event_loop()
