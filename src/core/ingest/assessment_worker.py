@@ -2387,6 +2387,38 @@ async def run_assessment_pipeline(
             for _cl_cal in clusters:
                 _calibrate_cluster_confidence(_cl_cal)
 
+        # ── Stage 5c+: operator sanctioned-context (suppress authorized pentest,
+        # elevate crown-jewel touches). No-op when no context file is configured. ──
+        try:
+            from src.core.operator_context import load_operator_context
+            _opctx = load_operator_context()
+            if not _opctx.is_empty:
+                _suppressed = _elevated = 0
+                for _cl_oc in clusters:
+                    if _opctx.cluster_is_authorized_pentest(_cl_oc):
+                        _cl_oc["_authorized_pentest"] = True
+                        _cl_oc["final_verdict"] = "BENIGN_EXPECTED"
+                        _cl_oc["verdict"] = "BENIGN_EXPECTED"
+                        _cl_oc.setdefault("factor_tags", [])
+                        if "ops:authorized_pentest" not in _cl_oc["factor_tags"]:
+                            _cl_oc["factor_tags"].append("ops:authorized_pentest")
+                        _suppressed += 1
+                        continue  # authorized — do not also elevate
+                    _cj = _opctx.touches_crown_jewel(_cl_oc)
+                    if _cj:
+                        _cl_oc["_crown_jewels_touched"] = _cj
+                        _cl_oc.setdefault("factor_tags", [])
+                        if "impact:crown_jewel_access" not in _cl_oc["factor_tags"]:
+                            _cl_oc["factor_tags"].append("impact:crown_jewel_access")
+                        _cl_oc["severity"] = "critical"
+                        _elevated += 1
+                if _suppressed or _elevated:
+                    logger.info("operator context: %d pentest cluster(s) suppressed, "
+                                "%d crown-jewel cluster(s) elevated for %s",
+                                _suppressed, _elevated, assessment_id)
+        except Exception as exc:
+            logger.debug("operator context stage skipped for %s: %s", assessment_id, exc)
+
         _progress("reasoning", 78, "Building persona dispatch payloads")
         try:
             _enrich_and_dispatch_personas(assessment, clusters, filtered_rows, org)
