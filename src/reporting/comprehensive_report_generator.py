@@ -823,6 +823,59 @@ def _build_soc_page(payload: dict, meta: dict, assessment_view: dict,
                      f'<td>{escape(action)}</td></tr>')
     parts.append('</tbody></table></div>')
 
+    # CORRELATION DETAILS — cross-domain verdict + campaign progression + temporal anomalies.
+    # Surfaces the behavioral _campaign_links and ChronoGraph factors that were previously
+    # computed but never rendered, so the report tells one campaign story.
+    corr = payload.get('correlation') or {}
+    campaign_links = (payload.get('campaign_links') or assessment_view.get('campaign_links')
+                      or [l for r in rows for l in (r.get('campaign_links') or [])])
+    chrono_factors = sorted(
+        {f for r in rows for f in (r.get('_chrono_factors') or [])}
+        | set(assessment_view.get('chrono_factors') or [])
+    )
+    if corr or campaign_links or chrono_factors:
+        parts.append('<div class="section">')
+        parts.append(f'<strong style="color:{accent};display:block;margin-bottom:10px">Correlation details</strong>')
+        if corr:
+            cv = escape(str(corr.get('verdict') or '').upper())
+            _cc = corr.get('confidence')
+            cc_s = f" · {int(float(_cc) * 100)}% confidence" if _cc not in (None, '') else ''
+            doms = ', '.join(escape(str(d)) for d in (corr.get('top_domains') or []))
+            rec = escape(str(corr.get('recommended_action') or ''))
+            parts.append('<table><tbody>')
+            parts.append(f'<tr><td style="width:170px;color:#9bb">Cross-domain verdict</td>'
+                         f'<td style="font-weight:600;color:#f87171">{cv}{cc_s}</td></tr>')
+            if doms:
+                parts.append(f'<tr><td style="color:#9bb">Domains involved</td><td>{doms}</td></tr>')
+            if rec:
+                parts.append(f'<tr><td style="color:#9bb">Recommended action</td>'
+                             f'<td style="font-weight:600;color:#fbbf24">{rec}</td></tr>')
+            parts.append('</tbody></table>')
+        if campaign_links:
+            parts.append('<div style="margin-top:8px;color:#fbbf24">Campaign progression (linked clusters):</div>'
+                         '<ul style="margin:4px 0 0 18px;color:#cbd5e1">')
+            for l in campaign_links[:6]:
+                rel = escape(str(l.get('relationship') or 'linked'))
+                cid = escape(str(l.get('cluster_id') or ''))
+                parts.append(f'<li>{rel} cluster {cid}</li>')
+            parts.append('</ul>')
+        if chrono_factors:
+            parts.append('<div style="margin-top:8px;color:#c7d2fe">Temporal anomalies (ChronoGraph): '
+                         + ' '.join(f'<span class="pill" style="background:#1a2030;color:#c7d2fe">{escape(f)}</span>'
+                                    for f in chrono_factors[:8]) + '</div>')
+        parts.append('</div>')
+
+    # KEY FACTORS — the deterministic signals that drove the verdict.
+    if all_factors:
+        parts.append('<div class="section">')
+        parts.append(f'<strong style="color:{accent};display:block;margin-bottom:8px">Key factors</strong>')
+        parts.append('<div>')
+        for fac, cnt in sorted(all_factors.items(), key=lambda x: -x[1])[:18]:
+            lbl = _FACTOR_LABELS.get(fac, fac)
+            parts.append(f'<span class="pill" style="background:#2a1520;color:#fca5a5">'
+                         f'{escape(str(lbl))} ({cnt})</span>')
+        parts.append('</div></div>')
+
     # IOC TRIAGE table
     hosts_seen, ips_seen, hashes_seen, domains_seen = set(), set(), set(), set()
     for r in rows:
@@ -959,9 +1012,20 @@ def _build_soc_page(payload: dict, meta: dict, assessment_view: dict,
                     or str(r.get('verdict') or '').lower() in ('malicious', 'suspicious', 'review', 'escalate')]
     if flagged_rows:
         coll_parts.append(f'<strong style="color:#9bb;display:block;margin-top:14px">Raw Event Appendix ({len(flagged_rows)} flagged rows)</strong>')
+        # Structured one-line summary per row (no raw-JSON <pre> dump — that was unreadable
+        # and the reason persona reports looked like a data dump).
+        _preview_fields = ('timestamp', 'host', 'user', 'process_name', 'command_line',
+                           'verdict', 'src_ip', 'dst_ip', 'domain', 'dst_domain', 'sha256')
         for i, r in enumerate(flagged_rows[:30]):
-            coll_parts.append(f'<div style="margin:4px 0"><strong style="font-size:11px;color:#9bb">Row {i+1}</strong>'
-                              + _render_row_preview(r) + '</div>')
+            _kv = []
+            for k in _preview_fields:
+                v = r.get(k)
+                if v not in (None, '', 'None'):
+                    _kv.append(f'<span style="color:#7f93a8">{escape(k)}</span>=' + escape(str(v)[:80]))
+            coll_parts.append(
+                f'<div style="margin:4px 0;font-size:11px;line-height:1.5">'
+                f'<strong style="color:#9bb">Row {i+1}</strong> · '
+                + ' · '.join(_kv) + '</div>')
 
     if coll_parts:
         parts.append(_collapsible('Cluster Table & Raw Event Appendix', '\n'.join(coll_parts), accent))
