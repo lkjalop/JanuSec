@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 from typing import Any, Dict
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, HTTPException
 
 try:
     from integrations.threat_intel_client import CLIENT as TI_CLIENT  # type: ignore
