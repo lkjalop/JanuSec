@@ -147,6 +147,26 @@ class OperatorContext:
         d = (dest or "").strip().lower()
         return bool(d) and d in self.sanctioned_destinations
 
+    @staticmethod
+    def _registrable(host: str) -> str:
+        """Last two labels of a host (sharepoint.com from x.sharepoint.com)."""
+        parts = (host or "").strip().lower().rstrip(".").split(".")
+        return ".".join(parts[-2:]) if len(parts) >= 2 else (host or "").lower()
+
+    def lookalike_of_sanctioned(self, dest: str) -> Optional[str]:
+        """If *dest* is an UNsanctioned host sharing a sanctioned host's registrable domain
+        (e.g. martin-chen.sharepoint.com when only acmevesper.sharepoint.com is sanctioned),
+        return the sanctioned host it mimics — else None. Catches the lookalike-subdomain
+        exfil channel without an external tenant-graph lookup."""
+        d = (dest or "").strip().lower()
+        if not d or d in self.sanctioned_destinations:
+            return None
+        d_reg = self._registrable(d)
+        for s in self.sanctioned_destinations:
+            if self._registrable(s) == d_reg and s != d:
+                return s
+        return None
+
 
 _CACHE: Optional[OperatorContext] = None
 

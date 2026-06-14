@@ -72,3 +72,21 @@ class TestCrownJewelAndDestinations:
     def test_sanctioned_destination(self):
         assert self.c.is_sanctioned_destination("acmevesper.sharepoint.com")
         assert not self.c.is_sanctioned_destination("martin-chen.sharepoint.com")
+
+
+class TestLookalikeDetection:
+    def setup_method(self):
+        self.c = OperatorContext({"sanctioned_destinations": ["acmevesper.sharepoint.com"]})
+
+    def test_lookalike_subdomain_flagged(self):
+        assert self.c.lookalike_of_sanctioned("martin-chen.sharepoint.com") == "acmevesper.sharepoint.com"
+
+    def test_sanctioned_itself_not_lookalike(self):
+        assert self.c.lookalike_of_sanctioned("acmevesper.sharepoint.com") is None
+
+    def test_unrelated_domain_not_lookalike(self):
+        assert self.c.lookalike_of_sanctioned("mega.nz") is None
+        assert self.c.lookalike_of_sanctioned("dropbox.com") is None
+
+    def test_empty_context_no_lookalike(self):
+        assert OperatorContext({}).lookalike_of_sanctioned("martin-chen.sharepoint.com") is None
