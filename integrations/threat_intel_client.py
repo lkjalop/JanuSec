@@ -21,6 +21,13 @@ class _ShimClient:
         self._confidence: Dict[str, Dict[str, float]] = {}
         self._origins: Dict[str, Dict[str, str]] = {}
         self.sync_interval = 900
+        # Per-(tenant,feed) enabled state for the /feeds/{feed}/toggle endpoint.
+        self.feed_enabled: Dict[str, Dict[str, bool]] = {}
+        # MITRE technique attribution: factor -> [techniques]; and provenance
+        # factor -> technique -> {source feeds}. Populated by enrichment in prod;
+        # exposed via /techniques/provenance.
+        self.factor_techniques: Dict[str, list] = {}
+        self._technique_provenance: Dict[str, Dict[str, set]] = {}
 
     def _add_ip(self, ip: str, ttl_hours: int = 24) -> None:
         self._ips[ip] = time.time() + float(ttl_hours) * 3600.0
@@ -131,6 +138,46 @@ class _ShimClient:
     async def sync_now(self, source: str) -> dict:
         # Test stub: pretend to sync and return a small summary
         return {'synced': True, 'created': []}
+
+    # Feed enable/disable, keyed per tenant ('*' = global default).
+    def set_feed_enabled(self, feed: str, enabled: bool, tenant_id: str | None = None) -> bool:
+        key = tenant_id or '*'
+        self.feed_enabled.setdefault(key, {})[feed] = bool(enabled)
+        return bool(enabled)
+
+    def is_feed_enabled(self, feed: str, tenant_id: str | None = None) -> bool:
+        key = tenant_id or '*'
+        per = self.feed_enabled.get(key) or self.feed_enabled.get('*') or {}
+        return bool(per.get(feed, True))
+
+    # JSON-serializable view of technique provenance (sets -> sorted lists).
+    def technique_provenance(self) -> Dict[str, Dict[str, list]]:
+        out: Dict[str, Dict[str, list]] = {}
+        for factor, techs in self._technique_provenance.items():
+            out[factor] = {t: sorted(srcs) for t, srcs in (techs or {}).items()}
+        return out
+
+    # Circuit-breaker-guarded HTTP GET for feed fetches. Returns the response on
+    # success, None on a network error (after recording the failure), and raises
+    # circuit_open once the breaker has tripped.
+    async def _http_get(self, url: str):
+        import os
+        from core.net.circuit_breaker import get_circuit
+        cb = get_circuit('intel_http')
+        # Honor a live CB_FAILURE_THRESHOLD even if the breaker was cached earlier.
+        try:
+            cb.failure_threshold = int(os.getenv('CB_FAILURE_THRESHOLD', cb.failure_threshold) or cb.failure_threshold)
+        except Exception:
+            pass
+        if cb.is_open():
+            raise RuntimeError(f'circuit_open:{cb.name}')
+        import httpx
+        try:
+            async with httpx.AsyncClient() as client:
+                return await client.get(url)
+        except Exception:
+            await cb.record_failure()
+            return None
 
 
 CLIENT = _ShimClient()

@@ -497,6 +497,13 @@ if playbook_router is None:
 from .report_endpoints import router as report_router
 from .soar_endpoints import router as soar_router
 from .nlp_endpoints import router as nlp_router
+# risk_endpoints exposes /api/v1/risk/score|dread; it was listed in the router-spec loop
+# as 'risk_router' but never imported, so globals().get('risk_router') was None and the
+# routes 404'd. Import it so the spec loop mounts it.
+try:
+    from .risk_endpoints import router as risk_router
+except Exception:  # pragma: no cover - optional
+    risk_router = None
 from .report_forwarding_endpoints import router as report_forwarding_router
 from .sbom_endpoints import router as sbom_router
 from .integrations import router as integrations_router_new
@@ -4522,6 +4529,24 @@ def register_core_routers(full: bool = True):
             logger.info('Included alerts_router into app (lite)')
         except Exception:
             logger.debug('alerts_router include failed (lite)')
+        # Risk scoring endpoints (/api/v1/risk/score|dread). These live in the
+        # directly-included loop below, which is skipped when full=False (lite/test
+        # mode), so they 404'd under pytest. Mount here so the lite path serves them.
+        try:
+            from src.api.risk_endpoints import router as _risk_router_lite
+            app.include_router(_risk_router_lite)
+            logger.info('Included risk_router into app (lite)')
+        except Exception:
+            logger.debug('risk_router include failed (lite)')
+        # Supply-chain / SBOM endpoints (/api/v1/sbom/verify_package). Dynamically
+        # mounted only in the post-loop block below, which lite/test mode skips, so
+        # the SBOM routes 404'd under pytest. Mount here for the lite path.
+        try:
+            from src.api.supply_chain_endpoints import router as _supply_chain_router_lite
+            app.include_router(_supply_chain_router_lite)
+            logger.info('Included supply_chain_router into app (lite)')
+        except Exception:
+            logger.debug('supply_chain_router include failed (lite)')
         # Include IAM connector endpoints in lite mode for tests
         try:
             try:
