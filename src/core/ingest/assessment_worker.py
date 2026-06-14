@@ -2077,6 +2077,20 @@ async def run_assessment_pipeline(
             _BREACH_VERD_5J = {"VALIDATED_BREACH", "LIKELY_BREACH", "LIKELY_COMPROMISE", "INCIDENT"}
             _RECON_SEQ_MIN_5J = int(os.getenv("JANUSEC_OFFHOURS_RECON_SEQUENCE_MIN", "4"))
             _RECON_SEQ_DAYS_5J = int(os.getenv("JANUSEC_RECON_SEQUENCE_DAYS_MIN", "4"))
+            # Per-entity behavioral baselining: these counts are accumulated per user in
+            # Stage 5i but were never scored. z_score baselines each user against their OWN
+            # temporal history (falling back to the peer population on cold start), so a spike
+            # in lolbin/encoded-PS/WMI/fan-out/foreign-ASN/auth-failure/external-send activity
+            # surfaces as a factor without any hand-tuned absolute threshold (de-brittling).
+            _BEHAV_METRICS_5J = {
+                "endpoint:lolbin_count": "behavior:lolbin_spike",
+                "endpoint:encoded_ps_count": "behavior:encoded_powershell_spike",
+                "endpoint:wmi_exec_count": "behavior:wmi_exec_spike",
+                "network:unique_dest_count": "behavior:network_fanout_spike",
+                "cloud:foreign_asn_count": "behavior:foreign_asn_spike",
+                "iam:pre_auth_fail_count": "behavior:auth_failure_spike",
+                "email:external_send_count": "behavior:external_send_spike",
+            }
             for _cl_j in clusters:
                 _verd_j = str(_cl_j.get("final_verdict") or _cl_j.get("verdict") or "").upper()
                 if _verd_j not in _BREACH_VERD_5J:
@@ -2149,6 +2163,17 @@ async def run_assessment_pipeline(
                     # Gap 5: first-seen host access
                     if _chrono_first_seen.get(_u_j):
                         _new_f.append("endpoint:first_seen_host_access")
+                    # Gap 6: per-entity behavioral baselining. Score each accumulated
+                    # behavioral count against the user's own history / peer population.
+                    for _bm, _bf in _BEHAV_METRICS_5J.items():
+                        try:
+                            _bz2 = _chrono_j.z_score("user", _u_j, _bm,
+                                                     window_seconds=86400 * 7, reference_ts=_ref_j)
+                            if _bz2.get("anomaly") or abs(float(_bz2.get("z") or 0)) >= 2.5:
+                                if _bf not in _new_f:
+                                    _new_f.append(_bf)
+                        except Exception:
+                            continue
                 if _new_f:
                     _existing_f = _cl_j.setdefault("factor_tags", [])
                     for _ff in set(_new_f):

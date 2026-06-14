@@ -405,6 +405,14 @@ _FACTOR_TAG_LABELS: dict[str, str] = {
     "exfil:cumulative_cloud_bytes_anomaly": "Cumulative cloud exfiltration anomaly (T1567) — aggregate bytes to cloud storage (S3/OneDrive/SharePoint) exceed peer-group norm",
     # Recon
     "recon:sustained_offhours_sequence": "Sustained off-hours activity sequence (T1078) — repeated access events outside business hours over multiple days; consistent with attacker maintaining persistence",
+    # Behavioral baselining — per-entity z-score spikes vs the account's own history (peer-population on cold start)
+    "behavior:lolbin_spike": "LOLBin execution spike (T1218) — living-off-the-land binary usage far above this account's baseline",
+    "behavior:encoded_powershell_spike": "Encoded PowerShell spike (T1059.001/T1027) — obfuscated command volume well above this account's baseline",
+    "behavior:wmi_exec_spike": "WMI execution spike (T1047) — WMI-based execution far above this account's baseline; lateral movement / remote exec indicator",
+    "behavior:network_fanout_spike": "Network fan-out spike (T1046) — unique destination count well above this account's baseline; scanning or C2 spread indicator",
+    "behavior:foreign_asn_spike": "Foreign-ASN access spike (T1078) — connections from unusual networks far above this account's baseline; anomalous geo/infrastructure",
+    "behavior:auth_failure_spike": "Authentication-failure spike (T1110) — pre-auth failures well above this account's baseline; brute-force or password-spray indicator",
+    "behavior:external_send_spike": "External-send spike (T1567/T1114) — outbound email volume far above this account's baseline; collection or exfil indicator",
 }
 
 
