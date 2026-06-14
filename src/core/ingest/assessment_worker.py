@@ -2124,13 +2124,26 @@ async def run_assessment_pipeline(
                         }
                         if _dst_sums:
                             _top_dst, _top_bytes = max(_dst_sums.items(), key=lambda kv: kv[1])
-                            if _top_bytes >= _EXFIL_DST_BYTES_FLOOR:
+                            # Lookalike check: an UNsanctioned destination on a sanctioned
+                            # host's registrable domain (martin-chen.sharepoint.com vs the
+                            # legit acmevesper.sharepoint.com) is hostile even at lower volume.
+                            _mimics = None
+                            try:
+                                from src.core.operator_context import load_operator_context as _loc
+                                _mimics = _loc().lookalike_of_sanctioned(_top_dst)
+                            except Exception:
+                                _mimics = None
+                            if _top_bytes >= _EXFIL_DST_BYTES_FLOOR or _mimics:
                                 if "exfil:cumulative_bytes_anomaly" not in _new_f:
                                     _new_f.append("exfil:cumulative_bytes_anomaly")
-                                _cl_j.setdefault("_exfil_destinations", {})[_u_j] = {
+                                _dst_rec = {
                                     "destination": _top_dst,
                                     "cumulative_bytes": int(_top_bytes),
                                 }
+                                if _mimics:
+                                    _new_f.append("exfil:lookalike_destination")
+                                    _dst_rec["lookalike_of"] = _mimics
+                                _cl_j.setdefault("_exfil_destinations", {})[_u_j] = _dst_rec
                     except Exception:
                         pass
                     # Gap 5: first-seen host access
