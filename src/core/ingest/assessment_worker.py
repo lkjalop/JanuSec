@@ -573,6 +573,13 @@ def _score_async_ingest_row(raw: dict, normalized: dict) -> float:
         "informational": 0.03,
     }.get(sev, 0.05)
 
+    # OAuth illicit-consent grant (excessive scopes + offline persistence) is a primary
+    # intrusion ENTRY POINT — a single, individually-low-volume event. It must survive
+    # triage filtering so it clusters with the actor's later activity and is narrated as
+    # "how they got in". (Set by streaming_ingest._normalize_iam.)
+    if normalized.get("oauth_consent_excessive") or raw.get("oauth_consent_excessive"):
+        score = max(score, 0.85)
+
     # Elevate security-relevant cloud/IAM events above the triage threshold.
     # BAU events (SELECT queries, ListBuckets, routine file access) are NOT
     # elevated — they form single-source noise clusters at scale.

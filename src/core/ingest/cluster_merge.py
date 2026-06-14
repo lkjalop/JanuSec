@@ -322,6 +322,10 @@ def _det_oauth_device_code(row: dict, text: str) -> bool:
     """T1528 / T1550.001 — OAuth Device Code flow phishing; suspicious app consent.
     APT29 (Midnight Blizzard), Storm-0558 primary initial-access technique.
     Also covers delegated-permission grant abuse and rogue app registration."""
+    # Excessive-scope consent flag (set by the normalizer) is a direct, high-confidence
+    # signal regardless of how the operation string is phrased.
+    if row.get('oauth_consent_excessive'):
+        return True
     op = str(row.get('Operation') or row.get('operation') or row.get('event_name') or '').lower()
     if op in (
         'consent to application', 'add app role assignment to service principal',
@@ -2241,6 +2245,24 @@ def _make_phase_child_cluster(
     child_phase = dict(phase)
     child_phase["row_refs"] = phase_rows or sorted(refs)
     child_phase["row_count"] = len(child_phase["row_refs"])
+    # Surface ALL phases present in this child's rows as factor_tags — not just the anchor
+    # phase. Otherwise a secondary-but-critical signal (e.g. the OAuth consent ENTRY POINT
+    # absorbed into a powershell-labelled child) is captured in row_refs but invisible.
+    _present_phases: set[str] = set()
+    _entry_point = None
+    for _r in rows:
+        _present_phases |= detect_row_phase_tags(_r)
+        if _r.get("oauth_consent_excessive") and not _entry_point:
+            _entry_point = {
+                "type": "oauth_consent_grant",
+                "user": _lower(_r.get("user_canonical") or _r.get("user")),
+                "app": _r.get("oauth_app_name"),
+                "scopes": _r.get("oauth_scopes"),
+            }
+    factor_tags = sorted(_present_phases)
+    if _entry_point:
+        if "iam:oauth_consent_excessive_scope" not in factor_tags:
+            factor_tags.append("iam:oauth_consent_excessive_scope")
     lead = (
         f"{phase.get('name') or phase_id.replace('_', ' ').title()} cluster "
         f"around {anchor} - {len(refs)} rows - {len(sources)} telemetry source(s)"
@@ -2261,6 +2283,8 @@ def _make_phase_child_cluster(
         "reason_summary": lead,
         "phases": [child_phase],
         "phase_count": 1,
+        "factor_tags": factor_tags,
+        **({"_entry_point": _entry_point} if _entry_point else {}),
         "phase_anchor_row_count": len(child_phase["row_refs"]),
         "engagement_refs": parent.get("engagement_refs") or [],
         "change_refs": parent.get("change_refs") or [],

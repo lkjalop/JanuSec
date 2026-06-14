@@ -181,6 +181,7 @@ def _normalize_cloud(row: dict) -> dict:
     r.setdefault('region', _safe(row.get('awsRegion') or row.get('location') or ''))
     # Snowflake: start_time is the event timestamp
     r.setdefault('timestamp', _safe(row.get('start_time') or row.get('START_TIME') or ''))
+    _extract_oauth_consent(row, r)  # Azure AD consent can route here too
     r['_source_type'] = SOURCE_CLOUD
     return r
 
@@ -265,8 +266,51 @@ def _normalize_iam(row: dict) -> dict:
         row.get('eventType') or row.get('activityDisplayName') or row.get('displayName') or
         row.get('action') or row.get('Operation') or row.get('eventName') or ''
     ))
+
+    _extract_oauth_consent(row, r)
     r['_source_type'] = SOURCE_IAM
     return r
+
+
+def _extract_oauth_consent(row: dict, r: dict) -> None:
+    """Extract Azure AD OAuth consent-grant scopes from the nested
+    targetResources[].modifiedProperties[].newValue and flag excessive-scope grants.
+
+    Called from BOTH _normalize_iam and _normalize_cloud because Azure AD AuditLogs route
+    to either depending on the source hint — and an excessive-scope consent is a primary
+    intrusion ENTRY POINT that must never be lost to routing. Idempotent / no-op for
+    non-consent events.
+    """
+    _activity = _safe(row.get('activityDisplayName') or row.get('eventType')
+                      or row.get('operationName')).lower()
+    if 'consent' not in _activity:
+        return
+    _scopes: list[str] = []
+    _app_name = ''
+    _app_id = ''
+    for _tr in (row.get('targetResources') or []):
+        if not isinstance(_tr, dict):
+            continue
+        _app_name = _app_name or _safe(_tr.get('displayName'))
+        _app_id = _app_id or _safe(_tr.get('id'))
+        for _mp in (_tr.get('modifiedProperties') or []):
+            if isinstance(_mp, dict) and 'permission' in _safe(_mp.get('displayName')).lower():
+                # Capture both dotted (Mail.Read, Files.Read.All) and underscore
+                # (offline_access) scope forms.
+                _scopes.extend(re.findall(r'[A-Za-z]+(?:[._][A-Za-z]+)+', _safe(_mp.get('newValue'))))
+    if not _scopes:
+        return
+    r['oauth_scopes'] = sorted(set(_scopes))
+    r['oauth_app_name'] = _app_name
+    r['oauth_app_id'] = _app_id
+    r.setdefault('event_name', 'Consent to application')
+    # Excessive-scope = read-all mail/files + offline persistence — the classic
+    # illicit-consent grant pattern (MITRE T1528 / T1098.003).
+    _sl = ' '.join(s.lower() for s in _scopes)
+    r['oauth_consent_excessive'] = (
+        ('mail.read' in _sl or 'files.read' in _sl or 'user.read.all' in _sl)
+        and 'offline_access' in _sl
+    )
 
 
 def _normalize_email(row: dict) -> dict:
