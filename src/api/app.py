@@ -8641,6 +8641,16 @@ try:
         logger.info('ROUTE AUDIT OK — all %d critical routes registered.', len(_REQUIRED_ROUTES))
 except Exception:
     logger.exception('ROUTE AUDIT: audit itself threw')
+    _missing_routes = []
+
+# Strict-wiring gate (JANUSEC_STRICT_WIRING=1): fail fast in CI when a refactor
+# silently drops a critical route, instead of letting it become a runtime 404. Raised
+# OUTSIDE the audit try/except above so the ~1,191 silent_swallow handlers can't
+# swallow it (the very anti-pattern this guards). Collision detection lives in
+# tests/test_route_collisions.py, which inspects the fully-imported app (this audit
+# runs mid-module, before the straggler @app routes below, so it can't see them).
+if os.getenv('JANUSEC_STRICT_WIRING', '0').lower() in {'1', 'true', 'yes'} and _missing_routes:
+    raise RuntimeError(f'STRICT_WIRING: missing critical routes: {_missing_routes}')
 
 
 @app.get('/api/v1/decisions/recent')
