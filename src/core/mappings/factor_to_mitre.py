@@ -600,6 +600,18 @@ FACTOR_TO_MITRE.update({
     'net:ja4_ja3_mismatch':               ['T1036', 'T1565'],
 })
 
+# ── BGP hijack, BEC kill-chain, actor-rate, adaptive-cadence C2 ───────────────
+# Newer detector factors that had no ATT&CK mapping, so get_all_mappings()
+# returned [] and these techniques never surfaced in reports / phase swimlanes.
+FACTOR_TO_MITRE.update({
+    'network:bgp_route_hijack':               ['T1599'],            # Network Boundary Bridging
+    'network:bgp_hijack':                     ['T1599'],            # alias of the above
+    'sequence:bec_kill_chain':                ['T1566', 'T1114.003', 'T1534'],  # phish → inbox rule → internal spread
+    'actor:script_kiddie_rate':               ['T1595'],            # high-rate active scanning
+    'network:c2_jitter_evasion':              ['T1071', 'T1571'],   # app-layer C2 + non-standard port
+    'network:adaptive_ewma_regular_cadence':  ['T1071'],            # regular beacon cadence (app-layer C2)
+})
+
 def get_all_mappings(factors: list[str]) -> dict[str, list[str]]:
     """Return combined mapping tags: ATT&CK techniques, ATLAS, and OWASP LLM.
 
