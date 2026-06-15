@@ -422,6 +422,103 @@ def _normalize_remote(row: dict) -> dict:
     return r
 
 
+# ── OCSF (Open Cybersecurity Schema Framework) ───────────────────────────────
+# AWS Security Lake emits OCSF for AWS + Azure (Event Hub) + GCP (Pub/Sub) +
+# GuardDuty + custom sources. One normalizer ingests that whole multi-cloud estate
+# instead of a parser per vendor. class_uid = category_uid*1000 + class index.
+_OCSF_CLASS_TO_SOURCE = {
+    1001: SOURCE_ENDPOINT,   # File System Activity
+    1007: SOURCE_ENDPOINT,   # Process Activity
+    2001: SOURCE_CLOUD,      # Security Finding
+    2004: SOURCE_CLOUD,      # Detection Finding (GuardDuty / SCC / Defender)
+    3002: SOURCE_IAM,        # Authentication
+    3003: SOURCE_IAM,        # Authorize Session
+    3005: SOURCE_IAM,        # Entity Management
+    4001: SOURCE_NETWORK,    # Network Activity
+    4002: SOURCE_NETWORK,    # HTTP Activity
+    4003: SOURCE_NETWORK,    # DNS Activity
+    4006: SOURCE_EMAIL,      # Email Activity
+    6003: SOURCE_NETWORK,    # API Activity
+    6005: SOURCE_NETWORK,    # Web Resources Access
+}
+
+_OCSF_SEVERITY = {0: 'low', 1: 'low', 2: 'low', 3: 'medium', 4: 'high', 5: 'critical', 6: 'critical'}
+
+
+def _ocsf_get(row: dict, *paths: str):
+    """Nested-path getter for OCSF objects, e.g. _ocsf_get(row, 'actor.user.name')."""
+    for path in paths:
+        cur: Any = row
+        ok = True
+        for part in path.split('.'):
+            if isinstance(cur, dict) and part in cur:
+                cur = cur[part]
+            else:
+                ok = False
+                break
+        if ok and cur not in (None, '', [], {}):
+            return cur
+    return None
+
+
+def _is_ocsf_row(row: dict) -> bool:
+    """OCSF rows carry class_uid (+ usually category_uid / metadata.version)."""
+    if 'class_uid' in row:
+        return True
+    meta = row.get('metadata')
+    return isinstance(meta, dict) and ('version' in meta or 'product' in meta) and 'category_uid' in row
+
+
+def _normalize_ocsf(row: dict) -> dict:
+    """Map an OCSF v1.x event to canonical fields (one parser for the Security-Lake estate)."""
+    r = dict(row)
+    try:
+        class_uid = int(row.get('class_uid') or 0)
+    except (TypeError, ValueError):
+        class_uid = 0
+    st = _OCSF_CLASS_TO_SOURCE.get(class_uid, SOURCE_CLOUD)
+
+    user = _ocsf_get(row, 'actor.user.name', 'actor.user.email_addr', 'user.name', 'user.uid')
+    if user:
+        r.setdefault('user', _safe(user))
+    src_ip = _ocsf_get(row, 'src_endpoint.ip', 'src_endpoint.addr', 'device.ip')
+    if src_ip:
+        r.setdefault('src_ip', _safe(src_ip))
+    dst_ip = _ocsf_get(row, 'dst_endpoint.ip', 'dst_endpoint.addr')
+    if dst_ip:
+        r.setdefault('dst_ip', _safe(dst_ip))
+    host = _ocsf_get(row, 'device.hostname', 'device.name', 'src_endpoint.hostname', 'dst_endpoint.hostname')
+    if host:
+        r.setdefault('hostname', _safe(host))
+    evt = _ocsf_get(row, 'activity_name', 'type_name', 'finding_info.title', 'metadata.event_code')
+    if evt:
+        r.setdefault('event_name', _safe(evt))
+        r.setdefault('event_signature', _safe(evt))
+    sev_id = row.get('severity_id')
+    if sev_id is not None:
+        try:
+            r.setdefault('severity', _OCSF_SEVERITY.get(int(sev_id), 'medium'))
+        except (TypeError, ValueError):
+            pass
+    elif row.get('severity'):
+        r.setdefault('severity', str(row.get('severity')).lower())
+    t = row.get('time') or row.get('time_dt') or _ocsf_get(row, 'metadata.logged_time')
+    if t:
+        r.setdefault('timestamp', _safe(t))
+    geo = _ocsf_get(row, 'src_endpoint.location.country', 'device.location.country')
+    if geo:
+        r.setdefault('geo_country', _safe(geo))
+    asn = _ocsf_get(row, 'src_endpoint.autonomous_system.number', 'src_endpoint.location.asn')
+    if asn:
+        r.setdefault('asn', _safe(asn))
+    prod = _ocsf_get(row, 'metadata.product.name', 'metadata.product.vendor_name')
+    if prod:
+        r.setdefault('_ocsf_product', _safe(prod))
+    r['_source_type'] = st
+    r['_ocsf_class_uid'] = class_uid
+    return r
+
+
 _NORMALIZERS = {
     SOURCE_CLOUD:    _normalize_cloud,
     SOURCE_IAM:      _normalize_iam,
@@ -545,6 +642,11 @@ def normalize_row(row: dict, source_type: str | None = None) -> dict:
     if any(raw_src.startswith(p) for p in _K8S_FALCO_PREFIXES):
         r = _normalize_k8s_falco(row)
         st = SOURCE_ENDPOINT
+    # OCSF (AWS Security Lake / multi-cloud) — structural detection by class_uid,
+    # routed by OCSF class to the right source-type. One parser for the whole estate.
+    elif _is_ocsf_row(row):
+        r = _normalize_ocsf(row)
+        st = r.get('_source_type', SOURCE_CLOUD)
     else:
         # When _source is a filename (no vendor matched), try _section/_sheet
         # as a routing hint.  _section is set by file_parser for multi-section
