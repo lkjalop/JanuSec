@@ -624,6 +624,14 @@ FACTOR_TO_MITRE.update({
     'cloud:ses_leaked_key_send':          ['T1078.004', 'T1567'],   # Amazon SES abuse via leaked IAM key
 })
 
+# ── New telemetry sources: Purview DLP/insider, CDN/WAF edge ──────────────────
+FACTOR_TO_MITRE.update({
+    'data:dlp_violation':                 ['T1567', 'T1530'],       # Purview DLP: sensitive data moved
+    'insider:risk_elevated':              ['T1078', 'T1530'],       # Purview Insider Risk elevation
+    'network:waf_block':                  ['T1190'],                # CDN/WAF: web-exploit attempt blocked at edge
+    'network:edge_recon_scan':            ['T1595'],                # CDN: high-rate scanning at the edge
+})
+
 def get_all_mappings(factors: list[str]) -> dict[str, list[str]]:
     """Return combined mapping tags: ATT&CK techniques, ATLAS, and OWASP LLM.
 

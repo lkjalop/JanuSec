@@ -422,6 +422,11 @@ _FACTOR_TAG_LABELS: dict[str, str] = {
     "endpoint:edr_telemetry_gap": "EDR telemetry gap (T1562.001/T1564) — expected endpoint events missing vs baseline; eBPF/io_uring telemetry tampering / EDR blinding",
     "iam:helpdesk_anomalous_reset": "Helpdesk-driven credential/MFA reset (T1098/T1556) — password/MFA reset outside normal pattern; social-engineering of IT helpdesk",
     "cloud:ses_leaked_key_send": "Amazon SES abuse (T1078.004/T1567) — bulk send via SES from a leaked IAM key; phishing/exfil channel",
+    # New telemetry sources: Purview DLP/insider, CDN/WAF edge
+    "data:dlp_violation": "DLP violation (T1567/T1530) — sensitive data moved against a Purview policy; correlate with exfil arc",
+    "insider:risk_elevated": "Insider risk elevated (T1078/T1530) — Purview Insider Risk raised this account's risk; data-access anomaly",
+    "network:waf_block": "WAF block (T1190) — web-exploit attempt (SQLi/XSS/RCE/path-traversal) blocked at the CDN edge",
+    "network:edge_recon_scan": "Edge recon/scan (T1595) — high-rate scanning observed at the CDN edge before origin",
 }
 
 

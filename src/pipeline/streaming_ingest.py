@@ -119,6 +119,12 @@ _SOURCE_ALIASES: Dict[str, str] = {
     # Remote / VPN / RDP
     'vpn': SOURCE_REMOTE, 'rdp': SOURCE_REMOTE, 'citrix': SOURCE_REMOTE,
     'anyconnect': SOURCE_REMOTE, 'globalprotect': SOURCE_REMOTE,
+    # CDN / edge / WAF — web + edge telemetry (HTTP/WAF/bot); Zero-Trust subsets
+    # (Cloudflare Access) carry identity but route here and surface user via field map.
+    'cloudflare': SOURCE_NETWORK, 'akamai': SOURCE_NETWORK,
+    'fastly': SOURCE_NETWORK, 'cloudfront': SOURCE_NETWORK,
+    # Data governance / DLP / insider risk (Microsoft Purview via O365 Mgmt Activity)
+    'purview': SOURCE_IAM, 'dlp': SOURCE_IAM,
 }
 
 
@@ -563,7 +569,32 @@ CANONICAL_ATTRIBUTION_FIELDS = (
 # code paths. Applied AFTER the generic source-type normalizer, so it adds
 # vendor-specific fidelity (geo, action, rule, asset_class) on top of the baseline.
 # Populated per-vendor (e.g. cloudflare/m365_ual/purview_dlp) alongside their aliases.
-FIELD_MAPS: Dict[str, Dict[str, str]] = {}
+FIELD_MAPS: Dict[str, Dict[str, str]] = {
+    # Cloudflare (HTTP requests / Firewall-WAF / Access Zero-Trust logs)
+    'cloudflare': {
+        'src_ip': 'ClientIP', 'hostname': 'ClientRequestHost', 'geo_country': 'ClientCountry',
+        'asn': 'ClientASN', 'action': 'Action', 'event_signature': 'RuleID',
+        'user': 'Email', 'outcome': 'EdgeResponseStatus', 'asset_class': '_edge',
+    },
+    'akamai': {
+        'src_ip': 'clientIP', 'hostname': 'reqHost', 'geo_country': 'geo',
+        'action': 'action', 'event_signature': 'ruleId', 'asset_class': '_edge',
+    },
+    # Microsoft 365 Unified Audit Log (SharePoint/Exchange/Teams activity)
+    'm365_ual': {
+        'user': 'UserId', 'src_ip': 'ClientIP', 'event_name': 'Operation',
+        'target': 'ObjectId', 'asset_class': 'Workload',
+    },
+    'unified_audit': {
+        'user': 'UserId', 'src_ip': 'ClientIP', 'event_name': 'Operation', 'target': 'ObjectId',
+    },
+    # Microsoft Purview (DLP / Insider Risk / DSPM-for-AI via O365 Mgmt Activity)
+    'purview': {
+        'user': 'UserPrincipalName', 'event_name': 'Operation',
+        'data_class': 'SensitiveInfoType', 'event_signature': 'PolicyName',
+        'target': 'ObjectId', 'outcome': 'PolicyAction',
+    },
+}
 
 
 def _detect_vendor(raw_src: str, row: dict) -> str | None:
