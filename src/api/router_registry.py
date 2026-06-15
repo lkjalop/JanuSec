@@ -48,11 +48,26 @@ def ensure_add_event_handler(app: FastAPI) -> None:
 
 
 def include_optional_router(app: FastAPI, router: Any, logger: Any, *, name: str) -> bool:
-    """Best-effort router include with structured visibility."""
+    """Best-effort router include with structured visibility.
 
+    Returns True if the router was mounted. Previously this function fell through
+    after the None-check and NEVER called app.include_router (the include code was
+    orphaned after a `return` in include_router_specs), so every router passed via
+    include_router_specs was silently dropped — masked only because some were also
+    mounted elsewhere. Restored to actually mount the router.
+    """
     if router is None:
         try:
             logger.debug("router_registry: optional router %s not available", name)
+        except Exception:
+            pass
+        return False
+    try:
+        app.include_router(router)
+        return True
+    except Exception:
+        try:
+            logger.exception("router_registry: failed to include router %s", name)
         except Exception:
             pass
         return False
@@ -65,12 +80,3 @@ def include_router_specs(app: FastAPI, specs: list[tuple[str, Any]], logger: Any
     for name, router in specs:
         results[name] = include_optional_router(app, router, logger, name=name)
     return results
-    try:
-        app.include_router(router)
-        return True
-    except Exception:
-        try:
-            logger.exception("router_registry: failed to include router %s", name)
-        except Exception:
-            pass
-        return False
