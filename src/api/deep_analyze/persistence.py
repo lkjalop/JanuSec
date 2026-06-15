@@ -11,13 +11,63 @@ import datetime
 import json
 import logging
 import os
+import threading
 
 from src.api.persist_utils import atomic_write_json
 
 logger = logging.getLogger(__name__)
 
+
+class _BoundedDict(dict):
+    """Thread-safe dict with a FIFO size cap.
+
+    REPORT_STORE holds one full assessment object per id. Before the Phase A
+    refactor it was a bounded dict; the refactor replaced it with a plain dict,
+    so a long-running server grew it without limit (latent OOM). This restores
+    the cap.
+
+    Semantics:
+      - inserting a NEW key when at capacity evicts the OLDEST key (insertion
+        order); updating an EXISTING key keeps its position and never evicts.
+      - on eviction, if the evicted value carries a ``persisted_path`` it is
+        flushed to disk first, so reads can still recover it via the disk
+        fallback in ``_get_assessment_cached`` (write-through safety).
+      - ``items()`` returns a list snapshot so concurrent writers can't mutate
+        an iterator mid-loop.
+    """
+
+    def __init__(self, *args, maxsize: int = 1024, **kwargs):
+        self._maxsize = max(1, int(maxsize))
+        self._lock = threading.RLock()
+        super().__init__(*args, **kwargs)
+
+    def __setitem__(self, key, value):
+        with self._lock:
+            existing = key in self
+            super().__setitem__(key, value)
+            if not existing and len(self) > self._maxsize:
+                oldest = next(iter(self))
+                self._flush_on_evict(oldest, super().get(oldest))
+                super().__delitem__(oldest)
+
+    def items(self):
+        with self._lock:
+            return list(super().items())
+
+    @staticmethod
+    def _flush_on_evict(key, value) -> None:
+        try:
+            if isinstance(value, dict) and value.get('persisted_path'):
+                atomic_write_json(value['persisted_path'], value)
+        except Exception:
+            logger.debug('REPORT_STORE evict flush failed for %s', key)
+
+
 # Primary in-memory assessment store: assessment_id → assessment dict.
-REPORT_STORE: dict[str, dict] = {}
+# Bounded so a long-running process can't grow it unbounded; persisted entries
+# remain recoverable from disk after eviction.
+_REPORT_STORE_MAX = int(os.getenv('JANUSEC_REPORT_STORE_MAX', '1024') or 1024)
+REPORT_STORE: dict[str, dict] = _BoundedDict(maxsize=_REPORT_STORE_MAX)
 
 # Parent → [child_assessment_id, ...] index for batch/split assessments.
 PARENT_CHILD_INDEX: dict[str, list[str]] = {}
