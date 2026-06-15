@@ -24,6 +24,10 @@ class StageDefinition:
     name: str
     runner: StageRunner
     heavy: bool = False
+    # Optional per-stage wall-clock budget (ms). Enforced for heavy stages when the
+    # pipeline runs them in the executor pool, so one slow/hung stage can't stall the
+    # whole event pipeline. None = no per-stage timeout.
+    timeout_ms: int | None = None
 
 
 @dataclass

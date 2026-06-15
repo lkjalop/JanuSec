@@ -66,11 +66,57 @@ class EventPipeline:
         self.heavy_skip_threshold = float(cfg_get(cfg_get(config, 'pipeline', {}), 'heavy_skip_confidence', 0.8) or 0.8)
         self._egress_history: dict[str, deque[float]] = {}
 
+        # Heavy-stage isolation. When enabled, heavy stages run in a bounded
+        # executor with a timeout, so a slow or crashing heavy stage can't stall
+        # or take down the event pipeline; the error is recorded in
+        # PipelineResult.metadata['stage_errors'] instead. Opt-in (default off) so
+        # the normal streaming path is unchanged. NB: a thread-pool executor
+        # isolates exceptions and enforces timeouts but not native crashes; true
+        # process isolation is deferred until a heavy stage actually needs it.
+        _pipe_cfg = cfg_get(config, 'pipeline', {})
+        self._use_process_pool = bool(cfg_get(_pipe_cfg, 'use_process_pool', False))
+        self._process_pool_timeout = float(cfg_get(_pipe_cfg, 'process_pool_timeout', 30) or 30)
+        self._stage_executor = None
+        # Tests / callers may override the stage list; None = the default registry.
+        self._active_stage_definitions: list[StageDefinition] | None = None
+
     async def initialize(self) -> None:
         self.logger.info('Event pipeline initialized')
 
     async def shutdown(self) -> None:
         self.logger.info('Event pipeline shutdown')
+        ex = self._stage_executor
+        if ex is not None:
+            try:
+                ex.shutdown(wait=False)
+            except Exception:
+                pass
+            self._stage_executor = None
+
+    def _get_stage_executor(self):
+        if self._stage_executor is None:
+            from concurrent.futures import ThreadPoolExecutor
+            self._stage_executor = ThreadPoolExecutor(
+                max_workers=int(cfg_get(cfg_get(self.config, 'pipeline', {}), 'process_pool_workers', 4) or 4),
+                thread_name_prefix='heavy-stage',
+            )
+        return self._stage_executor
+
+    async def _run_heavy_stage(self, stage_def: StageDefinition, event: dict, ctx) -> StageResult:
+        """Run a heavy stage in the executor with a timeout. Raises on timeout or
+        stage error so the caller can record it without stalling the pipeline."""
+        import asyncio
+        import functools
+        timeout_s = None
+        if stage_def.timeout_ms:
+            timeout_s = stage_def.timeout_ms / 1000.0
+        elif self._process_pool_timeout:
+            timeout_s = self._process_pool_timeout
+        loop = asyncio.get_event_loop()
+        fut = loop.run_in_executor(self._get_stage_executor(), functools.partial(stage_def.runner, event, ctx))
+        if timeout_s:
+            return await asyncio.wait_for(fut, timeout=timeout_s)
+        return await fut
 
     async def process_event(self, event: dict[str, Any]) -> PipelineResult:
         start = time.perf_counter()
@@ -112,10 +158,12 @@ class EventPipeline:
         cumulative_factors: list[str] = []
         timings: list[StageTiming] = []
         skipped: list[str] = []
+        stage_errors: list[dict[str, str]] = []
         confidence = 0.0
         terminal_hit = False
 
-        for stage_def in STAGE_DEFINITIONS:
+        _stage_defs = self._active_stage_definitions or STAGE_DEFINITIONS
+        for stage_def in _stage_defs:
             # Optional skip-by-confidence gate (tenant-aware threshold)
             if stage_def.heavy and confidence >= heavy_skip_threshold_evt:
                 skipped.append(stage_def.name)
@@ -142,7 +190,18 @@ class EventPipeline:
                     pass
 
             ctx.state['factors'] = list(cumulative_factors)
-            result = await stage_def.runner(event, ctx)
+            if self._use_process_pool and stage_def.heavy:
+                # Isolated heavy-stage execution: timeout-bounded, errors captured
+                # rather than propagated so one bad stage can't stall/kill the run.
+                try:
+                    result = await self._run_heavy_stage(stage_def, event, ctx)
+                except Exception as exc:
+                    stage_errors.append({'stage': stage_def.name, 'error': repr(exc)})
+                    self.metrics.record_stage_skip(stage_def.name, 'heavy_error')
+                    self._lane_registry = ctx.state.get('lane_registry', self._lane_registry)
+                    continue
+            else:
+                result = await stage_def.runner(event, ctx)
             if not isinstance(result, StageResult):
                 self._lane_registry = ctx.state.get('lane_registry', self._lane_registry)
                 continue
@@ -217,6 +276,8 @@ class EventPipeline:
         breaker_meta = ctx.state.get('breaker_state')
         if breaker_meta:
             metadata['breaker_state'] = breaker_meta
+        if stage_errors:
+            metadata['stage_errors'] = stage_errors
         result.metadata = metadata
         synthesis = self._compute_factor_synthesis(event, cumulative_factors)
         if synthesis:
