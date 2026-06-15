@@ -2923,29 +2923,34 @@ def clear_rate_limits():
 
 
 @pytest.fixture(autouse=True)
-def restore_auth_env():
-    """Snapshot & restore auth-related env vars around each test.
+def restore_environ():
+    """Hermetic env: snapshot the full os.environ before each test and restore it
+    after (re-adding deleted keys, removing added keys, reverting changed values).
 
-    Many test modules set API_KEYS_JSON / ADMIN_UI_TOKEN at module or function
-    scope via os.environ[...]= (not monkeypatch), which leaks across tests: auth
-    is read per-request from these vars, so a neighbor's leaked value makes
-    auth-dependent tests pass alone but fail in the full suite (order artifacts,
-    e.g. test_scope_enforcement, test_auth_smoke). Restoring them to each test's
-    starting value isolates the auth context without touching the tests.
+    Test-isolation root cause: auth and many feature flags are read per-request from
+    os.environ, and ~19 test modules mutate it via os.environ[...]= (not monkeypatch)
+    at module/function scope. That leaks across tests, so order changes the result —
+    tests pass alone but fail in the full suite (scope_enforcement, auth_smoke,
+    smoke_enrichment, fp_ratio_metric, ...). Restoring each test's starting environment
+    makes every test order-independent without rewriting the offending modules.
+
+    NB: module-level os.environ set at import time is captured in the snapshot (it ran
+    before this fixture), so it's preserved during the test and restored to that value
+    after — only *mutations during a test* are undone, which is exactly the leak.
     """
-    _keys = (
-        'API_KEYS_JSON', 'ADMIN_UI_TOKEN', 'TEST_HELPER_API_KEYS',
-        'JWT_SECRET', 'JWT_TEST_SECRET', 'JWT_AUDIENCE', 'JWT_TEST_AUDIENCE',
-        'JWT_ISSUER', 'JWT_TEST_ISSUER',
-    )
-    _saved = {k: os.environ.get(k) for k in _keys}
+    _saved = dict(os.environ)
     try:
         yield
     finally:
+        # Revert added/changed keys.
+        for _k in list(os.environ.keys()):
+            if _k not in _saved:
+                del os.environ[_k]
+            elif os.environ[_k] != _saved[_k]:
+                os.environ[_k] = _saved[_k]
+        # Re-add keys a test deleted.
         for _k, _v in _saved.items():
-            if _v is None:
-                os.environ.pop(_k, None)
-            else:
+            if _k not in os.environ:
                 os.environ[_k] = _v
 
 
