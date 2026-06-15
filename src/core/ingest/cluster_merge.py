@@ -718,6 +718,22 @@ def _det_ike_vpn_exploit(row: dict, text: str) -> bool:
     ))
 
 
+def _det_dlp_exfil(row: dict, text: str) -> bool:
+    """T1567 — Microsoft Purview DLP policy violation: sensitive data moved/blocked.
+    Ties data-governance telemetry into the exfiltration phase so a DLP hit clusters
+    with the intrusion and feeds the exfil-first 'data left before encryption' arc —
+    a data-aware breach story alert-triage tools can't tell."""
+    if row.get('data_class') and str(row.get('outcome') or '').lower() in (
+        'block', 'blocked', 'blockaccess', 'quarantine', 'remove', 'deny'
+    ):
+        return True
+    return any(t in text for t in (
+        'dlp policy', 'dlppolicy', 'dlp rule match', 'dlpruleundo',
+        'sensitive info type', 'sensitiveinfotype', 'data loss prevention',
+        'exfiltration policy', 'insider risk', 'insiderrisk',
+    ))
+
+
 PHASE_DETECTORS: list[PhaseDetector] = [
     PhaseDetector("credential_theft",          "Credential Theft (LSASS)",        "credential_theft",     "critical", _det_lsass),
     PhaseDetector("data_exfiltration_snowflake","Snowflake Bulk Unload",          "data_exfiltration",    "critical", _det_sf_unload),
@@ -759,6 +775,7 @@ PHASE_DETECTORS: list[PhaseDetector] = [
     PhaseDetector("mfa_fatigue",               "MFA Fatigue / Push-Bombing (T1621)",   "initial_access",   "high",     _det_mfa_fatigue),
     PhaseDetector("aitm_session",              "Adversary-in-the-Middle Session Theft (T1557)", "initial_access", "high", _det_aitm_session),
     PhaseDetector("ike_vpn_exploit",           "VPN/IKE Exploit (T1190/T1133)",        "initial_access",   "critical", _det_ike_vpn_exploit),
+    PhaseDetector("dlp_exfil",                 "DLP Policy Violation / Data Exfil (T1567)", "data_exfiltration", "high",  _det_dlp_exfil),
 ]
 
 
