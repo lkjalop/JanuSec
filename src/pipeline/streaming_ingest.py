@@ -125,6 +125,9 @@ _SOURCE_ALIASES: Dict[str, str] = {
     'fastly': SOURCE_NETWORK, 'cloudfront': SOURCE_NETWORK,
     # Data governance / DLP / insider risk (Microsoft Purview via O365 Mgmt Activity)
     'purview': SOURCE_IAM, 'dlp': SOURCE_IAM,
+    # AI agent / MCP (Model Context Protocol) tool-call telemetry — agent executes
+    # tools, so it maps to the ENDPOINT/execution lane for clustering.
+    'mcp': SOURCE_ENDPOINT, 'agent_audit': SOURCE_ENDPOINT, 'openlit': SOURCE_ENDPOINT,
 }
 
 
@@ -594,6 +597,25 @@ FIELD_MAPS: Dict[str, Dict[str, str]] = {
         'data_class': 'SensitiveInfoType', 'event_signature': 'PolicyName',
         'target': 'ObjectId', 'outcome': 'PolicyAction',
     },
+    # FortiGate native key=value syslog (UTM/threat logs carry the IPS/AV signal)
+    'fortinet': {
+        'src_ip': 'srcip', 'dst_ip': 'dstip', 'src_port': 'srcport', 'dst_port': 'dstport',
+        'user': 'user', 'action': 'action', 'category': 'subtype', 'event_name': 'attack',
+        'event_signature': 'attack', 'geo_country': 'srccountry', 'severity': 'crlevel',
+    },
+    # Palo Alto Networks comma-CSV / key=value (traffic/threat/url logs)
+    'paloalto': {
+        'src_ip': 'src', 'dst_ip': 'dst', 'src_port': 'sport', 'dst_port': 'dport',
+        'user': 'srcuser', 'action': 'action', 'category': 'category',
+        'event_name': 'threatid', 'event_signature': 'threatid', 'geo_country': 'srcloc',
+    },
+    # MCP / AI-agent tool-call telemetry (OpenTelemetry spans or MCP server audit).
+    # agent identity -> user; tool -> action; server -> host; request id -> session
+    # so the identity-pivot clustering links an agent's tool calls into one session.
+    'mcp': {
+        'user': 'agent_id', 'event_name': 'tool_name', 'hostname': 'mcp_server',
+        'session_id': 'request_id', 'action': 'mcp_event', 'target': 'resource_uri',
+    },
 }
 
 
@@ -610,11 +632,19 @@ def _detect_vendor(raw_src: str, row: dict) -> str | None:
     return None
 
 
+# Generic placeholder values a vendor field map MAY override — the source-type
+# normalizer fills these as defaults (e.g. event_name='flow'), but the vendor's
+# specific value (e.g. the IPS signature name) is strictly better.
+_GENERIC_PLACEHOLDERS = frozenset({'', 'flow', 'event', 'vpn_event', 'generic', 'unknown', '-'})
+
+
 def _apply_field_map(row: dict, r: dict, vendor: str) -> None:
-    """Fill canonical fields from a vendor's raw keys (only when not already set,
-    so the source-type normalizer's values win where present)."""
+    """Fill canonical fields from a vendor's raw keys. The source-type normalizer's
+    value wins where present, EXCEPT when it's a generic placeholder (then the
+    vendor-specific value wins)."""
     for canon, raw_key in FIELD_MAPS.get(vendor, {}).items():
-        if r.get(canon):
+        existing = r.get(canon)
+        if existing and str(existing).strip().lower() not in _GENERIC_PLACEHOLDERS:
             continue
         val = row.get(raw_key)
         if val not in (None, '', [], {}):
