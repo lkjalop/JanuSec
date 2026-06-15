@@ -58,8 +58,15 @@ def _score_shared_entities(rows: List[dict], entities: Dict[str, List[str]]) -> 
 def _score_temporal_contiguity(rows: List[dict]) -> float:
     if not rows:
         return 0.0
-    times = [_parse_time(r.get('timestamp_utc') or r.get('timestamp_epoch') or r.get('_ts_epoch') or r.get('timestamp'))
-             for r in rows]
+    # NB: explicit None checks, not `a or b` — a legitimate epoch of 0 is falsy and
+    # an `or` chain would drop it, collapsing the span and mis-scoring as 1.0.
+    def _first_ts(r: dict):
+        for _k in ('timestamp_utc', 'timestamp_epoch', '_ts_epoch', 'timestamp'):
+            _v = r.get(_k)
+            if _v is not None:
+                return _v
+        return None
+    times = [_parse_time(_first_ts(r)) for r in rows]
     times = [t for t in times if t is not None]
     if len(times) < 2:
         return 1.0
