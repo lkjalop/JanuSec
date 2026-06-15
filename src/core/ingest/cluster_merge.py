@@ -652,6 +652,72 @@ def _det_ransomware_staging(row: dict, text: str) -> bool:
     ))
 
 
+# ── 2026 H1 threat coverage (Scattered Spider/UNC3944, STORM-2372, VPN 0-days) ──
+def _det_esxi_ransomware(row: dict, text: str) -> bool:
+    """T1486 on hypervisors — Scattered Spider/UNC3944 ESXi-targeted ransomware.
+    One action on the ESXi host encrypts every guest VM at once (mass VM shutdown +
+    datastore/.vmdk encryption). Distinct from host-level ransomware: the asset is
+    the hypervisor itself."""
+    asset = _lower(row.get('asset_class') or row.get('platform') or row.get('os'))
+    on_hypervisor = asset in ('hypervisor', 'esxi', 'vmware', 'vsphere') or any(
+        t in text for t in ('esxi', 'vmkernel', 'vcenter', 'vpxd', 'vmfs', 'vsphere')
+    )
+    destructive = any(t in text for t in (
+        'vmsvc/power.off', 'esxcli vm process kill', 'vmdk encrypt',
+        'datastore encrypt', 'mass vm shutdown', 'encrypt', 'ransom',
+        'lockdown mode disabled', 'vsphere ssh enabled',
+    ))
+    if on_hypervisor and destructive:
+        return True
+    return any(t in text for t in (
+        'esxiargs', 'esxi ransomware', 'hypervisor ransomware', 'datastore encryption',
+    ))
+
+
+def _det_mfa_fatigue(row: dict, text: str) -> bool:
+    """T1621 — MFA fatigue / push-bombing (STORM-2372, Scattered Spider). Repeated
+    MFA prompts until the user approves. Per-row signal is an explicit fatigue flag
+    or a high denied-count; the rate-based version is z-scored in ChronoGraph
+    (behavior:mfa_fatigue_spike)."""
+    try:
+        denied = int(row.get('mfa_denied_count') or row.get('mfa_deny_count') or 0)
+        if denied >= 5:
+            return True
+    except (TypeError, ValueError):
+        pass
+    return any(t in text for t in (
+        'mfa fatigue', 'mfa bombing', 'push bombing', 'push-bombing',
+        'mfa spamming', 'repeated mfa', 'multiple mfa requests',
+        'authentication fatigue', 'mfa flood',
+    ))
+
+
+def _det_aitm_session(row: dict, text: str) -> bool:
+    """T1557 — Adversary-in-the-Middle session/token theft (reverse-proxy phishing).
+    Stolen session cookie/token replayed from attacker infra, bypassing MFA. More
+    specific than generic session_theft: keyed to AiTM toolkits and post-phish
+    cookie/token replay."""
+    return any(t in text for t in (
+        'aitm', 'adversary-in-the-middle', 'adversary in the middle',
+        'evilginx', 'evilproxy', 'modlishka', 'muraena', 'tycoon 2fa',
+        'pass-the-cookie', 'pass the cookie', 'stolen session cookie',
+        'session cookie replay', 'cookie replay', 'reverse proxy phishing',
+    ))
+
+
+def _det_ike_vpn_exploit(row: dict, text: str) -> bool:
+    """T1190 / T1133 — VPN/IKE exploitation. CVE-2026-50751 (Check Point IKEv1
+    certificate-validation auth bypass, exploited by Qilin) and CVE-2026-33824
+    (Windows IKE service RCE). Unauthenticated VPN session establishment / IKE RCE."""
+    return any(t in text for t in (
+        'cve-2026-50751', 'cve-2026-33824',
+        'ike auth bypass', 'ikev1 bypass', 'ike service rce',
+        'vpn auth bypass', 'unauthenticated vpn session',
+        'ike certificate validation', 'mobile access vpn exploit',
+        'remote access vpn bypass',
+    ))
+
+
 PHASE_DETECTORS: list[PhaseDetector] = [
     PhaseDetector("credential_theft",          "Credential Theft (LSASS)",        "credential_theft",     "critical", _det_lsass),
     PhaseDetector("data_exfiltration_snowflake","Snowflake Bulk Unload",          "data_exfiltration",    "critical", _det_sf_unload),
@@ -688,6 +754,11 @@ PHASE_DETECTORS: list[PhaseDetector] = [
     PhaseDetector("ransomware_staging",        "Ransomware Staging/Wiper Prep",    "impact",               "critical", _det_ransomware_staging),
     # Insider threat
     PhaseDetector("insider_after_hours",       "Insider After-Hours Sensitive Access", "exfiltration",     "high",     _det_insider_after_hours),
+    # ── 2026 H1 threat coverage ──────────────────────────────────────────────
+    PhaseDetector("esxi_ransomware",           "ESXi/Hypervisor Ransomware (T1486)",   "impact",           "critical", _det_esxi_ransomware),
+    PhaseDetector("mfa_fatigue",               "MFA Fatigue / Push-Bombing (T1621)",   "initial_access",   "high",     _det_mfa_fatigue),
+    PhaseDetector("aitm_session",              "Adversary-in-the-Middle Session Theft (T1557)", "initial_access", "high", _det_aitm_session),
+    PhaseDetector("ike_vpn_exploit",           "VPN/IKE Exploit (T1190/T1133)",        "initial_access",   "critical", _det_ike_vpn_exploit),
 ]
 
 

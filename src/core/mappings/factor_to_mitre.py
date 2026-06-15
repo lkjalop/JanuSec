@@ -612,6 +612,18 @@ FACTOR_TO_MITRE.update({
     'network:adaptive_ewma_regular_cadence':  ['T1071'],            # regular beacon cadence (app-layer C2)
 })
 
+# ── 2026 H1 threat coverage: ESXi ransomware, MFA fatigue, AiTM, VPN/IKE, EDR-blinding ──
+FACTOR_TO_MITRE.update({
+    'impact:esxi_hypervisor_ransomware':  ['T1486'],                # Scattered Spider/UNC3944 ESXi encryption
+    'iam:mfa_fatigue_bombing':            ['T1621'],                # MFA push-bombing (STORM-2372)
+    'behavior:mfa_fatigue_spike':         ['T1621'],                # ChronoGraph rate-anomaly variant
+    'email:aitm_session':                 ['T1557', 'T1539'],       # adversary-in-the-middle + steal web session cookie
+    'remote:ike_vpn_exploit':             ['T1190', 'T1133'],       # CVE-2026-50751/-33824 VPN/IKE exploit
+    'endpoint:edr_telemetry_gap':         ['T1562.001', 'T1564'],   # eBPF/io_uring telemetry tampering / EDR blinding
+    'iam:helpdesk_anomalous_reset':       ['T1098', 'T1556'],       # helpdesk-coerced credential/MFA reset
+    'cloud:ses_leaked_key_send':          ['T1078.004', 'T1567'],   # Amazon SES abuse via leaked IAM key
+})
+
 def get_all_mappings(factors: list[str]) -> dict[str, list[str]]:
     """Return combined mapping tags: ATT&CK techniques, ATLAS, and OWASP LLM.
 
