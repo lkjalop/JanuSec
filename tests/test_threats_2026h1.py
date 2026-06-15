@@ -57,6 +57,30 @@ def test_2026_factors_map_to_mitre():
         assert code in get_all_mappings([factor]).get("mitre", []), f"{factor} -> {code} missing"
 
 
+def test_intrusion_arc_velocity_and_exfil_first():
+    from src.core.ingest.cluster_narrator import _intrusion_arc
+    arc = _intrusion_arc({
+        "phases": [{"case_role": "initial_access"}, {"case_role": "data_exfiltration"}, {"case_role": "impact"}],
+        "span_seconds": 4 * 3600,             # 4h => rapid campaign
+        "_entry_point": "oauth_consent_grant",
+    })
+    assert arc["stages"] == ["delivery", "exfiltration", "impact"]
+    assert arc["rapid_campaign"] is True
+    assert arc["span_hours"] == 4.0
+    assert arc["exfil_before_impact"] is True
+    assert arc["entry_point"] == "oauth_consent_grant"
+
+
+def test_intrusion_arc_slow_campaign_not_rapid_and_no_phases_none():
+    from src.core.ingest.cluster_narrator import _intrusion_arc
+    slow = _intrusion_arc({
+        "phases": [{"case_role": "initial_access"}, {"case_role": "execution"}, {"case_role": "impact"}],
+        "span_seconds": 10 * 86400,
+    })
+    assert slow.get("rapid_campaign") is not True
+    assert _intrusion_arc({"phases": []}) is None
+
+
 def test_2026_factors_have_narrator_labels():
     for factor in (
         "impact:esxi_hypervisor_ransomware", "iam:mfa_fatigue_bombing",
