@@ -822,6 +822,15 @@ def normalize_row(row: dict, source_type: str | None = None) -> dict:
         r = normalizer(row) if normalizer else dict(row)
 
     r['_source_type'] = st
+
+    # Vendor field-map: add vendor-specific fidelity (geo/action/rule/asset_class +
+    # actor/user) BEFORE the cross-source enrichment below, so user_canonical /
+    # src_ip-derived pivots see fields the map fills (e.g. MCP agent_id->user).
+    _vendor = _detect_vendor(raw_src, row)
+    if _vendor:
+        _apply_field_map(row, r, _vendor)
+        r.setdefault('_vendor', _vendor)
+
     # Canonical common fields
     r.setdefault('severity', _safe(row.get('severity') or row.get('risk_level') or 'medium').lower())
     r.setdefault('triage_score', _triage_from_severity(r['severity']))
@@ -886,20 +895,14 @@ def normalize_row(row: dict, source_type: str | None = None) -> dict:
                     except (ValueError, TypeError):
                         pass
 
-    # Vendor field-map: add vendor-specific fidelity (geo/action/rule/asset_class)
-    # on top of the source-type normalizer, declaratively (see FIELD_MAPS).
-    _vendor = _detect_vendor(raw_src, row)
-    if _vendor:
-        _apply_field_map(row, r, _vendor)
-        r.setdefault('_vendor', _vendor)
-
     # Per-row provenance — which feed/normalizer produced this evidence. Foundation
     # for attribution + grounded narration (a verdict can cite the source feed).
+    # _vendor was resolved earlier (before the cross-source enrichment).
     if '_origin' not in r:
         r['_origin'] = {
             'source': raw_src or st,
             'source_type': st,
-            'vendor': _vendor,
+            'vendor': r.get('_vendor'),
             'section': (_safe(row.get('_section') or row.get('_sheet') or '') or None),
             'normalizer_version': _NORMALIZER_VERSION,
         }
