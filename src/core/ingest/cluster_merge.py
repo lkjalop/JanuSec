@@ -734,6 +734,42 @@ def _det_dlp_exfil(row: dict, text: str) -> bool:
     ))
 
 
+def _det_firewall_threat(row: dict, text: str) -> bool:
+    """Firewall/IPS threat-prevention block (FortiGate/Palo/Check Point). A blocked
+    exploit/botnet/IPS signature at the perimeter is an attempted attack worth
+    corroborating with endpoint/identity activity (left-of-boom network signal)."""
+    cat = str(row.get('category') or '').lower()
+    act = str(row.get('action') or '').lower()
+    threat_cat = any(t in cat for t in (
+        'ips', 'intrusion', 'virus', 'botnet', 'malware', 'exploit', 'c2',
+        'command-and-control', 'spyware', 'anomaly',
+    ))
+    blocked = act in ('block', 'blocked', 'deny', 'denied', 'drop', 'dropped', 'reset', 'reset-both')
+    if threat_cat and (blocked or act):
+        return True
+    return any(t in text for t in (
+        'ips signature', 'botnet c2', 'virus detected', 'exploit blocked',
+        'threat prevention block', 'utm log', 'ips_drop',
+    ))
+
+
+def _det_mcp_tool_abuse(row: dict, text: str) -> bool:
+    """MCP tool-call abuse (ATLAS) — tool poisoning, agent-memory/preference injection,
+    or an agent accessing context far outside its grant. Detected on MCP server audit /
+    OpenTelemetry tool-call telemetry. Most XDRs don't watch the agent layer at all."""
+    if str(row.get('mcp_event') or row.get('event_type') or '').lower() in (
+        'tool_call', 'tool_invocation', 'mcp_tool_call', 'resource_access'
+    ):
+        # Structured signals from MCP telemetry: injection in args, or scope violation.
+        if row.get('tool_args_injection') or row.get('scope_violation') or row.get('unexpected_tool'):
+            return True
+    return any(t in text for t in (
+        'tool poisoning', 'tool_poisoning', 'mcp injection', 'rug pull',
+        'preference manipulation', 'parasitic toolchain', 'agent memory injection',
+        'ignore previous instructions', 'shadow tool', 'mcp scope violation',
+    ))
+
+
 PHASE_DETECTORS: list[PhaseDetector] = [
     PhaseDetector("credential_theft",          "Credential Theft (LSASS)",        "credential_theft",     "critical", _det_lsass),
     PhaseDetector("data_exfiltration_snowflake","Snowflake Bulk Unload",          "data_exfiltration",    "critical", _det_sf_unload),
@@ -776,6 +812,8 @@ PHASE_DETECTORS: list[PhaseDetector] = [
     PhaseDetector("aitm_session",              "Adversary-in-the-Middle Session Theft (T1557)", "initial_access", "high", _det_aitm_session),
     PhaseDetector("ike_vpn_exploit",           "VPN/IKE Exploit (T1190/T1133)",        "initial_access",   "critical", _det_ike_vpn_exploit),
     PhaseDetector("dlp_exfil",                 "DLP Policy Violation / Data Exfil (T1567)", "data_exfiltration", "high",  _det_dlp_exfil),
+    PhaseDetector("firewall_threat",           "Firewall/IPS Threat Block (T1190/T1071)",   "c2_communication", "high",  _det_firewall_threat),
+    PhaseDetector("mcp_tool_abuse",            "MCP Tool-Call Abuse (ATLAS)",               "execution",        "high",  _det_mcp_tool_abuse),
 ]
 
 

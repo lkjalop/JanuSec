@@ -427,6 +427,9 @@ _FACTOR_TAG_LABELS: dict[str, str] = {
     "insider:risk_elevated": "Insider risk elevated (T1078/T1530) — Purview Insider Risk raised this account's risk; data-access anomaly",
     "network:waf_block": "WAF block (T1190) — web-exploit attempt (SQLi/XSS/RCE/path-traversal) blocked at the CDN edge",
     "network:edge_recon_scan": "Edge recon/scan (T1595) — high-rate scanning observed at the CDN edge before origin",
+    "network:firewall_threat_block": "Firewall/IPS threat block (T1190/T1071) — perimeter blocked an exploit/botnet/IPS signature; attempted attack",
+    "ai:mcp_tool_poisoning": "MCP tool poisoning (ATLAS AML.T0051) — malicious instructions in a tool description/args or agent-memory injection",
+    "ai:mcp_scope_violation": "MCP scope violation (ATLAS AML.T0053) — AI agent accessed context/tools far outside its grant",
 }
 
 

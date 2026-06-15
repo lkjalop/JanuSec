@@ -630,6 +630,9 @@ FACTOR_TO_MITRE.update({
     'insider:risk_elevated':              ['T1078', 'T1530'],       # Purview Insider Risk elevation
     'network:waf_block':                  ['T1190'],                # CDN/WAF: web-exploit attempt blocked at edge
     'network:edge_recon_scan':            ['T1595'],                # CDN: high-rate scanning at the edge
+    'network:firewall_threat_block':      ['T1190', 'T1071'],       # FortiGate/Palo IPS/AV/botnet block
+    'ai:mcp_tool_poisoning':              ['AML.T0051', 'AML.T0053'],  # ATLAS: LLM prompt/tool poisoning
+    'ai:mcp_scope_violation':             ['AML.T0053'],            # ATLAS: agent accesses out-of-grant context
 })
 
 def get_all_mappings(factors: list[str]) -> dict[str, list[str]]:

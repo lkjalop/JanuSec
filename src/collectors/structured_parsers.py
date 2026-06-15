@@ -28,10 +28,16 @@ def parse_cef(line: str) -> Dict:
                 except Exception:
                     pass
             ext[k] = v
-    # attempt to map common extension keys to canonical fields
-    canonical = {}
+    # CEF header: CEF:Version|Vendor|Product|Version|SignatureID|Name|Severity|Ext
+    # parts[5] = Name, parts[6] = Severity (previously mis-indexed as name=parts[6]).
+    name = parts[5] if len(parts) > 5 else None
+    severity_raw = parts[6] if len(parts) > 6 else None
+
+    # Map standard CEF extension keys -> Janusec canonical fields. Firewall/IPS logs
+    # (FortiGate/Palo/Check Point in CEF) carry the threat-prevention signal in
+    # act/cat/suser, which the old mapping dropped -> weak network attribution.
+    canonical: Dict = {}
     if ext:
-        # common mappings
         if "src" in ext:
             canonical["src_ip"] = ext.get("src")
         if "dst" in ext:
@@ -40,23 +46,54 @@ def parse_cef(line: str) -> Dict:
             canonical["src_port"] = ext.get("spt") or ext.get("sourcePort")
         if "dpt" in ext or "destinationPort" in ext:
             canonical["dst_port"] = ext.get("dpt") or ext.get("destinationPort")
-        if "rt" in ext or "rt1" in ext:
-            # try parse as timestamp
-            for k in ("rt", "rt1"):
-                if k in ext:
-                    try:
-                        canonical["ts"] = datetime.fromtimestamp(int(ext[k]))
-                    except Exception:
-                        pass
+        _user = ext.get("suser") or ext.get("sourceUserName") or ext.get("duser")
+        if _user:
+            canonical["user"] = _user
+        _act = ext.get("act") or ext.get("deviceAction")
+        if _act:
+            canonical["action"] = _act
+        _cat = ext.get("cat") or ext.get("cs1") or ext.get("categoryBehavior")
+        if _cat:
+            canonical["category"] = _cat
+        if ext.get("cn1") or ext.get("dhost"):
+            canonical["hostname"] = ext.get("dhost") or ext.get("cn1")
+        for k in ("rt", "rt1", "end", "start"):
+            if k in ext:
+                try:
+                    canonical["timestamp"] = datetime.fromtimestamp(int(ext[k]) / 1000.0).isoformat()
+                except Exception:
+                    pass
+                break
 
-    return {
+    # Severity: CEF is 0-10 (or Low/Medium/High/Very-High) -> janusec band.
+    sev = None
+    if severity_raw is not None:
+        s = str(severity_raw).strip().lower()
+        if s.isdigit():
+            n = int(s)
+            sev = 'critical' if n >= 9 else 'high' if n >= 7 else 'medium' if n >= 4 else 'low'
+        else:
+            sev = {'very-high': 'critical', 'high': 'high', 'medium': 'medium', 'low': 'low'}.get(s)
+    if sev:
+        canonical["severity"] = sev
+    if name:
+        canonical["event_name"] = name
+        canonical["event_signature"] = name
+
+    # Flat output: canonical fields at top level (normalize_row-ready) PLUS the
+    # legacy keys (name/extension/vendor/...) that syslog_collector relies on.
+    out: Dict = dict(canonical)
+    out.update({
         "vendor": parts[1],
         "product": parts[2],
         "version": parts[3],
-        "name": parts[6] if len(parts) > 6 else None,
+        "name": name,
+        "severity_raw": severity_raw,
         "extension": ext,
         "canonical": canonical,
-    }
+        "_source": f"{parts[1]} {parts[2]}".strip().lower(),  # e.g. 'fortinet fortigate' -> NETWORK
+    })
+    return out
 
 
 def is_leef(line: str) -> bool:
