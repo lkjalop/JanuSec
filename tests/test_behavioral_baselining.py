@@ -63,6 +63,31 @@ def test_population_fallback_flags_outlier_on_first_assessment():
     assert z["anomaly"] is True
 
 
+def test_telemetry_gap_is_negative_z():
+    # EDR-blinding signal: a host whose event volume collapses far below its own
+    # baseline yields a strongly NEGATIVE temporal z-score (Stage 5j Gap 7).
+    store = ChronoSketchStore()
+    ref = 1_739_000_000.0
+    day = 86400.0
+    # 20 days of healthy event volume (varied 80-120/day) before the window.
+    for d in range(8, 28):
+        store.increment("host", "web01", "events", float(100 + (d % 5) * 10), ts=ref - d * day)
+    # Current window: near-silence (telemetry dropped).
+    store.increment("host", "web01", "events", 1.0, ts=ref - day)
+    z = store.z_score("host", "web01", "events", window_seconds=7 * day,
+                      reference_ts=ref, allow_population=False)
+    assert z["source"] == "temporal"
+    assert z["z"] <= -2.5
+
+
+def test_mfa_metric_in_behavior_map():
+    # The MFA push-bombing metric must be wired into the Stage 5j behavioral map.
+    from src.core.ingest import assessment_worker  # noqa: F401
+    # Map is built inside the function scope; assert the factor label exists instead.
+    from src.core.ingest.cluster_narrator import _FACTOR_TAG_LABELS
+    assert "behavior:mfa_fatigue_spike" in _FACTOR_TAG_LABELS
+
+
 def test_in_baseline_user_is_not_flagged():
     store = ChronoSketchStore()
     ref = 1_739_000_000.0

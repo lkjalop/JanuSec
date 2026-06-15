@@ -2037,6 +2037,12 @@ async def run_assessment_pipeline(
                             _chrono.increment("user", _u_ch, "cloud:ca_bypass_count", 1.0, ts=_ts_ch)
                         if "consent" in _etype_ch or "grant" in _etype_ch:
                             _chrono.increment("user", _u_ch, "cloud:consent_grant_count", 1.0, ts=_ts_ch)
+                        # MFA prompt rate — push-bombing (T1621) is a burst of MFA
+                        # challenges/denials far above the account's baseline. z-scored
+                        # in Stage 5j -> behavior:mfa_fatigue_spike (no fixed threshold).
+                        _mfa_ch = str(_row_ch.get("mfa_result") or _row_ch.get("auth_method") or "").lower()
+                        if "mfa" in _etype_ch or "mfa" in _mfa_ch or "strongauth" in _etype_ch:
+                            _chrono.increment("user", _u_ch, "iam:mfa_prompt_count", 1.0, ts=_ts_ch)
                     # Endpoint / Sysmon
                     if _src_type_ch in ("sysmon", "endpoint_lolbins", "endpoint", "edr"):
                         _cmd_ch = str(_row_ch.get("command_line") or _row_ch.get("cmdline") or "").lower()
@@ -2090,6 +2096,7 @@ async def run_assessment_pipeline(
                 "cloud:foreign_asn_count": "behavior:foreign_asn_spike",
                 "iam:pre_auth_fail_count": "behavior:auth_failure_spike",
                 "email:external_send_count": "behavior:external_send_spike",
+                "iam:mfa_prompt_count": "behavior:mfa_fatigue_spike",   # T1621 push-bombing
             }
             for _cl_j in clusters:
                 _verd_j = str(_cl_j.get("final_verdict") or _cl_j.get("verdict") or "").upper()
@@ -2174,6 +2181,24 @@ async def run_assessment_pipeline(
                                     _new_f.append(_bf)
                         except Exception:
                             continue
+                # Gap 7: telemetry-gap / EDR blinding (negative-space detection). A
+                # host whose event volume collapses far BELOW its own baseline
+                # (negative z, temporal only) is consistent with eBPF/io_uring
+                # telemetry tampering. Needs cross-assessment host history to fire.
+                for _h_g in list(_cl_j.get("shared_hosts") or [])[:4]:
+                    _h_g = str(_h_g).strip().lower()
+                    if not _h_g:
+                        continue
+                    try:
+                        _gz = _chrono_j.z_score("host", _h_g, "events",
+                                                window_seconds=86400 * 7,
+                                                reference_ts=(_chrono_ref_ts or None),
+                                                allow_population=False)
+                        if _gz.get("source") == "temporal" and float(_gz.get("z") or 0) <= -2.5:
+                            if "endpoint:edr_telemetry_gap" not in _new_f:
+                                _new_f.append("endpoint:edr_telemetry_gap")
+                    except Exception:
+                        continue
                 if _new_f:
                     _existing_f = _cl_j.setdefault("factor_tags", [])
                     for _ff in set(_new_f):
