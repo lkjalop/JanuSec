@@ -233,6 +233,10 @@ def _normalize_iam(row: dict) -> dict:
     # Janusec Okta/M365 export: snake_case user_principal_name
     if not user:
         user = _safe(row.get('user_principal_name') or '')
+    # Generic fallback: honor a pre-set user/username (already-normalized rows or
+    # simple feeds) instead of overwriting it with empty.
+    if not user:
+        user = _safe(row.get('user') or row.get('username') or row.get('UserName') or '')
     # AWS CloudTrail IAM: userIdentity.userName, else parse the ARN. Without this,
     # CloudTrail rows arrive entity-less and (a) fail per-user clustering — fusing
     # every actor's API calls into one mega-component via the generic iam_op pivot —
@@ -258,6 +262,9 @@ def _normalize_iam(row: dict) -> dict:
             row.get('ipAddress') or row.get('clientIpAddress')
             or row.get('callerIpAddress') or row.get('sourceIPAddress') or ''
         )
+    # Generic fallback: honor a pre-set src_ip rather than overwriting with empty.
+    if not src_ip:
+        src_ip = _safe(row.get('src_ip') or row.get('source_ip') or row.get('remote_ip') or '')
     r['src_ip'] = src_ip
 
     # Event name — include AWS CloudTrail eventName so the iam_op pivot is specific
@@ -531,6 +538,23 @@ _NORMALIZERS = {
 # K8s/Falco get the specialised normalizer regardless of source_type bucket.
 # We detect them by _source prefix before the generic normalizer dispatch.
 _K8S_FALCO_PREFIXES = ('k8s.', 'kubernetes.', 'falco.', 'k8s_', 'falco_')
+
+
+# ── Canonical evidence schema ────────────────────────────────────────────────
+# The contract every normalized row should satisfy so downstream (clustering,
+# ChronoGraph, attribution, grounded narration) gets attribution-grade evidence,
+# not raw text. BASELINE fields are guaranteed on every row; ATTRIBUTION fields are
+# the 5-W's populated when the source carries them. Enforced by
+# tests/test_evidence_schema_contract.py.
+CANONICAL_BASELINE_FIELDS = ("_source_type", "severity", "timestamp", "_origin", "_normalizer_version")
+CANONICAL_ATTRIBUTION_FIELDS = (
+    "user", "user_canonical",        # actor
+    "src_ip", "dst_ip", "hostname",  # endpoints / target host
+    "event_name",                    # action
+    "session_id", "device_id", "oauth_token_id",  # identity pivots
+    "geo_country", "asn",            # geo / network attribution
+    "asset_class",                   # target classification
+)
 
 
 # ── Declarative vendor field-map registry ────────────────────────────────────
