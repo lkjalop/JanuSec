@@ -2,9 +2,36 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from typing import Any
 
 from fastapi import FastAPI
+
+
+def detect_route_collisions(app: FastAPI) -> dict[tuple[str, str], list[str]]:
+    """Return every (method, path) registered on *app* more than once.
+
+    A collision means two handlers claim the same route; FastAPI serves the first
+    one mounted, so the winner depends on mount order. That is the root of several
+    order-dependent bugs (e.g. an auth-enforcing handler shadowed by a permissive
+    one). Use in a startup audit / test to fail fast instead of debugging a
+    mysterious 200-that-should-be-401.
+
+    Returns {(METHOD, path): [endpoint_name, ...]} for colliding routes only.
+    """
+    seen: Counter[tuple[str, str]] = Counter()
+    endpoints: dict[tuple[str, str], list[str]] = {}
+    for route in getattr(app, "routes", []):
+        path = getattr(route, "path", None)
+        methods = getattr(route, "methods", None) or set()
+        if not path:
+            continue
+        for method in methods:
+            key = (method, path)
+            seen[key] += 1
+            name = getattr(getattr(route, "endpoint", None), "__name__", "?")
+            endpoints.setdefault(key, []).append(name)
+    return {k: endpoints[k] for k, c in seen.items() if c > 1}
 
 
 def ensure_add_event_handler(app: FastAPI) -> None:
