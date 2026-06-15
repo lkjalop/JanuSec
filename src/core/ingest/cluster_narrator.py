@@ -413,6 +413,15 @@ _FACTOR_TAG_LABELS: dict[str, str] = {
     "behavior:foreign_asn_spike": "Foreign-ASN access spike (T1078) — connections from unusual networks far above this account's baseline; anomalous geo/infrastructure",
     "behavior:auth_failure_spike": "Authentication-failure spike (T1110) — pre-auth failures well above this account's baseline; brute-force or password-spray indicator",
     "behavior:external_send_spike": "External-send spike (T1567/T1114) — outbound email volume far above this account's baseline; collection or exfil indicator",
+    # 2026 H1 threat coverage
+    "impact:esxi_hypervisor_ransomware": "ESXi/hypervisor ransomware (T1486) — mass VM-datastore encryption from the ESXi host; one action encrypts every guest VM (Scattered Spider/UNC3944 pattern)",
+    "iam:mfa_fatigue_bombing": "MFA fatigue / push-bombing (T1621) — repeated MFA prompts until approval; consent-fatigue coercion (STORM-2372)",
+    "behavior:mfa_fatigue_spike": "MFA prompt-rate spike (T1621) — MFA challenge volume far above this account's baseline; push-bombing indicator",
+    "email:aitm_session": "Adversary-in-the-middle session theft (T1557/T1539) — stolen session cookie/token replayed from attacker infrastructure, bypassing MFA",
+    "remote:ike_vpn_exploit": "VPN/IKE exploitation (T1190/T1133) — unauthenticated VPN session or IKE RCE (CVE-2026-50751 / CVE-2026-33824)",
+    "endpoint:edr_telemetry_gap": "EDR telemetry gap (T1562.001/T1564) — expected endpoint events missing vs baseline; eBPF/io_uring telemetry tampering / EDR blinding",
+    "iam:helpdesk_anomalous_reset": "Helpdesk-driven credential/MFA reset (T1098/T1556) — password/MFA reset outside normal pattern; social-engineering of IT helpdesk",
+    "cloud:ses_leaked_key_send": "Amazon SES abuse (T1078.004/T1567) — bulk send via SES from a leaked IAM key; phishing/exfil channel",
 }
 
 
