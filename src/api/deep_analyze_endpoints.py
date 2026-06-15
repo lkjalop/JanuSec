@@ -25,7 +25,7 @@ except Exception as _exc:
 from src.api.metrics_init import ensure_metrics, _safe_hist, _safe_counter, _safe_gauge
 from src.api.deep_analyze.helpers import _safe_text, _nested_get, _collect_strings_from_row  # noqa: F401
 from src.api.deep_analyze.persistence import (  # noqa: F401
-    REPORT_STORE, PARENT_CHILD_INDEX,
+    REPORT_STORE, PARENT_CHILD_INDEX, _BoundedDict,
     _persist_assessment_state, _get_assessment_cached,
     _write_assessment_index, _load_assessment_from_disk,
 )
