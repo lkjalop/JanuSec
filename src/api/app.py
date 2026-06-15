@@ -4529,28 +4529,18 @@ def register_core_routers(full: bool = True):
             logger.info('Included alerts_router into app (lite)')
         except Exception:
             logger.debug('alerts_router include failed (lite)')
-        # ── Lite-safe router registry ────────────────────────────────────────
-        # Single source of truth for routers that otherwise live ONLY in the
-        # directly-included loop / create_app's defensive blocks (both skipped when
-        # full=False), yet serve import-light endpoints tests and the UI need under
-        # pytest/lite mode. Add a lite-safe router HERE (one place) instead of the
-        # per-router whack-a-mole that previously 404'd risk/supply_chain/etc.
-        # Keep entries import-light (no heavy ML deps) so collection stays fast.
-        _LITE_SAFE_ROUTER_SPECS = [
-            ('src.api.risk_endpoints', 'router', 'risk'),            # /api/v1/risk/score|dread
-            ('src.api.supply_chain_endpoints', 'router', 'supply_chain'),  # /api/v1/sbom/verify_package
-            ('src.api.suppression_admin_endpoints', 'router', 'suppression_admin'),  # /api/v1/admin/suppression
-            ('src.api.analytics_endpoints', 'router', 'analytics'),  # /api/v1/analytics/*
-        ]
-        for _mod_path, _attr, _label in _LITE_SAFE_ROUTER_SPECS:
-            try:
-                _lr_mod = __import__(_mod_path, fromlist=[_attr])
-                _lr = getattr(_lr_mod, _attr, None)
-                if _lr is not None:
-                    app.include_router(_lr)
-                    logger.debug('Included lite-safe router %s', _label)
-            except Exception as _exc:
-                logger.debug('lite-safe router %s include failed: %s', _label, _exc)
+        # ── Declarative router manifest (single source of truth) ──────────────
+        # Routers that otherwise live only in the directly-included loop / create_app
+        # defensive blocks (both skipped when full=False) are declared once in
+        # route_manifest.ROUTER_MANIFEST and mounted here for the lite tier. Add a
+        # lite-safe router THERE (one place), not via the old per-router whack-a-mole.
+        try:
+            from src.api.route_manifest import mount_manifest
+            _mounted = mount_manifest(app, 'lite', logger)
+            if _mounted:
+                logger.debug('manifest mounted (lite): %s', _mounted)
+        except Exception as _exc:
+            logger.debug('manifest mount (lite) failed: %s', _exc)
         # Include IAM connector endpoints in lite mode for tests
         try:
             try:
