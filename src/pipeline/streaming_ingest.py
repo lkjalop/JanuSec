@@ -533,6 +533,68 @@ _NORMALIZERS = {
 _K8S_FALCO_PREFIXES = ('k8s.', 'kubernetes.', 'falco.', 'k8s_', 'falco_')
 
 
+# ── Declarative vendor field-map registry ────────────────────────────────────
+# vendor -> {canonical_field: raw_key}. A new source becomes a DATA edit (one map)
+# instead of a new _normalize_X branch — reduces the organic growth of normalizer
+# code paths. Applied AFTER the generic source-type normalizer, so it adds
+# vendor-specific fidelity (geo, action, rule, asset_class) on top of the baseline.
+# Populated per-vendor (e.g. cloudflare/m365_ual/purview_dlp) alongside their aliases.
+FIELD_MAPS: Dict[str, Dict[str, str]] = {}
+
+
+def _detect_vendor(raw_src: str, row: dict) -> str | None:
+    """Return the FIELD_MAPS vendor key that applies to this row, if any.
+    Matches on the raw source string / section hint tokens."""
+    if not FIELD_MAPS:
+        return None
+    hay = f"{raw_src} {row.get('_section') or ''} {row.get('_sheet') or ''}".lower()
+    tokens = set(re.split(r'[^a-z0-9]+', hay))
+    for vendor in FIELD_MAPS:
+        if vendor in tokens or vendor in hay:
+            return vendor
+    return None
+
+
+def _apply_field_map(row: dict, r: dict, vendor: str) -> None:
+    """Fill canonical fields from a vendor's raw keys (only when not already set,
+    so the source-type normalizer's values win where present)."""
+    for canon, raw_key in FIELD_MAPS.get(vendor, {}).items():
+        if r.get(canon):
+            continue
+        val = row.get(raw_key)
+        if val not in (None, '', [], {}):
+            r[canon] = val if isinstance(val, (dict, list)) else _safe(val)
+
+
+# ── Parse / ingest accounting ────────────────────────────────────────────────
+# Silent row drops (the except: pass sites in the parse path) are invisible data
+# loss. This counter makes ingestion observable: rows normalized per source-type +
+# drops by reason. Surfaced in assessment diagnostics so a drop spike is visible
+# instead of a silent gap (mirrors the clustering evidence-retention telemetry).
+_INGEST_STATS: Dict[str, Any] = {'normalized': 0, 'by_source_type': {}, 'dropped': {}}
+
+
+def record_dropped_row(reason: str) -> None:
+    """Record a row the parse/ingest path discarded, by reason."""
+    _INGEST_STATS['dropped'][reason] = _INGEST_STATS['dropped'].get(reason, 0) + 1
+
+
+def get_ingest_stats() -> Dict[str, Any]:
+    """Snapshot of ingest accounting: normalized count, per-source-type, drops-by-reason."""
+    return {
+        'normalized': _INGEST_STATS['normalized'],
+        'by_source_type': dict(_INGEST_STATS['by_source_type']),
+        'dropped': dict(_INGEST_STATS['dropped']),
+        'dropped_total': sum(_INGEST_STATS['dropped'].values()),
+    }
+
+
+def reset_ingest_stats() -> None:
+    _INGEST_STATS['normalized'] = 0
+    _INGEST_STATS['by_source_type'] = {}
+    _INGEST_STATS['dropped'] = {}
+
+
 # ── Cross-source enrichment helpers ───────────────────────────────────────────
 # These run after source-specific normalisation and populate fields that
 # cluster_merge uses for transitive pivot merging.
@@ -739,8 +801,30 @@ def normalize_row(row: dict, source_type: str | None = None) -> dict:
                     except (ValueError, TypeError):
                         pass
 
+    # Vendor field-map: add vendor-specific fidelity (geo/action/rule/asset_class)
+    # on top of the source-type normalizer, declaratively (see FIELD_MAPS).
+    _vendor = _detect_vendor(raw_src, row)
+    if _vendor:
+        _apply_field_map(row, r, _vendor)
+        r.setdefault('_vendor', _vendor)
+
+    # Per-row provenance — which feed/normalizer produced this evidence. Foundation
+    # for attribution + grounded narration (a verdict can cite the source feed).
+    if '_origin' not in r:
+        r['_origin'] = {
+            'source': raw_src or st,
+            'source_type': st,
+            'vendor': _vendor,
+            'section': (_safe(row.get('_section') or row.get('_sheet') or '') or None),
+            'normalizer_version': _NORMALIZER_VERSION,
+        }
+
     # Normalizer version stamp — lets assessment_worker detect stale stored rows.
     r['_normalizer_version'] = _NORMALIZER_VERSION
+
+    # Ingest accounting (observability for silent-drop detection).
+    _INGEST_STATS['normalized'] += 1
+    _INGEST_STATS['by_source_type'][st] = _INGEST_STATS['by_source_type'].get(st, 0) + 1
 
     return r
 

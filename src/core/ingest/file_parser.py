@@ -77,7 +77,12 @@ def _parse_ndjson(path: str, source: str) -> Iterator[dict]:
                             item.setdefault("_source", source)
                             yield item
             except json.JSONDecodeError:
-                pass
+                # Was a silent drop — now accounted so malformed-line loss is visible.
+                try:
+                    from src.pipeline.streaming_ingest import record_dropped_row
+                    record_dropped_row('json_decode_error')
+                except Exception:
+                    pass
 
 
 # ── CSV ───────────────────────────────────────────────────────────────────────
