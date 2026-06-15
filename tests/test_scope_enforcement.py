@@ -1,11 +1,15 @@
-import os
+import pytest
 from fastapi.testclient import TestClient
 
 
-def setup_module(module):
-    # Minimal env: admin token and API keys
-    os.environ['ADMIN_UI_TOKEN'] = 'admin-test'
-    os.environ['API_KEYS_JSON'] = '[{"key":"key-no-scope","scopes":[]},{"key":"key-feedback","scopes":["feedback.write"]}]'
+@pytest.fixture(autouse=True)
+def _scope_env(monkeypatch):
+    # Set auth env per-test via monkeypatch (auto-reverted) instead of a
+    # setup_module + os.environ mutation. setup_module runs at test-run time and
+    # would clobber other modules' import-time ADMIN_UI_TOKEN (e.g. test_auth_smoke),
+    # leaking across the suite. Function-scoped monkeypatch keeps it contained.
+    monkeypatch.setenv('ADMIN_UI_TOKEN', 'admin-test')
+    monkeypatch.setenv('API_KEYS_JSON', '[{"key":"key-no-scope","scopes":[]},{"key":"key-feedback","scopes":["feedback.write"]}]')
 
 
 def get_client():

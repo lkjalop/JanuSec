@@ -8252,6 +8252,24 @@ if os.getenv('PLATFORM_LITE_INIT','0').lower() in {'1','true','yes'}:
         reviewer: str | None = None
 
     async def _lite_label_handler(event_id: str, payload: LiteLabelPayload, request: Request) -> dict:
+        # This lite handler shadows the auth-enforcing production label route in
+        # test/lite mode (see _dedupe filter above). Without an auth check it was a
+        # silent bypass, so whether auth was enforced depended on route-mount order
+        # (test order) — the scope_enforcement ordering flake. Align it with prod:
+        # when auth is configured (API_KEYS_JSON / ADMIN_UI_TOKEN), require the
+        # feedback.write scope; stay permissive only when no auth is configured.
+        import os as _os
+        if _os.getenv('API_KEYS_JSON') or _os.getenv('ADMIN_UI_TOKEN'):
+            try:
+                from src.security.auth import auth_dependency as _auth_dep
+            except Exception:
+                _auth_dep = None
+            if _auth_dep is not None:
+                await _auth_dep(
+                    request.headers.get('x-api-key'),
+                    request.headers.get('authorization'),
+                    ['feedback.write'],
+                )
         label = (payload.label or '').strip().lower()
         if label not in VALID_LABELS:
             raise HTTPException(status_code=400, detail='invalid_label')
