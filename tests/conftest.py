@@ -2923,6 +2923,33 @@ def clear_rate_limits():
 
 
 @pytest.fixture(autouse=True)
+def restore_auth_env():
+    """Snapshot & restore auth-related env vars around each test.
+
+    Many test modules set API_KEYS_JSON / ADMIN_UI_TOKEN at module or function
+    scope via os.environ[...]= (not monkeypatch), which leaks across tests: auth
+    is read per-request from these vars, so a neighbor's leaked value makes
+    auth-dependent tests pass alone but fail in the full suite (order artifacts,
+    e.g. test_scope_enforcement, test_auth_smoke). Restoring them to each test's
+    starting value isolates the auth context without touching the tests.
+    """
+    _keys = (
+        'API_KEYS_JSON', 'ADMIN_UI_TOKEN', 'TEST_HELPER_API_KEYS',
+        'JWT_SECRET', 'JWT_TEST_SECRET', 'JWT_AUDIENCE', 'JWT_TEST_AUDIENCE',
+        'JWT_ISSUER', 'JWT_TEST_ISSUER',
+    )
+    _saved = {k: os.environ.get(k) for k in _keys}
+    try:
+        yield
+    finally:
+        for _k, _v in _saved.items():
+            if _v is None:
+                os.environ.pop(_k, None)
+            else:
+                os.environ[_k] = _v
+
+
+@pytest.fixture(autouse=True)
 def restore_hopgraph_module_aliases():
     """Undo tests that directly replace HopGraph modules in sys.modules.
 

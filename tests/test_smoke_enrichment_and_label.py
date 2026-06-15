@@ -20,7 +20,7 @@ def test_smoke_enrichment_and_label(monkeypatch):
             return True
         return _inner
 
-    monkeypatch.setattr('security.auth.require_scopes', _noop_require_scopes)
+    monkeypatch.setattr('src.security.auth.require_scopes', _noop_require_scopes)
     # Minimal event that should trigger one of the Batch 3 rules (e.g., c2_rare_ja3_beacon)
     payload = {
         "events": [
@@ -50,4 +50,6 @@ def test_smoke_enrichment_and_label(monkeypatch):
     headers = {'x-api-key': 'testkey123'}
     r2 = client.post(f'/api/v1/decisions/{event_id}/label', json=label_payload, headers=headers)
     assert r2.status_code == 200, r2.text
-    assert r2.json().get('ok') is True
+    # The label endpoint returns {'status': 'ok', ...} (both the production and the
+    # lite/test handler). The old {'ok': True} shape no longer exists.
+    assert r2.json().get('status') == 'ok'
