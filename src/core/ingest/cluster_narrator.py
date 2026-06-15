@@ -443,8 +443,43 @@ def _humanize_factor_tags(cluster: dict) -> str:
     return "\n".join(lines)
 
 
+def _intrusion_arc(cluster: dict) -> dict | None:
+    """Decision-grade summary so narration leads with the arc a CISO needs:
+    HOW they got in -> WHAT they did -> HOW FAST -> and whether data left before
+    encryption. Deterministic, computed from the cluster's phases + span.
+
+    - stages: kill-chain-ordered phase progression.
+    - entry_point: the attributed initial-access vector (from phase-child attribution).
+    - span_hours / rapid_campaign: 2026 crews run entry->impact in hours; a tight
+      multi-stage span is itself a signature worth surfacing.
+    - exfil_before_impact: exfil + impact both present -> assume-breach framing
+      ('data was taken before encryption; paying ransom does not undo the breach').
+    """
+    stages = _killchain_from_phases(cluster)
+    if not stages:
+        return None
+    arc: dict[str, object] = {"stages": stages}
+    try:
+        span = float(cluster.get("span_seconds") or 0)
+    except (TypeError, ValueError):
+        span = 0.0
+    if span > 0:
+        arc["span_hours"] = round(span / 3600.0, 1)
+        if len(stages) >= 3 and span <= 24 * 3600:
+            arc["rapid_campaign"] = True
+    entry = cluster.get("_entry_point")
+    if entry:
+        arc["entry_point"] = entry
+    if "exfiltration" in stages and "impact" in stages:
+        arc["exfil_before_impact"] = True
+    return arc
+
+
 def _cluster_signal_block(cluster: dict) -> str:
     signals: dict[str, object] = {}
+    arc = _intrusion_arc(cluster)
+    if arc:
+        signals["intrusion_arc"] = arc
     for key in (
         "_chrono_factors",
         "_chrono_first_seen",
