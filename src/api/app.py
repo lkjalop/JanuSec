@@ -4529,24 +4529,28 @@ def register_core_routers(full: bool = True):
             logger.info('Included alerts_router into app (lite)')
         except Exception:
             logger.debug('alerts_router include failed (lite)')
-        # Risk scoring endpoints (/api/v1/risk/score|dread). These live in the
-        # directly-included loop below, which is skipped when full=False (lite/test
-        # mode), so they 404'd under pytest. Mount here so the lite path serves them.
-        try:
-            from src.api.risk_endpoints import router as _risk_router_lite
-            app.include_router(_risk_router_lite)
-            logger.info('Included risk_router into app (lite)')
-        except Exception:
-            logger.debug('risk_router include failed (lite)')
-        # Supply-chain / SBOM endpoints (/api/v1/sbom/verify_package). Dynamically
-        # mounted only in the post-loop block below, which lite/test mode skips, so
-        # the SBOM routes 404'd under pytest. Mount here for the lite path.
-        try:
-            from src.api.supply_chain_endpoints import router as _supply_chain_router_lite
-            app.include_router(_supply_chain_router_lite)
-            logger.info('Included supply_chain_router into app (lite)')
-        except Exception:
-            logger.debug('supply_chain_router include failed (lite)')
+        # ── Lite-safe router registry ────────────────────────────────────────
+        # Single source of truth for routers that otherwise live ONLY in the
+        # directly-included loop / create_app's defensive blocks (both skipped when
+        # full=False), yet serve import-light endpoints tests and the UI need under
+        # pytest/lite mode. Add a lite-safe router HERE (one place) instead of the
+        # per-router whack-a-mole that previously 404'd risk/supply_chain/etc.
+        # Keep entries import-light (no heavy ML deps) so collection stays fast.
+        _LITE_SAFE_ROUTER_SPECS = [
+            ('src.api.risk_endpoints', 'router', 'risk'),            # /api/v1/risk/score|dread
+            ('src.api.supply_chain_endpoints', 'router', 'supply_chain'),  # /api/v1/sbom/verify_package
+            ('src.api.suppression_admin_endpoints', 'router', 'suppression_admin'),  # /api/v1/admin/suppression
+            ('src.api.analytics_endpoints', 'router', 'analytics'),  # /api/v1/analytics/*
+        ]
+        for _mod_path, _attr, _label in _LITE_SAFE_ROUTER_SPECS:
+            try:
+                _lr_mod = __import__(_mod_path, fromlist=[_attr])
+                _lr = getattr(_lr_mod, _attr, None)
+                if _lr is not None:
+                    app.include_router(_lr)
+                    logger.debug('Included lite-safe router %s', _label)
+            except Exception as _exc:
+                logger.debug('lite-safe router %s include failed: %s', _label, _exc)
         # Include IAM connector endpoints in lite mode for tests
         try:
             try:
