@@ -31,6 +31,7 @@ sys.path.insert(0, str(ROOT))
 
 from src.core.ingest.file_parser import parse_file  # noqa: E402
 from src.pipeline.streaming_ingest import normalize_row  # noqa: E402
+from src.core.entity_resolver import resolve_entities  # noqa: E402
 from src.core.ingest.cluster_merge import transitive_merge_clusters  # noqa: E402
 
 _BREACH_VERDICTS = {"VALIDATED_BREACH", "LIKELY_BREACH", "INCIDENT", "LIKELY_COMPROMISE"}
@@ -48,6 +49,9 @@ def _load_norm(folder: str) -> list[dict]:
             raw.setdefault("_source", os.path.basename(path))
             rows.append(raw)
     norm = [normalize_row(r) for r in rows]
+    # Phase 1: entity resolution — backfill host->owner so host-only telemetry
+    # (e.g. the cumulative exfil rows) stitches to the identity campaign.
+    resolve_entities(norm)
     for i, r in enumerate(norm):
         r["row_index"] = i
     return norm
