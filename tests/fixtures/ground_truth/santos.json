@@ -1,0 +1,12 @@
+{
+  "scenario": "santos",
+  "note": "No HANDOFF doc; ground truth encoded from observed run + operator context. Key truth: pentest-readonly-feb2026 is a SANCTIONED pentest and must NOT be a standalone VALIDATED_BREACH (the operator-context suppression must hold end-to-end).",
+  "must_detect": [],
+  "must_suppress": [
+    {"entity": "pentest-readonly-feb2026", "reason": "authorized penetration test (operator-context sanctioned)"}
+  ],
+  "known_gaps": [
+    {"id": "no_false_breach_inflation", "desc": "no-identity network clusters must NOT be VALIDATED_BREACH", "vesper_gap_class": "F-grading", "target_max_fp_network_breaches": 0},
+    {"id": "host_user_attribution", "desc": "Santos has 15k+ host+user co-occurrences -> host-only rows should inherit owner (data-driven entity resolution)", "vesper_gap_class": "D-identity-plane", "target": true}
+  ]
+}

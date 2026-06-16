@@ -1,0 +1,23 @@
+{
+  "scenario": "vesper",
+  "source": "dump/test files/Vesper/VESPER_HANDOFF.md",
+  "note": "APT29-style 7-stage intrusion on martin.chen. must_detect = asserted now (no regression). known_gaps = the documented breaks this gate exists to close (Phase 1-2); recorded as baseline, printed as the truth delta, NOT asserted-green yet.",
+  "must_detect": [
+    {
+      "actor": "martin.chen",
+      "min_verdict": "VALIDATED_BREACH",
+      "entry_point_type": "oauth_consent_grant",
+      "phases_present_any": ["oauth_device_code", "wmi_dcom_lateral", "powershell_staged_payload"]
+    }
+  ],
+  "must_suppress": [
+    {"entity": "anna.kowalski", "reason": "legit end-of-month finance upload to acmevesper.sharepoint.com (legit tenant, not the lookalike)"},
+    {"entity": "svc_jenkins", "reason": "legit RC4 encryption for legacy compatibility"},
+    {"entity": "david.okafor", "reason": "benign DBA wmic from a different host (not Martin's lateral movement)"}
+  ],
+  "known_gaps": [
+    {"id": "exfil_stitched_to_actor", "desc": "cumulative exfil to martin-chen.sharepoint.com must attach to martin.chen's breach cluster", "exfil_destination": "martin-chen.sharepoint.com", "vesper_gap_class": "D-identity-plane", "target": true},
+    {"id": "full_killchain_one_cluster", "desc": "oauth->recon->as-rep->golden-ticket->lateral->exfil should be ONE campaign for martin.chen", "vesper_gap_class": "C/D", "target_min_phases": 5},
+    {"id": "no_false_breach_inflation", "desc": "no-identity network clusters must NOT be VALIDATED_BREACH", "vesper_gap_class": "F-grading", "target_max_fp_network_breaches": 0}
+  ]
+}
