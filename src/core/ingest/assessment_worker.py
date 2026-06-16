@@ -1297,6 +1297,12 @@ async def run_assessment_pipeline(
             # silently promoting raw pivot fragments to production clusters.
             try:
                 from src.core.ingest.cluster_merge import transitive_merge_clusters
+                from src.core.entity_resolver import resolve_entities
+                # Entity resolution: backfill host->owner so host-only telemetry (network
+                # exfil, endpoint) stitches to the identity campaign instead of fragmenting
+                # into no-user clusters. This is what lets the cumulative exfil attach to
+                # the actor (proven against the VESPER ground-truth gate).
+                await asyncio.to_thread(resolve_entities, filtered_rows)
                 _progress("clustering", 60, "Transitive campaign merge")
                 _diag: dict[str, Any] = {}
                 analysis_clusters = await asyncio.to_thread(
@@ -1882,19 +1888,14 @@ async def run_assessment_pipeline(
         except Exception as exc:
             logger.debug("BaselineService update skipped for %s: %s", assessment_id, exc)
 
-        # ── Stage 5i: ChronoGraph accumulation (MOVED + EXTENDED) ───────────
-        # Moved before persona dispatch so retrieve_chrono_anomalies() sees current data.
-        # Extended with: off-hours recon sequence, cloud bytes exfil, first-seen host.
-        _chrono_first_seen: dict[str, set] = {}  # user -> new hosts seen this assessment
-        _chrono_offhours_recon_counts: dict[str, int] = {}
-        _chrono_recon_days: dict[str, set[str]] = {}
-        # Max event timestamp across the data — anchors ChronoGraph z-score windows to the
-        # DATA's time range, not wall-clock now (these are historical logs).
-        _chrono_ref_ts: float = 0.0
+        # ── Stage 5i: ChronoGraph accumulation (extracted → chrono.pipeline) ──
+        # Runs the SAME long-horizon detection the ground-truth gate runs (one source of
+        # truth; entity_metrics is now data-time anchored, fixing historical assessments).
+        from src.core.chrono.pipeline import accumulate as _chrono_accumulate, elevate_clusters as _chrono_elevate
+        _chrono_accum = None
+        _chrono_ref_ts = 0.0
         try:
             from src.core.chrono.sketch_store import CHRONO as _chrono
-            # Full-telemetry row set for ChronoGraph (min_triage=0 — see CHRONO_ROW_CAP).
-            # Falls back to filtered_rows if the unfiltered load is empty/fails.
             try:
                 _chrono_rows = await asyncio.to_thread(
                     _store.load_rows, assessment_id, min_triage=0.0, limit=CHRONO_ROW_CAP,
@@ -1903,312 +1904,24 @@ async def run_assessment_pipeline(
                 _chrono_rows = None
             if not _chrono_rows:
                 _chrono_rows = filtered_rows
+            # Entity resolution on the full-telemetry set too, so host-only exfil rows
+            # carry the actor and their cumulative per-destination bytes accumulate under
+            # the right user (the signal that stitches exfil to the campaign).
+            from src.core.entity_resolver import resolve_entities as _resolve_entities
+            _resolve_entities(_chrono_rows)
             logger.info("Stage 5i: ChronoGraph over %d rows (vs %d clustered) for %s",
                         len(_chrono_rows), len(filtered_rows), assessment_id)
-            _ch_rows = 0
-            _tz_offset_h = int(os.getenv("JANUSEC_ORG_TZ_OFFSET_H", "0"))
-            _ORG_TENANT_5I = os.getenv("JANUSEC_ORG_TENANT_NAME", "").strip().lower()
-            _RECON_KEYWORDS = (
-                "net group", "net user", "dsquery", "setspn", "get-aduser",
-                "get-adcomputer", "get-adgroup", "nltest", "invoke-sharphound",
-                "sharphound", "get-domainuser", "get-domaincomputer", "get-domaingroupmember",
-            )
-
-            def _is_recon_cmd_5i(row: dict) -> bool:
-                _seid = str(row.get("sysmon_event_id") or "").strip()
-                _eid = str(row.get("event_id") or row.get("windows_event_id") or "").strip()
-                if _seid != "1" and _eid not in ("1", "4688"):
-                    return False
-                _cmd = str(row.get("command_line") or row.get("cmdline") or "").lower()
-                return any(k in _cmd for k in _RECON_KEYWORDS)
-
-            def _is_off_hours_5i(ts_epoch: float) -> bool:
-                try:
-                    import datetime as _dt
-                    _utc_h = _dt.datetime.utcfromtimestamp(ts_epoch).hour
-                    _local_h = (_utc_h + _tz_offset_h) % 24
-                    return _local_h < 8 or _local_h >= 18
-                except Exception:
-                    return False
-
-            def _local_day_5i(ts_epoch: float) -> str:
-                try:
-                    import datetime as _dt
-                    return _dt.datetime.utcfromtimestamp(ts_epoch + (_tz_offset_h * 3600)).strftime("%Y-%m-%d")
-                except Exception:
-                    return ""
-
-            _host_users_5i: dict[str, set[str]] = {}
-            for _row_hu in _chrono_rows:
-                if not isinstance(_row_hu, dict):
-                    continue
-                _u_hu = str(_row_hu.get("user_canonical") or _row_hu.get("user") or "").strip().lower()
-                _h_hu = str(
-                    _row_hu.get("host") or _row_hu.get("hostname") or
-                    _row_hu.get("src_host") or _row_hu.get("source_host") or ""
-                ).strip().lower()
-                if _u_hu and _h_hu:
-                    _host_users_5i.setdefault(_h_hu, set()).add(_u_hu)
-
-            for _row_ch in _chrono_rows:
-                if not isinstance(_row_ch, dict):
-                    continue
-                _ts_ch = float(_row_ch.get("_ts_epoch") or 0)
-                if not _ts_ch:
-                    continue
-                if _ts_ch > _chrono_ref_ts:
-                    _chrono_ref_ts = _ts_ch
-                _u_ch = str(_row_ch.get("user_canonical") or _row_ch.get("user") or "").strip().lower()
-                _h_ch = str(
-                    _row_ch.get("host") or _row_ch.get("hostname") or
-                    _row_ch.get("src_host") or _row_ch.get("source_host") or ""
-                ).strip().lower()
-                if not _u_ch and _h_ch:
-                    _mapped_users_ch = _host_users_5i.get(_h_ch) or set()
-                    if len(_mapped_users_ch) == 1:
-                        _u_ch = next(iter(_mapped_users_ch))
-                        _row_ch["_chrono_inferred_user"] = _u_ch
-                _b_ch = float(_row_ch.get("bytes_out") or _row_ch.get("bytes_sent") or _row_ch.get("orig_bytes") or _row_ch.get("bytes") or 0)
-                _dst_h_ch = str(
-                    _row_ch.get("dst_host") or _row_ch.get("resp_h") or
-                    _row_ch.get("domain") or _row_ch.get("tls_sni") or ""
-                ).strip().lower()
-                _src_type_ch = str(_row_ch.get("_source_type") or _row_ch.get("source_type") or "").lower()
-
-                if _u_ch:
-                    _chrono.increment("user", _u_ch, "events", 1.0, ts=_ts_ch)
-                    if _b_ch > 0:
-                        _chrono.increment("user", _u_ch, "bytes_out", _b_ch, ts=_ts_ch)
-                        # Cloud bytes: separate metric for non-RFC1918 destinations
-                        _is_cloud_dst = _dst_h_ch and not _dst_h_ch.startswith(
-                            ("10.", "172.", "192.168.", "127.")
-                        )
-                        if _is_cloud_dst:
-                            _chrono.increment("user", _u_ch, "cloud_bytes_out", _b_ch, ts=_ts_ch)
-                            # Per-destination cumulative bytes — lets exfil to a single
-                            # (often lookalike) destination stand out from diffuse browsing.
-                            # martin-chen.sharepoint.com accumulates separately from the
-                            # legit acmevesper.sharepoint.com.
-                            if _dst_h_ch:
-                                _chrono.increment("user", _u_ch, f"bytes_out_dst:{_dst_h_ch}",
-                                                  _b_ch, ts=_ts_ch)
-                    # Recon event tracking (Gap 1 fix)
-                    if _is_recon_cmd_5i(_row_ch):
-                        _chrono.increment("user", _u_ch, "recon_events", 1.0, ts=_ts_ch)
-                        _day_ch = _local_day_5i(_ts_ch)
-                        if _day_ch:
-                            _chrono_recon_days.setdefault(_u_ch, set()).add(_day_ch)
-                        if _is_off_hours_5i(_ts_ch):
-                            _chrono.increment("user", _u_ch, "off_hours_recon_events", 1.0, ts=_ts_ch)
-                            _chrono_offhours_recon_counts[_u_ch] = _chrono_offhours_recon_counts.get(_u_ch, 0) + 1
-                    elif _is_off_hours_5i(_ts_ch):
-                        _chrono.increment("user", _u_ch, "off_hours_events", 1.0, ts=_ts_ch)
-                    # First-seen host tracking (Gap 5 fix): query BEFORE incrementing
-                    if _h_ch:
-                        _prior_access = _chrono.window_sum(
-                            "user", _u_ch, f"host_access:{_h_ch}", 0, _ts_ch - 1
-                        )
-                        if _prior_access == 0.0:
-                            _chrono_first_seen.setdefault(_u_ch, set()).add(_h_ch)
-                        _chrono.increment("user", _u_ch, f"host_access:{_h_ch}", 1.0, ts=_ts_ch)
-
-                    # ── Source-type prefixed metrics (cross-source ISO feature vector) ──
-                    # IAM / Kerberos
-                    if _src_type_ch in ("windows_security", "identity_kerberos", "iam"):
-                        _enc_ch = str(_row_ch.get("ticket_encryption") or "").strip()
-                        _weid_ch = str(_row_ch.get("windows_event_id") or _row_ch.get("event_id") or "").strip()
-                        if _enc_ch in ("0x17", "0x18") and _weid_ch == "4769":
-                            _chrono.increment("user", _u_ch, "iam:rc4_count", 1.0, ts=_ts_ch)
-                        if _weid_ch in ("4768", "4769"):
-                            _chrono.increment("user", _u_ch, "iam:ticket_volume", 1.0, ts=_ts_ch)
-                        if _weid_ch in ("4771", "4625"):
-                            _chrono.increment("user", _u_ch, "iam:pre_auth_fail_count", 1.0, ts=_ts_ch)
-                    # Cloud / Azure AD
-                    if _src_type_ch in ("cloud_identity", "azure_ad", "entra", "cloud"):
-                        _asn_ch = str(_row_ch.get("asn") or _row_ch.get("src_asn") or "").strip()
-                        _src_ip_ch = str(_row_ch.get("src_ip") or _row_ch.get("source_ip") or "").strip()
-                        _is_foreign = _asn_ch and _src_ip_ch and not _src_ip_ch.startswith(
-                            ("10.", "172.", "192.168.", "127.")
-                        )
-                        if _is_foreign:
-                            _chrono.increment("user", _u_ch, "cloud:foreign_asn_count", 1.0, ts=_ts_ch)
-                        _etype_ch = str(_row_ch.get("event_type") or _row_ch.get("operation") or "").lower()
-                        if "ca_bypass" in _etype_ch or "conditional_access" in _etype_ch and "bypass" in _etype_ch:
-                            _chrono.increment("user", _u_ch, "cloud:ca_bypass_count", 1.0, ts=_ts_ch)
-                        if "consent" in _etype_ch or "grant" in _etype_ch:
-                            _chrono.increment("user", _u_ch, "cloud:consent_grant_count", 1.0, ts=_ts_ch)
-                        # MFA prompt rate — push-bombing (T1621) is a burst of MFA
-                        # challenges/denials far above the account's baseline. z-scored
-                        # in Stage 5j -> behavior:mfa_fatigue_spike (no fixed threshold).
-                        _mfa_ch = str(_row_ch.get("mfa_result") or _row_ch.get("auth_method") or "").lower()
-                        if "mfa" in _etype_ch or "mfa" in _mfa_ch or "strongauth" in _etype_ch:
-                            _chrono.increment("user", _u_ch, "iam:mfa_prompt_count", 1.0, ts=_ts_ch)
-                    # Endpoint / Sysmon
-                    if _src_type_ch in ("sysmon", "endpoint_lolbins", "endpoint", "edr"):
-                        _cmd_ch = str(_row_ch.get("command_line") or _row_ch.get("cmdline") or "").lower()
-                        _par_ch = str(_row_ch.get("parent_process") or "").lower()
-                        _lolbins = ("certutil", "bitsadmin", "mshta", "regsvr32", "rundll32",
-                                    "wscript", "cscript", "msiexec", "wmic", "forfiles")
-                        if any(lb in _cmd_ch for lb in _lolbins):
-                            _chrono.increment("user", _u_ch, "endpoint:lolbin_count", 1.0, ts=_ts_ch)
-                        if "-enc" in _cmd_ch or "-encodedcommand" in _cmd_ch:
-                            _chrono.increment("user", _u_ch, "endpoint:encoded_ps_count", 1.0, ts=_ts_ch)
-                        if "wmiprvse.exe" in _par_ch or "wmic" in _cmd_ch:
-                            _chrono.increment("user", _u_ch, "endpoint:wmi_exec_count", 1.0, ts=_ts_ch)
-                    # Network
-                    if _src_type_ch in ("network", "zeek", "vpc_flow", "flow"):
-                        if _b_ch > 0:
-                            _chrono.increment("user", _u_ch, "network:unique_dest_count", 1.0, ts=_ts_ch)
-                    # Email
-                    if _src_type_ch in ("email", "mimecast", "proofpoint", "o365_mail"):
-                        _attach_b = float(_row_ch.get("attachment_size") or _row_ch.get("attachment_bytes") or 0)
-                        if _b_ch > 0:
-                            _chrono.increment("user", _u_ch, "email:external_send_count", 1.0, ts=_ts_ch)
-                        if _attach_b > 0:
-                            _chrono.increment("user", _u_ch, "email:attachment_bytes", _attach_b, ts=_ts_ch)
-
-                if _h_ch and _ts_ch:
-                    _chrono.increment("host", _h_ch, "events", 1.0, ts=_ts_ch)
-                _ch_rows += 1
-            logger.info("Stage 5i: ChronoGraph accumulated %d rows for %s", _ch_rows, assessment_id)
+            _chrono_accum = _chrono_accumulate(_chrono_rows, _chrono)
+            _chrono_ref_ts = _chrono_accum.ref_ts
+            logger.info("Stage 5i: ChronoGraph accumulated %d rows for %s", len(_chrono_rows), assessment_id)
         except Exception as exc:
             logger.debug("ChronoGraph accumulation skipped for %s: %s", assessment_id, exc)
 
-        # ── Stage 5j: ChronoGraph anomaly → cluster factor elevation ─────────
-        # Reads z-scores from CHRONO for each breach cluster's principals and
-        # appends long-horizon factors (recon sequence, cumulative bytes, first-seen
-        # host) to factor_tags so narrators and breach UI surface these signals.
+        # ── Stage 5j: ChronoGraph anomaly → cluster factor elevation (extracted) ──
         try:
             from src.core.chrono.sketch_store import CHRONO as _chrono_j
-            _BREACH_VERD_5J = {"VALIDATED_BREACH", "LIKELY_BREACH", "LIKELY_COMPROMISE", "INCIDENT"}
-            _RECON_SEQ_MIN_5J = int(os.getenv("JANUSEC_OFFHOURS_RECON_SEQUENCE_MIN", "4"))
-            _RECON_SEQ_DAYS_5J = int(os.getenv("JANUSEC_RECON_SEQUENCE_DAYS_MIN", "4"))
-            # Per-entity behavioral baselining: these counts are accumulated per user in
-            # Stage 5i but were never scored. z_score baselines each user against their OWN
-            # temporal history (falling back to the peer population on cold start), so a spike
-            # in lolbin/encoded-PS/WMI/fan-out/foreign-ASN/auth-failure/external-send activity
-            # surfaces as a factor without any hand-tuned absolute threshold (de-brittling).
-            _BEHAV_METRICS_5J = {
-                "endpoint:lolbin_count": "behavior:lolbin_spike",
-                "endpoint:encoded_ps_count": "behavior:encoded_powershell_spike",
-                "endpoint:wmi_exec_count": "behavior:wmi_exec_spike",
-                "network:unique_dest_count": "behavior:network_fanout_spike",
-                "cloud:foreign_asn_count": "behavior:foreign_asn_spike",
-                "iam:pre_auth_fail_count": "behavior:auth_failure_spike",
-                "email:external_send_count": "behavior:external_send_spike",
-                "iam:mfa_prompt_count": "behavior:mfa_fatigue_spike",   # T1621 push-bombing
-            }
-            for _cl_j in clusters:
-                _verd_j = str(_cl_j.get("final_verdict") or _cl_j.get("verdict") or "").upper()
-                if _verd_j not in _BREACH_VERD_5J:
-                    continue
-                _princ_j = list(
-                    _cl_j.get("affected_principals") or
-                    _cl_j.get("shared_accounts") or
-                    _cl_j.get("shared_users") or []
-                )
-                _new_f: list[str] = []
-                for _u_j in _princ_j[:4]:
-                    if not _u_j:
-                        continue
-                    _u_j = str(_u_j).strip().lower()
-                    _ref_j = _chrono_ref_ts or None  # anchor windows to the data's time range
-                    # Gap 1: off-hours recon sequence
-                    _rz = _chrono_j.z_score("user", _u_j, "off_hours_recon_events",
-                                            window_seconds=86400 * 7, reference_ts=_ref_j)
-                    if (
-                        _rz.get("anomaly")
-                        or abs(float(_rz.get("z") or 0)) >= 2.5
-                        or _chrono_offhours_recon_counts.get(_u_j, 0) >= _RECON_SEQ_MIN_5J
-                        or len(_chrono_recon_days.get(_u_j) or set()) >= _RECON_SEQ_DAYS_5J
-                    ):
-                        _new_f.append("recon:sustained_offhours_sequence")
-                    # Gap 2: cumulative bytes anomaly
-                    _bz = _chrono_j.z_score("user", _u_j, "bytes_out",
-                                            window_seconds=86400 * 7, reference_ts=_ref_j)
-                    if _bz.get("anomaly") or abs(float(_bz.get("z") or 0)) >= 2.5:
-                        _new_f.append("exfil:cumulative_bytes_anomaly")
-                    _cbz = _chrono_j.z_score("user", _u_j, "cloud_bytes_out",
-                                             window_seconds=86400 * 7, reference_ts=_ref_j)
-                    if (_cbz.get("anomaly") or abs(float(_cbz.get("z") or 0)) >= 2.5
-                            and "exfil:cumulative_bytes_anomaly" not in _new_f):
-                        _new_f.append("exfil:cumulative_cloud_bytes_anomaly")
-                    # Gap 2b: per-destination cumulative exfil with an ABSOLUTE floor.
-                    # z-scores need a baseline; a multi-day drip to one destination may not
-                    # produce one. An absolute cumulative volume to a SINGLE destination is
-                    # the exfil signature regardless — and it names the (often lookalike) host.
-                    try:
-                        _emets = _chrono_j.entity_metrics("user", _u_j, window_seconds=86400 * 30)
-                        _dst_sums = {
-                            k.split("bytes_out_dst:", 1)[1]: float(v.get("window_sum") or 0)
-                            for k, v in _emets.items() if k.startswith("bytes_out_dst:")
-                        }
-                        if _dst_sums:
-                            _top_dst, _top_bytes = max(_dst_sums.items(), key=lambda kv: kv[1])
-                            # Lookalike check: an UNsanctioned destination on a sanctioned
-                            # host's registrable domain (martin-chen.sharepoint.com vs the
-                            # legit acmevesper.sharepoint.com) is hostile even at lower volume.
-                            _mimics = None
-                            try:
-                                from src.core.operator_context import load_operator_context as _loc
-                                _mimics = _loc().lookalike_of_sanctioned(_top_dst)
-                            except Exception:
-                                _mimics = None
-                            if _top_bytes >= _EXFIL_DST_BYTES_FLOOR or _mimics:
-                                if "exfil:cumulative_bytes_anomaly" not in _new_f:
-                                    _new_f.append("exfil:cumulative_bytes_anomaly")
-                                _dst_rec = {
-                                    "destination": _top_dst,
-                                    "cumulative_bytes": int(_top_bytes),
-                                }
-                                if _mimics:
-                                    _new_f.append("exfil:lookalike_destination")
-                                    _dst_rec["lookalike_of"] = _mimics
-                                _cl_j.setdefault("_exfil_destinations", {})[_u_j] = _dst_rec
-                    except Exception:
-                        pass
-                    # Gap 5: first-seen host access
-                    if _chrono_first_seen.get(_u_j):
-                        _new_f.append("endpoint:first_seen_host_access")
-                    # Gap 6: per-entity behavioral baselining. Score each accumulated
-                    # behavioral count against the user's own history / peer population.
-                    for _bm, _bf in _BEHAV_METRICS_5J.items():
-                        try:
-                            _bz2 = _chrono_j.z_score("user", _u_j, _bm,
-                                                     window_seconds=86400 * 7, reference_ts=_ref_j)
-                            if _bz2.get("anomaly") or abs(float(_bz2.get("z") or 0)) >= 2.5:
-                                if _bf not in _new_f:
-                                    _new_f.append(_bf)
-                        except Exception:
-                            continue
-                # Gap 7: telemetry-gap / EDR blinding (negative-space detection). A
-                # host whose event volume collapses far BELOW its own baseline
-                # (negative z, temporal only) is consistent with eBPF/io_uring
-                # telemetry tampering. Needs cross-assessment host history to fire.
-                for _h_g in list(_cl_j.get("shared_hosts") or [])[:4]:
-                    _h_g = str(_h_g).strip().lower()
-                    if not _h_g:
-                        continue
-                    try:
-                        _gz = _chrono_j.z_score("host", _h_g, "events",
-                                                window_seconds=86400 * 7,
-                                                reference_ts=(_chrono_ref_ts or None),
-                                                allow_population=False)
-                        if _gz.get("source") == "temporal" and float(_gz.get("z") or 0) <= -2.5:
-                            if "endpoint:edr_telemetry_gap" not in _new_f:
-                                _new_f.append("endpoint:edr_telemetry_gap")
-                    except Exception:
-                        continue
-                if _new_f:
-                    _existing_f = _cl_j.setdefault("factor_tags", [])
-                    for _ff in set(_new_f):
-                        if _ff not in _existing_f:
-                            _existing_f.append(_ff)
-                    _cl_j["_chrono_factors"] = list(set(_new_f))
-                    _cl_j["_chrono_first_seen"] = {
-                        _u: sorted(_hosts) for _u, _hosts in _chrono_first_seen.items()
-                        if _u in {str(p).strip().lower() for p in _princ_j if p}
-                    }
+            if _chrono_accum is not None:
+                _chrono_elevate(clusters, _chrono_accum, _chrono_j)
             logger.info("Stage 5j: ChronoGraph anomaly elevation done for %s", assessment_id)
         except Exception as exc:
             logger.debug("Stage 5j ChronoGraph elevation skipped for %s: %s", assessment_id, exc)

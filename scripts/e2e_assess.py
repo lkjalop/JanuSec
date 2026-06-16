@@ -55,6 +55,13 @@ def _load_rows(folder: str) -> list[dict]:
                 ridx += 1
         except Exception as exc:  # pragma: no cover - data-dependent
             print(f"  WARN parse {os.path.basename(path)}: {exc}", file=sys.stderr)
+    # Entity resolution (matches production): backfill host->owner so host-only rows
+    # stitch to the identity campaign instead of fragmenting into no-user clusters.
+    try:
+        from src.core.entity_resolver import resolve_entities
+        resolve_entities(rows)
+    except Exception as exc:  # pragma: no cover
+        print(f"  WARN resolve_entities: {exc}", file=sys.stderr)
     return rows
 
 
