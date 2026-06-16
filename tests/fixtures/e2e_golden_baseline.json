@@ -3,29 +3,29 @@
   "scenarios": {
     "vesper": {
       "rows": 98750,
-      "actionable_clusters": 6,
+      "actionable_clusters": 5,
       "isolated_clusters": 0,
       "cluster_merge_version": "1.10",
       "evidence_retention_rate": 1.0,
       "oversized_clusters": 0,
       "oversized_rows_capped": 0,
-      "behavioral_links": 4,
+      "behavioral_links": 3,
       "empty_entity_clusters": 0,
       "validated_breaches": 2,
       "_elapsed_s": 32.5
     },
     "meridian": {
       "rows": 24438,
-      "actionable_clusters": 8,
+      "actionable_clusters": 7,
       "isolated_clusters": 88,
       "cluster_merge_version": "1.10",
       "evidence_retention_rate": 1.0,
       "oversized_clusters": 0,
       "oversized_rows_capped": 0,
-      "behavioral_links": 2,
+      "behavioral_links": 3,
       "empty_entity_clusters": 0,
       "validated_breaches": 4,
-      "_elapsed_s": 5.9
+      "_elapsed_s": 10.1
     },
     "santos": {
       "rows": 43834,
@@ -38,7 +38,7 @@
       "behavioral_links": 1,
       "empty_entity_clusters": 0,
       "validated_breaches": 4,
-      "_elapsed_s": 10.3
+      "_elapsed_s": 16.6
     }
   }
 }
