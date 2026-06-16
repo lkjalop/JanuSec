@@ -45,6 +45,15 @@ def test_meridian_stays_clean_positive_control(results):
     assert results["meridian"]["gaps"]["fp_network_breaches"] == 0
 
 
+@pytest.mark.parametrize("scenario", ["vesper", "santos", "meridian"])
+def test_red_herrings_suppressed(results, scenario):
+    # Phase 2 corroboration grading must keep the red herrings out of confirmed
+    # breaches: VESPER's anna (legit upload), Santos's sanctioned pentest. These were
+    # FPs before the regrade; lock them suppressed.
+    fp = results[scenario]["fp"]
+    assert fp == [], f"{scenario}: red herring(s) graded as confirmed breach: {fp}"
+
+
 # ── Known gaps — ratchet (may only improve) ──────────────────────────────────
 # Phase 1 (entity resolution) backfilled host->owner, eliminating VESPER's no-user
 # network 'breaches' (4 -> 0, now LOCKED). Santos still 4 (its no-user clusters are
