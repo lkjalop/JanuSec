@@ -1,0 +1,9 @@
+{
+  "scenario": "meridian",
+  "note": "No HANDOFF doc; Meridian is the HEALTHY reference (identity-rich -> 8 clean named-actor breaches, 0 over-merge). Used as the positive control: the gate must keep Meridian clean as Phase 1-2 change the entity layer (no regression on what already works).",
+  "must_detect": [],
+  "must_suppress": [],
+  "known_gaps": [
+    {"id": "no_false_breach_inflation", "desc": "Meridian already clean (0 no-user breaches) — must STAY 0 through the entity-layer refactor", "vesper_gap_class": "F-grading", "target_max_fp_network_breaches": 0}
+  ]
+}
