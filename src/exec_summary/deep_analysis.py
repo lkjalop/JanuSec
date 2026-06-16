@@ -311,6 +311,14 @@ def _build_deep_rollup(cluster_results: list[dict], assessment: dict) -> dict:
         1 for v in final_verdicts
         if v in ('CONFIRMED_BREACH', 'VALIDATED_BREACH', 'LIKELY_BREACH')
     )
+    # Investigate tier: clusters the corroboration grader downgraded from a confirmed
+    # breach (a lone ambiguous signal — e.g. normal-looking RDP) to SUSPECTED. They are
+    # correctly NOT confirmed breaches, but must still surface as "things to look at"
+    # rather than vanish from the report.
+    suspected_count = sum(
+        1 for v in final_verdicts
+        if str(v).upper() in ('SUSPECTED_BREACH', 'REQUIRES_INVESTIGATION', 'UNCERTAIN', 'SUSPICIOUS_ACTIVITY')
+    )
 
     # CEO one-liners per cluster
     ceo_lines = [
@@ -325,6 +333,7 @@ def _build_deep_rollup(cluster_results: list[dict], assessment: dict) -> dict:
         'coherent_sequences': coherent_sequences,
         'adversarial_passes_completed': adversarial_completed,
         'confirmed_clusters': confirmed_count,
+        'investigate_clusters': suspected_count,
         'average_confidence': round(avg_confidence, 3),
         'final_verdicts': final_verdicts,
         'ceo_summary_lines': ceo_lines,
