@@ -70,12 +70,13 @@ def test_no_false_network_breach_regression(results, scenario):
     )
 
 
-def test_vesper_exfil_stitch_gap_is_tracked(results):
-    # PHASE-2 TARGET: this must become True once host->user entity resolution attaches
-    # the cumulative exfil rows to martin.chen's cluster. Tracked here so the fix is
-    # measurable against truth; not yet asserted True (that's the point of Phase 1-2).
-    stitched = results["vesper"]["gaps"].get("exfil_stitched_to_actor")
-    assert stitched is False, (
-        "VESPER exfil now stitches to the actor — Phase 2 worked! "
-        "Flip this assertion to `is True` and update the roadmap."
+def test_vesper_exfil_stitches_to_actor(results):
+    # THE FINALE: the cumulative <350MB exfil to the lookalike destination
+    # (martin-chen.sharepoint.com) now attaches to martin.chen's breach cluster.
+    # Entity resolution (host->user) gives the benign-per-row exfil rows an actor, and
+    # ChronoGraph (data-time-anchored cumulative per-destination bytes) surfaces the
+    # signal that only exists across the batch. The whole kill chain stitches.
+    assert results["vesper"]["gaps"]["exfil_stitched_to_actor"] is True, (
+        "VESPER exfil no longer stitches to martin.chen — entity resolution or "
+        "ChronoGraph cumulative-exfil regressed."
     )

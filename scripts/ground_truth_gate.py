@@ -33,6 +33,8 @@ from src.core.ingest.file_parser import parse_file  # noqa: E402
 from src.pipeline.streaming_ingest import normalize_row  # noqa: E402
 from src.core.entity_resolver import resolve_entities  # noqa: E402
 from src.core.ingest.cluster_merge import transitive_merge_clusters  # noqa: E402
+from src.core.chrono.sketch_store import ChronoSketchStore  # noqa: E402
+from src.core.chrono.pipeline import accumulate, elevate_clusters  # noqa: E402
 
 _BREACH_VERDICTS = {"VALIDATED_BREACH", "LIKELY_BREACH", "INCIDENT", "LIKELY_COMPROMISE"}
 _DATA = ROOT / "dump" / "test files"
@@ -81,6 +83,14 @@ def evaluate(scenario: str) -> dict:
     clusters = transitive_merge_clusters(None, norm, diagnostics_out=diag)
     actionable = [c for c in clusters if not c.get("_isolated")]
 
+    # Phase 2 full-pipeline: ChronoGraph long-horizon detection (the SAME code the
+    # worker runs). Fresh store per dataset (no cross-contamination). This is where the
+    # cumulative <350MB exfil to the lookalike destination becomes a factor on the
+    # actor's cluster — the signal that only emerges across the batch, not per-row.
+    _chrono = ChronoSketchStore()
+    _accum = accumulate(norm, _chrono)
+    elevate_clusters(actionable, _accum, _chrono)
+
     res: dict = {"scenario": scenario, "rows": len(norm), "actionable": len(actionable),
                  "tp": [], "fn": [], "fp": [], "gaps": {}}
     actor_cluster: dict = {}
@@ -117,6 +127,13 @@ def evaluate(scenario: str) -> dict:
             dest = g["exfil_destination"].lower()
             stitched = False
             for hit in actor_cluster.values():
+                # The chrono elevation attaches the cumulative exfil destination to the
+                # actor's cluster (even though the benign per-row transfers were filtered
+                # out of clustering). That recorded destination IS the stitch.
+                exfil_dests = hit.get("_exfil_destinations") or {}
+                if any(dest in str(rec.get("destination", "")).lower() for rec in exfil_dests.values()):
+                    stitched = True
+                    break
                 refs = [i for i in (hit.get("row_refs") or []) if isinstance(i, int) and i < len(norm)]
                 if any(dest in str(norm[i]).lower() for i in refs):
                     stitched = True
