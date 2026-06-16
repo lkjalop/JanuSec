@@ -1667,6 +1667,55 @@ def _campaign_rollup(clusters: list[dict], max_campaigns: int = 8) -> list[dict]
     return kept + overflow + other_clusters
 
 
+# Phases that, ALONE, look like routine admin / are already mitigated — they need
+# corroboration before a cluster is a CONFIRMED breach. Everything else (kerberoasting,
+# session_theft, dcsync, golden ticket, oauth_device_code, dlp_exfil, lolbin/encoded-PS,
+# ransomware, ...) is a self-confirming malicious pattern. This denylist is the durable
+# knob: a new detector is "ambiguous" only if explicitly listed here.
+_AMBIGUOUS_PHASES = frozenset({
+    "bastion_rdp_lateral",    # RDP between hosts = normal admin
+    "wmi_dcom_lateral",       # WMI/DCOM = normal admin tooling
+    "identity_ip_anomaly",    # geo/ASN drift = VPN false positives
+    "c2_dns_beacon",          # low-rep DNS = can be legit/CDN
+    "firewall_threat",        # blocked at the perimeter = already mitigated
+    "network:edge_recon_scan", "edge_recon_scan",  # scanning = constant background noise
+})
+
+
+def _regrade_verdicts(clusters: list[dict]) -> list[dict]:
+    """Single authoritative verdict-confidence pass, run AFTER all merge/rollup/
+    phase-child decomposition so no construction site can inflate a breach.
+
+    Downgrade VALIDATED_BREACH -> SUSPECTED_BREACH only when the cluster's evidence is a
+    LONE AMBIGUOUS phase (one distinct phase, and it's in _AMBIGUOUS_PHASES — looks like
+    normal admin). A strong phase (anything not ambiguous) OR kill-chain corroboration
+    (>=2 distinct phases) stays confirmed. This kills VESPER's anna red-herring
+    (bastion_rdp alone) and Santos's IP-only network 'breaches' WITHOUT downgrading real
+    breaches that ride on a single strong high-severity phase (kerberoasting, session
+    theft, dlp exfil). Only ever downgrades; never upgrades."""
+    known = {d.phase_id for d in PHASE_DETECTORS}
+    for c in clusters:
+        if str(c.get("verdict") or "").upper() != "VALIDATED_BREACH":
+            continue
+        pids: set[str] = set()
+        for p in (c.get("phases") or []):
+            pid = p.get("phase_id") if isinstance(p, dict) else p
+            if pid:
+                pids.add(str(pid))
+        for ft in (c.get("factor_tags") or []):       # phase-children carry these
+            if isinstance(ft, str) and ft in known:
+                pids.add(ft)
+        if not pids:
+            continue  # nothing to assess — leave as-is
+        has_strong = any(p not in _AMBIGUOUS_PHASES for p in pids)
+        if has_strong or len(pids) >= 2:
+            continue  # confirmed (a strong phase, or kill-chain corroboration)
+        c["verdict"] = "SUSPECTED_BREACH"
+        c["final_verdict"] = "SUSPECTED_BREACH"
+        c["analysis_classification"] = "requires_investigation"
+    return clusters
+
+
 # ── Public entrypoint ────────────────────────────────────────────────────────
 def transitive_merge_clusters(
     pivot_groups: dict[str, list[int]] | None,
@@ -1921,6 +1970,9 @@ def transitive_merge_clusters(
 
     # Append isolated clusters at the end with a sentinel so callers can
     # split them out for the isolated_count header without losing audit data.
+    # Authoritative final grading: downgrade lone-ambiguous-phase 'breaches' to
+    # SUSPECTED (one place decides confidence, after all merge/decomposition).
+    out = _regrade_verdicts(out)
     return out + isolated
 
 
@@ -1971,6 +2023,10 @@ def _classify_component(
     all_have_change     = change_refs    and rows_with_change    == n
 
     # ── Decide cluster_kind ──
+    # NB: verdict CONFIDENCE (VALIDATED vs SUSPECTED) is decided in the single
+    # authoritative _regrade_verdicts pass that runs after all merge/decomposition —
+    # not here — so the scattered construction sites can't disagree. Here we just mark
+    # a phase-bearing component as a campaign breach; _regrade downgrades lone-ambiguous.
     if has_phase:
         kind = "campaign"
         verdict = "VALIDATED_BREACH"

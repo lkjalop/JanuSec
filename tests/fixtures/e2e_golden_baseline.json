@@ -11,7 +11,7 @@
       "oversized_rows_capped": 0,
       "behavioral_links": 4,
       "empty_entity_clusters": 0,
-      "validated_breaches": 6,
+      "validated_breaches": 2,
       "_elapsed_s": 32.5
     },
     "meridian": {
@@ -24,7 +24,7 @@
       "oversized_rows_capped": 0,
       "behavioral_links": 2,
       "empty_entity_clusters": 0,
-      "validated_breaches": 8,
+      "validated_breaches": 4,
       "_elapsed_s": 5.9
     },
     "santos": {
@@ -37,7 +37,7 @@
       "oversized_rows_capped": 0,
       "behavioral_links": 1,
       "empty_entity_clusters": 0,
-      "validated_breaches": 8,
+      "validated_breaches": 4,
       "_elapsed_s": 10.3
     }
   }
