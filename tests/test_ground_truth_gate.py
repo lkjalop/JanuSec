@@ -46,9 +46,10 @@ def test_meridian_stays_clean_positive_control(results):
 
 
 # ── Known gaps — ratchet (may only improve) ──────────────────────────────────
-# Baselines captured at Phase 0. Phase 2 (verdict grading on no-identity clusters)
-# drives these toward 0; tighten the numbers here as it lands.
-_FP_NETWORK_BREACH_BASELINE = {"vesper": 4, "santos": 4, "meridian": 0}
+# Phase 1 (entity resolution) backfilled host->owner, eliminating VESPER's no-user
+# network 'breaches' (4 -> 0, now LOCKED). Santos still 4 (its no-user clusters are
+# IP-only network rows that host->owner can't reach — needs ip->owner / Phase 2 grading).
+_FP_NETWORK_BREACH_BASELINE = {"vesper": 0, "santos": 4, "meridian": 0}
 
 
 @pytest.mark.parametrize("scenario", ["vesper", "santos", "meridian"])
