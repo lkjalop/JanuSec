@@ -316,17 +316,23 @@ class ChronoSketchStore:
         entity_type: str,
         entity_id: str,
         window_seconds: float = 86400 * 7,
+        reference_ts: Optional[float] = None,
     ) -> Dict[str, Dict[str, Any]]:
-        """Return all metrics for one entity with z-scores — for TemporalRAG context."""
+        """Return all metrics for one entity with z-scores — for TemporalRAG context.
+
+        reference_ts anchors the window to the DATA's time range (the max event time),
+        not wall-clock now. Without it, historical logs (e.g. a breach from last month)
+        fall outside the window and every metric reads 0 — which silently lost the
+        cumulative-exfil signal on historical assessments. Mirrors z_score's fix."""
         out: Dict[str, Dict[str, Any]] = {}
-        now = time.time()
-        start = now - window_seconds
+        ref = reference_ts if reference_ts is not None else time.time()
+        start = ref - window_seconds
         with self._lock:
             keys = [k for k in self._store if k[0] == entity_type and k[1] == entity_id]
             pairs = [(k[2], self._store[k]) for k in keys]
         for metric, emb in pairs:
-            wsum = emb.sum_window(start, now)
-            zdata = emb.z_score(window_seconds)
+            wsum = emb.sum_window(start, ref)
+            zdata = emb.z_score(window_seconds, reference_ts=reference_ts)
             out[metric] = {
                 "window_sum": round(wsum, 2),
                 **zdata,
