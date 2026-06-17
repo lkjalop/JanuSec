@@ -838,6 +838,44 @@ async def report_ingestion(
     raise HTTPException(status_code=400, detail='unsupported_format')
 
 
+@router.get('/api/v1/report/pasta')
+async def report_pasta(request: Request) -> Any:
+    """PASTA scenario rollup: map recorded decision factors to attack scenarios
+    (SCN-* ids) via the scenario engine, aggregated by occurrence/risk. Thin
+    wrapper over the same machinery the ingestion report's scenario section uses."""
+    try:
+        from .report_aggregation import aggregate_decisions, _scenario_summary, SCEN_ENGINE  # type: ignore
+    except Exception:
+        from src.api.report_aggregation import aggregate_decisions, _scenario_summary, SCEN_ENGINE  # type: ignore
+    decisions = aggregate_decisions()
+    for rec in (decisions.get('flagged_events', []) + decisions.get('autoblocked_samples', [])):
+        try:
+            rec['scenarios'] = SCEN_ENGINE.evaluate(rec.get('factors', []) or [])
+        except Exception:
+            rec['scenarios'] = []
+    return _scenario_summary(decisions)
+
+
+@router.get('/api/v1/report/threat_model')
+async def report_threat_model(request: Request) -> Any:
+    """STRIDE / threat-model rollup across recorded decisions: derive a unified
+    threat model per decision and aggregate STRIDE categories + framework counts."""
+    try:
+        from .report_aggregation import aggregate_decisions, _build_framework_summary, _unified_threat_model  # type: ignore
+    except Exception:
+        from src.api.report_aggregation import aggregate_decisions, _build_framework_summary, _unified_threat_model  # type: ignore
+    decisions = aggregate_decisions()
+    records = decisions.get('flagged_events', []) + decisions.get('autoblocked_samples', [])
+    for rec in records:
+        try:
+            model = _unified_threat_model(rec.get('factors', []) or [])
+            if model:
+                rec['threat_model'] = model
+        except Exception:
+            continue
+    return _build_framework_summary(records) or {'stride_categories': [], 'stride_counts': []}
+
+
 @router.post('/api/v1/report/generate_pdf')
 async def generate_pdf_report(req: Request, include_model: bool = Query(False)):
     """Generate a PDF from the standard HTML report. Uses WeasyPrint when available.

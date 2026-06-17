@@ -15,7 +15,8 @@ def test_ingestion_report_with_scenarios():
     DECISION_CACHE.clear()
     _seed_decision('evt-scn-1', ['dns:tunnel_suspected','net:beacon_periodic','ssl:ja3_rare'])
     _seed_decision('evt-scn-2', ['endpoint:lolbin_certutil_suspicious','endpoint:persistence_candidate'])
-    r = client.get('/api/v1/report/ingestion?include_scenarios=true&include_model=true', headers=default_test_headers())
+    # format=json so we get the structured report (the default html serves the LIVE console)
+    r = client.get('/api/v1/report/ingestion?format=json&include_scenarios=true&include_model=true', headers=default_test_headers())
     assert r.status_code == 200, r.text
     data = r.json()
     assert 'scenario_summary' in data
