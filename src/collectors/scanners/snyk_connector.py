@@ -22,10 +22,15 @@ class SnykConnector:
         api_base = os.getenv('SNYK_API_BASE', 'https://api.snyk.io')
         org_id = os.getenv('SNYK_ORG_ID')
         project_id = os.getenv('SNYK_PROJECT_ID') or project
-        if real_mode and api_token and org_id and project_id:
+        # REAL_MODE means "actually attempt the scan and surface what happens".
+        # We deliberately do NOT also require creds here: returning the fabricated
+        # stub SBOM below when real-mode was explicitly requested but mis-configured
+        # is a silent fail (a SOC would think it scanned). Missing creds/HTTP errors
+        # are surfaced via the `errors` list instead.
+        if real_mode:
             try:
                 import httpx
-                headers = {'Authorization': f'token {api_token}'}
+                headers = {'Authorization': f'token {api_token}'} if api_token else {}
                 timeout = int(os.getenv('SNYK_TIMEOUT_SEC','60') or 60)
                 max_pages = int(os.getenv('SNYK_MAX_PAGES','10') or 10)
                 page_size = int(os.getenv('SNYK_PAGE_SIZE','100') or 100)
