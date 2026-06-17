@@ -48,11 +48,8 @@ CLUSTER_ROW_CAP = int(os.getenv("JANUSEC_CLUSTER_ROW_CAP", "25000"))
 # pattern. Feeding it only triage-passing rows is why the VESPER recon/exfil blindspots
 # never fired. Generous cap; accumulation is cheap (counter increments).
 CHRONO_ROW_CAP = int(os.getenv("JANUSEC_CHRONO_ROW_CAP", "200000"))
-# Absolute cumulative-bytes floor (per user, per destination, over the window) that flags
-# exfil even when the z-baseline is too thin to score a slow multi-day drip. Default 2 GB
-# catches a 7 GB SharePoint exfil; legitimate high-volume uploaders to allowlisted
-# destinations are suppressed via the operator context channel (Phase 4).
-_EXFIL_DST_BYTES_FLOOR = float(os.getenv("JANUSEC_EXFIL_DST_BYTES_FLOOR", "2000000000"))
+# NB: the per-destination cumulative-bytes exfil floor (JANUSEC_EXFIL_DST_BYTES_FLOOR)
+# now lives in src/core/chrono/pipeline.py with the extracted Stage 5i/5j logic.
 
 PARSE_BATCH_SIZE = int(os.getenv("JANUSEC_PARSE_BATCH_SIZE", "5000"))
 ASSESSMENT_EVIDENCE_PREVIEW_CAP = int(os.getenv("JANUSEC_ASSESSMENT_EVIDENCE_PREVIEW_CAP", "500"))
