@@ -155,3 +155,9 @@ ewma_roc_summary.csv
 # MCP and Playwright runner artifacts
 .playwright-mcp/
 
+
+# Server run logs + pytest scratch output (session artifacts, never commit)
+start_server*.out
+start_server*.err
+pytest_*.txt
+scripts/llm_compare_results.json
