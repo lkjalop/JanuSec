@@ -199,8 +199,12 @@ def get_rule_precision(rule_id: str, days: int = 30) -> Dict[str, Any]:
     conn = sqlite3.connect(path)
     cur = conn.cursor()
     cur.execute(
-        "SELECT SUM(is_true_positive) as tp, COUNT(*) as total FROM precision_metrics WHERE rule_id=? AND recorded_at >= date('now','-%d day')",
-        (rule_id, days - 1),
+        # days is a typed int -> %d formats the interval into the SQL safely; the
+        # only bound parameter is rule_id. (Was passing days-1 as a 2nd binding for
+        # a single-placeholder statement -> ProgrammingError: incorrect bindings.)
+        "SELECT SUM(is_true_positive) as tp, COUNT(*) as total FROM precision_metrics "
+        "WHERE rule_id=? AND recorded_at >= date('now','-%d day')" % (days - 1),
+        (rule_id,),
     )
     row = cur.fetchone()
     conn.close()
