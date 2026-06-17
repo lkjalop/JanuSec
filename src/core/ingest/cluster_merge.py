@@ -770,6 +770,41 @@ def _det_mcp_tool_abuse(row: dict, text: str) -> bool:
     ))
 
 
+def _det_helpdesk_anomalous_reset(row: dict, text: str) -> bool:
+    """T1098/T1556 — helpdesk-driven credential/MFA reset (Scattered Spider's #1 entry
+    vector). An admin/helpdesk resets a user's password or re-registers their MFA device,
+    often for a different user, out of the normal pattern. The structured signal is a
+    reset/registration operation performed BY one actor FOR another."""
+    op = str(row.get('Operation') or row.get('operation') or row.get('event_name') or '').lower()
+    if op in (
+        'reset password (by admin)', 'reset user password', 'change user password',
+        'register security info', 'user registered security info', 'admin reset mfa',
+        'update user', 'set force change user password',
+    ):
+        return True
+    return any(t in text for t in (
+        'helpdesk reset', 'help desk reset', 'admin password reset', 'mfa re-register',
+        'mfa device registered', 'reset mfa', 'security info registered', 'sspr by admin',
+    ))
+
+
+def _det_ses_leaked_key(row: dict, text: str) -> bool:
+    """T1078.004/T1567 — Amazon SES abuse via a leaked IAM key. A sudden bulk-send or
+    sending-quota/identity change via SES from an access key (often newly used or from a
+    foreign ASN) is the leaked-key exfil/phishing channel."""
+    svc = str(row.get('eventSource') or row.get('event_source') or row.get('service') or '').lower()
+    op = str(row.get('eventName') or row.get('event_name') or row.get('operation') or '').lower()
+    if 'ses' in svc and any(t in op for t in (
+        'sendemail', 'sendrawemail', 'sendbulk', 'updateaccountsendingenabled',
+        'putaccountsendingattributes', 'verifyemailidentity', 'createconfigurationset',
+    )):
+        return True
+    return any(t in text for t in (
+        'ses bulk send', 'sendrawemail', 'leaked iam key', 'ses sending quota',
+        'ses phishing', 'amazon ses abuse',
+    ))
+
+
 PHASE_DETECTORS: list[PhaseDetector] = [
     PhaseDetector("credential_theft",          "Credential Theft (LSASS)",        "credential_theft",     "critical", _det_lsass),
     PhaseDetector("data_exfiltration_snowflake","Snowflake Bulk Unload",          "data_exfiltration",    "critical", _det_sf_unload),
@@ -814,6 +849,8 @@ PHASE_DETECTORS: list[PhaseDetector] = [
     PhaseDetector("dlp_exfil",                 "DLP Policy Violation / Data Exfil (T1567)", "data_exfiltration", "high",  _det_dlp_exfil),
     PhaseDetector("firewall_threat",           "Firewall/IPS Threat Block (T1190/T1071)",   "c2_communication", "high",  _det_firewall_threat),
     PhaseDetector("mcp_tool_abuse",            "MCP Tool-Call Abuse (ATLAS)",               "execution",        "high",  _det_mcp_tool_abuse),
+    PhaseDetector("helpdesk_anomalous_reset",  "Helpdesk Credential/MFA Reset (T1098/T1556)", "initial_access", "high",  _det_helpdesk_anomalous_reset),
+    PhaseDetector("ses_leaked_key",            "Amazon SES Abuse via Leaked Key (T1078.004/T1567)", "exfiltration", "high", _det_ses_leaked_key),
 ]
 
 
