@@ -713,6 +713,31 @@ async def _build_graph_session(payload: Dict, request: Request = None) -> Dict:
     # aliasing quirks.
     try:
         summary = result.get('summary') or {}
+        # Surface per-entity factors recorded against the referenced file batches so
+        # they are counted in the per-tenant detector_factor metrics below. The
+        # canonical builder focuses on graph semantics and does not re-emit the
+        # batch-level factors, so without this they never reach the metric.
+        try:
+            sids = payload.get('session_ids') if isinstance(payload, dict) else None
+            if sids:
+                _rt = None
+                try:
+                    _rt = get_server_runtime_state(getattr(request, 'app', None)) if request is not None else None
+                except Exception:
+                    _rt = None
+                from src.api.runtime_state import get_file_batch_analysis as _gfba
+                _batches = _gfba(_rt) or {}
+                _sf = summary.setdefault('factors', [])
+                _existing = {(_x.get('factor') if isinstance(_x, dict) else str(_x)) for _x in _sf}
+                for _sid in sids:
+                    _rec = _batches.get(_sid) or _batches.get(f'session:{_sid}') or {}
+                    for _file in (_rec.get('files') or []):
+                        for _fac in (_file.get('factors') or []):
+                            if _fac and _fac not in _existing:
+                                _sf.append(_fac)
+                                _existing.add(_fac)
+        except Exception:
+            pass
         factors = summary.get('factors') or []
         tenant_label = ''
         try:

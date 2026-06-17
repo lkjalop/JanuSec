@@ -6970,6 +6970,18 @@ async def metrics_endpoint(request: Request) -> Response:
                         lines.append(f'detector_factor_fp_ratio{{factor="{factor}"}} {ratio}')
                     except Exception:
                         continue
+                # detector_factor_total is recorded into runtime state by the graph
+                # session builder; render it here too because the prometheus Counter
+                # is a no-op under the lite/test stub registry.
+                tcounts = getattr(runtime, 'detector_factor_metric_counts', {}) or {}
+                if tcounts:
+                    lines.append('# TYPE detector_factor_total counter')
+                    for _k, _cval in tcounts.items():
+                        try:
+                            _fname, _ftenant = (_k if isinstance(_k, tuple) and len(_k) == 2 else (str(_k), ''))
+                            lines.append(f'detector_factor_total{{factor="{_fname}",tenant="{_ftenant}"}} {_cval}')
+                        except Exception:
+                            continue
             except Exception as _exc:
                 logger.debug('silent_swallow at %s:%d: %s', __file__, 6970, _exc)
             payload = ("\n".join(lines) + "\n").encode('utf-8')
@@ -7003,6 +7015,16 @@ async def metrics_endpoint(request: Request) -> Response:
                         fp_val = fp_counts.get(factor, 0)
                         ratio = (float(fp_val) / float(max(1, total)))
                         extra_lines.append(f'detector_factor_fp_ratio{{factor="{factor}"}} {ratio}')
+                    except Exception:
+                        continue
+            # detector_factor_total from runtime state (Counter may be a no-op stub).
+            tcounts = getattr(runtime, 'detector_factor_metric_counts', {}) or {}
+            if tcounts:
+                extra_lines.append('# TYPE detector_factor_total counter')
+                for _k, _cval in tcounts.items():
+                    try:
+                        _fname, _ftenant = (_k if isinstance(_k, tuple) and len(_k) == 2 else (str(_k), ''))
+                        extra_lines.append(f'detector_factor_total{{factor="{_fname}",tenant="{_ftenant}"}} {_cval}')
                     except Exception:
                         continue
         except Exception as _exc:
