@@ -93,6 +93,31 @@ def test_narrator_neutralizes_indirect_prompt_injection():
     assert "[REDACTED:injection]" in prompt
 
 
+def test_helpdesk_reset_detector():
+    assert "helpdesk_anomalous_reset" in _phases(
+        {"row_index": 1, "Operation": "Reset password (by admin)"})
+    assert "helpdesk_anomalous_reset" in _phases(
+        {"row_index": 2, "message": "admin password reset + mfa re-register for user"})
+    assert "helpdesk_anomalous_reset" not in _phases(
+        {"row_index": 3, "Operation": "UserLoggedIn"})
+
+
+def test_ses_leaked_key_detector():
+    assert "ses_leaked_key" in _phases(
+        {"row_index": 1, "eventSource": "ses.amazonaws.com", "eventName": "SendRawEmail"})
+    assert "ses_leaked_key" in _phases(
+        {"row_index": 2, "message": "amazon ses abuse: bulk send from leaked iam key"})
+    assert "ses_leaked_key" not in _phases(
+        {"row_index": 3, "eventSource": "s3.amazonaws.com", "eventName": "GetObject"})
+
+
+def test_helpdesk_ses_severity_and_role():
+    helpdesk = next(d for d in PHASE_DETECTORS if d.phase_id == "helpdesk_anomalous_reset")
+    ses = next(d for d in PHASE_DETECTORS if d.phase_id == "ses_leaked_key")
+    assert helpdesk.case_role == "initial_access" and helpdesk.severity == "high"
+    assert ses.case_role == "exfiltration" and ses.severity == "high"
+
+
 def test_2026_factors_have_narrator_labels():
     for factor in (
         "impact:esxi_hypervisor_ransomware", "iam:mfa_fatigue_bombing",
