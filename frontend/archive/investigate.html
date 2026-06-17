@@ -481,6 +481,12 @@
       <div class="pipeline-bar__fill" id="pipelineBarFill"></div>
     </div>
 
+    <!-- ── STAGED EVENTS IMPORT BANNER ── shown when home.html staged events are waiting ── -->
+    <div id="stagedImportBanner" style="display:none;background:#1e3a5f;border-bottom:1px solid #2d6a9f;padding:8px 16px;display:flex;align-items:center;justify-content:space-between;font-size:13px;color:#a8c8e8;">
+      <span>You have staged events from the live dashboard. <a href="#" onclick="importStagedEvents();return false;" style="color:#60b0ff;text-decoration:underline;">Import now</a></span>
+      <button onclick="dismissStagedBanner()" style="background:none;border:none;color:#a8c8e8;cursor:pointer;font-size:16px;padding:0 4px;">&#x2715;</button>
+    </div>
+
     <!-- ── UPLOAD BAR ── always visible ── -->
     <section class="upload-bar" id="uploadBar">
       <!-- Drop zone row (shown when no files loaded) -->
