@@ -208,3 +208,58 @@ def _expand_technique(tid: str) -> list[str]:
     if len(parts) > 1:
         out.append(parts[0])  # parent technique
     return out
+
+
+def derive_controls_breached_v2(
+    fragments: "dict[str, str | None] | list | None" = None,
+    *,
+    mitre_techniques: "list[str] | None" = None,
+) -> list[dict]:
+    """Derive breached compliance controls from BOTH MITRE techniques and evidence
+    keywords, with provenance.
+
+    Two derivation paths, unified on (framework, control_id):
+      * ``mitre_mapping``  — a technique in ``mitre_techniques`` maps via
+        ``_MITRE_TO_CONTROLS`` (sub-techniques expand to parent: T1003.001 → T1003).
+      * ``keyword_fallback`` — an evidence fragment keyword matches ``_COMPLIANCE_MAP``.
+    A control reached by both paths is tagged ``mitre+keyword``. Each entry carries
+    ``triggered_by`` (the technique IDs that mapped it) for audit traceability.
+
+    Superset of ``derive_controls_breached`` (keyword-only); reuses the same data so
+    the two stay consistent. Used by the compliance section of exec breach reports.
+    """
+    techniques = mitre_techniques or []
+    by_key: dict[tuple[str, str], dict] = {}
+
+    # 1) MITRE technique → control mapping (authoritative).
+    for raw in techniques:
+        tid = _normalise_technique(raw)
+        if not tid:
+            continue
+        for lookup in _expand_technique(tid):
+            for framework, control_id, control_name in _MITRE_TO_CONTROLS.get(lookup, []):
+                key = (framework, control_id)
+                entry = by_key.get(key)
+                if entry is None:
+                    by_key[key] = {
+                        'framework': framework,
+                        'control_id': control_id,
+                        'control_name': control_name,
+                        'derivation': 'mitre_mapping',
+                        'triggered_by': [tid],
+                    }
+                elif tid not in entry['triggered_by']:
+                    entry['triggered_by'].append(tid)
+
+    # 2) Keyword fallback over evidence fragments (reuses the v1 keyword logic).
+    if fragments and isinstance(fragments, dict):
+        for c in derive_controls_breached(fragments):
+            key = (c['framework'], c['control_id'])
+            entry = by_key.get(key)
+            if entry is None:
+                by_key[key] = {**c, 'derivation': 'keyword_fallback', 'triggered_by': []}
+            else:
+                # reached by both MITRE and keyword evidence
+                entry['derivation'] = 'mitre+keyword'
+
+    return list(by_key.values())
