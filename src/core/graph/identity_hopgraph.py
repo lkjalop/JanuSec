@@ -111,8 +111,12 @@ class IdentityHopGraph:
     # --- Ingest helpers from events ---
     def ingest_identity_event(self, ev: Dict[str, Any], aggregator: Any = None) -> None:
         t0 = time.time()
+        # Prefer user_canonical (the single attribution key the entity resolver +
+        # clustering use) so the identity graph keys the SAME actor the same way as the
+        # rest of the pipeline — previously it preferred raw 'user', so the same person
+        # could appear as 'martin.chen@acme.io' here but 'martin.chen' in clustering.
         user = (
-            ev.get('user') or ev.get('user_canonical') or ev.get('username') or
+            ev.get('user_canonical') or ev.get('user') or ev.get('username') or
             ev.get('userPrincipalName') or ev.get('user_principal_name') or
             ev.get('actor') or ev.get('account_name')
         )
