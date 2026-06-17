@@ -430,6 +430,9 @@ _FACTOR_TAG_LABELS: dict[str, str] = {
     "network:firewall_threat_block": "Firewall/IPS threat block (T1190/T1071) — perimeter blocked an exploit/botnet/IPS signature; attempted attack",
     "ai:mcp_tool_poisoning": "MCP tool poisoning (ATLAS AML.T0051) — malicious instructions in a tool description/args or agent-memory injection",
     "ai:mcp_scope_violation": "MCP scope violation (ATLAS AML.T0053) — AI agent accessed context/tools far outside its grant",
+    "iam:sim_swap_indicator": "SIM-swap / number port (T1451) — account phone/SIM changed; SMS-MFA can now flow to the attacker",
+    "cloud:gcp_audit_anomaly": "GCP audit anomaly (T1078.004/T1098) — anomalous IAM/admin activity in Google Cloud audit logs",
+    "identity:repo_audit_anomaly": "Source-repo audit anomaly (T1078/T1213) — unusual GitHub/GitLab repo or secret access",
 }
 
 

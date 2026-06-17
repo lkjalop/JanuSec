@@ -805,6 +805,20 @@ def _det_ses_leaked_key(row: dict, text: str) -> bool:
     ))
 
 
+def _det_sim_swap(row: dict, text: str) -> bool:
+    """T1451 — SIM-swap. The victim's phone number is ported / a new SIM registered,
+    then SMS-based MFA flows to the attacker. Signal: a number/SIM change on an account,
+    or an SMS-MFA delivery to a newly-changed device, ahead of an account takeover."""
+    op = str(row.get('Operation') or row.get('operation') or row.get('event_name') or '').lower()
+    if op in ('update phone number', 'change phone number', 'sim change', 'number port',
+              'register phone', 'update mfa phone'):
+        return True
+    return any(t in text for t in (
+        'sim swap', 'sim-swap', 'sim_swap', 'number port', 'ported number',
+        'new sim registered', 'phone number changed', 'mfa phone updated',
+    ))
+
+
 PHASE_DETECTORS: list[PhaseDetector] = [
     PhaseDetector("credential_theft",          "Credential Theft (LSASS)",        "credential_theft",     "critical", _det_lsass),
     PhaseDetector("data_exfiltration_snowflake","Snowflake Bulk Unload",          "data_exfiltration",    "critical", _det_sf_unload),
@@ -851,6 +865,7 @@ PHASE_DETECTORS: list[PhaseDetector] = [
     PhaseDetector("mcp_tool_abuse",            "MCP Tool-Call Abuse (ATLAS)",               "execution",        "high",  _det_mcp_tool_abuse),
     PhaseDetector("helpdesk_anomalous_reset",  "Helpdesk Credential/MFA Reset (T1098/T1556)", "initial_access", "high",  _det_helpdesk_anomalous_reset),
     PhaseDetector("ses_leaked_key",            "Amazon SES Abuse via Leaked Key (T1078.004/T1567)", "exfiltration", "high", _det_ses_leaked_key),
+    PhaseDetector("sim_swap",                  "SIM-Swap / Number Port (T1451)",            "initial_access",   "high",  _det_sim_swap),
 ]
 
 

@@ -123,6 +123,10 @@ _SOURCE_ALIASES: Dict[str, str] = {
     # (Cloudflare Access) carry identity but route here and surface user via field map.
     'cloudflare': SOURCE_NETWORK, 'akamai': SOURCE_NETWORK,
     'fastly': SOURCE_NETWORK, 'cloudfront': SOURCE_NETWORK,
+    # Secure web gateway / SASE proxy — user-attributed web egress (CASB/DLP subset).
+    'zscaler': SOURCE_NETWORK, 'netskope': SOURCE_NETWORK, 'zia': SOURCE_NETWORK,
+    # Source-repo audit (GitHub/GitLab) — actor-attributed repo/secret access -> IAM lane.
+    'github': SOURCE_IAM, 'gitlab': SOURCE_IAM, 'github_audit': SOURCE_IAM,
     # Data governance / DLP / insider risk (Microsoft Purview via O365 Mgmt Activity)
     'purview': SOURCE_IAM, 'dlp': SOURCE_IAM,
     # AI agent / MCP (Model Context Protocol) tool-call telemetry — agent executes
@@ -173,6 +177,17 @@ def _normalize_cloud(row: dict) -> dict:
     # Entra sign-in (if it routes here): userPrincipalName
     if not r.get('user'):
         r['user'] = _safe(row.get('caller') or row.get('userPrincipalName') or '')
+    # GCP CloudAudit: actor + caller IP live under nested protoPayload.* — without
+    # this the GCP principal is invisible (no actor -> can't attribute/cluster).
+    proto = row.get('protoPayload')
+    if isinstance(proto, dict):
+        if not r.get('user'):
+            auth = proto.get('authenticationInfo')
+            if isinstance(auth, dict):
+                r['user'] = _safe(auth.get('principalEmail') or '')
+        meta = proto.get('requestMetadata')
+        if isinstance(meta, dict) and not r.get('src_ip'):
+            r['src_ip'] = _safe(meta.get('callerIp') or '')
     r.setdefault('src_ip', _safe(
         row.get('sourceIPAddress') or row.get('callerIpAddress') or row.get('source_ip') or
         # Snowflake query_log uses CLIENT_IP / client_ip for the session source.
@@ -615,6 +630,24 @@ FIELD_MAPS: Dict[str, Dict[str, str]] = {
     'mcp': {
         'user': 'agent_id', 'event_name': 'tool_name', 'hostname': 'mcp_server',
         'session_id': 'request_id', 'action': 'mcp_event', 'target': 'resource_uri',
+    },
+    # Zscaler / Netskope secure web gateway (user-attributed web egress; CASB/DLP).
+    # login user -> user, destination URL/host -> target, policy verdict -> action.
+    'zscaler': {
+        'user': 'user', 'src_ip': 'clientpublicIP', 'hostname': 'host',
+        'target': 'url', 'action': 'action', 'category': 'urlcategory',
+        'geo_country': 'location', 'event_signature': 'reason',
+    },
+    'netskope': {
+        'user': 'user', 'src_ip': 'srcip', 'hostname': 'hostname',
+        'target': 'url', 'action': 'action', 'data_class': 'dlp_profile',
+        'event_signature': 'policy', 'category': 'category',
+    },
+    # GitHub / GitLab audit log (actor-attributed repo/secret/admin actions -> IAM).
+    # actor -> user, action verb -> event_name, repo -> target.
+    'github': {
+        'user': 'actor', 'event_name': 'action', 'target': 'repo',
+        'src_ip': 'actor_ip', 'outcome': 'result', 'session_id': 'hashed_token',
     },
 }
 

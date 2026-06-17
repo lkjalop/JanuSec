@@ -633,6 +633,9 @@ FACTOR_TO_MITRE.update({
     'network:firewall_threat_block':      ['T1190', 'T1071'],       # FortiGate/Palo IPS/AV/botnet block
     'ai:mcp_tool_poisoning':              ['AML.T0051', 'AML.T0053'],  # ATLAS: LLM prompt/tool poisoning
     'ai:mcp_scope_violation':             ['AML.T0053'],            # ATLAS: agent accesses out-of-grant context
+    'iam:sim_swap_indicator':             ['T1451'],                # SIM-swap / number port -> SMS-MFA hijack
+    'cloud:gcp_audit_anomaly':            ['T1078.004', 'T1098'],   # GCP audit: anomalous IAM/admin activity
+    'identity:repo_audit_anomaly':        ['T1078', 'T1213'],       # GitHub/GitLab audit: repo/secret access
 })
 
 def get_all_mappings(factors: list[str]) -> dict[str, list[str]]:
