@@ -367,8 +367,10 @@ def _det_dcsync(row: dict, text: str) -> bool:
     """T1003.006 — DCSync domain replication credential harvest.
     Windows Event 4662 with GUID {1131f6aa} / {1131f6ad} / {89e95b76}.
     APT29, Conti, LockBit post-exploitation toolkit chains."""
-    event_id = str(row.get('event_id') or row.get('EventID') or '').strip()
-    if event_id == '4662':
+    # Use _win_event_id (NOT raw event_id) — NDJSON sources carry a hash event_id that
+    # shadows the real windows_event_id, silently breaking 4662 detection (same bug class
+    # that disabled Kerberos detection on VESPER).
+    if _win_event_id(row) == '4662':
         props = str(row.get('Properties') or row.get('property_names') or '').lower()
         if any(t in props for t in (
             '1131f6aa', '1131f6ad', '89e95b76', 'ds-replication-get-changes',

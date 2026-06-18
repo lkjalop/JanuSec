@@ -278,11 +278,18 @@ class AdversarialCritic:
 
         with _CRITIC_LOCK:
             try:
-                call_timeout = float(os.getenv("JANUSEC_CRITIC_TIMEOUT_S", "40"))
+                # Match the narrator's T2 settings: a clean-JSON, non-reasoning model and
+                # a budget that actually completes. With the old default (slow reasoning
+                # model + 40s) the critic silently timed out on every T2 cluster — the
+                # CEO-grade narrative got NO adversarial/hallucination review at all.
+                call_timeout = float(os.getenv("JANUSEC_CRITIC_TIMEOUT_S", "90"))
+                _critic_model = (os.getenv("JANUSEC_CRITIC_MODEL")
+                                 or os.getenv("JANUSEC_T2_NARRATOR_MODEL", "qwen2.5:14b"))
                 result = _client.generate(
                     prompt,
                     system=_SYSTEM_PROMPT,
-                    max_tokens=600,
+                    max_tokens=800,
+                    model=_critic_model,
                     tenant_id=assessment_id or "critic",
                     overrides={"timeout": call_timeout, "retries": 0, "temperature": 0.2},
                 )
