@@ -39,8 +39,12 @@ TOP_N_CLUSTERS = int(os.getenv('JANUSEC_NARRATOR_TOP_N', '11'))
 _NARRATOR_CONCURRENCY = max(1, int(os.getenv('JANUSEC_NARRATOR_CONCURRENCY', '1')))
 _NARRATOR_LOCK = threading.Semaphore(_NARRATOR_CONCURRENCY)
 
-# T2 quality narrator — used for top clusters that feed the CEO exec summary
-_T2_MODEL = os.getenv('JANUSEC_T2_NARRATOR_MODEL', '')
+# T2 quality narrator — used for top clusters that feed the CEO exec summary.
+# Default to qwen2.5:14b: benchmarked clean-JSON + non-reasoning (no <think> preamble)
+# so the CEO-grade narrative actually parses instead of falling back. Reasoning models
+# (qwen3*/deepseek-r1*) emit <think> that breaks JSON grammar; _parse_llm_output strips
+# it defensively, but the top cluster gets the model that doesn't need stripping.
+_T2_MODEL = os.getenv('JANUSEC_T2_NARRATOR_MODEL', 'qwen2.5:14b')
 _T2_CONFIDENCE_THRESHOLD = float(os.getenv('JANUSEC_T2_CONFIDENCE_THRESHOLD', '0.88'))
 
 # Critic budget controls
@@ -760,8 +764,55 @@ _VALID_KILL_CHAIN = {
 }
 
 
+def _repair_truncated_json(text: str) -> dict | None:
+    """Best-effort recovery of a JSON object truncated by the model's token budget.
+    Closes an unterminated string and balances open braces/brackets, then retries.
+    Returns the parsed dict or None if unrecoverable."""
+    s = text.strip()
+    start = s.find("{")
+    if start < 0:
+        return None
+    s = s[start:]
+    # Walk the string tracking structure; stop at the last point we can safely close.
+    in_str = False
+    esc = False
+    stack: list[str] = []
+    for ch in s:
+        if esc:
+            esc = False
+            continue
+        if ch == "\\" and in_str:
+            esc = True
+            continue
+        if ch == '"':
+            in_str = not in_str
+            continue
+        if in_str:
+            continue
+        if ch in "{[":
+            stack.append("}" if ch == "{" else "]")
+        elif ch in "}]" and stack:
+            stack.pop()
+    repaired = s
+    if in_str:
+        repaired += '"'        # close the dangling string
+    # drop a trailing comma/colon that would break a closed object
+    repaired = re.sub(r"[,:]\s*$", "", repaired.rstrip())
+    repaired += "".join(reversed(stack))  # close open containers
+    try:
+        return json.loads(repaired)
+    except json.JSONDecodeError:
+        return None
+
+
 def _parse_llm_output(raw: str, cluster_id: str) -> dict:
     text = raw.strip()
+    # Reasoning models (qwen3*, deepseek-r1*) emit a <think>...</think> preamble whose
+    # prose often contains braces — that breaks the greedy {.*} JSON extraction below.
+    # Strip it first (no-op for non-reasoning models). Also drop a bare leading <think>
+    # with no close tag (truncated reasoning).
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r"^.*?</think>", "", text, flags=re.DOTALL | re.IGNORECASE).strip() if "</think>" in text else text.strip()
     # Strip markdown code fences if the model wrapped the JSON
     if text.startswith("```"):
         text = re.sub(r"^```(?:json)?\s*", "", text)
@@ -775,8 +826,14 @@ def _parse_llm_output(raw: str, cluster_id: str) -> dict:
     try:
         obj = json.loads(text)
     except json.JSONDecodeError:
-        logger.warning("cluster_narrator: JSON parse failed for %s — using fallback", cluster_id)
-        return _fallback_narrative(cluster_id, raw_text=raw[:500])
+        # The response can be truncated mid-JSON when the model hits its token budget.
+        # Try to salvage it (close an unterminated string + balance braces) before
+        # giving up to the deterministic fallback — a partial CEO narrative beats none.
+        obj = _repair_truncated_json(text)
+        if obj is None:
+            logger.warning("cluster_narrator: JSON parse failed for %s — using fallback", cluster_id)
+            return _fallback_narrative(cluster_id, raw_text=raw[:500])
+        logger.info("cluster_narrator: salvaged truncated JSON for %s", cluster_id)
 
     # Validate and normalise
     verdict = str(obj.get("verdict") or "REQUIRES_INVESTIGATION").upper()
@@ -1229,6 +1286,11 @@ def narrate_cluster(
     selected_model: str | None = model_override
     cluster_conf = float(cluster.get("confidence") or 0.0)
     _is_t2 = False
+    # narrate_top_clusters passes the T2 model as model_override for the top cluster;
+    # treat that as the T2 tier too (so it gets the larger T2 timeout below).
+    if selected_model and _T2_MODEL and selected_model == _T2_MODEL:
+        _is_t2 = True
+        cluster["_narrator_tier"] = "T2"
     if not selected_model and _T2_MODEL:
         if cluster_conf >= _T2_CONFIDENCE_THRESHOLD:
             selected_model = _T2_MODEL
@@ -1278,7 +1340,11 @@ def narrate_cluster(
             # outage for the entire feature's lifetime.
             logger.warning("narrator: scatter-gather unavailable for %s: %s", cluster_id, _sg_exc)
 
-    call_timeout = float(os.getenv("JANUSEC_INGEST_LLM_TIMEOUT_S", "45"))
+    # T2 (CEO-grade top cluster) gets a larger budget — it's the one narrative that
+    # must not fall back. T1 stays tight so the stage budget covers many clusters.
+    _t1_timeout = float(os.getenv("JANUSEC_INGEST_LLM_TIMEOUT_S", "45"))
+    _t2_timeout = float(os.getenv("JANUSEC_INGEST_T2_LLM_TIMEOUT_S", "90"))
+    call_timeout = _t2_timeout if _is_t2 else _t1_timeout
     t_start = time.monotonic()
 
     # ── Optional sovereignty redaction ────────────────────────────────────────
@@ -1297,8 +1363,13 @@ def narrate_cluster(
 
     with _NARRATOR_LOCK:
         try:
+            # The full narrative JSON (verdict + kill_chain + ioc_summary +
+            # attack_narrative + next_steps) routinely exceeds ~900 tokens; truncation
+            # mid-JSON was the intermittent parse-failure -> fallback. Give it room.
+            _t2_max = int(os.getenv("JANUSEC_NARRATE_T2_MAX_TOKENS", "1500"))
+            _t1_max = int(os.getenv("JANUSEC_NARRATE_T1_MAX_TOKENS", "1100"))
             generate_kwargs: dict = {
-                "max_tokens": 900 if cluster.get("_narrator_tier") == "T2" else 800,
+                "max_tokens": _t2_max if cluster.get("_narrator_tier") == "T2" else _t1_max,
                 "tenant_id": assessment_id or "ingest",
                 "overrides": {"timeout": call_timeout, "retries": 0},
             }
