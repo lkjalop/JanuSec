@@ -634,6 +634,7 @@ FACTOR_TO_MITRE.update({
     'ai:mcp_tool_poisoning':              ['AML.T0051', 'AML.T0053'],  # ATLAS: LLM prompt/tool poisoning
     'ai:mcp_scope_violation':             ['AML.T0053'],            # ATLAS: agent accesses out-of-grant context
     'iam:sim_swap_indicator':             ['T1451'],                # SIM-swap / number port -> SMS-MFA hijack
+    'discovery:ad_enumeration':           ['T1087', 'T1069', 'T1018'],  # AD discovery: users/groups/trusts via LOLBins
     'cloud:gcp_audit_anomaly':            ['T1078.004', 'T1098'],   # GCP audit: anomalous IAM/admin activity
     'identity:repo_audit_anomaly':        ['T1078', 'T1213'],       # GitHub/GitLab audit: repo/secret access
 })

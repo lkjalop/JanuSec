@@ -435,6 +435,7 @@ _FACTOR_TAG_LABELS: dict[str, str] = {
     "ai:mcp_tool_poisoning": "MCP tool poisoning (ATLAS AML.T0051) — malicious instructions in a tool description/args or agent-memory injection",
     "ai:mcp_scope_violation": "MCP scope violation (ATLAS AML.T0053) — AI agent accessed context/tools far outside its grant",
     "iam:sim_swap_indicator": "SIM-swap / number port (T1451) — account phone/SIM changed; SMS-MFA can now flow to the attacker",
+    "discovery:ad_enumeration": "Active Directory discovery (T1087/T1069/T1018) — enumerated users, privileged groups (Domain Admins) and trusts via LOLBins (net/dsquery/nltest/BloodHound)",
     "cloud:gcp_audit_anomaly": "GCP audit anomaly (T1078.004/T1098) — anomalous IAM/admin activity in Google Cloud audit logs",
     "identity:repo_audit_anomaly": "Source-repo audit anomaly (T1078/T1213) — unusual GitHub/GitLab repo or secret access",
 }
@@ -1034,6 +1035,7 @@ def _apply_narrative_to_cluster(cluster: dict, narrative: dict, *, upgrade_only:
 # with a coarse ordinal so derived stages come out in kill-chain order. Used to recover
 # a real stage when the LLM returns "unknown" — the pipeline already detected the phase.
 _CASE_ROLE_TO_KILLCHAIN: dict[str, tuple[int, str]] = {
+    "discovery":             (2, "recon"),
     "initial_access":        (1, "delivery"),
     "execution":             (2, "exploitation"),
     "persistence":           (3, "installation"),
@@ -1057,15 +1059,26 @@ def _killchain_from_phases(cluster: dict) -> list[str]:
     """
     ranked: list[tuple[int, str]] = []
     seen: set[str] = set()
+    roles: list[str] = []
     for ph in cluster.get("phases") or []:
         # Phases may be dicts ({"case_role": ...}, from cluster_merge) or bare strings
         # (a case_role / phase label, used by some callers and fixtures). Handle both.
         if isinstance(ph, dict):
-            role = str(ph.get("case_role") or "")
+            roles.append(str(ph.get("case_role") or ""))
         elif isinstance(ph, str):
-            role = ph
-        else:
-            continue
+            roles.append(ph)
+    # present_phase_ids carries the actor's FULL kill chain even when this cluster is a
+    # decomposed single-phase child — so the CEO narrative tells the whole story
+    # (oauth->recon->kerberoast->lateral->powershell), not just the anchor fragment.
+    present = cluster.get("present_phase_ids") or []
+    if present:
+        try:
+            from src.core.ingest.cluster_merge import _PHASE_ID_TO_ROLE as _PID2ROLE
+        except Exception:
+            _PID2ROLE = {}
+        for pid in present:
+            roles.append(_PID2ROLE.get(pid, pid))   # phase_id -> case_role (fallback: as-is)
+    for role in roles:
         mapped = _CASE_ROLE_TO_KILLCHAIN.get(role)
         if mapped and mapped[1] not in seen:
             ranked.append(mapped)

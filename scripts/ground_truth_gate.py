@@ -139,6 +139,16 @@ def evaluate(scenario: str) -> dict:
                     stitched = True
                     break
             res["gaps"]["exfil_stitched_to_actor"] = stitched
+        if g["id"] == "full_killchain_one_cluster":
+            min_phases = int(g.get("target_min_phases") or 5)
+            # present_phase_ids = the actor's full kill chain across the parent campaign
+            # (decomposition surfaces it per-actor, so red herrings aren't mixed in).
+            best = 0
+            for hit in actor_cluster.values():
+                best = max(best, len({p for p in (hit.get("present_phase_ids") or []) if p}))
+            res["gaps"]["actor_killchain_phases"] = best
+            res["gaps"]["full_killchain_one_cluster"] = best >= min_phases
+    res["_clusters"] = actionable
     return res
 
 
