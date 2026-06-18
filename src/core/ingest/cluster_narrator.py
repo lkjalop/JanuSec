@@ -1083,6 +1083,16 @@ def _killchain_from_phases(cluster: dict) -> list[str]:
         if mapped and mapped[1] not in seen:
             ranked.append(mapped)
             seen.add(mapped[1])
+    # The cumulative-bytes exfil to a lookalike destination is a ChronoGraph FACTOR
+    # (not a per-row phase) — without this the breach FINALE (the actual data theft, the
+    # whole point of the intrusion) is absent from the kill chain the CEO sees. Surface
+    # the exfiltration stage when the cluster carries an exfil factor or recorded dest.
+    if "exfiltration" not in seen and (
+        cluster.get("_exfil_destinations")
+        or any("exfil" in str(f).lower() for f in (cluster.get("factor_tags") or []))
+    ):
+        ranked.append((9, "exfiltration"))
+        seen.add("exfiltration")
     ranked.sort(key=lambda t: t[0])
     return [stage for _, stage in ranked]
 
