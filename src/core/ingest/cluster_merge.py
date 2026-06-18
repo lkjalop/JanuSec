@@ -382,31 +382,55 @@ def _det_dcsync(row: dict, text: str) -> bool:
     ))
 
 
+def _win_event_id(row: dict) -> str:
+    """Resolve the Windows Security event code (4769/4768/...) across field-name
+    variants. CRITICAL: VESPER NDJSON carries BOTH a unique `event_id` hash AND the
+    real `windows_event_id`; the old `event_id or ... or windows_event_id` chain picked
+    the hash first, so Kerberos detection silently never fired. Prefer the field that
+    actually looks like a Windows event code (short, all digits)."""
+    for v in (row.get('windows_event_id'), row.get('EventID'), row.get('event_code'),
+              row.get('event_id')):
+        s = str(v or '').strip()
+        if s.isdigit() and len(s) <= 5:
+            return s
+    return ''
+
+
+def _kerb_self_service_ticket(row: dict) -> bool:
+    """True when a service account requests a ticket for ITS OWN host service — the
+    benign legacy-RC4 pattern (VESPER's svc_jenkins red herring). svc_jenkins ->
+    host/SVR-JENKINS-01 is self; svc_sql -> krbtgt is NOT (that's roasting)."""
+    acct = str(row.get('account_name') or row.get('user') or '').lower()
+    svc = str(row.get('service_name') or row.get('spn') or '').lower()
+    if acct.startswith('svc_') and len(acct) > 4:
+        base = acct[4:]
+        return bool(base) and base in svc
+    return False
+
+
 def _det_kerberoasting(row: dict, text: str) -> bool:
     """T1558.003 / T1558.004 / T1558.001 — Kerberoasting, AS-REP roasting, Golden Ticket.
     RC4_HMAC_MD5 (etype 0x17) TGS requests; pre-auth disabled accounts; forged TGTs.
-    Near-universal in targeted attacks: APT29, Fin6, many ransomware groups.
-    Field aliases: windows_event_id (VESPER NDJSON), EventID (XML), event_id (normalised)."""
-    # Accept both Windows XML field names and VESPER NDJSON field names
-    event_id = str(
-        row.get('event_id') or row.get('EventID') or row.get('windows_event_id') or ''
-    ).strip()
+    Near-universal in targeted attacks: APT29, Fin6, many ransomware groups."""
+    event_id = _win_event_id(row)
     if event_id == '4769':
+        ticket_opts = str(
+            row.get('ticket_options') or row.get('TicketOptions') or ''
+        ).strip()
+        # Golden Ticket: forged TGT/TGS — anomalous ticket_options indicate forgery.
+        # 0x60a10000 = forwardable+renewable+proxiable+renewable_ok (atypical). This is
+        # the strongest, account-unique signal (no self-service legitimacy) — check first.
+        if ticket_opts in ('0x60a10000', '0x40a10000', '0x60810000', '0x60a00000'):
+            return True
         enc_type = str(
             row.get('TicketEncryptionType') or row.get('ticket_encryption_type')
             or row.get('ticket_encryption') or ''
         ).strip()
         if enc_type in ('0x17', '0x18', '23', '18', '0x17 rc4'):
-            # Kerberoasting: RC4-downgraded TGS request
-            return True
-        # Golden Ticket: forged TGT/TGS — anomalous ticket_options indicate forgery
-        # 0x60a10000 = forwardable+renewable+proxiable+renewable_ok (atypical combination)
-        ticket_opts = str(
-            row.get('ticket_options') or row.get('TicketOptions') or ''
-        ).strip()
-        if enc_type in ('0x17', '0x18', '23', '18') and ticket_opts in (
-            '0x60a10000', '0x40a10000', '0x60810000', '0x60a00000',
-        ):
+            # Kerberoasting: RC4-downgraded TGS request. Suppress the benign self-service
+            # legacy-RC4 pattern (svc_X requesting its own host service) — the red herring.
+            if _kerb_self_service_ticket(row):
+                return False
             return True
     if event_id == '4768':
         preauth = str(
@@ -422,6 +446,32 @@ def _det_kerberoasting(row: dict, text: str) -> bool:
         'spn enumeration', 'gmsapassword',
         'kerbrute', 'rubeus.exe', 'impacket getuserspns', 'getuserspns.py',
     ))
+
+
+def _det_ad_recon_discovery(row: dict, text: str) -> bool:
+    """T1087 / T1069 / T1018 — Active Directory discovery via LOLBins. Post-compromise
+    enumeration of users, groups (esp. Domain Admins) and trusts: net group/user,
+    dsquery, nltest, whoami /groups, plus BloodHound/SharpHound/AdFind collectors.
+    This is the recon stage of the kill chain (martin.chen ran `net group "Domain
+    Admins" /domain` and `dsquery user` on WS-MARTIN-01 before lateral movement)."""
+    cmd = str(row.get('CommandLine') or row.get('command_line') or row.get('command') or '').lower()
+    proc = str(row.get('process_name') or row.get('process') or '').lower()
+    hay = cmd or text
+    if any(t in hay for t in (
+        'net group "domain admins"', 'net group "enterprise admins"',
+        'net group /domain', 'net user /domain', 'net localgroup administrators',
+        'dsquery user', 'dsquery group', 'dsquery computer',
+        'nltest /domain_trusts', 'nltest /dclist',
+        'whoami /groups', 'whoami /priv', 'whoami /all',
+        'get-aduser', 'get-adgroupmember', 'get-addomain', 'get-netgroupmember',
+        'bloodhound', 'sharphound', 'adfind', 'invoke-bloodhound',
+    )):
+        return True
+    if proc in ('net.exe', 'net1.exe', 'dsquery.exe', 'nltest.exe') and any(
+        t in hay for t in ('domain admins', '/domain', ' group ', ' user ')
+    ):
+        return True
+    return False
 
 
 def _det_shadow_copy_deletion(row: dict, text: str) -> bool:
@@ -840,6 +890,7 @@ PHASE_DETECTORS: list[PhaseDetector] = [
     # Credential access
     PhaseDetector("dcsync_replication",        "DCSync Domain Replication (T1003.006)","credential_access",  "critical", _det_dcsync),
     PhaseDetector("kerberoasting",             "Kerberoasting/AS-REP Roasting (T1558.003)", "credential_access", "high", _det_kerberoasting),
+    PhaseDetector("ad_recon_discovery",        "Active Directory Discovery (T1087/T1069)",  "discovery",        "medium", _det_ad_recon_discovery),
     PhaseDetector("ntlm_relay_pth",            "NTLM Relay / Pass-the-Hash (T1550.002)", "lateral_movement", "high",     _det_ntlm_relay_pth),
     PhaseDetector("cloud_imds_theft",          "Cloud IMDS Credential Theft (T1552.005)", "credential_access", "critical", _det_cloud_imds_theft),
     # Lateral movement
@@ -2320,6 +2371,9 @@ def _classify_component(
         "reason_summary": lead,
         "phases": phases,
         "phase_count": len(phases),
+        # Mirror of the phase_ids present (== phases here for undecomposed clusters);
+        # decomposed children override this with their full context-window phase set.
+        "present_phase_ids": sorted(phase_hits.keys()),
         "phase_anchor_row_count": sum(p["row_count"] for p in phases) if phases else 0,
         "engagement_refs": sorted(engagement_refs),
         "change_refs": sorted(change_refs),
@@ -2409,6 +2463,25 @@ def _expand_large_campaign_cluster(
         selected_keys.extend(key for key, _ in items[:per_phase_cap])
     selected_keys.sort(key=lambda key: (key[2], key[0], key[1]))
 
+    # Per-actor kill-chain: which phases each actor's OWN rows span across the whole
+    # parent component. Decomposition fragments a campaign into per-phase children, so a
+    # single child's context window is a non-deterministic slice; the actor's full phase
+    # set is the truthful campaign view (martin.chen -> oauth+recon+kerberoast+lateral+
+    # powershell) with clean attribution (anna's rows are anna's, never mixed in).
+    actor_phases: dict[str, set[str]] = defaultdict(set)
+    for phase in cluster.get("phases") or []:
+        pid = str(phase.get("phase_id") or "")
+        if not pid:
+            continue
+        for ref in phase.get("row_refs") or []:
+            idx = _int_or_none(ref)
+            if idx is None:
+                continue
+            actor = _lower((row_by_idx.get(idx) or {}).get("user_canonical")
+                           or (row_by_idx.get(idx) or {}).get("user"))
+            if actor:
+                actor_phases[actor].add(pid)
+
     children: list[dict] = []
     for n, key in enumerate(selected_keys, start=1):
         phase_id, anchor, _bucket = key
@@ -2417,7 +2490,7 @@ def _expand_large_campaign_cluster(
         if len(child_refs) < 2:
             child_refs = set(anchor_refs)
         if child_refs:
-            children.append(_make_phase_child_cluster(cluster, phase_meta.get(phase_id) or {}, phase_id, anchor, n, child_refs, row_by_idx, ts_by_idx))
+            children.append(_make_phase_child_cluster(cluster, phase_meta.get(phase_id) or {}, phase_id, anchor, n, child_refs, row_by_idx, ts_by_idx, actor_phases))
 
     if len(children) < min_children:
         return []
@@ -2464,6 +2537,7 @@ def _make_phase_child_cluster(
     refs: set[int],
     row_by_idx: dict[int, dict],
     ts_by_idx: dict[int, float],
+    actor_phases: dict[str, set[str]] | None = None,
 ) -> dict:
     rows = [row_by_idx[i] for i in sorted(refs) if i in row_by_idx]
     sources = sorted({
@@ -2517,6 +2591,16 @@ def _make_phase_child_cluster(
         "reason_summary": lead,
         "phases": [child_phase],
         "phase_count": 1,
+        # The full kill chain for THIS child's dominant actor across the whole parent
+        # component (not just the non-deterministic context-window slice). `phases`
+        # carries only the anchor for per-phase triage; this preserves the campaign view
+        # so the CEO narrative + full-killchain gate see the WHOLE story (martin.chen's
+        # oauth->recon->kerberoast->lateral->powershell) with clean attribution — anna's
+        # rows stay in anna's set, never mixed into martin's campaign.
+        "present_phase_ids": sorted(
+            _present_phases | set().union(*(actor_phases.get(u, set()) for u in (users or [])))
+            if actor_phases else _present_phases
+        ),
         "factor_tags": factor_tags,
         **({"_entry_point": _entry_point} if _entry_point else {}),
         "phase_anchor_row_count": len(child_phase["row_refs"]),

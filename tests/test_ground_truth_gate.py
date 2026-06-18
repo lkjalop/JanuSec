@@ -80,3 +80,28 @@ def test_vesper_exfil_stitches_to_actor(results):
         "VESPER exfil no longer stitches to martin.chen — entity resolution or "
         "ChronoGraph cumulative-exfil regressed."
     )
+
+
+def test_vesper_full_killchain_in_one_campaign(results):
+    # The intrusion is a single campaign for martin.chen: oauth -> recon -> kerberoast
+    # -> lateral -> powershell, surfaced as the actor's present_phase_ids across the
+    # decomposed parent. Was the open full_killchain_one_cluster gap (1 phase visible);
+    # the AD-recon + Kerberos detectors + per-actor phase aggregation close it.
+    gaps = results["vesper"]["gaps"]
+    assert gaps.get("full_killchain_one_cluster") is True, (
+        f"martin.chen kill chain fragmented — only {gaps.get('actor_killchain_phases')} "
+        f"phases in one campaign (need >=5)")
+    assert gaps.get("actor_killchain_phases", 0) >= 5
+
+
+def test_vesper_red_herrings_not_full_campaigns(results):
+    # The detectors must not inflate the red herrings into multi-phase campaigns: the
+    # bait users (anna/james/sarah legit RDP, svc_jenkins legacy RC4) must each stay a
+    # lone-phase cluster, never picking up the actor's kill chain (over-merge guard).
+    herrings = {"anna.kowalski", "james.wright", "sarah.lin", "svc_jenkins"}
+    for c in results["vesper"]["_clusters"]:
+        users = {str(u).lower() for u in (c.get("shared_users") or c.get("shared_accounts") or [])}
+        if users & herrings:
+            n = len({p for p in (c.get("present_phase_ids") or []) if p})
+            who = sorted(users & herrings)
+            assert n <= 2, f"red herring {who} inflated to {n}-phase campaign (over-merge)"
