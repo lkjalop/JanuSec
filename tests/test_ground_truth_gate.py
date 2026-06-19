@@ -19,10 +19,13 @@ import pytest
 
 from scripts.ground_truth_gate import evaluate, dataset_present
 
-pytestmark = pytest.mark.skipif(
-    not all(dataset_present(s) for s in ("vesper", "meridian", "santos")),
-    reason="VESPER/Meridian/Santos datasets not present in this checkout",
-)
+pytestmark = [
+    pytest.mark.acceptance,  # part of the golden acceptance harness
+    pytest.mark.skipif(
+        not all(dataset_present(s) for s in ("vesper", "meridian", "santos")),
+        reason="VESPER/Meridian/Santos datasets not present in this checkout",
+    ),
+]
 
 
 @pytest.fixture(scope="module")

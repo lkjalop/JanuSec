@@ -20,6 +20,8 @@ import pytest
 
 from src.core.ingest.cluster_merge import detect_row_phase_tags, PHASE_DETECTORS
 
+pytestmark = pytest.mark.acceptance  # part of the golden acceptance harness
+
 _VESPER = os.path.join("dump", "test files", "Vesper")
 
 # Detectors that MUST fire somewhere in VESPER's telemetry — the documented kill chain.
