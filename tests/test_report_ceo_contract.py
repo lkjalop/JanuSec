@@ -14,6 +14,8 @@ import pytest
 
 os.environ.setdefault("PLATFORM_LITE_INIT", "1")
 
+pytestmark = pytest.mark.acceptance  # part of the golden acceptance harness
+
 # The detection factors a real VALIDATED_BREACH carries (must map to all frameworks).
 _BREACH_FACTORS = [
     "iam:oauth_consent_excessive_scope",
@@ -112,3 +114,21 @@ def test_assessment_id_export_is_deterministic():
     first = _fetch_sections()
     second = _fetch_sections()
     assert first == second, "assessment_id export is non-deterministic across calls"
+
+
+def test_ceo_html_export_contains_ceo_sections():
+    # The HTML a CEO/analyst actually opens must carry the framework sections, not just
+    # a stat bar. Acceptance-level "is the export presentable" check.
+    from fastapi.testclient import TestClient
+    from src.api.server import app, _record_decision
+    from tests._helpers import default_test_headers
+
+    _clear_all_decision_caches()
+    _record_decision("ceo-html-1", "VALIDATED_BREACH", 0.95, _BREACH_FACTORS)
+    client = TestClient(app)
+    r = client.get("/api/v1/report/ingestion?format=html&include_scenarios=true",
+                   headers=default_test_headers())
+    assert r.status_code == 200
+    html = r.text.lower()
+    for section in ("severity distribution", "top mitre techniques"):
+        assert section in html, f"CEO HTML export missing '{section}' section"

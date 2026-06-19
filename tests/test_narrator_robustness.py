@@ -10,7 +10,11 @@ Locks the three robustness fixes:
 """
 from __future__ import annotations
 
+import pytest
+
 from src.core.ingest import cluster_narrator as cn
+
+pytestmark = pytest.mark.acceptance  # part of the golden acceptance harness
 
 
 def test_t2_model_defaults_to_clean_json_model():
