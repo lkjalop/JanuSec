@@ -95,10 +95,9 @@ __all__ = ['router']
 
 
 # ---------------------- Artifact Listing Endpoint ----------------------
-try:
-    from .runtime_state import DECISION_CACHE  # type: ignore
-except Exception:  # pragma: no cover
-    DECISION_CACHE = {}
+# Bind the ONE canonical decision cache via the accessor (no `= {}` dual-instance fallback).
+from .runtime_state import get_decision_cache as _get_decision_cache
+DECISION_CACHE = _get_decision_cache()
 
 def _artifact_from_decision(dec_obj) -> dict:
     # Support both object-like decisions and plain dicts

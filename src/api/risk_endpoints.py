@@ -47,10 +47,8 @@ def risk_score_post(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 @router.get('/api/v1/risk/score/{event_id}')
 def risk_score_get(event_id: str) -> Dict[str, Any]:
-    try:
-        from .server import DECISION_CACHE  # type: ignore
-    except Exception:
-        DECISION_CACHE = {}
+    from .runtime_state import get_decision_cache
+    DECISION_CACHE = get_decision_cache()
     decision = DECISION_CACHE.get(event_id)
     if not decision:
         raise HTTPException(status_code=404, detail='not_found')

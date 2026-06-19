@@ -16,10 +16,10 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Header, Query, Request
 
-try:
-    from .runtime_state import DECISION_CACHE  # type: ignore
-except Exception:  # pragma: no cover
-    DECISION_CACHE = {}
+# Bind the ONE canonical decision cache via the accessor — NOT a `= {}` fallback, which
+# would create a second instance during a circular import (the dual-instance bug).
+from .runtime_state import get_decision_cache as _get_decision_cache
+DECISION_CACHE = _get_decision_cache()
 
 from .dependencies import get_canonical_alert_ring
 from .tenant_helpers import resolve_tenant_id
