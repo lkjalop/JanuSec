@@ -1066,6 +1066,33 @@ _RUNTIME = ServerRuntime()
 __all__.extend(['DECISION_CACHE','dns_agg','asn_stats','rules_engine','_sanitize_event','_recent_guardrail_fallback','_recent_guardrail_select','EVENT_QUEUE','RECENT_DECISION_WINDOW','GUARDRAIL_HISTORY_SIZE','GUARDRAIL_MIN_SAMPLE','LOGGER','_RUNTIME'])
 
 
+def get_decision_cache() -> dict:
+    """THE canonical decision cache accessor — resolved at CALL time, never bound at
+    import time.
+
+    The dual-instance bug (a confirmed breach written via one path, invisible via
+    another) comes from modules doing ``try: from .runtime_state import DECISION_CACHE
+    except: DECISION_CACHE = {}`` — the fallback binds a SEPARATE dict when the import
+    races a circular load. Call-time resolution via sys.modules sidesteps that window:
+    every caller gets the one canonical object that THIS module owns, regardless of
+    whether the package was reached as ``api.*`` or ``src.api.*``. Prefer this over
+    importing the DECISION_CACHE symbol; it makes the aggregate_decisions 7-path merge
+    unnecessary.
+    """
+    import sys as _sys
+    for _name in ('src.api.runtime_state', 'api.runtime_state'):
+        _mod = _sys.modules.get(_name)
+        if _mod is not None:
+            _cache = getattr(_mod, 'DECISION_CACHE', None)
+            if _cache is not None:
+                return _cache
+    # This module is, by definition, loaded when this function runs.
+    return DECISION_CACHE
+
+
+__all__.append('get_decision_cache')
+
+
 def cache_set(key: str, value: Any) -> None:
     """Normalize and set a value into the canonical DECISION_CACHE.
 
