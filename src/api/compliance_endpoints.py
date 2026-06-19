@@ -248,11 +248,9 @@ async def compliance_summary(
         tenant_id = resolve_tenant_id(request, tenant_id)
     except Exception:
         pass
-    # Import runtime caches lazily to avoid circulars
-    try:
-        from .runtime_state import DECISION_CACHE  # type: ignore
-    except Exception:
-        DECISION_CACHE = {}
+    # Resolve the ONE canonical decision cache at call time (no `= {}` dual-instance fallback)
+    from .runtime_state import get_decision_cache
+    DECISION_CACHE = get_decision_cache()
 
     # Local STRIDE -> control hints (keep consistent with /map/stride)
     stride_to_controls = _STRIDE_TO_CONTROLS
@@ -473,10 +471,8 @@ async def bias_report(
     limit_events: int = Query(1000, ge=10, le=10000),
     window_seconds: int | None = Query(None, ge=60, le=60*60*24*90, description='Optional time window to filter recent decisions'),
 ) -> dict[str, Any]:
-    try:
-        from .runtime_state import DECISION_CACHE  # type: ignore
-    except Exception:
-        DECISION_CACHE = {}
+    from .runtime_state import get_decision_cache
+    DECISION_CACHE = get_decision_cache()
     # Collect recent decisions (optionally windowed by timestamp)
     items = list(DECISION_CACHE.values())
     now = time.time()
@@ -561,10 +557,8 @@ async def ai_incident_plan() -> dict[str, Any]:
 
 @router.get('/metrics/validate', summary='Validate external metrics vs internal cache (heuristic)')
 async def metrics_validate() -> dict[str, Any]:
-    try:
-        from .runtime_state import DECISION_CACHE  # type: ignore
-    except Exception:
-        DECISION_CACHE = {}
+    from .runtime_state import get_decision_cache
+    DECISION_CACHE = get_decision_cache()
     cache_size = len(DECISION_CACHE)
     # Probe Prometheus registry if available
     registry_ok = False
