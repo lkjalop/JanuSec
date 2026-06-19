@@ -452,10 +452,17 @@ def aggregate_decisions(limit: int = 500) -> dict[str, Any]:
         }
         if persona_tags:
             rec['persona_tags'] = persona_tags
-        if verdict in ('review','escalate','suspicious'):
+        # Flagged = anything needing attention. CRITICAL: the breach verdicts
+        # (validated_breach/likely_breach/suspected_breach/incident/...) were absent
+        # here, so a CONFIRMED BREACH decision was silently dropped from the report —
+        # every framework rollup (kill_chain/stride/maestro/dread) came back empty for
+        # the exact thing the platform exists to surface.
+        if verdict in ('review', 'escalate', 'suspicious', 'suspected_breach',
+                       'validated_breach', 'likely_breach', 'likely_compromise',
+                       'incident', 'requires_investigation'):
             if len(flagged) < 25:
                 flagged.append(rec)
-        if verdict in ('block','malicious'):
+        if verdict in ('block', 'malicious', 'autoblock', 'auto_block'):
             if len(autoblocked) < 25:
                 autoblocked.append(rec)
     top_mitre_sorted = sorted(top_mitre.items(), key=lambda kv: kv[1], reverse=True)[:15]
@@ -664,6 +671,247 @@ def _build_framework_summary(records: list[dict[str, Any]]) -> dict[str, Any] | 
         'cvss_distribution': {dim: sorted(vals.items(), key=lambda x: (-x[1], x[0])) for dim, vals in cvss_counts.items()},
         'controls': sorted(controls_set),
     }
+
+_KILL_CHAIN_ORDER: dict[str, int] = {
+    'delivery': 10,
+    'initial_access': 10,
+    'recon': 20,
+    'reconnaissance': 20,
+    'discovery': 20,
+    'exploitation': 30,
+    'execution': 30,
+    'credential_access': 35,
+    'credential_theft': 35,
+    'privilege_escalation': 40,
+    'installation': 50,
+    'persistence': 50,
+    'defense_evasion': 55,
+    'c2': 60,
+    'command_and_control': 60,
+    'lateral_movement': 70,
+    'collection': 80,
+    'exfiltration': 90,
+    'impact': 100,
+}
+
+_MAESTRO_TO_KILL_CHAIN: dict[str, str] = {
+    'initial_access': 'delivery',
+    'discovery': 'recon',
+    'recon': 'recon',
+    'execution': 'exploitation',
+    'credential_access': 'exploitation',
+    'credential_theft': 'exploitation',
+    'privilege_escalation': 'exploitation',
+    'defense_evasion': 'installation',
+    'persistence': 'installation',
+    'command_and_control': 'c2',
+    'c2_communication': 'c2',
+    'lateral_movement': 'lateral_movement',
+    'collection': 'collection',
+    'exfiltration': 'exfiltration',
+    'data_exfiltration': 'exfiltration',
+    'impact': 'impact',
+}
+
+def _normalise_kill_chain_stage(value: Any) -> str | None:
+    if isinstance(value, dict):
+        value = value.get('phase') or value.get('stage') or value.get('case_role') or value.get('phase_id')
+    text = str(value or '').strip().lower().replace('-', '_').replace(' ', '_')
+    if not text or text == 'unknown':
+        return None
+    return _MAESTRO_TO_KILL_CHAIN.get(text, text)
+
+def _ordered_stage_counts(stage_counts: dict[str, int]) -> list[dict[str, Any]]:
+    return [
+        {'phase': phase, 'count': count}
+        for phase, count in sorted(
+            stage_counts.items(),
+            key=lambda item: (_KILL_CHAIN_ORDER.get(item[0], 999), -item[1], item[0]),
+        )
+    ]
+
+def _iter_factor_values(source: Any) -> list[str]:
+    if not isinstance(source, list):
+        return []
+    values: list[str] = []
+    for item in source:
+        if isinstance(item, dict):
+            value = item.get('name') or item.get('factor') or item.get('id') or item.get('label')
+        else:
+            value = item
+        text = str(value or '').strip()
+        if text and text not in values:
+            values.append(text)
+    return values
+
+def _cluster_factors(cluster: dict[str, Any]) -> list[str]:
+    factors: list[str] = []
+    for key in ('factor_tags', '_chrono_factors', '_campaign_factor_tags', 'factors'):
+        for factor in _iter_factor_values(cluster.get(key)):
+            if factor not in factors:
+                factors.append(factor)
+    return factors
+
+def _cluster_is_reportable(cluster: dict[str, Any]) -> bool:
+    verdict = str(cluster.get('final_verdict') or cluster.get('verdict') or '').upper()
+    if any(term in verdict for term in ('BENIGN', 'NO_VALIDATED', 'INSUFFICIENT')):
+        return False
+    return bool(verdict) or bool(_cluster_factors(cluster)) or bool(cluster.get('phases'))
+
+def _records_with_models(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for rec in records or []:
+        if not isinstance(rec, dict):
+            continue
+        factors = rec.get('factors') or []
+        if not isinstance(factors, list) or not factors:
+            out.append(rec)
+            continue
+        if rec.get('threat_model'):
+            out.append(rec)
+            continue
+        clone = dict(rec)
+        model = _unified_threat_model(factors)
+        if model:
+            clone['threat_model'] = model
+        out.append(clone)
+    return out
+
+def _cluster_rollup_records(clusters: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for cluster in clusters or []:
+        if not isinstance(cluster, dict) or not _cluster_is_reportable(cluster):
+            continue
+        factors = _cluster_factors(cluster)
+        if not factors:
+            continue
+        model = _unified_threat_model(factors)
+        out.append({
+            'event_id': cluster.get('cluster_id') or cluster.get('id'),
+            'factors': factors,
+            'threat_model': model,
+            'phases': cluster.get('phases') or [],
+            'present_phase_ids': cluster.get('present_phase_ids') or [],
+            'kill_chain_stages': cluster.get('kill_chain_stages') or [],
+        })
+    return out
+
+def _stages_from_cluster(cluster: dict[str, Any]) -> list[str]:
+    stages: list[str] = []
+    try:
+        from src.core.ingest.cluster_narrator import _killchain_from_phases  # type: ignore
+        stages.extend(_killchain_from_phases(cluster) or [])
+    except Exception:
+        pass
+    for key in ('kill_chain_stages', 'kill_chain_phases', 'attack_phases'):
+        for stage in cluster.get(key) or []:
+            norm = _normalise_kill_chain_stage(stage)
+            if norm:
+                stages.append(norm)
+    return [stage for stage in stages if stage]
+
+def _stages_from_record_model(record: dict[str, Any]) -> list[str]:
+    stages: list[str] = []
+    model = record.get('threat_model') or {}
+    for phase, _count in (model.get('maestro') or {}).get('phases', []) or []:
+        norm = _normalise_kill_chain_stage(phase)
+        if norm:
+            stages.append(norm)
+    return stages
+
+def _derive_kill_chain_rollup(
+    records: list[dict[str, Any]],
+    clusters: list[dict[str, Any]] | None,
+    maestro_rollup: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    stage_counts: dict[str, int] = {}
+    reportable_clusters = [
+        cluster for cluster in (clusters or [])
+        if isinstance(cluster, dict) and _cluster_is_reportable(cluster)
+    ]
+    if reportable_clusters and len(records or []) == len(reportable_clusters):
+        for cluster, rec in zip(reportable_clusters, records or []):
+            seen: set[str] = set()
+            for stage in _stages_from_cluster(cluster) + _stages_from_record_model(rec):
+                if stage not in seen:
+                    stage_counts[stage] = stage_counts.get(stage, 0) + 1
+                    seen.add(stage)
+    else:
+        for cluster in reportable_clusters:
+            seen = set()
+            for stage in _stages_from_cluster(cluster):
+                if stage not in seen:
+                    stage_counts[stage] = stage_counts.get(stage, 0) + 1
+                    seen.add(stage)
+        for rec in records or []:
+            seen = set()
+            for stage in _stages_from_record_model(rec):
+                if stage not in seen:
+                    stage_counts[stage] = stage_counts.get(stage, 0) + 1
+                    seen.add(stage)
+    if stage_counts:
+        return _ordered_stage_counts(stage_counts)
+    fallback: dict[str, int] = {}
+    for item in maestro_rollup or []:
+        stage = _normalise_kill_chain_stage(item.get('phase') if isinstance(item, dict) else item)
+        if not stage:
+            continue
+        try:
+            count = int(item.get('count') or 1) if isinstance(item, dict) else 1
+        except Exception:
+            count = 1
+        fallback[stage] = fallback.get(stage, 0) + count
+    return _ordered_stage_counts(fallback)
+
+def build_framework_rollups(
+    records: list[dict[str, Any]] | None = None,
+    clusters: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    cluster_records = _cluster_rollup_records(clusters)
+    rollup_records = cluster_records if cluster_records else _records_with_models(records or [])
+    framework_summary = _build_framework_summary(rollup_records)
+    top_stride: list[dict[str, Any]] = []
+    pasta_rollup: list[dict[str, Any]] = []
+    cvss_rollup: dict[str, list[dict[str, Any]]] = {}
+    maestro_rollup: list[dict[str, Any]] = []
+    dread_average = None
+    controls_overview: list[str] = []
+    if framework_summary:
+        top_stride = [{'category': cat, 'count': cnt} for cat, cnt in (framework_summary.get('stride_counts') or [])[:15]]
+        pasta_rollup = [{'stage': stage, 'count': count} for stage, count in (framework_summary.get('pasta_stage_distribution') or [])]
+        cvss_rollup = {
+            dim: [{'value': value, 'count': count} for value, count in vals]
+            for dim, vals in (framework_summary.get('cvss_distribution') or {}).items()
+        }
+        maestro_rollup = [{'phase': phase, 'count': count} for phase, count in (framework_summary.get('maestro_phase_density') or [])]
+        dread_average = framework_summary.get('dread_average_across_events')
+        controls_overview = framework_summary.get('controls', [])
+    return {
+        'framework_summary': framework_summary,
+        'rollup_records': rollup_records,
+        'top_stride': top_stride,
+        'pasta_stages': pasta_rollup,
+        'cvss_summary': cvss_rollup,
+        'maestro_phases': maestro_rollup,
+        'kill_chain_phases': _derive_kill_chain_rollup(rollup_records, clusters, maestro_rollup),
+        'dread_average': dread_average,
+        'controls_overview': controls_overview,
+    }
+
+def decorate_report_framework_rollups(
+    report: dict[str, Any],
+    records: list[dict[str, Any]] | None = None,
+    clusters: list[dict[str, Any]] | None = None,
+) -> dict[str, Any] | None:
+    rollups = build_framework_rollups(records, clusters)
+    report['top_stride'] = rollups['top_stride']
+    report['pasta_stages'] = rollups['pasta_stages']
+    report['cvss_summary'] = rollups['cvss_summary']
+    report['maestro_phases'] = rollups['maestro_phases']
+    report['kill_chain_phases'] = rollups['kill_chain_phases']
+    report['dread_average'] = rollups['dread_average']
+    report['controls_overview'] = rollups['controls_overview']
+    return rollups.get('framework_summary')
 
 def _compute_domain_rollups(records: list[dict[str, Any]]) -> dict[str, Any]:
     if not records:
@@ -1068,6 +1316,10 @@ def _load_assessment_rows(session_ids: list[str]) -> dict[str, Any] | None:
                     'flagged_events': flagged,
                     'autoblocked_samples': autoblocked,
                     'threat_models': threat_models,
+                    '_assessment_clusters': assessment.get('clusters')
+                        or assessment.get('raw_correlation_clusters')
+                        or assessment.get('correlation_clusters')
+                        or [],
                     '_assessment_source': matches[0],
                     '_assessment_id': assessment.get('assessment_id'),
                 }
@@ -1210,7 +1462,8 @@ def build_ingestion_report(
 
     scenario_block = _scenario_summary(decisions) if include_scenarios else None
     combined_records = decisions.get('flagged_events', []) + decisions.get('autoblocked_samples', [])
-    framework_summary = _build_framework_summary(combined_records)
+    framework_rollups = build_framework_rollups(combined_records, decisions.get('_assessment_clusters') or [])
+    framework_summary = framework_rollups.get('framework_summary')
     model_summary: dict[str, Any] | None = framework_summary if include_model and framework_summary else None
 
     # Business impact summary across combined records (best-effort)
@@ -1311,30 +1564,15 @@ def build_ingestion_report(
     if decisions.get('threat_models'):
         report['threat_models'] = decisions['threat_models']
     report['network_highlights'] = network_snapshot
-    # Cross-framework rollups
-    top_stride = []
-    pasta_rollup = []
-    cvss_rollup: dict[str, list[dict[str, Any]]] = {}
-    maestro_rollup = []
-    dread_average = None
-    controls_overview = []
-    if framework_summary:
-        top_stride = [{'category': cat, 'count': cnt} for cat, cnt in (framework_summary.get('stride_counts') or [])[:15]]
-        pasta_rollup = [{'stage': stage, 'count': count} for stage, count in (framework_summary.get('pasta_stage_distribution') or [])]
-        cvss_rollup = {
-            dim: [{'value': value, 'count': count} for value, count in vals]
-            for dim, vals in (framework_summary.get('cvss_distribution') or {}).items()
-        }
-        maestro_rollup = [{'phase': phase, 'count': count} for phase, count in (framework_summary.get('maestro_phase_density') or [])]
-        dread_average = framework_summary.get('dread_average_across_events')
-        controls_overview = framework_summary.get('controls', [])
-    report['top_stride'] = top_stride
-    report['pasta_stages'] = pasta_rollup
-    report['cvss_summary'] = cvss_rollup
-    report['maestro_phases'] = maestro_rollup
-    report['kill_chain_phases'] = list(maestro_rollup)
-    report['dread_average'] = dread_average
-    report['controls_overview'] = controls_overview
+    # Cross-framework rollups. Kill chain uses detected campaign phase context
+    # when available, with MAESTRO density as fallback for legacy live decisions.
+    report['top_stride'] = framework_rollups['top_stride']
+    report['pasta_stages'] = framework_rollups['pasta_stages']
+    report['cvss_summary'] = framework_rollups['cvss_summary']
+    report['maestro_phases'] = framework_rollups['maestro_phases']
+    report['kill_chain_phases'] = framework_rollups['kill_chain_phases']
+    report['dread_average'] = framework_rollups['dread_average']
+    report['controls_overview'] = framework_rollups['controls_overview']
 
     domain_rollups = _compute_domain_rollups(combined_records)
     report['domain_rollups'] = domain_rollups
@@ -1622,4 +1860,4 @@ def _derive_recommendations(decisions: dict[str, Any], alerts: list[dict[str,Any
         recs.append('Environment appears stable; continue baseline monitoring.')
     return recs
 
-__all__ = ['build_ingestion_report']
+__all__ = ['build_ingestion_report', 'build_framework_rollups', 'decorate_report_framework_rollups']
