@@ -66,3 +66,21 @@ def test_persona_report_renders_signature_section(client, persona, signature):
     assert signature in html, (
         f"{persona} report missing its signature section '{signature}' — persona render "
         f"regressed or the breach didn't reach it")
+
+
+def test_threat_hunter_queries_grounded_in_real_iocs():
+    # Grounding (#1): hunt queries must substitute THIS incident's real IOCs, not the
+    # `known_bad_ips` placeholder. A query with the real attacker IP is runnable.
+    from src.reporting.comprehensive_report_generator import _build_threat_hunter_page
+
+    payload = {"rows": [
+        {"dst_ip": "203.45.42.201", "dst_domain": "martin-chen.sharepoint.com"},
+        {"src_ip": "10.42.3.79", "dst_ip": "185.199.108.133"},  # private + external
+    ], "meta": {"verdict": "VALIDATED_BREACH"}}
+    html = _build_threat_hunter_page(payload, payload["meta"], {}, "s", "Acme", "2026-01-01")
+    assert "203.45.42.201" in html, "real attacker IP not grounded into hunt queries"
+    assert "known_bad_ips" not in html, "placeholder survived despite real IPs being available"
+    # private IPs must NOT be injected as the 'bad' list
+    import re
+    bad_clauses = re.findall(r"dst_ip IN \(([^)]*)\)", html)
+    assert bad_clauses and "10.42.3.79" not in bad_clauses[0], "private IP injected as malicious"

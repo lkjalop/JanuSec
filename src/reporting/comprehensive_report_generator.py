@@ -1390,6 +1390,25 @@ def _build_threat_hunter_page(payload: dict, meta: dict, assessment_view: dict,
     ips_seen = {r.get('dst_ip') for r in rows if r.get('dst_ip')} | {r.get('src_ip') for r in rows if r.get('src_ip')}
     ips_seen.discard(None); ips_seen.discard('None'); ips_seen.discard('')
 
+    # ── Ground the templated hunt queries in THIS incident's real IOCs ──────────
+    # A query with the actual attacker IP/domain is runnable; one with `known_bad_ips`
+    # is a demo. Substitute the observed EXTERNAL IPs + domains into the templates.
+    import ipaddress as _ipaddr
+
+    def _is_external(_ip: str) -> bool:
+        try:
+            return not _ipaddr.ip_address(str(_ip)).is_private
+        except Exception:
+            return False
+    _ext_ips = [str(i) for i in sorted(ips_seen) if _is_external(i)][:6]
+    _domains = sorted({str(r.get('dst_domain') or r.get('domain')) for r in rows
+                       if (r.get('dst_domain') or r.get('domain'))} - {'None', ''})[:6]
+    _ip_sql = ("'" + "', '".join(_ext_ips) + "'") if _ext_ips else 'known_bad_ips'
+    _dom_sql = ("'" + "', '".join(_domains) + "'") if _domains else 'suspicious_domains'
+
+    def _ground_query(_q: str) -> str:
+        return (_q or '').replace('known_bad_ips', _ip_sql).replace('suspicious_domains', _dom_sql)
+
     parts = [_page_header('THREAT HUNTER REPORT', verdict, confidence, company, session, generated_at, accent)]
 
     parts.append(_stat_bar([
@@ -1440,9 +1459,9 @@ def _build_threat_hunter_page(payload: dict, meta: dict, assessment_view: dict,
         parts.append(f'<div style="padding:12px">')
         parts.append(f'<p style="color:#9bb;margin:0 0 10px">{escape(desc_h)}</p>')
         parts.append(f'<div style="margin-bottom:6px"><span style="color:#60a5fa;font-size:11px;font-weight:600">SPL (Splunk)</span>'
-                     f'<pre style="margin-top:4px;font-size:11px">{escape(spl)}</pre></div>')
+                     f'<pre style="margin-top:4px;font-size:11px">{escape(_ground_query(spl))}</pre></div>')
         parts.append(f'<div><span style="color:#34d399;font-size:11px;font-weight:600">KQL (Sentinel / Defender)</span>'
-                     f'<pre style="margin-top:4px;font-size:11px">{escape(kql)}</pre></div>')
+                     f'<pre style="margin-top:4px;font-size:11px">{escape(_ground_query(kql))}</pre></div>')
         parts.append('</div></details>')
 
     # PIVOT GRAPH — text-based attacker infrastructure tree
