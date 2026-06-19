@@ -109,3 +109,34 @@ def test_every_registered_detector_has_unique_phase_id():
     ids = [d.phase_id for d in PHASE_DETECTORS]
     dupes = {p for p in ids if ids.count(p) > 1}
     assert not dupes, f"duplicate PhaseDetector phase_id(s): {sorted(dupes)}"
+
+
+def test_detector_errors_are_counted_not_swallowed():
+    # A2 observability: a detector that RAISES must be counted, not vanish into a debug
+    # log. Guards the Mode-A failure on the detection path.
+    import src.core.ingest.cluster_merge as cm
+    det = cm.PHASE_DETECTORS[0]
+    original = det.matcher
+    cm.reset_detector_error_counts()
+    try:
+        def _boom(row, text):
+            raise ValueError("synthetic detector crash")
+        det.matcher = _boom
+        cm.detect_row_phase_tags({"message": "anything"})
+        counts = cm.get_detector_error_counts()
+        assert counts.get(det.phase_id, 0) >= 1, "raising detector was swallowed silently"
+    finally:
+        det.matcher = original
+        cm.reset_detector_error_counts()
+
+
+def test_clustering_diagnostics_surface_detector_errors():
+    import src.core.ingest.cluster_merge as cm
+    diag: dict = {}
+    cm.transitive_merge_clusters(
+        None,
+        [{"row_index": 0, "user_canonical": "u", "timestamp": "2026-01-01T00:00:00Z",
+          "message": "x"}],
+        diagnostics_out=diag,
+    )
+    assert "detector_errors" in diag  # healthy run -> {} ; any entry -> a detector is throwing

@@ -113,6 +113,13 @@ def _parse_json_stdlib(path: str, source: str) -> Iterator[dict]:
             data = json.load(fh)
     except Exception as exc:
         logger.warning("JSON parse failed for %s: %s", path, exc)
+        # Whole-file loss is the worst silent drop — count it so a failed source file
+        # shows up in ingest diagnostics, not just a log line nobody watches.
+        try:
+            from src.pipeline.streaming_ingest import record_dropped_row
+            record_dropped_row('json_file_parse_error')
+        except Exception:
+            pass
         return
     yield from _flatten_json_data(data, source)
 
