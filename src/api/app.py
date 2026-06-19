@@ -4280,7 +4280,12 @@ else:
     _RATE_LIMIT_ENABLED = str(_RATE_LIMIT_ENABLED).lower() not in {'0', 'false', 'no'}
 _RATE_LIMIT_MAX_REQUESTS = int(os.getenv('RATE_LIMIT_MAX_REQUESTS', '300'))
 _RATE_LIMIT_WINDOW_SECONDS = int(os.getenv('RATE_LIMIT_WINDOW_SECONDS', '60'))
-_RATE_LIMIT_STORAGE: defaultdict[str, deque[float]] = defaultdict(deque)
+# Rate-limit STORAGE moved to runtime_state (canonical single instance, Step 2). Imported
+# here so app.py re-exposes the names (existing getattr(app_mod, '_TENANT_RATE_*') callers
+# in admin_ingest_alerts / graph_endpoints keep working). Config + locks stay local.
+from .runtime_state import (  # noqa: E402
+    _RATE_LIMIT_STORAGE, _TENANT_RATE_STORAGE, _TENANT_RATE_DROPS, _TENANT_LAST_ALERT,
+)
 _RATE_LIMIT_LOCK = asyncio.Lock()
 
 # Per-tenant rate limiting (independent from global IP rate limit)
@@ -4295,10 +4300,7 @@ except Exception:
 _TENANT_RATE_ENABLED = os.getenv('TENANT_RATE_LIMIT_ENABLED', _default_tenant_rate).lower() not in {'0','false','no'}
 _TENANT_RATE_MAX = int(os.getenv('TENANT_RATE_LIMIT_MAX','600') or 600)
 _TENANT_RATE_WINDOW = int(os.getenv('TENANT_RATE_LIMIT_WINDOW','60') or 60)
-_TENANT_RATE_STORAGE: defaultdict[str, deque[float]] = defaultdict(deque)
 _TENANT_RATE_LOCK = asyncio.Lock()
-_TENANT_RATE_DROPS: defaultdict[str, int] = defaultdict(int)
-_TENANT_LAST_ALERT: dict[str, float] = {}
 _TENANT_NOISY_ALERT_THRESHOLD = int(os.getenv('TENANT_NOISY_ALERT_THRESHOLD','0') or 0)  # 0 disables
 _TENANT_NOISY_ALERT_COOLDOWN = int(os.getenv('TENANT_NOISY_ALERT_COOLDOWN_SECONDS','300') or 300)
 

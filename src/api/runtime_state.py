@@ -1090,6 +1090,18 @@ def get_decision_cache() -> dict:
     return DECISION_CACHE
 
 
+# ── Rate-limit state (moved from app.py, Step 2) ─────────────────────────────
+# Canonical single instance so app.py routes, admin_ingest_alerts, graph_endpoints, and
+# any extracted router share ONE store — instead of reaching into app.py's namespace via
+# getattr(app_mod, ...). app.py imports these names (re-exposing them), so existing
+# getattr(app_mod, '_TENANT_RATE_*') callers keep working unchanged.
+_RATE_LIMIT_STORAGE: defaultdict[str, deque[float]] = defaultdict(deque)
+_TENANT_RATE_STORAGE: defaultdict[str, deque[float]] = defaultdict(deque)
+_TENANT_RATE_DROPS: defaultdict[str, int] = defaultdict(int)
+_TENANT_LAST_ALERT: dict[str, float] = {}
+__all__.extend(['_RATE_LIMIT_STORAGE', '_TENANT_RATE_STORAGE', '_TENANT_RATE_DROPS', '_TENANT_LAST_ALERT'])
+
+
 __all__.append('get_decision_cache')
 
 
