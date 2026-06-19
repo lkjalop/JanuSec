@@ -922,6 +922,27 @@ PHASE_DETECTORS: list[PhaseDetector] = [
 ]
 
 
+# ── Detector-error observability ─────────────────────────────────────────────
+# A detector that raises is caught so it can't fail clustering — but a SILENT catch is
+# how a crashing detector drops its phase invisibly (the Mode-A failure on the detection
+# path). Count errors by phase_id so a detector that starts throwing is visible in the
+# assessment diagnostics instead of vanishing into a debug log.
+_DETECTOR_ERROR_COUNTS: dict[str, int] = {}
+
+
+def _record_detector_error(phase_id: str) -> None:
+    _DETECTOR_ERROR_COUNTS[phase_id] = _DETECTOR_ERROR_COUNTS.get(phase_id, 0) + 1
+
+
+def get_detector_error_counts() -> dict[str, int]:
+    """Per-detector exception counts since the last reset (surfaced in diagnostics)."""
+    return dict(_DETECTOR_ERROR_COUNTS)
+
+
+def reset_detector_error_counts() -> None:
+    _DETECTOR_ERROR_COUNTS.clear()
+
+
 def detect_row_phase_tags(row: dict) -> set[str]:
     """Return the set of phase_ids that fire on a single row."""
     text = _row_text(row)
@@ -931,6 +952,7 @@ def detect_row_phase_tags(row: dict) -> set[str]:
             if det.matcher(row, text):
                 hits.add(det.phase_id)
         except Exception:   # noqa: BLE001
+            _record_detector_error(det.phase_id)
             continue
     return hits
 
@@ -1868,6 +1890,8 @@ def transitive_merge_clusters(
             diagnostics_out.update({"pivot_count": 0, "component_count": 0, "singleton_drop_count": 0, "phase_hit_count": 0, "stale_rows": 0})
         return []
 
+    reset_detector_error_counts()  # per-run; surfaced in diagnostics_out["detector_errors"]
+
     # Count stale rows (stored before normalizer produced canonical fields).
     stale_row_count = sum(
         1 for r in rows
@@ -2021,6 +2045,9 @@ def transitive_merge_clusters(
             "phase_hit_count": phase_hits,
             "stale_rows": stale_row_count,
             "cluster_merge_version": _CLUSTER_MERGE_VERSION,
+            # Visible signal that a detector started crashing (else its phase silently
+            # vanishes). Empty dict == healthy; any entry == that detector is throwing.
+            "detector_errors": get_detector_error_counts(),
         })
 
     # ── Post-merge deduplication and campaign rollup ─────────────────────────
@@ -2101,6 +2128,7 @@ def _classify_component(
                 if det.matcher(r, text):
                     phase_hits[det.phase_id].append(int(r.get("row_index")))
             except Exception:   # noqa: BLE001 — detector errors must not fail clustering
+                _record_detector_error(det.phase_id)
                 logger.debug("phase detector %s raised on row %s", det.phase_id, r.get("row_index"), exc_info=True)
                 continue
 
