@@ -7414,55 +7414,6 @@ async def temporal_rag_stats() -> dict:
     }
 
 
-# Lightweight shim for report ingestion used by UI tests and the LIVE console.
-# Enable explicitly via `ENABLE_REPORT_INGESTION_SHIM` when the canonical
-# ingestion route is unavailable; otherwise defer to
-# `src.api.report_endpoints` for the real implementation.
-if os.getenv('ENABLE_REPORT_INGESTION_SHIM','0').lower() in {'1','true','yes'}:
-    @app.get('/api/v1/report/ingestion')
-    async def report_ingestion_get(format: str = 'html', include_model: bool = False, include_scenarios: bool = False, sessions: str | None = None) -> Response:  # type: ignore[return-value]
-        try:
-            parts = []
-            parts.append(f'<div style="font-family:Inter,Segoe UI,Arial,sans-serif;color:#e8ebf0;background:#0b0e14;padding:18px;border-radius:8px;">')
-            parts.append(f'<h2>JanuSec - Report Ingestion (shim)</h2>')
-            parts.append(f'<div><strong>format</strong>: {format}</div>')
-            parts.append(f'<div><strong>include_model</strong>: {str(bool(include_model))}</div>')
-            parts.append(f'<div><strong>include_scenarios</strong>: {str(bool(include_scenarios))}</div>')
-            if sessions:
-                parts.append(f'<div><strong>sessions</strong>: {sessions}</div>')
-            parts.append('<p>This is a lightweight test shim for /api/v1/report/ingestion used by Playwright tests.</p>')
-            parts.append('</div>')
-            html = '<!doctype html><html><head><meta charset="utf-8"><title>Report Ingestion</title></head><body>' + '\n'.join(parts) + '</body></html>'
-            return Response(content=html, media_type='text/html')
-        except Exception:
-            return Response(content='<html><body><h1>Report Ingestion</h1></body></html>', media_type='text/html')
-
-
-    @app.post('/api/v1/report/ingestion')
-    async def report_ingestion_post(request: Request) -> Response:  # type: ignore[return-value]
-        # Accept POST for completeness; echo some details back so tests can validate
-        try:
-            params = dict(request.query_params)
-        except Exception:
-            params = {}
-        body = ''
-        try:
-            body = await request.body()
-        except Exception:
-            body = b''
-        html = '<!doctype html><html><head><meta charset="utf-8"><title>Report Ingestion (POST)</title></head><body>'
-        html += '<h2>Report Ingestion (shim - POST)</h2>'
-        html += '<div><strong>query</strong>: ' + _html_safe(str(params)) + '</div>'
-        html += '<div><strong>body</strong>: <pre>' + _html_safe(body.decode('utf-8', errors='replace')) + '</pre></div>'
-        html += '</body></html>'
-        return Response(content=html, media_type='text/html')
-
-
-def _html_safe(s: str) -> str:
-    try:
-        return (s or '').replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-    except Exception:
-        return ''
 
 # ---------------- Admin: Per-tenant rate limit controls -----------------
 def _admin_ok(request: Request) -> bool:
