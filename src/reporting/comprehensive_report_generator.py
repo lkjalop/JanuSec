@@ -814,6 +814,39 @@ def _build_soc_page(payload: dict, meta: dict, assessment_view: dict,
         (len(mitre_hits), 'MITRE Techniques', '#a78bfa'),
     ]))
 
+    # Severity Distribution + Top MITRE Techniques — always rendered so the report has a
+    # consistent structure (and a CEO/analyst can see "nothing observed" vs a missing
+    # section). Data flows from aggregate_decisions via the report payload.
+    _sev_dist = payload.get('severity_distribution') or payload.get('severity_counts') or {}
+    parts.append('<div class="section">')
+    parts.append(f'<strong style="color:{accent};display:block;margin-bottom:8px">Severity Distribution</strong>')
+    if _sev_dist:
+        parts.append('<table><thead><tr><th>Severity</th><th style="width:100px">Count</th></tr></thead><tbody>')
+        for _sev in ('critical', 'high', 'medium', 'low'):
+            parts.append(f'<tr><td>{escape(_sev.title())}</td>'
+                         f'<td style="text-align:right">{int(_sev_dist.get(_sev, 0) or 0)}</td></tr>')
+        parts.append('</tbody></table>')
+    else:
+        parts.append('<div style="color:#9bb">No severity data.</div>')
+    parts.append('</div>')
+
+    _top_mitre = payload.get('top_mitre') or []
+    parts.append('<div class="section">')
+    parts.append(f'<strong style="color:{accent};display:block;margin-bottom:8px">Top MITRE Techniques</strong>')
+    if _top_mitre:
+        parts.append('<div>')
+        for _m in _top_mitre[:12]:
+            _tid = (_m.get('technique') if isinstance(_m, dict) else str(_m)) or ''
+            _cnt = (_m.get('count', 1) if isinstance(_m, dict) else 1)
+            _name = _MITRE_NAMES.get(_tid, '')
+            _lbl = _tid + (f' · {_name}' if _name else '')
+            parts.append(f'<span class="pill" style="background:#1c1020;color:#c084fc">'
+                         f'{escape(str(_lbl))} ({int(_cnt)})</span>')
+        parts.append('</div>')
+    else:
+        parts.append('<div style="color:#9bb">No MITRE techniques observed.</div>')
+    parts.append('</div>')
+
     # START HERE box
     parts.append('<div class="warn" style="background:#1a0a0a;border:2px solid #e05252">')
     parts.append(f'<div style="color:{accent};font-weight:700;font-size:14px;margin-bottom:10px">START HERE — CONTAINMENT TIMELINE</div>')

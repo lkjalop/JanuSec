@@ -78,3 +78,37 @@ def test_kill_chain_covers_multiple_stages(ceo_report):
     # A multi-stage breach must narrate as multiple kill-chain stages, not one.
     stages = {p.get("phase") for p in (ceo_report.get("kill_chain_phases") or [])}
     assert len(stages) >= 3, f"kill chain too thin: {sorted(stages)}"
+
+
+def test_assessment_id_export_is_deterministic():
+    # LIVE export pins a specific assessment_id; the same id must produce the same
+    # report data every time (no "latest assessment" drift, no random ordering).
+    from fastapi.testclient import TestClient
+    from src.api.server import app
+    from src.api.deep_analyze.persistence import REPORT_STORE
+    from tests._helpers import default_test_headers
+
+    aid = "ceo-determinism-aid-1"
+    REPORT_STORE[aid] = {
+        "clusters": [{
+            "cluster_id": "c1",
+            "verdict": "VALIDATED_BREACH", "final_verdict": "VALIDATED_BREACH",
+            "factor_tags": ["iam:kerberoasting", "iam:golden_ticket", "discovery:ad_enumeration"],
+            "shared_users": ["martin.chen"], "row_count": 12,
+        }],
+    }
+    client = TestClient(app)
+
+    def _fetch_sections():
+        r = client.get(f"/api/v1/report/ingestion?assessment_id={aid}&format=json&include_scenarios=true",
+                       headers=default_test_headers())
+        assert r.status_code == 200, r.text
+        d = r.json()
+        # Compare only deterministic data sections (exclude generated_at / meta timestamps).
+        return {k: d.get(k) for k in
+                ("kill_chain_phases", "top_stride", "maestro_phases", "total",
+                 "severity_distribution", "scenario_summary")}
+
+    first = _fetch_sections()
+    second = _fetch_sections()
+    assert first == second, "assessment_id export is non-deterministic across calls"
