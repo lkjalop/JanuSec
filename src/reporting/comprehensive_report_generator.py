@@ -2019,6 +2019,101 @@ def _build_assessment_page(payload: dict, meta: dict, assessment_view: dict,
     return _wrap_page(title, '\n'.join(parts), accent)
 
 
+def _build_mssp_page(payload: dict, meta: dict, assessment_view: dict,
+                     session: str, company: str, generated_at: str) -> str:
+    """MSSP / managed-SOC view: 'what do I tell the customer, and what SLA applies?'
+    Client-facing summary + SLA posture/clock + per-tenant containment + a ready-to-send
+    customer update. Fills the persona that was in the design doc but had no builder."""
+    accent = '#14b8a6'
+    rows = payload.get('rows') or []
+    all_factors = _collect_all_factors(rows)
+    verdict = str(assessment_view.get('verdict') or meta.get('verdict') or 'UNDER INVESTIGATION').upper()
+    conf_raw = assessment_view.get('confidence') or meta.get('confidence') or ''
+    try:
+        confidence = str(int(float(conf_raw) * 100)) if conf_raw and float(conf_raw) <= 1 else (str(int(float(conf_raw))) if conf_raw else '')
+    except Exception:
+        confidence = str(conf_raw)
+    source_count = int(assessment_view.get('source_count') or 0)
+    tenant = meta.get('tenant_id') or meta.get('tenant') or assessment_view.get('tenant_id') or company or 'client'
+
+    # SLA tier from verdict severity — drives response/update commitments.
+    _is_breach = ('BREACH' in verdict or 'MALICIOUS' in verdict or 'INCIDENT' in verdict)
+    _is_suspect = ('SUSPECT' in verdict or 'SUSPICIOUS' in verdict or 'INVESTIGATION' in verdict)
+    if _is_breach:
+        sla = ('P1 — Critical', '15 minutes', 'Hourly', '#ef4444')
+    elif _is_suspect:
+        sla = ('P2 — High', '1 hour', 'Every 4 hours', '#f59e0b')
+    else:
+        sla = ('P3 — Standard', '4 hours', 'Daily', '#60a5fa')
+    sla_tier, sla_response, sla_cadence, sla_clr = sla
+
+    parts = [_page_header('MSSP — CLIENT INCIDENT REPORT', verdict, confidence, company, session, generated_at, accent)]
+    parts.append(_stat_bar([
+        (sla_tier.split(' ')[0], 'SLA Priority', sla_clr),
+        (int(assessment_view.get('cluster_count') or 0), 'Clusters', '#f59e0b'),
+        (source_count, 'Sources', '#60a5fa'),
+        (len({r.get('host') for r in rows if r.get('host')}), 'Affected Hosts', '#a78bfa'),
+    ]))
+
+    # SLA POSTURE — the signature MSSP section
+    parts.append('<div class="warn" style="background:#06201d;border:2px solid #14b8a6">')
+    parts.append(f'<strong style="color:{accent};font-size:15px;display:block;margin-bottom:10px">SLA POSTURE — {escape(tenant)}</strong>')
+    parts.append('<table><tbody>')
+    parts.append(f'<tr><td style="width:200px;color:#9bb">Priority tier</td><td style="color:{sla_clr};font-weight:700">{escape(sla_tier)}</td></tr>')
+    parts.append(f'<tr><td style="color:#9bb">Response commitment</td><td>Acknowledge within <strong>{sla_response}</strong> of detection</td></tr>')
+    parts.append(f'<tr><td style="color:#9bb">Update cadence</td><td><strong>{sla_cadence}</strong> until contained</td></tr>')
+    parts.append(f'<tr><td style="color:#9bb">Next client update due</td><td style="color:{accent}">{sla_cadence} cadence — schedule now</td></tr>')
+    parts.append('</tbody></table></div>')
+
+    # CLIENT-FACING SUMMARY — plain English (no internal jargon)
+    summary = str((assessment_view.get('executive_story') or {}).get('what_happened') or '')
+    if not summary:
+        fk = list(all_factors.keys())
+        bits = []
+        if any('kerber' in f or 'credential' in f or 'golden' in f for f in fk):
+            bits.append('credential-theft activity against your directory')
+        if any('lateral' in f or 'wmi' in f or 'rdp' in f for f in fk):
+            bits.append('movement between systems')
+        if any('exfil' in f or 'cumulative' in f for f in fk):
+            bits.append('data being moved to an external destination')
+        if any('oauth' in f or 'consent' in f for f in fk):
+            bits.append('a suspicious application consent grant')
+        summary = ('Our monitoring detected ' + (', '.join(bits) if bits else 'correlated suspicious activity')
+                   + ' in your environment. We have correlated the events into a single incident and begun response.')
+    parts.append('<div class="section">')
+    parts.append(f'<strong style="color:{accent};display:block;margin-bottom:8px">CLIENT-FACING SUMMARY</strong>')
+    parts.append(f'<p style="color:#e6eef8;font-size:14px;line-height:1.7;margin:0">{escape(summary.strip())}</p>')
+    parts.append('</div>')
+
+    # TENANT CONTAINMENT STATUS
+    hosts = [h for h in {r.get('host') for r in rows if r.get('host')} if h][:6]
+    accounts = [a for a in {r.get('user') or r.get('username') for r in rows if (r.get('user') or r.get('username'))} if a and str(a) != 'None'][:5]
+    parts.append('<div class="section">')
+    parts.append(f'<strong style="color:{accent};display:block;margin-bottom:8px">TENANT CONTAINMENT STATUS</strong>')
+    parts.append('<table><thead><tr><th>Asset</th><th style="width:140px">Recommended Action</th></tr></thead><tbody>')
+    if hosts or accounts:
+        for h in hosts:
+            parts.append(f'<tr><td style="font-family:monospace;font-size:11px">{escape(str(h))}</td><td style="color:{sla_clr}">Isolate / await client OK</td></tr>')
+        for a in accounts:
+            parts.append(f'<tr><td style="font-family:monospace;font-size:11px">{escape(str(a))}</td><td style="color:{sla_clr}">Disable + reset credential</td></tr>')
+    else:
+        parts.append('<tr><td colspan="2" style="color:#9bb">No specific assets resolved — confirm scope with client.</td></tr>')
+    parts.append('</tbody></table></div>')
+
+    # CLIENT COMMUNICATION DRAFT — ready to send
+    parts.append('<div class="section">')
+    parts.append(f'<strong style="color:{accent};display:block;margin-bottom:8px">CLIENT COMMUNICATION DRAFT</strong>')
+    draft = (f'Subject: [{sla_tier.split(" ")[0]}] Security incident in your environment — action requested\n\n'
+             f'Hello {escape(str(tenant))} team,\n\n{escape(summary.strip())}\n\n'
+             f'Priority: {sla_tier}. We will provide updates {sla_cadence.lower()} until the incident is contained. '
+             f'Please authorise isolation of the affected systems listed above so we can contain immediately.\n\n'
+             f'— Managed SOC')
+    parts.append(f'<pre style="white-space:pre-wrap;font-size:12px;background:#0a1414;padding:12px;border-radius:6px;border:1px solid {accent}44">{escape(draft)}</pre>')
+    parts.append('</div>')
+
+    return _wrap_page(f'MSSP Client Report — {escape(verdict)}', '\n'.join(parts), accent)
+
+
 def build_report_html(payload):
     import datetime
     assessment_view = payload.get('assessment_view') if isinstance(payload.get('assessment_view'), dict) else {}
@@ -2039,6 +2134,7 @@ def build_report_html(payload):
         'threat_hunter': _build_threat_hunter_page,
         'forensics':     _build_forensics_page,
         'compliance':    _build_compliance_page,
+        'mssp':          _build_mssp_page,
         'assessment':    _build_assessment_page,
     }
     builder = _builders.get(persona)
