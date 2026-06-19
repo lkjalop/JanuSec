@@ -28,6 +28,7 @@ _PERSONA_SIGNATURE = {
     "threat_hunter": "mitre att&ck coverage",
     "forensics":     "evidence acquisition order",
     "compliance":    "framework summary",
+    "mssp":          "sla posture",
 }
 
 
