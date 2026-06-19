@@ -331,69 +331,12 @@ def _severity_from(decision: Any) -> str:
     return 'low'
 
 def aggregate_decisions(limit: int = 500) -> dict[str, Any]:
-    # Avoid stale module-level DECISION_CACHE created during circular imports by
-    # importing the runtime DECISION_CACHE at call time.
+    # Resolve the ONE canonical decision cache at call time (Step 1: replaces the old
+    # 7-path merge that defended against duplicate DECISION_CACHE instances). The
+    # singleton invariant is locked by tests/test_state_singleton.py.
     try:
-        # Collect DECISION_CACHE values from possible runtime_state modules to
-        # guard against test imports that create multiple module objects.
-        import importlib
-        from collections import OrderedDict
-        caches = []
-        try:
-            mod = importlib.import_module('src.api.runtime_state')
-            caches.append(getattr(mod, 'DECISION_CACHE'))
-        except Exception:
-            pass
-        try:
-            mod2 = importlib.import_module('api.runtime_state')
-            caches.append(getattr(mod2, 'DECISION_CACHE'))
-        except Exception:
-            pass
-        try:
-            srv = importlib.import_module('src.api.server')
-            caches.append(getattr(srv, 'DECISION_CACHE'))
-        except Exception:
-            pass
-        try:
-            srv2 = importlib.import_module('api.server')
-            caches.append(getattr(srv2, 'DECISION_CACHE'))
-        except Exception:
-            pass
-        try:
-            app_mod = importlib.import_module('src.api.app')
-            caches.append(getattr(app_mod, 'DECISION_CACHE'))
-        except Exception:
-            pass
-        try:
-            app_mod2 = importlib.import_module('api.app')
-            caches.append(getattr(app_mod2, 'DECISION_CACHE'))
-        except Exception:
-            pass
-        try:
-            # local package path
-            from .runtime_state import DECISION_CACHE as local_cache  # type: ignore
-            caches.append(local_cache)
-        except Exception:
-            pass
-        # Merge caches preserving insertion order; prefer later caches' values when keys collide
-        merged = OrderedDict()
-        for c in caches:
-            try:
-                for k, v in (getattr(c, 'items', lambda: list(c.items()))()):
-                    merged[k] = v
-            except Exception:
-                try:
-                    # c might be a plain dict-like
-                    for k, v in list(c.items()):
-                        merged[k] = v
-                except Exception:
-                    pass
-        # Use the merged set of decisions but limit to the most recent `limit`
-        # entries to avoid older test artifacts dominating the top_mitre list.
-        # We merge caches first (to collect values from multiple runtime_state
-        # instances) then slice to the last `limit` values which represent the
-        # most-recent insertion order across the merged view.
-        items = list(merged.values())[-limit:]
+        from .runtime_state import get_decision_cache
+        items = list(get_decision_cache().values())[-limit:]
     except Exception:
         items = []
     verdict_counts: dict[str,int] = {}
