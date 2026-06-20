@@ -1400,9 +1400,17 @@ def _build_threat_hunter_page(payload: dict, meta: dict, assessment_view: dict,
             return not _ipaddr.ip_address(str(_ip)).is_private
         except Exception:
             return False
-    _ext_ips = [str(i) for i in sorted(ips_seen) if _is_external(i)][:6]
+    _ext_ips = [str(i) for i in sorted(ips_seen) if _is_external(i)]
     _domains = sorted({str(r.get('dst_domain') or r.get('domain')) for r in rows
-                       if (r.get('dst_domain') or r.get('domain'))} - {'None', ''})[:6]
+                       if (r.get('dst_domain') or r.get('domain'))} - {'None', ''})
+    # Canonical campaign object is grounding-ready (external_ips + domains already
+    # isolated) — prefer it when present; this is the keystone payoff.
+    for _camp in (payload.get('campaigns') or []):
+        _ce = _camp.get('entities') or {}
+        _ext_ips = list(dict.fromkeys(_ext_ips + list(_ce.get('external_ips') or [])))
+        _domains = list(dict.fromkeys(_domains + list(_ce.get('domains') or [])))
+    _ext_ips = _ext_ips[:6]
+    _domains = _domains[:6]
     _ip_sql = ("'" + "', '".join(_ext_ips) + "'") if _ext_ips else 'known_bad_ips'
     _dom_sql = ("'" + "', '".join(_domains) + "'") if _domains else 'suspicious_domains'
 
