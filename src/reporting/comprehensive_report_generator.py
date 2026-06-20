@@ -1600,6 +1600,10 @@ def _build_forensics_page(payload: dict, meta: dict, assessment_view: dict,
         if r.get('process') or r.get('process_name'):
             processes_seen.add(r.get('process') or r.get('process_name'))
 
+    # Supplement the host/IP acquisition list from the canonical campaign.
+    _ce = _campaign_entities(payload)
+    hosts_seen |= _ce['hosts']; ips_seen |= _ce['ips']
+
     parts = [_page_header('FORENSICS REPORT', verdict, confidence, company, session, generated_at, accent)]
 
     parts.append(_stat_bar([
