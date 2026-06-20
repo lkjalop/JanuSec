@@ -36,10 +36,10 @@ except Exception:
     # Fallback to relative import when package context is different (tests may import `api` as top-level)
     from ..reporting.comprehensive_report_generator import build_report_html
 try:
-    from src.api.report_aggregation import build_ingestion_report
+    from src.api.report_aggregation import build_ingestion_report, decorate_report_framework_rollups
     from src.api.dependencies import get_platform_state
 except Exception:
-    from .report_aggregation import build_ingestion_report  # type: ignore
+    from .report_aggregation import build_ingestion_report, decorate_report_framework_rollups  # type: ignore
     from .dependencies import get_platform_state  # type: ignore
 
 try:
@@ -560,6 +560,18 @@ async def report_ingestion(
             report['verdict'] = assessment_data['verdict']
         if clusters:
             report['clusters'] = clusters
+            # Canonical campaign objects — the single breach-truth source personas /
+            # grounding read from instead of re-deriving per surface.
+            try:
+                from src.core.campaign import build_campaigns
+                report['campaigns'] = [c.to_dict() for c in build_campaigns(clusters)]
+            except Exception:
+                report['campaigns'] = []
+            decorate_report_framework_rollups(
+                report,
+                records=(report.get('flagged_events') or []) + (report.get('sample_autoblocked') or []),
+                clusters=clusters,
+            )
         if assessment_data.get('executive_summary'):
             report['executive_summary'] = assessment_data.get('executive_summary')
         meta_a = report.setdefault('meta', {})
