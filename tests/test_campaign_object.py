@@ -85,3 +85,19 @@ def test_persona_grounding_reads_from_campaign_when_rows_sparse():
     html = _build_threat_hunter_page(payload, payload["meta"], {}, "s", "Acme", "2026-01-01")
     assert "203.45.42.201" in html, "campaign external IP not grounded into queries"
     assert "known_bad_ips" not in html, "placeholder survived despite campaign IOCs"
+
+
+def test_soc_and_exec_render_from_campaign_when_rows_empty():
+    # Keystone cleanup: SOC IOC TRIAGE + executive scope render real entities from the
+    # canonical campaign even with NO raw rows (previously these sections were empty).
+    from src.reporting.comprehensive_report_generator import _build_soc_page, _build_executive_page
+    payload = {"rows": [], "meta": {"verdict": "VALIDATED_BREACH"}, "campaigns": [{
+        "actor": "martin.chen", "verdict": "VALIDATED_BREACH",
+        "entities": {"hosts": ["ws-martin-01"], "ips": ["203.45.42.201"],
+                     "external_ips": ["203.45.42.201"], "domains": ["martin-chen.sharepoint.com"],
+                     "users": ["martin.chen"]}}]}
+    soc = _build_soc_page(payload, payload["meta"], {}, "s", "Acme", "2026-01-01").lower()
+    ex = _build_executive_page(payload, payload["meta"], {}, "s", "Acme", "2026-01-01").lower()
+    assert "ioc triage" in soc and "203.45.42.201" in soc, "SOC IOC TRIAGE empty despite campaign"
+    assert "ws-martin-01" in soc
+    assert "martin.chen" in ex, "executive scope missing the actor from the campaign"

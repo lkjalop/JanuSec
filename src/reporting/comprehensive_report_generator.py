@@ -771,6 +771,20 @@ def _td(val, mono: bool = False, clr: str = '', align: str = 'left') -> str:
     return f'<td style="{s}">{escape(str(val))}</td>'
 
 
+def _campaign_entities(payload: dict) -> dict:
+    """Merged entity sets from the canonical campaigns[] — so a persona renders real
+    hosts/IPs/domains/users even when raw evidence rows are sparse. The keystone payoff:
+    personas read incident truth from one object instead of re-deriving from rows."""
+    out = {'hosts': set(), 'ips': set(), 'external_ips': set(), 'domains': set(), 'users': set()}
+    for camp in (payload.get('campaigns') or []):
+        e = camp.get('entities') or {}
+        for k in out:
+            for x in (e.get(k) or []):
+                if x and str(x) != 'None':
+                    out[k].add(str(x))
+    return out
+
+
 # ── per-persona full-page builders ───────────────────────────────────────────
 
 from src.reporting.html.scaffold import (  # noqa: E402,F811
@@ -918,6 +932,10 @@ def _build_soc_page(payload: dict, meta: dict, assessment_view: dict,
         if r.get('sha256'): hashes_seen.add(r['sha256'])
         if r.get('domain'): domains_seen.add(r['domain'])
         if r.get('dst_domain'): domains_seen.add(r['dst_domain'])
+    # Supplement from the canonical campaign so IOC TRIAGE renders real indicators even
+    # when the report has no raw rows (e.g. an assessment-backed export).
+    _ce = _campaign_entities(payload)
+    hosts_seen |= _ce['hosts']; ips_seen |= _ce['ips']; domains_seen |= _ce['domains']
 
     ioc_rows_html = []
     for ip in list(ips_seen)[:8]:
@@ -1291,10 +1309,11 @@ def _build_executive_page(payload: dict, meta: dict, assessment_view: dict,
     parts.append(f'<p style="color:#e6eef8;font-size:15px;line-height:1.7;margin:0">{escape(what_happened.strip())}</p>')
     parts.append('</div>')
 
-    # WHO WAS AFFECTED
-    hosts_seen = list({r.get('host') for r in rows if r.get('host')})[:8]
-    accounts_seen = list({r.get('user') or r.get('username') or r.get('account') for r in rows
-                         if r.get('user') or r.get('username') or r.get('account')})[:5]
+    # WHO WAS AFFECTED — merge raw rows with the canonical campaign's entities.
+    _ce = _campaign_entities(payload)
+    hosts_seen = list(({r.get('host') for r in rows if r.get('host')} | _ce['hosts']))[:8]
+    accounts_seen = list(({r.get('user') or r.get('username') or r.get('account') for r in rows
+                          if r.get('user') or r.get('username') or r.get('account')} | _ce['users']))[:5]
     if hosts_seen or accounts_seen:
         parts.append('<div class="section">')
         parts.append(f'<strong style="color:{accent};display:block;margin-bottom:8px">WHO WAS AFFECTED</strong>')
