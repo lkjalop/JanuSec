@@ -8,6 +8,15 @@ def test_aggregate_threat_model_stride_and_maestro():
         ('endpoint:rare_lineage', ['tampering', 'elevation'], ['execution', 'persistence']),
         ('corr_egress_exfil_pattern', ['information_disclosure', 'exfiltration'], ['exfiltration']),
         ('lane_host_pivot', ['lateral_movement', 'discovery', 'elevation'], ['lateral_movement', 'discovery']),
+        ('iam:oauth_consent_grant_suspicious_app', ['spoofing', 'elevation'], ['initial_access', 'persistence']),
+        ('iam:oauth_consent_excessive_scope', ['spoofing', 'elevation'], ['initial_access', 'credential_access']),
+        ('iam:sp_credential_add', ['spoofing', 'elevation'], ['persistence', 'privilege_escalation']),
+        ('iam:kerberoasting', ['elevation', 'information_disclosure'], ['credential_access']),
+        ('iam:golden_ticket', ['spoofing', 'elevation', 'lateral_movement'], ['credential_access', 'privilege_escalation']),
+        ('endpoint:wmi_lateral_exec', ['lateral_movement', 'tampering'], ['lateral_movement', 'execution']),
+        ('wmi_lateral_movement', ['lateral_movement', 'tampering'], ['lateral_movement', 'execution']),
+        ('exfil:cumulative_bytes_anomaly', ['information_disclosure', 'exfiltration'], ['collection', 'exfiltration']),
+        ('discovery:ad_enumeration', ['information_disclosure', 'discovery'], ['discovery']),
     ]
     for factor, expected_stride, expected_maestro in cases:
         m = aggregate_threat_model([factor])
