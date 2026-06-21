@@ -44,6 +44,12 @@ class Campaign:
     exfil_destinations: list[str]
     evidence_refs: list[int]
     row_count: int
+    # Temporal window of the campaign's activity (epoch seconds). detected_at is the
+    # anchor regulatory clocks (GDPR 72h, SEC 4-day) and the timeline render from.
+    first_seen: float | None = None
+    last_seen: float | None = None
+    span_seconds: float = 0.0
+    detected_at: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -83,6 +89,15 @@ def build_campaign(cluster: dict) -> Campaign:
         _known = set()
     phase_ids = sorted({p for p in (cluster.get("present_phase_ids") or []) if not _known or p in _known})
 
+    # Temporal window — the cluster carries time_window {start, end, span_seconds}.
+    tw = cluster.get("time_window") or {}
+    first_seen = tw.get("start")
+    last_seen = tw.get("end")
+    try:
+        span_seconds = float(tw.get("span_seconds") or 0)
+    except (TypeError, ValueError):
+        span_seconds = 0.0
+
     return Campaign(
         campaign_id=campaign_id,
         actor=(users[0] if users else None),
@@ -103,6 +118,10 @@ def build_campaign(cluster: dict) -> Campaign:
         exfil_destinations=exfil_dsts,
         evidence_refs=[int(i) for i in (cluster.get("row_refs") or []) if isinstance(i, int)][:500],
         row_count=int(cluster.get("row_count") or len(cluster.get("row_refs") or [])),
+        first_seen=first_seen,
+        last_seen=last_seen,
+        span_seconds=span_seconds,
+        detected_at=last_seen,   # detection anchor = last observed activity
     )
 
 

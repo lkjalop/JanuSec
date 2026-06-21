@@ -31,6 +31,7 @@ def _martin_cluster() -> dict:
         "_exfil_destinations": {"d1": {"destination": "martin-chen.sharepoint.com"}},
         "row_refs": list(range(50)),
         "row_count": 50,
+        "time_window": {"start": 1_700_000_000.0, "end": 1_700_086_400.0, "span_seconds": 86_400.0},
     }
 
 
@@ -42,6 +43,14 @@ def test_build_campaign_assembles_full_truth():
     assert c.verdict == "VALIDATED_BREACH" and c.is_breach
     assert c.entry_point and c.entry_point["type"] == "oauth_consent_grant"
     assert "martin-chen.sharepoint.com" in c.exfil_destinations
+
+
+def test_campaign_carries_temporal_window():
+    c = build_campaign(_martin_cluster())
+    assert c.first_seen == 1_700_000_000.0
+    assert c.last_seen == 1_700_086_400.0
+    assert c.span_seconds == 86_400.0
+    assert c.detected_at == c.last_seen  # detection anchor for regulatory clocks
 
 
 def test_campaign_kill_chain_includes_exfil_finale():
