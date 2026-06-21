@@ -1101,7 +1101,17 @@ def _build_ciso_page(payload: dict, meta: dict, assessment_view: dict,
     except Exception:
         confidence = str(conf_raw)
 
-    discovery_ts = _dt.datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')
+    # Anchor the regulatory clocks to the campaign's detection time (detected_at) so the
+    # deadlines are real timestamps, not generic durations. Falls back to now.
+    _det_epoch = next((c.get('detected_at') for c in (payload.get('campaigns') or []) if c.get('detected_at')), None)
+    try:
+        _anchor = _dt.datetime.utcfromtimestamp(float(_det_epoch)) if _det_epoch else _dt.datetime.utcnow()
+    except Exception:
+        _anchor = _dt.datetime.utcnow()
+    discovery_ts = _anchor.strftime('%Y-%m-%d %H:%M UTC')
+
+    def _deadline(hours: float) -> str:
+        return (_anchor + _dt.timedelta(hours=hours)).strftime('%Y-%m-%d %H:%M UTC')
     cluster_count = int(assessment_view.get('cluster_count') or 0)
     validated_count = int(assessment_view.get('validated_breach_count') or 0)
 
@@ -1124,11 +1134,11 @@ def _build_ciso_page(payload: dict, meta: dict, assessment_view: dict,
         'malicious_process', 'external_connection',
     ))
     regimes = [
-        ('GDPR Art.33', '72h', 'red' if gdpr_triggered else 'grey',
+        ('GDPR Art.33', f'72h → {_deadline(72)}', 'red' if gdpr_triggered else 'grey',
          'Notify DPA if personal data affected' if gdpr_triggered else 'Likely not triggered — verify PII scope'),
-        ('NIS2 / CER', '24h early warning + 72h', '#f59e0b',
+        ('NIS2 / CER', f'24h ({_deadline(24)}) + 72h ({_deadline(72)})', '#f59e0b',
          'Early warning to CSIRT; full notification at 72h'),
-        ('SEC Cyber Rule', '4 business days', '#f59e0b',
+        ('SEC Cyber Rule', f'4 business days → ~{_deadline(96)}', '#f59e0b',
          'Material incident disclosure to SEC Form 8-K if publicly listed'),
         ('HIPAA Breach', '60 days', '#60a5fa',
          'Notify HHS and affected individuals if PHI in scope'),
@@ -2117,8 +2127,9 @@ def _build_mssp_page(payload: dict, meta: dict, assessment_view: dict,
     parts.append('</div>')
 
     # TENANT CONTAINMENT STATUS
-    hosts = [h for h in {r.get('host') for r in rows if r.get('host')} if h][:6]
-    accounts = [a for a in {r.get('user') or r.get('username') for r in rows if (r.get('user') or r.get('username'))} if a and str(a) != 'None'][:5]
+    _ce = _campaign_entities(payload)
+    hosts = [h for h in ({r.get('host') for r in rows if r.get('host')} | _ce['hosts']) if h][:6]
+    accounts = [a for a in ({r.get('user') or r.get('username') for r in rows if (r.get('user') or r.get('username'))} | _ce['users']) if a and str(a) != 'None'][:5]
     parts.append('<div class="section">')
     parts.append(f'<strong style="color:{accent};display:block;margin-bottom:8px">TENANT CONTAINMENT STATUS</strong>')
     parts.append('<table><thead><tr><th>Asset</th><th style="width:140px">Recommended Action</th></tr></thead><tbody>')

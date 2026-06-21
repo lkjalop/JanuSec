@@ -110,3 +110,23 @@ def test_soc_and_exec_render_from_campaign_when_rows_empty():
     assert "ioc triage" in soc and "203.45.42.201" in soc, "SOC IOC TRIAGE empty despite campaign"
     assert "ws-martin-01" in soc
     assert "martin.chen" in ex, "executive scope missing the actor from the campaign"
+
+
+def test_ciso_clock_grounds_deadlines_in_detected_at():
+    # CISO regulatory clocks must show real deadlines (detected_at + 72h), not durations.
+    from src.reporting.comprehensive_report_generator import _build_ciso_page
+    p = {"rows": [], "meta": {"verdict": "VALIDATED_BREACH"},
+         "campaigns": [{"verdict": "VALIDATED_BREACH", "detected_at": 1_700_000_000.0,
+                        "entities": {}}]}
+    html = _build_ciso_page(p, p["meta"], {}, "s", "Acme", "2026-01-01")
+    assert "2023-11-14" in html, "clock not anchored to detected_at"
+    assert "2023-11-17" in html, "GDPR 72h deadline (detected_at + 72h) not computed"
+
+
+def test_mssp_tenant_containment_reads_from_campaign():
+    from src.reporting.comprehensive_report_generator import _build_mssp_page
+    p = {"rows": [], "meta": {"verdict": "VALIDATED_BREACH"},
+         "campaigns": [{"verdict": "VALIDATED_BREACH",
+                        "entities": {"hosts": ["ws-martin-01"], "users": ["martin.chen"]}}]}
+    html = _build_mssp_page(p, p["meta"], {}, "s", "Acme", "2026-01-01").lower()
+    assert "ws-martin-01" in html, "MSSP tenant containment empty despite campaign"
