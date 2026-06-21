@@ -45,4 +45,25 @@ def resolve_tenant_id(request: Request | None, tenant_id: str | None = None) -> 
     return tenant_id or req_tenant
 
 
-__all__ = ["resolve_tenant_id"]
+def resolve_tenant_with_default(request: Request | None, fallback: str | None = None) -> str | None:
+    """Resolve tenant id from headers honoring lite/demo defaults (moved from app.py,
+    Step 3). Simpler header-only variant used by the report/admin paths; distinct from
+    resolve_tenant_id which also enforces request.state mismatch protection."""
+    try:
+        if request is None:
+            return fallback
+        raw = request.headers.get('X-Tenant-ID') or request.headers.get('x-tenant-id')
+        if raw:
+            return raw
+        allow_default = os.getenv('ALLOW_DEFAULT_TENANT', '1').lower() not in {'0', 'false', 'no'}
+        if not allow_default:
+            raise HTTPException(status_code=400, detail='tenant_id_required')
+        return fallback
+    except Exception:
+        # NB: preserves the original app.py behavior exactly — this except also catches
+        # the HTTPException above, so ALLOW_DEFAULT_TENANT=0 falls back rather than 400s.
+        # (Latent quirk, kept identical during the move; fix separately if intended.)
+        return fallback
+
+
+__all__ = ["resolve_tenant_id", "resolve_tenant_with_default"]
