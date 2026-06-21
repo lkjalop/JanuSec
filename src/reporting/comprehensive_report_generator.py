@@ -2204,12 +2204,33 @@ def _build_mssp_page(payload: dict, meta: dict, assessment_view: dict,
     _is_breach = ('BREACH' in verdict or 'MALICIOUS' in verdict or 'INCIDENT' in verdict)
     _is_suspect = ('SUSPECT' in verdict or 'SUSPICIOUS' in verdict or 'INVESTIGATION' in verdict)
     if _is_breach:
-        sla = ('P1 — Critical', '15 minutes', 'Hourly', '#ef4444')
+        sla = ('P1 — Critical', '15 minutes', 'Hourly', '#ef4444', 15, 60)
     elif _is_suspect:
-        sla = ('P2 — High', '1 hour', 'Every 4 hours', '#f59e0b')
+        sla = ('P2 — High', '1 hour', 'Every 4 hours', '#f59e0b', 60, 240)
     else:
-        sla = ('P3 — Standard', '4 hours', 'Daily', '#60a5fa')
-    sla_tier, sla_response, sla_cadence, sla_clr = sla
+        sla = ('P3 — Standard', '4 hours', 'Daily', '#60a5fa', 240, 1440)
+    sla_tier, sla_response, sla_cadence, sla_clr, _resp_min, _cad_min = sla
+
+    # Live SLA clock from the campaign's detection time: is the response window breached,
+    # and when is the next client update due? Turns the static panel into a live clock.
+    import datetime as _dt
+    _det = next((c.get('detected_at') for c in (payload.get('campaigns') or []) if c.get('detected_at')), None)
+    _sla_status = '<span style="color:#9bb">no detection time</span>'
+    _next_update = f'{sla_cadence} cadence — schedule now'
+    if _det:
+        try:
+            _det_dt = _dt.datetime.utcfromtimestamp(float(_det))
+            _now = _dt.datetime.utcnow()
+            _resp_deadline = _det_dt + _dt.timedelta(minutes=_resp_min)
+            if _now > _resp_deadline:
+                _over = int((_now - _resp_deadline).total_seconds() // 60)
+                _sla_status = f'<span style="color:#ef4444;font-weight:700">BREACHED — {_over} min over response SLA</span>'
+            else:
+                _left = int((_resp_deadline - _now).total_seconds() // 60)
+                _sla_status = f'<span style="color:#4ade80;font-weight:700">ON TRACK — {_left} min to response deadline</span>'
+            _next_update = (_now + _dt.timedelta(minutes=_cad_min)).strftime('%Y-%m-%d %H:%M UTC')
+        except Exception:
+            pass
 
     parts = [_page_header('MSSP — CLIENT INCIDENT REPORT', verdict, confidence, company, session, generated_at, accent)]
     parts.append(_stat_bar([
@@ -2225,8 +2246,9 @@ def _build_mssp_page(payload: dict, meta: dict, assessment_view: dict,
     parts.append('<table><tbody>')
     parts.append(f'<tr><td style="width:200px;color:#9bb">Priority tier</td><td style="color:{sla_clr};font-weight:700">{escape(sla_tier)}</td></tr>')
     parts.append(f'<tr><td style="color:#9bb">Response commitment</td><td>Acknowledge within <strong>{sla_response}</strong> of detection</td></tr>')
+    parts.append(f'<tr><td style="color:#9bb">SLA status</td><td>{_sla_status}</td></tr>')
     parts.append(f'<tr><td style="color:#9bb">Update cadence</td><td><strong>{sla_cadence}</strong> until contained</td></tr>')
-    parts.append(f'<tr><td style="color:#9bb">Next client update due</td><td style="color:{accent}">{sla_cadence} cadence — schedule now</td></tr>')
+    parts.append(f'<tr><td style="color:#9bb">Next client update due</td><td style="color:{accent}">{_next_update}</td></tr>')
     parts.append('</tbody></table></div>')
 
     # CLIENT-FACING SUMMARY — plain English (no internal jargon)
