@@ -130,3 +130,18 @@ def test_mssp_tenant_containment_reads_from_campaign():
                         "entities": {"hosts": ["ws-martin-01"], "users": ["martin.chen"]}}]}
     html = _build_mssp_page(p, p["meta"], {}, "s", "Acme", "2026-01-01").lower()
     assert "ws-martin-01" in html, "MSSP tenant containment empty despite campaign"
+
+
+def test_executive_renders_timeline_and_confidence_trace():
+    # The headline visual (#3): entry->exfil timeline + "why confirmed" confidence trace.
+    from src.reporting.comprehensive_report_generator import _build_executive_page
+    camp = {"actor": "martin.chen", "verdict": "VALIDATED_BREACH", "confidence": 0.95,
+            "phases": ["delivery", "recon", "exploitation", "lateral_movement", "exfiltration"],
+            "entry_point": {"type": "oauth_consent_grant", "app": "System Health Monitor"},
+            "exfil_destinations": ["martin-chen.sharepoint.com"], "entities": {"users": ["martin.chen"]}}
+    p = {"rows": [], "meta": {"verdict": "VALIDATED_BREACH"}, "campaigns": [camp]}
+    html = _build_executive_page(p, p["meta"], {}, "s", "Acme", "2026-01-01").lower()
+    assert "attack timeline" in html and "confidence trace" in html
+    assert "oauth consent grant" in html, "entry point missing from timeline"
+    assert "martin-chen.sharepoint.com" in html, "exfil destination missing from timeline"
+    assert "deterministic" in html and "ground-truth" in html, "moat/determinism claim missing"

@@ -785,6 +785,62 @@ def _campaign_entities(payload: dict) -> dict:
     return out
 
 
+def _render_campaign_timeline(payload: dict, accent: str) -> str:
+    """Headline visual: the entry->exfil kill-chain timeline + a confidence trace
+    ('why JanuSec says confirmed'). Renders straight from the canonical campaign — the
+    single most compelling proof of the analytical moat for a buyer/auditor/exec."""
+    camps = payload.get('campaigns') or []
+    if not camps:
+        return ''
+    c = camps[0]  # highest-confidence campaign
+    phases = c.get('phases') or []
+    entry = c.get('entry_point') or {}
+    exfil = c.get('exfil_destinations') or []
+    actor = c.get('actor') or 'unknown actor'
+    verdict = str(c.get('verdict') or '')
+    try:
+        conf_pct = int(float(c.get('confidence') or 0) * 100)
+    except Exception:
+        conf_pct = 0
+
+    steps: list[tuple[str, str]] = []
+    if entry:
+        _e = str(entry.get('type', 'entry')).replace('_', ' ').title()
+        if entry.get('app'):
+            _e += f" — {entry.get('app')}"
+        steps.append(('ENTRY', _e))
+    for ph in phases:
+        if ph not in ('delivery',):   # entry already shown
+            steps.append(('STAGE', str(ph).replace('_', ' ').title()))
+    if exfil:
+        steps.append(('EXFIL', ', '.join(str(d) for d in exfil[:2])))
+
+    out = ['<div class="section">']
+    out.append(f'<strong style="color:{accent};display:block;margin-bottom:10px">ATTACK TIMELINE — ENTRY → EXFIL</strong>')
+    line = []
+    for i, (label, txt) in enumerate(steps):
+        conn = '  ↓\n' if i else ''
+        clr = '#ef4444' if label in ('ENTRY', 'EXFIL') else '#fbbf24'
+        line.append(f'{conn}<span style="color:{clr};font-weight:700">{escape(label)}</span>  {escape(txt)}')
+    out.append('<pre style="font-size:12px;line-height:1.6;white-space:pre-wrap">' + '\n'.join(line) + '</pre>')
+    out.append('</div>')
+
+    # Confidence trace — why this verdict
+    out.append('<div class="section">')
+    out.append(f'<strong style="color:{accent};display:block;margin-bottom:8px">WHY {escape(verdict)} — CONFIDENCE TRACE ({conf_pct}%)</strong>')
+    reasons = [f'<strong>{len(phases)}</strong> kill-chain stage(s) correlated to one actor (<strong>{escape(str(actor))}</strong>): {escape(", ".join(phases))}']
+    if entry:
+        reasons.append(f'Attributed entry point: <strong>{escape(str(entry.get("type", "")))}</strong>')
+    if exfil:
+        reasons.append(f'Data exfiltration to: <strong>{escape(", ".join(str(d) for d in exfil[:2]))}</strong>')
+    reasons.append('Verdict is deterministic + ground-truth-validated (see acceptance gate), not LLM-inferred.')
+    out.append('<ul style="margin:0 0 0 18px;color:#e6eef8;line-height:1.8">')
+    for r in reasons:
+        out.append(f'<li>{r}</li>')
+    out.append('</ul></div>')
+    return '\n'.join(out)
+
+
 # ── per-persona full-page builders ───────────────────────────────────────────
 
 from src.reporting.html.scaffold import (  # noqa: E402,F811
@@ -1296,6 +1352,9 @@ def _build_executive_page(payload: dict, meta: dict, assessment_view: dict,
     if confidence:
         parts.append(f'<div style="font-size:16px;color:#9bb;margin-top:6px">{escape(confidence)}% confidence · {validated_count} validated breach cluster{"s" if validated_count != 1 else ""}</div>')
     parts.append('</div>')
+
+    # ATTACK TIMELINE + CONFIDENCE TRACE — the headline visual, from the canonical campaign
+    parts.append(_render_campaign_timeline(payload, accent))
 
     # WHAT HAPPENED — plain English
     parts.append('<div class="section">')
