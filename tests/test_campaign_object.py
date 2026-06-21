@@ -167,6 +167,19 @@ def test_render_baseline_cards_shows_why_abnormal():
     assert "ws-martin-01" in html and "4.2" in html and "above" in html
 
 
+def test_mssp_sla_clock_is_live_from_detected_at():
+    # MSSP SLA panel computes breach/on-track from the campaign's detected_at, not static.
+    import time
+    from src.reporting.comprehensive_report_generator import _build_mssp_page
+    old = {"verdict": "VALIDATED_BREACH", "detected_at": time.time() - 86400, "entities": {}}
+    p = {"rows": [], "meta": {"verdict": "VALIDATED_BREACH"}, "campaigns": [old]}
+    html = _build_mssp_page(p, p["meta"], {}, "s", "Acme", "2026-01-01").lower()
+    assert "breached" in html and "over response sla" in html, "SLA clock not live"
+    recent = {"verdict": "VALIDATED_BREACH", "detected_at": time.time() - 60, "entities": {}}
+    p2 = {"rows": [], "meta": {"verdict": "VALIDATED_BREACH"}, "campaigns": [recent]}
+    assert "on track" in _build_mssp_page(p2, p2["meta"], {}, "s", "Acme", "2026-01-01").lower()
+
+
 def test_executive_renders_timeline_and_confidence_trace():
     # The headline visual (#3): entry->exfil timeline + "why confirmed" confidence trace.
     from src.reporting.comprehensive_report_generator import _build_executive_page
