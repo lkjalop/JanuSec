@@ -841,6 +841,37 @@ def _render_campaign_timeline(payload: dict, accent: str) -> str:
     return '\n'.join(out)
 
 
+def _render_factor_telemetry_drawer(payload: dict, accent: str) -> str:
+    """Factor telemetry drawer + tuning advisor (Horizon-2 #5/#6): which factors are
+    noisy (precision/FP history) and exactly what to do about it. The analyst-toil view."""
+    tel = payload.get('factor_telemetry') or []
+    advice = payload.get('tuning_advice') or []
+    if not tel and not advice:
+        return ''
+    out = ['<div class="section">']
+    out.append(f'<strong style="color:{accent};display:block;margin-bottom:8px">FACTOR TELEMETRY &amp; TUNING</strong>')
+    if tel:
+        out.append('<table><thead><tr><th>Factor</th><th style="width:70px">Fired</th>'
+                   '<th style="width:60px">FP%</th><th style="width:80px">Precision</th></tr></thead><tbody>')
+        for s in tel[:12]:
+            noisy = s.get('is_noisy')
+            clr = '#f87171' if noisy else '#9bb'
+            out.append(f'<tr><td style="font-family:monospace;font-size:11px;color:{clr}">{escape(str(s.get("factor")))}</td>'
+                       f'<td style="text-align:right">{int(s.get("occurrences", 0))}</td>'
+                       f'<td style="text-align:right;color:{clr}">{int(float(s.get("fp_ratio", 0))*100)}%</td>'
+                       f'<td style="text-align:right">{float(s.get("precision", 0)):.2f}</td></tr>')
+        out.append('</tbody></table>')
+    if advice:
+        out.append(f'<div style="margin-top:10px"><strong style="color:{accent}">TUNING ADVISOR</strong>')
+        out.append('<ul style="margin:6px 0 0 18px;color:#fde68a;line-height:1.7">')
+        for a in advice[:8]:
+            out.append(f'<li><strong>{escape(str(a.get("factor")))}</strong>: {escape(str(a.get("recommendation")))} '
+                       f'<span style="color:#9bb">— {escape(str(a.get("rationale")))}</span></li>')
+        out.append('</ul></div>')
+    out.append('</div>')
+    return '\n'.join(out)
+
+
 # ── per-persona full-page builders ───────────────────────────────────────────
 
 from src.reporting.html.scaffold import (  # noqa: E402,F811
@@ -1052,6 +1083,9 @@ def _build_soc_page(payload: dict, meta: dict, assessment_view: dict,
     for g in gap_list[:6]:
         parts.append(f'<li style="margin:4px 0">{escape(g)}</li>')
     parts.append('</ul></div>')
+
+    # FACTOR TELEMETRY & TUNING ADVISOR (Horizon-2 #5/#6) — reduce analyst toil
+    parts.append(_render_factor_telemetry_drawer(payload, accent))
 
     # CONTROL FAILURES → SOC ACTIONS
     top_factors = assessment_view.get('top_factors') or []

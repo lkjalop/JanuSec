@@ -532,6 +532,25 @@ async def report_ingestion(
         variant=variant,
     )
 
+    # Factor telemetry + tuning advice (Horizon-2 #5/#6): for each factor in this report,
+    # surface its global precision/noise and recommend tuning for the noisy ones.
+    try:
+        from src.core.factor_telemetry import compute_factor_telemetry, tuning_advice
+        from src.api.runtime_state import get_server_runtime_state
+        _rt = get_server_runtime_state(getattr(request, 'app', None)) if request is not None else None
+        _factors = sorted({str(f) for e in (report.get('flagged_events') or [])
+                           for f in (e.get('factors') or [])})
+        _stats = compute_factor_telemetry(
+            _factors,
+            getattr(_rt, 'fp_factor_counts', {}) or {},
+            getattr(_rt, 'fp_factor_fp_labels_counts', {}) or {},
+        )
+        report['factor_telemetry'] = [s.to_dict() for s in _stats]
+        report['tuning_advice'] = tuning_advice(_stats)
+    except Exception:
+        report.setdefault('factor_telemetry', [])
+        report.setdefault('tuning_advice', [])
+
     # Merge assessment-specific evidence when available (fixes "0 events" from dispatch preview)
     if assessment_data:
         rows = (assessment_data.get('normalized_rows')
