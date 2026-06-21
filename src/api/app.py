@@ -7418,13 +7418,9 @@ async def temporal_rag_stats() -> dict:
 
 
 # ---------------- Admin: Per-tenant rate limit controls -----------------
-def _admin_ok(request: Request) -> bool:
-    try:
-        key = request.headers.get('x-admin-key') or request.headers.get('X-Admin-Key')
-        expected = os.getenv('ADMIN_API_KEY') or os.getenv('X_ADMIN_KEY')
-        return bool(expected) and key == expected
-    except Exception:
-        return False
+# _admin_ok moved to the canonical auth_helpers (Step 3); imported back so every existing
+# app.py caller and getattr(app_mod, '_admin_ok') keeps working unchanged.
+from .auth_helpers import admin_ok as _admin_ok  # noqa: E402
 
 @app.get('/api/v1/admin/rate_limits/tenant')
 async def get_tenant_rate_limits(request: Request, auth=Depends(require_roles('admin'))):
@@ -8033,21 +8029,9 @@ async def serve_live_console():
 from fastapi import Body
 
 
-def _resolve_tenant(request: Request | None, fallback: str | None = None) -> str | None:
-    """Resolve tenant id from headers honoring lite/demo defaults."""
-    try:
-        if request is None:
-            return fallback
-        raw = request.headers.get('X-Tenant-ID') or request.headers.get('x-tenant-id')
-        if raw:
-            return raw
-        allow_default = os.getenv('ALLOW_DEFAULT_TENANT', '1').lower() not in {'0', 'false', 'no'}
-        if not allow_default:
-            from fastapi import HTTPException as _HTTPEx
-            raise _HTTPEx(status_code=400, detail='tenant_id_required')
-        return fallback
-    except Exception:
-        return fallback
+# _resolve_tenant moved to tenant_helpers (Step 3); imported back so callers + getattr
+# (app_mod, '_resolve_tenant') keep working unchanged.
+from .tenant_helpers import resolve_tenant_with_default as _resolve_tenant  # noqa: E402
 
 def _obj_tenant(obj: object) -> str | None:
     """Extract tenant id from dict or object."""
