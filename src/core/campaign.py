@@ -50,6 +50,10 @@ class Campaign:
     last_seen: float | None = None
     span_seconds: float = 0.0
     detected_at: float | None = None
+    # Per-entity behavioral baselines: [{entity_type, entity_id, metric, z, baseline,
+    # current}] — "why this account/host is abnormal". Populated by the async assessment
+    # stage (BaselineService) and rendered sync as baseline cards.
+    baselines: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -122,7 +126,42 @@ def build_campaign(cluster: dict) -> Campaign:
         last_seen=last_seen,
         span_seconds=span_seconds,
         detected_at=last_seen,   # detection anchor = last observed activity
+        baselines=list(cluster.get("entity_baselines") or []),
     )
+
+
+async def attach_entity_baselines(
+    campaign: Campaign,
+    baseline_service: Any,
+    metrics: tuple[str, ...] = ("event_count", "byte_volume", "offhours_count"),
+    *,
+    z_floor: float = 2.0,
+) -> Campaign:
+    """Populate campaign.baselines from BaselineService for the campaign's actor/hosts.
+    Called by the async assessment stage (BaselineService is async); the report renders
+    the result synchronously. Keeps only ANOMALOUS metrics (|z| >= z_floor) — the cards
+    answer 'why is this entity abnormal', not 'here's every metric'."""
+    cards: list[dict[str, Any]] = []
+    targets = ([("user", u) for u in (campaign.entities.get("users") or [])[:5]]
+               + [("host", h) for h in (campaign.entities.get("hosts") or [])[:5]])
+    for entity_type, entity_id in targets:
+        for metric in metrics:
+            try:
+                res = await baseline_service.get_z(entity_type, entity_id, metric)
+            except Exception:
+                continue
+            z = (res or {}).get("z")
+            if z is None or abs(float(z)) < z_floor:
+                continue
+            cards.append({
+                "entity_type": entity_type, "entity_id": entity_id, "metric": metric,
+                "z": round(float(z), 2),
+                "baseline": (res or {}).get("baseline"),
+                "current": (res or {}).get("current"),
+            })
+    cards.sort(key=lambda c: -abs(c["z"]))
+    campaign.baselines = cards[:12]
+    return campaign
 
 
 def build_campaigns(clusters: list[dict], *, breach_only: bool = True) -> list[Campaign]:
