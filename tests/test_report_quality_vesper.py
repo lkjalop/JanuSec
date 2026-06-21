@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from src.core.ingest.evidence_assembler import get_assessment_clusters, get_assessment_rows
+from src.api.report_aggregation import build_framework_rollups
 from src.reporting.assessment_view_model import build_assessment_report_view
 from src.reporting.comprehensive_report_generator import build_report_html
 
@@ -63,6 +64,20 @@ def test_vesper_assessment_view_model_promotes_confirmed_breach_evidence():
     assert "Legal breach notification is a separate" in story["legal_boundary"]
     assert story["iso27035_lifecycle"]["standard"] == "ISO/IEC 27035"
     assert any(item["origins"] for item in view["top_factors"])
+
+
+def test_vesper_report_framework_rollups_use_confirmed_breach_factors():
+    assessment = _load_vesper()
+    rollups = build_framework_rollups([], get_assessment_clusters(assessment))
+
+    stride = {item["category"] for item in rollups["top_stride"]}
+    maestro = {item["phase"] for item in rollups["maestro_phases"]}
+    kill_chain = {item["phase"] for item in rollups["kill_chain_phases"]}
+
+    assert {"spoofing", "elevation", "information_disclosure", "lateral_movement", "exfiltration"} <= stride
+    assert {"initial_access", "credential_access", "lateral_movement", "collection", "exfiltration"} <= maestro
+    assert {"delivery", "recon", "exploitation", "lateral_movement", "collection", "exfiltration"} <= kill_chain
+    assert rollups["controls_overview"]
 
 
 def test_vesper_html_report_prioritizes_breach_summary_over_raw_tables():
