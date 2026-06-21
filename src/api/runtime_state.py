@@ -1099,7 +1099,11 @@ _RATE_LIMIT_STORAGE: defaultdict[str, deque[float]] = defaultdict(deque)
 _TENANT_RATE_STORAGE: defaultdict[str, deque[float]] = defaultdict(deque)
 _TENANT_RATE_DROPS: defaultdict[str, int] = defaultdict(int)
 _TENANT_LAST_ALERT: dict[str, float] = {}
-__all__.extend(['_RATE_LIMIT_STORAGE', '_TENANT_RATE_STORAGE', '_TENANT_RATE_DROPS', '_TENANT_LAST_ALERT'])
+# Lite/in-memory incident fallback store (moved from app.py, Step 3c) — shared by the
+# lite incident routes and the extracted test-helpers router.
+_LITE_INCIDENT_STORE: list[dict] = []
+__all__.extend(['_RATE_LIMIT_STORAGE', '_TENANT_RATE_STORAGE', '_TENANT_RATE_DROPS',
+                '_TENANT_LAST_ALERT', '_LITE_INCIDENT_STORE'])
 
 
 __all__.append('get_decision_cache')

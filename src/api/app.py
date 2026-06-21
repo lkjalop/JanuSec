@@ -4719,6 +4719,12 @@ def register_core_routers(full: bool = True):
     except Exception:
         logger.debug('report_router include failed (lite)')
     try:
+        from .test_helpers_endpoints import router as test_helpers_router
+        app.include_router(test_helpers_router)
+        logger.info('Included test_helpers_router into app (lite)')
+    except Exception:
+        logger.debug('test_helpers_router include failed (lite)')
+    try:
         app.include_router(report_forwarding_router)
         logger.info('Included report_forwarding_router into app (lite)')
     except Exception:
@@ -7304,81 +7310,7 @@ except Exception as _exc:
     logger.debug('silent_swallow at %s:%d: %s', __file__, 7247, _exc)
 
 
-# ---------------- Test helpers (lite/test-only) -----------------
-@app.post('/api/v1/test_helpers/reset_tenant_rate')
-async def _reset_tenant_rate(request: Request):
-    """Test-only helper to clear in-memory tenant rate windows and counters.
-
-    Guarded: only available when PLATFORM_LITE_INIT=1 or caller provides
-    ADMIN_API_KEY in X-Admin-Key header. This prevents accidental exposure in
-    production deployments.
-    """
-    # Allow when explicitly in lite/test mode
-    if os.getenv('PLATFORM_LITE_INIT','0').lower() in {'1','true','yes'}:
-        allowed = True
-    else:
-        allowed = _admin_ok(request)
-    if not allowed:
-        raise HTTPException(status_code=403, detail='forbidden')
-    try:
-        _TENANT_RATE_STORAGE.clear()
-        _TENANT_RATE_DROPS.clear()
-        _TENANT_LAST_ALERT.clear()
-        return {'status': 'ok', 'cleared': True}
-    except Exception:
-        raise HTTPException(status_code=500, detail='reset_failed')
-
-
-# Test helper: create an incident bypassing RBAC when request originates from localhost.
-# This is intended for local development and automated UI tests only. It will
-# accept requests from 127.0.0.1 or ::1 and create an incident in the same
-# way as the lite incident endpoint.
-@app.post('/api/v1/test_helpers/create_incident')
-async def test_create_incident(request: Request, payload: dict = None) -> dict:
-    from fastapi import Body
-    if payload is None:
-        payload = await request.json()
-    # Allow when explicitly in lite/test mode or request from localhost
-    remote = None
-    try:
-        remote = request.client.host if request.client else None
-    except Exception:
-        remote = None
-    allowed = os.getenv('PLATFORM_LITE_INIT','0').lower() in {'1','true','yes'} or (remote in ('127.0.0.1', '::1', 'localhost'))
-    if not allowed:
-        raise HTTPException(status_code=403, detail='forbidden')
-    import time as _t
-    iid = payload.get('id') or f"inc-{int(_t.time()*1000)}"
-    tenant_hdr = None
-    try:
-        tenant_hdr = _resolve_tenant(request)
-    except Exception:
-        try:
-            tenant_hdr = request.headers.get('X-Tenant-ID') or request.headers.get('x-tenant-id') or None
-        except Exception:
-            tenant_hdr = None
-    item = {
-        'id': iid,
-        'artifact_id': payload.get('artifact_id'),
-        'title': payload.get('title'),
-        'severity': payload.get('severity') or 'high',
-        'status': payload.get('status') or 'open',
-        'summary': payload.get('description'),
-        'metadata': {'attack_subgraph': payload.get('attack_subgraph')} if 'attack_subgraph' in payload else {},
-        'tenant_id': payload.get('tenant_id') or tenant_hdr,
-        'ts': _t.time(),
-    }
-    try:
-        import src.repositories.incidents_repo as incidents_repo  # type: ignore
-        coro = incidents_repo.upsert_incident(iid, item, item.get('tenant_id'))
-        if asyncio.iscoroutine(coro):
-            await coro  # type: ignore[misc]
-    except Exception:
-        try:
-            _LITE_INCIDENT_STORE.append(item)
-        except Exception as _exc:  # best-effort fallback: ignore if in-memory store not available
-            logger.debug('silent_swallow at %s:%d: %s', __file__, 7323, _exc)
-    return {'incident': item}
+# Test-helper routes extracted to test_helpers_endpoints.py (Step 3c).
 
 
 @app.get('/api/v1/temporal/stats', include_in_schema=False)
@@ -8051,8 +7983,9 @@ def _obj_tenant(obj: object) -> str | None:
 
 
 if os.getenv('PLATFORM_LITE_INIT','0').lower() in {'1','true','yes'}:
-    # In-memory incident store for lite/demo mode fallback
-    _LITE_INCIDENT_STORE: list[dict] = []
+    # In-memory incident store moved to runtime_state (Step 3c); imported back so the lite
+    # incident routes here AND the extracted test-helpers router share ONE store.
+    from .runtime_state import _LITE_INCIDENT_STORE  # noqa: E402,F401
 
     def _register_lite_incident_routes() -> None:
         """Register lite-mode incident routes once."""
