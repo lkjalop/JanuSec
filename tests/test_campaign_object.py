@@ -132,6 +132,41 @@ def test_mssp_tenant_containment_reads_from_campaign():
     assert "ws-martin-01" in html, "MSSP tenant containment empty despite campaign"
 
 
+async def test_attach_entity_baselines_keeps_only_anomalous():
+    # The async compute (worker integration) populates campaign.baselines, filtering to
+    # |z| >= floor (cards answer "why abnormal", not "every metric").
+    from src.core.campaign import attach_entity_baselines
+
+    class _FakeBaseline:
+        async def get_z(self, etype, eid, metric):
+            # martin.chen byte_volume is way off baseline; everything else is normal.
+            if eid == "martin.chen" and metric == "byte_volume":
+                return {"z": 4.2, "baseline": 100.0, "current": 520.0}
+            return {"z": 0.3, "baseline": 100.0, "current": 103.0}
+
+    c = build_campaign(_martin_cluster())
+    await attach_entity_baselines(c, _FakeBaseline())
+    assert len(c.baselines) == 1, "only the anomalous metric should be kept"
+    card = c.baselines[0]
+    assert card["entity_id"] == "martin.chen" and card["metric"] == "byte_volume"
+    assert card["z"] == 4.2
+
+
+def test_build_campaign_carries_baselines_from_cluster():
+    cl = dict(_martin_cluster(), entity_baselines=[{"entity_id": "ws-martin-01", "metric": "offhours_count", "z": 3.1}])
+    assert build_campaign(cl).baselines[0]["entity_id"] == "ws-martin-01"
+
+
+def test_render_baseline_cards_shows_why_abnormal():
+    from src.reporting.comprehensive_report_generator import _build_soc_page
+    p = {"rows": [], "meta": {"verdict": "VALIDATED_BREACH"}, "campaigns": [{
+        "entities": {}, "baselines": [
+            {"entity_type": "host", "entity_id": "ws-martin-01", "metric": "byte_volume", "z": 4.2}]}]}
+    html = _build_soc_page(p, p["meta"], {}, "s", "Acme", "2026-01-01").lower()
+    assert "why these entities are abnormal" in html
+    assert "ws-martin-01" in html and "4.2" in html and "above" in html
+
+
 def test_executive_renders_timeline_and_confidence_trace():
     # The headline visual (#3): entry->exfil timeline + "why confirmed" confidence trace.
     from src.reporting.comprehensive_report_generator import _build_executive_page

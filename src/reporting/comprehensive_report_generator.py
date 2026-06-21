@@ -872,6 +872,34 @@ def _render_factor_telemetry_drawer(payload: dict, accent: str) -> str:
     return '\n'.join(out)
 
 
+def _render_baseline_cards(payload: dict, accent: str) -> str:
+    """Per-entity baseline cards (Horizon-2 #5b): 'why this account/host is abnormal' —
+    a z-score against its own learned baseline. Complements the factor drawer (noisy
+    factor) with the entity view (anomalous principal)."""
+    cards: list[dict] = []
+    for c in (payload.get('campaigns') or []):
+        cards.extend(c.get('baselines') or [])
+    if not cards:
+        return ''
+    out = ['<div class="section">']
+    out.append(f'<strong style="color:{accent};display:block;margin-bottom:8px">WHY THESE ENTITIES ARE ABNORMAL</strong>')
+    for b in cards[:10]:
+        try:
+            z = float(b.get('z') or 0)
+        except Exception:
+            z = 0.0
+        direction = 'above' if z >= 0 else 'below'
+        clr = '#f87171' if abs(z) >= 3 else '#fbbf24'
+        metric = str(b.get('metric', 'activity')).replace('_', ' ')
+        out.append(f'<div style="padding:6px 0;border-bottom:1px solid #1e2535">'
+                   f'<span style="font-family:monospace;color:#e6eef8">{escape(str(b.get("entity_id")))}</span> '
+                   f'<span style="color:#9bb">({escape(str(b.get("entity_type")))})</span> — '
+                   f'<span style="color:{clr};font-weight:700">{abs(z):.1f}σ {direction}</span> '
+                   f'baseline on <strong>{escape(metric)}</strong></div>')
+    out.append('</div>')
+    return '\n'.join(out)
+
+
 # ── per-persona full-page builders ───────────────────────────────────────────
 
 from src.reporting.html.scaffold import (  # noqa: E402,F811
@@ -1086,6 +1114,8 @@ def _build_soc_page(payload: dict, meta: dict, assessment_view: dict,
 
     # FACTOR TELEMETRY & TUNING ADVISOR (Horizon-2 #5/#6) — reduce analyst toil
     parts.append(_render_factor_telemetry_drawer(payload, accent))
+    # BASELINE CARDS (Horizon-2 #5b) — why these entities are abnormal
+    parts.append(_render_baseline_cards(payload, accent))
 
     # CONTROL FAILURES → SOC ACTIONS
     top_factors = assessment_view.get('top_factors') or []
