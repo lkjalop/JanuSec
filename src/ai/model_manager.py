@@ -1,4 +1,4 @@
-﻿"""AI model manager with graceful degradation and provider selection."""
+"""AI model manager with graceful degradation and provider selection."""
 from __future__ import annotations
 
 import asyncio
@@ -771,7 +771,7 @@ class AIModelManager:
             'details_hash': hash(json.dumps(event_data.get('details', {}), sort_keys=True))
         }
         
-        cache_key = hashlib.md5(json.dumps(key_fields, sort_keys=True).encode()).hexdigest()
+        cache_key = hashlib.sha256(json.dumps(key_fields, sort_keys=True).encode()).hexdigest()
         return cache_key
     
     def _get_cached_result(self, cache_key: str) -> AnalysisResult | None:

@@ -652,7 +652,7 @@ class BaselineModule:
         if not signature_parts:
             # Fallback to hash of entire event
             event_str = json.dumps(event, sort_keys=True)
-            return hashlib.md5(event_str.encode()).hexdigest()[:16]
+            return hashlib.sha256(event_str.encode()).hexdigest()[:16]
         
         return "|".join(signature_parts)
 

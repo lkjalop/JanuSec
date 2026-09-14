@@ -5,7 +5,7 @@ from typing import Iterable, Tuple
 
 
 def _md5_hex(s: str) -> str:
-    return hashlib.md5(s.encode('utf-8')).hexdigest()
+    return hashlib.md5(s.encode('utf-8'), usedforsecurity=False).hexdigest()
 
 
 def ja4_from_tls_http(version: int, cipher_count: int, ext_count: int, ua: str | None = None) -> Tuple[str, str]:
@@ -15,7 +15,7 @@ def ja4_from_tls_http(version: int, cipher_count: int, ext_count: int, ua: str |
     features commonly available: TLS version, counts of ciphers/extensions, and
     a weak UA hash (if provided). Returns (string, md5 hash).
     """
-    ua_hash = hashlib.md5((ua or '').strip().lower().encode()).hexdigest()[:8] if ua else ''
+    ua_hash = hashlib.md5((ua or '').strip().lower().encode(), usedforsecurity=False).hexdigest()[:8] if ua else ''
     s = f"v{int(version)}-c{int(cipher_count)}-e{int(ext_count)}-u{ua_hash}"
     return s, _md5_hex(s)
 

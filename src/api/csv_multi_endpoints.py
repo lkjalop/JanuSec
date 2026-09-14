@@ -96,7 +96,7 @@ async def upload_csv(file: UploadFile = File(...), request: Request = None, mapp
                     key = request.headers.get('x-api-key') or request.headers.get('X-API-Key')
                     if key:
                         headers['x-api-key'] = key
-                return requests.post(url, json=json, headers=headers)
+                return requests.post(url, json=json, headers=headers, timeout=15)
             except Exception:
                 class R: status_code = 500
                 return R()

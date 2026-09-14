@@ -145,7 +145,7 @@ def _normalize_value(entity_type: str, value: Any) -> str:
 
 
 def _fingerprint(entity_type: str, normalized: str, length: int = 12) -> str:
-    digest = hashlib.sha1(normalized.encode('utf-8')).hexdigest()  # noqa: S324 (sha1 ok for labels)
+    digest = hashlib.sha256(normalized.encode('utf-8')).hexdigest()  # noqa: S324 (sha1 ok for labels)
     return f"{entity_type}:{digest[:length]}"
 
 

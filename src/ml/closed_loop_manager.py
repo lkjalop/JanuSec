@@ -543,7 +543,7 @@ class ClosedLoopManager:
                 candidate = _json.loads(row[0]) if isinstance(row[0], str) else row[0]
             except Exception:
                 try:
-                    candidate = eval(row[0]) if isinstance(row[0], str) else row[0]
+                    candidate = __import__('ast').literal_eval(row[0]) if isinstance(row[0], str) else row[0]
                 except Exception:
                     candidate = {}
         applied = {}

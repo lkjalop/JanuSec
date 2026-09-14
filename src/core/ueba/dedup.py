@@ -76,7 +76,7 @@ class DedupClusterer:
                     c.add(alert_id, ioch, vec)
                     return cid
         # create new cluster
-        cid = hashlib.sha1((alert_id + ioch).encode('utf-8')).hexdigest()[:12]
+        cid = hashlib.sha256((alert_id + ioch).encode('utf-8')).hexdigest()[:12]
         c = Cluster(id=cid)
         c.add(alert_id, ioch, vec)
         self.clusters[cid] = c

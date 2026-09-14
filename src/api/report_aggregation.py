@@ -257,7 +257,7 @@ def _compute_decision_cache_fingerprint(items: list) -> str:
                     minimal.append(('', ''))
         minimal.sort()
         blob = _json.dumps(minimal, separators=(',', ':'), ensure_ascii=False)
-        return hashlib.sha1(blob.encode('utf-8')).hexdigest()[:12]
+        return hashlib.sha256(blob.encode('utf-8')).hexdigest()[:12]
     except Exception:
         return ''
 

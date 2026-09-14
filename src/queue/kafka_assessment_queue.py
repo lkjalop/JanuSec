@@ -44,7 +44,7 @@ def build_assessment_job(
             'org': payload.get('org') or payload.get('tenant') or tenant_id or 'default',
         },
     }
-    job['dedupe_key'] = f"{job['tenant_id']}:{job['assessment_id']}:{hashlib.sha1(str(sorted((payload.get('rows') or [])[:3], key=str)).encode('utf-8')).hexdigest()[:12]}"
+    job['dedupe_key'] = f"{job['tenant_id']}:{job['assessment_id']}:{hashlib.sha256(str(sorted((payload.get('rows') or [])[:3], key=str)).encode('utf-8')).hexdigest()[:12]}"
     return job
 
 

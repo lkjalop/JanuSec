@@ -48,7 +48,7 @@ def build_sessions_from_packets(packets: List[Dict[str, Any]]) -> List[Dict[str,
 
         # build simple session id from tuple and time window
         raw = f"{k[0]}:{k[1]}-{k[2]}:{k[3]}-{k[4]}-{start_ts}-{end_ts}"
-        sid = hashlib.sha1(raw.encode('utf-8')).hexdigest()[:16]
+        sid = hashlib.sha256(raw.encode('utf-8')).hexdigest()[:16]
 
         session = {
             'session_id': sid,

@@ -100,7 +100,7 @@ class SuppressionCorrelator:
                         continue
                     self._last_emit[key] = now
                     # stable small hash to differentiate suppression pairs if needed
-                    h = hashlib.sha1(f"{a}|{b}".encode('utf-8')).hexdigest()[:6]
+                    h = hashlib.sha256(f"{a}|{b}".encode('utf-8')).hexdigest()[:6]
                     suppress_factor = f'corr:suppress_low_value'
                     if suppress_factor not in emitted and suppress_factor not in factors:
                         emitted.append(suppress_factor)

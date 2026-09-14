@@ -212,7 +212,7 @@ def parse_zeek_line(kind: str, line: str) -> dict[str, Any] | None:
             import hashlib
             parts = [str(obj.get('kex_algs','')).lower(), str(obj.get('encr_algs','')).lower(), str(obj.get('mac_algs','')).lower(), str(obj.get('comp_algs','')).lower()]
             concat = ';'.join(parts)
-            hassh = hashlib.md5(concat.encode()).hexdigest()
+            hassh = hashlib.md5(concat.encode(), usedforsecurity=False).hexdigest()
             return {
                 'ts': obj.get('ts'),
                 'host': obj.get('id.orig_h') or obj.get('orig_h'),

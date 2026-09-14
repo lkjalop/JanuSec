@@ -18,7 +18,7 @@ def compute_ja3_from_client_hello(ch_payload: bytes) -> Optional[str]:
         try:
             if not ch_payload:
                 return None
-            return hashlib.md5(ch_payload).hexdigest()
+            return hashlib.md5(ch_payload, usedforsecurity=False).hexdigest()
         except Exception:
             return None
 

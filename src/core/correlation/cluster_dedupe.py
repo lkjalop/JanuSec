@@ -19,7 +19,7 @@ def cluster_mark(factors: list[str]) -> list[str]:
     if not core:
         return []
     sig_basis = '|'.join(sorted(core)[:40])
-    sig_hash = hashlib.sha1(sig_basis.encode()).hexdigest()[:16]
+    sig_hash = hashlib.sha256(sig_basis.encode()).hexdigest()[:16]
     count = _seen[sig_hash]
     _seen[sig_hash] += 1
     if count == 0:

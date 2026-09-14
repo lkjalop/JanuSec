@@ -21,7 +21,7 @@ BASE.mkdir(parents=True, exist_ok=True)
 def _session_id_for_event(ev: Dict[str, Any]) -> str:
     """Derive a session id for simple correlation by hashing key fields."""
     key = f"{ev.get('type')}-{ev.get('src_ip')}-{ev.get('dst_ip')}-{ev.get('dst_port', '')}"
-    return hashlib.sha1(key.encode('utf-8')).hexdigest()
+    return hashlib.sha256(key.encode('utf-8')).hexdigest()
 
 
 def enqueue_event(ev: Dict[str, Any]) -> str:

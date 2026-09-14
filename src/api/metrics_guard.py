@@ -56,7 +56,7 @@ def tenant_label_for(tenant: Optional[str]) -> str:
         buckets = 0
     if buckets and buckets > 0:
         # stable hash
-        h = hashlib.sha1(tenant.encode('utf-8')).hexdigest()
+        h = hashlib.sha256(tenant.encode('utf-8')).hexdigest()
         val = int(h[:8], 16) % buckets
         return f'b{val}'
 

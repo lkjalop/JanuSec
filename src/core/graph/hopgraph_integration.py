@@ -165,9 +165,9 @@ def _generate_fallback_graph(row: Dict[str, Any], max_hops: int) -> Dict[str, An
     proc = row.get("process_name") or row.get("process") or "unknown.exe"
     host = row.get("host") or "UNKNOWN-HOST"
     sha256 = row.get("sha256") or "unknown"
-    node_id_1 = hashlib.md5(f"{proc}{host}".encode("utf-8")).hexdigest()[:8]
-    node_id_2 = hashlib.md5(f"{proc}{host}parent".encode("utf-8")).hexdigest()[:8]
-    node_id_3 = hashlib.md5(f"{proc}{host}child".encode("utf-8")).hexdigest()[:8]
+    node_id_1 = hashlib.sha256(f"{proc}{host}".encode("utf-8")).hexdigest()[:8]
+    node_id_2 = hashlib.sha256(f"{proc}{host}parent".encode("utf-8")).hexdigest()[:8]
+    node_id_3 = hashlib.sha256(f"{proc}{host}child".encode("utf-8")).hexdigest()[:8]
     nodes = [
         {
             "id": node_id_2,

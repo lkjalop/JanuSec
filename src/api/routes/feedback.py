@@ -75,7 +75,7 @@ def _decision_snapshot(event_id: str) -> tuple[list[dict[str,Any]], dict[str,Any
 
 def _hash_factor(name: str) -> str:
     import hashlib
-    return hashlib.sha1(name.encode('utf-8')).hexdigest()[:10]
+    return hashlib.sha256(name.encode('utf-8')).hexdigest()[:10]
 
 @router.post('', summary='Submit analyst feedback')  # type: ignore[misc]
 def submit_feedback(body: FeedbackIn):

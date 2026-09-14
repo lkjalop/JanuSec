@@ -9,7 +9,7 @@ from typing import Tuple, Optional, List
 logger = logging.getLogger(__name__)
 
 def _md5_hex(s: str) -> str:
-    return hashlib.md5(s.encode('utf-8')).hexdigest()
+    return hashlib.md5(s.encode('utf-8'), usedforsecurity=False).hexdigest()
 
 def _assemble_ja3(version: int, ciphers: List[int], extensions: List[int], groups: List[int], sig_algs: List[int]) -> str:
     # Format: <version>,<cipher list>,<ext list>,<groups list>,<sig algs list>

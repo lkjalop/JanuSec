@@ -14,7 +14,7 @@ def _filter_grease(seq: Iterable[int]) -> List[int]:
 
 
 def _md5_hex(s: str) -> str:
-    return hashlib.md5(s.encode('utf-8')).hexdigest()
+    return hashlib.md5(s.encode('utf-8'), usedforsecurity=False).hexdigest()
 
 
 def ja3_from_fields(version: int, ciphers: Iterable[int], extensions: Iterable[int], curves: Iterable[int], ec_point_formats: Iterable[int]) -> Tuple[str, str]:

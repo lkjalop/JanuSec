@@ -296,7 +296,8 @@ def _eval_comparison(c: Comparison, event: Dict[str, Any]) -> bool:
             return val != rhs
         if c.op in {'>','<','>=','<='}:
             if isinstance(val, (int,float)) and isinstance(rhs, (int,float)):
-                return eval(f"{val} {c.op} {rhs}")  # noqa: S307 minimal numeric compare
+                import operator
+                return {'>': operator.gt, '<': operator.lt, '>=': operator.ge, '<=': operator.le}[c.op](val, rhs)
             return False
         if c.op == '~':
             if val is None:

@@ -245,7 +245,7 @@ def _canonical_envelope(sensor: str, raw: Dict[str, Any]) -> Dict[str, Any]:
     try:
         import hashlib
         key_src = json.dumps({'sensor': sensor, 'ts': env['ts'], 'raw_preview': {k: raw.get(k) for k in sorted(list(raw.keys())[:6])}}, sort_keys=True)
-        eid = hashlib.sha1(key_src.encode('utf-8')).hexdigest()
+        eid = hashlib.sha256(key_src.encode('utf-8')).hexdigest()
         env['event_id'] = f'evt_{eid}'
     except Exception:
         env['event_id'] = f'evt_{int(time.time()*1000)}'

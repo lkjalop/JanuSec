@@ -711,7 +711,7 @@ def _build_evidence_snapshot(matches: list[Any]) -> list[dict[str, Any]]:
             for s in getattr(m, 'strings', []) or []:
                 try:
                     sid, off, data = s
-                    h = hashlib.sha1(data or b'').hexdigest()[:8] if isinstance(data, (bytes, bytearray)) else None
+                    h = hashlib.sha1(data or b'', usedforsecurity=False).hexdigest()[:8] if isinstance(data, (bytes, bytearray)) else None
                     out.append({ 'id': sid, 'offset': int(off), 'length': (len(data) if data is not None else 0), 'sha1_8': h })
                     if len(out) >= MAX:
                         return out

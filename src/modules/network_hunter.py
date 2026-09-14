@@ -241,7 +241,7 @@ class NetworkThreatHunter:
                     # naive compact hash-like composition
                     import hashlib
                     base = '|'.join([ch_cs, alpn, chf])
-                    event['ja4'] = hashlib.sha1(base.encode('utf-8')).hexdigest()[:16]
+                    event['ja4'] = hashlib.sha1(base.encode('utf-8'), usedforsecurity=False).hexdigest()[:16]
         except Exception:
             pass
         for key,prefix in ((event.get('ja3'), 'ssl:ja3'), (event.get('ja3s'), 'ssl:ja3s'),
@@ -964,7 +964,7 @@ class NetworkThreatHunter:
                 ua = (event.get('http_user_agent') or event.get('user_agent') or '').strip().lower()
                 if ja3 or ua:
                     import hashlib
-                    ua_hash = hashlib.md5(ua.encode()).hexdigest()[:8] if ua else ''
+                    ua_hash = hashlib.md5(ua.encode(), usedforsecurity=False).hexdigest()[:8] if ua else ''
                     # very simple bucket on domain novelty (presence of domain_novel_observed factor)
                     bucket = 'novel' if ('domain_novel_observed' in factors) else 'base'
                     key = f"dfp:{ja3}:{ua_hash}:{bucket}"

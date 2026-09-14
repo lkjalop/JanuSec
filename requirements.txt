@@ -107,3 +107,6 @@ pytest-cov>=4.1.0
 # Static analysis
 # Use latest available pefile release compatible with PyPI
 pefile>=2024.8.26
+
+# Reject XML entity expansion in vendor responses.
+defusedxml==0.7.1

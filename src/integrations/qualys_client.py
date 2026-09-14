@@ -5,7 +5,7 @@ import json
 import logging
 import os
 import time
-import xml.etree.ElementTree as ET
+import defusedxml.ElementTree as ET
 from pathlib import Path
 from typing import Any, Dict, List
 

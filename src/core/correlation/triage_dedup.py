@@ -26,7 +26,7 @@ def bucket_by_hash(rows: List[Dict[str, Any]], key_fields: List[str], bucket_bit
         for k in key_fields:
             parts.append(str(r.get(k, '')).strip().lower())
         s = '|'.join(parts)
-        h = hashlib.sha1(s.encode('utf-8')).hexdigest()
+        h = hashlib.sha256(s.encode('utf-8')).hexdigest()
         b = int(h[:nibble_len], 16)
         out.setdefault(b, []).append(r)
     return out
@@ -150,7 +150,7 @@ def mini_batch_k_medoids(rows: List[Dict[str, Any]], k: int = 3, fields: List[st
     k = min(k, n)
     # initialize medoid indices deterministically
     medoid_idxs = []
-    start = int(hashlib.sha1(str(n).encode('utf-8')).hexdigest(), 16)
+    start = int(hashlib.sha256(str(n).encode('utf-8')).hexdigest(), 16)
     i = start % n
     while len(medoid_idxs) < k:
         if i not in medoid_idxs:

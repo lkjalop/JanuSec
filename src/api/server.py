@@ -3314,9 +3314,9 @@ async def _process_endpoint_event(event_model: LogEvent, ctx: LogBatchContext) -
                 cluster_id = mh.hexdigest()
                 raw_sig = f"minhash:{cluster_id}"
             except Exception:
-                cluster_id = hashlib.sha1(raw_sig.encode('utf-8')).hexdigest()
+                cluster_id = hashlib.sha256(raw_sig.encode('utf-8')).hexdigest()
         else:
-            cluster_id = hashlib.sha1(raw_sig.encode('utf-8')).hexdigest()
+            cluster_id = hashlib.sha256(raw_sig.encode('utf-8')).hexdigest()
         cl_res = await CLUSTERING.update(cluster_id, event_id, ts=time.time(), raw_signature=raw_sig, contributors={'rules': factor_subset, 'ioc_count': len(iocs)})
         # Always attach cluster metadata for explainability
         processed_event.setdefault('clusters', []).append({'cluster_id': cluster_id, 'size': cl_res.get('size'), 'novelty': cl_res.get('novelty_score')})

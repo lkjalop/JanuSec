@@ -229,5 +229,5 @@ def _coherence_warning(score: float, is_parallel: bool) -> CoherenceWarning:
 
 def _make_id(cluster_id: str, seg_idx: int) -> str:
     raw = f'{cluster_id}:{seg_idx}'
-    h = hashlib.sha1(raw.encode()).hexdigest()[:8]
+    h = hashlib.sha256(raw.encode()).hexdigest()[:8]
     return f'INC-{h}'

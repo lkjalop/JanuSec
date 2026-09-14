@@ -103,7 +103,7 @@ class CooccurrenceCorrelator:
                 corr_factor = 'corr:pair_high_pmi'
                 if self.emit_specific and self._specific_active < self.max_specific:
                     import hashlib
-                    h = hashlib.sha1(f"{a}|{b}".encode('utf-8')).hexdigest()[:8]
+                    h = hashlib.sha256(f"{a}|{b}".encode('utf-8')).hexdigest()[:8]
                     specific = f'corr:pmi:{h}'
                     if specific not in factors and specific not in emitted:
                         emitted.append(specific)

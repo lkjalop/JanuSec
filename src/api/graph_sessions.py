@@ -3317,7 +3317,7 @@ async def build_session(
         try:
             import hashlib as _hash, json as _json
             weights_blob = _json.dumps(scoring_cfg.get('weights', {}), sort_keys=True)
-            weights_hash = _hash.sha1(weights_blob.encode('utf-8')).hexdigest()[:10]
+            weights_hash = _hash.sha256(weights_blob.encode('utf-8')).hexdigest()[:10]
             summary['scoring_config_version'] = os.getenv('SCORING_CONFIG_VERSION') or weights_hash
             summary['compliance'] = {
                 'intended_purpose': os.getenv('COMPLIANCE_INTENDED_PURPOSE','demo'),

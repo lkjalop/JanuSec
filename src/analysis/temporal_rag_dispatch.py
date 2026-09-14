@@ -54,7 +54,7 @@ class IncidentSignature:
         tokens.append(f'verdict:{self.verdict}')
         for tok in tokens:
             for salt in ('a', 'b'):
-                h = int(hashlib.sha1(f'{salt}|{tok}'.encode()).hexdigest(), 16)
+                h = int(hashlib.sha256(f'{salt}|{tok}'.encode()).hexdigest(), 16)
                 v[h % n_dims] += 1.0
         norm = math.sqrt(sum(x * x for x in v)) or 1.0
         return [x / norm for x in v]

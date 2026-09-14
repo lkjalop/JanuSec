@@ -943,7 +943,7 @@ def _compute_prompt_source_hash(fn: Any) -> str:
         source = inspect.getsource(fn)
     except Exception:
         source = getattr(fn, '__name__', 'unknown_prompt')
-    digest = hashlib.sha1(source.encode('utf-8')).hexdigest()[:10]
+    digest = hashlib.sha256(source.encode('utf-8')).hexdigest()[:10]
     return digest
 
 
