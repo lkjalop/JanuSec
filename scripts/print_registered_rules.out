@@ -1,0 +1,4 @@
+Traceback (most recent call last):
+  File "D:\AI\Threat_thy_sniffer\scripts\print_registered_rules.py", line 1, in <module>
+    from src.core.correlation.rules.registry import CORRELATION_RULES
+ModuleNotFoundError: No module named 'src'

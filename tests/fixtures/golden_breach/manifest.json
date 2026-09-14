@@ -1,0 +1,11 @@
+{
+  "schema_version": "janusec.golden-breach/v1",
+  "case_id": "golden-identity-cloud-001",
+  "variants": {
+    "breach": {"file": "breach.jsonl", "expected": "suspected", "required_domains": ["identity", "endpoint", "cloud"]},
+    "benign": {"file": "benign.jsonl", "expected": "not_demonstrated"},
+    "missing_sensor": {"file": "missing_sensor.jsonl", "expected": "insufficient_evidence", "required_gap": "endpoint"},
+    "delayed_log": {"file": "delayed_log.jsonl", "expected": "suspected", "required_lag_seconds": 1140},
+    "cross_tenant": {"file": "cross_tenant.jsonl", "expected": "tenant_isolated", "forbidden_cross_tenant_edges": 0}
+  }
+}

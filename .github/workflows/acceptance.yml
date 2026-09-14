@@ -1,0 +1,53 @@
+name: Acceptance harness
+
+# The golden "is the platform still correct end-to-end" gate.
+# Runs `pytest -m acceptance` — JanuSec's deterministic-correctness evidence.
+#
+# Note on datasets: the large ground-truth breach datasets (dump/test files/*)
+# are gitignored and are NOT present on GitHub-hosted runners, so the
+# dataset-backed gates (ground-truth verdicts, detector-firing coverage) SKIP
+# cleanly here (see scripts/ground_truth_gate.dataset_present). The
+# dataset-free gates still run and are enforced on every PR: narrator
+# robustness, canonical campaign object, CEO-export contract, factor
+# telemetry, persona rendering, and the state singleton. To run the full
+# suite including the dataset gates, execute this workflow on a self-hosted
+# runner that has `dump/test files/` populated, or restore the datasets as a
+# pre-step.
+
+# Environment-specific suite; see docs/CI_SCOPE.md.
+on:
+  workflow_dispatch:
+
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    env:
+      # Lite/fast flags keep collection stable and avoid heavy startup + network.
+      PLATFORM_LITE_INIT: '1'
+      FAST_TEST_MODE: '1'
+      SKIP_ISMS_SCAN: '1'
+      DB_DISABLE_NETWORK_CONNECT: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Run acceptance harness
+        run: |
+          python -m pytest -m acceptance -p no:cacheprovider -o addopts="" --timeout=600 -q
+      - name: Generate acceptance proof
+        if: always()
+        run: |
+          python scripts/acceptance_proof.py || true
+      - name: Upload acceptance proof
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: acceptance-proof
+          path: artifacts/ACCEPTANCE_PROOF.md
+          if-no-files-found: ignore

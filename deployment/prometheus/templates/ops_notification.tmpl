@@ -1,0 +1,13 @@
+{{ define "ops_notification" }}
+Alert: {{ .CommonLabels.alertname }}
+Severity: {{ .CommonLabels.severity }}
+Description: {{ .CommonAnnotations.description }}
+Summary: {{ .CommonAnnotations.summary }}
+Generator: {{ .GeneratorURL }}
+
+{{ range .Alerts }}
+ - Instance: {{ .Labels.instance }}
+   StartsAt: {{ .StartsAt }}
+   Annotations: {{ .Annotations }}
+{{ end }}
+{{ end }}

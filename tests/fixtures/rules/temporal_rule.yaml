@@ -1,0 +1,14 @@
+id: temporal-001
+version: '1.0'
+name: Multiple Failed Logins
+description: Trigger when more than 3 failed_login events occur within 60 seconds for same user
+severity: high
+score: 0.8
+mitre:
+  - T1110
+conditions:
+  - type: temporal_count
+    field: event_type
+    value: failed_login
+    threshold: 3
+    window_seconds: 60

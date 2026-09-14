@@ -1,0 +1,11 @@
+version: '3.8'
+services:
+  app:
+    environment:
+      - AZURE_DEF_SCHED_DIR=/ingest/azure_defender
+      - AZURE_DEF_SCHED_INTERVAL_SEC=60
+      - AZURE_DEF_SCHED_BASE=http://localhost:8080
+      - AZURE_DEF_SCHED_API_KEY=devkey123
+      - AZURE_DEF_SCHED_TENANT=default
+    volumes:
+      - "C:\\ingest\\azure_defender:/ingest/azure_defender:ro"

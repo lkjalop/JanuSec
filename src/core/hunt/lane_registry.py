@@ -5,12 +5,14 @@ metrics prove value. Toggle via config: pipeline.hunt_lanes.enabled
 Per-lane enable flags: pipeline.hunt_lanes.lanes.<lane_name>=true|false
 """
 from __future__ import annotations
-from typing import Dict, Any, List, Protocol, Callable, Awaitable
-import os
+
 import logging
+import os
+from collections.abc import Awaitable, Callable
+from typing import Any, Dict, List, Protocol
 
 try:
-    from prometheus_client import Histogram, Counter, Gauge
+    from prometheus_client import Counter, Gauge, Histogram
 except Exception:  # pragma: no cover
     Histogram = None  # type: ignore
     Counter = None    # type: ignore
@@ -25,7 +27,7 @@ class Lane(Protocol):  # interface for type checkers
 class LaneRegistry:
     def __init__(self, config):
         self.config = config
-        self.lanes: Dict[str, Lane] = {}
+        self.lanes: dict[str, Lane] = {}
         self._init_metrics()
 
     def _init_metrics(self):
@@ -41,6 +43,12 @@ class LaneRegistry:
             pass
 
     def register(self, lane: Lane):
+        # Enforce global uniqueness of factor sources at registration time
+        try:
+            from src.core.factor_source_registry import register_source  # type: ignore
+            register_source('LANE', getattr(lane, 'name', 'unknown_lane'), 'hunt_lane')
+        except Exception:
+            pass
         self.lanes[lane.name] = lane
 
     def enabled(self) -> bool:
@@ -66,7 +74,8 @@ class LaneRegistry:
         if getattr(self.__class__, 'lane_parallel_enabled', None):
             try: self.__class__.lane_parallel_enabled.set(1 if parallel else 0)
             except Exception: pass
-        import time, asyncio
+        import asyncio
+        import time
         start = time.perf_counter()
         if not parallel:
             for name, lane in self.lanes.items():
@@ -116,5 +125,27 @@ class LaneRegistry:
                 self.__class__.lane_latency.labels(lane=name).observe(elapsed)
             if getattr(self.__class__, 'lane_events', None) and envelope.emissions and envelope.emissions[-1].lane == name:
                 self.__class__.lane_events.labels(lane=name).inc()
-        except Exception as e:  # broad catch for lane isolation; log stack for debugging
+            # Export emissions for hopgraph/session builder integration (best-effort)
+            try:
+                from .hopgraph_export import enqueue_emissions
+                # event id fallback
+                eid = None
+                try:
+                    evt = getattr(envelope, 'event', {}) or {}
+                    eid = evt.get('event_id') or evt.get('id') or None
+                except Exception:
+                    eid = None
+                if not eid:
+                    # synthesize id from object id
+                    eid = f"evt-{id(envelope)}"
+                sigs = []
+                try:
+                    sigs = envelope.export_hopgraph_signals()
+                except Exception:
+                    sigs = []
+                if sigs:
+                    enqueue_emissions(eid, sigs)
+            except Exception:
+                pass
+        except Exception:  # broad catch for lane isolation; log stack for debugging
             logger.exception(f"Lane {name} failed")

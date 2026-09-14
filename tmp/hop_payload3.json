@@ -1,0 +1,27 @@
+{
+    "ewma":  false,
+    "sessions":  [
+                     {
+                         "id":  "acme-e2e-1",
+                         "data":  {
+                                      "entities":  {
+                                                       "host":  [
+                                                                    "host1"
+                                                                ],
+                                                       "user":  [
+                                                                    "alice"
+                                                                ],
+                                                       "file_hash":  [
+                                                                         "deadbeef"
+                                                                     ]
+                                                   }
+                                  }
+                     }
+                 ],
+    "mapping":  {
+                    "host":  "host",
+                    "user":  "user",
+                    "file_hash":  "file_hash"
+                },
+    "correlate":  true
+}

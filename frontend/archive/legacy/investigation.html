@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JanuSec — Investigation</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:#0f172a; color:#e2e8f0;
+         font:15px/1.6 -apple-system,Segoe UI,Roboto,sans-serif; padding:28px; }
+  header { display:flex; align-items:baseline; gap:14px; margin-bottom:6px; }
+  h1 { font-size:22px; margin:0; }
+  .aid { color:#94a3b8; font-size:13px; }
+  .tabs { display:flex; gap:10px; margin:20px 0 22px; }
+  .tab { background:#1e293b; color:#cbd5e1; border:1px solid #334155; border-radius:8px;
+         padding:12px 20px; text-decoration:none; font-weight:600; }
+  .tab.primary { background:#1d4ed8; border-color:#1d4ed8; color:#fff; }
+  .tab:hover { border-color:#60a5fa; }
+  .demo-banner { background:#422006; color:#fde68a; border:1px solid #b45309;
+         border-radius:8px; padding:8px 14px; font-size:13px; margin:6px 0 14px; }
+  code { background:#1e293b; padding:1px 5px; border-radius:4px; font-size:12px; }
+  .muted { color:#94a3b8; } .err { color:#f87171; }
+  .incident { background:#0b1220; border:1px solid #334155; border-radius:12px;
+         padding:18px 20px; margin:0 0 18px; }
+  .inc-head { display:flex; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:6px; }
+  .inc-actor { font-weight:700; font-size:17px; }
+  .badge { font-size:11px; font-weight:700; padding:2px 9px; border-radius:20px; }
+  .b-critical { background:#7f1d1d; color:#fecaca; } .b-high { background:#7c2d12; color:#fed7aa; }
+  .b-medium { background:#78350f; color:#fde68a; } .b-low { background:#1e3a5f; color:#bfdbfe; }
+  .verdict { color:#94a3b8; font-size:13px; }
+  .meta { color:#cbd5e1; font-size:13px; margin:8px 0 4px; }
+  .chip { display:inline-block; background:#1e293b; border:1px solid #334155; border-radius:6px;
+         padding:2px 8px; margin:2px 4px 2px 0; font-size:12px; }
+  .chip.mitre { background:#312e81; border-color:#4338ca; color:#c7d2fe; }
+  /* kill chain */
+  .kc { display:flex; flex-wrap:wrap; align-items:stretch; gap:0; margin:14px 0; }
+  .kc-step { background:#111c33; border:1px solid #334155; border-radius:8px; padding:8px 12px;
+         min-width:150px; max-width:220px; position:relative; }
+  .kc-step + .kc-step { margin-left:22px; }
+  .kc-step + .kc-step::before { content:"\2192"; position:absolute; left:-19px; top:50%;
+         transform:translateY(-50%); color:#475569; font-size:18px; }
+  .kc-n { color:#60a5fa; font-weight:700; font-size:12px; }
+  .kc-label { font-size:13px; margin-top:2px; }
+  .kc-phase { color:#64748b; font-family:Consolas,monospace; font-size:11px; margin-top:3px; }
+  /* evidence */
+  .ev { margin-top:12px; }
+  .ev-title { font-size:13px; color:#94a3b8; margin-bottom:6px; }
+  .rowchip { background:#1e293b; color:#a7f3d0; border:1px solid #334155; border-radius:6px;
+         padding:4px 10px; margin:0 6px 6px 0; font-size:12px; cursor:pointer; font-weight:600; }
+  .rowchip:hover { border-color:#34d399; }
+  .ev-detail { background:#0a0f1c; border:1px solid #334155; border-radius:8px; padding:12px 14px;
+         margin-top:8px; font-size:12.5px; }
+  .ev-detail table { border-collapse:collapse; width:100%; }
+  .ev-detail td { padding:2px 8px 2px 0; vertical-align:top; }
+  .ev-detail td.k { color:#94a3b8; white-space:nowrap; }
+  .custody { color:#34d399; font-family:Consolas,monospace; font-size:11px; word-break:break-all;
+         margin-top:8px; border-top:1px solid #1e293b; padding-top:8px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>JanuSec — Investigation</h1>
+  <span class="aid" id="aid"></span>
+</header>
+
+<div class="demo-banner" id="demo-banner" hidden>
+  Showing the built-in <strong>demo-vesper</strong> assessment — append
+  <code>?assessment=&lt;id&gt;</code> to view your own.
+</div>
+
+<nav class="tabs">
+  <a class="tab" id="tab-summary" href="#">Summary</a>
+  <a class="tab primary" id="tab-invest" href="#">Investigation</a>
+  <a class="tab" id="tab-control" href="#">Control Assurance</a>
+</nav>
+
+<section id="incidents"><div class="muted">Loading incidents…</div></section>
+
+<script>
+  const params = new URLSearchParams(location.search);
+  const aidParam = params.get('assessment') || params.get('id') || params.get('aid') || '';
+  const isDemo = !aidParam;
+  const aid = aidParam || 'demo-vesper';
+  const key = params.get('key') || '';
+  const keyq = key ? ('?key=' + encodeURIComponent(key)) : '';
+  const kAmp = key ? ('&key=' + encodeURIComponent(key)) : '';
+  const api = p => '/api/v1/assessments/' + encodeURIComponent(aid) + p + keyq;
+  const headers = key ? { 'X-API-Key': key } : {};
+
+  if (isDemo) document.getElementById('demo-banner').hidden = false;
+  document.getElementById('aid').textContent = 'Assessment ' + aid + (isDemo ? ' (demo)' : '');
+  document.getElementById('tab-summary').href = 'assessment.html?aid=' + encodeURIComponent(aid) + kAmp;
+  document.getElementById('tab-control').href = api('/audit-pack.html');
+
+  function esc(s){ return String(s==null?'':s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+  const sevClass = s => 'b-' + (['critical','high','medium','low'].includes(s) ? s : 'low');
+
+  function killChain(steps){
+    if(!steps || !steps.length) return '';
+    return '<div class="kc">' + steps.map((s,i) =>
+      '<div class="kc-step"><div class="kc-n">Step ' + (i+1) + '</div>' +
+      '<div class="kc-label">' + esc(s.label) + '</div>' +
+      (s.phase ? '<div class="kc-phase">' + esc(s.phase) + '</div>' : '') + '</div>').join('') + '</div>';
+  }
+
+  function renderIncident(inc){
+    const mitre = (inc.mitre||[]).map(m => '<span class="chip mitre">' + esc(m) + '</span>').join('');
+    const hosts = (inc.affected_hosts||[]).map(h => '<span class="chip">' + esc(h) + '</span>').join('');
+    const ids = (inc.affected_identities||[]).map(h => '<span class="chip">' + esc(h) + '</span>').join('');
+    const rows = (inc.evidence_rows||[]).map(r =>
+      '<button class="rowchip" data-row="' + esc(r) + '">row ' + esc(r) + ' &rarr; evidence</button>').join('');
+    return '<div class="incident">' +
+      '<div class="inc-head"><span class="inc-actor">' + esc(inc.actor) + '</span>' +
+        '<span class="badge ' + sevClass(inc.severity) + '">' + esc(inc.severity||'') .toUpperCase() +
+          ' · DREAD ' + esc(inc.dread_score) + '</span>' +
+        '<span class="verdict">' + esc(inc.verdict) + ' · ' + esc(inc.incident_id) + '</span></div>' +
+      '<div class="meta">Attack complexity: <strong>' + esc(inc.attack_complexity||'n/a') + '</strong>' +
+        ' · Duration: ' + esc(inc.duration||'n/a') + ' · Data scope: ' + esc(inc.data_scope||'n/a') + '</div>' +
+      killChain(inc.kill_chain) +
+      '<div class="meta">MITRE: ' + (mitre||'<span class="muted">none</span>') + '</div>' +
+      '<div class="meta">Affected hosts: ' + (hosts||'<span class="muted">none</span>') + '</div>' +
+      '<div class="meta">Affected identities: ' + (ids||'<span class="muted">none</span>') + '</div>' +
+      '<div class="ev"><div class="ev-title">Cited evidence (click to resolve claim &rarr; raw event + custody hash):</div>' +
+        rows + '<div class="ev-detail" hidden></div></div></div>';
+  }
+
+  fetch(api('/timeline'), { headers })
+    .then(r => r.ok ? r.json() : Promise.reject(r.status))
+    .then(data => {
+      const el = document.getElementById('incidents');
+      const incs = data.incidents || [];
+      el.innerHTML = incs.length ? incs.map(renderIncident).join('')
+        : '<div class="muted">No incidents in this assessment.</div>';
+      el.querySelectorAll('.rowchip').forEach(btn => btn.addEventListener('click', () => {
+        const panel = btn.closest('.ev').querySelector('.ev-detail');
+        panel.hidden = false;
+        panel.innerHTML = '<span class="muted">Resolving row ' + esc(btn.dataset.row) + '…</span>';
+        fetch(api('/rows/' + encodeURIComponent(btn.dataset.row)), { headers })
+          .then(r => r.ok ? r.json() : Promise.reject(r.status))
+          .then(j => {
+            const ev = j.event || {};
+            const trs = Object.keys(ev).filter(k => k !== 'row_index')
+              .map(k => '<tr><td class="k">' + esc(k) + '</td><td>' + esc(typeof ev[k]==='object'?JSON.stringify(ev[k]):ev[k]) + '</td></tr>').join('');
+            panel.innerHTML = '<table>' + trs + '</table>' +
+              '<div class="custody">custody SHA-256: ' + esc((j.custody||{}).sha256||'') + '</div>';
+          })
+          .catch(st => { panel.innerHTML = '<span class="err">Raw event not available (status ' + esc(st) + ').</span>'; });
+      }));
+    })
+    .catch(st => {
+      document.getElementById('incidents').innerHTML = st === 401
+        ? '<div class="err">Authorisation required — append <code>?key=&lt;api-key&gt;</code> (not needed in demo/lite mode).</div>'
+        : '<div class="muted">No timeline available for this assessment (status ' + esc(st) + ').</div>';
+    });
+</script>
+</body>
+</html>

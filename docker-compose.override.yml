@@ -1,0 +1,12 @@
+services:
+  app:
+    restart: unless-stopped
+    environment:
+      REDIS_TEMPORAL_MAINTENANCE_ENABLED: "1"
+      REDIS_TEMPORAL_MAINTENANCE_INTERVAL: "300"
+
+  worker:
+    restart: unless-stopped
+
+  redis:
+    restart: unless-stopped

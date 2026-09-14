@@ -1,0 +1,25 @@
+[
+  {
+    "row_index": 0,
+    "sheet": "AzureAudit",
+    "activityDateTime": "2026-03-20T03:10:00Z",
+    "activityDisplayName": "Update application credentials",
+    "initiatedBy": {"user": {"userPrincipalName": "svc-admin@contoso.com"}},
+    "targetResources": [{"displayName": "build-pipeline-sp"}],
+    "result": "success",
+    "service_principal": "build-pipeline-sp",
+    "approved_change": true,
+    "change_ticket": "CAB-2026-0502"
+  },
+  {
+    "row_index": 1,
+    "sheet": "AzureActivity",
+    "time": "2026-03-20T03:12:00Z",
+    "resourceGroupName": "rg-build",
+    "operationName": {"value": "Microsoft.ManagedIdentity/userAssignedIdentities/write"},
+    "caller": "svc-admin@contoso.com",
+    "category": {"value": "Administrative"},
+    "approved_change": true,
+    "change_ticket": "CAB-2026-0502"
+  }
+]

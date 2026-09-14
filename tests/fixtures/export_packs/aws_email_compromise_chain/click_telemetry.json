@@ -1,0 +1,10 @@
+[
+  {
+    "message_id": "msg-aws-bec-001",
+    "timestamp": "2025-03-15T02:43:00Z",
+    "user": "ap@acme-industrial.example",
+    "clicked_url": "https://cdn-dropbox-sync.co/wire-review?id=818",
+    "result": "document_preview_opened",
+    "src_ip": "185.220.101.52"
+  }
+]

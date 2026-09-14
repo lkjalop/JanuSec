@@ -20,14 +20,22 @@ class RoutingMixin:
     logger: Any
     factor_weights: dict[str, float]
 
-    async def process_event(self, event: Dict[str, Any]) -> ProcessingResult:
+    async def process_event(self, event: dict[str, Any]) -> ProcessingResult:
         start_time = time.time()
         event_id = event.get('id', 'unknown')
+        # Tracing span
+        try:
+            from telemetry.tracing import pipeline_span
+            span_ctx = pipeline_span('decision_pipeline')
+        except Exception:
+            from contextlib import nullcontext
+            span_ctx = nullcontext()
 
         try:
-            self.events_processed += 1
-            await self.metrics.record_event_ingestion(event)
-            await self._persist_raw_event(event)
+            async with span_ctx:
+                self.events_processed += 1
+                await self.metrics.record_event_ingestion(event)
+                await self._persist_raw_event(event)
 
             async with asyncio.timeout(1.0):
                 pipeline_result = await self.event_pipeline.process_event(event)
@@ -46,6 +54,13 @@ class RoutingMixin:
 
             processing_time = (time.time() - start_time) * 1000
             await self.metrics.record_processing_complete(final_result, processing_time)
+            # Secondary histogram
+            try:
+                from prometheus_client import Histogram  # type: ignore
+                if hasattr(self.metrics.__class__, 'decision_time_hist') and getattr(self.metrics.__class__, 'decision_time_hist'):
+                    self.metrics.__class__.decision_time_hist.observe(processing_time)
+            except Exception:
+                pass
             await self._persist_decision(event, final_result)
             return final_result
 
@@ -63,7 +78,7 @@ class RoutingMixin:
             await self._attempt_persist_decision(event, fallback)
             return fallback
 
-    async def _persist_raw_event(self, event: Dict[str, Any]) -> None:
+    async def _persist_raw_event(self, event: dict[str, Any]) -> None:
         try:
             await events_repo.upsert_event(event)
         except Exception as exc:
@@ -87,14 +102,14 @@ class RoutingMixin:
         except Exception:
             pass
 
-    async def _execute_routing_decision(self, event: Dict[str, Any], decision) -> ProcessingResult:
+    async def _execute_routing_decision(self, event: dict[str, Any], decision) -> ProcessingResult:
         if decision.path == 'benign':
             return await self._fast_benign_path(event, decision)
         if decision.path == 'malicious':
             return await self._fast_malicious_path(event, decision)
         return await self._deep_analysis_path(event, decision)
 
-    async def _fast_benign_path(self, event: Dict[str, Any], decision) -> ProcessingResult:
+    async def _fast_benign_path(self, event: dict[str, Any], decision) -> ProcessingResult:
         baseline_module = await self.module_registry.get_module('baseline')
         await baseline_module.learn_benign(event)
         storage_manager = await self.module_registry.get_module('storage_manager')
@@ -110,7 +125,7 @@ class RoutingMixin:
             custody_hash=decision.custody_hash or self._calculate_custody_hash(event, decision.factors),
         )
 
-    async def _fast_malicious_path(self, event: Dict[str, Any], decision) -> ProcessingResult:
+    async def _fast_malicious_path(self, event: dict[str, Any], decision) -> ProcessingResult:
         playbook_executor = await self.module_registry.get_module('playbook_executor')
         execution_result = await playbook_executor.execute_for_decision(decision)
         await self._generate_alert(event, decision, execution_result)
@@ -125,7 +140,7 @@ class RoutingMixin:
             custody_hash=decision.custody_hash or self._calculate_custody_hash(event, decision.factors),
         )
 
-    async def _deep_analysis_path(self, event: Dict[str, Any], decision) -> ProcessingResult:
+    async def _deep_analysis_path(self, event: dict[str, Any], decision) -> ProcessingResult:
         analysis_result = await self.event_pipeline.deep_analysis(event, decision)
         final_decision = await self.decision_engine.finalize_decision(analysis_result)
         final_verdict = getattr(final_decision, 'verdict', 'suspicious')
@@ -147,7 +162,7 @@ class RoutingMixin:
             custody_hash=final_custody,
         )
 
-    async def _fallback_processing(self, event: Dict[str, Any]) -> ProcessingResult:
+    async def _fallback_processing(self, event: dict[str, Any]) -> ProcessingResult:
         baseline_module = await self.module_registry.get_module('baseline')
         result = await baseline_module.quick_check(event)
         return ProcessingResult(
@@ -161,7 +176,7 @@ class RoutingMixin:
             custody_hash=self._calculate_custody_hash(event, result.factors),
         )
 
-    async def _error_fallback(self, event: Dict[str, Any], error: str) -> ProcessingResult:
+    async def _error_fallback(self, event: dict[str, Any], error: str) -> ProcessingResult:
         return ProcessingResult(
             event_id=event['id'],
             verdict='suspicious',
@@ -173,7 +188,7 @@ class RoutingMixin:
             custody_hash=self._calculate_custody_hash(event, ['processing_error']),
         )
 
-    async def _generate_alert(self, event: Dict[str, Any], decision, execution_result) -> None:
+    async def _generate_alert(self, event: dict[str, Any], decision, execution_result) -> None:
         tenant_id = event.get('tenant_id')
         alert_data = {
             'event_id': event['id'],
@@ -210,15 +225,16 @@ class RoutingMixin:
         await self._append_alert_audit(event, decision, alert_data)
         await self._persist_evidence(event, alert_data)
 
-    async def _append_alert_audit(self, event: Dict[str, Any], decision, alert_data: Dict[str, Any]) -> None:
+    async def _append_alert_audit(self, event: dict[str, Any], decision, alert_data: dict[str, Any]) -> None:
         try:
             tenant_id = event.get('tenant_id')
             try:
                 prev_hash = await audit_repo.get_last_hash(event['id'], tenant_id)
             except Exception:
                 prev_hash = None
-            computed_decision_hash = self._calculate_custody_hash(event, decision.factors)
-            custody_hash = self._calculate_custody_hash(event, decision.factors + ['alert_generated'])
+            decision_factor_set = list(decision.factors or [])
+            computed_decision_hash = self._calculate_custody_hash(event, decision_factor_set)
+            custody_hash = self._calculate_custody_hash(event, decision_factor_set + ['alert_generated'])
             prev_hash = prev_hash or computed_decision_hash
             await audit_repo.append_audit(event['id'], 'alert_generated', alert_data, custody_hash, prev_hash, tenant_id)
         except Exception as exc:
@@ -226,7 +242,7 @@ class RoutingMixin:
                 self.logger.debug('Alert audit skipped: %s', exc)
             except Exception:
                 pass
-    async def _persist_evidence(self, event: Dict[str, Any], alert_data: Dict[str, Any]) -> None:
+    async def _persist_evidence(self, event: dict[str, Any], alert_data: dict[str, Any]) -> None:
         try:
             evidence = alert_data.get('evidence')
             if evidence:
@@ -247,7 +263,7 @@ class RoutingMixin:
         except Exception:
             pass
 
-    async def _attempt_persist_decision(self, event: Dict[str, Any], result: ProcessingResult) -> None:
+    async def _attempt_persist_decision(self, event: dict[str, Any], result: ProcessingResult) -> None:
         try:
             await self._persist_decision(event, result)
         except Exception as exc:

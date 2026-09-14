@@ -1,0 +1,23 @@
+{
+  "alerts": [
+    {
+      "id": "a-1001",
+      "type": "exec_macro",
+      "host": "WKS-021",
+      "user": "alice",
+      "mitre": ["T1204","T1059"],
+      "evidence": {"macro_name": "AutoOpen", "file": "invoice.docm"},
+      "severity": "high",
+      "timestamp": "2025-10-06T10:02:00Z"
+    },
+    {
+      "id": "a-1002",
+      "type": "beacon_c2",
+      "host": "WKS-021",
+      "mitre": ["T1071"],
+      "ioc": {"ip": "185.220.101.1", "domain": "bad-domain.ml"},
+      "severity": "critical",
+      "timestamp": "2025-10-06T10:02:30Z"
+    }
+  ]
+}

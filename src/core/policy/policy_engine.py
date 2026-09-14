@@ -5,10 +5,17 @@ is_allow / is_block checks. Matching is case-insensitive. Wildcard * only
 at beginning or end of pattern for domains/processes (simple contains/startswith).
 """
 from __future__ import annotations
-from typing import Dict, Any, List, Callable
-import os, json, re, functools, time
 
-def _load_config() -> Dict[str, Any]:
+import functools
+import json
+import os
+import re
+import time
+from collections.abc import Callable
+from typing import Any, Dict, List
+
+
+def _load_config() -> dict[str, Any]:
     blob = os.getenv('POLICY_CONFIG_JSON')
     if not blob:
         return {'allow':{},'block':{}}
@@ -28,7 +35,7 @@ class PolicyEngine:
     Command regex list is block-only for now; allow substrings for allow-list.
     """
     def __init__(self):
-        self._cache: Dict[str, tuple[float, str]] = {}
+        self._cache: dict[str, tuple[float, str]] = {}
         self._cache_ttl = 300  # seconds
         self._cache_max = 1024
         self.reload()
@@ -77,7 +84,7 @@ class PolicyEngine:
         cre = re.compile(expr)
         return lambda v, c=cre: bool(c.match(v.lower()))
 
-    def evaluate(self, ev: Dict[str, Any]) -> str | None:
+    def evaluate(self, ev: dict[str, Any]) -> str | None:
         """Return 'block', 'allow', or None (undecided) with cache."""
         key = f"{ev.get('tenant_id')}|{ev.get('domain')}|{ev.get('process_name')}|{ev.get('command_line')}"
         cached = self._cache_get(key)
@@ -115,10 +122,10 @@ class PolicyEngine:
         return verdict
 
     # Backwards compatibility helper
-    def is_block(self, ev: Dict[str, Any]) -> bool:
+    def is_block(self, ev: dict[str, Any]) -> bool:
         return self.evaluate(ev) == 'block'
 
-    def is_allow(self, ev: Dict[str, Any]) -> bool:
+    def is_allow(self, ev: dict[str, Any]) -> bool:
         return self.evaluate(ev) == 'allow'
 
 _ENGINE: PolicyEngine | None = None

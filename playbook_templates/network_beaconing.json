@@ -1,0 +1,52 @@
+{
+  "alert_type": "network_beaconing",
+  "summary": "Low-and-slow outbound callbacks to rare ASN/IPs indicating C2 tunneling or staging (MITRE T1071, T1105). Often overlaps with ransomware staging and KEV infrastructure bulletins.",
+  "severity": "critical",
+  "mitre": [
+    "T1071.001",
+    "T1105",
+    "T1568.002"
+  ],
+  "cisa_kev": [],
+  "cvss_reference": 9.1,
+  "epss": 0.62,
+  "references": [
+    "https://attack.mitre.org/techniques/T1071/001/",
+    "https://attack.mitre.org/techniques/T1105/"
+  ],
+  "steps": [
+    {
+      "order": 1,
+      "action": "Block or sinkhole destination IP/domain at egress controls",
+      "rationale": "Cuts off command channel while host triage proceeds.",
+      "automated": true,
+      "automation_id": "block_c2_destination"
+    },
+    {
+      "order": 2,
+      "action": "Capture rolling PCAP / Zeek sessions for impacted host",
+      "rationale": "Preserves payload bytes, JA3, and SNI for retrospective hunts.",
+      "tool_suggestion": "Zeek or Corelight on-demand capture",
+      "automated": false
+    },
+    {
+      "order": 3,
+      "action": "Collect volatile memory + process list from host",
+      "rationale": "Correlates network beacons with implanted process (T1105).",
+      "tool_suggestion": "Velociraptor Windows.Timeline",
+      "automated": false
+    },
+    {
+      "order": 4,
+      "action": "Pivot to peer hosts contacting same ASN/domain",
+      "rationale": "Identifies multi-host compromises for containment.",
+      "automated": true
+    },
+    {
+      "order": 5,
+      "action": "Share indicators with SOAR and SOC hunt wiki",
+      "rationale": "Documented evidence enables repeatable hunts.",
+      "automated": false
+    }
+  ]
+}

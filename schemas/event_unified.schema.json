@@ -1,0 +1,47 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "UnifiedEventV1",
+  "type": "object",
+  "required": ["event_id","tenant_id","ts","domain"],
+  "properties": {
+    "event_id": {"type": "string"},
+    "tenant_id": {"type": "string"},
+    "ts": {"type": "number"},
+    "ingest_source": {"type": "string"},
+    "domain": {"type": "string","enum":["iam","data","api","email","cloud","endpoint","network","remote","sbom","ai"]},
+    "kill_chain_hint": {"type": "array", "items": {"type": "string"}},
+    "factors": {"type": "array", "items": {"type": "string"}},
+    "actor": {"type": "object","properties": {
+      "principal_id": {"type":"string"},
+      "principal_type": {"type":"string"},
+      "account_age_days": {"type":"number"},
+      "mfa_enrolled": {"type":"boolean"}
+    }},
+    "network": {"type": "object"},
+    "object": {"type": "object"},
+    "api": {"type": "object"},
+    "cloud": {"type": "object"},
+    "email": {"type": "object"},
+    "iam": {"type": "object"},
+    "ai": {"type": "object", "properties": {
+      "model": {"type": "string"},
+      "model_provider": {"type": "string"},
+      "prompt": {"type": "string"},
+      "tool": {"type": "string"},
+      "tool_args": {"type": "object"},
+      "embedding_id": {"type": "string"},
+      "vector_db": {"type": "string"},
+      "rag_index": {"type": "string"},
+      "guardrail": {"type": "string"},
+      "chain": {"type": "string"},
+      "agent": {"type": "string"},
+      "feature_store": {"type": "string"},
+      "dataset": {"type": "string"}
+    }},
+    "sequence": {"type": "object"},
+    "metrics": {"type": "object"},
+    "embedding_ref": {"type": "string"},
+    "tags": {"type": "array", "items": {"type": "string"}},
+    "confidence": {"type": "number","minimum":0,"maximum":1}
+  }
+}

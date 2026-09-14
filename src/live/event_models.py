@@ -6,34 +6,36 @@ network telemetry without initializing the full orchestrator stack.
 """
 from __future__ import annotations
 
+import time
+import uuid
+from typing import Any, Dict, List, Optional
+
 from pydantic import BaseModel, Field
-from typing import Optional, List, Dict, Any
-import time, uuid
 
 
-class ProcInfo(BaseModel):
-    name: Optional[str] = None
-    parent: Optional[str] = None
-    cmdline: Optional[str] = None
+class ProcInfo(BaseModel):  # type: ignore[misc]
+    name: str | None = None
+    parent: str | None = None
+    cmdline: str | None = None
 
 
-class NetInfo(BaseModel):
-    dest_ip: Optional[str] = Field(None, alias="dest_ip")
-    dest_port: Optional[int] = None
-    proto: Optional[str] = None
+class NetInfo(BaseModel):  # type: ignore[misc]
+    dest_ip: str | None = Field(None, alias="dest_ip")
+    dest_port: int | None = None
+    proto: str | None = None
 
 
-class EndpointRawEvent(BaseModel):
-    ts: Optional[float] = Field(None, description="Event timestamp (epoch seconds)")
-    host: Optional[str] = None
-    user: Optional[str] = None
-    proc: Optional[ProcInfo] = None
-    net: Optional[NetInfo] = None
-    hash: Optional[str] = None
-    tags: Optional[List[str]] = None
-    id: Optional[str] = None
+class EndpointRawEvent(BaseModel):  # type: ignore[misc]
+    ts: float | None = Field(None, description="Event timestamp (epoch seconds)")
+    host: str | None = None
+    user: str | None = None
+    proc: ProcInfo | None = None
+    net: NetInfo | None = None
+    hash: str | None = None
+    tags: list[str] | None = None
+    id: str | None = None
 
-    def to_normalized(self) -> Dict[str, Any]:
+    def to_normalized(self) -> dict[str, Any]:
         """Convert to normalized internal dict representation.
 
         Fields intentionally flattened to simplify correlation & export.
@@ -57,22 +59,57 @@ class EndpointRawEvent(BaseModel):
         return norm
 
 
-class NormalizedEvent(BaseModel):
+class NormalizedEvent(BaseModel):  # type: ignore[misc]
     id: str
     ts: float
     host: str
     user: str
     proc_name: str
-    parent_proc: Optional[str] = None
-    cmdline: Optional[str] = None
-    dest_ip: Optional[str] = None
-    dest_port: Optional[int] = None
-    proto: Optional[str] = None
-    hash: Optional[str] = None
+    parent_proc: str | None = None
+    cmdline: str | None = None
+    dest_ip: str | None = None
+    dest_port: int | None = None
+    proto: str | None = None
+    hash: str | None = None
     tags: list[str] = []
     source: str = 'endpoint_batch'
 
     @classmethod
-    def from_raw(cls, raw: EndpointRawEvent) -> 'NormalizedEvent':
+    def from_raw(cls, raw: EndpointRawEvent) -> NormalizedEvent:
         data = raw.to_normalized()
-        return cls(**data)  # type: ignore[arg-type]
+        return cls(**data)
+
+
+class EmailEvent(BaseModel):  # type: ignore[misc]
+    """Lightweight email event used by collectors and enrichment stages.
+
+    Fields are intentionally simple: headers/body plus common metadata
+    so downstream enrichment can run without heavy dependencies.
+    """
+    timestamp: float | None = Field(None, description="Event timestamp (epoch seconds)")
+    tenant_id: str | None = None
+    source: str | None = None  # office365 | gmail | imap
+    sender: str | None = None
+    sender_display_name: str | None = None
+    recipients: list[str] | None = None
+    subject: str | None = None
+    has_attachments: bool | None = None
+    headers: dict[str, Any] | None = None
+    body_preview: str | None = None
+    message_id: str | None = None
+    raw_event: dict[str, Any] | None = None
+
+    def to_envelope(self) -> dict[str, Any]:
+        return {
+            'timestamp': float(self.timestamp or 0.0),
+            'tenant_id': self.tenant_id,
+            'source': self.source,
+            'sender': self.sender,
+            'sender_display_name': self.sender_display_name,
+            'recipients': list(self.recipients or []),
+            'subject': self.subject,
+            'has_attachments': bool(self.has_attachments or False),
+            'headers': dict(self.headers or {}),
+            'body_preview': self.body_preview,
+            'message_id': self.message_id,
+        }

@@ -4,16 +4,20 @@ Manages lifecycle of a hunt session: INIT -> RUNNING -> COMPLETE/ABORT.
 Integrates with cost estimator & (future) HopGraph ingestion pipeline.
 """
 from __future__ import annotations
-from dataclasses import dataclass, field
-from typing import Dict, Optional, List, Tuple
-from collections import Counter
-import time
+
 import threading
+import time
+from collections import Counter
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional, Tuple
+
 from core.finops.cost_estimator import estimate_hunt_cost  # type: ignore
 from core.finops.finops_manager import get_finops_manager
-from .hopgraph_light import get_hopgraph
+
 from .fusion_heuristics import aggregate as aggregate_features
+from .hopgraph_light import get_hopgraph
 from .model_orchestrator import select_model
+
 try:
     from prometheus_client import Counter as _PromCounter, Histogram as _PromHistogram  # type: ignore
 except Exception:  # pragma: no cover
@@ -32,11 +36,15 @@ if _PromCounter and '_hunt_model_tier_selection_total' not in globals():
             _replay_latency_hist = _PromHistogram('hunt_replay_latency_seconds','Replay execution latency (s)')
     except Exception:
         _tier_counter = None
+import json
+import os
+
 from core.reporting.hunt_report import to_json, to_markdown
+
 from .provenance import compute_session_hash
-import os, json
+
 try:
-    from prometheus_client import Gauge as _PromGauge, Counter as _PromCounter2  # type: ignore
+    from prometheus_client import Counter as _PromCounter2, Gauge as _PromGauge  # type: ignore
 except Exception:
     _PromGauge = None
     _PromCounter2 = None
@@ -52,25 +60,25 @@ class HuntSession:
     start_time: float = 0.0
     end_time: float = 0.0
     status: str = 'INIT'
-    report: Dict[str, object] = field(default_factory=dict)
-    model_tiers_used: Dict[int,int] = field(default_factory=dict)
-    factors: Dict[str,float] = field(default_factory=dict)
-    tier_timeline: List[Dict[str, object]] = field(default_factory=list)
-    artifact_ref: Optional[str] = None
-    replay_hash: Optional[str] = None
+    report: dict[str, object] = field(default_factory=dict)
+    model_tiers_used: dict[int,int] = field(default_factory=dict)
+    factors: dict[str,float] = field(default_factory=dict)
+    tier_timeline: list[dict[str, object]] = field(default_factory=list)
+    artifact_ref: str | None = None
+    replay_hash: str | None = None
     baseline_snapshot: dict | None = None
     coverage_delta: dict | None = None
-    factor_emergence: List[Dict[str, object]] = field(default_factory=list)
-    embedding_simulation: Dict[str, object] | None = None
+    factor_emergence: list[dict[str, object]] = field(default_factory=list)
+    embedding_simulation: dict[str, object] | None = None
 
 class SidecarSessionManager:
     def __init__(self):
-        self._sessions: Dict[str,HuntSession] = {}
+        self._sessions: dict[str,HuntSession] = {}
         self._lock = threading.Lock()
-        self._background_threads: Dict[str, threading.Thread] = {}
-        self._coverage_history: List[dict] = []  # ring buffer of recent coverage deltas
+        self._background_threads: dict[str, threading.Thread] = {}
+        self._coverage_history: list[dict] = []  # ring buffer of recent coverage deltas
         # Per-tenant coverage deltas (mirrors global ring buffer)
-        self._coverage_history_by_tenant: Dict[str, List[dict]] = {}
+        self._coverage_history_by_tenant: dict[str, list[dict]] = {}
         import os
         # Retention sizing: prefer explicit COVERAGE_HISTORY_RETENTION else fallback to COVERAGE_HISTORY_MAX
         try:
@@ -78,7 +86,7 @@ class SidecarSessionManager:
         except Exception:
             self._coverage_history_max = 200
         # Rolling emergence memory per factor for promotion workflow
-        self._emergence_history: Dict[str, List[float]] = {}  # factor -> list of last emergence scores
+        self._emergence_history: dict[str, list[float]] = {}  # factor -> list of last emergence scores
         self._emergence_history_max = int(os.getenv('EMERGENCE_HISTORY_MAX','30'))
         # Sustained promotion threshold defaults (can be tuned via env)
         self._promotion_min_sessions = int(os.getenv('PROMOTION_MIN_SESSIONS','3'))
@@ -87,9 +95,9 @@ class SidecarSessionManager:
         # Quotas
         self._max_hunts_window = int(os.getenv('MAX_HUNTS_PER_TENANT_WINDOW','0') or 0) or None
         self._hunts_window_seconds = int(os.getenv('HUNTS_PER_TENANT_WINDOW_SECONDS','3600'))
-        self._tenant_hunt_starts: Dict[str, List[float]] = {}
+        self._tenant_hunt_starts: dict[str, list[float]] = {}
 
-    def preview(self, tenant: str, window_hours: int, model_enabled: bool) -> Dict[str, object]:
+    def preview(self, tenant: str, window_hours: int, model_enabled: bool) -> dict[str, object]:
         est = estimate_hunt_cost(window_hours, tenant, model_enabled)
         return est
 
@@ -126,7 +134,7 @@ class SidecarSessionManager:
         # Placeholder severity & confidence seeds
         severity = 0.5 if sess.window_hours <= 24 else 0.75
         confidence = 0.35  # low to trigger possible escalation
-        fm = get_finops_manager()
+        get_finops_manager()
         # Budget remaining approximation (no tenant budgets yet) assume 1.0
         availability = {0: True, 1: True, 2: True, 3: True, 4: False}
         decision = select_model(severity, confidence, 1.0, availability)
@@ -139,7 +147,7 @@ class SidecarSessionManager:
                 pass
         # Simulate graph population
         hg = get_hopgraph()
-        hg.add_node(f'user:alice', 'user')
+        hg.add_node('user:alice', 'user')
         hg.add_node('host:web01','asset')
         hg.add_edge('user:alice','host:web01','login')
         factors = aggregate_features(hg)
@@ -200,7 +208,7 @@ class SidecarSessionManager:
                         self.__class__._coverage_hist_gauge = _PromGauge('coverage_history_entries','Coverage history ring size')
                     except Exception:
                         self.__class__._coverage_hist_gauge = None
-                if hasattr(self.__class__,'_coverage_hist_gauge') and getattr(self.__class__,'_coverage_hist_gauge'):
+                if hasattr(self.__class__,'_coverage_hist_gauge') and self.__class__._coverage_hist_gauge:
                     try: self.__class__._coverage_hist_gauge.set(len(self._coverage_history))
                     except Exception: pass
         # Factor emergence scoring
@@ -248,7 +256,7 @@ class SidecarSessionManager:
     def get(self, session_id: str) -> HuntSession | None:
         return self._sessions.get(session_id)
 
-    def report(self, session_id: str) -> Dict[str, object] | None:
+    def report(self, session_id: str) -> dict[str, object] | None:
         sess = self.get(session_id)
         if not sess:
             return None
@@ -258,11 +266,11 @@ class SidecarSessionManager:
             'report_markdown': getattr(sess, 'report_markdown', None)
         }
 
-    def timeline(self, session_id: str) -> List[Dict[str, object]]:
+    def timeline(self, session_id: str) -> list[dict[str, object]]:
         sess = self.get(session_id)
         return [] if not sess else sess.tier_timeline
 
-    def graph_snapshot(self, session_id: str, fmt: str = 'json') -> Dict[str, object] | str:
+    def graph_snapshot(self, session_id: str, fmt: str = 'json') -> dict[str, object] | str:
         # Minimal snapshot for now (since we add only a few nodes)
         from .hopgraph_light import get_hopgraph
         hg = get_hopgraph()
@@ -292,19 +300,19 @@ class SidecarSessionManager:
         sess.report['replay_of'] = original_session_id
         return sess
 
-    def coverage_trends(self, limit: int = 50) -> List[dict]:
+    def coverage_trends(self, limit: int = 50) -> list[dict]:
         with self._lock:
             return list(self._coverage_history[-limit:])
 
-    def coverage_trends_tenant(self, tenant: str, limit: int = 50) -> List[dict]:
+    def coverage_trends_tenant(self, tenant: str, limit: int = 50) -> list[dict]:
         with self._lock:
             t_list = self._coverage_history_by_tenant.get(tenant, [])
             return list(t_list[-limit:])
 
-    def promotion_candidates(self, min_sessions: int = 2, top_n: int = 15) -> List[dict]:
+    def promotion_candidates(self, min_sessions: int = 2, top_n: int = 15) -> list[dict]:
         # Aggregate factor emergence entries (exclude meta rows)
-        factor_stats: Dict[str, Dict[str, float]] = {}
-        tenant_factor_sessions: Dict[str, Dict[str,int]] = {}
+        factor_stats: dict[str, dict[str, float]] = {}
+        tenant_factor_sessions: dict[str, dict[str,int]] = {}
         with self._lock:
             sessions = list(self._sessions.values())
         for s in sessions:
@@ -341,13 +349,13 @@ class SidecarSessionManager:
                 self.__class__._promotion_candidates_gauge = _PromGauge('detection_promotion_candidates_total','Current promotion candidate count')
             except Exception:
                 self.__class__._promotion_candidates_gauge = None
-        if hasattr(self.__class__, '_promotion_candidates_gauge') and getattr(self.__class__,'_promotion_candidates_gauge'):
+        if hasattr(self.__class__, '_promotion_candidates_gauge') and self.__class__._promotion_candidates_gauge:
             try: self.__class__._promotion_candidates_gauge.set(len(rows))
             except Exception: pass
         # Attach tenant distribution if single candidate list requested (optional external use)
         # Build tenant distribution map for top candidates only
         top = rows[:top_n]
-        tenant_dist: Dict[str, Dict[str,int]] = {}
+        tenant_dist: dict[str, dict[str,int]] = {}
         for cand in top:
             f = cand['factor']
             for tenant, fcounts in tenant_factor_sessions.items():
@@ -359,7 +367,7 @@ class SidecarSessionManager:
                 cand['tenant_distribution'] = td
         return top
 
-    def _compute_sustained_promotion(self, factor: str) -> Dict[str, object] | None:
+    def _compute_sustained_promotion(self, factor: str) -> dict[str, object] | None:
         """Derive sustained promotion readiness for a factor using rolling emergence history.
 
         Criteria (env tunable):
@@ -389,15 +397,22 @@ class SidecarSessionManager:
     # --- Coverage Delta Helpers ---
     def _capture_baseline_snapshot(self, max_events: int = 500) -> dict:
         try:
-            from api.server import DECISION_CACHE  # type: ignore
+            from src.api.server import DECISION_CACHE  # type: ignore
         except Exception:
             return {'factors':{}, 'verdicts':{}, 'event_count':0}
         recent = list(DECISION_CACHE.values())[-max_events:]
         factor_counter: Counter = Counter()
         verdict_counter: Counter = Counter()
         for r in recent:
-            verdict_counter[r.verdict] += 1
-            for f in r.factors:
+            # Decision cache entries may be dicts or objects; normalize access
+            if isinstance(r, dict):
+                v = r.get('verdict') or 'UNKNOWN'
+                factors = r.get('factors') or []
+            else:  # fallback attribute style
+                v = getattr(r, 'verdict', 'UNKNOWN')
+                factors = getattr(r, 'factors', []) or []
+            verdict_counter[v] += 1
+            for f in factors:
                 factor_counter[f] += 1
         return {
             'factors': dict(factor_counter),
@@ -437,7 +452,7 @@ class SidecarSessionManager:
         }
 
     # --- Factor Emergence Scoring ---
-    def _compute_factor_emergence(self, sess: HuntSession) -> List[Dict[str, object]]:
+    def _compute_factor_emergence(self, sess: HuntSession) -> list[dict[str, object]]:
         """Compute emergence score for each hunt factor relative to baseline.
 
         emergence_score = (hunt_freq - baseline_freq_norm) * severity_weight
@@ -449,23 +464,36 @@ class SidecarSessionManager:
         """
         baseline = sess.baseline_snapshot or {'factors':{}, 'event_count':0}
         baseline_events = max(1, baseline.get('event_count',0))
-        baseline_factor_counts: Dict[str,int] = baseline.get('factors',{})
+        baseline_factor_counts: dict[str,int] = baseline.get('factors',{})
         # Re-scan DECISION_CACHE to collect post-baseline occurrences (events after session start)
         try:
-            from api.server import DECISION_CACHE  # type: ignore
+            from src.api.server import DECISION_CACHE  # type: ignore
             recent_all = list(DECISION_CACHE.values())
         except Exception:
             recent_all = []
-        post_events = [r for r in recent_all if r.timestamp >= sess.start_time]
+        post_events = []
+        for r in recent_all:
+            ts = None
+            if isinstance(r, dict):
+                ts = r.get('ts') or r.get('timestamp')
+            else:
+                ts = getattr(r, 'timestamp', None)
+            if ts is None or ts < sess.start_time:
+                continue
+            post_events.append(r)
         post_event_count = max(1, len(post_events))
         hunt_factor_counts: Counter = Counter()
         for r in post_events:
-            for f in r.factors:
+            if isinstance(r, dict):
+                factors = r.get('factors') or []
+            else:
+                factors = getattr(r, 'factors', []) or []
+            for f in factors:
                 hunt_factor_counts[f] += 1
-        hunt_factors: Dict[str,int] = dict(hunt_factor_counts)
-        rows: List[Tuple[str, float, float, str, float]] = []  # (factor, hunt_occurrence_rate, baseline_norm, bucket, score)
+        hunt_factors: dict[str,int] = dict(hunt_factor_counts)
+        rows: list[tuple[str, float, float, str, float]] = []  # (factor, hunt_occurrence_rate, baseline_norm, bucket, score)
 
-        def bucket_and_weight(name: str) -> Tuple[str,float]:
+        def bucket_and_weight(name: str) -> tuple[str,float]:
             n = name.lower()
             if any(k in n for k in ['chain','lateral','priv_esc','risky']):
                 return 'high', 3.0
@@ -483,7 +511,7 @@ class SidecarSessionManager:
 
         # Sort by score descending, then by factor name
         rows.sort(key=lambda r: (-r[4], r[0]))
-        out: List[Dict[str, object]] = []
+        out: list[dict[str, object]] = []
         for factor, hunt_freq, baseline_norm, bucket, score in rows:
             out.append({
                 'factor': factor,
@@ -504,7 +532,7 @@ class SidecarSessionManager:
         return out
 
     # --- Selective Embedding Simulation ---
-    def _simulate_selective_embedding(self, sess: HuntSession) -> Dict[str, object]:
+    def _simulate_selective_embedding(self, sess: HuntSession) -> dict[str, object]:
         """Simulate potential suppression of high-tier escalation via semantic embeddings.
 
         Approach:
@@ -515,7 +543,8 @@ class SidecarSessionManager:
           - Compute net_savings_units = (suppressed_escalations * escalation_unit_penalty) - (embedding_calls * embedding_unit_cost)
           - escalation_unit_penalty is approximated as 0.2 units per avoided high-tier model call.
         """
-        import random, math
+        import math
+        import random
         factors = sess.factors or {}
         if not factors:
             return {}
@@ -525,7 +554,7 @@ class SidecarSessionManager:
         if not escalation_candidates:
             return {'thresholds': [], 'note': 'no_escalation_candidates'}
         # Synthetic similarity distribution (skew high for repeated/common factors)
-        sim_map: Dict[str,float] = {}
+        sim_map: dict[str,float] = {}
         for f in escalation_candidates:
             base = random.random()
             weight = min(1.0, max(0.05, factors.get(f,0.0)/max(1.0,sum(factors.values())) * 3))

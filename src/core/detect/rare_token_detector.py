@@ -5,9 +5,17 @@ Maintains token frequency distribution of command lines and emits:
  - cmd_rare_token_spike (discrete factor if ratio exceeds threshold)
 """
 from __future__ import annotations
+
+import hashlib
+import hmac
+import json
+import math
+import os
+import re
+import threading
+import time
 from collections import Counter, deque
 from typing import Dict, List
-import re, threading, math, json, os, hashlib, hmac, time
 
 TOKEN_RE = re.compile(r"[A-Za-z0-9_\-]{4,}")
 
@@ -24,15 +32,15 @@ class RareTokenModel:
         self._ttl_observations = ttl_observations
         self._base_dir = base_dir
         # tenant -> Counter + total observed tokens
-        self._freq: Dict[str, Counter[str]] = {}
-        self._total: Dict[str, int] = {}
+        self._freq: dict[str, Counter[str]] = {}
+        self._total: dict[str, int] = {}
         self._dirty: set[str] = set()
         self._load_all()
 
     def _tenant_path(self, tenant: str) -> str:
         return os.path.join(self._base_dir, tenant, 'rare_tokens.json')
 
-    def observe(self, tenant: str, cmdline: str) -> Dict[str,float | int]:
+    def observe(self, tenant: str, cmdline: str) -> dict[str,float | int]:
         tenant = tenant or 'default'
         tokens = TOKEN_RE.findall(cmdline.lower())
         rare = 0
@@ -68,7 +76,7 @@ class RareTokenModel:
                 if not os.path.exists(path):
                     continue
                 try:
-                    with open(path,'r',encoding='utf-8') as f:
+                    with open(path,encoding='utf-8') as f:
                         wrapper = json.load(f)
                     data = wrapper.get('payload', wrapper)
                     raw = json.dumps(data, sort_keys=True).encode('utf-8')

@@ -1,0 +1,195 @@
+"""Canonical Campaign object — the single source of breach truth.
+
+Locks that build_campaign assembles the full breach picture from a cluster (actor,
+verdict, kill chain incl. exfil, real IOC entities, entry point, exfil destination) so
+reports/personas/grounding stop re-deriving it ad-hoc.
+"""
+from __future__ import annotations
+
+import pytest
+
+from src.core.campaign import build_campaign, build_campaigns, Campaign
+
+pytestmark = pytest.mark.acceptance
+
+
+def _martin_cluster() -> dict:
+    return {
+        "cluster_id": "analysis-0-powershell-47",
+        "parent_cluster_id": "analysis-0",
+        "verdict": "VALIDATED_BREACH",
+        "confidence": 0.97,
+        "severity": "critical",
+        "shared_users": ["martin.chen"],
+        "shared_ips": ["203.45.11.147", "10.42.3.79"],     # external + private
+        "shared_hosts": ["ws-martin-01"],
+        "present_phase_ids": ["oauth_device_code", "ad_recon_discovery", "kerberoasting",
+                              "wmi_dcom_lateral", "powershell_staged_payload"],
+        "phases": [{"phase_id": "powershell_staged_payload", "case_role": "execution"}],
+        "factor_tags": ["iam:kerberoasting", "exfil:cumulative_bytes_anomaly"],
+        "_entry_point": {"type": "oauth_consent_grant", "user": "martin.chen"},
+        "_exfil_destinations": {"d1": {"destination": "martin-chen.sharepoint.com"}},
+        "row_refs": list(range(50)),
+        "row_count": 50,
+        "time_window": {"start": 1_700_000_000.0, "end": 1_700_086_400.0, "span_seconds": 86_400.0},
+    }
+
+
+def test_build_campaign_assembles_full_truth():
+    c = build_campaign(_martin_cluster())
+    assert isinstance(c, Campaign)
+    assert c.campaign_id == "analysis-0"          # rolls up to the parent
+    assert c.actor == "martin.chen"
+    assert c.verdict == "VALIDATED_BREACH" and c.is_breach
+    assert c.entry_point and c.entry_point["type"] == "oauth_consent_grant"
+    assert "martin-chen.sharepoint.com" in c.exfil_destinations
+
+
+def test_campaign_carries_temporal_window():
+    c = build_campaign(_martin_cluster())
+    assert c.first_seen == 1_700_000_000.0
+    assert c.last_seen == 1_700_086_400.0
+    assert c.span_seconds == 86_400.0
+    assert c.detected_at == c.last_seen  # detection anchor for regulatory clocks
+
+
+def test_campaign_kill_chain_includes_exfil_finale():
+    c = build_campaign(_martin_cluster())
+    assert len(c.phases) >= 4, f"kill chain too thin: {c.phases}"
+    assert "exfiltration" in c.phases, "the breach finale (exfil) must be in the kill chain"
+
+
+def test_campaign_entities_are_grounding_ready():
+    c = build_campaign(_martin_cluster())
+    # external IPs isolated (for attacker-infra / hunt grounding), private excluded
+    assert "203.45.11.147" in c.entities["external_ips"]
+    assert "10.42.3.79" not in c.entities["external_ips"]
+    assert "martin-chen.sharepoint.com" in c.entities["domains"]
+    assert c.actor in c.entities["users"]
+
+
+def test_build_campaigns_filters_to_breaches_and_dedupes():
+    breach = _martin_cluster()
+    benign = {"cluster_id": "c2", "verdict": "NO_VALIDATED_BREACH", "shared_users": ["bob"]}
+    dup_child = dict(breach, cluster_id="analysis-0-recon-12",
+                     present_phase_ids=["ad_recon_discovery"])  # same parent, fewer phases
+    camps = build_campaigns([breach, benign, dup_child])
+    assert len(camps) == 1, "breach-only + per-campaign dedupe expected"
+    assert camps[0].campaign_id == "analysis-0"
+    assert len(camps[0].phase_ids) == 5, "kept the richest representative of the campaign"
+
+
+def test_persona_grounding_reads_from_campaign_when_rows_sparse():
+    # The keystone payoff: with NO evidence rows but a canonical campaign present, the
+    # hunter queries still ground in the campaign's real IOCs.
+    from src.reporting.comprehensive_report_generator import _build_threat_hunter_page
+    payload = {
+        "rows": [],
+        "meta": {"verdict": "VALIDATED_BREACH"},
+        "campaigns": [{
+            "actor": "martin.chen", "verdict": "VALIDATED_BREACH",
+            "entities": {"external_ips": ["203.45.42.201"], "domains": ["martin-chen.sharepoint.com"]},
+        }],
+    }
+    html = _build_threat_hunter_page(payload, payload["meta"], {}, "s", "Acme", "2026-01-01")
+    assert "203.45.42.201" in html, "campaign external IP not grounded into queries"
+    assert "known_bad_ips" not in html, "placeholder survived despite campaign IOCs"
+
+
+def test_soc_and_exec_render_from_campaign_when_rows_empty():
+    # Keystone cleanup: SOC IOC TRIAGE + executive scope render real entities from the
+    # canonical campaign even with NO raw rows (previously these sections were empty).
+    from src.reporting.comprehensive_report_generator import _build_soc_page, _build_executive_page
+    payload = {"rows": [], "meta": {"verdict": "VALIDATED_BREACH"}, "campaigns": [{
+        "actor": "martin.chen", "verdict": "VALIDATED_BREACH",
+        "entities": {"hosts": ["ws-martin-01"], "ips": ["203.45.42.201"],
+                     "external_ips": ["203.45.42.201"], "domains": ["martin-chen.sharepoint.com"],
+                     "users": ["martin.chen"]}}]}
+    soc = _build_soc_page(payload, payload["meta"], {}, "s", "Acme", "2026-01-01").lower()
+    ex = _build_executive_page(payload, payload["meta"], {}, "s", "Acme", "2026-01-01").lower()
+    assert "ioc triage" in soc and "203.45.42.201" in soc, "SOC IOC TRIAGE empty despite campaign"
+    assert "ws-martin-01" in soc
+    assert "martin.chen" in ex, "executive scope missing the actor from the campaign"
+
+
+def test_ciso_clock_grounds_deadlines_in_detected_at():
+    # CISO regulatory clocks must show real deadlines (detected_at + 72h), not durations.
+    from src.reporting.comprehensive_report_generator import _build_ciso_page
+    p = {"rows": [], "meta": {"verdict": "VALIDATED_BREACH"},
+         "campaigns": [{"verdict": "VALIDATED_BREACH", "detected_at": 1_700_000_000.0,
+                        "entities": {}}]}
+    html = _build_ciso_page(p, p["meta"], {}, "s", "Acme", "2026-01-01")
+    assert "2023-11-14" in html, "clock not anchored to detected_at"
+    assert "2023-11-17" in html, "GDPR 72h deadline (detected_at + 72h) not computed"
+
+
+def test_mssp_tenant_containment_reads_from_campaign():
+    from src.reporting.comprehensive_report_generator import _build_mssp_page
+    p = {"rows": [], "meta": {"verdict": "VALIDATED_BREACH"},
+         "campaigns": [{"verdict": "VALIDATED_BREACH",
+                        "entities": {"hosts": ["ws-martin-01"], "users": ["martin.chen"]}}]}
+    html = _build_mssp_page(p, p["meta"], {}, "s", "Acme", "2026-01-01").lower()
+    assert "ws-martin-01" in html, "MSSP tenant containment empty despite campaign"
+
+
+async def test_attach_entity_baselines_keeps_only_anomalous():
+    # The async compute (worker integration) populates campaign.baselines, filtering to
+    # |z| >= floor (cards answer "why abnormal", not "every metric").
+    from src.core.campaign import attach_entity_baselines
+
+    class _FakeBaseline:
+        async def get_z(self, etype, eid, metric):
+            # martin.chen byte_volume is way off baseline; everything else is normal.
+            if eid == "martin.chen" and metric == "byte_volume":
+                return {"z": 4.2, "baseline": 100.0, "current": 520.0}
+            return {"z": 0.3, "baseline": 100.0, "current": 103.0}
+
+    c = build_campaign(_martin_cluster())
+    await attach_entity_baselines(c, _FakeBaseline())
+    assert len(c.baselines) == 1, "only the anomalous metric should be kept"
+    card = c.baselines[0]
+    assert card["entity_id"] == "martin.chen" and card["metric"] == "byte_volume"
+    assert card["z"] == 4.2
+
+
+def test_build_campaign_carries_baselines_from_cluster():
+    cl = dict(_martin_cluster(), entity_baselines=[{"entity_id": "ws-martin-01", "metric": "offhours_count", "z": 3.1}])
+    assert build_campaign(cl).baselines[0]["entity_id"] == "ws-martin-01"
+
+
+def test_render_baseline_cards_shows_why_abnormal():
+    from src.reporting.comprehensive_report_generator import _build_soc_page
+    p = {"rows": [], "meta": {"verdict": "VALIDATED_BREACH"}, "campaigns": [{
+        "entities": {}, "baselines": [
+            {"entity_type": "host", "entity_id": "ws-martin-01", "metric": "byte_volume", "z": 4.2}]}]}
+    html = _build_soc_page(p, p["meta"], {}, "s", "Acme", "2026-01-01").lower()
+    assert "why these entities are abnormal" in html
+    assert "ws-martin-01" in html and "4.2" in html and "above" in html
+
+
+def test_mssp_sla_clock_is_live_from_detected_at():
+    # MSSP SLA panel computes breach/on-track from the campaign's detected_at, not static.
+    import time
+    from src.reporting.comprehensive_report_generator import _build_mssp_page
+    old = {"verdict": "VALIDATED_BREACH", "detected_at": time.time() - 86400, "entities": {}}
+    p = {"rows": [], "meta": {"verdict": "VALIDATED_BREACH"}, "campaigns": [old]}
+    html = _build_mssp_page(p, p["meta"], {}, "s", "Acme", "2026-01-01").lower()
+    assert "breached" in html and "over response sla" in html, "SLA clock not live"
+    recent = {"verdict": "VALIDATED_BREACH", "detected_at": time.time() - 60, "entities": {}}
+    p2 = {"rows": [], "meta": {"verdict": "VALIDATED_BREACH"}, "campaigns": [recent]}
+    assert "on track" in _build_mssp_page(p2, p2["meta"], {}, "s", "Acme", "2026-01-01").lower()
+
+
+def test_executive_renders_timeline_and_confidence_trace():
+    # The headline visual (#3): entry->exfil timeline + "why confirmed" confidence trace.
+    from src.reporting.comprehensive_report_generator import _build_executive_page
+    camp = {"actor": "martin.chen", "verdict": "VALIDATED_BREACH", "confidence": 0.95,
+            "phases": ["delivery", "recon", "exploitation", "lateral_movement", "exfiltration"],
+            "entry_point": {"type": "oauth_consent_grant", "app": "System Health Monitor"},
+            "exfil_destinations": ["martin-chen.sharepoint.com"], "entities": {"users": ["martin.chen"]}}
+    p = {"rows": [], "meta": {"verdict": "VALIDATED_BREACH"}, "campaigns": [camp]}
+    html = _build_executive_page(p, p["meta"], {}, "s", "Acme", "2026-01-01").lower()
+    assert "attack timeline" in html and "confidence trace" in html
+    assert "oauth consent grant" in html, "entry point missing from timeline"
+    assert "martin-chen.sharepoint.com" in html, "exfil destination missing from timeline"
+    assert "deterministic" in html and "ground-truth" in html, "moat/determinism claim missing"

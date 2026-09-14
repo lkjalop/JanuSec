@@ -1,0 +1,4 @@
+event_id,timestamp,principal,account,region,action,resource,result,verdict,factors
+cloud-1,2025-11-08T07:58:01Z,svc-endpoint@example.com,acct-123,us-east-1,CreateUser,arn:aws:iam::acct-123:user/temp-user,Success,SUSPICIOUS,"cloud:iam_overprivileged,identity_priv_esc"
+cloud-2,2025-11-08T08:10:01Z,svc-endpoint@example.com,acct-123,us-east-1,PutObject,arn:aws:s3:::customer-data/secret.csv,Success,SUSPICIOUS,"data_exfiltration,playbook:cloud_breach"
+cloud-3,2025-11-08T08:20:01Z,batch-job@example.com,acct-123,us-east-1,ListBuckets,arn:aws:s3:::*,Success,PASS,"cloud:inventory"

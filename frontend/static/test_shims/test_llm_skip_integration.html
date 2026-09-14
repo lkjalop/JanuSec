@@ -1,0 +1,11 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>LLM Skip Reason Test</title></head><body>
+<div id="tier1Sidebar"></div>
+<script>
+  // Simulate merge behavior: server returns llm_skipped_reason attached to row
+  var row = { row_index: 0, raw: {a:1}, verdict: 'SUSPICIOUS', llm_skipped_reason: 'below_severity_threshold' };
+  window.LAST_RESULTS = [row];
+  // Simulate a Tier1 response merge that would attach to record
+  (function(){ var rec = window.LAST_RESULTS[0]; if(rec && rec.llm_skipped_reason){ var sb = document.getElementById('tier1Sidebar'); sb.innerText = 'LLM Skip: '+rec.llm_skipped_reason; sb.setAttribute('data-skip', rec.llm_skipped_reason); } })();
+</script>
+</body></html>

@@ -1,0 +1,2 @@
+timestamp,user,database,table,query,rows_affected,execution_time
+2024-11-01T12:00:01Z,etl,prod,customers,SELECT id,email,ssn FROM customers,25000,540

@@ -1,0 +1,9 @@
+{
+  "count": 150,
+  "avg_ms": 26.901,
+  "p95_ms": 33.063,
+  "failures": 0,
+  "throughput_eps": 37.17,
+  "tenant": "tenant-bravo",
+  "pipeline_profile": "customer-bravo"
+}

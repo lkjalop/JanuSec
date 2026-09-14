@@ -1,0 +1,5 @@
+templates:
+  - 'templates/ops_notification.tmpl'
+
+# Example template (templates/ops_notification.tmpl)
+*** End Patch

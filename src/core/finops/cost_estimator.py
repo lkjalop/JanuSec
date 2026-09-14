@@ -4,11 +4,14 @@ Provides rough estimation for hunt or pipeline sidecar runs.
 Uses rolling averages from FinOpsManager daily/hourly summaries.
 """
 from __future__ import annotations
-from .finops_manager import get_finops_manager
-from typing import Dict, Any
-import statistics
 
-def estimate_hunt_cost(window_hours: int, tenant: str, model_enabled: bool = False) -> Dict[str, Any]:
+import statistics
+from typing import Any, Dict
+
+from .finops_manager import get_finops_manager
+
+
+def estimate_hunt_cost(window_hours: int, tenant: str, model_enabled: bool = False) -> dict[str, Any]:
     fm = get_finops_manager()
     # Simplistic placeholder stats: derive average hourly spend for tenant
     hs = fm.hourly_summary(tenant)

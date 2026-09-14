@@ -1,0 +1,23 @@
+_format_version: "3.0"
+_transform: true
+
+services:
+  - name: janusec-api
+    url: http://janusec_api_upstream
+    routes:
+      - name: janusec-api-route
+        paths:
+          - /api/
+        strip_path: false
+        https_redirect_status_code: 426
+    plugins:
+      - name: rate-limiting
+        config:
+          minute: 600
+          policy: local
+      - name: request-transformer
+        config:
+          add:
+            headers:
+              - X-Forwarded-Proto:https
+

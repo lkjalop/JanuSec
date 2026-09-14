@@ -1,0 +1,10 @@
+[
+  {
+    "incidentId": "inc-1001",
+    "title": "Impossible travel followed by suspicious role activity",
+    "severity": "high",
+    "status": "active",
+    "assignedTo": null,
+    "alerts": [{"alertId": "alert-1", "serviceSource": "MicrosoftDefenderXDR"}]
+  }
+]

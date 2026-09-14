@@ -1,0 +1,28 @@
+{{- if .Values.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "janusec.fullname" . }}
+  annotations:
+    kubernetes.io/ingress.class: {{ .Values.ingress.className | quote }}
+    {{- if .Values.oauth2Proxy.enabled }}
+    nginx.ingress.kubernetes.io/auth-url: "http://{{ include "janusec.fullname" . }}-oauth2-proxy.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.oauth2Proxy.servicePort }}/oauth2/auth"
+    nginx.ingress.kubernetes.io/auth-signin: "https://{{ .Values.ingress.host }}/oauth2/start?rd=$scheme://$host$request_uri"
+    {{- end }}
+spec:
+  tls:
+    - hosts:
+        - {{ .Values.ingress.host | quote }}
+      secretName: {{ .Values.ingress.tls.secretName | quote }}
+  rules:
+    - host: {{ .Values.ingress.host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ ternary (printf "%s-oauth2-proxy" (include "janusec.fullname" .)) (include "janusec.fullname" .) .Values.oauth2Proxy.enabled }}
+                port:
+                  number: {{ ternary .Values.oauth2Proxy.servicePort .Values.service.port .Values.oauth2Proxy.enabled }}
+{{- end }}

@@ -5,16 +5,21 @@ This is a stub executor; actions are logged and stored, not actually integrated
 with external systems.
 """
 from __future__ import annotations
-import asyncio, time, uuid, logging
-from typing import List, Dict, Any, Optional, Deque, Tuple
+
+import asyncio
+import logging
+import time
+import uuid
 from collections import deque
+from typing import Any, Deque, Dict, List, Optional, Tuple
+
 from core.playbooks.anomaly_mapping import advisory_for_alert
 from repositories import playbook_executions_repo
 
 logger = logging.getLogger(__name__)
 
 class PlaybookTask:
-    def __init__(self, alert_id: Optional[int], category: str):
+    def __init__(self, alert_id: int | None, category: str):
         self.alert_id = alert_id
         self.category = category
         self.enqueued_at = time.time()
@@ -22,10 +27,10 @@ class PlaybookTask:
 
 class PlaybookExecutor:
     def __init__(self, max_queue: int = 1000):
-        self.queue: Deque[PlaybookTask] = deque()
+        self.queue: deque[PlaybookTask] = deque()
         self.max_queue = max_queue
         self._stop = False
-        self._inflight: Dict[str, PlaybookTask] = {}
+        self._inflight: dict[str, PlaybookTask] = {}
         self._executed_ids: set[str] = set()  # idempotency
         # Metrics counters (best-effort)
         try:
@@ -36,7 +41,7 @@ class PlaybookExecutor:
         import os
         self.mode = os.getenv('PLAYBOOK_EXECUTION_MODE','dry-run').lower()  # 'dry-run' or 'live'
 
-    def enqueue(self, alert_id: Optional[int], category: str) -> bool:
+    def enqueue(self, alert_id: int | None, category: str) -> bool:
         if len(self.queue) >= self.max_queue:
             return False
         task = PlaybookTask(alert_id, category)

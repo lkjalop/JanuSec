@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Supply Chain Overview</title>
+  <style>
+    :root {
+      --bg: #0f1218; --fg: #e6e6e6; --panel: #161b22; --accent: #58a6ff;
+    }
+    body { background: var(--bg); color: var(--fg); font-family: system-ui, sans-serif; }
+    .container { max-width: 1200px; margin: 20px auto; padding: 16px; }
+    .panel { background: var(--panel); padding: 16px; border-radius: 8px; margin-bottom: 16px; }
+    h1, h2 { margin: 0 0 8px 0; }
+    input, button, textarea { background: #0d1117; color: var(--fg); border: 1px solid #30363d; border-radius: 6px; padding: 8px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 12px; background: #21262d; margin-right: 6px; }
+    .factor { padding: 4px 6px; background: #1b1f24; border-radius: 6px; margin: 4px 0; }
+    .edge { padding: 2px 6px; border-left: 3px solid var(--accent); margin: 2px 0; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Supply Chain Overview</h1>
+    <div class="panel">
+      <p>Upload a minimal SBOM JSON (CycloneDX/SPDX-ish) to visualize package graph, provenance tags, and sandbox factors.</p>
+      <textarea id="sbom" rows="8" placeholder='{"components":[{"name":"pkgA","version":"1.0.0","dependencies":{"pkgB":">=0.9"}}]}'></textarea>
+      <div style="margin-top:8px">
+        <button id="upload">Upload SBOM</button>
+      </div>
+    </div>
+    <div class="grid">
+      <div class="panel">
+        <h2>Graph (Edges)</h2>
+        <div id="edges"></div>
+      </div>
+      <div class="panel">
+        <h2>Factors</h2>
+        <div id="factors"></div>
+      </div>
+    </div>
+  </div>
+<script>
+const apiKey = (localStorage.apiKey || 'devkey123');
+async function uploadSbom() {
+  let payload;
+  try { payload = JSON.parse(document.getElementById('sbom').value); } catch(e){ alert('Invalid JSON'); return; }
+  const resp = await fetch('/api/v1/sbom/upload', { method: 'POST', headers: { 'Content-Type':'application/json', 'x-api-key': apiKey }, body: JSON.stringify(payload) });
+  const j = await resp.json();
+  if (!resp.ok) { alert('Upload failed: ' + (j.detail || resp.status)); return; }
+  const sid = j.sbom_id;
+  const vulnsResp = await fetch('/api/v1/sbom/vulns?sbom_id=' + encodeURIComponent(sid), { headers: { 'x-api-key': apiKey } });
+  const vj = await vulnsResp.json();
+  renderFactors(vj.vulns || []);
+  // Edges are not returned directly; demo renders edges by reading the upload payload deps
+  renderEdges(payload.components || [], payload.dependencies || [], payload.relationships || []);
+}
+function renderFactors(vulns) {
+  const cont = document.getElementById('factors'); cont.innerHTML = '';
+  vulns.forEach(v => {
+    const f = v.factors || [];
+    f.forEach(x => {
+      const el = document.createElement('div');
+      el.className = 'factor';
+      el.textContent = (x.factor || 'factor') + ' — ' + (x.producer || '');
+      cont.appendChild(el);
+    });
+  });
+}
+function renderEdges(components, topDeps, relationships) {
+  const edges = document.getElementById('edges'); edges.innerHTML = '';
+  // Simple rendering from components.dependencies
+  (components || []).forEach(c => {
+    const deps = c.dependencies || {}; const name = c.name; const ver = c.version || '';
+    Object.keys(deps).forEach(child => {
+      const div = document.createElement('div'); div.className = 'edge';
+      div.textContent = `${name}@${ver} depends_on ${child}@${(components.find(x => x.name === child)?.version || '')}`;
+      edges.appendChild(div);
+    });
+  });
+  // CycloneDX-style
+  (topDeps || []).forEach(d => {
+    const ref = d.ref; (d.dependsOn || []).forEach(child => {
+      const div = document.createElement('div'); div.className = 'edge';
+      div.textContent = `${ref} depends_on ${child}`; edges.appendChild(div);
+    });
+  });
+  // SPDX-style
+  (relationships || []).forEach(r => {
+    if ((r.relationshipType || '').toUpperCase() === 'DEPENDS_ON') {
+      const div = document.createElement('div'); div.className = 'edge';
+      div.textContent = `${r.from || r.source} depends_on ${r.to || r.target}`; edges.appendChild(div);
+    }
+  });
+}
+
+document.getElementById('upload').addEventListener('click', uploadSbom);
+</script>
+</body>
+</html>

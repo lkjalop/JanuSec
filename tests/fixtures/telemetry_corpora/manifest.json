@@ -1,0 +1,62 @@
+[
+  {
+    "path": "Vesper/janusec_cloud_identity_v3.json",
+    "sha256": "e623ab555ed1714d726efbbba69c877809389e050cca93dcc78580f08be4eb4e",
+    "bytes": 1291032
+  },
+  {
+    "path": "Vesper/janusec_endpoint_lolbins_v3.ndjson",
+    "sha256": "0868600dc25cee230cca61994363ee0214de13abc0d0102843511f5f33bec5f2",
+    "bytes": 7394208
+  },
+  {
+    "path": "Vesper/janusec_identity_kerberos_v3.ndjson",
+    "sha256": "22ae80df71ca47dd5d2b2a411a9917cda95358d3afcca5a14ae1e21afdded9a8",
+    "bytes": 2876146
+  },
+  {
+    "path": "Vesper/janusec_network_v3.csv",
+    "sha256": "59e8d2a7e06d85e992c9e4edcd90fb6b47d70b7ca42fc4ef9941d24bd43652da",
+    "bytes": 10230100
+  },
+  {
+    "path": "Meridian/janusec_cloud_identity_v2.json",
+    "sha256": "57d41489ef421175fd80364f6ea5ce414de40d26ce0f89a478187e0852fb37ec",
+    "bytes": 2185587
+  },
+  {
+    "path": "Meridian/janusec_email_exchange_v2.ndjson",
+    "sha256": "0ab60bf7e3c0cbed4978f23b7aa553219468a70d22801f0fb7d553da9cf8d45c",
+    "bytes": 1672936
+  },
+  {
+    "path": "Meridian/janusec_email_gmail_v2.ndjson",
+    "sha256": "7de8fab4c0b3a2c709dc3c027d14f304964dc5fa8d1239e4b340e8a9ee6b6175",
+    "bytes": 1710682
+  },
+  {
+    "path": "Meridian/janusec_endpoint_k8s_v2.ndjson",
+    "sha256": "ecb3f0c370534980df10c227822eaa2ea0264ef438b286d624dd945d99c12149",
+    "bytes": 4340802
+  },
+  {
+    "path": "Meridian/janusec_network_v2.csv",
+    "sha256": "ae413a0668a2fc2924c27f94413dcc932090f1e3d3fc27aa99ce83c35e44cfa9",
+    "bytes": 1507394
+  },
+  {
+    "path": "Santos/janusec_cloud_identity_v1.json",
+    "sha256": "c6572a9fb0d4eb65a34163904d6506cd7135042982af61d37e1ef1a916515693",
+    "bytes": 6735395
+  },
+  {
+    "path": "Santos/janusec_endpoint_k8s_v1.ndjson",
+    "sha256": "ac71c1750b5a803e78ad8207caecab73bfa91a75d2be04acd6dd58346a28e9eb",
+    "bytes": 7280110
+  },
+  {
+    "path": "Santos/janusec_network_v1.csv",
+    "sha256": "58812110759b099b72a219670c2115feca2e9c0dfea3a50409121ef5cb0d8561",
+    "bytes": 3627229
+  }
+]

@@ -1,0 +1,21 @@
+[
+  {
+    "message_id": "msg-shopsquire-001",
+    "timestamp": "2025-03-21T02:16:00Z",
+    "to": "finance@shopsquire.example",
+    "attachment_name": "Harbourside_Acquisition_Details_CONFIDENTIAL.xlsm",
+    "attachment_path": "tests/fixtures/email_replay/shopsquire_supplier_bec/artifacts/Harbourside_Acquisition_Details_CONFIDENTIAL.xlsm",
+    "vba_source_path": "tests/fixtures/email_replay/shopsquire_supplier_bec/artifacts/VBA_SOURCE_SecurityModule.bas",
+    "supplier_name": "Ingram Micro",
+    "trusted_supplier_domain": "ingrammicro.com.au"
+  },
+  {
+    "message_id": "msg-shopsquire-001",
+    "timestamp": "2025-03-21T02:16:10Z",
+    "to": "finance@shopsquire.example",
+    "attachment_name": "Wire_Transfer_Authorization_Form.pdf",
+    "attachment_path": "tests/fixtures/email_replay/shopsquire_supplier_bec/artifacts/Wire_Transfer_Authorization_Form.pdf",
+    "supplier_name": "Ingram Micro",
+    "trusted_supplier_domain": "ingrammicro.com.au"
+  }
+]

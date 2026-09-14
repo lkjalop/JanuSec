@@ -1,0 +1,13 @@
+path,method,protection,notes
+/api/v1/models/promote,POST,admin,Model artifact promotion - require admin or promoter role
+/api/v1/models/alias,POST,admin,Set model alias - require admin
+/api/v1/decisions/{event_id}/label,POST,feedback.write,Analyst label writes - require feedback.write scope
+/api/v1/risk/calibration/proposals/{ts}/accept,POST,factors.search,Accept recalibration proposal - require factors.search
+/api/v1/risk/calibration/proposals/{ts}/reject,POST,factors.search,Reject recalibration proposal
+/api/v1/risk/calibration/auto_accept,POST,factors.search,Auto-accept evaluation/apply
+/api/v1/dlq/{dlq_id}/requeue,POST,admin,DLQ requeue-as sensitive operation
+/admin/*,GET/POST,admin,Admin UI pages
+/api/v1/admin/sessions/*,POST/GET,admin,Admin session management
+/api/v1/models/registry,GET,viewer,Registry read access
+/api/v1/risk/calibration/export,GET,feedback.write,Export labeled calibration rows
+/api/v1/decisions/{event_id}/explain,GET,viewer,Decision explain (read-only)

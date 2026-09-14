@@ -7,8 +7,11 @@ Only extracts minimal fields required for current factors + policy. Raw payload
 is truncated to MAX_RAW bytes (env override) to avoid excessive storage.
 """
 from __future__ import annotations
+
+import hashlib
+import os
+import time
 from typing import Any, Dict, List
-import os, hashlib, time
 
 MAX_RAW = int(os.getenv('MAX_RAW_PAYLOAD_BYTES','32768'))
 
@@ -17,11 +20,11 @@ CANONICAL_FIELDS = [
     'domain','dst_ip','dst_port','bytes_out','sbom_component'
 ]
 
-def _gen_event_id(tenant: str | None, payload: Dict[str, Any]) -> str:
+def _gen_event_id(tenant: str | None, payload: dict[str, Any]) -> str:
     base = (tenant or 'default') + '|' + str(payload.get('timestamp') or payload.get('ts') or time.time()) + '|' + (payload.get('domain') or payload.get('command_line') or '')[:80]
     return hashlib.sha256(base.encode()).hexdigest()[:32]
 
-def normalize_single(raw: Dict[str, Any], tenant: str | None) -> Dict[str, Any]:
+def normalize_single(raw: dict[str, Any], tenant: str | None) -> dict[str, Any]:
     """Return canonical internal event.
 
     Input is an Eclipse.XDR event (fields vary). We map conservative set.
@@ -74,7 +77,7 @@ def normalize_single(raw: Dict[str, Any], tenant: str | None) -> Dict[str, Any]:
         'raw': raw_copy
     }
 
-def parse(body: Any, tenant: str | None) -> List[Dict[str, Any]]:
+def parse(body: Any, tenant: str | None) -> list[dict[str, Any]]:
     if isinstance(body, list):
         return [normalize_single(ev, tenant) for ev in body if isinstance(ev, dict)]
     if isinstance(body, dict):

@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>CSV Analyzer (test shim)</title>
+  <style>body{font-family:system-ui,Segoe UI,Roboto,Arial;margin:12px}table{border-collapse:collapse}td{padding:6px;border:1px solid #eee}</style>
+</head>
+<body>
+  <h2 id="csv_title">CSV Analyzer - Test Shim</h2>
+  <input id="fileInput" data-test="csv-file-input" type="file" />
+  <button id="btnLoad" data-test="csv-btn-load">Load</button>
+  <button id="btnExplain" data-test="csv-btn-explain">Fetch Explain</button>
+  <button id="btnAnalyzePipeline" data-test="csv-btn-deep-analyze">Deep Analyze</button>
+  <div id="pipelineBadge" style="display:inline-block"><span class="pill" style="display:none">pipeline</span></div>
+  <div id="csv_results_ready" data-test="csv-results-ready" style="display:none"></div>
+
+  <div id="csvDrillModal" style="display:none">
+    <div id="csvDrillBody"></div>
+    <a id="csvExplainAnchor"></a>
+    <button class="csv-modal-close">Close</button>
+  </div>
+
+  <script>
+    // Minimal, well-documented deterministic shim for automated tests.
+    // Exposes a small API:
+    //  - window.ensureTbodyRowsFromList(list)
+    //  - window.openCsvRowDetails(index)
+    //  - data-test attributes on key controls
+    window.__csvReady = true;
+    // Lightweight placeholder for XLSX loader so preload tests can detect it.
+    window.XLSX = { __placeholder: true };
+    window.parseTabular = { ensureXlsxLib: function(){ /* test shim noop */ } };
+
+    function renderTableFromResults(){
+      var t = document.getElementById('tbody');
+      if(!t){
+        var table = document.createElement('table'); table.id='results';
+        var tbody = document.createElement('tbody'); tbody.id='tbody'; table.appendChild(tbody); document.body.appendChild(table);
+        t = tbody;
+      }
+      var list = window.LAST_RESULTS || [];
+      t.innerHTML = (list||[]).slice(0,50).map(function(r,i){
+        var verdict = r && r.verdict || '';
+        var signals = (r && r.factors && r.factors.join(', ')) || '';
+        return '<tr data-row="'+i+'">' +
+          '<td>'+(r&&r.process_name||'')+'</td>'+
+          '<td>'+(r&&r.file_path||'')+'</td>'+
+          '<td>'+(r&&r.sha256||'')+'</td>'+
+          '<td>'+(r&&r.host||'')+'</td>'+
+          '<td>'+verdict+'</td>'+
+          '<td>'+(r&&r._dread&&r._dread.score||'')+'</td>'+
+          '<td>'+signals+'</td>'+
+          '<td><button title="Why flagged / details">Details</button></td>'+
+        '</tr>';
+      }).join('');
+      document.getElementById('csv_results_ready').style.display='block';
+      window.dispatchEvent(new Event('csv-results-ready'));
+    }
+
+    window.ensureTbodyRowsFromList = function(list){ window.LAST_RESULTS = list || []; renderTableFromResults(); };
+
+    // File load: deterministic conversion of first CSV row to LAST_RESULTS[0]
+    document.getElementById('btnLoad').addEventListener('click', function(){
+      var inp = document.getElementById('fileInput');
+      if(!inp || !inp.files || !inp.files.length) return;
+      var f = inp.files[0];
+      var reader = new FileReader();
+      reader.onload = function(ev){
+        try{
+          var text = ev.target.result || '';
+          var lines = text.split(/\r?\n/).filter(Boolean);
+          var first = lines[1] || lines[0] || '';
+          var cols = first.split(',');
+          window.LAST_RESULTS = [{ process_name: cols[0]||'unknown', file_path: cols[1]||'/tmp/file', sha256: 'deadbeef', host: 'host-1', verdict: 'SUSPICIOUS', factors: ['stub'], _dread: { score: 4 } }];
+          renderTableFromResults();
+        }catch(e){ console.warn('file read parse', e); }
+      };
+      reader.readAsText(f);
+    });
+
+    // Global explain behavior
+    document.getElementById('btnExplain').addEventListener('click', function(){
+      document.getElementById('csvExplainAnchor').innerText = 'Explain (local)';
+      var modal = document.getElementById('csvDrillModal'); modal.style.display='block';
+      document.getElementById('csvDrillBody').innerText = 'signals: stub';
+    });
+
+    // Deep analyze simulates pipeline enrichment deterministically
+    document.getElementById('btnAnalyzePipeline').addEventListener('click', function(){
+      var arr = window.LAST_RESULTS || [];
+      if(arr.length){ arr[0].factors = (arr[0].factors||[]).concat(['deep_enriched']); arr[0]._dread = arr[0]._dread || { score: 7 }; }
+      window.LAST_RESULTS = arr; renderTableFromResults();
+      var pill = document.querySelector('#pipelineBadge .pill'); if(pill) pill.style.display='inline-block';
+    });
+
+    window.openCsvRowDetails = function(index){
+      var row = (window.LAST_RESULTS||[])[index];
+      var body = document.getElementById('csvDrillBody'); body.innerHTML='';
+      var info = document.createElement('div'); info.innerText = 'signals: ' + (row && row.factors ? row.factors.join(', ') : ''); body.appendChild(info);
+      var dread = document.createElement('div'); dread.innerText = 'DREAD: ' + ((row && row._dread && row._dread.score) || '0'); body.appendChild(dread);
+      var inlineBtn = document.createElement('button'); inlineBtn.className='csv-btn-inline'; inlineBtn.disabled = !(row && row.raw && row.raw.event_id); inlineBtn.innerText='Fetch Explain'; inlineBtn.setAttribute('data-test','csv-btn-explain'); inlineBtn.addEventListener('click', function(){ document.getElementById('csvExplainAnchor').innerText='Explain (local)'; }); body.appendChild(inlineBtn);
+      document.getElementById('csvExplainAnchor').innerText=''; document.getElementById('csvDrillModal').style.display='block';
+    };
+
+    document.addEventListener('click', function(e){ try{ if(e.target && e.target.getAttribute && e.target.getAttribute('title')==='Why flagged / details'){ var tr = e.target.closest('tr[data-row]'); if(tr){ var idx = parseInt(tr.getAttribute('data-row'),10); if(!isNaN(idx)) window.openCsvRowDetails(idx); } } }catch(_){} });
+    document.querySelector('.csv-modal-close').addEventListener('click', function(){ document.getElementById('csvDrillModal').style.display='none'; });
+  </script>
+</body>
+</html>

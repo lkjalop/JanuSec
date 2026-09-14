@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Sandbox Integrations</title>
+  <style>
+    body{background:#0f1720;color:#e6eef6;font-family:Inter,Segoe UI,Arial;padding:24px}
+    .card{background:#0b1220;padding:18px;border-radius:8px;max-width:720px;margin:12px auto}
+    label{display:block;margin-top:12px}
+    input,select,textarea{width:100%;padding:8px;margin-top:6px;border-radius:6px;border:1px solid #233042;background:#07101a;color:#e6eef6}
+    button{margin-top:12px;padding:10px 14px;border-radius:6px;background:#1f6feb;border:none;color:#fff}
+    .note{color:#9fb0c8;font-size:0.9em}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>Sandbox Integration</h2>
+    <p class="note">Store vendor API/webhook settings for sandbox integrations (Cuckoo, Joe, AnyRun).</p>
+
+    <label>Provider
+      <select id="provider">
+        <option value="cuckoo">Cuckoo</option>
+        <option value="joe">Joe Sandbox</option>
+        <option value="anyrun">AnyRun</option>
+      </select>
+    </label>
+
+    <label>API Base URL
+      <input id="api_url" placeholder="https://cuckoo.example.local:8090" />
+    </label>
+
+    <label>API Key / Token
+      <input id="api_key" placeholder="Optional, e.g. Bearer token" />
+    </label>
+
+    <label>Webhook Callback URL (optional)
+      <input id="webhook" placeholder="https://hooks.example.com/ingest" />
+    </label>
+
+    <label>Notes / Config JSON (optional)
+      <textarea id="extra" rows="4" placeholder='{"param": "value"}'></textarea>
+    </label>
+
+    <button id="saveBtn">Save</button>
+    <button id="testBtn" style="background:#22c55e">Save + Test</button>
+
+    <div id="out" style="margin-top:10px;font-size:0.9em;color:#cfe9ff"></div>
+  </div>
+
+  <script>
+    const providerEl = document.getElementById('provider')
+    const urlEl = document.getElementById('api_url')
+    const keyEl = document.getElementById('api_key')
+    const hookEl = document.getElementById('webhook')
+    const extraEl = document.getElementById('extra')
+    const out = document.getElementById('out')
+
+    function load() {
+      const cfg = JSON.parse(localStorage.getItem('sandbox_cfg') || '{}')
+      providerEl.value = cfg.provider || 'cuckoo'
+      urlEl.value = cfg.api_url || ''
+      // Do not load api_key into the field for security; show masked indicator
+      if (cfg.api_key_present) {
+        keyEl.value = '••••••'
+        keyEl.dataset.masked = '1'
+      } else {
+        keyEl.value = ''
+        keyEl.dataset.masked = '0'
+      }
+      hookEl.value = cfg.webhook || ''
+      extraEl.value = cfg.extra || ''
+    }
+
+    function saveLocal() {
+      // Avoid storing the raw api_key in localStorage. Only store presence flag.
+      const cfg = {provider: providerEl.value, api_url: urlEl.value, api_key_present: (keyEl.value && keyEl.dataset && keyEl.dataset.masked !== '1') ? true : (keyEl.dataset.masked === '1'), webhook: hookEl.value, extra: extraEl.value}
+      localStorage.setItem('sandbox_cfg', JSON.stringify(cfg))
+      return cfg
+    }
+
+    async function persistServer(name, cfg) {
+      const resp = await fetch(`/api/v1/integrations/${encodeURIComponent(name)}/config`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(cfg)})
+      return resp.json()
+    }
+
+    document.getElementById('saveBtn').addEventListener('click', async () => {
+      // Save metadata locally but do not store raw API key
+      const cfg = saveLocal()
+      // If user entered a new key (not masked), persist to server immediately
+      if (keyEl.value && keyEl.dataset.masked !== '1') {
+        try {
+          const payload = { provider: providerEl.value, api_url: urlEl.value, api_key: keyEl.value, webhook: hookEl.value, extra: extraEl.value }
+          await fetch(`/api/v1/integrations/${encodeURIComponent(providerEl.value)}/config`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)})
+          // mask field to avoid showing secret
+          keyEl.value = '••••••'
+          keyEl.dataset.masked = '1'
+          out.textContent = 'Saved (key masked locally).'
+        } catch (e) {
+          out.textContent = 'Server save failed: ' + e
+        }
+      } else {
+        out.textContent = 'Saved locally (no secret stored).'
+      }
+    })
+
+    document.getElementById('testBtn').addEventListener('click', async () => {
+      const cfg = saveLocal()
+      out.textContent = 'Saving and testing...'
+      try {
+        // include raw api_key only if user entered it (not masked); server will encrypt on save
+        const payload = { provider: providerEl.value, api_url: urlEl.value, webhook: hookEl.value, extra: extraEl.value }
+        if (keyEl.value && keyEl.dataset.masked !== '1') {
+          payload.api_key = keyEl.value
+        }
+        const r = await persistServer(cfg.provider, payload)
+        // mask key locally after successful server save
+        if (payload.api_key) {
+          keyEl.value = '••••••'
+          keyEl.dataset.masked = '1'
+        }
+        out.textContent = 'Saved server-side: ' + (r.path || JSON.stringify(r))
+      } catch (e) {
+        out.textContent = 'Server save failed: ' + e
+      }
+    })
+
+    load()
+  </script>
+</body>
+</html>

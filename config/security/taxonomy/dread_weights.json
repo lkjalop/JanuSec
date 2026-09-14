@@ -1,0 +1,13 @@
+{
+  "defaults": {
+    "DamagePotential": 1.0,
+    "Reproducibility": 0.8,
+    "Exploitability": 1.0,
+    "AffectedUsers": 0.9,
+    "Discoverability": 0.6
+  },
+  "scales": {
+    "min": 0,
+    "max": 10
+  }
+}

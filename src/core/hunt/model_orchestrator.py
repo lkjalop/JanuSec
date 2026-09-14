@@ -3,6 +3,7 @@
 Defines escalation & degradation logic across model tiers.
 """
 from __future__ import annotations
+
 from dataclasses import dataclass
 from typing import Dict, Optional
 
@@ -14,7 +15,7 @@ class ModelDecision:
     model_id: str
     reason: str
 
-def select_model(severity: float, confidence: float, budget_remaining_ratio: float, availability: Dict[int,bool]) -> ModelDecision:
+def select_model(severity: float, confidence: float, budget_remaining_ratio: float, availability: dict[int,bool]) -> ModelDecision:
     # Base desired tier from severity
     if severity >= 0.85: desired = 3
     elif severity >= 0.6: desired = 2

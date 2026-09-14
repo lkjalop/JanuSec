@@ -1,0 +1,6 @@
+{
+  "cisa_kev_url": "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json",
+  "refresh_cron": "0 */6 * * *",
+  "cache_ttl_seconds": 21600,
+  "notes": "Demo pointer for Security Observer to overlay KEV presence in risk scoring."
+}

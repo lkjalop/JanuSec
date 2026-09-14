@@ -1,0 +1,2 @@
+process_name,file_path,sha256,host,CommandLine
+rundll32.exe,C:\\temp\\bad.exe,deadbeef123,host-1,"rundll32 C:\\temp\\bad.exe"

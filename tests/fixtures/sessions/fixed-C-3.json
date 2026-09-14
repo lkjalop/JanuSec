@@ -1,0 +1,4 @@
+[
+  {"user":"eve","host":"web02","ip":"10.0.0.2","file_hash":"def456"},
+  {"user":"alice","host":"web01","ip":"10.0.0.1","file_hash":"abc123"}
+]

@@ -1,0 +1,2 @@
+timestamp,user,bastion_host,command,sudo_used,target_host
+2024-11-01T13:00:00Z,carol,bastion-1,"mysqldump -u root prod > /tmp/out.sql",true,db-1

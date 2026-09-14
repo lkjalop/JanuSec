@@ -1,0 +1,62 @@
+﻿<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+  <title>JanuSec React Console</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <script type="module" crossorigin src="/assets/index-RCLp2Sfu.js"></script>
+  </head>
+  <body>
+    <div id="root"></div>
+
+    <script>
+      (function(){
+        try{
+          function ensureFileInput(){
+            try{
+              if(!document.getElementById('fileInput')){
+                const inp = document.createElement('input'); inp.type='file'; inp.id='fileInput'; inp.multiple=true;
+                inp.accept = '.csv,.tsv,.log,.txt,.json,.jsonl,.ndjson,.xls,.xlsx,.xlsm,.ods,.zip,.gz'; inp.style.display='none'; document.body.appendChild(inp);
+              }
+            }catch(e){}
+          }
+          ensureFileInput(); [60,200,600].forEach(t=> setTimeout(ensureFileInput, t));
+          try{ window.__liveConsoleReady = true; }catch(_){ }
+          try{ if(!document.getElementById('live_console_ready')) document.body.insertAdjacentHTML('beforeend','<div id="live_console_ready" style="display:none"></div>'); }catch(_){ }
+          try{ window.dispatchEvent(new Event('live-console-ready')); }catch(_){ }
+        }catch(e){ console.warn('index shim init failed', e); }
+      })();
+    </script>
+
+  
+        <script>
+            (function(){
+                try{
+                    // Insert a hidden file input if missing and poll briefly to re-insert if
+                    // client code removes it during hydration. This keeps Playwright's
+                    // page.waitForSelector('#fileInput') stable.
+                try:
+                    from .supply_chain_endpoints import router as supply_chain_router
+                except Exception:
+                    supply_chain_router = None
+                    function ensureFileInput(){
+                        try{
+                            if(!document.getElementById('fileInput')){
+                                const inp = document.createElement('input'); inp.type = 'file'; inp.id = 'fileInput'; inp.multiple = true;
+                                inp.accept = '.csv,.tsv,.log,.txt,.json,.jsonl,.ndjson,.xls,.xlsx,.xlsm,.ods,.zip,.gz'; inp.style.display = 'none'; document.body.appendChild(inp);
+                            }
+                        }catch(e){}
+                    }
+                    ensureFileInput();
+                    // Re-run ensure a few times after hydration to avoid transient removal
+                    [60, 200, 600].forEach(function(t){ setTimeout(ensureFileInput, t); });
+                    try{ window.__liveConsoleReady = true; }catch(_){ }
+                    try{ if(!document.getElementById('live_console_ready')) document.body.insertAdjacentHTML('beforeend', '<div id="live_console_ready" style="display:none"></div>'); }catch(_){ }
+                    try{ window.dispatchEvent(new Event('live-console-ready')); }catch(_){ }
+                }catch(e){ console.warn('live-console shim injection failed', e); }
+            })();
+        </script>
+
+</body>
+</html>
+

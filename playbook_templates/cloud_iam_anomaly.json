@@ -1,0 +1,53 @@
+{
+  "alert_type": "cloud_iam_anomaly",
+  "summary": "Privileged IAM principal performing out-of-policy actions (new API keys, role chaining, or policy tampering). Maps to MITRE T1078, T1098 in cloud kill-chains.",
+  "severity": "high",
+  "mitre": [
+    "T1078.004",
+    "T1098",
+    "T1562.001"
+  ],
+  "cisa_kev": [
+    "CVE-2023-36025"
+  ],
+  "cvss_reference": 8.2,
+  "epss": 0.41,
+  "references": [
+    "https://attack.mitre.org/techniques/T1078/004/",
+    "https://cloudsecurityalliance.org/blog/2023/11/02/cloud-iam-threat-brief/"
+  ],
+  "steps": [
+    {
+      "order": 1,
+      "action": "Immediately revoke suspect access keys / sessions",
+      "rationale": "Prevents continued policy changes or data theft.",
+      "automated": true,
+      "automation_id": "cloud_disable_keys"
+    },
+    {
+      "order": 2,
+      "action": "Download CloudTrail / Audit logs covering prior 24h for the principal",
+      "rationale": "Establishes scope of privilege escalation.",
+      "automated": true
+    },
+    {
+      "order": 3,
+      "action": "Review IAM policy delta and restore golden profile",
+      "rationale": "Attackers often loosen guardrails post compromise.",
+      "tool_suggestion": "Terraform drift or AWS Access Analyzer",
+      "automated": false
+    },
+    {
+      "order": 4,
+      "action": "Force MFA reset and rotate long-lived secrets",
+      "rationale": "Removes persistence vector described in CISA KEV bulletins.",
+      "automated": false
+    },
+    {
+      "order": 5,
+      "action": "Notify application/data owners about potential blast radius",
+      "rationale": "Business teams prepare contingency while analysis completes.",
+      "automated": false
+    }
+  ]
+}

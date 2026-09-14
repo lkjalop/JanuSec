@@ -1,0 +1,26 @@
+{
+  "event_id": "abc123",
+  "score": 0.87,
+  "raw_score": 1.42,
+  "method": "multiplicative_v1",
+  "confidence": 0.91,
+  "variance": 0.0123,
+  "ci95": [0.81, 0.92],
+  "mean_contribution": 0.18,
+  "breakdown": [
+    {"factor": "baseline:|z|:proc_exec_rate", "weight": 0.9, "delta": 1.30, "contribution": 0.22},
+    {"factor": "cluster:novelty", "weight": 1.1, "delta": 1.15, "contribution": 0.18},
+    {"factor": "geo:velocity_anomaly", "weight": 1.0, "delta": 1.12, "contribution": 0.15},
+    {"factor": "lane_lolbin:powershell_encoded", "weight": 1.2, "delta": 1.10, "contribution": 0.14},
+    {"factor": "completeness:penalty", "weight": 0.85, "delta": 0.92, "contribution": -0.07}
+  ],
+  "metadata": {
+    "calibration": {
+      "enabled": true,
+      "slope": 4.0,
+      "center": 0.5
+    },
+    "weights_source": "yaml+env+learned",
+    "updated_at": "2025-10-03T21:15:00Z"
+  }
+}

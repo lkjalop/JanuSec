@@ -1,0 +1,50 @@
+global:
+  resolve_timeout: 5m
+route:
+  receiver: 'team-secops'
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 3h
+  routes:
+    - match:
+        severity: critical
+      receiver: 'pagerduty'
+    - match_re:
+        service: "slack-.*"
+      receiver: 'slack'
+    - match:
+        team: secops
+      receiver: 'team-secops'
+    - match:
+        escalation: 'true'
+      receiver: 'escalation-webhook'
+receivers:
+  - name: 'team-secops'
+    email_configs:
+      - to: 'secops@example.com'
+        from: 'alertmanager@example.com'
+        smarthost: 'smtp.example.com:587'
+        auth_username: 'alertmanager'
+        auth_password: 'REPLACE_ME'
+        require_tls: true
+  - name: 'slack'
+    slack_configs:
+      - api_url: 'https://hooks.slack.com/services/REPLACE/ME/HOOK'
+        channel: '#secops'
+        send_resolved: true
+  - name: 'pagerduty'
+    pagerduty_configs:
+      - service_key: 'REPLACE_PAGERDUTY_KEY'
+        severity: 'critical'
+        send_resolved: true
+  - name: 'msteams'
+    webhook_configs:
+      - url: 'https://outlook.office.com/webhook/REPLACE/ME'
+        send_resolved: true
+  - name: 'escalation-webhook'
+    webhook_configs:
+      - url: 'https://example.com/ops/escalation'
+        send_resolved: true
+        http_config:
+          bearer_token: 'REPLACE_WEBHOOK_TOKEN'
+templates: []

@@ -1,0 +1,52 @@
+{
+  "errors": [],
+  "http_errors": [],
+  "pages": [
+    {
+      "name": "integrations",
+      "status": 200
+    },
+    {
+      "name": "metrics",
+      "status": 200
+    },
+    {
+      "name": "sbom",
+      "status": 200
+    },
+    {
+      "name": "compliance",
+      "status": 200
+    },
+    {
+      "name": "csv_multi_analyzer",
+      "status": 200
+    },
+    {
+      "name": "hunt_network",
+      "status": 200
+    },
+    {
+      "name": "hunt_endpoint",
+      "status": 200
+    },
+    {
+      "name": "multi_log_investigator",
+      "status": 200
+    },
+    {
+      "name": "investigate",
+      "status": 200
+    }
+  ],
+  "historical_receipt": {
+    "schema_version": "janusec.case-view-history/v1",
+    "tenant_id": "default",
+    "assessment_id": "assessment-1789211650-f3252b26",
+    "case_id": "analysis-incomplete",
+    "recorded_at": "2026-09-14T00:24:12.496840+00:00",
+    "input_hash": "81d708177299422d1f568300ba0a7cdc3372b05dda92e32d641aeb66429f2158",
+    "view_hash": "4e4e43950ef2f0227c54fabad86655853dc9186a9435aed39eac9f0f336a8c58",
+    "receipt_hash": "31b3643f3b436b5f601cf6b1a6c54e226eae2bacc7818b050b541d599b4a8d97"
+  }
+}

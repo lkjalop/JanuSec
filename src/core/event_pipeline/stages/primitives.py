@@ -7,13 +7,18 @@ from core.graph.hopgraph_lite import get_graph
 from core.network.packet_summary import summarize_packet_event
 
 from ..utils import cfg_get
-from .base import StageContext, StageResult, timed_stage, maybe_await
+from .base import StageContext, StageResult, maybe_await, timed_stage
 
+# Streaming change detector for auth bursts (optional)
+try:  # pragma: no cover
+    from metrics.streaming import CUSUM_DEFAULT as _CUSUM
+except Exception:  # pragma: no cover
+    _CUSUM = None  # type: ignore
 
 @timed_stage('baseline')
 async def baseline_stage(event: dict, ctx: StageContext) -> StageResult:
     module = await ctx.resolve_module('baseline')
-    factors: List[str] = []
+    factors: list[str] = []
     delta = 0.0
     terminal = False
     if module:
@@ -33,7 +38,7 @@ async def baseline_stage(event: dict, ctx: StageContext) -> StageResult:
 @timed_stage('regex')
 async def regex_stage(event: dict, ctx: StageContext) -> StageResult:
     module = await ctx.resolve_module('regex_engine')
-    factors: List[str] = []
+    factors: list[str] = []
     delta = 0.0
     if module and hasattr(module, 'analyze_event'):
         try:
@@ -64,7 +69,7 @@ async def parent_child_stage(event: dict, ctx: StageContext) -> StageResult:
     child = event.get('process') or event.get('proc') or {}
     p_name = (parent.get('name') if isinstance(parent, dict) else None) or event.get('parent_name')
     c_name = (child.get('name') if isinstance(child, dict) else None) or event.get('process_name')
-    factors: List[str] = []
+    factors: list[str] = []
     if p_name and c_name:
         pair = f"{str(p_name).lower()}->{str(c_name).lower()}"
         if pair in SUSPICIOUS_PAIRS:
@@ -77,7 +82,7 @@ async def parent_child_stage(event: dict, ctx: StageContext) -> StageResult:
 @timed_stage('endpoint')
 async def endpoint_stage(event: dict, ctx: StageContext) -> StageResult:
     module = await ctx.resolve_module('endpoint_hunter')
-    factors: List[str] = []
+    factors: list[str] = []
     delta = 0.0
     if module and hasattr(module, 'analyze_event'):
         try:
@@ -97,6 +102,29 @@ async def endpoint_stage(event: dict, ctx: StageContext) -> StageResult:
 async def auth_burst_stage(event: dict, ctx: StageContext) -> StageResult:
     try:
         factors = auth_burst_factors(event) or []
+        # Streaming CUSUM on per-user auth activity (counts)
+        user = event.get('user') or event.get('username')
+        tenant = event.get('tenant_id') or 'default'
+        is_auth_evt = False
+        try:
+            et = (event.get('event_type') or '').lower()
+            details = event.get('details') or {}
+            # Restrict to failures for burst spikes to avoid noise
+            is_auth_evt = (et in ('auth_fail','login_failed') or (details.get('auth') == 'fail'))
+        except Exception:
+            is_auth_evt = False
+        # Allow gating via config: pipeline.auth_burst.cusum_emit (default True)
+        gate = True
+        try:
+            pipeline_cfg = cfg_get(ctx.config, 'pipeline', {})
+            ab_cfg = cfg_get(pipeline_cfg, 'auth_burst', {})
+            gate = bool(cfg_get(ab_cfg, 'cusum_emit', True))
+        except Exception:
+            gate = True
+        if gate and user and is_auth_evt and _CUSUM is not None:
+            out = _CUSUM.update(f"{tenant}::{user}::auth_rate", 1.0)
+            if bool(out.get('alarm')):
+                factors.append('chg:auth_burst')
     except Exception as exc:
         try:
             ctx.logger.debug('Auth burst stage error: %s', exc)
@@ -127,8 +155,8 @@ async def adaptive_pre_stage(event: dict, ctx: StageContext) -> StageResult:
 
     tuner = getattr(ctx.config, 'adaptive_tuner', None) or ctx.state.get('adaptive_tuner')
     if tuner is None and hasattr(ctx, 'adaptive_tuner'):
-        tuner = getattr(ctx, 'adaptive_tuner')
-    factors: List[str] = []
+        tuner = ctx.adaptive_tuner
+    factors: list[str] = []
     delta = 0.0
     if tuner and hasattr(tuner, 'preliminary_assess'):
         try:

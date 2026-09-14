@@ -1,0 +1,19 @@
+C:\Temp\evil.exe	133176576000000000 entry 0x1A2B
+C:\Windows\System32\good.dll	2024-01-01T12:00:00 entry 0x2B3C
+C:\Program Files\Example\nested.exe	132537600000000000 entry 0x3C4D
+C:\Users\Admin\Desktop\runme.bat	2024-01-02 01:02:03 entry 0x4D5E
+C:\Windows\System32\drivers\dxgkrnl.sys	131483520000000000 entry 0x5E6F
+C:\Windows\Temp\suspicious.tmp.exe	133176576500000000 entry 0x6F70
+/some/unix/style/path.bin	133176576000000000 entry 0x7A8B
+C:\Path With Spaces\space.exe	2024-01-03T03:03:03 entry 0x8B9C
+C:\Program Files\Example\deep\deep.exe	132537600000000000 entry 0x9C0D
+C:\Windows\System32\good.dll	2023-12-31T23:59:59 entry 0xAAAA
+C:\Users\bob\AppData\Local\Temp\tmp1234.tmp	2024-01-01 00:00:00 entry 0xBBBB
+C:\Windows\SysWOW64\legacy.exe	133176576000000000 entry 0xCCCC
+C:\Windows\Prefetch\weird.exe-1234.pf	0x00010002 entry 0xDDDD
+C:\Program Files\Example\unicode_测试.exe	133176576000000100 entry 0xEEEE
+C:\Program Files\Example\weird-1.0.0.exe	133176576000000200 entry 0xFFFF
+C:\Users\guest\Downloads\payload.bin	133176576000000300 entry 0x1111
+C:\Nested\Deep\file.dll	2022-06-01 12:00:00 entry 0x2222
+C:\Program Files\Example\another_bad.exe	133176576000000400 entry 0x3333
+C:\Program Files\Example\weird.exe	133176576000000500 entry 0x4444

@@ -1,0 +1,37 @@
+{
+  "generated_at": 1760705102,
+  "overview": {
+    "recent_decisions": 42,
+    "active_incidents": 3,
+    "open_triage_rows": 18,
+    "network_beacons": 7,
+    "endpoint_anomalies": 5
+  },
+  "metrics": {
+    "detections_last_24h": 128,
+    "intel_hits": 11,
+    "baseline_anomalies": 9
+  },
+  "samples": {
+    "recent_events": [
+      {
+        "ts": 1760705102,
+        "src_ip": "10.0.0.5",
+        "dst_ip": "3.211.45.12",
+        "factors": [
+          "network:beacon"
+        ],
+        "host": "host-12"
+      },
+      {
+        "ts": 1760705042,
+        "src_ip": "10.0.0.8",
+        "dst_ip": "52.12.3.4",
+        "factors": [
+          "network:dns_suspicious"
+        ],
+        "host": "host-9"
+      }
+    ]
+  }
+}

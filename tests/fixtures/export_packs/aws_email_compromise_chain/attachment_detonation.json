@@ -1,0 +1,18 @@
+[
+  {
+    "message_id": "msg-aws-bec-001",
+    "timestamp": "2025-03-15T02:44:00Z",
+    "attachment_name": "Wire_Transfer_Authorization_Form.pdf",
+    "file_hash": "9ae9c6c6f4e41fc9f6be0dc77d22b78d3f2a7cd5145ab91827ae76ecfc92b113",
+    "sandbox_verdict": "suspicious",
+    "sandbox_engine": "janusec-demo-sandbox",
+    "sandbox_behaviors": [
+      "embedded_javascript",
+      "credential_harvest_redirect",
+      "follow_on_browser_spawn"
+    ],
+    "contacted_domains": [
+      "cdn-dropbox-sync.co"
+    ]
+  }
+]

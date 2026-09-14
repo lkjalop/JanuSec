@@ -17,31 +17,40 @@ Metrics (to be optionally registered elsewhere):
 Note: Only minimal imports at module import time; heavy model loads happen lazily.
 """
 from __future__ import annotations
-import os, hashlib, math, time
-from typing import List, Dict, Any, Optional, Protocol
 
-try:
-    from prometheus_client import Counter
-except Exception:  # fallback dummies
-    Counter = lambda *a, **k: None  # type: ignore
+import hashlib
+import math
+import os
+import time
+from typing import Any, Dict, List, Optional, Protocol
 
 _provider_select_counter = None
 _fallback_counter = None
-try:
-    _provider_select_counter = Counter('embedding_provider_selection_total', 'Embedding provider selections', ['provider'])
-    _fallback_counter = Counter('embedding_provider_fallback_total', 'Embedding provider fallbacks', ['source','reason'])
-except Exception:
-    pass
+
+def register_metrics(registry=None):
+    """Explicit registry binding for embedding metrics."""
+    global _provider_select_counter, _fallback_counter
+    try:
+        from prometheus_client import Counter  # type: ignore
+
+        from src.api.metrics_init import REGISTRY as DEFAULT_REG, ensure_metrics  # type: ignore
+        ensure_metrics()
+        reg = registry or DEFAULT_REG
+        _provider_select_counter = Counter('embedding_provider_selection_total','Embedding provider selections',['provider'], registry=reg)
+        _fallback_counter = Counter('embedding_provider_fallback_total','Embedding provider fallbacks',['source','reason'], registry=reg)
+    except Exception:
+        _provider_select_counter = _provider_select_counter or None
+        _fallback_counter = _fallback_counter or None
 
 class EmbeddingProvider(Protocol):
     name: str
-    async def embed(self, text: str) -> List[float]: ...
+    async def embed(self, text: str) -> list[float]: ...
 
 class HashProvider:
     name = 'hash'
     def __init__(self, dim: int = 32):
         self.dim = dim
-    async def embed(self, text: str) -> List[float]:
+    async def embed(self, text: str) -> list[float]:
         h = hashlib.sha256(text.encode()).digest()
         # repeat if dim > len
         raw = list(h)
@@ -56,11 +65,11 @@ class MiniLMProvider:
     async def _load(self):
         if self._loaded:
             return
-        from transformers import AutoTokenizer, AutoModel  # type: ignore
+        from transformers import AutoModel, AutoTokenizer  # type: ignore
         self._tok = AutoTokenizer.from_pretrained('sentence-transformers/all-MiniLM-L6-v2')
         self._model = AutoModel.from_pretrained('sentence-transformers/all-MiniLM-L6-v2')
         self._loaded = True
-    async def embed(self, text: str) -> List[float]:
+    async def embed(self, text: str) -> list[float]:
         try:
             await self._load()
             toks = self._tok(text, return_tensors='pt', truncation=True)
@@ -83,11 +92,11 @@ class TinyBERTSecProvider:
             return
         # Placeholder: using same MiniLM as stand-in unless security-tuned tiny model is downloaded
         # In production, point to a fine-tuned TinyBERT security model artifact.
-        from transformers import AutoTokenizer, AutoModel  # type: ignore
+        from transformers import AutoModel, AutoTokenizer  # type: ignore
         self._tok = AutoTokenizer.from_pretrained('sentence-transformers/paraphrase-MiniLM-L3-v2')
         self._model = AutoModel.from_pretrained('sentence-transformers/paraphrase-MiniLM-L3-v2')
         self._loaded = True
-    async def embed(self, text: str) -> List[float]:
+    async def embed(self, text: str) -> list[float]:
         try:
             await self._load()
             toks = self._tok(text, return_tensors='pt', truncation=True)
@@ -108,11 +117,11 @@ class SecBERTProvider:
         if self._loaded:
             return
         # Placeholder: reuse MiniLM pending security-specific checkpoint integration.
-        from transformers import AutoTokenizer, AutoModel  # type: ignore
+        from transformers import AutoModel, AutoTokenizer  # type: ignore
         self._tok = AutoTokenizer.from_pretrained('sentence-transformers/all-MiniLM-L6-v2')
         self._model = AutoModel.from_pretrained('sentence-transformers/all-MiniLM-L6-v2')
         self._loaded = True
-    async def embed(self, text: str) -> List[float]:
+    async def embed(self, text: str) -> list[float]:
         try:
             await self._load()
             toks = self._tok(text, return_tensors='pt', truncation=True)
@@ -134,7 +143,7 @@ class EmbeddingSelector:
         self.force = os.getenv('EMBEDDING_FORCE_PROVIDER')
         self.complexity_threshold = float(os.getenv('EMBEDDING_COMPLEXITY_THRESHOLD','0.6'))
 
-    def _score_complexity(self, factors: List[str]) -> float:
+    def _score_complexity(self, factors: list[str]) -> float:
         if not factors:
             return 0.0
         roots = set(f.split(':',1)[0] for f in factors)
@@ -143,7 +152,7 @@ class EmbeddingSelector:
         score = 0.5*diversity + 0.5*min(1.0, security_tokens/5)
         return min(1.0, score)
 
-    async def select(self, factors: List[str]) -> EmbeddingProvider:
+    async def select(self, factors: list[str]) -> EmbeddingProvider:
         if self.force:
             return getattr(self, self._force_attr(self.force), self.hash_provider)
         complexity = self._score_complexity(factors)
@@ -175,12 +184,12 @@ class EmbeddingSelector:
             pass
         return provider
 
-async def embed_text(text: str, factors: List[str], selector: Optional[EmbeddingSelector] = None) -> List[float]:
+async def embed_text(text: str, factors: list[str], selector: EmbeddingSelector | None = None) -> list[float]:
     selector = selector or EmbeddingSelector()
     prov = await selector.select(factors)
     try:
         return await prov.embed(text)
-    except Exception as e:
+    except Exception:
         # fallback
         if _fallback_counter:
             try: _fallback_counter.labels(source=prov.name, reason='exception').inc()

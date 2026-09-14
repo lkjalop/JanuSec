@@ -1,0 +1,10 @@
+[
+  {
+    "timestamp": "2025-03-20T20:00:00Z",
+    "supplier_name": "Ingram Micro",
+    "trusted_supplier_domain": "ingrammicro.com.au",
+    "approved_callback_number": "+61 2 9000 1111",
+    "known_bank_reference": "AUS-TRUST-001",
+    "vendor_master_last_updated": "2025-03-10T08:00:00Z"
+  }
+]

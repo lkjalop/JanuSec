@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>JanuSec Live Dashboard</title>
+    <style>
+        body { font-family: 'Courier New', monospace; background: #1a1a1a; color: #00ff00; padding: 20px; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        .section { border: 1px solid #333; margin: 10px 0; padding: 15px; background: #2a2a2a; }
+        .metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        .status { color: #00ff00; }
+        .alert { color: #ff4444; }
+        .warning { color: #ffaa00; }
+        pre { background: #333; padding: 10px; overflow-x: auto; }
+        button { background: #333; color: #00ff00; border: 1px solid #555; padding: 10px; margin: 5px; cursor: pointer; }
+        button:hover { background: #444; }
+        .live-feed { height: 300px; overflow-y: auto; border: 1px solid #555; padding: 10px; background: #111; }
+        .escalated { background:#440000; color:#ff6666; }
+        .event-line { padding:2px 4px; }
+        .badge { padding:2px 6px; border-radius:4px; font-weight:bold; }
+        .sev-ignore { background:#555; color:#eee; }
+        .sev-observe { background:#996600; color:#ffd580; }
+        .sev-alert { background:#660000; color:#ff6666; }
+        .sev-escalated { background:#4b0082; color:#e0c8ff; }
+        .kpi-grid { display:grid; grid-template-columns: repeat(auto-fit,minmax(180px,1fr)); gap:8px; }
+        .kpi { background:#222; padding:8px; border:1px solid #333; font-size:12px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>JanuSec Live Threat Detection Dashboard</h1>
+
+        <div class="section">
+            <h2>System Status</h2>
+            <div id="health-status">Loading...</div>
+        </div>
+
+        <div class="section">
+            <h2>Live Event Feed</h2>
+            <div class="live-feed" id="event-feed"></div>
+        </div>
+
+        <div class="metrics">
+            <div class="section">
+                <h2>Metrics</h2>
+                <pre id="metrics">Loading...</pre>
+            </div>
+
+            <div class="section">
+                <h2>Recent Alerts</h2>
+                <pre id="alerts">Loading...</pre>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>Executive KPIs</h2>
+            <div id="kpi-cards" class="kpi-grid"></div>
+            <div id="narrative" style="margin-top:6px;font-size:12px;color:#ccc;"></div>
+        </div>
+
+        <div class="section">
+            <h2>Recent Incidents</h2>
+            <pre id="incidents">(waiting)</pre>
+        </div>
+
+        <div class="section">
+            <h2>Test Events</h2>
+            <button onclick="sendBenignEvent()">Send Benign Event</button>
+            <button onclick="sendSuspiciousEvent()">Send Suspicious Event</button>
+            <button onclick="sendMaliciousEvent()">Send Malicious Event</button>
+            <button onclick="sendZeekEvent()">Send Zeek DNS Event</button>
+            <button onclick="fetchLastTimeline();">Fetch Timeline (Last Event)</button>
+            <button onclick="replayTrio();">Replay Trio</button>
+            <div id="last-event" style="margin-top:6px;font-size:12px;color:#aaa;"></div>
+            <div id="skip-rate" style="margin-top:4px;font-size:11px;color:#888;"></div>
+        </div>
+
+        <div class="section">
+            <h2>9-Stage Pipeline Status</h2>
+            <div id="pipeline-status">
+                <div id="stage1" class="stage">1. Baseline Filter: <span class="status">READY</span></div>
+                <div id="stage2" class="stage">2. Regex Patterns: <span class="status">READY</span></div>
+                <div id="stage3" class="stage">3. Parent-Child: <span class="status">READY</span></div>
+                <div id="stage4" class="stage">4. Endpoint Hunter: <span class="status">READY</span></div>
+                <div id="stage5" class="stage">5. Auth Burst: <span class="status">READY</span></div>
+                <div id="stage6" class="stage">6. HopGraph: <span class="status">READY</span></div>
+                <div id="stage7" class="stage">7. Adaptive Tuner: <span class="status">READY</span></div>
+                <div id="stage8" class="stage">8. Hunt Lanes: <span class="status">READY</span></div>
+                <div id="stage9" class="stage">9. Correlation: <span class="status">READY</span></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    const API_BASE = 'http://localhost:8080'; // Adjusted to JanuSec platform port
+        let eventCounter = 0;
+
+        let lastEventId = null;
+        function badgeFor(verdict, escalated) {
+            if (escalated) return '<span class="badge sev-escalated">ESCALATED</span>';
+            switch(verdict){
+                case 'ALERT': return '<span class="badge sev-alert">ALERT</span>';
+                case 'OBSERVE': return '<span class="badge sev-observe">OBSERVE</span>';
+                case 'IGNORE': return '<span class="badge sev-ignore">IGNORE</span>';
+                default: return '<span class="badge sev-ignore">'+(verdict||'NA')+'</span>';
+            }
+        }
+        function addToFeed(message, escalated=false, eid=null) {
+            const feed = document.getElementById('event-feed');
+            const timestamp = new Date().toLocaleTimeString();
+            const div = document.createElement('div');
+            div.className = 'event-line' + (escalated ? ' escalated' : '');
+            div.textContent = `[${timestamp}] ${message}`;
+            feed.appendChild(div);
+            feed.scrollTop = feed.scrollHeight;
+            if (eid) { lastEventId = eid; document.getElementById('last-event').textContent = 'Last Event ID: ' + eid; }
+        }
+
+        async function updateHealth() {
+            try {
+                const response = await fetch(`${API_BASE}/health`);
+                const health = await response.json();
+                document.getElementById('health-status').innerHTML = `
+                    Status: <span class="status">${health.status.toUpperCase()}</span><br>
+                    Uptime: ${Math.round(health.uptime_seconds)}s<br>
+                    Events Processed: ${health.events_processed}<br>
+                    Queue Depth: ${health.queue?.depth || 0}<br>
+                    Fast Live Mode: ${health.fast_live_mode}
+                `;
+            } catch (e) {
+                document.getElementById('health-status').innerHTML = `<span class="alert">DISCONNECTED</span>`;
+            }
+        }
+
+        async function updateMetrics() {
+            try {
+                const response = await fetch(`${API_BASE}/metrics`);
+                const metrics = await response.text();
+
+                // Filter relevant metrics
+                const lines = metrics.split('\n');
+                const relevant = lines.filter(line =>
+                    (line.includes('rule_hits') || line.includes('decisions') || line.includes('events_ingested'))
+                    && !line.startsWith('#')
+                ).slice(0, 20);
+
+                document.getElementById('metrics').textContent = relevant.length > 0
+                    ? relevant.join('\n')
+                    : 'No metrics available yet';
+            } catch (e) {
+                document.getElementById('metrics').textContent = 'Metrics unavailable';
+            }
+        }
+
+        async function updateAlerts() {
+            try {
+                const response = await fetch(`${API_BASE}/api/v1/alerts/recent`);
+                const data = await response.json();
+                document.getElementById('alerts').textContent = JSON.stringify(data, null, 2);
+            } catch (e) {
+                document.getElementById('alerts').textContent = 'Alerts unavailable';
+            }
+        }
+
+        async function sendEvent(eventData, description) {
+            try {
+                eventCounter++;
+                eventData.id = `test-${eventCounter}-${Date.now()}`;
+
+                addToFeed(`SENDING: ${description}`);
+
+                const response = await fetch(`${API_BASE}/api/v1/events`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id: eventData.id, details: {
+                        parent_process: { name: eventData.parent_proc },
+                        process: { name: eventData.proc_name },
+                        host: eventData.host,
+                        domain: eventData.domain,
+                        dst_ip: eventData.dest_ip || eventData.dest_ip,
+                        dst_port: eventData.dest_port || eventData.dest_port,
+                        command_line: eventData.command_line,
+                        dns_rcode: eventData.dns_rcode
+                    } })
+                });
+
+                const result = await response.json();
+                addToFeed(`RESULT: ${JSON.stringify(result)}`, false, eventData.id);
+
+                // Simulate pipeline stages
+                setTimeout(() => {
+                    document.getElementById('stage1').innerHTML = '1. Baseline Filter: <span class="warning">PROCESSING</span>';
+                    setTimeout(() => {
+                        document.getElementById('stage1').innerHTML = '1. Baseline Filter: <span class="status">COMPLETE</span>';
+                        document.getElementById('stage2').innerHTML = '2. Regex Patterns: <span class="warning">PROCESSING</span>';
+                    }, 100);
+                }, 100);
+
+            } catch (e) {
+                addToFeed(`ERROR: ${e.message}`);
+            }
+        }
+
+        function sendBenignEvent() {
+            sendEvent({
+                host: "test-host",
+                proc_name: "notepad.exe",
+                parent_proc: "explorer.exe"
+            }, "Benign - Notepad from Explorer");
+        }
+
+        function sendSuspiciousEvent() {
+            sendEvent({
+                host: "test-host",
+                proc_name: "powershell.exe",
+                parent_proc: "winword.exe",
+                dest_port: 443
+            }, "Suspicious - PowerShell from Word");
+        }
+
+        function sendMaliciousEvent() {
+            sendEvent({
+                host: "test-host",
+                proc_name: "powershell.exe",
+                parent_proc: "winword.exe",
+                dest_port: 4444,
+                command_line: "powershell.exe -enc base64_payload"
+            }, "Malicious - Hidden PowerShell C2");
+        }
+
+        function sendZeekEvent() {
+            sendEvent({
+                host: "test-host",
+                proc_name: "zeek:dns",
+                dest_ip: "8.8.8.8",
+                dns_rcode: "NXDOMAIN"
+            }, "Zeek - DNS NXDOMAIN");
+        }
+
+        // SSE Decisions stream subscription
+        (function initSSE(){
+            try {
+                const es = new EventSource(`${API_BASE}/api/v1/stream/decisions`);
+                es.onmessage = (evt) => {
+                    try {
+                        const data = JSON.parse(evt.data);
+                        const b = badgeFor(data.verdict, data.escalated===true);
+                        addToFeed(`DECISION ${b} id=${data.event_id} conf=${(data.confidence||0).toFixed(2)} skipped=${(data.skipped_stages||[]).join(',')}`, data.escalated===true, data.event_id);
+                    } catch (e) {
+                        addToFeed(`SSE_PARSE_ERR: ${e.message}`);
+                    }
+                };
+                es.onerror = () => { addToFeed('SSE: connection error'); };
+            } catch (e) { addToFeed('SSE init failed: '+ e.message); }
+        })();
+
+        async function updateKPIs(){
+            try {
+                const r = await fetch(`${API_BASE}/api/v1/metrics/executive`);
+                const k = await r.json();
+                const cards = [];
+                function card(label, val){ return `<div class="kpi"><div>${label}</div><div style='font-size:14px;color:#0f0;'>${val}</div></div>`; }
+                cards.push(card('RPS', k.ingest_rps));
+                cards.push(card('p50 ms', k.p50_latency_ms));
+                cards.push(card('p95 ms', k.p95_latency_ms));
+                cards.push(card('Skip %', (k.heavy_stage_skip_rate*100).toFixed(1)));
+                cards.push(card('Alert Ratio', (k.alert_ratio*100).toFixed(1)+'%'));
+                cards.push(card('Cost/1K (Real)', k.cost_per_1k_events_real));
+                cards.push(card('Cost/1K (Base)', k.cost_per_1k_events_baseline));
+                cards.push(card('Savings %', k.savings_pct));
+                document.getElementById('kpi-cards').innerHTML = cards.join('');
+                document.getElementById('skip-rate').textContent = `Heavy Stages Skipped: ${(k.heavy_stage_skip_rate*100).toFixed(1)}% (events=${k.events_total})`;
+                document.getElementById('narrative').textContent = `Gating avoided ${(k.heavy_skipped||0)} heavy stage executions, saving ~${k.potential_latency_saved_ms} ms and ${(k.cost_per_1k_events_baseline - k.cost_per_1k_events_real).toFixed(4)} USD per 1K events.`;
+            } catch(e){ /* silent for demo */ }
+        }
+
+        function replayTrio(){
+            const trio = [
+                { proc_name:'notepad.exe', parent_proc:'explorer.exe', host:'demo-host-1' },
+                { proc_name:'powershell.exe', parent_proc:'winword.exe', host:'demo-host-2', dest_port:443 },
+                { proc_name:'powershell.exe', parent_proc:'rundll32.exe', host:'demo-host-3', dest_port:4444, command_line:'pwsh -enc payload' }
+            ];
+            let delay = 0;
+            trio.forEach(ev => { setTimeout(()=> sendEvent(ev, 'Replay Trio'), delay); delay += 400; });
+        }
+
+        // Auto-refresh
+        setInterval(updateHealth, 2000);
+        setInterval(updateMetrics, 5000);
+    setInterval(updateAlerts, 3000);
+    setInterval(updateKPIs, 4000);
+    setInterval(updateIncidents, 5000);
+
+        // Initial load
+        updateHealth();
+        updateMetrics();
+    updateAlerts();
+    updateKPIs();
+        updateIncidents();
+
+        async function updateIncidents(){
+            try {
+                const r = await fetch(`${API_BASE}/api/v1/incidents/recent?limit=25`);
+                const j = await r.json();
+                document.getElementById('incidents').textContent = JSON.stringify(j, null, 2);
+            } catch(e){
+                document.getElementById('incidents').textContent = 'Incidents unavailable';
+            }
+        }
+
+        addToFeed("JanuSec Dashboard initialized");
+        addToFeed("Click buttons to test 9-stage pipeline");
+
+        async function fetchLastTimeline(){
+            if(!lastEventId){ addToFeed('No last event yet'); return; }
+            try {
+                const r = await fetch(`${API_BASE}/api/v1/decisions/timeline/${lastEventId}`);
+                const j = await r.json();
+                if(!j.found){ addToFeed(`Timeline not found for ${lastEventId}`); return; }
+                addToFeed(`TIMELINE ${lastEventId}: stages=${j.timeline.length} final_conf=${j.confidence}`);
+            } catch(e){ addToFeed('Timeline fetch error: '+ e.message); }
+        }
+    </script>
+</body>
+</html>

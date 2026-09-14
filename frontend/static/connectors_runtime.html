@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Janusec Connector Runtime</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body { font-family: Arial, sans-serif; margin: 24px; background: #0f172a; color: #e2e8f0; }
+    h1 { margin: 0 0 16px; }
+    .toolbar { display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
+    input, button { padding: 10px 12px; border-radius: 8px; border: 1px solid #334155; background: #111827; color: #e2e8f0; }
+    button { cursor: pointer; background: #1d4ed8; border-color: #1d4ed8; }
+    .grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+    .card { background: #111827; border: 1px solid #334155; border-left: 6px solid #475569; border-radius: 12px; padding: 16px; }
+    .ok { border-left-color: #16a34a; }
+    .warn { border-left-color: #f59e0b; }
+    .bad { border-left-color: #dc2626; }
+    .meta { font-size: 13px; color: #94a3b8; margin-top: 8px; }
+    pre { white-space: pre-wrap; word-break: break-word; background: #020617; padding: 12px; border-radius: 8px; }
+  </style>
+</head>
+<body>
+  <h1>Connector Runtime</h1>
+  <div class="toolbar">
+    <input id="tenant" value="default" placeholder="tenant">
+    <button onclick="loadStatus()">Refresh</button>
+  </div>
+  <div id="status" class="grid"></div>
+  <script>
+    function tone(c) {
+      if (c.circuit_open || c.status === 'error' || c.status === 'auth_failed') return 'bad';
+      if (!c.healthy || c.status === 'degraded' || c.status === 'misconfigured') return 'warn';
+      return 'ok';
+    }
+    async function loadStatus() {
+      const tenant = document.getElementById('tenant').value || 'default';
+      const res = await fetch('/api/v1/status/connectors', { headers: { 'x-tenant-id': tenant } });
+      const body = await res.json();
+      const root = document.getElementById('status');
+      root.innerHTML = '';
+      for (const c of body.connectors || []) {
+        const el = document.createElement('div');
+        el.className = `card ${tone(c)}`;
+        el.innerHTML = `
+          <h3>${c.name}</h3>
+          <div>Status: <strong>${c.status || 'unknown'}</strong></div>
+          <div>Healthy: <strong>${String(!!c.healthy)}</strong></div>
+          <div>Last count: <strong>${c.last_count ?? 0}</strong></div>
+          <div>Duplicates suppressed: <strong>${c.last_duplicate_count ?? 0}</strong></div>
+          <div>Latency: <strong>${c.last_latency_ms ?? 'n/a'} ms</strong></div>
+          <div>Circuit open: <strong>${String(!!c.circuit_open)}</strong></div>
+          <div class="meta">Checkpoint</div>
+          <pre>${JSON.stringify(c.checkpoint || {}, null, 2)}</pre>
+          <div class="meta">Runtime state</div>
+          <pre>${JSON.stringify(c.runtime_state || {}, null, 2)}</pre>
+        `;
+        root.appendChild(el);
+      }
+    }
+    loadStatus();
+  </script>
+</body>
+</html>

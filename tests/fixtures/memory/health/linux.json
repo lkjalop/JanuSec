@@ -1,0 +1,28 @@
+{
+  "host": "linux-mem-host",
+  "platform": "linux",
+  "volatility": {
+    "linux.pslist": [
+      {"comm": "sshd", "pid": 1122, "ppid": 1},
+      {"comm": "cron", "pid": 776, "ppid": 1}
+    ],
+    "linux.lsof": [
+      {"process": "sshd", "path": "/usr/lib/ssh/sshd", "fd": "3r"}
+    ],
+    "linux.netstat": [
+      {"Process": "sshd", "ForeignAddr": "203.0.113.5:443"}
+    ]
+  },
+  "rekall": {
+    "pslist": [
+      {"comm": "sshd", "pid": 1122}
+    ]
+  },
+  "sandbox": {
+    "status": "submitted",
+    "submissions": [
+      {"adapter": "joe", "verdict": "processing"},
+      {"adapter": "anyrun", "verdict": "processing"}
+    ]
+  }
+}

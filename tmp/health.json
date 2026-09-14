@@ -1,0 +1,1 @@
+{"status":"degraded","components":{"database":{"backend":"uninitialized","available":false,"fallback_active":false,"fallback_reason":null,"last_error":null,"dsn":null},"decision_cache":{"alert_ring_size":0,"decision_cache_size":0,"tenants":[]},"pipeline":{"allowlists_enabled":true}}}

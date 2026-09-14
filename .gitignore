@@ -1,43 +1,174 @@
-# Python
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-*.retry
-
-# Virtual environments
-.venv/
-venv/
-env/
-
-# IDEs & tooling
-.vscode/
-.idea/
-.pytest_cache/
-.mypy_cache/
-coverage.xml
-htmlcov/
-.pyre/
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Logs & temp
-*.log
-*.tmp
-artifacts/
-
-# Node
 node_modules/
 
-# Docker
-*.pid
+# User-owned scratch, acceptance artifacts, screenshots, upload packs, and
+# presentation/benchmark material. Keep local and dirty; do not clean or stash
+# by default. Promote formal fixtures into tests/fixtures/ instead.
+dump/
 
-# Build outputs
-build/
+# Python virtual environments
+.venv/
+.venv-ci/
+
+# Playwright traces
+.playwright_trace_tmp/
+*.trace
+*.stacks
+*.network
+
+# Transient tmp
+.tmp/
+.tmp_*
+*_tmp.py
+
+# Local generated sessions/data (dev)
+data/sessions/
+
+# Misc cache
+__pycache__/
+*.pyc
+*.log
+*.sqlite
+*.db
+server*.log
+server_*.log
+uvicorn*.log
+playwright-report/
+playwright-report/**
+tests/test_*.log
+.vscode/
+.idea/
+/.DS_Store
+npm-debug.log*
+package-lock.json
+yarn-debug.log*
+coverage/
+coverage.*
+reports/
+report_demo.py
 dist/
-*.egg-info/
+build/
+frontend/static/vendor/
 
-# Notebooks checkpoints
-.ipynb_checkpoints/
+# Environment secrets
+.env
+*.env.local
+
+# Transient test outputs and caches
+data/assessments/
+data/llm_cache/
+artifacts/
+.claude/
+_tmp_*
+*.log
+data/approval_keystore.json
+data/bec_state.json
+data/persistence_baseline.json
+data/test_snap.json
+data/test_hg_snapshot*.json
+data/tfidf/
+data/incidents/
+data/jobs/
+data/queues/
+data/replays/
+data/resign_jobs/
+data/training/
+pytest_output*.txt
+pytest_combined*.txt
+hopgraph_out*.txt
+smoke_out*.txt
+models/registry/upload_tmp_*.json
+
+# These files are generated at server startup / runtime and change on every run.
+# They must not be tracked — committing them causes constant dirty-tree noise
+# and can leak tenant state, session data, and internal metrics to git history.
+
+# Tenant and session runtime state
+data/tenants/
+
+# Connector runtime state (live poll cursors — regenerated on start)
+src/data/polling_state/
+src/data/cluster_enrich/
+src/data/tier2/
+
+# Scratch / debug / e2e one-off scripts at repo root
+_*.py
+!**/__init__.py
+_*.txt
+_*.json
+
+# Frontend vendored libraries (checked-in separately or CDN)
+frontend/static/js/vendors/
+d3.min.js
+xlsx.full.min.js
+
+# Playwright output
+test-results/
+data/sessions/
+data/file_batches/
+data/integrations/
+data/memory_jobs/
+data/uploads/
+
+# Offline baselines, models, and ephemeral analysis artefacts
+data/offline_baselines/
+data/tfidf_model.json
+data/tfidf_vectorizer.pkl
+data/correlation_chains*.jsonl
+data/chain_of_custody.jsonl
+data/events.jsonl
+data/crq_shadow.json
+data/log_heartbeat.json
+data/hopgraph_snapshot.json
+data/ewma_history.json
+data/case_queue.json
+data/incident_*.json
+
+# Audit/JSONL event logs (high-churn runtime outputs)
+audits/
+*.jsonl
+
+# Model registry caches
+models/registry/index.json
+models/registry/model-*.json
+
+# Runtime process / server session artifacts
+.server.pid
+*.pid
+start_server_session.err
+start_server_session.out
+
+# Debug scratch dumps at repo root
+tmp_*
+
+# Root-level screenshots (test captures, demo screenshots)
+/*.png
+/meridian-*.png
+/breach-*.png
+
+# Full data directory — DuckDB, hopgraph, uploads, job queues (2GB+, not for git)
+data/
+
+# Unrelated packages / analysis artefacts
+gridverdict_prd_package/
+ewma_roc_summary.csv
+
+# MCP and Playwright runner artifacts
+.playwright-mcp/
+
+
+# Server run logs + pytest scratch output (session artifacts, never commit)
+start_server*.out
+start_server*.err
+pytest_*.txt
+scripts/llm_compare_results.json
+
+# Private runtime credentials, infrastructure plans and personal material
+src/data/tenant_store/
+*.key
+*.json.enc
+*.tfvars
+!*.tfvars.example
+tfplan*
+*.tfstate*
+resumes/
+~$*

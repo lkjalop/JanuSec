@@ -1,0 +1,14 @@
+[Unit]
+Description=JanuSec Normalization Runner
+After=network.target
+
+[Service]
+Type=simple
+User=janusec
+WorkingDirectory=/opt/janusec
+Environment=JNS_DB_DSN=postgresql://postgres:postgres@db:5432/janusec
+ExecStart=/opt/janusec/.venv/bin/python -m service.janusec_runner
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,132 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "gnetId": null,
+  "graphTooltip": 0,
+  "id": null,
+  "iteration": 1629396314667,
+  "links": [],
+  "panels": [
+    {
+      "datasource": null,
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 2,
+      "options": {},
+      "pluginVersion": "8.0.0",
+      "targets": [
+        {
+          "expr": "janusec_precision_daily{tenant=~\"$tenant\",test_id=~\"$test_id\"}",
+          "format": "time_series",
+          "interval": "",
+          "legendFormat": "precision",
+          "refId": "A"
+        }
+      ],
+      "title": "Daily Precision",
+      "type": "timeseries"
+    },
+    {
+      "datasource": null,
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      },
+      "id": 3,
+      "options": {},
+      "pluginVersion": "8.0.0",
+      "targets": [
+        {
+          "expr": "janusec_precision_daily_variant{tenant=~\"$tenant\",test_id=~\"$test_id\"}",
+          "format": "time_series",
+          "legendFormat": "{{variant}}",
+          "refId": "B"
+        }
+      ],
+      "title": "Per-Variant Precision",
+      "type": "timeseries"
+    }
+    ,
+    {
+      "datasource": null,
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 8 },
+      "id": 4,
+      "options": { "showHeader": true },
+      "targets": [
+        {
+          "expr": "sum by (day,variant) (increase(janusec_tp_daily{tenant=~\"$tenant\",test_id=~\"$test_id\"}[1d])) / ignoring(tp) group_left sum by (day,variant) (increase((janusec_tp_daily{tenant=~\"$tenant\",test_id=~\"$test_id\"}[1d]) + (janusec_fp_daily{tenant=~\"$tenant\",test_id=~\"$test_id\"}[1d])))",
+          "format": "table",
+          "legendFormat": "{{variant}}",
+          "refId": "C"
+        }
+      ],
+      "title": "Per-Variant Recent Precision (table)",
+      "type": "table"
+    }
+  ],
+  "schemaVersion": 27,
+  "style": "dark",
+  "tags": [
+    "janusec",
+    "precision"
+  ],
+  "templating": {
+    "list": [
+      {
+        "allValue": null,
+        "current": {},
+        "hide": 0,
+        "label": "Tenant",
+        "name": "tenant",
+        "options": [],
+        "query": "label_values(janusec_precision_daily, tenant)",
+        "type": "query"
+      },
+      {
+        "allValue": null,
+        "current": {},
+        "hide": 0,
+        "label": "Test ID",
+        "name": "test_id",
+        "options": [],
+        "query": "label_values(janusec_precision_daily, test_id)",
+        "type": "query"
+      },
+      {
+        "allValue": null,
+        "current": {},
+        "hide": 0,
+        "label": "Variant",
+        "name": "variant",
+        "options": [],
+        "query": "label_values(janusec_precision_daily_variant, variant)",
+        "type": "query"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-7d",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Janusec Precision",
+  "uid": null
+}

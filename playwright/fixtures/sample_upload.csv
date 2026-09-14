@@ -1,0 +1,2 @@
+host,process,src_ip,dst_ip,domain,file_hash
+demo-host,demo.exe,10.0.0.5,8.8.8.8,example.com,DEADBEEF1234

@@ -7,12 +7,14 @@ Events (from dns.log adapter) should include:
 Maintains rolling counts with TTL for NXDOMAIN rate heuristic.
 """
 from __future__ import annotations
-import time, threading
+
+import threading
+import time
 from typing import Dict, Tuple
 
 _TTL = int(__import__('os').getenv('DNS_NX_TTL_SECONDS','900'))
 _lock = threading.Lock()
-_counts: Dict[str, dict] = {}
+_counts: dict[str, dict] = {}
 
 def record(host: str | None, rcode: str | int | None):
     if not host:
@@ -33,7 +35,7 @@ def record(host: str | None, rcode: str | int | None):
         elif rcode == 3:  # typical NXDOMAIN numeric
             rec['nxd'] += 1
 
-def get(host: str | None) -> Tuple[int,int]:
+def get(host: str | None) -> tuple[int,int]:
     if not host:
         return (0,0)
     now = time.time()

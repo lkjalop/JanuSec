@@ -1,0 +1,40 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.4",
+  "version": 1,
+  "components": [
+    {
+      "type": "library",
+      "name": "log4j-core",
+      "version": "2.14.1",
+      "purl": "pkg:maven/org.apache.logging.log4j/log4j-core@2.14.1",
+      "hashes": {"sha-256": "d34db33f00000000000000000000000000000000000000000000000000000001"},
+      "licenses": ["Apache-2.0"]
+    },
+    {
+      "type": "library",
+      "name": "spring-core",
+      "version": "5.3.17",
+      "purl": "pkg:maven/org.springframework/spring-core@5.3.17",
+      "hashes": {"sha-256": "d34db33f00000000000000000000000000000000000000000000000000000002"},
+      "licenses": ["Apache-2.0"]
+    },
+    {
+      "type": "library",
+      "name": "openssl",
+      "version": "1.0.2u",
+      "purl": "pkg:generic/openssl@1.0.2u",
+      "hashes": {"sha-256": "d34db33f00000000000000000000000000000000000000000000000000000003"},
+      "licenses": ["OpenSSL"]
+    },
+    {
+      "type": "library",
+      "name": "jackson-databind",
+      "version": "2.9.9",
+      "purl": "pkg:maven/com.fasterxml.jackson.core/jackson-databind@2.9.9",
+      "hashes": {"sha-256": "d34db33f00000000000000000000000000000000000000000000000000000004"},
+      "licenses": ["Apache-2.0"]
+    }
+  ]
+}
+

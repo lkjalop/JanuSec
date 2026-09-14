@@ -1,0 +1,3 @@
+Threat Hunter Brief:
+
+Hunt Next: pivot on host/process hashes and network egress to suspect IPs.

@@ -1,0 +1,62 @@
+# Example alert rules for Janusec Guardrails & SLOs
+# Import into Prometheus Alertmanager or Grafana Alerting depending on your stack.
+
+# Global SLOs
+- name: janusec-global-slo
+  rules:
+  - alert: JanusecSLOSuccessRateLow
+    expr: janusec_slo_success_rate < 0.97
+    for: 10m
+    labels:
+      severity: warning
+    annotations:
+      summary: Global dispatch success rate below target
+      description: Success rate is {{ $value }} (< 0.97) for over 10 minutes.
+  - alert: JanusecGuardrailErrorsHigh
+    expr: janusec_slo_errors_5xx_rate > 0.02
+    for: 10m
+    labels:
+      severity: warning
+    annotations:
+      summary: Elevated 5xx error rate in guardrails path
+      description: 5xx rate is {{ $value }} (> 0.02) for over 10 minutes.
+
+# Per-tenant SLOs
+- name: janusec-tenant-slo
+  rules:
+  - alert: JanusecTenantSLOSuccessRateLow
+    expr: janusec_slo_success_rate_tenant{tenant_id=~".+"} < 0.95
+    for: 15m
+    labels:
+      severity: critical
+    annotations:
+      summary: Tenant {{ $labels.tenant_id }} success rate below target
+      description: Tenant {{ $labels.tenant_id }} success rate is {{ $value }} (< 0.95) for 15m.
+  - alert: JanusecTenantMTTCSpiking
+    expr: janusec_guardrail_mttc_seconds_tenant{tenant_id=~".+"} > 5
+    for: 10m
+    labels:
+      severity: warning
+    annotations:
+      summary: Tenant {{ $labels.tenant_id }} MTTC elevated
+      description: Tenant {{ $labels.tenant_id }} EWMA MTTC is {{ $value }}s (> 5s) for 10m.
+
+# Azure Defender Ingest: Gap & Lag
+- name: azure-defender-ingest
+  rules:
+  - alert: AzureIngestLagHigh
+    expr: max_over_time(posture_ingest_lag_seconds[5m]) > 120
+    for: 5m
+    labels:
+      severity: warning
+    annotations:
+      summary: Azure ingest lag high
+      description: Max ingest lag is {{ $value }}s (> 120s) for 5m.
+  - alert: AzureIngestGapNoData
+    expr: sum by (tenant) (increase(posture_ingest_total[10m])) == 0
+    for: 10m
+    labels:
+      severity: critical
+    annotations:
+      summary: Azure ingest gap (no findings)
+      description: "No posture findings ingested for tenant {{ $labels.tenant }} in the last 10 minutes."

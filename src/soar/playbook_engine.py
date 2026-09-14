@@ -6,13 +6,14 @@ Author: Security Automation Team
 Version: 1.0.0
 """
 
-import json
 import asyncio
+import json
 import logging
+from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
-from typing import Dict, List, Any, Optional
-from dataclasses import dataclass, asdict
 from enum import Enum
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
+
 import aiohttp
 import yaml
 
@@ -39,22 +40,22 @@ class ActionType(Enum):
 @dataclass
 class PlaybookAction:
     action_type: ActionType
-    parameters: Dict[str, Any]
+    parameters: dict[str, Any]
     timeout_seconds: int = 300
     retry_count: int = 3
-    depends_on: List[str] = None
+    depends_on: Optional[list[str]] = None
     approval_required: bool = False
 
 
-@dataclass 
+@dataclass
 class PlaybookExecution:
     execution_id: str
     playbook_id: str
     triggered_by: str
     event_id: str
     status: PlaybookStatus
-    actions: List[PlaybookAction]
-    results: Dict[str, Any]
+    actions: list[PlaybookAction]
+    results: dict[str, Any]
     started_at: str
     completed_at: Optional[str] = None
     error_message: Optional[str] = None
@@ -66,10 +67,11 @@ class EclipseXDRIntegration:
     def __init__(self, api_key: str, base_url: str):
         self.api_key = api_key
         self.base_url = base_url.rstrip('/')
-        self.session = None
+        # session is initialized asynchronously; mark as Optional for type-checkers
+        self.session: Optional['aiohttp.ClientSession'] = None
         self.logger = logging.getLogger(__name__)
     
-    async def initialize(self):
+    async def initialize(self) -> None:
         """Initialize HTTP session for XDR API calls"""
         self.session = aiohttp.ClientSession(
             headers={
@@ -79,7 +81,7 @@ class EclipseXDRIntegration:
             timeout=aiohttp.ClientTimeout(total=30)
         )
     
-    async def isolate_endpoint(self, endpoint_id: str, reason: str) -> Dict[str, Any]:
+    async def isolate_endpoint(self, endpoint_id: str, reason: str) -> dict[str, Any]:
         """Isolate an endpoint through Eclipse XDR"""
         
         payload = {
@@ -90,7 +92,9 @@ class EclipseXDRIntegration:
         }
         
         try:
-            async with self.session.post(
+            session = self.session
+            assert session is not None
+            async with session.post(
                 f'{self.base_url}/endpoints/actions',
                 json=payload
             ) as response:
@@ -117,7 +121,7 @@ class EclipseXDRIntegration:
                 'error': f"Exception: {str(e)}"
             }
     
-    async def block_ip_address(self, ip_address: str, duration_hours: int = 24) -> Dict[str, Any]:
+    async def block_ip_address(self, ip_address: str, duration_hours: int = 24) -> dict[str, Any]:
         """Block an IP address through Eclipse XDR firewall"""
         
         payload = {
@@ -129,7 +133,9 @@ class EclipseXDRIntegration:
         }
         
         try:
-            async with self.session.post(
+            session = self.session
+            assert session is not None
+            async with session.post(
                 f'{self.base_url}/network/block-ip',
                 json=payload
             ) as response:
@@ -156,7 +162,7 @@ class EclipseXDRIntegration:
                 'error': f"Exception: {str(e)}"
             }
     
-    async def quarantine_file(self, file_hash: str, endpoints: List[str]) -> Dict[str, Any]:
+    async def quarantine_file(self, file_hash: str, endpoints: list[str]) -> dict[str, Any]:
         """Quarantine a file across specified endpoints"""
         
         payload = {
@@ -167,7 +173,9 @@ class EclipseXDRIntegration:
         }
         
         try:
-            async with self.session.post(
+            session = self.session
+            assert session is not None
+            async with session.post(
                 f'{self.base_url}/files/quarantine',
                 json=payload
             ) as response:
@@ -194,7 +202,7 @@ class EclipseXDRIntegration:
                 'error': f"Exception: {str(e)}"
             }
     
-    async def disable_user_account(self, username: str, domain: str = None) -> Dict[str, Any]:
+    async def disable_user_account(self, username: str, domain: Optional[str] = None) -> dict[str, Any]:
         """Disable a user account through Eclipse XDR"""
         
         payload = {
@@ -206,7 +214,9 @@ class EclipseXDRIntegration:
         }
         
         try:
-            async with self.session.post(
+            session = self.session
+            assert session is not None
+            async with session.post(
                 f'{self.base_url}/users/disable',
                 json=payload
             ) as response:
@@ -237,22 +247,23 @@ class EclipseXDRIntegration:
 class AIEnrichmentService:
     """AI-powered threat intelligence enrichment"""
     
-    def __init__(self, api_key: str = None):
+    def __init__(self, api_key: Optional[str] = None):
         self.api_key = api_key
-        self.session = None
+        # session is initialized asynchronously; mark Optional for mypy
+        self.session: Optional['aiohttp.ClientSession'] = None
         self.logger = logging.getLogger(__name__)
     
-    async def initialize(self):
+    async def initialize(self) -> None:
         """Initialize AI enrichment service"""
         self.session = aiohttp.ClientSession(
             timeout=aiohttp.ClientTimeout(total=60)
         )
     
-    async def enrich_threat_context(self, event_data: Dict[str, Any]) -> Dict[str, Any]:
+    async def enrich_threat_context(self, event_data: dict[str, Any]) -> dict[str, Any]:
         """Enrich threat context using AI analysis"""
         
         # Prepare prompt for AI analysis
-        prompt = self._build_enrichment_prompt(event_data)
+        self._build_enrichment_prompt(event_data)
         
         try:
             # In production, this would call your preferred AI service
@@ -277,7 +288,7 @@ class AIEnrichmentService:
                 'enrichment': {}
             }
     
-    def _build_enrichment_prompt(self, event_data: Dict[str, Any]) -> str:
+    def _build_enrichment_prompt(self, event_data: dict[str, Any]) -> str:
         """Build AI prompt for threat analysis"""
         
         return f"""
@@ -297,7 +308,7 @@ class AIEnrichmentService:
         5. Confidence level (0.0 - 1.0)
         """
     
-    async def _simulate_ai_analysis(self, event_data: Dict[str, Any]) -> Dict[str, Any]:
+    async def _simulate_ai_analysis(self, event_data: dict[str, Any]) -> dict[str, Any]:
         """Simulate AI analysis (replace with actual AI service call)"""
         
         # Simulate processing time
@@ -348,12 +359,12 @@ class AIEnrichmentService:
 class NotificationService:
     """Send notifications through various channels"""
     
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: dict[str, Any]):
         self.config = config
         self.logger = logging.getLogger(__name__)
     
     async def send_slack_notification(self, channel: str, message: str, 
-                                    severity: str = 'medium') -> Dict[str, Any]:
+                                    severity: str = 'medium') -> dict[str, Any]:
         """Send notification to Slack channel"""
         
         # Color coding based on severity
@@ -394,8 +405,8 @@ class NotificationService:
             self.logger.error(f"Exception sending Slack notification: {e}")
             return {'success': False, 'error': str(e)}
     
-    async def send_email_notification(self, recipients: List[str], subject: str, 
-                                    body: str) -> Dict[str, Any]:
+    async def send_email_notification(self, recipients: list[str], subject: str, 
+                                    body: str) -> dict[str, Any]:
         """Send email notification (placeholder for SMTP integration)"""
         
         # In production, integrate with SMTP server or email service
@@ -412,13 +423,13 @@ class NotificationService:
 class TicketingIntegration:
     """Integration with ticketing systems (ServiceNow, Jira, etc.)"""
     
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: dict[str, Any]):
         self.config = config
         self.system_type = config.get('system_type', 'servicenow')
         self.logger = logging.getLogger(__name__)
     
     async def create_security_ticket(self, title: str, description: str, 
-                                   severity: str, assignee: str = None) -> Dict[str, Any]:
+                                   severity: str, assignee: Optional[str] = None) -> dict[str, Any]:
         """Create a security incident ticket"""
         
         ticket_data = {
@@ -444,7 +455,7 @@ class TicketingIntegration:
             self.logger.error(f"Failed to create ticket: {e}")
             return {'success': False, 'error': str(e)}
     
-    async def _create_servicenow_ticket(self, ticket_data: Dict[str, Any]) -> Dict[str, Any]:
+    async def _create_servicenow_ticket(self, ticket_data: dict[str, Any]) -> dict[str, Any]:
         """Create ticket in ServiceNow"""
         
         servicenow_config = self.config.get('servicenow', {})
@@ -472,8 +483,16 @@ class TicketingIntegration:
                 else:
                     error_text = await response.text()
                     return {'success': False, 'error': f"HTTP {response.status}: {error_text}"}
+
+    async def _create_jira_ticket(self, ticket_data: dict[str, Any]) -> dict[str, Any]:
+        """Create a Jira ticket (simplified stub)"""
+        # For now, simulate Jira ticket creation
+        import uuid
+        ticket_key = f"JIRA-{str(uuid.uuid4())[:8].upper()}"
+        self.logger.info(f"Simulated Jira ticket created: {ticket_key}")
+        return {'success': True, 'ticket_number': ticket_key, 'ticket_id': str(uuid.uuid4())}
     
-    async def _simulate_ticket_creation(self, ticket_data: Dict[str, Any]) -> Dict[str, Any]:
+    async def _simulate_ticket_creation(self, ticket_data: dict[str, Any]) -> dict[str, Any]:
         """Simulate ticket creation for demo purposes"""
         
         import uuid
@@ -500,7 +519,7 @@ class TicketingIntegration:
 class SOARPlaybookEngine:
     """Main SOAR playbook execution engine"""
     
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: dict[str, Any]):
         self.config = config
         self.xdr_integration = EclipseXDRIntegration(
             config['eclipse_xdr']['api_key'],
@@ -515,21 +534,22 @@ class SOARPlaybookEngine:
         self.ticketing = TicketingIntegration(
             config.get('ticketing', {})
         )
-        
-        self.active_executions = {}
-        self.playbook_definitions = {}
+
+        # Typed module state
+        self.active_executions: dict[str, PlaybookExecution] = {}
+        self.playbook_definitions: dict[str, dict[str, Any]] = {}
         self.logger = logging.getLogger(__name__)
-        
+
         # Load playbook definitions
         self._load_playbook_definitions()
     
-    async def initialize(self):
+    async def initialize(self) -> None:
         """Initialize all SOAR components"""
         await self.xdr_integration.initialize()
         await self.ai_enrichment.initialize()
         self.logger.info("SOAR playbook engine initialized")
     
-    def _load_playbook_definitions(self):
+    def _load_playbook_definitions(self) -> None:
         """Load playbook definitions from configuration"""
         
         self.playbook_definitions = {
@@ -669,7 +689,7 @@ class SOARPlaybookEngine:
             }
         }
     
-    async def execute_playbook(self, playbook_id: str, event_data: Dict[str, Any], 
+    async def execute_playbook(self, playbook_id: str, event_data: dict[str, Any],
                              triggered_by: str = 'system') -> str:
         """Execute a SOAR playbook"""
         
@@ -714,24 +734,23 @@ class SOARPlaybookEngine:
         
         return execution_id
     
-    async def _execute_playbook_async(self, execution: PlaybookExecution, 
-                                    event_data: Dict[str, Any]):
+    async def _execute_playbook_async(self, execution: PlaybookExecution,
+                                    event_data: dict[str, Any]) -> None:
         """Execute playbook actions asynchronously"""
-        
         execution.status = PlaybookStatus.RUNNING
-        completed_actions = set()
-        
+        completed_actions: set[str] = set()
+
         try:
             while len(completed_actions) < len(execution.actions):
                 # Find actions ready to execute
-                ready_actions = []
-                
+                ready_actions: list[tuple[int, PlaybookAction, str]] = []
+
                 for i, action in enumerate(execution.actions):
                     action_id = f"action_{i}"
-                    
+
                     if action_id in completed_actions:
                         continue
-                    
+
                     # Check dependencies
                     if action.depends_on:
                         dependencies_met = all(
@@ -741,21 +760,21 @@ class SOARPlaybookEngine:
                         )
                         if not dependencies_met:
                             continue
-                    
+
                     ready_actions.append((i, action, action_id))
-                
+
                 if not ready_actions:
                     break  # No more actions can be executed
-                
+
                 # Execute ready actions
-                for action_index, action, action_id in ready_actions:
+                for _action_index, action, action_id in ready_actions:
                     try:
                         result = await self._execute_single_action(action, event_data, execution.results)
                         execution.results[action_id] = result
                         completed_actions.add(action_id)
-                        
+
                         self.logger.info(f"Completed action {action_id}: {action.action_type.value}")
-                        
+
                     except Exception as e:
                         self.logger.error(f"Action {action_id} failed: {e}")
                         execution.results[action_id] = {
@@ -763,24 +782,24 @@ class SOARPlaybookEngine:
                             'error': str(e)
                         }
                         completed_actions.add(action_id)  # Mark as completed even if failed
-                
+
                 # Brief pause between action batches
                 await asyncio.sleep(1)
-            
+
             execution.status = PlaybookStatus.COMPLETED
             execution.completed_at = datetime.utcnow().isoformat()
-            
+
             self.logger.info(f"Playbook execution {execution.execution_id} completed successfully")
-            
+
         except Exception as e:
             execution.status = PlaybookStatus.FAILED
             execution.error_message = str(e)
             execution.completed_at = datetime.utcnow().isoformat()
-            
+
             self.logger.error(f"Playbook execution {execution.execution_id} failed: {e}")
     
-    async def _execute_single_action(self, action: PlaybookAction, event_data: Dict[str, Any], 
-                                   previous_results: Dict[str, Any]) -> Dict[str, Any]:
+    async def _execute_single_action(self, action: PlaybookAction, event_data: dict[str, Any],
+                                   previous_results: dict[str, Any]) -> dict[str, Any]:
         """Execute a single playbook action"""
         
         # Substitute variables in parameters
@@ -831,8 +850,8 @@ class SOARPlaybookEngine:
         else:
             return {'success': False, 'error': f'Unknown action type: {action.action_type}'}
     
-    def _resolve_parameters(self, parameters: Dict[str, Any], event_data: Dict[str, Any], 
-                          previous_results: Dict[str, Any]) -> Dict[str, Any]:
+    def _resolve_parameters(self, parameters: dict[str, Any], event_data: dict[str, Any],
+                          previous_results: dict[str, Any]) -> dict[str, Any]:
         """Resolve variable placeholders in action parameters"""
         
         resolved = {}
@@ -864,7 +883,7 @@ class SOARPlaybookEngine:
         
         return resolved
     
-    def _get_nested_value(self, data: Dict[str, Any], path: List[str]) -> Any:
+    def _get_nested_value(self, data: dict[str, Any], path: list[str]) -> Any:
         """Get nested value from dictionary using path"""
         
         current = data
@@ -875,7 +894,7 @@ class SOARPlaybookEngine:
                 return None
         return current
     
-    def get_execution_status(self, execution_id: str) -> Optional[Dict[str, Any]]:
+    def get_execution_status(self, execution_id: str) -> Optional[dict[str, Any]]:
         """Get status of a playbook execution"""
         
         if execution_id not in self.active_executions:
@@ -916,7 +935,7 @@ SOAR_CONFIG = {
 }
 
 
-async def demo_soar_playbook():
+async def demo_soar_playbook() -> None:
     """Demonstrate SOAR playbook execution"""
     
     # Initialize SOAR engine
@@ -950,12 +969,16 @@ async def demo_soar_playbook():
     # Monitor execution status
     while True:
         status = soar_engine.get_execution_status(execution_id)
-        print(f"Status: {status['status']}")
-        
-        if status['status'] in ['completed', 'failed']:
-            print(f"Final results: {json.dumps(status['results'], indent=2)}")
+        if not status:
+            print("Status: unknown")
+            await asyncio.sleep(5)
+            continue
+        print(f"Status: {status.get('status')}")
+
+        if status.get('status') in ['completed', 'failed']:
+            print(f"Final results: {json.dumps(status.get('results') or {}, indent=2)}")
             break
-        
+
         await asyncio.sleep(5)
 
 

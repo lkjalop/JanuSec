@@ -1,0 +1,8 @@
+{
+  "tactics": {
+    "Initial Access": 3,
+    "Execution": 3,
+    "Persistence": 2
+  },
+  "min_rules_total": 20
+}

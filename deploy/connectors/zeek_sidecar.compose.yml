@@ -1,0 +1,38 @@
+version: '3.9'
+
+services:
+  zeek:
+    image: blacktop/zeek:latest
+    command: >-
+      sh -c "\
+        echo 'redef LogAscii::use_json = T;' > /usr/local/zeek/share/zeek/site/local.zeek && \
+        zeek -C -r /pcap/input.pcap local"
+    volumes:
+      - ./pcap:/pcap:ro
+      - zeek-logs:/usr/local/zeek/logs
+    restart: unless-stopped
+
+  fluent-bit:
+    image: cr.fluentbit.io/fluent/fluent-bit:2.2
+    depends_on:
+      - zeek
+    environment:
+      - JANUSEC_API_HOST=app
+      - JANUSEC_API_PORT=8080
+      - JANUSEC_API_PATH=/api/v1/stream/ingest
+      - JANUSEC_API_KEY=devkey123
+      - JANUSEC_TENANT=default
+    volumes:
+      - zeek-logs:/zeek/logs:ro
+      - ./fluentbit_zeek_to_http.conf:/fluent-bit/etc/fluentbit_zeek_to_http.conf:ro
+    command: ["-c", "/fluent-bit/etc/fluentbit_zeek_to_http.conf"]
+    restart: unless-stopped
+
+volumes:
+  zeek-logs:
+
+# Usage:
+# 1) Place a PCAP at ./pcap/input.pcap
+# 2) Start your API stack (service name 'app' reachable at port 8080)
+# 3) docker compose -f deploy/connectors/zeek_sidecar.compose.yml up
+#    Zeek parses PCAP into JSON logs; Fluent Bit tails and POSTs to /api/v1/stream/ingest (compat alias)

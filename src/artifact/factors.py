@@ -1,6 +1,10 @@
 from __future__ import annotations
-from typing import List, Dict, Any
-import math, re, time
+
+import math
+import re
+import time
+from typing import Any, Dict, List
+
 from .models import ArtifactObservation, FactorCategory
 
 # Simple pattern libraries
@@ -40,8 +44,8 @@ BASE64_RE = re.compile(r"(?i)(?:-enc\s+|encodedcommand\s+)?[A-Za-z0-9+/]{60,}={0
 OBFUSCATION_TOKENS = ['`','^','%','${','||',';','&&']
 
 
-def extract_static(obs: ArtifactObservation, meta: Dict[str, Any]):
-    path_l = (obs.path or '').lower()
+def extract_static(obs: ArtifactObservation, meta: dict[str, Any]):
+    (obs.path or '').lower()
     if obs.artifact_type in ('executable','driver'):
         if not meta.get('signed', True):
             add_factor(obs, 'unsigned_binary')
@@ -57,7 +61,7 @@ def extract_static(obs: ArtifactObservation, meta: Dict[str, Any]):
         if meta.get('pdf_embedded_js'): add_factor(obs,'pdf_embedded_js')
 
 
-def extract_script(obs: ArtifactObservation, meta: Dict[str, Any]):
+def extract_script(obs: ArtifactObservation, meta: dict[str, Any]):
     if obs.artifact_type == 'script' or (obs.path and any(obs.path.lower().endswith(e) for e in ['.ps1','.vbs','.js','.bat','.cmd'])):
         cmd = meta.get('command_line','') or ''
         if BASE64_RE.search(cmd):
@@ -68,7 +72,7 @@ def extract_script(obs: ArtifactObservation, meta: Dict[str, Any]):
             add_factor(obs,'script_obfuscation_high')
 
 
-def extract_lolbin(obs: ArtifactObservation, meta: Dict[str, Any]):
+def extract_lolbin(obs: ArtifactObservation, meta: dict[str, Any]):
     name_l = (obs.name or '').lower()
     cmd = (meta.get('command_line') or '').lower()
     if any(lb in name_l for lb in LOLBINS) or any(lb in cmd for lb in LOLBINS):
@@ -77,7 +81,7 @@ def extract_lolbin(obs: ArtifactObservation, meta: Dict[str, Any]):
         add_factor(obs,'tunneling_utility')
 
 
-def extract_origin(obs: ArtifactObservation, meta: Dict[str, Any]):
+def extract_origin(obs: ArtifactObservation, meta: dict[str, Any]):
     if meta.get('zone_id') in (3,'3','internet') or meta.get('download_origin'):
         # fresh download if age < 24h
         age = time.time() - obs.first_seen
@@ -85,7 +89,7 @@ def extract_origin(obs: ArtifactObservation, meta: Dict[str, Any]):
             add_factor(obs,'fresh_download')
 
 
-def extract_persistence(obs: ArtifactObservation, meta: Dict[str, Any]):
+def extract_persistence(obs: ArtifactObservation, meta: dict[str, Any]):
     if meta.get('registry_autorun'): add_factor(obs,'persistence_registry')
     if meta.get('scheduled_task_hidden'): add_factor(obs,'scheduled_task_hidden')
     if meta.get('wmi_consumer'): add_factor(obs,'wmi_persistence_consumer')
@@ -110,7 +114,7 @@ def extract_reputation(obs: ArtifactObservation):
         if ratio >= 0.7: add_factor(obs,'vt_ratio_high')
 
 
-def add_factor(obs: ArtifactObservation, name: str, details: Dict[str, Any] | None = None):
+def add_factor(obs: ArtifactObservation, name: str, details: dict[str, Any] | None = None):
     if name not in obs.factors:
         obs.factors.append(name)
         obs.factor_details[name] = details or {}
@@ -126,7 +130,7 @@ def compute_weighted_base(obs: ArtifactObservation) -> float:
     return min(1.0, max(0.0, total))
 
 
-def run_all(obs: ArtifactObservation, meta: Dict[str, Any]):
+def run_all(obs: ArtifactObservation, meta: dict[str, Any]):
     extract_static(obs, meta)
     extract_script(obs, meta)
     extract_lolbin(obs, meta)

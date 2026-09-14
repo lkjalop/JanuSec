@@ -1,0 +1,29 @@
+C:\Program Files\Example\bad.exe 2023-12-12 08:15:00 Flags: 3
+C:\Windows\System32\good.exe 2023-10-01 00:00:00 Flags: 1
+C:\Program Files (x86)\Legacy\oldtool.exe 2022-05-10 14:22:11 Flags: 0
+C:\Users\svc_account\AppData\Local\Temp\tmp1234.exe 2024-01-01 01:02:03 Flags: 7
+C:\Program Files\Example\bad.exe 2023-12-12T08:15:00 Flags: 3
+C:\Program Files\Another\weird name.exe 2023-11-11 11:11:11 Flags: 2
+C:\opt\notwindows\fake.exe 2023-01-01 00:00:00 Flags: 0
+C:\Windows\SysWOW64\helper.dll 2023-09-09 09:09:09 Flags: 1
+C:\Windows\System32\drivers\dxgkrnl.sys 2022-12-01 23:59:59 Flags: 0
+C:\Program Files\Example\subdir\nested.exe 2023-08-08 08:08:08 Flags: 4
+C:\Users\Alice\Downloads\installer.exe 2023-07-07 07:07:07 Flags: 1
+C:\Users\Bob\Desktop\run me.exe 2023-06-06 06:06:06 Flags: 0
+C:\Program Files\Example\space in name.exe 2023-05-05 05:05:05 Flags: 3
+C:\Program Files\Example\weird_chars-1.0.0.exe 2023-04-04 04:04:04 Flags: 1
+C:\Windows\Temp\suspicious.tmp.exe 2023-03-03 03:03:03 Flags: 7
+C:\Users\Service\AppData\Local\Programs\ServiceApp\svc.exe 2024-01-02 12:00:00 Flags: 2
+C:\Program Files\Common Files\helper.exe 2023-02-02 02:02:02 Flags: 0
+C:\Program Files\Example\nested\deep\deep.exe 2021-12-12 12:12:12 Flags: 6
+C:\Windows\Prefetch\chrome.exe-1A2B3C4D.pf 2020-01-01 00:00:00 Flags: 1
+C:\Windows\System32\good.exe 2023-10-01 00:00:00 Flags: 1
+C:\Windows\SysNative\legacy.exe 2022-11-11 11:11:11 Flags: 1
+C:\Program Files\Example\another_bad.exe 2023-12-24 00:00:00 Flags: 3
+C:\Users\bob\AppData\Local\Programs\bob\bob.exe 2023-01-15 13:14:15 Flags: 0
+C:\Program Files\Example\weird.exe 2023-12-01 10:10:10 Flags: 4
+C:\Windows\System32\notepad.exe 2022-02-02 02:02:02 Flags: 1
+C:\Program Files\Example\unicode_测试.exe 2023-03-03 03:03:03 Flags: 2
+C:\Users\admin\Desktop\runme.bat 2024-01-01 00:00:01 Flags: 0
+C:\Users\guest\AppData\Local\Temp\payload.bin 2023-12-31 23:59:58 Flags: 7
+C:\Program Files\Example\bad.exe 2023-12-12 08:15:01 Flags: 3

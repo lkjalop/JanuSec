@@ -1,0 +1,450 @@
+# Factor Specification Bundle (Version 1)
+# Fields:
+# id: unique factor id
+# domain: primary domain
+# kill_chain: list of stages aligned to Lockheed/MITRE chain
+# mitre_techniques: mapped technique IDs (or placeholders TBD)
+# stride: STRIDE categories (optional)
+# description: short summary
+# detection_logic: human-readable heuristic
+# telemetry: required event fields / sources
+# thresholds: numeric or pattern thresholds
+# severity_weight: relative impact (0-1)
+# suppression_hints: conditions to suppress benign cases
+# remediation: recommended actions / controls
+# sample_query: pseudo query or DSL fragment
+# status: planned|beta|production
+# version: spec version for factor
+
+factors:
+  - id: iam:privilege_chain_escalation
+    domain: iam
+    kill_chain: [PrivilegeEscalation, LateralMovement]
+    mitre_techniques: [T1068, T1078.004]
+    stride: [Elevation of Privilege]
+    description: Multi-step accumulation of higher privilege roles within short window.
+    detection_logic: iam.privilege_delta_count >= 20
+    telemetry: [iam.change_type, iam.roles_before, iam.roles_after, iam.privilege_delta_count, actor.principal_id, ts]
+    thresholds:
+      cumulative_privilege_delta: 20
+      window_minutes: 120
+    severity_weight: 0.85
+    suppression_hints: ["temporary_elevation_flag=true"]
+    remediation: Revoke newly added high-privilege roles; enforce MFA re-challenge; log change ticket.
+    sample_query: principal grant events WINDOW 120m SUM privilege_delta_count > 20 AND roles_after ~= /(Admin|Power|Root)/
+    status: planned
+    version: 1
+
+  - id: iam:unused_privilege_activation
+    domain: iam
+    kill_chain: [PrivilegeEscalation]
+    mitre_techniques: [T1078]
+    stride: [Elevation of Privilege]
+    description: Dormant high-privilege role activated after long inactivity.
+    detection_logic: Compare last activity timestamp for high-privilege role vs current activation; flag if inactivity > 30d.
+    telemetry: [iam.change_type, iam.roles_after, actor.principal_id, ts, metrics.last_role_activity_days]
+    thresholds:
+      inactivity_days: 30
+    severity_weight: 0.6
+    suppression_hints: ["scheduled_rotation"]
+    remediation: Validate business justification; monitor subsequent access; consider temporary scope reduction.
+    sample_query: role_grant AND last_role_activity_days > 30 AND roles_after contains "Admin"
+    status: planned
+    version: 1
+
+  - id: iam:abnormal_role_grant_volume
+    domain: iam
+    kill_chain: [PrivilegeEscalation, Reconnaissance]
+    mitre_techniques: [T1087]
+    stride: [Elevation of Privilege]
+    description: Spike in number of role grants by single actor compared to baseline.
+    detection_logic: Compute EWMA of grants_per_hour; if current hour > baseline_mean * 3.
+    telemetry: [iam.change_type, actor.principal_id, ts]
+    thresholds:
+      multiplier: 3
+      min_grants: 5
+    severity_weight: 0.55
+    suppression_hints: ["bulk_onboarding", "quarterly_audit"]
+    remediation: Audit granted roles; temporarily pause further grants; verify change tickets.
+    sample_query: COUNT(role_grant) BY actor_principal OVER 1h > 3 * EWMA(actor_principal)
+    status: planned
+    version: 1
+
+  - id: iam:mfa_bypass_pattern
+    domain: iam
+    kill_chain: [InitialAccess, PrivilegeEscalation]
+    mitre_techniques: [T1556]
+    stride: [Elevation of Privilege, Tampering]
+    description: MFA disabled followed by sensitive role grant within short interval.
+    detection_logic: Detect sequence mfa_disable -> role_grant (admin) within 15m for same principal.
+    telemetry: [iam.change_type, actor.principal_id, ts, iam.mfa_state_change, iam.roles_after]
+    thresholds:
+      sequence_window_minutes: 15
+    severity_weight: 0.9
+    suppression_hints: ["break_glass"]
+    remediation: Immediate MFA re-enable; session revocation; incident escalation.
+    sample_query: SEQ[mfa_disable, role_grant roles_after ~= /(Admin)/] WITHIN 15m
+    status: planned
+    version: 1
+
+  - id: data:staging_volume_spike
+    domain: data
+    kill_chain: [Exfiltration]
+    mitre_techniques: [T1074]
+    stride: [Information Disclosure]
+    description: Rapid growth in temporary staging directory size.
+    detection_logic: metrics.delta_bytes >= 524288000
+    telemetry: [object.name, object.size_bytes, object.classification, metrics.entropy, metrics.delta_bytes, ts]
+    thresholds:
+      delta_bytes: 524288000
+    severity_weight: 0.7
+    suppression_hints: ["scheduled_backup"]
+    remediation: Quarantine staging directory; throttle egress; snapshot for forensics.
+    sample_query: DIR_SIZE_DELTA(path="/staging") OVER 30m > 500MB
+    status: planned
+    version: 1
+
+  - id: data:classification_mismatch_access
+    domain: data
+    kill_chain: [CredentialAccess, Exfiltration]
+    mitre_techniques: [T1530]
+    stride: [Information Disclosure]
+    description: User without classification clearance accesses sensitive object.
+    detection_logic: Compare user clearance vs object.classification.
+    telemetry: [actor.principal_id, object.classification, actor.clearance_level]
+    thresholds:
+      clearance_gap: 1
+    severity_weight: 0.65
+    suppression_hints: ["approved_exception"]
+    remediation: Revoke access; review role; add monitoring triggers.
+    sample_query: access AND object.classification = "sensitive" AND actor.clearance_level < 2
+    status: planned
+    version: 1
+
+  - id: data:egress_protocol_rare
+    domain: data
+    kill_chain: [Exfiltration]
+    mitre_techniques: [T1048]
+    stride: [Information Disclosure]
+    description: Large outbound data via rarely used protocol (e.g., FTP in HTTP-only environment).
+    detection_logic: Protocol frequency percentile < 5% and byte_out > 50MB window 10m.
+    telemetry: [network.protocol, metrics.byte_out]
+    thresholds:
+      rarity_percentile: 5
+      min_bytes: 52428800
+    severity_weight: 0.75
+    suppression_hints: ["legacy_migration"]
+    remediation: Block protocol; capture session; notify data governance.
+    sample_query: SUM(byte_out) BY protocol OVER 10m > 50MB AND protocol_usage_percentile < 5
+    status: planned
+    version: 1
+
+  - id: data:multiple_repository_sweep
+    domain: data
+    kill_chain: [Reconnaissance, Exfiltration]
+    mitre_techniques: [T1083]
+    stride: [Information Disclosure]
+    description: Sequential listing of many repositories by same principal.
+    detection_logic: Count distinct repos listed in 20m > threshold.
+    telemetry: [object.name, actor.principal_id, ts]
+    thresholds:
+      distinct_repos: 12
+    severity_weight: 0.5
+    suppression_hints: ["inventory_audit"]
+    remediation: Limit enumeration; require justification; elevate monitoring.
+    sample_query: COUNT_DISTINCT(repo_list) BY principal OVER 20m > 12
+    status: planned
+    version: 1
+
+  - id: api:discovery_pattern_scan
+    domain: api
+    kill_chain: [Reconnaissance]
+    mitre_techniques: [T1190]
+    stride: [Information Disclosure]
+    description: High ratio of 404/405 responses across varied endpoints.
+    detection_logic: Unique path attempts > 40 and error_ratio > 0.6 in 10m.
+    telemetry: [api.path, api.status, actor.principal_id]
+    thresholds:
+      distinct_paths: 40
+      error_ratio: 0.6
+    severity_weight: 0.55
+    suppression_hints: ["api_docs_crawl"]
+    remediation: Rate-limit source; require authenticated enumeration.
+    sample_query: ERROR_RATIO(404,405) BY principal OVER 10m > 0.6 AND DISTINCT_PATHS > 40
+    status: planned
+    version: 1
+
+  - id: api:auth_token_reuse_cross_ip
+    domain: api
+    kill_chain: [CredentialAccess, LateralMovement]
+    mitre_techniques: [T1550]
+    stride: [Elevation of Privilege]
+    description: Same token used from multiple source IPs in short interval.
+    detection_logic: Distinct src_ip for token_id > 2 within 5m.
+    telemetry: [api.token_id, network.src_ip, ts]
+    thresholds:
+      distinct_ips: 2
+      window_minutes: 5
+    severity_weight: 0.8
+    suppression_hints: ["known_proxy_cluster"]
+    remediation: Invalidate token; force re-auth; investigate possible theft.
+    sample_query: DISTINCT(src_ip) BY token_id OVER 5m > 2
+    status: planned
+    version: 1
+
+  - id: api:rare_method_combo
+    domain: api
+    kill_chain: [Reconnaissance, Execution]
+    mitre_techniques: [T1059]
+    stride: [Tampering]
+    description: Unusual sequence of HTTP methods (e.g., OPTIONS -> PUT -> DELETE) seldom seen historically.
+    detection_logic: api.method_combo_size >= 4
+    telemetry: [api.method, api.path, api.method_combo_size, api.method_sequence_len, ts]
+    thresholds:
+      rarity_score: 0.05
+    severity_weight: 0.45
+    suppression_hints: ["new_deployment_testing"]
+    remediation: Inspect sequence; restrict verbs; apply schema validation.
+    sample_query: METHOD_SEQUENCE_RARITY(sequence) < 0.05
+    status: planned
+    version: 1
+
+  - id: api:response_schema_anomaly
+    domain: api
+    kill_chain: [Execution]
+    mitre_techniques: [T1059]
+    stride: [Information Disclosure]
+    description: Response payload deviates from baseline schema fingerprint.
+    detection_logic: Structural hash mismatch AND entropy delta > 2.0.
+    telemetry: [api.path, api.method, api.payload_entropy]
+    thresholds:
+      entropy_delta: 2.0
+    severity_weight: 0.6
+    suppression_hints: ["version_upgrade"]
+    remediation: Roll back release; inspect payload for leakage; enable strict validation.
+    sample_query: SCHEMA_HASH(path,method) != BASELINE AND entropy_delta > 2
+    status: planned
+    version: 1
+
+  - id: api:shadow_endpoint_access
+    domain: api
+    kill_chain: [Reconnaissance]
+    mitre_techniques: [T1595]
+    stride: [Information Disclosure]
+    description: Access to endpoint with no registered spec / OpenAPI definition.
+    detection_logic: path not in registered set AND status != 404.
+    telemetry: [api.path, api.status]
+    thresholds: {}
+    severity_weight: 0.5
+    suppression_hints: ["internal_beta"]
+    remediation: Register spec; restrict access; add monitoring.
+    sample_query: api.path NOT IN openapi_paths AND api.status != 404
+    status: planned
+    version: 1
+
+  - id: email:bec_likely_thread_hijack
+    domain: email
+    kill_chain: [InitialAccess]
+    mitre_techniques: [T1566.002]
+    stride: [Spoofing]
+    description: Reply-chain message with external domain divergence & finance keywords.
+    detection_logic: Subject starts with "Re:" AND original_thread_domain != sender_domain AND keyword score > threshold.
+    telemetry: [email.subject, email.from, email.thread_origin_domain, email.body_keywords]
+    thresholds:
+      keyword_score: 0.7
+    severity_weight: 0.75
+    suppression_hints: ["vendor_negotiation"]
+    remediation: Quarantine thread; verify sender by alternate channel; notify finance.
+    sample_query: SUBJECT_PREFIX("Re:") AND domain_divergence AND keyword_score > 0.7
+    status: planned
+    version: 1
+
+  - id: email:forward_rule_new_external
+    domain: email
+    kill_chain: [Exfiltration]
+    mitre_techniques: [T1114]
+    stride: [Information Disclosure]
+    description: New auto-forward rule to external address.
+    detection_logic: Detect rule_add AND destination_domain not in allowlist.
+    telemetry: [email.forward_rule_added, email.forward_destination]
+    thresholds: {}
+    severity_weight: 0.8
+    suppression_hints: ["approved_delegate"]
+    remediation: Remove rule; audit mailbox access; notify user.
+    sample_query: forward_rule_added AND external_domain
+    status: planned
+    version: 1
+
+  - id: email:credential_phish_link_pattern
+    domain: email
+    kill_chain: [InitialAccess]
+    mitre_techniques: [T1566.002]
+    stride: [Spoofing]
+    description: Link domain resembles known auth portal with homoglyph.
+    detection_logic: Fuzzy domain similarity score > 0.85 AND landing page form detection.
+    telemetry: [email.links, email.link_landing_form, metrics.domain_similarity]
+    thresholds:
+      similarity_score: 0.85
+    severity_weight: 0.9
+    suppression_hints: ["training_campaign"]
+    remediation: Block URL; alert user; reset credentials if clicked.
+    sample_query: domain_similarity(link_domain, auth_portals) > 0.85 AND landing_form_detected
+    status: planned
+    version: 1
+
+  - id: email:impossible_login_sequence
+    domain: email
+    kill_chain: [CredentialAccess]
+    mitre_techniques: [T1078.003]
+    stride: [Elevation of Privilege]
+    description: Rapid mailbox access from distant geographies inconsistent with travel velocity.
+    detection_logic: Geo distance between consecutive access events > 1000km within < 30m.
+    telemetry: [actor.principal_id, network.src_ip, geo]
+    thresholds:
+      distance_km: 1000
+      window_minutes: 30
+    severity_weight: 0.7
+    suppression_hints: ["vpn_cluster"]
+    remediation: Challenge session; enforce MFA; review access logs.
+    sample_query: GEO_HOPS(principal) OVER 30m > 1000km
+    status: planned
+    version: 1
+
+  - id: cloud:privilege_drift
+    domain: cloud
+    kill_chain: [PrivilegeEscalation]
+    mitre_techniques: [T1098]
+    stride: [Elevation of Privilege]
+    description: IAM policy diff increases effective privileges significantly.
+    detection_logic: Diff risk_delta > 0.3 AND added actions contain admin:* pattern.
+    telemetry: [cloud.change_type, cloud.risk_delta, cloud.new_value]
+    thresholds:
+      risk_delta: 0.3
+    severity_weight: 0.8
+    suppression_hints: ["approved_change_ticket"]
+    remediation: Revert change; require peer review; enable monitoring.
+    sample_query: policy_diff AND risk_delta > 0.3 AND new_value contains "*:*"
+    status: planned
+    version: 1
+
+  - id: cloud:public_object_reclassification
+    domain: cloud
+    kill_chain: [Exfiltration]
+    mitre_techniques: [T1537]
+    stride: [Information Disclosure]
+    description: Sensitive object ACL changes from private to public.
+    detection_logic: ACL diff old=private new=public AND classification=sensitive.
+    telemetry: [cloud.change_type, object.classification, cloud.new_value]
+    thresholds: {}
+    severity_weight: 0.85
+    suppression_hints: ["temporary_public_release"]
+    remediation: Restore ACL; rotate keys; audit access logs.
+    sample_query: acl_update AND old_acl="private" AND new_acl="public" AND classification="sensitive"
+    status: planned
+    version: 1
+
+  - id: cloud:unused_secret_usage
+    domain: cloud
+    kill_chain: [CredentialAccess, InitialAccess]
+    mitre_techniques: [T1552]
+    stride: [Elevation of Privilege]
+    description: Secret last used >90d suddenly invoked.
+    detection_logic: secret_age_days > 90 AND invocation event.
+    telemetry: [cloud.resource_id, metrics.secret_age_days]
+    thresholds:
+      age_days: 90
+    severity_weight: 0.65
+    suppression_hints: ["scheduled_rotation_test"]
+    remediation: Rotate secret; investigate source; narrow scope.
+    sample_query: secret_invocation AND secret_age_days > 90
+    status: planned
+    version: 1
+
+  - id: cloud:multi_region_lateral_path
+    domain: cloud
+    kill_chain: [LateralMovement]
+    mitre_techniques: [T1021]
+    stride: [Elevation of Privilege]
+    description: Chained access spanning >=3 regions within short window.
+    detection_logic: Distinct regions in sequence > 2 within 45m for principal.
+    telemetry: [cloud.resource_id, cloud.region, actor.principal_id]
+    thresholds:
+      distinct_regions: 3
+      window_minutes: 45
+    severity_weight: 0.55
+    suppression_hints: ["multi_region_deployment"]
+    remediation: Restrict region scope; review access tokens; enable geo controls.
+    sample_query: DISTINCT(region) BY principal OVER 45m > 2
+    status: planned
+    version: 1
+
+  - id: cloud:shadow_resource_creation
+    domain: cloud
+    kill_chain: [Persistence, DefenseEvasion]
+    mitre_techniques: [T1525]
+    stride: [Tampering]
+    description: New resource lacking IaC reference or tag baseline.
+    detection_logic: resource_creation AND missing required tags AND not in IaC registry.
+    telemetry: [cloud.resource_id, cloud.change_type, cloud.new_value]
+    thresholds: {}
+    severity_weight: 0.6
+    suppression_hints: ["emergency_hotfix"]
+    remediation: Tag resource; validate necessity; incorporate into IaC or remove.
+    sample_query: resource_create AND tags_missing AND iac_reference_missing
+    status: planned
+    version: 1
+
+  - id: exfil:chain_confidence
+    domain: data
+    kill_chain: [Exfiltration]
+    mitre_techniques: [T1048, T1074]
+    stride: [Information Disclosure]
+    description: "Composite factor: staging + compression indicator + outbound anomaly."
+    detection_logic: Presence of data:staging_volume_spike AND entropy_delta > 2 AND egress anomaly > threshold.
+    telemetry: [metrics.byte_out, metrics.entropy, object.size_bytes]
+    thresholds:
+      entropy_delta: 2.0
+      egress_anomaly_score: 0.8
+    severity_weight: 0.9
+    suppression_hints: ["bulk_export_authorized"]
+    remediation: Immediate egress block; snapshot dataset; notify legal/privacy.
+    sample_query: staging_volume_spike AND entropy_delta > 2 AND anomaly_score > 0.8
+    status: planned
+    version: 1
+
+  - id: impact:ransomware_encrypt_burst
+    domain: endpoint
+    kill_chain: [Impact]
+    mitre_techniques: [T1486]
+    stride: [Denial of Service]
+    description: Rapid file extension changes + high entropy writes.
+    detection_logic: ">= 200 file_write events with extension change AND average entropy > 6 in 5m."
+    telemetry: [object.name, metrics.entropy, ts]
+    thresholds:
+      min_files: 200
+      entropy_avg: 6
+      window_minutes: 5
+    severity_weight: 0.95
+    suppression_hints: ["test_encryption_lab"]
+    remediation: Isolate host; halt process; initiate recovery plan.
+    sample_query: COUNT(file_extension_change) OVER 5m > 200 AND AVG(entropy) > 6
+    status: planned
+    version: 1
+
+  - id: impact:service_disable_sequence
+    domain: endpoint
+    kill_chain: [Impact]
+    mitre_techniques: [T1499]
+    stride: [Denial of Service]
+    description: Multiple critical services stopped/restarted rapidly.
+    detection_logic: service_stop events >= 5 involving critical list within 3m.
+    telemetry: [endpoint.service_name, ts]
+    thresholds:
+      min_stops: 5
+      window_minutes: 3
+    severity_weight: 0.8
+    suppression_hints: ["planned_patch_window"]
+    remediation: Block actor process; restore services; validate integrity.
+    sample_query: COUNT(service_stop critical=true) OVER 3m >= 5
+    status: planned
+    version: 1

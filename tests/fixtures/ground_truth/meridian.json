@@ -1,0 +1,44 @@
+{
+  "scenario": "meridian",
+  "note": "Attribution-quality fixture using semantic cases, never upload-controlled labels.",
+  "must_detect": [
+    {"id": "supplier_account_endpoint_chain", "actor": "james.hargreaves", "min_verdict": "VALIDATED_BREACH", "phases_present_any": ["powershell_staged_payload", "c2_dns_beacon"]},
+    {"id": "novabridge_access_and_forwarding", "actor": "wei.zhang", "min_verdict": "VALIDATED_BREACH", "phases_present_any": ["cloud_object_collection", "email_external_exfil"]},
+    {"id": "public_s3_crawler", "ip": "185.234.219.47", "min_verdict": "VALIDATED_BREACH", "phases_present_any": ["cloud_object_collection"]}
+  ],
+  "must_separate": [
+    {"id": "three_independent_meridian_cases", "selectors": [
+      {"id": "james", "actor": "james.hargreaves"},
+      {"id": "wei", "actor": "wei.zhang"},
+      {"id": "crawler", "ip": "185.234.219.47"}
+    ]}
+  ],
+  "must_suppress": [
+    {"entity": "info", "reason": "ordinary vendor email sender must not become a breach identity"},
+    {"entity": "lisa.petrov", "reason": "lookalike phish recipient has no evidence of successful compromise"},
+    {"entity": "sarah.chen", "reason": "routine baseline user activity must not become a breach case"},
+    {"entity": "david.nguyen", "reason": "routine baseline user activity must not become a breach case"},
+    {"entity": "ben.fitzgerald", "reason": "routine baseline user activity must not become a breach case"},
+    {"entity": "chloe.park", "reason": "routine baseline user activity must not become a breach case"},
+    {"entity": "hui.tan", "reason": "routine baseline user activity must not become a breach case"},
+    {"entity": "alice.morrison", "reason": "routine baseline user activity must not become a breach case"},
+    {"entity": "michael.okonkwo", "reason": "routine baseline user activity must not become a breach case"},
+    {"entity": "raymond.lim", "reason": "routine baseline user activity must not become a breach case"},
+    {"entity": "daniel.wright", "reason": "routine baseline user activity must not become a breach case"},
+    {"entity": "emma.thornton", "reason": "routine baseline user activity must not become a breach case"}
+  ],
+  "role_assertions": [
+    {"entity": "james.hargreaves", "role": "actor"},
+    {"entity": "wei.zhang", "role": "actor"},
+    {"entity": "mig-lt-0100", "role": "victim"}
+  ],
+  "evidence_labels": [
+    {"id": "james_encoded_execution", "row_index": 17827, "expected_role": "support"},
+    {"id": "wei_external_forwarding", "row_index": 3500, "expected_role": "support"},
+    {"id": "crawler_cloud_api", "row_index": 1405, "expected_role": "support"},
+    {"id": "crawler_network_flow", "row_index": 24406, "expected_role": "support"}
+  ],
+  "known_gaps": [
+    {"id": "no_false_breach_inflation", "desc": "No confirmed cluster may be created from unrelated no-identity telemetry.", "target_max_fp_network_breaches": 0}
+  ]
+}

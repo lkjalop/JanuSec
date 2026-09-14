@@ -1,0 +1,19 @@
+# Map exporter IPs to tenant IDs and device info
+# Example entries
+"198.51.100.10":
+  tenant_id: tenant-a
+  vendor: paloalto
+  product: pa-fw
+  description: Corporate Firewall
+
+"192.0.2.45":
+  tenant_id: tenant-b
+  vendor: cisco
+  product: asa
+  description: Branch firewall
+
+# Default mapping by subnet (optional)
+subnets:
+  "10.0.0.0/8":
+    tenant_id: internal
+    vendor: unknown

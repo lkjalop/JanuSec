@@ -1,0 +1,1 @@
+{"sessions": [{"id": "s1", "data": {"entities": {"host": ["host1"], "process": ["cmd.exe"]}}}, {"id": "s2", "data": {"entities": {"ip": ["10.0.0.5"]}}}], "ewma": true, "ewma_alpha": 0.6}

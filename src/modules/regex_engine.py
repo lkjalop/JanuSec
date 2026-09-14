@@ -9,20 +9,27 @@ Target: <10ms p95 processing time with timeout protection.
 """
 
 import asyncio
-import logging
-import time
-import re
-import json
 import hashlib
-from typing import Dict, Any, List, Optional, Tuple, Pattern
-from dataclasses import dataclass
-from collections import defaultdict, deque
-from functools import lru_cache
+import json
+import logging
+import re
+import signal
 
 # For performance optimization
 import threading
+import time
+from collections import defaultdict, deque
 from concurrent.futures import ThreadPoolExecutor
-import signal
+from dataclasses import dataclass
+from functools import lru_cache
+from re import Pattern
+from typing import Any, Dict, List, Optional, Tuple
+
+from core.metrics import make_counter, make_histogram
+from functools import lru_cache
+import os
+import math
+from core.logging_utils import log_backoff
 
 
 @dataclass
@@ -40,9 +47,9 @@ class RegexMatch:
 @dataclass
 class RegexResult:
     """Result from regex pattern analysis"""
-    matches: List[RegexMatch]
+    matches: list[RegexMatch]
     confidence_delta: float
-    factors: List[str]
+    factors: list[str]
     processing_time_ms: float
     patterns_tested: int
     timeout_occurred: bool = False
@@ -75,8 +82,8 @@ class RegexPatternMatcher:
         self.logger = logging.getLogger(__name__)
         
         # Pattern storage
-        self.patterns: Dict[str, PatternDefinition] = {}
-        self.patterns_by_category: Dict[str, List[PatternDefinition]] = defaultdict(list)
+        self.patterns: dict[str, PatternDefinition] = {}
+        self.patterns_by_category: dict[str, list[PatternDefinition]] = defaultdict(list)
         
         # Performance optimization
         self.pattern_cache = {}  # LRU cache for compiled patterns
@@ -88,6 +95,24 @@ class RegexPatternMatcher:
         self.execution_times = deque(maxlen=1000)
         self.timeout_count = 0
         self.patterns_executed = 0
+
+        # Metrics
+        try:
+            self.metric_timeout_counter = make_counter('hunt_regex_timeouts_total', 'Total regex pattern timeouts')
+            self.metric_patterns_tested = make_counter('hunt_regex_patterns_tested_total', 'Total regex patterns tested')
+            self.metric_processing_time_ms = make_histogram('hunt_regex_processing_time_ms', 'Regex processing time (ms)', buckets=[1,5,10,25,50,100,250,500])
+            # New effectiveness metrics
+            self.metric_patterns_attempted = make_counter('regex_patterns_attempted_total','Regex patterns attempted')
+            self.metric_patterns_completed = make_counter('regex_patterns_completed_total','Regex patterns completed without timeout')
+            self.metric_patterns_timedout = make_counter('regex_patterns_timed_out_total','Regex patterns timed out')
+        except Exception:
+            # Prometheus not available or metric init failed; fall back silently
+            self.metric_timeout_counter = None
+            self.metric_patterns_tested = None
+            self.metric_processing_time_ms = None
+            self.metric_patterns_attempted = None
+            self.metric_patterns_completed = None
+            self.metric_patterns_timedout = None
         
         # Thread pool for pattern execution
         self.executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="regex")
@@ -117,7 +142,7 @@ class RegexPatternMatcher:
                         f"Loaded {len(self.patterns)} patterns across "
                         f"{len(self.patterns_by_category)} categories")
 
-    async def analyze_event(self, event: Dict[str, Any]) -> RegexResult:
+    async def analyze_event(self, event: dict[str, Any]) -> RegexResult:
         """
         Apply loose regex matching with performance bounds and timeout protection.
         Returns enriched confidence and matched factors.
@@ -170,7 +195,7 @@ class RegexPatternMatcher:
                 patterns_tested=0
             )
 
-    def _extract_searchable_content(self, event: Dict[str, Any]) -> Dict[str, str]:
+    def _extract_searchable_content(self, event: dict[str, Any]) -> dict[str, str]:
         """Extract and prepare content for regex matching"""
         content = {}
         
@@ -196,44 +221,64 @@ class RegexPatternMatcher:
         
         return content
 
-    async def _apply_patterns_with_timeout(self, content: Dict[str, str], event: Dict[str, Any]) -> List[RegexMatch]:
+    async def _apply_patterns_with_timeout(self, content: dict[str, str], event: dict[str, Any]) -> list[RegexMatch]:
         """Apply regex patterns with timeout protection"""
         matches = []
         patterns_to_test = self._select_patterns_for_event(event)
         
+        # Warn-once cache and aggregated timeout logging
+        warn_once: set[str] = getattr(self, '_warn_once_patterns', set())
+        self._warn_once_patterns = warn_once
+        aggregated_timeouts = 0
+
         try:
-            # Use asyncio timeout for overall execution
-            async with asyncio.timeout(self.global_timeout / 1000):  # Convert to seconds
+            async with asyncio.timeout(self.global_timeout / 1000):
                 for pattern_def in patterns_to_test:
                     if not pattern_def.enabled:
                         continue
-                    
                     try:
-                        # Test pattern against relevant content
+                        if self.metric_patterns_attempted:
+                            try: self.metric_patterns_attempted.inc()
+                            except Exception: pass
                         pattern_matches = await self._test_pattern(pattern_def, content)
                         matches.extend(pattern_matches)
-                        
-                        # Update performance tracking
                         await self._record_pattern_performance(pattern_def, pattern_matches)
-                        
+                        if self.metric_patterns_completed:
+                            try: self.metric_patterns_completed.inc()
+                            except Exception: pass
                     except asyncio.TimeoutError:
-                        self.logger.warning(f"Pattern {pattern_def.id} timed out")
+                        aggregated_timeouts += 1
                         self.timeout_count += 1
-                        break
+                        if self.metric_timeout_counter:
+                            try: self.metric_timeout_counter.inc()
+                            except Exception: pass
+                        if self.metric_patterns_timedout:
+                            try: self.metric_patterns_timedout.inc()
+                            except Exception: pass
+                        # Backoff logging per pattern
+                        log_backoff(self.logger, f"regex_timeout:{pattern_def.id}", logging.WARNING,
+                                    f"Regex pattern timeout (pattern_id={pattern_def.id})", first_n=1, ratio=25)
                     except Exception as e:
-                        self.logger.warning(f"Error testing pattern {pattern_def.id}: {e}")
+                        log_backoff(self.logger, f"regex_error:{pattern_def.id}", logging.WARNING,
+                                    f"Regex pattern error (pattern_id={pattern_def.id}): {e}", first_n=1, ratio=50)
                         continue
-        
         except asyncio.TimeoutError:
-            self.logger.warning(f"Global regex timeout reached ({self.global_timeout}ms)")
+            # Global timeout – single aggregated log
             self.timeout_count += 1
+            if self.metric_timeout_counter:
+                try: self.metric_timeout_counter.inc()
+                except Exception: pass
+            msg = (f"Global regex timeout after {aggregated_timeouts} individual pattern timeouts (limit={self.global_timeout}ms)"
+                   if aggregated_timeouts else f"Global regex timeout (limit={self.global_timeout}ms) with no individual pattern detail")
+            log_backoff(self.logger, "regex_global_timeout", logging.WARNING, msg, first_n=1, ratio=10)
         
         return matches
 
-    def _select_patterns_for_event(self, event: Dict[str, Any]) -> List[PatternDefinition]:
+    def _select_patterns_for_event(self, event: dict[str, Any]) -> list[PatternDefinition]:
         """Select relevant patterns based on event type and characteristics"""
         # Start with high-performance patterns
         selected_patterns = []
+        # (metrics not incremented here; selection is a fast local operation)
         
         # Categorize event to select relevant patterns
         event_categories = self._categorize_event(event)
@@ -242,8 +287,10 @@ class RegexPatternMatcher:
             if category in self.patterns_by_category:
                 category_patterns = self.patterns_by_category[category]
                 # Sort by performance (low complexity, high accuracy first)
-                sorted_patterns = sorted(category_patterns, 
-                                       key=lambda p: (p.complexity_score, -self._get_pattern_accuracy(p)))
+                sorted_patterns = sorted(
+                    category_patterns,
+                    key=lambda p: (p.complexity_score, -self._get_pattern_accuracy(p)),
+                )
                 selected_patterns.extend(sorted_patterns[:10])  # Top 10 per category
         
         # Always include critical security patterns
@@ -261,7 +308,7 @@ class RegexPatternMatcher:
         
         return unique_patterns[:25]  # Limit to 25 patterns max
 
-    def _categorize_event(self, event: Dict[str, Any]) -> List[str]:
+    def _categorize_event(self, event: dict[str, Any]) -> list[str]:
         """Categorize event to select relevant pattern categories"""
         categories = ['general']  # Always include general patterns
         
@@ -287,10 +334,10 @@ class RegexPatternMatcher:
         
         return categories
 
-    async def _test_pattern(self, pattern_def: PatternDefinition, content: Dict[str, str]) -> List[RegexMatch]:
+    async def _test_pattern(self, pattern_def: PatternDefinition, content: dict[str, str]) -> list[RegexMatch]:
         """Test a single pattern against content"""
         matches = []
-        pattern_start_time = time.perf_counter()
+        time.perf_counter()
         
         try:
             # Determine which content fields to test
@@ -299,18 +346,32 @@ class RegexPatternMatcher:
             for field_name, field_content in content_fields.items():
                 if not field_content or len(field_content) > 10000:  # Skip very large content
                     continue
-                
-                # Execute regex with timeout
+                # Execute regex with timeout and measure per-field processing
+                field_start = time.perf_counter()
                 regex_matches = await self._execute_regex_with_timeout(
-                    pattern_def.compiled_pattern, 
+                    pattern_def.compiled_pattern,
                     field_content,
-                    self.execution_timeout / 1000
+                    self.execution_timeout / 1000,
                 )
-                
+
+                field_processing_time = (time.perf_counter() - field_start) * 1000
+                try:
+                    if self.metric_processing_time_ms:
+                        self.metric_processing_time_ms.observe(field_processing_time)
+                except Exception:
+                    pass
+
+                # Increment patterns-tested metric once per pattern test
+                try:
+                    if self.metric_patterns_tested:
+                        self.metric_patterns_tested.inc()
+                except Exception:
+                    pass
+
                 # Process matches
                 for match in regex_matches:
                     confidence = self._calculate_match_confidence(pattern_def, match, field_name)
-                    
+
                     regex_match = RegexMatch(
                         pattern_id=pattern_def.id,
                         pattern_name=pattern_def.name,
@@ -318,9 +379,9 @@ class RegexPatternMatcher:
                         confidence_contribution=confidence,
                         factor=pattern_def.factor,
                         match_position=match.start(),
-                        processing_time_ms=(time.perf_counter() - pattern_start_time) * 1000
+                        processing_time_ms=field_processing_time,
                     )
-                    
+
                     matches.append(regex_match)
         
         except Exception as e:
@@ -328,7 +389,7 @@ class RegexPatternMatcher:
         
         return matches
 
-    def _select_content_for_pattern(self, pattern_def: PatternDefinition, content: Dict[str, str]) -> Dict[str, str]:
+    def _select_content_for_pattern(self, pattern_def: PatternDefinition, content: dict[str, str]) -> dict[str, str]:
         """Select appropriate content fields for a pattern"""
         # Map pattern categories to relevant content fields
         category_mappings = {
@@ -354,7 +415,7 @@ class RegexPatternMatcher:
         
         return selected_content
 
-    async def _execute_regex_with_timeout(self, pattern: Pattern[str], text: str, timeout: float) -> List:
+    async def _execute_regex_with_timeout(self, pattern: Pattern[str], text: str, timeout: float) -> list:
         """Execute regex with timeout protection"""
         try:
             # Use thread pool to execute regex with timeout
@@ -366,7 +427,7 @@ class RegexPatternMatcher:
             return list(matches)
             
         except asyncio.TimeoutError:
-            self.logger.debug(f"Regex execution timeout for pattern")
+            self.logger.debug("Regex execution timeout for pattern")
             return []
         except Exception as e:
             self.logger.debug(f"Regex execution error: {e}")
@@ -412,7 +473,7 @@ class RegexPatternMatcher:
         
         return pattern_def.true_positive_count / total_matches
 
-    def _calculate_confidence_delta(self, matches: List[RegexMatch]) -> float:
+    def _calculate_confidence_delta(self, matches: list[RegexMatch]) -> float:
         """Calculate overall confidence delta from all matches"""
         if not matches:
             return 0.0
@@ -429,7 +490,7 @@ class RegexPatternMatcher:
         
         return min(0.15, total_confidence)
 
-    async def _record_pattern_performance(self, pattern_def: PatternDefinition, matches: List[RegexMatch]):
+    async def _record_pattern_performance(self, pattern_def: PatternDefinition, matches: list[RegexMatch]):
         """Record pattern performance for optimization"""
         performance_data = {
             'pattern_id': pattern_def.id,
@@ -628,7 +689,7 @@ class RegexPatternMatcher:
             patterns = self.patterns_by_category[category]
             patterns.sort(key=lambda p: (p.complexity_score, -self._get_pattern_accuracy(p)))
 
-    async def update_patterns(self, pattern_updates: Dict[str, Any]):
+    async def update_patterns(self, pattern_updates: dict[str, Any]):
         """Update pattern configurations (for adaptive tuning)"""
         for pattern_id, updates in pattern_updates.items():
             if pattern_id in self.patterns:
@@ -652,7 +713,7 @@ class RegexPatternMatcher:
             else:
                 pattern.false_positive_count += 1
 
-    async def get_performance_stats(self) -> Dict[str, Any]:
+    async def get_performance_stats(self) -> dict[str, Any]:
         """Get performance statistics"""
         if not self.execution_times:
             return {}

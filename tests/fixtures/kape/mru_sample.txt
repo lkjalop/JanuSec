@@ -1,0 +1,10 @@
+Most Recently Used: C:\Users\alice\Documents\report.docx 2024-01-03 10:00:00
+Most Recently Used: C:\Users\bob\Downloads\tool.exe 2023-12-25 09:30:00
+Most Recently Used: C:\Program Files\Example\weird.exe 2024-01-01 00:00:00
+Most Recently Used: "C:\Users\svc\AppData\Local\Temp\tmp.exe" 2024-01-02 02:02:02
+Most Recently Used: C:\Path With Spaces\space.exe 2023-12-31 23:59:59
+Most Recently Used: relative_name.docx 2024-01-03 03:03:03
+Most Recently Used: C:\Users\admin\Desktop\runme.bat 2023-11-11 11:11:11
+Most Recently Used: C:\Windows\Temp\suspicious.tmp.exe 2023-10-10 10:10:10
+Most Recently Used: C:\Nested\Deep\file.dll 2022-06-01 12:00:00
+Most Recently Used: C:\Program Files\Example\unicode_测试.exe 2023-09-09 09:09:09

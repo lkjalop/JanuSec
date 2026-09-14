@@ -1,0 +1,7 @@
+{
+  "results": [
+    {"_time": "2025-12-09T10:00:00Z", "host": "web-1", "user": "alice", "action": "login"},
+    {"_time": "2025-12-09T10:05:00Z", "host": "web-2", "user": "bob", "action": "download"}
+  ],
+  "messages": []
+}

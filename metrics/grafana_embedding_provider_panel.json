@@ -1,0 +1,21 @@
+{
+  "title": "Embedding Provider Distribution",
+  "panels": [
+    {
+      "type": "piechart",
+      "title": "Provider Selection % (Last 6h)",
+      "targets": [
+        {"expr": "sum(increase(embedding_provider_selection_total[6h])) by (provider)"}
+      ],
+      "options": {"legend": {"displayMode": "list"}}
+    },
+    {
+      "type": "graph",
+      "title": "Escalations vs Fallbacks",
+      "targets": [
+        {"expr": "sum(increase(embedding_provider_selection_total[1h])) by (provider)", "legendFormat": "{{provider}} sel"},
+        {"expr": "sum(increase(embedding_provider_fallback_total[1h])) by (source)", "legendFormat": "{{source}} fallback"}
+      ]
+    }
+  ]
+}

@@ -1,0 +1,1 @@
+﻿{"confidence":0.9,"tags":["fp","vendor_whitelist"],"verdict":"false_positive","reviewer":"alice","event_id":"sess-1762903368082","timestamp":"2025-11-12T10:34:42.9996697+11:00","notes":"False positive due to vendor signature mismatch and low entropy"}

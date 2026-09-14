@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import os
-from typing import Any, Dict, Iterable, List, Tuple
+from collections.abc import Iterable
+from typing import Any, Dict, List, Tuple
 
 from .metrics import PipelineMetrics
 from .utils import cfg_get
@@ -59,15 +60,15 @@ class AllowlistManager:
             self.confidence_cap = 0.35
 
     @staticmethod
-    def _split_env_list(raw: str) -> List[str]:
+    def _split_env_list(raw: str) -> list[str]:
         return [item.strip() for item in raw.split(',') if item.strip()]
 
-    def apply(self, event: Dict[str, Any], factors: List[str], confidence: float) -> Tuple[float, List[str]]:
+    def apply(self, event: dict[str, Any], factors: list[str], confidence: float) -> tuple[float, list[str]]:
         if not self.enabled or (not self.vendor_allowlist and not self.binary_allowlist):
             return confidence, []
 
         process = event.get('process') if isinstance(event.get('process'), dict) else {}
-        candidate_fields: List[Any] = [
+        candidate_fields: list[Any] = [
             event.get('vendor'),
             event.get('publisher'),
             event.get('company'),
@@ -100,7 +101,7 @@ class AllowlistManager:
         if self.factor_suppress:
             factors[:] = [f for f in factors if f not in self.factor_suppress]
 
-        new_factors: List[str] = []
+        new_factors: list[str] = []
         for vendor in sorted(vendor_matches):
             new_factors.append(f"allowlist_vendor:{vendor.replace(' ', '_')}")
             if self.metrics:
@@ -117,8 +118,8 @@ class AllowlistManager:
         return adjusted_confidence, new_factors
 
     @staticmethod
-    def _match_any(values: Iterable[Any], allowlist: Iterable[str]) -> List[str]:
-        hits: List[str] = []
+    def _match_any(values: Iterable[Any], allowlist: Iterable[str]) -> list[str]:
+        hits: list[str] = []
         normalized_allow = [item for item in allowlist if item]
         for value in values:
             if not value:

@@ -1,0 +1,30 @@
+{
+  "dashboard": {
+    "id": null,
+    "uid": null,
+    "title": "IAM Evaluations & Feedback",
+    "timezone": "browser",
+    "schemaVersion": 30,
+    "version": 1,
+    "refresh": "10s",
+    "panels": [
+      {
+        "type": "timeseries",
+        "title": "IAM Evaluations (by verdict)",
+        "targets": [
+          {"expr": "sum by (tenant, verdict)(increase(iam_evals_total[1h]))", "refId": "A"}
+        ],
+        "gridPos": {"x": 0, "y": 0, "w": 12, "h": 8}
+      },
+      {
+        "type": "timeseries",
+        "title": "IAM Feedback (by verdict)",
+        "targets": [
+          {"expr": "sum by (tenant, verdict)(increase(iam_feedback_total[1h]))", "refId": "B"}
+        ],
+        "gridPos": {"x": 12, "y": 0, "w": 12, "h": 8}
+      }
+    ]
+  },
+  "overwrite": false
+}

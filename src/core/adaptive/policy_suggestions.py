@@ -9,14 +9,16 @@ Heuristics (MVP):
 Inputs: Provided via call (decisions window + escalation records) to avoid direct DB dependency in first pass.
 """
 from __future__ import annotations
-from typing import List, Dict, Any, Tuple
-import math, collections
+
+import collections
+import math
+from typing import Any, Dict, List, Tuple
 
 ALLOW_ESC_THRESHOLD = 3
 BLOCK_REPEAT_THRESHOLD = 4
 BLOCK_AVG_SEV_MIN = 0.85
 
-def _key_fields(decision: Dict[str, Any]):
+def _key_fields(decision: dict[str, Any]):
     det = decision.get('details') or {}
     domain = det.get('domain') or decision.get('domain') or decision.get('details',{}).get('domain')
     proc = det.get('process_name') or decision.get('process_name')
@@ -24,10 +26,10 @@ def _key_fields(decision: Dict[str, Any]):
     cmd_prefix = ' '.join(cmd.split()[:2]) if isinstance(cmd,str) else ''
     return domain, proc, cmd_prefix
 
-def suggest(decisions: List[Dict[str, Any]], escalations: List[Dict[str, Any]]) -> Dict[str, List[Dict[str,str]]]:
+def suggest(decisions: list[dict[str, Any]], escalations: list[dict[str, Any]]) -> dict[str, list[dict[str,str]]]:
     # Aggregate repeated patterns
-    allow_counts: Dict[Tuple[str,str,str], int] = collections.Counter()
-    block_stats: Dict[Tuple[str,str,str], Dict[str, Any]] = {}
+    allow_counts: dict[tuple[str,str,str], int] = collections.Counter()
+    block_stats: dict[tuple[str,str,str], dict[str, Any]] = {}
     for d in decisions:
         verdict = d.get('decision') or d.get('verdict') or d.get('path')
         reasons = d.get('reasons', []) or d.get('factors', [])

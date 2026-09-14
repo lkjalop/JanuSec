@@ -1,0 +1,38 @@
+id: A4_slow_exfil
+version: 1
+scenario: "Slow HTTPS data exfiltration via incremental chunks"
+tenant: demo
+stages:
+  - t: 0s
+    event_type: net
+    id: a4-net-1
+    src_host: hostE
+    dst_ip: 203.0.113.55
+    ja3: commonja3001
+    bytes_out: 4000
+  - t: 60s
+    event_type: net
+    id: a4-net-2
+    src_host: hostE
+    dst_ip: 203.0.113.55
+    ja3: commonja3001
+    bytes_out: 5200
+  - t: 120s
+    event_type: net
+    id: a4-net-3
+    src_host: hostE
+    dst_ip: 203.0.113.55
+    ja3: commonja3001
+    bytes_out: 6400
+  - t: 180s
+    event_type: net
+    id: a4-net-4
+    src_host: hostE
+    dst_ip: 203.0.113.55
+    ja3: commonja3001
+    bytes_out: 8800
+labels:
+  expected_factors: []  # Exfil lane not yet implemented; used to measure gap
+  optional_correlation: []
+sla:
+  first_detection_within: 0s

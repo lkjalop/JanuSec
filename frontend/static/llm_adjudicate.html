@@ -1,0 +1,36 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>LLM Claims Adjudication</title>
+  <style>body{font-family:Inter,Arial;margin:20px;background:#0b0f14;color:#e6eef6} .card{background:#0f1720;padding:12px;border-radius:8px;margin-bottom:12px}</style>
+</head>
+<body>
+  <h2>Pending LLM Claims</h2>
+  <div id="list">Loading...</div>
+  <script>
+    async function load() {
+      const res = await fetch('/api/v1/llm/tier1/claims/pending');
+      const js = await res.json();
+      const container = document.getElementById('list');
+      container.innerHTML = '';
+      if(!js.pending || js.pending.length===0) { container.innerHTML = '<p>No pending claims</p>'; return; }
+      js.pending.forEach(c=>{
+        const el = document.createElement('div'); el.className='card';
+        el.innerHTML = `<b>#${c.id}</b> <i>${c.claim_type}</i><div>${c.claim_text}</div><div style="font-size:12px;color:#9fb0c8">${c.evidence_refs}</div>`;
+        const btnOk = document.createElement('button'); btnOk.textContent='Correct'; btnOk.style.margin='6px';
+        btnOk.onclick = ()=> adjudicate(c.id, true, el);
+        const btnBad = document.createElement('button'); btnBad.textContent='Incorrect'; btnBad.onclick = ()=> adjudicate(c.id, false, el);
+        el.appendChild(btnOk); el.appendChild(btnBad);
+        container.appendChild(el);
+      })
+    }
+    async function adjudicate(id, ok, el){
+      await fetch(`/api/v1/llm/tier1/claims/${id}/adjudicate`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({is_correct:ok})});
+      el.style.opacity=0.5; setTimeout(()=>el.remove(),400);
+    }
+    load();
+    setInterval(load,5000);
+  </script>
+</body>
+</html>

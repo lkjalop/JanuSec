@@ -1,0 +1,44 @@
+{
+  "cases": [
+    {
+      "name": "owner_mismatch",
+      "ok": false,
+      "error": "HTTP 400",
+      "duration_ms": 108.714,
+      "body": "{\"detail\":\"'NoneType' object has no attribute 'get'\"}"
+    },
+    {
+      "name": "owner_match",
+      "ok": false,
+      "error": "HTTP 400",
+      "duration_ms": 30.983,
+      "body": "{\"detail\":\"'NoneType' object has no attribute 'get'\"}"
+    },
+    {
+      "name": "missing_headers",
+      "ok": false,
+      "error": "HTTP 400",
+      "duration_ms": 30.119,
+      "body": "{\"detail\":\"'NoneType' object has no attribute 'get'\"}"
+    },
+    {
+      "name": "unknown_route_inventory",
+      "ok": false,
+      "error": "HTTP 400",
+      "duration_ms": 34.348,
+      "body": "{\"detail\":\"'NoneType' object has no attribute 'get'\"}"
+    },
+    {
+      "name": "business_flow_policy_gap",
+      "ok": false,
+      "error": "HTTP 400",
+      "duration_ms": 237.889,
+      "body": "{\"detail\":\"'NoneType' object has no attribute 'get'\"}"
+    }
+  ],
+  "metrics": {
+    "count": 5,
+    "avg_ms": 88.411,
+    "p95_ms": 108.714
+  }
+}

@@ -6,13 +6,15 @@ Version: 1.0.0
 Manages configuration with cryptographic hashing for provenance and change detection.
 """
 
-import yaml
 import logging
 import os
-from typing import Dict, Any
 from pathlib import Path
-from config.models import AppConfig
+from typing import Any, Dict
+
+import yaml
 from pydantic import BaseModel
+
+from config.models import AppConfig
 
 
 class ConfigNamespace(dict):
@@ -59,8 +61,8 @@ class ConfigManager:
     
     def __init__(self, config_path: str):
         self.config_path = Path(config_path)
-        self.config_data: Dict[str, Any] = {}
-        self.config_digests: Dict[str, str] = {}
+        self.config_data: dict[str, Any] = {}
+        self.config_digests: dict[str, str] = {}
         self.logger = logging.getLogger(__name__)
         self.app_config: AppConfig | None = None
         
@@ -77,12 +79,12 @@ class ConfigManager:
             pass
         return value
 
-    def load_config(self) -> Dict[str, Any]:
+    def load_config(self) -> dict[str, Any]:
         """Load configuration from file and build AppConfig"""
-        raw: Dict[str, Any] = {}
+        raw: dict[str, Any] = {}
         try:
             if self.config_path.exists():
-                with open(self.config_path, 'r') as f:
+                with open(self.config_path) as f:
                     loaded = yaml.safe_load(f) or {}
                     if not isinstance(loaded, dict):
                         raise ValueError("Config root must be a mapping")
@@ -118,7 +120,7 @@ class ConfigManager:
                 section = getattr(self.app_config, path[0])
                 setattr(section, path[1], os.environ[env])
     
-    def get_current_digests(self) -> Dict[str, str]:
+    def get_current_digests(self) -> dict[str, str]:
         """Get current configuration digests"""
         return self.config_digests.copy()
 
@@ -168,7 +170,7 @@ class ConfigManager:
                 # Basic merge: if app_config has 'pipeline', update nested dict if attribute exists
                 if hasattr(self.app_config, 'pipeline'):
                     # assume pipeline attribute is a dict-like or object; attempt attribute then mapping
-                    target = getattr(self.app_config, 'pipeline')
+                    target = self.app_config.pipeline
                     if isinstance(target, dict):
                         target.setdefault(section, {})[flag] = value
         except Exception:

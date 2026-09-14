@@ -1,0 +1,42 @@
+{{- if and .Values.metrics.scrape .Values.metrics.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "janusec.fullname" . }}
+  labels:
+    app.kubernetes.io/name: {{ include "janusec.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    {{- with .Values.metrics.serviceMonitor.additionalLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "janusec.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+  namespaceSelector:
+    matchNames: [{{ .Release.Namespace | quote }}]
+---
+{{- if .Values.jaeger.metrics.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: jaeger-allinone
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: jaeger
+      app.kubernetes.io/component: allinone
+  endpoints:
+    - port: http-query
+      path: /metrics
+      interval: 30s
+  namespaceSelector:
+    matchNames: [{{ .Release.Namespace | quote }}]
+{{- end }}
+{{- end }}
+

@@ -1,0 +1,62 @@
+{
+  "customer-alpha": {
+    "customer_name": "Customer Alpha Healthcare",
+    "pipelines": ["customer-alpha-prod", "customer-alpha-dr"],
+    "fixture_vectors": [
+      "tests/data/api_security_auth_harness.json",
+      "tests/data/api_security_auth_harness_alpha.json"
+    ],
+    "artifact_base_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+    "notes": "HIPAA tier requires PHI-aware overrides plus shared harness vectors."
+  },
+  "customer-bravo": {
+    "customer_name": "Customer Bravo FinServ",
+    "pipelines": ["customer-bravo-core"],
+    "fixture_vectors": [
+      "tests/data/api_security_auth_harness.json",
+      "tests/data/api_security_auth_harness_bravo.json"
+    ],
+    "artifact_base_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+    "notes": "Payments/billing fixture pack extends shared harness with ledger flows."
+  },
+  "customer-gamma": {
+    "customer_name": "Customer Gamma SaaS",
+    "pipelines": ["customer-gamma-shared"],
+    "fixture_vectors": [
+      "tests/data/api_security_auth_harness.json",
+      "tests/data/api_security_auth_harness_gamma.json"
+    ],
+    "artifact_base_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+    "notes": "AI/LLM tenant uses MITRE ATLAS override fixtures."
+  },
+  "customer-delta": {
+    "customer_name": "Customer Delta Retail",
+    "pipelines": ["customer-delta-core"],
+    "fixture_vectors": [
+      "tests/data/api_security_auth_harness.json",
+      "tests/data/api_security_auth_harness_delta.json"
+    ],
+    "artifact_base_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+    "notes": "Retail payout and supply-chain APIs with vendor onboarding overrides."
+  },
+  "customer-saas": {
+    "customer_name": "Customer SaaS Automation",
+    "pipelines": ["customer-saas-shared"],
+    "fixture_vectors": [
+      "tests/data/api_security_auth_harness.json",
+      "tests/data/api_security_auth_harness_saas.json"
+    ],
+    "artifact_base_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+    "notes": "Automation + messaging APIs exercising runbook, phishing, and LLM misuse vectors."
+  },
+  "customer-private-preview": {
+    "customer_name": "Customer Private Preview",
+    "pipelines": ["customer-private-preview"],
+    "fixture_vectors": [
+      "tests/data/api_security_auth_harness.json",
+      "tests/data/api_security_auth_harness_private.json"
+    ],
+    "artifact_base_url": "https://github.com/lkjalop/JanuSec/actions/workflows/api-stage-harness.yml",
+    "notes": "Preview tenant covering ransomware backup tampering and high-value payout anomalies."
+  }
+}

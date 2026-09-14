@@ -3,14 +3,20 @@
 Links observed process image hashes to SBOM components and detects hash drift.
 """
 from __future__ import annotations
-from dataclasses import dataclass, asdict
+
+import hashlib
+import json
+import os
+import threading
+import time
+from dataclasses import asdict, dataclass
 from typing import Dict, Optional, Tuple
-import threading, time, json, os, hashlib
+
 
 @dataclass
 class ExecComponentLink:
     component_key: str
-    sbom_hashes: Dict[str,str]
+    sbom_hashes: dict[str,str]
     first_seen: float
     last_seen: float
     drift: bool = False
@@ -19,14 +25,14 @@ class SBOMExecutionRepository:
     def __init__(self, persist_path: str = 'artifacts/state/sbom_exec.json'):
         self._lock = threading.Lock()
         # (tenant, file_hash_sha256) -> ExecComponentLink
-        self._hash_map: Dict[Tuple[str,str], ExecComponentLink] = {}
+        self._hash_map: dict[tuple[str,str], ExecComponentLink] = {}
         # component_key -> known canonical hashes (union over SBOM)
-        self._component_hash_index: Dict[str, Dict[str,str]] = {}
+        self._component_hash_index: dict[str, dict[str,str]] = {}
         self._persist_path = persist_path
         self._dirty = False
         self._load()
 
-    def register_sbom_component(self, tenant: str, name: str, version: str | None, hashes: Dict[str,str]):
+    def register_sbom_component(self, tenant: str, name: str, version: str | None, hashes: dict[str,str]):
         name_norm = (name or '').lower()
         version_norm = (version or 'unknown').lower()
         key = f"{name_norm}:{version_norm}"
@@ -62,7 +68,7 @@ class SBOMExecutionRepository:
             return preferred
         return f"{base}:unknown"
 
-    def observe_execution(self, tenant: str, file_hash: str, image_name: str, component_guess: str | None = None) -> Dict[str,object]:
+    def observe_execution(self, tenant: str, file_hash: str, image_name: str, component_guess: str | None = None) -> dict[str,object]:
         now = time.time()
         key = (tenant, file_hash)
         drift = False
@@ -97,12 +103,13 @@ class SBOMExecutionRepository:
         try:
             if not os.path.exists(self._persist_path):
                 return
-            with open(self._persist_path,'r',encoding='utf-8') as f:
+            with open(self._persist_path,encoding='utf-8') as f:
                 wrapper = json.load(f)
             data = wrapper.get('payload', wrapper)
             expected = wrapper.get('sha256')
             try:
-                import hashlib, json as _json
+                import hashlib
+                import json as _json
                 calc = hashlib.sha256(json.dumps(data, sort_keys=True).encode('utf-8')).hexdigest()
                 if expected and calc != expected:
                     return  # integrity failure; skip load silently

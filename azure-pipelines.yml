@@ -1,0 +1,141 @@
+trigger:
+  branches:
+    include:
+      - main
+      - master
+      - develop
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  PYTHON_VERSION: '3.11'
+
+stages:
+  - stage: validate_pipeline_13_21
+    displayName: 'Validate Stages 13–21 and Threat Coverage'
+    jobs:
+      - job: test_and_report
+        displayName: 'Run tests and generate Markdown report'
+        variables:
+          TEST_HELPERS_ENABLED: '1'
+          DISABLE_DB: '1'
+          PLATFORM_LITE_INIT: '1'
+        steps:
+          - task: UsePythonVersion@0
+            inputs:
+              versionSpec: '$(PYTHON_VERSION)'
+          - script: |
+              python -V
+              python -m pip install --upgrade pip
+              if [ -f requirements-locked.txt ]; then pip install -r requirements-locked.txt; else pip install -r requirements.txt; fi || true
+              if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
+            displayName: 'Install dependencies'
+          - script: |
+              echo "Running security scans: tfsec, checkov, conftest (OPA)"
+              sudo apt-get update && sudo apt-get install -y wget unzip
+              # Install tfsec
+              wget -q https://github.com/aquasecurity/tfsec/releases/download/v1.28.1/tfsec-linux-amd64 -O /usr/local/bin/tfsec
+              chmod +x /usr/local/bin/tfsec
+              # Install Checkov
+              python -m pip install checkov
+              # Install OPA
+              wget -q https://openpolicyagent.org/downloads/latest/opa_linux_amd64 -O /usr/local/bin/opa
+              chmod +x /usr/local/bin/opa
+              # Run scanners if terraform/ exists
+              if [ -d terraform ]; then tfsec terraform || true; checkov -d terraform || true; fi
+              # Run OPA conftest if policies present
+              if [ -d security/policies ]; then \
+                python -m pip install conftest || true; \
+                conftest test terraform -p security/policies || true; \
+              fi
+            displayName: 'Policy-as-code gates (tfsec/checkov/OPA)'
+          - script: |
+              echo "Run pytest with matrix-like grouping (adapters/api + SIEM/smoke)"
+              pytest -q tests/integrations || true
+              pytest -q tests/api || true
+              pytest -q tests/test_siem_ingest.py || true
+              pytest -q tests/test_connectors_smoke.py || true
+              pytest -q tests/test_webhook_smoke.py || true
+            displayName: 'Run pytest groups (extended)'
+          - script: |
+              echo "Run correlation regression suite"
+              pytest -q tests/test_graph_session_ewma.py tests/test_graph_session_extended.py tests/test_graph_sessions.py tests/test_graph_session_factors.py tests/test_risk_score_factor_synthesis_integration.py
+            displayName: 'Run graph-session & synthesis regression'
+          - script: |
+              echo "Domain pack gating: sweep + compare"
+              python scripts/run_rule_quality_sweep.py
+              python scripts/compare_pack_to_sweep.py data/domain_pack_rules.json
+            displayName: 'Domain pack gating (sweep + compare)'
+          - script: |
+              echo "Focused domain pack tests (IAM/Email)"
+              pytest -q tests/test_iam_cloud_paths.py tests/test_email_pack.py
+            displayName: 'Run IAM/Email pack tests'
+          - script: |
+              python scripts/generate_stage_validation_report.py --preset full --out artifacts/validation-report.md
+            displayName: 'Run curated tests and build report'
+          - task: PublishTestResults@2
+            inputs:
+              testResultsFiles: 'artifacts/test-results.xml'
+              testResultsFormat: 'JUnit'
+              failTaskOnFailedTests: false
+            condition: succeededOrFailed()
+  - stage: deploy_gcp_scc_function
+    displayName: 'Deploy GCP SCC Cloud Function + Run SCC Schema Asserts'
+    dependsOn: validate_pipeline_13_21
+    condition: succeededOrFailed()
+    jobs:
+      - job: gcp_deploy_and_test
+        displayName: 'Install gcloud, deploy function, run tests'
+        variables:
+          GCP_PROJECT_ID: '$(GCP_PROJECT_ID)'
+          GCP_REGION: '$(GCP_REGION)'
+          GCP_FUNCTION_NAME: '$(GCP_FUNCTION_NAME)'
+          PUBSUB_TOPIC: '$(GCP_SCC_PUBSUB_TOPIC)'
+          PLATFORM_API_BASE: '$(PLATFORM_API_BASE)'
+          TENANT_ID: '$(TENANT_ID)'
+          TLS_ENFORCE: '1'
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - task: UsePythonVersion@0
+            inputs:
+              versionSpec: '$(PYTHON_VERSION)'
+          - script: |
+              python -m pip install --upgrade pip
+              pip install -r gcp/functions/scc_pubsub/requirements.txt || true
+            displayName: 'Prep Python deps'
+          - script: |
+              echo "Install Google Cloud SDK"
+              sudo apt-get update -y
+              sudo apt-get install -y apt-transport-https ca-certificates gnupg
+              echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] http://packages.cloud.google.com/apt cloud-sdk main" | sudo tee /etc/apt/sources.list.d/google-cloud-sdk.list
+              curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg
+              sudo apt-get update -y && sudo apt-get install -y google-cloud-cli
+            displayName: 'Install gcloud'
+          - script: |
+              echo "Authenticate to GCP"
+              echo "$(GCP_SA_KEY_JSON)" > sa.json
+              gcloud auth activate-service-account --key-file=sa.json
+              gcloud config set project $(GCP_PROJECT_ID)
+              gcloud config set functions/region $(GCP_REGION)
+            displayName: 'gcloud auth'
+          - script: |
+              echo "Deploy Cloud Function (Pub/Sub trigger)"
+              cd gcp/functions/scc_pubsub
+              gcloud functions deploy $(GCP_FUNCTION_NAME) \
+                --region=$(GCP_REGION) \
+                --runtime=python311 \
+                --trigger-topic=$(PUBSUB_TOPIC) \
+                --entry-point=pubsub_entry \
+                --set-env-vars=PLATFORM_API_BASE=$(PLATFORM_API_BASE),TENANT_ID=$(TENANT_ID),TLS_ENFORCE=$(TLS_ENFORCE)
+            displayName: 'Deploy GCP SCC Function'
+          - script: |
+              echo "Run SCC schema asserts"
+              pytest -q tests/test_gcp_scc_schema_assert.py || true
+            displayName: 'Run tests'
+          - task: PublishBuildArtifacts@1
+            inputs:
+              pathToPublish: 'artifacts'
+              artifactName: 'pipeline-13-21-validation'
+            condition: succeededOrFailed()

@@ -1,0 +1,19 @@
+[
+  {
+    "eventTime": "2025-03-15T02:45:00Z",
+    "eventName": "AssumeRole",
+    "eventSource": "sts.amazonaws.com",
+    "sourceIPAddress": "185.220.101.52",
+    "recipientAccountId": "123456789012",
+    "userIdentity": { "arn": "arn:aws:iam::123456789012:user/ops-user" },
+    "responseElements": { "credentials": { "accessKeyId": "ASIAIOSFODNN7SESS01" } }
+  },
+  {
+    "eventTime": "2025-03-15T02:51:00Z",
+    "eventName": "AttachRolePolicy",
+    "eventSource": "iam.amazonaws.com",
+    "sourceIPAddress": "185.220.101.52",
+    "recipientAccountId": "123456789012",
+    "userIdentity": { "arn": "arn:aws:sts::123456789012:assumed-role/FinanceRole/ops-user" }
+  }
+]

@@ -1,0 +1,21 @@
+# Tuned default rule weights for FAST_LIVE_MODE
+# You can override RULES_CONFIG_PATH to point to a different file.
+rules:
+  lolbin_misuse:
+    weight: 0.7
+  suspicious_cmdline_flags:
+    weight: 0.72
+  suspicious_outbound_port:
+    weight: 0.5
+  lineage_anomaly:
+    weight: 0.45
+  zeek_low_volume_long_duration:
+    weight: 0.55
+  zeek_high_nxdomain_rate:
+    weight: 0.6
+  asn_rare_outbound:
+    weight: 0.58
+  suspicious_domain_tld:
+    weight: 0.5
+  rare_domain:
+    weight: 0.52

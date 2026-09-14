@@ -1,0 +1,71 @@
+{"ts":"2025-12-19T09:22:57.755516Z","level":"INFO","logger":"src.api.app","msg":"PLATFORM_LITE_INIT active: skipping initialize_platform_components heavy init"}
+{"ts":"2025-12-19T09:22:57.787510Z","level":"INFO","logger":"src.api.app","msg":"register_core_routers called (full=False)"}
+{"ts":"2025-12-19T09:22:57.846513Z","level":"INFO","logger":"src.api.app","msg":"Included rules_admin_router into app (lite)"}
+{"ts":"2025-12-19T09:22:57.857515Z","level":"INFO","logger":"src.api.app","msg":"Included decision_feedback_router into app (lite)"}
+{"ts":"2025-12-19T09:22:57.881513Z","level":"INFO","logger":"src.api.app","msg":"Included decisions_router into app (lite)"}
+{"ts":"2025-12-19T09:22:57.889516Z","level":"INFO","logger":"src.api.app","msg":"Included decision_endpoints into app (lite)"}
+{"ts":"2025-12-19T09:22:57.892535Z","level":"INFO","logger":"src.api.app","msg":"Included hopgraph_stream_router into app"}
+{"ts":"2025-12-19T09:22:57.893516Z","level":"INFO","logger":"src.api.app","msg":"Included config_router into app (lite)"}
+{"ts":"2025-12-19T09:22:57.895515Z","level":"INFO","logger":"src.api.app","msg":"Included assessments_router into app (lite)"}
+{"ts":"2025-12-19T09:22:57.910514Z","level":"INFO","logger":"src.api.app","msg":"Included report_router into app (lite)"}
+{"ts":"2025-12-19T09:22:57.948513Z","level":"INFO","logger":"src.api.app","msg":"Included report_forwarding_router into app (lite)"}
+{"ts":"2025-12-19T09:22:57.949513Z","level":"INFO","logger":"src.api.app","msg":"Included tier2_router into app (lite)"}
+{"ts":"2025-12-19T09:22:57.982516Z","level":"INFO","logger":"src.api.app","msg":"Included iam_ingest_router into app (lite)"}
+{"ts":"2025-12-19T09:22:58.086514Z","level":"INFO","logger":"src.api.app","msg":"Included iam_connector_router into app (lite)"}
+{"ts":"2025-12-19T09:22:58.132511Z","level":"INFO","logger":"src.api.app","msg":"Included integrations_router into app (lite)"}
+{"ts":"2025-12-19T09:22:58.143512Z","level":"INFO","logger":"src.api.app","msg":"Included intel_router into app (lite)"}
+{"ts":"2025-12-19T09:22:58.159514Z","level":"INFO","logger":"src.api.app","msg":"Included deep_analyze_router into app (lite)"}
+{"ts":"2025-12-19T09:22:58.162513Z","level":"INFO","logger":"src.api.app","msg":"Included endpoint_malware router (lite)"}
+{"ts":"2025-12-19T09:22:58.164515Z","level":"INFO","logger":"src.api.app","msg":"Included artifact_router into app (lite)"}
+{"ts":"2025-12-19T09:22:58.165515Z","level":"INFO","logger":"src.api.app","msg":"Included network_ingest_router into app (lite)"}
+{"ts":"2025-12-19T09:22:58.165515Z","level":"INFO","logger":"src.api.app","msg":"App routes after lite registration: /api/v1/ab_test/assign,/api/v1/ab_test/disable,/api/v1/ab_test/enable,/api/v1/ab_test/list,/api/v1/abtests/assign,/api/v1/abtests/create,/api/v1/actions/block,/api/v1/actions/create_ticket,/api/v1/actions/export_intel,/api/v1/actions/isolate,/api/v1/admin/risk_profiles,/api/v1/ai/force_external,/api/v1/analysis/session/start,/api/v1/analysis/session/{session_id}/cancel,/api/v1/analysis/session/{session_id}/status,/api/v1/api_keys/audit,/api/v1/api_keys/rotate,/api/v1/artifacts/analyze_batch,/api/v1/artifacts/list,/api/v1/assessments/admin/consume_retrain,/api/v1/assessments/assessments/{assessment_id}/evidence/{cache_key},/api/v1/assessments/csv/deep_analyze/stream,/api/v1/assessments/deep_analyze,/api/v1/assessments/feedback,/api/v1/assessments/generate_insight,/api/v1/assessments/generate_llm_summaries,/api/v1/assessments/generate_persona,/api/v1/assessments/hopgraph_report,/api/v1/assessments/metrics/llm_costs,/api/v1/assessments/report/{report_id},/api/v1/assessments/report/{report_id}/action_all,/api/v1/assessments/report/{report_id}/finalize,/api/v1/assessments/report/{report_id}/flag_for_retrain,/api/v1/assessments/save_metadata,/api/v1/assessments/semantic_logs/search,/api/v1/assessments/{assessment_id},/api/v1/assessments/{assessment_id}/investigate/build,/api/v1/assessments/{assessment_id}/investigate/{investigate_id},/api/v1/assessments/{assessment_id}/llm/abort,/api/v1/assessments/{assessment_id}/llm/enqueue,/api/v1/assessments/{assessment_id}/llm/progress,/api/v1/assessments/{assessment_id}/llm/status/{row_index},/api/v1/assessments/{assessment_id}/llm/verification,/api/v1/assessments/{assessment_id}/llm/verify,/api/v1/assessments/{assessment_id}/report,/api/v1/assessments/{assessment_id}/rows,/api/v1/assessments/{assessment_id}/rows/{row_index}/review,/api/v1/assessments/{parent_id}/batches,/api/v1/config/assessment_defaults,/api/v1/csv/tier2_sse"}
+{"ts":"2025-12-19T09:22:58.167516Z","level":"INFO","logger":"src.api.app","msg":"Included fallback emitted_factors handler"}
+{"ts":"2025-12-19T09:22:58.168516Z","level":"INFO","logger":"src.api.app","msg":"Mounting React frontend at /react from D:\\AI\\Threat_thy_sniffer\\frontend\\react\\dist"}
+{"ts":"2025-12-19T09:22:58.168516Z","level":"INFO","logger":"src.api.app","msg":"Mounting SPA frontend at /spa from D:\\AI\\Threat_thy_sniffer\\frontend\\spa"}
+{"ts":"2025-12-19T09:22:58.277514Z","level":"INFO","logger":"src.api.app","msg":"Included unified ingestion controller router"}
+Duplicate registration for rule col_keylogger_detected_exfil detected; keeping first registration
+Duplicate registration for rule pe_token_theft_combo detected; keeping first registration
+Duplicate registration for rule imp_shadowcopy_delete detected; keeping first registration
+Duplicate registration for rule imp_encrypt_pattern_canary detected; keeping first registration
+Duplicate registration for rule cred_dump_lsass_trace detected; keeping first registration
+Duplicate registration for rule filesystem_encryption_trigger detected; keeping first registration
+Duplicate registration for rule cloud_role_escalation_from_vm detected; keeping first registration
+Duplicate registration for rule defense_evasion_amsi_bypass_combo detected; keeping first registration
+Duplicate registration for rule c2_http_small_periodic_payload detected; keeping first registration
+Duplicate registration for rule c2_ssl_odd_sni_beacon detected; keeping first registration
+Duplicate registration for rule c2_http_small_periodic_payload detected; keeping first registration
+Duplicate registration for rule c2_ssl_odd_sni_beacon detected; keeping first registration
+Duplicate registration for rule lateral_smb_admin_burst detected; keeping first registration
+Duplicate registration for rule exfil_ftp_large_payload detected; keeping first registration
+Duplicate registration for rule persistence_service_binary_change detected; keeping first registration
+Duplicate registration for rule defense_evasion_amsi_bypass_combo detected; keeping first registration
+Duplicate registration for rule discovery_dns_reverse_enum detected; keeping first registration
+Duplicate registration for rule cred_dump_lsass_trace detected; keeping first registration
+Duplicate registration for rule staged_payload_chain detected; keeping first registration
+Duplicate registration for rule script_lateral_execution_by_wmi detected; keeping first registration
+Duplicate registration for rule impostor_domain_beacon detected; keeping first registration
+Duplicate registration for rule stealth_proc_injection_combo detected; keeping first registration
+Duplicate registration for rule config_file_tamper detected; keeping first registration
+Duplicate registration for rule lateral_ssh_sweep_internal detected; keeping first registration
+Duplicate registration for rule filesystem_encryption_trigger detected; keeping first registration
+Duplicate registration for rule cloud_role_escalation_from_vm detected; keeping first registration
+Duplicate registration for rule supply_chain_downloader detected; keeping first registration
+Duplicate registration for rule exfil_stealth_cloud_metadata detected; keeping first registration
+Duplicate registration for rule graph_lateral_chain_burst detected; keeping first registration
+Duplicate registration for rule exec_office_macro_chain detected; keeping first registration
+Duplicate registration for rule cred_lsass_openprocess detected; keeping first registration
+Duplicate registration for rule ca_lsass_access_seq detected; keeping first registration
+Duplicate registration for rule pe_token_theft_combo detected; keeping first registration
+Duplicate registration for rule pe_uac_bypass_fodhelper detected; keeping first registration
+Duplicate registration for rule pe_namedpipe_impersonation detected; keeping first registration
+Duplicate registration for rule pe_service_binpath_space detected; keeping first registration
+Duplicate registration for rule pe_lolbin_msi_silent_elevated detected; keeping first registration
+Duplicate registration for rule exfil_cloud_storage_new detected; keeping first registration
+Duplicate registration for rule exfil_paste_bin detected; keeping first registration
+Duplicate registration for rule imp_shadowcopy_delete detected; keeping first registration
+Duplicate registration for rule imp_stop_security_services detected; keeping first registration
+Duplicate registration for rule c2_dns_tunnel_exfil detected; keeping first registration
+Duplicate registration for rule col_keylogger_detected_exfil detected; keeping first registration
+ERROR: file or directory not found: ;
+
+

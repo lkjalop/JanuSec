@@ -19,6 +19,8 @@ class PipelineMetrics:
     beacon_counter = None
     rss_gauge = None
     mem_trip_total = None
+    breaker_state_gauge = None
+    breaker_fallback_counter = None
 
     def __init__(self) -> None:
         self._ensure_core_metrics()
@@ -28,7 +30,7 @@ class PipelineMetrics:
         if cls._initialized:
             return
         try:
-            from prometheus_client import Histogram, Counter  # type: ignore
+            from prometheus_client import Counter, Gauge, Histogram  # type: ignore
         except Exception:  # pragma: no cover - metrics optional
             cls._initialized = True
             return
@@ -86,6 +88,15 @@ class PipelineMetrics:
                 'beacon_detection_total',
                 'Count of beacon heuristic detections'
             )
+            cls.breaker_state_gauge = Gauge(
+                'pipeline_breaker_disabled',
+                'Circuit breaker state (1=disabled, 0=enabled)',
+            )
+            cls.breaker_fallback_counter = Counter(
+                'pipeline_breaker_fallback_total',
+                'Fallback activations triggered by the circuit breaker',
+                ['source', 'status']
+            )
         finally:
             cls._initialized = True
 
@@ -94,7 +105,7 @@ class PipelineMetrics:
         if cls.rss_gauge is not None:
             return
         try:
-            from prometheus_client import Gauge, Counter  # type: ignore
+            from prometheus_client import Counter, Gauge  # type: ignore
         except Exception:
             return
         with contextlib.suppress(Exception):
@@ -126,6 +137,19 @@ class PipelineMetrics:
         if self.stage_skip_counter:
             with contextlib.suppress(Exception):
                 self.stage_skip_counter.labels(stage=stage, reason=reason).inc()
+
+    def record_breaker_state(self, disabled: bool) -> None:
+        gauge = self.__class__.breaker_state_gauge
+        if gauge:
+            with contextlib.suppress(Exception):
+                gauge.set(1 if disabled else 0)
+
+    def record_breaker_fallback(self, source: str, success: bool) -> None:
+        counter = self.__class__.breaker_fallback_counter
+        if counter:
+            status = 'ok' if success else 'error'
+            with contextlib.suppress(Exception):
+                counter.labels(source=source, status=status).inc()
 
     def increment_pipeline_events(self, terminal: bool) -> None:
         if self.pipeline_events:

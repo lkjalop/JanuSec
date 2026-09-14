@@ -1,0 +1,139 @@
+# AU Regulator Content Pack
+# =========================
+#
+# This file externalises clock durations, trigger conditions, and
+# submission endpoints so the regulator form modules don't need code
+# changes when:
+#   - OAIC NDB Tranche 2 reform lands (clock changes from "as soon as
+#     practicable" to 72h)
+#   - APRA tweaks CPS 234 paragraph numbering
+#   - SOCI Act sector list expands
+#   - Cyber Security Act 2024 reporting body changes
+#
+# The form modules (au_ndb.py, au_apra_cps234.py, etc.) read this file
+# at module-import time. To roll out a clock change: update this YAML,
+# restart the service.
+#
+# v1 NOTE: This content pack is NOT YET WIRED INTO THE FORM MODULES.
+# v1 modules have these values hardcoded for safety. v1.1 will switch
+# to reading from this pack. Treat this file as the source of truth for
+# WHAT the values should be — the modules are the source of truth for
+# what they currently are.
+
+regulators:
+  ndb_privacy_act:
+    name: "Privacy Act 1988 (Cth) — Notifiable Data Breaches scheme"
+    regulator: "OAIC"
+    jurisdiction: "AU"
+    form_module: "au_ndb"
+    form_version_current: "ndb_online_form_v3_2024"
+    clock:
+      current:
+        seconds: 2592000        # 30 days (current "as soon as practicable")
+        human:   "30d"
+        note:    "Current clock is 'as soon as practicable' — 30d treated as outer limit"
+      tranche2_proposed:
+        seconds: 259200         # 72 hours (Tranche 2 reform)
+        human:   "72h"
+        active:  false          # flip to true when reform takes effect
+    submission:
+      endpoint: "https://www.oaic.gov.au/privacy/notifiable-data-breaches/report-a-data-breach"
+      method:   "manual_form_with_review"
+      auto_submit_allowed: false
+    trigger_when:
+      data_classes_any:
+        - customer_pii
+        - personal_information
+        - sensitive_information
+        - health_records
+        - phi
+        - credit_card
+
+  apra_cps234:
+    name: "Prudential Standard CPS 234 — Information Security"
+    regulator: "APRA"
+    jurisdiction: "AU"
+    form_module: "au_apra_cps234"
+    form_version: "apra_cps234_notification_prose_2024"
+    clock:
+      material_incident:
+        seconds: 259200          # 72h
+        human:   "72h"
+        rule:    "paragraph 36 — material information security incident"
+      material_control_weakness:
+        seconds: 864000          # 10 business days ≈ 14 calendar days
+        human:   "10 business days"
+        rule:    "paragraph 37 — material information security control weakness"
+        v1_implemented: false
+    submission:
+      channel: "APRA Connect or direct submission to responsible APRA supervisor"
+      method:  "manual_form_with_review"
+      auto_submit_allowed: false
+    trigger_when:
+      entity_context_flag: "apra_regulated_entity"
+
+  soci_act:
+    name: "Security of Critical Infrastructure Act 2018 (Cth)"
+    regulator: "ASD"
+    jurisdiction: "AU"
+    form_module: "au_soci"
+    form_version: "asd_cyber_incident_reporting_2024"
+    clock:
+      significant:
+        seconds: 43200          # 12h
+        human:   "12h"
+        rule:    "real and material impact on availability/integrity of CI asset"
+      other_reportable:
+        seconds: 259200         # 72h
+        human:   "72h"
+    submission:
+      endpoint: "https://www.cyber.gov.au/report-and-recover/report"
+      method:   "manual_form_with_review"
+      auto_submit_allowed: false
+    trigger_when:
+      entity_context_field: "soci_sectors"
+      condition: "non_empty"
+    sectors_supported:
+      - electricity
+      - gas
+      - water
+      - ports
+      - freight
+      - aviation
+      - food_grocery
+      - financial_services
+      - healthcare
+      - higher_education
+      - data_storage_processing
+      - communications
+      - defence_industry
+      - space_technology
+
+  cyber_security_act:
+    name: "Cyber Security Act 2024 (Cth) — Schedule 1 Ransomware Payment Reporting"
+    regulator: "ASD"
+    jurisdiction: "AU"
+    form_module: "au_cyber_security_act"
+    form_version: "au_csa_ransomware_reporting_2024"
+    clock:
+      ransomware_payment:
+        seconds: 259200          # 72h
+        human:   "72h"
+        rule:    "from making or arranging the payment, or becoming aware payment was made on entity's behalf"
+    submission:
+      method: "manual_form_with_review"
+      auto_submit_allowed: false
+    trigger_when:
+      tenant_config_flag: "_ransomware_payment_made"
+      condition: "true"
+    additional_warnings:
+      - "Sanctions implications (OFAC, DFAT) — must be reviewed by legal counsel before filing"
+      - "AFP must be notified separately of the payment"
+      - "Separate from and in addition to OAIC NDB, APRA CPS 234, SOCI Act reports"
+
+# Cross-cutting — applies to all AU regulators
+binding_constraints:
+  human_review_required_always: true
+  auto_submit_allowed_anywhere: false
+  field_provenance_required:    true
+  bitemporal_audit_trail:       true

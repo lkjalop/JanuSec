@@ -1,0 +1,82 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "janusec.fullname" . }}
+  labels:
+    app.kubernetes.io/name: {{ include "janusec.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "janusec.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "janusec.name" . }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+      {{- if .Values.vaultInjector.enabled }}
+      annotations:
+        {{- toYaml .Values.vaultInjector.annotations | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- if .Values.podSecurityContext.enabled }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: api
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- if .Values.securityContext.enabled }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          {{- end }}
+          ports:
+            - containerPort: 8080
+          {{- if .Values.envFromSecrets }}
+          envFrom:
+            {{- range .Values.envFromSecrets }}
+            - secretRef:
+                name: {{ . | quote }}
+            {{- end }}
+          {{- end }}
+          env:
+            {{- range .Values.env }}
+            - name: {{ .name }}
+              value: {{ .value | quote }}
+            {{- end }}
+            {{- /* guard auto-wiring if env already provided */ -}}
+            {{- $envMap := dict "hasRedis" false "hasDBHost" false "hasDBPort" false -}}
+            {{- range .Values.env }}
+              {{- if eq .name "REDIS_URL" }}{{- $_ := set $envMap "hasRedis" true -}}{{- end -}}
+              {{- if eq .name "DB_HOST" }}{{- $_ := set $envMap "hasDBHost" true -}}{{- end -}}
+              {{- if eq .name "DB_PORT" }}{{- $_ := set $envMap "hasDBPort" true -}}{{- end -}}
+            {{- end }}
+            {{- if and .Values.redisHa.enabled .Values.autoWire.redisUrl (not ($envMap.hasRedis)) }}
+            - name: REDIS_URL
+              value: {{ default (printf "redis://%s:%d/0" .Values.redisHa.service.name .Values.redisHa.service.port) .Values.redisHa.redisUrl | quote }}
+            {{- end }}
+            {{- if and .Values.pgbouncer.enabled .Values.autoWire.dbHostPort (not ($envMap.hasDBHost)) }}
+            - name: DB_HOST
+              value: {{ .Values.pgbouncer.service.name | quote }}
+            {{- end }}
+            {{- if and .Values.pgbouncer.enabled .Values.autoWire.dbHostPort (not ($envMap.hasDBPort)) }}
+            - name: DB_PORT
+              value: "{{ .Values.pgbouncer.service.port }}"
+            {{- end }}
+          readinessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}

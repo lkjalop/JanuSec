@@ -5,13 +5,16 @@ Centralizes environment-derived thresholds/weights for governance & introspectio
 Exposed values are resolved once on import; call refresh() to re-read env.
 """
 from __future__ import annotations
-import os, json
-from dataclasses import dataclass, asdict
-from typing import Dict, Any
+
+import json
+import os
+from dataclasses import asdict, dataclass
+from typing import Any, Dict
+
 
 @dataclass
 class SeverityWeights:
-    weights: Dict[str, float]
+    weights: dict[str, float]
     override_source: str | None
 
 @dataclass
@@ -92,7 +95,7 @@ def refresh() -> RuntimeConfigSnapshot:
     )
     return _current
 
-def snapshot() -> Dict[str, Any]:
+def snapshot() -> dict[str, Any]:
     if _current is None:
         refresh()
     assert _current is not None

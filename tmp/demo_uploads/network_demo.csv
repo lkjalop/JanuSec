@@ -1,0 +1,3 @@
+event_id,src_ip,dst_ip,domain,protocol,bytes,timestamp
+net-1,10.0.0.5,8.8.8.8,malicious.example,udp,120,2025-11-12T00:00:10Z
+net-2,10.0.0.6,8.8.4.4,benign.example,tcp,560,2025-11-12T00:01:05Z

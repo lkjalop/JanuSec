@@ -3,9 +3,10 @@
 Enforces per-tenant token usage budgets with soft and hard thresholds.
 """
 from __future__ import annotations
+
 import time
 from dataclasses import dataclass
-from typing import Dict, Any
+from typing import Any, Dict
 
 try:
     from prometheus_client import Counter, Gauge
@@ -21,8 +22,8 @@ class TenantBudget:
 
 class ExternalBudgetManager:
     def __init__(self):
-        self._tenant_usage: Dict[str, list[tuple[float,int]]] = {}
-        self._tenant_budget: Dict[str, TenantBudget] = {}
+        self._tenant_usage: dict[str, list[tuple[float,int]]] = {}
+        self._tenant_budget: dict[str, TenantBudget] = {}
         self._init_metrics()
 
     def _init_metrics(self):

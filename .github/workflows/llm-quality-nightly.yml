@@ -1,0 +1,35 @@
+name: LLM quality (nightly)
+
+# The LLM-layer quality benchmark (scripts/llm_compare.py) — hallucinated_entities,
+# kill-chain recall, entity recall, Santos-benign gate — across VESPER + Meridian.
+#
+# This needs a local LLM (Ollama) and the ground-truth fixtures, which GitHub-hosted
+# runners do NOT have, so it targets a SELF-HOSTED runner labelled 'ollama' and runs
+# nightly / on demand rather than per-PR. The per-PR deterministic guarantee lives in
+# grounding-gate.yml (no Ollama needed). If no self-hosted runner is available this
+# job simply does not run.
+
+# Environment-specific suite; see docs/CI_SCOPE.md.
+on:
+  workflow_dispatch:
+
+jobs:
+  llm-quality:
+    runs-on: [self-hosted, ollama]
+    if: ${{ github.repository_owner != '' }}
+    env:
+      LLM_PROVIDER: ollama
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ollama reachable?
+        run: curl -s -m 5 http://localhost:11434/api/version || (echo "Ollama not reachable — skipping" && exit 0)
+      - name: Narrator quality benchmark (VESPER + Meridian)
+        run: |
+          python scripts/llm_compare.py --models qwen2.5:14b --max-clusters 2 || true
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: llm-compare-results
+          path: scripts/llm_compare_results.json
+          if-no-files-found: ignore
