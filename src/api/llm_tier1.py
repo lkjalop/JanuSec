@@ -125,7 +125,7 @@ def _call_llm(prompt: str, score: float) -> Dict[str, Any]:
             if action_m:
                 action = action_m.group(1).upper()
                 # Extract first sentence-like rationale after action keyword
-                rationale = re.sub(r'^.*?' + action_m.group(1), '', text, flags=re.IGNORECASE).strip()
+                rationale = text[action_m.end():].strip()
                 rationale = (rationale[:200] or 'LLM response could not be fully parsed').strip()
                 return {
                     'action': action,

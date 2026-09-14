@@ -1,4 +1,5 @@
 import os
+from src.security.storage_paths import storage_id, storage_path
 import json
 import time
 from typing import Any, Dict, Optional
@@ -13,12 +14,12 @@ def _ensure_dir(path: str) -> None:
         pass
 
 def tenant_path(tenant: str) -> str:
-    return os.path.join(DATA_DIR, tenant)
+    return storage_path(DATA_DIR, storage_id(tenant))
 
 def persist_tenant_partition(tenant: str, payload: Dict[str, Any]) -> bool:
     try:
         _ensure_dir(tenant_path(tenant))
-        path = os.path.join(tenant_path(tenant), 'partition.json')
+        path = storage_path(tenant_path(tenant), 'partition.json')
         payload = payload.copy()
         payload['_persisted_ts'] = time.time()
         with open(path, 'w', encoding='utf-8') as fh:
@@ -29,7 +30,7 @@ def persist_tenant_partition(tenant: str, payload: Dict[str, Any]) -> bool:
 
 def load_tenant_partition(tenant: str) -> Optional[Dict[str, Any]]:
     try:
-        path = os.path.join(tenant_path(tenant), 'partition.json')
+        path = storage_path(tenant_path(tenant), 'partition.json')
         with open(path, 'r', encoding='utf-8') as fh:
             return json.load(fh)
     except Exception:

@@ -53,29 +53,20 @@ def send_report(payload: SendReportPayload, request: Request):
 
     # If target looks like a webhook URL, POST to it
     if target.startswith('http://') or target.startswith('https://'):
-        # prefer httpx if available
+        from src.security.configured_targets import configured_webhook
+        import httpx
         try:
-            import httpx
-            body = {'text': (payload.message or '') + '\n' + report_url}
-            try:
-                with httpx.Client(timeout=10.0) as _c:
-                    r = _c.post(target, json=body)
-            except TypeError:
-                with httpx.Client() as _c:
-                    r = _c.post(target, json=body, timeout=10.0)
-            if r.status_code >= 400:
-                raise HTTPException(status_code=502, detail=f'Webhook POST failed: {r.status_code} {r.text}')
-            return {'status': 'sent', 'via': 'webhook', 'code': r.status_code}
-        except Exception as e:
-            # fallback to urllib
-            try:
-                import urllib.request, urllib.error
-                data = json.dumps({'text': (payload.message or '') + '\n' + report_url}).encode('utf-8')
-                req = urllib.request.Request(target, data=data, headers={'Content-Type':'application/json'})
-                with urllib.request.urlopen(req, timeout=10) as resp:
-                    return {'status':'sent', 'via':'webhook', 'code': resp.getcode()}
-            except Exception as e2:
-                raise HTTPException(status_code=502, detail=f'Webhook POST failed: {e} / {e2}')
+            destination = configured_webhook(target)
+        except ValueError:
+            raise HTTPException(status_code=400, detail='Webhook destination is not approved') from None
+        try:
+            with httpx.Client(timeout=10.0, follow_redirects=False, trust_env=False) as client:
+                response = client.post(destination, json={'text': (payload.message or '') + '\n' + report_url})
+            if not 200 <= response.status_code < 300:
+                raise HTTPException(status_code=502, detail='Webhook delivery failed')
+            return {'status': 'sent', 'via': 'webhook', 'code': response.status_code}
+        except httpx.HTTPError:
+            raise HTTPException(status_code=502, detail='Webhook delivery failed') from None
 
     # If channel is email, attempt SMTP if configured, else return mailto link
     if channel in ('email', 'mail') or ('@' in target and not target.startswith('+')):

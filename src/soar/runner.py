@@ -6,6 +6,7 @@ import time
 from typing import Any, Dict, List
 
 import httpx
+from src.security.configured_targets import configured_webhook
 from src.soar.connectors import get_registry, ConnectorError
 from src.soar.connector_audit import record_audit
 
@@ -80,9 +81,7 @@ class PlaybookRunner:
                 except Exception:
                     pass
                 return StepResult("block_ip", True, data=res)
-            # fallback to a noop stub
-            await asyncio.sleep(0.01)
-            return StepResult("block_ip", True, data={"ip": ip})
+            return StepResult("block_ip", False, detail="No block connector configured")
         except ConnectorError as e:
             return StepResult("block_ip", False, detail=str(e))
         except Exception as e:
@@ -97,19 +96,20 @@ class PlaybookRunner:
         if not url:
             return StepResult("notify", False, detail="no webhook_url")
         try:
+            url = configured_webhook(url)
             # allow using a connector for notify if specified
             reg = get_registry()
             connector_name = params.get('connector')
             if connector_name:
                 conn = reg.get(connector_name)
                 if conn:
-                    res = await conn({'url': url, 'msg': msg, **params})
+                    res = await conn({**params, 'url': url, 'webhook_url': url, 'msg': msg})
                     return StepResult("notify", True, data=res)
-            async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as c:
+            async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT, follow_redirects=False, trust_env=False) as c:
                 resp = await c.post(url, json={"text": msg})
                 return StepResult("notify", resp.status_code < 300, detail=str(resp.status_code), data=resp.text[:200])
         except Exception as e:
-            return StepResult("notify", False, detail=str(e))
+            return StepResult("notify", False, detail="Notification failed")
 
     async def _step_revoke_sessions(self, params: Dict[str, Any]) -> StepResult:
         user = params.get("user") or params.get("username")

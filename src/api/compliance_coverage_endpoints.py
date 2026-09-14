@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse, HTMLResponse
+from html import escape
 from typing import List
 from typing import Optional
 
@@ -14,12 +15,12 @@ def compliance_coverage(framework: str = Query(..., pattern="^(mitre|nist_csf|ci
     cov = coverage(framework)
     if format == 'html':
         html = ["<html><head><title>Compliance Coverage</title></head><body>"]
-        html.append(f"<h2>Framework Coverage: {framework}</h2>")
+        html.append(f"<h2>Framework Coverage: {escape(framework)}</h2>")
         html.append(f"<p><strong>Mapped:</strong> {cov['mapped']} / {cov['total_factors']} ({cov['coverage_percent']}%)</p>")
         if cov['unmapped_factors']:
             html.append("<h3>Unmapped Factors</h3><ul>")
             for k in cov['unmapped_factors'][:50]:
-                html.append(f"<li>{k}</li>")
+                html.append(f"<li>{escape(str(k))}</li>")
             html.append("</ul>")
         html.append("</body></html>")
         return HTMLResponse(''.join(html))
@@ -44,7 +45,7 @@ def coverage_report(format: Optional[str] = Query("html")):
     html.append("<h2>Cross-Mapping Coverage Summary</h2>")
     html.append("<table border='1' cellspacing='0' cellpadding='4'><tr><th>Framework</th><th>Mapped</th><th>Total</th><th>Coverage %</th></tr>")
     for r in rows:
-        html.append(f"<tr><td>{r['framework']}</td><td>{r['mapped']}</td><td>{r['total_factors']}</td><td>{r['coverage_percent']}</td></tr>")
+        html.append(f"<tr><td>{escape(str(r['framework']))}</td><td>{r['mapped']}</td><td>{r['total_factors']}</td><td>{r['coverage_percent']}</td></tr>")
     html.append("</table>")
     # Sample unmapped slice for executive visibility
     unmapped = []
@@ -54,7 +55,7 @@ def coverage_report(format: Optional[str] = Query("html")):
     if unmapped:
         html.append("<h3>Sample Unmapped Factors (Top 5 per Framework)</h3><ul>")
         for fw,u in unmapped:
-            html.append(f"<li><strong>{fw}</strong>: {u}</li>")
+            html.append(f"<li><strong>{escape(str(fw))}</strong>: {escape(str(u))}</li>")
         html.append("</ul>")
     html.append("</body></html>")
     return HTMLResponse(''.join(html))

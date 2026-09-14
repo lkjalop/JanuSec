@@ -15,6 +15,7 @@ import time
 from typing import Dict, Optional
 
 import requests
+from src.security.storage_paths import storage_id, storage_path
 from cryptography.fernet import Fernet
 
 logger = logging.getLogger(__name__)
@@ -68,8 +69,8 @@ class FileSecretBackend(BaseSecretBackend):
         self.fernet = Fernet(key)
 
     def _path_for(self, key: str) -> str:
-        safe = key.replace("/", "_")
-        return os.path.join(STORE_DIR, f"{safe}.json.enc")
+        safe = "_".join(storage_id(part) for part in key.split("/"))
+        return storage_path(STORE_DIR, f"{safe}.json.enc")
 
     def save(self, key: str, payload: Dict) -> None:
         path = self._path_for(key)
@@ -226,7 +227,7 @@ class TenantStore:
         self.backend = _build_backend(backend)
 
     def _token_key(self, tenant_id: str) -> str:
-        return f"tenants/{tenant_id}/tokens"
+        return f"tenants/{storage_id(tenant_id)}/tokens"
 
     def save_tokens(self, tenant_id: str, token_payload: Dict) -> None:
         self.backend.save(self._token_key(tenant_id), token_payload)

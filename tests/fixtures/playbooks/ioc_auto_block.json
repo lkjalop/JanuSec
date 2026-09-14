@@ -1,0 +1,26 @@
+{
+  "name": "ioc-auto-block",
+  "dry_run": true,
+  "steps": [
+    {
+      "type": "enrich",
+      "params": {}
+    },
+    {
+      "type": "open_case",
+      "params": {}
+    },
+    {
+      "type": "block_ip",
+      "params": {
+        "ip": "192.0.2.1"
+      }
+    },
+    {
+      "type": "notify",
+      "params": {
+        "msg": "Synthetic dry-run test"
+      }
+    }
+  ]
+}

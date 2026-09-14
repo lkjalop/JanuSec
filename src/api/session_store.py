@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import time
+from src.security.storage_paths import storage_path
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -35,7 +36,7 @@ class JsonSessionStore(BaseSessionStore):
             pass
 
     def _path(self, session_id: str) -> Path:
-        return self.dir / f"{session_id}.json"
+        return Path(storage_path(self.dir, f"{session_id}.json"))
 
     def save(self, session_id: str, summary: Dict[str, Any]) -> None:
         record = {'session_id': session_id, 'summary': summary}

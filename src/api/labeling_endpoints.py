@@ -84,12 +84,9 @@ async def list_labels(tenant_id: Optional[str] = None, page: int = 1, page_size:
     if q:
         where = where + " AND (decision_id ILIKE $2 OR label ILIKE $2 OR evidence ILIKE $2)"
         params = [tenant_id, f"%{q}%"]
-    # Validate sort_by
-    if sort_by not in ('created_at','label','decision_id'):
-        sort_by = 'created_at'
-    sort_dir = str(sort_dir).lower()
-    if sort_dir not in ('asc','desc'):
-        sort_dir = 'desc'
+    # Resolve SQL identifiers from constants, never interpolate request strings.
+    sort_by = {'created_at': 'created_at', 'label': 'label', 'decision_id': 'decision_id'}.get(sort_by, 'created_at')
+    sort_dir = {'asc': 'ASC', 'desc': 'DESC'}.get(str(sort_dir).lower(), 'DESC')
     SQL = f"SELECT * FROM decision_labels WHERE {where} ORDER BY {sort_by} {sort_dir} LIMIT $%d OFFSET $%d" % (len(params)+1, len(params)+2)
     try:
         rows = await fetch(SQL, *params, int(page_size), offset)

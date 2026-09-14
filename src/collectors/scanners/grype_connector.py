@@ -3,6 +3,7 @@ import os
 import logging
 from typing import Dict, Any, List
 import asyncio
+from src.security.configured_targets import configured_target
 
 logger = logging.getLogger(__name__)
 
@@ -19,9 +20,10 @@ class GrypeConnector:
         real_mode = os.getenv('SCANNERS_REAL_MODE','0').lower() in {'1','true','yes'}
         grype_path = os.getenv('GRYPE_PATH') or 'grype'
         if real_mode:
+            target = configured_target(target, "JANUSEC_APPROVED_SCANNER_TARGETS")
             try:
                 import subprocess, json
-                cmd = [grype_path, target, '-o', 'json']
+                cmd = [grype_path, '-o', 'json', '--', target]
                 proc = subprocess.run(cmd, capture_output=True, text=True, timeout=int(os.getenv('GRYPE_TIMEOUT_SEC','120') or 120))
                 if proc.returncode == 0:
                     data = json.loads(proc.stdout or '{}')
@@ -34,10 +36,10 @@ class GrypeConnector:
                         cve = vuln.get('id')
                         score = (vuln.get('cvss', [{}])[0] or {}).get('metrics', {}).get('baseScore')
                         comps.append({'name': name, 'version': ver, 'cve': cve, 'cvss_base_score': score})
-                    if comps:
-                        return {'sbom_id': f'grype-{self.tenant_id}', 'components': comps}
+                    return {'sbom_id': f'grype-{self.tenant_id}', 'components': comps}
+                raise RuntimeError("grype scan failed")
             except Exception:
-                logger.exception('Grype scan failed')
+                raise RuntimeError("grype scan failed; no findings produced") from None
         comps: List[Dict[str, Any]] = [
             {'name': 'struts', 'version': '2.5.10', 'summary': 'Potential risky component'},
         ]

@@ -72,13 +72,10 @@ import io
 import re
 
 def _simple_sanitize(html: str) -> str:
-    # Very small fallback sanitizer: remove script/style tags and on* attributes
-    html = re.sub(r'(?is)<script.*?>.*?</script>', '', html)
-    html = re.sub(r'(?is)<style.*?>.*?</style>', '', html)
-    # remove on* attributes like onclick
-    html = re.sub(r'\son\w+="[^"]*"', '', html)
-    html = re.sub(r"\son\w+='[^']*'", '', html)
-    return html
+    # Parser-based sanitization is preferred; escaping fails closed if unavailable.
+    from html import escape
+    return escape(html, quote=True)
+
 
 _STREAM_THRESHOLD = int(__import__('os').environ.get('REPORT_STREAM_THRESHOLD_BYTES', '16384'))
 
@@ -818,7 +815,7 @@ async def report_ingestion(
                 )
                 try:
                     if _HAS_BLEACH:
-                        model_html = bleach.clean(model_html, tags=bleach.sanitizer.ALLOWED_TAGS + ['div','h3','h4','pre','code','span','table','thead','tbody','tr','th','td','ul','li'], attributes=bleach.sanitizer.ALLOWED_ATTRIBUTES, strip=True)
+                        model_html = bleach.clean(model_html, tags=list(bleach.sanitizer.ALLOWED_TAGS) + ['div','h3','h4','pre','code','span','table','thead','tbody','tr','th','td','ul','li'], attributes=bleach.sanitizer.ALLOWED_ATTRIBUTES, strip=True)
                     else:
                         model_html = _simple_sanitize(model_html)
                 except Exception:
@@ -950,7 +947,7 @@ async def generate_pdf_report(req: Request, include_model: bool = Query(False)):
 
     # Fallback: return HTML content
     buf = html.encode('utf-8')
-    return StreamingResponse(io.BytesIO(buf), media_type='text/html')
+    return StreamingResponse(io.BytesIO(buf), media_type='text/plain', headers={'X-Content-Type-Options': 'nosniff'})
 
 
 @router.post('/api/v1/report/generate_pdf_from_html')
@@ -965,6 +962,13 @@ async def generate_pdf_from_html_endpoint(req: Request):
     html = body.get('html', '')
     if not html:
         raise HTTPException(status_code=400, detail='html_required')
+    # Arbitrary user HTML cannot load resources or execute scripts in a renderer.
+    if not isinstance(html, str) or len(html) > 1_000_000:
+        raise HTTPException(status_code=400, detail='html_too_large_or_invalid')
+    if _HAS_BLEACH:
+        html = bleach.clean(html, tags=['p', 'br', 'h1', 'h2', 'h3', 'strong', 'em', 'ul', 'ol', 'li', 'table', 'thead', 'tbody', 'tr', 'td', 'th', 'pre', 'code'], attributes={}, protocols=[], strip=True)
+    else:
+        html = _simple_sanitize(html)
     try:
         from src.reporting.export import export_pdf_bytes_from_html as _export  # type: ignore
         pdf_bytes = _export(html)
@@ -982,7 +986,7 @@ async def generate_pdf_from_html_endpoint(req: Request):
         pass
     except Exception:
         pass
-    return StreamingResponse(io.BytesIO(html.encode('utf-8')), media_type='text/html',
+    return StreamingResponse(io.BytesIO(html.encode('utf-8')), media_type='text/plain',
                              headers={'Content-Disposition': f'attachment; filename="report_{int(time.time())}.html"'})
 
 
@@ -1082,17 +1086,17 @@ async def generate_report(req: Request, format: str = Query('html'), include_mod
     # Sanitize HTML output to avoid XSS
     try:
         if _HAS_BLEACH:
-            safe_html = bleach.clean(html, tags=bleach.sanitizer.ALLOWED_TAGS + ['table', 'tr', 'td', 'th'], attributes=bleach.sanitizer.ALLOWED_ATTRIBUTES, strip=True)
+            safe_html = bleach.clean(html, tags=list(bleach.sanitizer.ALLOWED_TAGS) + ['table', 'tr', 'td', 'th'], attributes=bleach.sanitizer.ALLOWED_ATTRIBUTES, strip=True)
         else:
             safe_html = _simple_sanitize(html)
     except Exception:
-        safe_html = html
+        safe_html = _simple_sanitize(html)
 
     # Sanitize model_html if present
     try:
         if result.get('model_html'):
             if _HAS_BLEACH:
-                result['model_html'] = bleach.clean(result['model_html'], tags=bleach.sanitizer.ALLOWED_TAGS + ['div','h3','pre','code','span'], attributes=bleach.sanitizer.ALLOWED_ATTRIBUTES, strip=True)
+                result['model_html'] = bleach.clean(result['model_html'], tags=list(bleach.sanitizer.ALLOWED_TAGS) + ['div','h3','pre','code','span'], attributes=bleach.sanitizer.ALLOWED_ATTRIBUTES, strip=True)
             else:
                 result['model_html'] = _simple_sanitize(result['model_html'])
     except Exception:

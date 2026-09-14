@@ -25,7 +25,7 @@ def test_arc_rfc_verification_harness(monkeypatch):
 
     # Generate test key
     import rsa
-    (pub, priv) = rsa.newkeys(1024)
+    (pub, priv) = rsa.newkeys(2048)
     priv_pem = priv.save_pkcs1()
     pub_pem = pub.save_pkcs1()
 

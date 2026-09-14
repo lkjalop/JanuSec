@@ -3,6 +3,7 @@ import os
 import logging
 from typing import Dict, Any, List
 import asyncio
+from src.security.configured_targets import configured_target
 
 logger = logging.getLogger(__name__)
 
@@ -19,9 +20,10 @@ class SyftConnector:
         real_mode = os.getenv('SCANNERS_REAL_MODE','0').lower() in {'1','true','yes'}
         syft_path = os.getenv('SYFT_PATH') or 'syft'
         if real_mode:
+            target = configured_target(target, "JANUSEC_APPROVED_SCANNER_TARGETS")
             try:
                 import subprocess, json
-                cmd = [syft_path, target, '-o', 'json']
+                cmd = [syft_path, '-o', 'json', '--', target]
                 proc = subprocess.run(cmd, capture_output=True, text=True, timeout=int(os.getenv('SYFT_TIMEOUT_SEC','120') or 120))
                 if proc.returncode == 0:
                     data = json.loads(proc.stdout or '{}')
@@ -53,8 +55,9 @@ class SyftConnector:
                         # dependency graph builders and SBOM endpoints recognize it.
                         deps.append({'ref': s, 'dependsOn': sorted(list(children))})
                     return {'sbom_id': f'syft-{self.tenant_id}', 'components': comps, 'relationships': deps}
+                raise RuntimeError("syft scan failed")
             except Exception:
-                logger.exception('Syft scan failed')
+                raise RuntimeError("syft scan failed; no findings produced") from None
         comps: List[Dict[str, Any]] = [
             {'name': 'commons-io', 'version': '2.6'},
         ]

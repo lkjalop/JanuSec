@@ -25,7 +25,7 @@ def test_canonicalization_and_strict_verify(monkeypatch):
 
     # Generate ephemeral RSA key pair using dkim library helper if present
     import rsa
-    (pub, priv) = rsa.newkeys(1024)
+    (pub, priv) = rsa.newkeys(2048)
     priv_pem = priv.save_pkcs1()
     selector = b'testsel'
     domain = b'example.test'

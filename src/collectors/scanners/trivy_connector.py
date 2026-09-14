@@ -3,6 +3,7 @@ import os
 import logging
 from typing import Dict, Any, List
 import asyncio
+from src.security.configured_targets import configured_target
 
 logger = logging.getLogger(__name__)
 
@@ -20,9 +21,10 @@ class TrivyConnector:
         trivy_path = os.getenv('TRIVY_PATH') or 'trivy'
         real_mode = os.getenv('SCANNERS_REAL_MODE','0').lower() in {'1','true','yes'}
         if real_mode:
+            image = configured_target(image, "JANUSEC_APPROVED_SCANNER_TARGETS")
             try:
                 import subprocess, json
-                cmd = [trivy_path, 'image', '--quiet', '--format', 'json', image]
+                cmd = [trivy_path, 'image', '--quiet', '--format', 'json', '--', image]
                 proc = subprocess.run(cmd, capture_output=True, text=True, timeout=int(os.getenv('TRIVY_TIMEOUT_SEC','120') or 120))
                 if proc.returncode == 0:
                     data = json.loads(proc.stdout or '{}')
@@ -35,10 +37,10 @@ class TrivyConnector:
                             cve = v.get('VulnerabilityID')
                             score = v.get('CVSS', {}).get('nvd', {}).get('V2Score') or v.get('CVSS', {}).get('nvd', {}).get('Score')
                             comps.append({'name': name, 'version': ver, 'cve': cve, 'cvss_base_score': score})
-                    if comps:
-                        return {'sbom_id': f'trivy-{self.tenant_id}', 'components': comps}
-            except Exception as e:
-                logger.exception('Trivy scan failed: %s', e)
+                    return {'sbom_id': f'trivy-{self.tenant_id}', 'components': comps}
+                raise RuntimeError("trivy scan failed")
+            except Exception:
+                raise RuntimeError("trivy scan failed; no findings produced") from None
         # Fallback stub
         comps: List[Dict[str, Any]] = [
             {'name': 'openssl', 'version': '1.1.0', 'cve': 'CVE-2020-1967', 'cvss_base_score': 7.5, 'summary': 'OpenSSL vuln'},

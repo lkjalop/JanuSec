@@ -43,13 +43,15 @@ class _PubKey:
         )
 
 
-def newkeys(key_size: int = 1024) -> Tuple[_PubKey, _PrivKey]:
+def newkeys(key_size: int = 2048) -> Tuple[_PubKey, _PrivKey]:
     """Generate a new RSA keypair and return (pub, priv).
 
     The API mirrors the minimal behaviour used by tests: the private key
     object supports `save_pkcs1()` returning PEM bytes acceptable to
     dkimpy for signing.
     """
+    if key_size < 2048:
+        raise ValueError("RSA keys must be at least 2048 bits")
     priv = _rsa.generate_private_key(public_exponent=65537, key_size=key_size, backend=_default_backend())
     pub = priv.public_key()
     return (_PubKey(pub), _PrivKey(priv))

@@ -70,5 +70,9 @@
   "tests/test_tenant_middleware_strict.py",
   "tests/test_token_refresh.py",
   "tests/test_verdict_taxonomy_canonical.py",
-  "tests/test_zero_ts_union_guard.py"
+  "tests/test_zero_ts_union_guard.py",
+  "tests/test_configured_outbound_targets.py",
+  "tests/test_report_security_boundaries.py",
+  "tests/test_soar_runner.py",
+  "tests/test_storage_path_boundaries.py"
 ]

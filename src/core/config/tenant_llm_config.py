@@ -29,6 +29,7 @@ import json
 import logging
 import os
 import time
+from src.security.storage_paths import storage_id, storage_path
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -147,12 +148,12 @@ def _store_dir() -> Path:
 
 
 def _safe(s: str) -> str:
-    return ''.join(c if c.isalnum() or c in '-_.' else '_' for c in s)
+    return storage_id(s)
 
 
 def load_tenant_llm_config(tenant_id: str) -> Optional[TenantLLMConfig]:
     """Load persisted config for *tenant_id*, or None if not configured."""
-    path = _store_dir() / f'{_safe(tenant_id)}.json'
+    path = Path(storage_path(_store_dir(), f'{_safe(tenant_id)}.json'))
     if not path.exists():
         return None
     try:
@@ -179,7 +180,7 @@ def load_tenant_llm_config(tenant_id: str) -> Optional[TenantLLMConfig]:
 def save_tenant_llm_config(cfg: TenantLLMConfig) -> None:
     """Persist a TenantLLMConfig to disk."""
     cfg.updated_at = time.time()
-    path = _store_dir() / f'{_safe(cfg.tenant_id)}.json'
+    path = Path(storage_path(_store_dir(), f'{_safe(cfg.tenant_id)}.json'))
     try:
         path.write_text(json.dumps(asdict(cfg), indent=2, ensure_ascii=False), encoding='utf-8')
     except Exception as exc:
@@ -189,7 +190,7 @@ def save_tenant_llm_config(cfg: TenantLLMConfig) -> None:
 
 def delete_tenant_llm_config(tenant_id: str) -> bool:
     """Remove tenant config; returns True if it existed."""
-    path = _store_dir() / f'{_safe(tenant_id)}.json'
+    path = Path(storage_path(_store_dir(), f'{_safe(tenant_id)}.json'))
     if path.exists():
         path.unlink()
         return True

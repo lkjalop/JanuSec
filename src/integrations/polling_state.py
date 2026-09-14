@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import threading
+from src.security.storage_paths import storage_id, storage_path
 from typing import Dict, Optional
 
 
@@ -15,9 +16,9 @@ class PollingStateStore:
         self._lock = threading.Lock()
 
     def _path(self, tenant_id: str, provider: str) -> str:
-        safe_tenant = tenant_id.replace("/", "_")
-        safe_provider = provider.replace("/", "_")
-        return os.path.join(self.root, f"{safe_tenant}_{safe_provider}.json")
+        safe_tenant = storage_id(tenant_id)
+        safe_provider = storage_id(provider)
+        return storage_path(self.root, f"{safe_tenant}_{safe_provider}.json")
 
     def load_state(self, tenant_id: str, provider: str) -> Dict:
         path = self._path(tenant_id, provider)
