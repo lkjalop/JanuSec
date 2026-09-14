@@ -1,4 +1,5 @@
 from __future__ import annotations
+from src.security.storage_paths import storage_path, confined_path
 
 import json
 import os
@@ -55,7 +56,7 @@ def list_playbooks() -> Dict[str, Any]:
 def save_playbook(name: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     if not name.endswith('.json'):
         name = name + '.json'
-    path = os.path.join(PLAYBOOKS_DIR, name)
+    path = storage_path(PLAYBOOKS_DIR, name)
     with open(path, 'w', encoding='utf-8') as f:
         json.dump(payload, f)
     return {"saved": True, "path": path}

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from src.security.storage_paths import storage_path
+
 import io
 import json
 import os
@@ -17,7 +19,7 @@ except Exception:  # pragma: no cover
 
 
 def _load_config(name: str) -> Dict[str, Any]:
-    path = os.path.join('data', 'integrations', f'{name}.json')
+    path = storage_path('data/integrations', f'{name}.json')
     if not os.path.exists(path):
         return {}
     try:
@@ -44,19 +46,20 @@ class GenericSandboxProvider(SandboxProvider):
         self.name = name
         self.cfg = _load_config(name)
         self.base = (self.cfg.get('base_url') or '').rstrip('/')
-        self.headers = dict(self.cfg.get('headers') or {})
+        headers = self.cfg.get('headers') or {}
+        if self.cfg.get('_headers_encrypted'):
+            headers = json.loads(decrypt_secret(headers))
+        self.headers = dict(headers)
         # if api_key stored encrypted, decrypt and inject into headers
         api_key = self.cfg.get('api_key')
         if api_key and self.cfg.get('_api_key_encrypted'):
             try:
                 secret = decrypt_secret(api_key)
                 header_name = self.cfg.get('api_key_header') or 'Authorization'
-                if header_name.lower() == 'authorization' and not self.headers.get('Authorization'):
-                    self.headers['Authorization'] = f'Bearer {secret}'
-                else:
-                    self.headers[header_name] = secret
+                if not any(name.lower() == header_name.lower() for name in self.headers):
+                    self.headers[header_name] = f'Bearer {secret}' if header_name.lower() == 'authorization' else secret
             except Exception:
-                pass
+                raise RuntimeError("Sandbox credential decryption failed") from None
 
     async def submit(self, file_bytes: bytes | None, filename: str | None, url: str | None) -> str:
         if not self.base or httpx is None:

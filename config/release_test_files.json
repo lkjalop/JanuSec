@@ -75,5 +75,6 @@
   "tests/test_report_security_boundaries.py",
   "tests/test_soar_runner.py",
   "tests/test_storage_path_boundaries.py",
-  "tests/test_storage_remediation_round2.py"
+  "tests/test_storage_remediation_round2.py",
+  "tests/test_integration_security_boundaries.py"
 ]

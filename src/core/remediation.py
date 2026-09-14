@@ -34,7 +34,7 @@ def restart_collector(name: str, dry_run: bool = True) -> Dict[str, Any]:
             return {"action": "restart_collector", "name": name, "status": "error", "details": "unknown manager"}
     except Exception as e:
         LOG.exception("restart_collector failed: %s", e)
-        return {"action": "restart_collector", "name": name, "status": "error", "details": str(e)}
+        return {"action": "restart_collector", "name": name, "status": "error", "details": "remediation_failed"}
 
 
 def refresh_api_token(connector_name: str, dry_run: bool = True) -> Dict[str, Any]:
@@ -57,7 +57,7 @@ def refresh_api_token(connector_name: str, dry_run: bool = True) -> Dict[str, An
         return {"action": "refresh_api_token", "connector": connector_name, "status": "error", "details": "no handler"}
     except Exception as e:
         LOG.exception("refresh_api_token failed: %s", e)
-        return {"action": "refresh_api_token", "connector": connector_name, "status": "error", "details": str(e)}
+        return {"action": "refresh_api_token", "connector": connector_name, "status": "error", "details": "remediation_failed"}
 
 
 __all__ = ["restart_collector", "refresh_api_token"]

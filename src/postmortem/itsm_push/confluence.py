@@ -250,7 +250,7 @@ def _create_page(base_url: str, payload: dict, auth) -> dict:
             }
         return {"success": False, "error": f"confluence_http_{r.status_code}", "body": r.text[:500]}
     except Exception as exc:
-        return {"success": False, "error": f"confluence_exception:{exc}"}
+        return {"success": False, "error": "confluence_request_failed"}
 
 
 def _update_page(base_url: str, existing: dict, payload: dict, auth) -> dict:
@@ -280,7 +280,7 @@ def _update_page(base_url: str, existing: dict, payload: dict, auth) -> dict:
             }
         return {"success": False, "error": f"confluence_http_{r.status_code}", "body": r.text[:500]}
     except Exception as exc:
-        return {"success": False, "error": f"confluence_exception:{exc}"}
+        return {"success": False, "error": "confluence_request_failed"}
 
 
 __all__ = ["push"]

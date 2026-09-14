@@ -25,6 +25,7 @@
   - Stores built session summaries in memory and optionally persists to SQLite via HopGraphPersistence for identity adjacency enrichment in future.
 """
 from __future__ import annotations
+from src.security.storage_paths import storage_path, confined_path
 
 import os
 import logging
@@ -1409,7 +1410,7 @@ async def build_session(
             inline_index = {}
 
         for sid in session_ids:
-            path = fixtures_dir / f"{sid}.json"
+            path = Path(storage_path(fixtures_dir, f"{sid}.json"))
             value_sets: Dict[str, set] = {f: set() for f in _CANONICAL_FIELDS}
             helper_payload = helper_entities.get(sid)
             # Inline session data takes precedence when provided
@@ -1537,7 +1538,7 @@ async def build_session(
             if sid not in batch_source:
                 if batch_value_sets.get(sid) is None:
                     batch_source[sid] = 'synthetic' if synthetic_evidence_enabled else 'missing'
-                elif (fixtures_dir / f"{sid}.json").exists() and synthetic_evidence_enabled:
+                elif (Path(storage_path(fixtures_dir, f"{sid}.json"))).exists() and synthetic_evidence_enabled:
                     batch_source[sid] = 'fixture'
                 else:
                     batch_source[sid] = 'runtime'
@@ -2843,7 +2844,7 @@ async def build_session(
 
         # If fully fixture-driven (or fixture files exist), prefer the deterministic expected factor set used in strict tests
         try:
-            fixtures_present = synthetic_evidence_enabled and all((fixtures_dir / f"{sid}.json").exists() for sid in session_ids)
+            fixtures_present = synthetic_evidence_enabled and all((Path(storage_path(fixtures_dir, f"{sid}.json"))).exists() for sid in session_ids)
         except Exception:
             fixtures_present = False
         # Only enforce deterministic fixture-driven expected factors when no
@@ -4227,7 +4228,7 @@ async def build_session(
         # stable algorithmic outputs remain consistent despite later enrichments.
         try:
             try:
-                fixtures_present_final = synthetic_evidence_enabled and all((fixtures_dir / f"{sid}.json").exists() for sid in session_ids)
+                fixtures_present_final = synthetic_evidence_enabled and all((Path(storage_path(fixtures_dir, f"{sid}.json"))).exists() for sid in session_ids)
             except Exception:
                 fixtures_present_final = False
             try:
@@ -4310,7 +4311,7 @@ async def build_session(
                 # In fixture-driven flows with EWMA enabled (create_app tests),
                 # strict tests expect string-only algorithmic factors; skip metrics.
                 try:
-                    fixtures_present = synthetic_evidence_enabled and all((fixtures_dir / f"{sid}.json").exists() for sid in session_ids)
+                    fixtures_present = synthetic_evidence_enabled and all((Path(storage_path(fixtures_dir, f"{sid}.json"))).exists() for sid in session_ids)
                 except Exception:
                     fixtures_present = False
                 try:
@@ -4365,7 +4366,7 @@ async def build_session(
             try:
                 fixtures_final = (
                     synthetic_evidence_enabled
-                    and all((fixtures_dir / f"{sid}.json").exists() for sid in session_ids)
+                    and all((Path(storage_path(fixtures_dir, f"{sid}.json"))).exists() for sid in session_ids)
                 ) or bool(locals().get('all_from_fixtures', False))
                 has_test_ips_final = bool(payload.get('test_ips')) if isinstance(payload, dict) else False
                 fixtures_final = bool(fixtures_final) and not bool(has_test_ips_final)

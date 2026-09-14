@@ -1022,7 +1022,7 @@ async def run():
                 payload = generate_latest()  # type: ignore
                 return web.Response(body=payload, headers={'Content-Type': CONTENT_TYPE_LATEST})
             except Exception as e:
-                return web.Response(text=str(e), status=500)
+                return web.Response(text="metrics_unavailable", status=500)
         app = web.Application()
         app.router.add_get('/metrics', handle_metrics)
         runner = web.AppRunner(app)

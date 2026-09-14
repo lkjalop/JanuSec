@@ -310,7 +310,7 @@ class SentinelWorkspaceConnector:
             _log.getLogger(__name__).error(
                 'sentinel_workspace: push_janusec_verdict failed: %s', exc
             )
-            return {'error': str(exc)}
+            return {'error': 'sentinel_request_failed'}
 
     def list_incident_alerts(self, incident_id: str) -> List[Dict[str, Any]]:
         """List alerts attached to an incident."""
@@ -411,7 +411,7 @@ class SentinelWorkspaceConnector:
             incidents = self.list_incidents(top=1)
             return {'ok': True, 'incident_count_sample': len(incidents)}
         except Exception as exc:
-            return {'ok': False, 'error': str(exc)}
+            return {'ok': False, 'error': 'sentinel_request_failed'}
 
 
 # ── KQL result flattener ──────────────────────────────────────────────

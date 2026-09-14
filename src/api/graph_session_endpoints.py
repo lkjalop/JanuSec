@@ -1,4 +1,5 @@
 from __future__ import annotations
+from src.security.storage_paths import storage_path, confined_path
 
 import os
 import json
@@ -458,7 +459,7 @@ async def build_session(payload: BuildPayload, request: Request, auth=Depends(re
     }
     # persist
     data = {"ts": time.time(), "summary": summary}
-    _safe_write(SESSION_PERSIST_DIR / f"session_{sid}.json", data)
+    _safe_write(Path(storage_path(SESSION_PERSIST_DIR, f"session_{sid}.json")), data)
     if SESSION_CLEAN_INTERVAL_SECONDS > 0:
         _prune_sessions_now()
     # Tiered LLM summaries (stubbed, driven by factors)
@@ -484,7 +485,7 @@ async def build_session(payload: BuildPayload, request: Request, auth=Depends(re
 
 @router.get("/{sid}")
 async def get_session(sid: str, request: Request, auth=Depends(require_api_key)) -> Dict[str, Any]:
-    path = SESSION_PERSIST_DIR / f"session_{sid}.json"
+    path = Path(storage_path(SESSION_PERSIST_DIR, f"session_{sid}.json"))
     data = _safe_read(path)
     if not data:
         raise HTTPException(status_code=404, detail="session_not_found")
@@ -494,7 +495,7 @@ async def get_session(sid: str, request: Request, auth=Depends(require_api_key))
 @router.get("/{sid}/explain")
 async def explain_session(sid: str, request: Request, auth=Depends(require_api_key)) -> Dict[str, Any]:
     # simple volatility explanation using last matrix counts
-    path = SESSION_PERSIST_DIR / f"session_{sid}.json"
+    path = Path(storage_path(SESSION_PERSIST_DIR, f"session_{sid}.json"))
     data = _safe_read(path)
     summary = data.get("summary") or {}
     mat = summary.get("correlation") or {}
@@ -537,8 +538,7 @@ class BuildSessionRequest(BaseModel):
 
 
 def _session_path(sid: str) -> str:
-    safe = sid.replace('/', '_').replace('..', '_')
-    return os.path.join(SESSION_PERSIST_DIR, f"{safe}.json")
+    return storage_path(SESSION_PERSIST_DIR, f"{sid}.json")
 
 
 def persist_session(sid: str, data: Dict[str, Any]) -> None:
@@ -880,7 +880,7 @@ async def build_session(req: Request, args: Optional[List[str]] = None, kwargs: 
     edges: list[Dict[str, Any]] = []
     import hashlib as _hashlib
     def _stable_node_id(etype: str, val: str) -> str:
-        h = _hashlib.sha1(f"{etype}:{val}".encode('utf-8')).hexdigest()[:12]
+        h = _hashlib.sha256(f"{etype}:{val}".encode('utf-8')).hexdigest()
         return f'entity:{etype}:{h}'
 
     entity_index: Dict[Tuple[str,str], str] = {}
@@ -1073,7 +1073,7 @@ def build_session_response(sessions_input: List[Tuple[str, Dict[str, Any]]], pay
     edges = []
     import hashlib as _hashlib
     def _stable_node_id(etype: str, val: str) -> str:
-        h = _hashlib.sha1(f"{etype}:{val}".encode('utf-8')).hexdigest()[:12]
+        h = _hashlib.sha256(f"{etype}:{val}".encode('utf-8')).hexdigest()
         return f'entity:{etype}:{h}'
 
     for sid in ids:

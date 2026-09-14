@@ -33,7 +33,7 @@ def execute_playbook(action: str, target: str, params: Dict[str, Any] | None = N
         return {"action": action, "target": target, "status": "error", "details": "unknown action"}
     except Exception as e:
         LOG.exception("playbook execution failed")
-        return {"action": action, "target": target, "status": "error", "details": str(e)}
+        return {"action": action, "target": target, "status": "error", "details": "execution_failed"}
 
 
 __all__ = ["execute_playbook"]

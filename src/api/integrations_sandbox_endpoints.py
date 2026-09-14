@@ -10,18 +10,14 @@ from fastapi import APIRouter, HTTPException, Request, Depends
 from src.artifact.memory_repository import MEMORY_JOB_STORE, record_memory_job, MemoryJobStore
 from src.integrations.sandbox.cuckoo_provider import CuckooProvider
 from src.security.crypto_utils import encrypt_secret, decrypt_secret
-from src.security.roles import get_request_roles
+from src.security.auth import require_scopes
+from src.security.storage_paths import storage_path
 
 router = APIRouter()
 LOG = logging.getLogger(__name__)
 
 
-async def _admin_dep(request: Request) -> None:
-    """FastAPI-compatible dependency: raises 403 if caller does not have admin role."""
-    roles = get_request_roles(request)
-    if 'admin' not in roles:
-        raise HTTPException(status_code=403, detail='forbidden_role')
-
+_admin_dep = require_scopes('admin:integrations')
 
 class IntegrationsConfigPayload(dict):
     pass
@@ -33,26 +29,34 @@ async def set_integration_config(name: str, request: Request, auth=Depends(_admi
     try:
         payload = await request.json()
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=f'invalid json: {exc}')
+        raise HTTPException(status_code=400, detail='invalid json')
 
-    path = f'data/integrations/{name}.json'
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail='invalid configuration')
+    try:
+        path = storage_path('data/integrations', f'{name}.json')
+    except ValueError:
+        raise HTTPException(status_code=400, detail='invalid provider') from None
+    # Encrypt every credential-bearing field before opening any output file.
+    try:
+        for field in ('api_key', 'webhook_secret', 'headers'):
+            payload.pop(f'_{field}_encrypted', None)
+            if payload.get(field):
+                value = json.dumps(payload[field]) if field == 'headers' else payload[field]
+                if not isinstance(value, str):
+                    raise ValueError('invalid credential')
+                payload[field] = encrypt_secret(value)
+                payload[f'_{field}_encrypted'] = True
+    except Exception:
+        raise HTTPException(status_code=503, detail='integration encryption unavailable') from None
     try:
         import os
         os.makedirs('data/integrations', exist_ok=True)
-        # encrypt api_key if present
-        if 'api_key' in payload and payload.get('api_key'):
-            try:
-                payload['api_key'] = encrypt_secret(payload['api_key'])
-                payload['_api_key_encrypted'] = True
-            except Exception:
-                LOG.exception('failed to encrypt api_key; saving plaintext')
-                payload['_api_key_encrypted'] = False
-
         with open(path, 'w', encoding='utf-8') as fh:
             json.dump(payload, fh)
-    except Exception as exc:
-        LOG.exception('failed to persist integration config')
-        raise HTTPException(status_code=500, detail=str(exc))
+    except Exception:
+        LOG.error('failed to persist integration config')
+        raise HTTPException(status_code=500, detail='configuration persistence failed') from None
 
     return {'status': 'ok', 'path': path}
 
@@ -68,7 +72,7 @@ async def list_sandbox_tasks(limit: int = 50, auth=Depends(_admin_dep)):
         return {'count': len(has), 'tasks': has}
     except Exception as exc:
         LOG.exception('failed to list sandbox tasks')
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail='operation failed')
 
 
 @router.post('/api/v1/admin/sandbox/refresh')

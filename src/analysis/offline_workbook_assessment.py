@@ -1,4 +1,5 @@
 from __future__ import annotations
+from src.security.storage_paths import storage_path, confined_path
 
 import ipaddress
 import hashlib
@@ -374,7 +375,12 @@ def _read_local_attachment_bytes(row: Dict[str, Any]) -> bytes | None:
     if not path_value:
         return None
     try:
-        path = Path(str(path_value))
+        # Local references in uploaded telemetry must never open server files.
+        # Only the dedicated, operator-run offline mode may resolve attachments.
+        root = os.getenv("JANUSEC_OFFLINE_ATTACHMENT_ROOT")
+        if not root or os.getenv("JANUSEC_OFFLINE_ATTACHMENT_READS") != "1":
+            raise ValueError("local attachment reads disabled")
+        path = Path(confined_path(root, Path(root) / str(path_value)))
         if path.exists() and path.is_file():
             return path.read_bytes()
     except Exception:
@@ -386,7 +392,12 @@ def _read_local_text(path_value: Any) -> str:
     if not path_value:
         return ""
     try:
-        path = Path(str(path_value))
+        # Local references in uploaded telemetry must never open server files.
+        # Only the dedicated, operator-run offline mode may resolve attachments.
+        root = os.getenv("JANUSEC_OFFLINE_ATTACHMENT_ROOT")
+        if not root or os.getenv("JANUSEC_OFFLINE_ATTACHMENT_READS") != "1":
+            raise ValueError("local attachment reads disabled")
+        path = Path(confined_path(root, Path(root) / str(path_value)))
         if path.exists() and path.is_file():
             return path.read_text(encoding="utf-8", errors="ignore")
     except Exception:
@@ -498,8 +509,7 @@ def _row_hour(ts: float | None) -> int | None:
 
 def _baseline_path(tenant_id: str) -> Path:
     base_dir = Path(os.getenv("OFFLINE_BASELINE_DIR", _DEFAULT_OFFLINE_BASELINE_DIR))
-    safe = re.sub(r"[^a-zA-Z0-9_.-]+", "_", tenant_id or "default")
-    return base_dir / f"{safe}.json"
+    return Path(storage_path(base_dir, str(tenant_id or "default") + ".json"))
 
 
 def _aged_count(value: Any, now_ts: float, *, default_ts: float | None = None) -> int:
@@ -3513,7 +3523,7 @@ def build_offline_workbook_assessment(rows: list[Dict[str, Any]], *, assessment_
                         "generated_at": now,
                     }
         except Exception as _llm_exc:
-            tier2_analysis = {"error": str(_llm_exc), "grounded_narrative": ""}
+            tier2_analysis = {"error": "narration_unavailable", "grounded_narrative": ""}
     elif auto_llm:
         # LLM_MOCK mode: deterministic grounded stub for testing
         tier2_analysis = {

@@ -308,7 +308,7 @@ def _single_post_with_retry(post_func: Callable, path: str, payload: dict, retri
                 continue
             return True, {'status_code': status}
         except Exception as e:
-            last_err = {'exception': str(e)}
+            last_err = {'exception': 'processing_failed'}
             if debug:
                 logger.exception("CSV forward exception on path=%s attempt=%s", path, attempt + 1)
             time.sleep(backoff * (2 ** attempt) + random.random() * 0.05)
@@ -326,7 +326,7 @@ async def _async_single_post_with_retry(client: httpx.AsyncClient, url: str, pay
                 continue
             return True, {'status_code': r.status_code}
         except Exception as e:
-            last_err = {'exception': str(e)}
+            last_err = {'exception': 'processing_failed'}
             await asyncio.sleep(backoff * (2 ** attempt) + random.random() * 0.05)
     return False, last_err or {}
 
@@ -666,7 +666,7 @@ class CSVProcessor:
             logger.error(f"CSV processing error: {e}")
             return {
                 'status': 'error',
-                'error': str(e),
+                'error': 'processing_failed',
                 'filename': filename
             }
 
@@ -745,7 +745,7 @@ class CSVProcessor:
             }
         except Exception as e:
             logger.error(f"JSON processing error: {e}")
-            return {'status': 'error', 'error': str(e), 'filename': filename}
+            return {'status': 'error', 'error': 'processing_failed', 'filename': filename}
 
     async def process_csv_stream(self, file_content: bytes, filename: str) -> dict[str, Any]:
         """Streaming oriented processing for large CSV files.
@@ -788,7 +788,7 @@ class CSVProcessor:
             }
         except Exception as e:  # pragma: no cover - large file edge case
             logger.error(f"Streaming CSV processing error: {e}")
-            return {'status':'error','error':str(e),'filename':filename,'streaming':True}
+            return {'status':'error','error':'processing_failed','filename':filename,'streaming':True}
 
     def _parse_row(self, row: dict, row_num: int) -> dict[str, Any]:
         """Parse single CSV row into artifact format"""

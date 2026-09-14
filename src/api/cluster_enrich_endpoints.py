@@ -355,7 +355,7 @@ async def enrich_cluster(
             }
         except ValueError as ve:
             # Should not happen — we already checked REJECT above
-            result['llm_skipped_reason'] = str(ve)
+            result['llm_skipped_reason'] = 'routing_rejected'
             _save_cached(tenant_id, assessment_id, cluster_id, result)
             return result
         except Exception as re:

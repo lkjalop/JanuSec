@@ -91,7 +91,7 @@ def validate_edges(edges: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], l
         try:
             accepted.append(TypedEdge.from_dict(raw).to_dict())
         except Exception as exc:
-            excluded.append({"candidate": raw, "reason": str(exc)})
+            excluded.append({"candidate": raw, "reason": "invalid_edge"})
     return accepted, excluded
 
 

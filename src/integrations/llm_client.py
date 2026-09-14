@@ -40,7 +40,7 @@ class BaseLLMClient:
             try:
                 out.append(self.generate(p, max_tokens=max_tokens or 512, tenant_id=tenant_id, overrides=overrides, model=model))
             except Exception as exc:
-                out.append({'error': str(exc)})
+                out.append({'error': 'generation_failed'})
         return out
 
     def reserve_tenant_budget(self, tenant_id: str, cost: float) -> bool:
@@ -120,7 +120,7 @@ class LocalDeterministicClient(BaseLLMClient):
             return {'text': text, 'meta': {'provider': self.provider, 'model': model, 'prompt_hash': hashlib.sha256(prompt.encode()).hexdigest()}}
         except Exception as exc:
             LOGGER.exception('LocalDeterministicClient.generate failed')
-            return {'text': 'error', 'meta': {'error': str(exc)}}
+            return {'text': 'error', 'meta': {'error': 'generation_failed'}}
 
     def generate_batch(self, prompts: list, max_tokens: int | None = None, tenant_id: str | None = None, overrides: Dict[str, Any] | None = None, model: str | None = None) -> list:
         """Deterministic batch — returns one result per prompt in input order."""
@@ -1063,7 +1063,7 @@ class LLMClient(BaseLLMClient):
                 try:
                     out.append(self.generate(p, max_tokens=max_tokens, tenant_id=tenant_id, overrides=overrides, model=model))
                 except Exception as e:
-                    out.append({'error': str(e)})
+                    out.append({'error': 'generation_failed'})
             return out
 
         # Limit concurrency to a small pool to avoid overwhelming local resources
@@ -1079,7 +1079,7 @@ class LLMClient(BaseLLMClient):
                     res = fut.result()
                     results[idx] = res
                 except Exception as e:
-                    results[idx] = {'error': str(e)}
+                    results[idx] = {'error': 'generation_failed'}
         return results
 
 

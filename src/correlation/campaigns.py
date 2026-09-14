@@ -72,7 +72,7 @@ class CampaignCorrelator:
                         continue
                     self._last_emit[pivot] = now
                     # Stable short hash for pivot -> campaign factor identity
-                    h = hashlib.sha1(pivot.encode('utf-8')).hexdigest()[:8]
+                    h = hashlib.sha256(pivot.encode('utf-8')).hexdigest()
                     campaign_factor = f'campaign:{h}'
                     if campaign_factor not in emitted and campaign_factor not in factors:
                         emitted.append(campaign_factor)

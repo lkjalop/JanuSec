@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from src.security.storage_paths import storage_path
+from src.security.crypto_utils import decrypt_secret
+
 import hmac
 import hashlib
 import json
@@ -29,15 +32,22 @@ async def sandbox_webhook(provider_name: str, request: Request):
         raise HTTPException(status_code=400, detail='invalid json')
 
     # Load provider config to find webhook secret
-    cfg_path = f'data/integrations/{provider_name}.json'
+    try:
+        cfg_path = storage_path('data/integrations', f'{provider_name}.json')
+    except ValueError:
+        raise HTTPException(status_code=400, detail='invalid provider') from None
     secret = None
     try:
         with open(cfg_path, 'r', encoding='utf-8') as fh:
             cfg = json.load(fh)
             secret = cfg.get('webhook_secret')
+            if secret and cfg.get('_webhook_secret_encrypted'):
+                secret = decrypt_secret(secret)
             header_name = cfg.get('webhook_secret_header', 'X-Sandbox-Signature')
     except Exception:
-        header_name = 'X-Sandbox-Signature'
+        raise HTTPException(status_code=503, detail='webhook verification unavailable') from None
+    if not secret:
+        raise HTTPException(status_code=503, detail='webhook verification unavailable')
 
     header_val = request.headers.get(header_name)
     if secret:
@@ -56,6 +66,6 @@ async def sandbox_webhook(provider_name: str, request: Request):
         record_memory_job(job)
     except Exception as exc:
         LOG.exception('failed to persist webhook payload')
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail='webhook persistence failed')
 
     return {'status': 'ok'}

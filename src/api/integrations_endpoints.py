@@ -1,4 +1,5 @@
 from __future__ import annotations
+from src.security.storage_paths import storage_path, confined_path
 import json, time
 from typing import Any, Dict
 from fastapi import APIRouter, HTTPException, Body, Request
@@ -1879,7 +1880,7 @@ async def webhook_audit_summary(vendor: str | None = None, auth=Depends(require_
             vendors.append(name)
     out: dict[str, dict[str, Any]] = {}
     for v in vendors:
-        path = os.path.join(_XDR_AUDIT_DIR, f"{v}.jsonl")
+        path = storage_path(_XDR_AUDIT_DIR, f"{v}.jsonl")
         count = 0; last_ts = None
         try:
             with open(path, 'r', encoding='utf-8') as f:

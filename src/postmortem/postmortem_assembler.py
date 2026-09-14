@@ -390,7 +390,7 @@ def _build_failed_section(section_id: str, v1_status: str, exc: Exception) -> di
         "signoff":     None,
         "build_error": {
             "exception_class": type(exc).__name__,
-            "message":         str(exc)[:500],
+            "message":         "section_generation_failed",
         },
     }
 

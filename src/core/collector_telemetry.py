@@ -1,4 +1,5 @@
 from __future__ import annotations
+from src.security.storage_paths import storage_path, confined_path
 from typing import Dict, Any, Optional
 from datetime import datetime
 from src.core.log_schema import CollectorProvenance
@@ -17,13 +18,13 @@ def ingest_collector_telemetry(collector_id: str, payload: Dict[str, Any]) -> No
     _ensure_dir()
     ts = datetime.utcnow().isoformat() + "Z"
     record = {"collector_id": collector_id, "ts": ts, "payload": payload}
-    path = os.path.join(TELEMETRY_DIR, f"{collector_id}.log")
+    path = storage_path(TELEMETRY_DIR, f"{collector_id}.log")
     with open(path, "a", encoding="utf-8") as f:
         f.write(json.dumps(record) + "\n")
 
 
 def read_last_collector_status(collector_id: str) -> Optional[Dict[str, Any]]:
-    path = os.path.join(TELEMETRY_DIR, f"{collector_id}.log")
+    path = storage_path(TELEMETRY_DIR, f"{collector_id}.log")
     if not os.path.exists(path):
         return None
     with open(path, "r", encoding="utf-8") as f:

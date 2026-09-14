@@ -96,7 +96,7 @@ def fixture_hash(assessment: dict) -> str:
 
 
 def prompt_hash(prompt: str) -> str:
-    return hashlib.md5(prompt.encode()).hexdigest()[:10]
+    return hashlib.sha256(prompt.encode()).hexdigest()
 
 
 def top_clusters(assessment: dict, n: int = 3, verdict_filter: str | None = None) -> list[dict]:

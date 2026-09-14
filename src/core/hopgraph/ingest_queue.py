@@ -6,6 +6,7 @@ an EWMA-smoothed overlap metric. It's a stub suitable for local testing
 and can be replaced by a real HopGraph client later.
 """
 from __future__ import annotations
+from src.security.storage_paths import storage_path, confined_path
 
 import json
 from pathlib import Path
@@ -28,7 +29,7 @@ def enqueue_event(ev: Dict[str, Any]) -> str:
     sid = _session_id_for_event(ev)
     # ensure base dir exists for current cwd (tests may change cwd)
     BASE.mkdir(parents=True, exist_ok=True)
-    path = BASE / f"{sid}.events.jsonl"
+    path = Path(storage_path(BASE, f"{sid}.events.jsonl"))
     rec = dict(ev)
     rec.setdefault('ingest_ts', time.time())
     with path.open('a', encoding='utf-8') as f:
@@ -49,7 +50,7 @@ def _update_session_metadata(sid: str, exporter: Dict[str, Any]) -> None:
 
     Stores metadata in `{sid}.meta.json` containing exporter address list and last_seen.
     """
-    meta_path = BASE / f"{sid}.meta.json"
+    meta_path = Path(storage_path(BASE, f"{sid}.meta.json"))
     meta = {'session_id': sid, 'exporters': [], 'created_ts': time.time()}
     if meta_path.exists():
         try:
@@ -86,7 +87,7 @@ def _update_session_metadata(sid: str, exporter: Dict[str, Any]) -> None:
 
 
 def _read_session_events(sid: str) -> Iterable[Dict[str, Any]]:
-    path = BASE / f"{sid}.events.jsonl"
+    path = Path(storage_path(BASE, f"{sid}.events.jsonl"))
     if not BASE.exists() or not path.exists():
         return []
     out = []
@@ -152,7 +153,7 @@ def build_session_summary(sid: str, alpha: float = 0.6) -> Dict[str, Any]:
     events = _read_session_events(sid)
     raw = compute_pairwise_overlap(events)
     # load prior ewma if exists (per-session)
-    ewma_path = BASE / f'{sid}.ewma.json'
+    ewma_path = Path(storage_path(BASE, f'{sid}.ewma.json'))
     prev = None
     if ewma_path.exists():
         try:
@@ -173,7 +174,7 @@ def build_session_summary(sid: str, alpha: float = 0.6) -> Dict[str, Any]:
         'alpha': alpha,
     }
     # include exporter metadata if present
-    meta_path = BASE / f'{sid}.meta.json'
+    meta_path = Path(storage_path(BASE, f'{sid}.meta.json'))
     if meta_path.exists():
         try:
             summary['exporters'] = json.loads(meta_path.read_text()).get('exporters', [])
@@ -182,7 +183,7 @@ def build_session_summary(sid: str, alpha: float = 0.6) -> Dict[str, Any]:
     else:
         summary['exporters'] = []
     # persist summary
-    summary_path = BASE / f'{sid}.summary.json'
+    summary_path = Path(storage_path(BASE, f'{sid}.summary.json'))
     try:
         summary_path.write_text(json.dumps(summary))
     except Exception:
@@ -198,7 +199,7 @@ def list_sessions() -> Dict[str, Dict[str, any]]:
     for p in BASE.glob('*.events.jsonl'):
         sid = p.name.split('.')[0]
         stats = p.stat()
-        summary_path = BASE / f'{sid}.summary.json'
+        summary_path = Path(storage_path(BASE, f'{sid}.summary.json'))
         out[sid] = {
             'session_id': sid,
             'events_file': str(p),
@@ -225,7 +226,7 @@ def cleanup_sessions(ttl_seconds: int = 60 * 60 * 24 * 7) -> int:
                 removed += 1
                 # remove summary and ewma
                 for ext in ('.summary.json', '.ewma.json'):
-                    f = BASE / f'{sid}{ext}'
+                    f = Path(storage_path(BASE, f'{sid}{ext}'))
                     if f.exists():
                         f.unlink()
             except Exception:

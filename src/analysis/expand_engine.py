@@ -23,6 +23,7 @@ save_expand_cache(assessment_id, task_id, result)
     -> None
 """
 from __future__ import annotations
+from src.security.storage_paths import storage_path, confined_path
 
 import hashlib
 import json
@@ -600,9 +601,9 @@ def get_expand_cache_path(assessment_id: str, task_id: str) -> Optional[str]:
     """Return the file path for the expand cache entry, or None if unresolvable."""
     try:
         _ensure_cache_dir()
-        safe_aid = re.sub(r"[^a-zA-Z0-9_\-]", "_", assessment_id)[:64]
-        safe_tid = re.sub(r"[^a-zA-Z0-9_\-]", "_", task_id)[:64]
-        return os.path.join(EXPAND_CACHE_DIR, f"{safe_aid}__{safe_tid}.json")
+        import hashlib
+        key = hashlib.sha256(json.dumps([assessment_id, task_id]).encode('utf-8')).hexdigest()
+        return storage_path(EXPAND_CACHE_DIR, f"{key}.json")
     except Exception:
         return None
 
