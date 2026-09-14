@@ -487,41 +487,8 @@
     });
   }catch(_){ } })();
 
-    // Share flow: open a small modal to send report to webhook/email/teams/whatsapp
-    (function shareReport(){ try{
-      // append modal markup
-      const shareModal = document.createElement('div'); shareModal.id='shareModal'; shareModal.style.display='none'; shareModal.style.position='fixed'; shareModal.style.left='0'; shareModal.style.top='0'; shareModal.style.right='0'; shareModal.style.bottom='0'; shareModal.style.background='rgba(0,0,0,.55)'; shareModal.style.alignItems='center'; shareModal.style.justifyContent='center'; shareModal.innerHTML = `
-        <div style="background:var(--bg-secondary); border:1px solid var(--border); border-radius:8px; padding:16px; width:480px; max-width:96%; margin:48px auto;">
-          <h3 style="margin:0 0 8px; font-size:15px;">Share Report</h3>
-          <div style="display:flex; gap:8px; margin-bottom:8px;"><input id="shareTarget" placeholder="Webhook URL, email or phone" style="flex:1; padding:8px; border-radius:6px; border:1px solid var(--border); background:var(--bg-tertiary); color:var(--text-primary);" /><select id="shareChannel" style="width:140px; padding:8px; border-radius:6px; border:1px solid var(--border); background:var(--bg-tertiary); color:var(--text-primary);"><option value="webhook">Webhook</option><option value="email">Email</option><option value="whatsapp">WhatsApp</option><option value="teams">Teams</option></select></div>
-          <div style="margin-bottom:8px;"><input id="shareMsg" placeholder="Optional message" style="width:100%; padding:8px; border-radius:6px; border:1px solid var(--border); background:var(--bg-tertiary); color:var(--text-primary);"/></div>
-          <div style="display:flex; gap:8px; justify-content:flex-end;"><button id="shareCancel" class="btn">Cancel</button><button id="shareSend" class="btn btn-primary">Send</button></div>
-        </div>`;
-      document.body.appendChild(shareModal);
-      // add a share button next to export
-      const exportBtn = document.getElementById('btnExportReport');
-      if(exportBtn){ const shareBtn = document.createElement('button'); shareBtn.id='btnShareReport'; shareBtn.className='btn'; shareBtn.textContent='Share Report'; exportBtn.parentNode.insertBefore(shareBtn, exportBtn.nextSibling);
-        shareBtn.addEventListener('click', function(){ shareModal.style.display='flex'; }); }
-      document.getElementById('shareCancel').addEventListener('click', function(){ shareModal.style.display='none'; });
-      document.getElementById('shareSend').addEventListener('click', async function(){
-        try{
-          const target = document.getElementById('shareTarget').value.trim();
-          const channel = document.getElementById('shareChannel').value;
-          const message = document.getElementById('shareMsg').value || '';
-          if(!target){ if(window.notifications && notifications.toast) notifications.toast('Enter a webhook or email','warn'); return; }
-          const reportObj = window.__LAST_GENERATED_REPORT;
-          if(!reportObj || !reportObj.html){ if(window.notifications && notifications.toast) notifications.toast('No generated report to share. Export first.','warn'); return; }
-          // Upload the report HTML to server so it can generate a public path
-          const upResp = await fetch('/api/v1/report/upload', { method:'POST', headers: { 'Content-Type':'application/json', 'x-api-key': (localStorage.getItem('apiKey')||'devkey123') }, body: JSON.stringify({ filename: 'report_'+Date.now()+'.html', content: reportObj.html }) });
-          if(!upResp.ok){ const t=await upResp.text(); if(window.notifications && notifications.toast) notifications.toast('Upload failed','error'); return; }
-          const upJson = await upResp.json(); const url = upJson.url || upJson.path || '/';
-          // Call send endpoint
-          const sendResp = await fetch('/api/v1/integrations/send_report', { method: 'POST', headers: { 'Content-Type':'application/json', 'x-api-key': (localStorage.getItem('apiKey')||'devkey123') }, body: JSON.stringify({ channel: channel, target: target, report_url: url, message: message }) });
-          if(!sendResp.ok){ const t=await sendResp.text(); if(window.notifications && notifications.toast) notifications.toast('Send failed','error'); return; }
-          const j = await sendResp.json(); if(window.notifications && notifications.toast) notifications.toast('Report shared','success'); shareModal.style.display='none';
-        }catch(e){ if(window.notifications && notifications.toast) notifications.toast('Share failed','error'); }
-      });
-    }catch(_){ } })();
+    // Reports contain tenant evidence. Use the authenticated export workflow;
+    // the former public static upload/share action has been retired.
     // Small accessibility: toggle explain checkbox persists
     document.addEventListener('DOMContentLoaded', function(){ try{ var el=document.getElementById('explainToggle'); var v=localStorage.getItem('csv_explain_toggle')||'1'; if(el) { el.checked = (v!=='0'); el.addEventListener('change', function(){ try{ localStorage.setItem('csv_explain_toggle', el.checked?'1':'0'); window.dispatchEvent(new Event('csv-explain-toggle-changed')); }catch(_){ } }); } }catch(_){ } });
 

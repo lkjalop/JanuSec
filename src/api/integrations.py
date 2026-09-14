@@ -1,17 +1,10 @@
 import os
-import pathlib
-import json
 import smtplib
 from email.mime.text import MIMEText
 from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel
 
 router = APIRouter()
-
-# Directory to publish reports so they are accessible under /static/reports/
-REPORTS_DIR = pathlib.Path(__file__).resolve().parents[2] / 'frontend' / 'static' / 'reports'
-REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-
 
 class UploadReportPayload(BaseModel):
     filename: str
@@ -27,17 +20,8 @@ class SendReportPayload(BaseModel):
 
 @router.post('/api/v1/report/upload')
 def upload_report(payload: UploadReportPayload):
-    # sanitize filename
-    name = os.path.basename(payload.filename)
-    if not name.lower().endswith('.html'):
-        name = name + '.html'
-    dest = REPORTS_DIR / name
-    try:
-        with open(dest, 'w', encoding='utf-8') as fh:
-            fh.write(payload.content)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f'Failed to write report: {e}')
-    return {'url': f'/static/reports/{name}', 'path': str(dest)}
+    # Public static storage bypasses tenant authorization and hosts active HTML.
+    raise HTTPException(status_code=410, detail='Public report sharing is retired; use authenticated report exports')
 
 
 @router.post('/api/v1/integrations/send_report', operation_id='integrations_send_report')

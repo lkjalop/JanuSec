@@ -79,3 +79,11 @@ def test_snapshot_rejects_traversal_before_loading(monkeypatch):
     with pytest.raises(HTTPException) as exc:
         endpoint._load_snapshot_payload('../private', None, 'acme')
     assert exc.value.status_code == 404
+
+
+def test_public_report_upload_is_retired():
+    from fastapi import HTTPException
+    from src.api.integrations import upload_report, UploadReportPayload
+    with pytest.raises(HTTPException) as exc:
+        upload_report(UploadReportPayload(filename='public.html', content='<script>active()</script>'))
+    assert exc.value.status_code == 410
