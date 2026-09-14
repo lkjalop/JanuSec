@@ -1,0 +1,7 @@
+{
+  "subject": "Payment details changed",
+  "from": "billing@vendorbank.com",
+  "attachments": [{"filename":"invoice.pdf"}],
+  "indicators": {"from_domain_flip": true, "reply_to_mismatch": true},
+  "dkim_status": "pass"
+}

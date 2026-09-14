@@ -1,0 +1,4 @@
+{
+  "exec_method": "wmi",
+  "suspicious_script": true
+}

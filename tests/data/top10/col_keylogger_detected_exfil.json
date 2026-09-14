@@ -1,0 +1,5 @@
+{
+  "detection": "keylogger detected",
+  "network_outbound": true,
+  "dest_host": "malicious.example.com"
+}

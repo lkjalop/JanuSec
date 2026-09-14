@@ -1,0 +1,6 @@
+{
+  "source": "mimikatz.exe",
+  "target_process": "lsass.exe",
+  "action": "read_memory",
+  "file_path": "C:/Windows/Temp/lsass.dmp"
+}

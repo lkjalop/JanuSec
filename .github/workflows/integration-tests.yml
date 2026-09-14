@@ -55,15 +55,7 @@ jobs:
         if: github.event_name == 'push'
         run: |
           python -m pytest -q tests/test_graph_sessions.py tests/test_hopgraph_integration.py -q
-name: Integration Tests
-
-on:
-  workflow_dispatch:
-  push:
-    branches: [ main ]
-
-jobs:
-  integration:
+  postgres-migrations:
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -94,7 +86,7 @@ jobs:
         run: |
           pwsh -File scripts/wait_and_migrate.ps1 -dsn $env:APP_DB_DSN
           pwsh -File scripts/run_tests_integration.ps1
-        shell: bash
+        shell: pwsh
       - name: Upload test results
         if: failure()
         uses: actions/upload-artifact@v4

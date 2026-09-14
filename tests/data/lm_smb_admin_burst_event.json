@@ -1,0 +1,6 @@
+{
+  "id": "evt-smb-1",
+  "host": "host-c",
+  "user": "carol",
+  "net:admin_smb_count": 5
+}

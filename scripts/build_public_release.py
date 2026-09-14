@@ -19,6 +19,12 @@ PRIVATE_TERMS = ("career", "resume", "email_to_", "pitch", "jalop", "disr_",
 def exclusion(path):
     p = Path(path)
     low = path.lower()
+    if low.startswith(("logs/", "tmp/", "artifacts/")) or any(
+        part in {"__pycache__", ".pytest_cache", "test-results"} for part in p.parts
+    ):
+        return "generated-runtime-output"
+    if p.suffix.lower() in {".pyc", ".pyo"}:
+        return "compiled-output"
     if any(part.lower().startswith(("tmp_", "_tmp", "~$")) for part in p.parts):
         return "scratch"
     if low.startswith(("data/", "src/data/", "dump/", "resumes/", "sultry_prd/",

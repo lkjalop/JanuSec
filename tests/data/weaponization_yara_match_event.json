@@ -1,0 +1,4 @@
+{
+  "yara_hits": ["YARA_RANSOMWARE_SAMPLE", "YARA_C2_DROPper"],
+  "file_hash": "feedface"
+}

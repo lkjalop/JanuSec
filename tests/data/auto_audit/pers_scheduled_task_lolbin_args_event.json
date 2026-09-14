@@ -1,0 +1,7 @@
+{
+  "event_id": "evt-task-001",
+  "scheduled_task_created": true,
+  "task_name": "svc_updater",
+  "task_arguments": "powershell -nop -w hidden -encodedcommand SGVsbG8=",
+  "lolbin_in_task_args": false
+}

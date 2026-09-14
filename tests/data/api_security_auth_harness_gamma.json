@@ -1,0 +1,51 @@
+[
+  {
+    "name": "gamma_llm_misuse",
+    "event": {
+      "tenant_id": "tenant-gamma",
+      "uri": "/api/v1/llm/completions",
+      "method": "POST",
+      "auth_user": "gamma-ml",
+      "domain": "ai",
+      "model": "gpt-enterprise",
+      "prompt": "BEGIN PROMPT INJECTION -- escalate privileges"
+    },
+    "expected": {
+      "factors_contains": ["api:llm_atlas_risk"]
+    }
+  },
+  {
+    "name": "gamma_token_usage_anomaly",
+    "event": {
+      "tenant_id": "tenant-gamma",
+      "uri": "/api/v1/automation/run",
+      "method": "POST",
+      "auth_user": "gamma-ops",
+      "token_usage": 4000,
+      "auth_context": {
+        "scopes": ["automation:invoke"],
+        "token_usage": 4000
+      }
+    },
+    "expected": {
+      "factors_contains": ["api:automation_runbook_abuse"]
+    }
+  },
+  {
+    "name": "gamma_missing_headers",
+    "event": {
+      "tenant_id": "tenant-gamma",
+      "uri": "/gamma/portal",
+      "method": "GET",
+      "auth_user": "gamma-admin",
+      "status": 200,
+      "response_headers": {
+        "content-type": "text/html"
+      },
+      "response_body": "<html><body>portal</body></html>"
+    },
+    "expected": {
+      "factors_contains": ["api:missing_security_headers"]
+    }
+  }
+]

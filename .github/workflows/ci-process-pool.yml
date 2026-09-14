@@ -24,10 +24,6 @@ jobs:
         env:
           USE_PROCESS_POOL: ${{ matrix.use_pool }}
         run: |
-          python - <<'PY'
-import os
-v = os.environ.get('USE_PROCESS_POOL','False').lower() in ('1','true','yes')
-cfg_str = f"from types import SimpleNamespace\ncnf = SimpleNamespace(pipeline={{'use_process_pool': {v}, 'process_pool_timeout': 5}})\n"
           pytest -q tests/test_process_pool_isolation.py::test_heavy_sleep_runs_in_process -q
       - name: Upload test results
         if: always()

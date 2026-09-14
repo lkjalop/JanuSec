@@ -71,8 +71,7 @@ jobs:
             let body = 'TF-IDF metrics not found';
             if (fs.existsSync(path)) {
               const m = fs.readFileSync(path, 'utf8');
-              body = 'TF-IDF metrics (artifact):\n```
-' + m + '\n```';
+              body = 'TF-IDF metrics (artifact):\n' + m;
             }
             github.rest.issues.createComment({
               issue_number: context.payload.pull_request.number,

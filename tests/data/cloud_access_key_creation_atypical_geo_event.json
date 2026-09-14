@@ -1,0 +1,10 @@
+{
+  "domain": "cloud",
+  "eventSource": "iam.amazonaws.com",
+  "eventName": "CreateAccessKey",
+  "userName": "ops-user",
+  "iam_create_access_key": true,
+  "src_geo": "cn",
+  "actor_home_geo": "us",
+  "off_hours": true
+}

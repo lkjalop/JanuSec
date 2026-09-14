@@ -1,0 +1,5 @@
+{
+  "action": "service_modify",
+  "file_path": "C:/Program Files/Service/malicious.exe",
+  "original_path": "C:/Windows/System32/service.exe"
+}

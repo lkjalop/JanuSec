@@ -1,0 +1,4 @@
+{
+  "process": "C:\\Windows\\System32\\at.exe",
+  "cmdline": "at 12:00 /every:M,T,W cmd.exe /c calc.exe"
+}

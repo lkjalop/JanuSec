@@ -26,17 +26,17 @@ jobs:
           TFIDF_MIN_PRECISION: '0.5'
         run: |
           python - <<'PY'
-import json, os
-from src.enrichment.tfidf import seed_and_build_from_disk
-metrics = seed_and_build_from_disk()
-print('metrics=', metrics)
-minp = float(os.getenv('TFIDF_MIN_PRECISION','0.5'))
-prec = metrics.get('precision') if metrics else None
-if prec is None:
-    print('No test metrics produced; failing')
-    raise SystemExit(2)
-if float(prec) < minp:
-    print(f'Precision {prec} < required {minp}; failing')
-    raise SystemExit(3)
-print('Precision OK:', prec)
-PY
+          import json, os
+          from src.enrichment.tfidf import seed_and_build_from_disk
+          metrics = seed_and_build_from_disk()
+          print('metrics=', metrics)
+          minp = float(os.getenv('TFIDF_MIN_PRECISION','0.5'))
+          prec = metrics.get('precision') if metrics else None
+          if prec is None:
+              print('No test metrics produced; failing')
+              raise SystemExit(2)
+          if float(prec) < minp:
+              print(f'Precision {prec} < required {minp}; failing')
+              raise SystemExit(3)
+          print('Precision OK:', prec)
+          PY

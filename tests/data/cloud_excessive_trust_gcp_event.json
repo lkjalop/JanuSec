@@ -1,0 +1,22 @@
+{
+  "protoPayload": {
+    "methodName": "google.iam.admin.v1.SetIamPolicy",
+    "policy": {
+      "bindings": [
+        {
+          "role": "roles/owner",
+          "members": [
+            "allUsers"
+          ]
+        }
+      ]
+    }
+  },
+  "provider": "gcp",
+  "iam_put_role_policy": true,
+  "role_trusts_external": true,
+  "principal_wildcard": true,
+  "actor_account_id": "project-xyz",
+  "target_account_id": "project-abc",
+  "off_hours": false
+}

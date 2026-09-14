@@ -1,0 +1,7 @@
+{
+  "event_id": "evt-disc-rdp-1",
+  "host": "host-111",
+  "timestamp": "2025-10-12T13:10:00Z",
+  "external_rdp_exposed": true,
+  "rdp_bruteforce_attempts": 7
+}

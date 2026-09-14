@@ -1,0 +1,46 @@
+[
+  {
+    "name": "delta_vendor_payout_policy_gap",
+    "event": {
+      "tenant_id": "tenant-delta",
+      "uri": "/api/v1/vendors/payouts",
+      "method": "POST",
+      "auth_user": "delta-treasury",
+      "business_flow": "vendor_payout",
+      "transaction_amount": 480000,
+      "risk_score": 0.91
+    },
+    "expected": {
+      "factors_contains": ["api:business_flow_policy_gap"]
+    }
+  },
+  {
+    "name": "delta_unknown_inventory_route",
+    "event": {
+      "tenant_id": "tenant-delta",
+      "uri": "/api/v9/internal/debug-toggle",
+      "method": "GET",
+      "auth_user": "delta-service",
+      "status": 200
+    },
+    "expected": {
+      "factors_contains": ["api:inventory_route_unknown"]
+    }
+  },
+  {
+    "name": "delta_supply_chain_publish",
+    "event": {
+      "tenant_id": "tenant-delta",
+      "uri": "/api/v1/registry/packages/edge-plugin",
+      "method": "POST",
+      "auth_user": "delta-cicd",
+      "supply_chain_stage": "publish",
+      "auth_context": {
+        "scopes": ["supply_chain:publish"]
+      }
+    },
+    "expected": {
+      "factors_contains": ["api:supply_chain_pipeline_modification"]
+    }
+  }
+]

@@ -1,0 +1,4 @@
+{
+  "process": "schtasks",
+  "command_line": "schtasks /create /sc daily /tn MyTask /tr \"notepad.exe\""
+}
