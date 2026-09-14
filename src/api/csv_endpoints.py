@@ -718,9 +718,8 @@ async def csv_deep_analyze(payload: dict, tenant_id: str | None = Header(None, a
     normalized_payload['org'] = org
     if tenant_id and 'tenant' not in normalized_payload:
         normalized_payload['tenant'] = tenant_id
-    # Propagate API key for downstream auditing if provided
-    if api_key and 'api_key' not in normalized_payload:
-        normalized_payload['api_key'] = api_key
+    # Transport credentials are never part of an assessment payload.
+    normalized_payload.pop('api_key', None)
     try:
         return await _run_deep_analyze_pipeline(normalized_payload)
     except HTTPException:
@@ -1654,7 +1653,7 @@ def _load_backfill_job_from_disk(assessment_id: str, target_map: dict | None = N
     """Best-effort single job loader used by the status endpoint."""
     try:
         base = os.getenv('SESSION_PERSIST_DIR') or os.path.join(os.getcwd(), 'data', 'sessions')
-        path = os.path.join(base, 'backfill_jobs', f'{assessment_id}.json')
+        path = storage_path(os.path.join(base, 'backfill_jobs'), f'{assessment_id}.json')
         if not os.path.exists(path):
             return None
         with open(path, 'r', encoding='utf-8') as fh:

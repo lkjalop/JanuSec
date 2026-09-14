@@ -6357,7 +6357,8 @@ async def assessment_llm_verification(assessment_id: str):
     try:
         base_path = assessment.get('persisted_path')
         if base_path:
-            parent = os.path.dirname(base_path)
+            root = os.getenv('SESSION_PERSIST_DIR') or os.path.join(os.getcwd(), 'data', 'assessments')
+            parent = os.path.dirname(confined_path(root, base_path))
             out_path = storage_path(parent, f"{assessment_id}-llm-verification.md")
             with open(out_path+'.tmp','w',encoding='utf-8') as fh:
                 fh.write(markdown)

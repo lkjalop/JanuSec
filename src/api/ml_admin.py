@@ -1,4 +1,5 @@
 from __future__ import annotations
+from src.security.storage_paths import storage_path, confined_path
 from fastapi import APIRouter, HTTPException, Header, Query, Depends
 from typing import Optional, List
 from src.ml.isolation_model import GLOBAL_ISO_MODEL
@@ -39,6 +40,12 @@ async def train_isolation(
     persist_path: Optional[str] = Query(None),
 ):
     _check_admin(x_admin_key)
+    if persist_path:
+        root = os.path.dirname(os.path.realpath(str(GLOBAL_ISO_MODEL.model_path)))
+        try:
+            persist_path = confined_path(root, persist_path)
+        except ValueError:
+            raise HTTPException(status_code=400, detail='invalid_model_path') from None
     X: List[List[float]] = []
     try:
         # Gather recent per-identity events; prefer the most recent entries
@@ -70,4 +77,4 @@ async def train_isolation(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail='training_failed')

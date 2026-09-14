@@ -1,4 +1,5 @@
 from __future__ import annotations
+from src.security.storage_paths import storage_path, confined_path
 
 import os
 from typing import Any, Dict
@@ -93,6 +94,14 @@ async def reload_calibration(payload: Dict[str, Any] | None = None, request: Req
         manager.persist(force=True)
     else:
         path = body.get('path')
+        if path:
+            configured = manager.calibration_path()
+            if not configured:
+                raise HTTPException(status_code=400, detail='calibration_not_configured')
+            try:
+                path = confined_path(os.path.dirname(os.path.realpath(configured)), path)
+            except ValueError:
+                raise HTTPException(status_code=400, detail='invalid_calibration_path') from None
         ok = manager.reload_calibration_config(path)
         if not ok:
             raise HTTPException(status_code=400, detail='calibration_not_configured')

@@ -1,4 +1,5 @@
 from __future__ import annotations
+from src.security.storage_paths import storage_path, confined_path
 
 from fastapi import APIRouter, HTTPException, Body, Header, Request
 from typing import Dict, Any
@@ -38,6 +39,9 @@ async def reload_suppression(request: Request, path: str | None = Body(None, emb
     if not _admin_ok(x_admin_key):
         raise HTTPException(status_code=403, detail='forbidden')
     try:
+        if path:
+            configured = os.getenv('COOCCURRENCE_CONFIG_PATH', 'config/cooccurrence.yaml')
+            path = confined_path(os.path.dirname(os.path.realpath(configured)), path)
         reload_config(path)
         if audit_emit:
             try: audit_emit('suppression_reload', audit_user(request, None), {'path': path})
@@ -66,6 +70,9 @@ async def set_suppression(request: Request, payload: Dict[str, float] = Body(...
         doc['suppression_templates'] = sup
         with open(path, 'w', encoding='utf-8') as fh:
             yaml.safe_dump(doc, fh)
+        if path:
+            configured = os.getenv('COOCCURRENCE_CONFIG_PATH', 'config/cooccurrence.yaml')
+            path = confined_path(os.path.dirname(os.path.realpath(configured)), path)
         reload_config(path)
         if audit_emit:
             try: audit_emit('suppression_set', audit_user(request, None), {'changed': list(payload.keys())})

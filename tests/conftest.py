@@ -1,3 +1,4 @@
+from src.security.storage_paths import storage_path
 import os
 import pytest
 # Ensure import-time metric collection is disabled during pytest runs to
@@ -1506,7 +1507,7 @@ def _stub_external_http():
                                     data = None
                             if data is None:
                                 try:
-                                    p = pathlib.Path(sess_dir) / f"{sid}.json"
+                                    p = pathlib.Path(storage_path(sess_dir, f"{sid}.json"))
                                     if p.exists():
                                         with p.open('r', encoding='utf-8') as fh:
                                             loaded = json.load(fh)
@@ -1636,7 +1637,7 @@ def _stub_external_http():
                         pathlib.Path(sess_dir).mkdir(parents=True, exist_ok=True)
                         for s in sessions:
                             sid = s['id']
-                            file_path = pathlib.Path(sess_dir) / f"{sid}.json"
+                            file_path = pathlib.Path(storage_path(sess_dir, f"{sid}.json"))
                             # If the session data is already a list of rows, persist that
                             # directly so graph builders that expect a JSON array of rows
                             # can load it. If it's a dict wrapper with 'files', persist
@@ -2088,7 +2089,7 @@ def _stub_external_http():
                             try:
                                 import os, json, pathlib
                                 sess_dir = os.getenv('SESSION_PERSIST_DIR', os.path.join('data','sessions'))
-                                p = pathlib.Path(sess_dir) / f"{sid}.json"
+                                p = pathlib.Path(storage_path(sess_dir, f"{sid}.json"))
                                 if p.exists():
                                     with p.open('r', encoding='utf-8') as fh:
                                         data = json.load(fh)
@@ -2175,7 +2176,7 @@ def _stub_external_http():
                                         try:
                                             sess_dir = os.getenv('SESSION_PERSIST_DIR', os.path.join('data','sessions'))
                                             pathlib.Path(sess_dir).mkdir(parents=True, exist_ok=True)
-                                            p = pathlib.Path(sess_dir) / f"{sid}.json"
+                                            p = pathlib.Path(storage_path(sess_dir, f"{sid}.json"))
                                             with open(p, 'w', encoding='utf-8') as fh:
                                                 json.dump(parsed if isinstance(parsed, list) else [parsed], fh)
                                         except Exception:
@@ -2202,7 +2203,7 @@ def _stub_external_http():
                             try:
                                 sess_dir = os.getenv('SESSION_PERSIST_DIR', os.path.join('data','sessions'))
                                 pathlib.Path(sess_dir).mkdir(parents=True, exist_ok=True)
-                                p = pathlib.Path(sess_dir) / f"{sid}.json"
+                                p = pathlib.Path(storage_path(sess_dir, f"{sid}.json"))
                                 with open(p, 'w', encoding='utf-8') as fh:
                                     json.dump([], fh)
                             except Exception:

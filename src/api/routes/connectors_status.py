@@ -1,4 +1,5 @@
 from __future__ import annotations
+from src.security.storage_paths import storage_path, confined_path
 
 import json
 import os
@@ -86,7 +87,9 @@ def connector_notify(tenant_id: str, provider: str, payload: dict, request: Requ
         # Fallback: write simple alert log
         root = os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'tenant_store', 'alerts')
         os.makedirs(root, exist_ok=True)
-        path = os.path.join(root, f"{tenant_id}_{provider}.log")
+        tenant_root = storage_path(root, tenant_id)
+        os.makedirs(tenant_root, exist_ok=True)
+        path = storage_path(tenant_root, f"{provider}.log")
         with open(path, 'a', encoding='utf-8') as fh:
             fh.write(json.dumps({'ts': int(time.time()), 'level': level, 'note': note}) + "\n")
     except Exception:

@@ -481,7 +481,7 @@ def _create_issue(base_url: str, payload: dict, auth) -> dict:
             "body":    r.text[:500],
         }
     except Exception as exc:
-        return {"success": False, "error": f"jira_exception:{exc}"}
+        return {"success": False, "error": "jira_request_failed"}
 
 
 # ─────────────────────────────────────────────────────────────────────────────

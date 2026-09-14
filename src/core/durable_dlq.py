@@ -66,7 +66,7 @@ def enqueue(payload: Dict[str, Any]) -> None:
         try:
             s3 = boto3.client('s3')
             body = json.dumps(payload, default=str)
-            key = f"dlq/{int(__import__('time').time())}-{hashlib.sha256(body.encode('utf-8')).hexdigest()}.json"
+            key = f"dlq/{int(__import__('time').time())}-{__import__('uuid').uuid4().hex}.json"
             put_kwargs = {'Bucket': S3_BUCKET, 'Key': key, 'Body': body.encode('utf-8')}
             # Optionally tag S3 object for retention TTL, terraform lifecycle rules can filter by tag
             retention_days = DLQ_S3_RETENTION_DAYS or os.getenv('DLQ_ARCHIVE_RETENTION_DAYS')

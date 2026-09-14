@@ -170,7 +170,7 @@ async def replay_arc_dlq(request: Request, index: int = Body(..., embed=True)):
         rc.lrem(key, 1, item)
         # write audit entry (db-backed when available)
         try:
-            entry = {'action':'replay_by_index','index':index,'req_id': job.get('req_id') if isinstance(job, dict) else None,'actor': request.headers.get('x-admin-key') or request.headers.get('x-api-key'),'ts': int(time.time())}
+            entry = {'action':'replay_by_index','index':index,'req_id': job.get('req_id') if isinstance(job, dict) else None,'actor': getattr(getattr(request.state, 'auth', None), 'subject', 'authenticated'),'ts': int(time.time())}
             try:
                 from src.repositories.dlq_audit_repo import insert_audit
                 import asyncio
@@ -260,7 +260,7 @@ async def replay_bulk(request: Request, dry_run: bool = Body(True), max_items: i
                 rc.lrem(key, 1, item)
                 # audit each
                 try:
-                    entry = {'action':'replay_bulk_item','req_id': job.get('req_id'),'actor': request.headers.get('x-admin-key') or request.headers.get('x-api-key'),'ts': int(time.time())}
+                    entry = {'action':'replay_bulk_item','req_id': job.get('req_id'),'actor': getattr(getattr(request.state, 'auth', None), 'subject', 'authenticated'),'ts': int(time.time())}
                     try:
                         from src.repositories.dlq_audit_repo import insert_audit
                         import asyncio
@@ -313,7 +313,7 @@ async def replay_arc_dlq_by_req(request: Request, req_id: str = Body(..., embed=
                     rc.lrem(key, 1, item)
                     # write audit via repo if available
                     try:
-                        entry = {'action':'replay_by_req','req_id': req_id,'actor': request.headers.get('x-admin-key') or request.headers.get('x-api-key'),'ts': int(time.time())}
+                        entry = {'action':'replay_by_req','req_id': req_id,'actor': getattr(getattr(request.state, 'auth', None), 'subject', 'authenticated'),'ts': int(time.time())}
                         try:
                             from src.repositories.dlq_audit_repo import insert_audit
                             import asyncio
