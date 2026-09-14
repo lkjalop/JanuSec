@@ -59,16 +59,16 @@ def migrate(dry_run: bool = False, verbose: bool = False) -> int:
                 key = iam_cfg._vault_secret_key(tenant, connector_id, field_name)  # type: ignore[attr-defined]
                 total += 1
                 if dry_run:
-                    print(f"[dry-run] would migrate {tenant}/{connector_id}.{field_name} -> {key}")
+                    print('[dry-run] secret migration candidate found')
                     continue
                 ok = vault_set_secret(key, value)
                 if not ok:
-                    print(f"[warn] failed to persist {key}; leaving plaintext value in place", file=sys.stderr)
+                    print('[warn] vault persistence failed; migration incomplete', file=sys.stderr)
                     continue
                 stored[field_name] = {'_vault_key': key}
                 changed = True
                 if verbose:
-                    print(f"[migrated] {tenant}/{connector_id}.{field_name} -> {key}")
+                    print('[migrated] secret stored in vault')
     if changed and not dry_run:
         backup = Path(str(cfg_path) + '.bak')
         if original_text is not None:

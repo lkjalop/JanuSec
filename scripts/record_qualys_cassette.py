@@ -32,7 +32,7 @@ def main():
             '--client-secret', args.client_secret,
             '--api-base', args.api_base,
         ]
-        print('Running:', ' '.join(cmd))
+        print('Running Qualys ingestion (credentials omitted)')
         subprocess.check_call(cmd)
         print('Recorded cassette to', cassette_path)
 

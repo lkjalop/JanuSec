@@ -62,3 +62,17 @@ def test_unapproved_notification_does_not_call_connector(monkeypatch):
     monkeypatch.setattr("src.soar.runner.get_registry", lambda: pytest.fail("connector invoked"))
     result = asyncio.run(PlaybookRunner(dry_run=False)._step_notify({"webhook_url": "http://127.0.0.1"}))
     assert result.ok is False
+
+
+def test_auth_debug_does_not_log_supplied_api_key(monkeypatch, caplog):
+    import logging
+    from fastapi import HTTPException
+    from src.security import auth
+    supplied = 'dummy-regression-credential'
+    monkeypatch.setenv('AUTH_DEBUG', '1')
+    monkeypatch.setattr(auth, '_load_api_keys', lambda: {})
+    with caplog.at_level(logging.DEBUG, logger='src.security.auth'):
+        with pytest.raises(HTTPException):
+            asyncio.run(auth.auth_dependency(x_api_key=supplied, authorization=None, required_scopes=[]))
+    assert supplied not in caplog.text
+    assert 'api_key_present' in caplog.text

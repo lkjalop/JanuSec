@@ -60,10 +60,10 @@ def register_xdr(base: str, integrator_id: str, secret: str) -> bool:
     url = f"{base.rstrip('/')}/api/v1/integrations/xdr/register?integrator_id={integrator_id}&secret={secret}"
     try:
         r = requests.post(url, timeout=5)
-        print('XDR register', r.status_code, r.text)
+        print('XDR register status:', r.status_code)
         return r.status_code == 200
     except Exception as e:
-        print('XDR register failed', e)
+        print('XDR register failed')
         return False
 
 

@@ -21,7 +21,7 @@ print('feedback key:', r3.status_code, r3.text)
 # introspect auth module
 import src.security.auth as sa
 importlib.reload(sa)
-print('API_KEYS_RAW:', sa._API_KEYS_RAW)
-print('API_KEYS:', sa._load_api_keys())
+print('API key configuration present:', bool(sa._API_KEYS_RAW))
+print('Configured API key count:', len(sa._load_api_keys()))
 print('match feedback.write:', sa._match_scopes(sa._load_api_keys().get('key-feedback',[]), ['feedback.write']))
 print('require_scopes for feedback.write fn:', sa.require_scopes('feedback.write'))

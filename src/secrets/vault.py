@@ -106,7 +106,7 @@ def _hashicorp_set(name: str, value: str) -> bool:
         client.secrets.kv.v2.create_or_update_secret(path=path, mount_point=mount, secret={'value': value})
         return True
     except Exception as exc:  # pragma: no cover - hvac runtime
-        logger.warning('HashiCorp Vault write failed for %s: %s', name, exc)
+        logger.warning('HashiCorp Vault write failed')
         return False
 
 def get_secret(name: str) -> Optional[str]:

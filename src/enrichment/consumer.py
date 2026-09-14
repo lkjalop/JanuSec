@@ -127,7 +127,7 @@ async def _process_event(ev: Dict[str, Any]):
                     if safe_upsert_node is not None:
                         try:
                             try:
-                                logger.debug('About to call safe_upsert_node on %r with attrs=%r', GLOBAL_HOPGRAPH, node_event.get('attrs'))
+                                logger.debug('Updating graph node from enrichment event')
                             except Exception:
                                 pass
                             safe_upsert_node(GLOBAL_HOPGRAPH, 'file_hash', fh, attrs=node_event.get('attrs') or {}, source='enrichment_consumer')

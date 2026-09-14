@@ -148,7 +148,7 @@ async def auth_dependency(
             logger.debug(
                 'AUTH_DEP debug: %s',
                 {
-                    'x_api_key': x_api_key,
+                    'api_key_present': bool(x_api_key),
                     'authorization': bool(authorization),
                     'required_scopes': required_scopes,
                 },

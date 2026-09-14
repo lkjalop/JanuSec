@@ -616,7 +616,7 @@ async def demo_security_controls():
     # Demo 1: API key management
     await security_mgr.config_manager.store_api_key('eclipse_xdr', 'xdr_api_key_12345')
     api_key = await security_mgr.config_manager.get_api_key('eclipse_xdr')
-    print(f"Retrieved API key: {api_key[:8]}...")
+    print('API key retrieval succeeded:', bool(api_key))
     
     # Demo 2: PII redaction
     sensitive_event = {
