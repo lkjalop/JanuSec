@@ -20,7 +20,7 @@ def run_alembic(db_url, repo_root=None):
     ini_path = os.path.join(repo_root, 'alembic.ini')
     cfg = Config(ini_path)
     cfg.set_main_option('sqlalchemy.url', db_url)
-    print('Running alembic upgrade head against', db_url)
+    print('Running alembic upgrade head against the configured database')
     alembic_command.upgrade(cfg, 'head')
 
 def verify_sqlite(db_path):
@@ -53,7 +53,7 @@ def main():
     try:
         run_alembic(db)
     except Exception as e:
-        print('Alembic run failed:', e)
+        print('Alembic run failed; inspect the protected database/server logs')
         sys.exit(2)
     if db_path:
         ok = verify_sqlite(db_path)

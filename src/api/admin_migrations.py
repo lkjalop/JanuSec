@@ -6,14 +6,14 @@ ADMIN_TRIGGER_MIGRATIONS environment flag to avoid accidental runs.
 """
 import os
 import subprocess
-import shlex
+import sys
+from urllib.parse import urlsplit, unquote
 import json
 import datetime
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from ..auth import auth_dependency, require_admin  # project auth helpers
-from src.security.roles import require_roles
+from src.security.auth import require_scopes
 
 try:
     import psycopg2
@@ -21,7 +21,7 @@ try:
 except Exception:
     psycopg2 = None  # DB audit will be best-effort
 
-router = APIRouter(prefix="/api/v1/admin/db", tags=["admin"], dependencies=[Depends(require_roles('admin'))])
+router = APIRouter(prefix="/api/v1/admin/db", tags=["admin"])
 
 
 def migrations_enabled() -> bool:
@@ -29,12 +29,9 @@ def migrations_enabled() -> bool:
 
 
 @router.post('/migrate')
-def trigger_migrations(payload: dict, user=Depends(auth_dependency)):
+def trigger_migrations(payload: dict, user=Depends(require_scopes("admin:migrations"))):
     if not migrations_enabled():
         raise HTTPException(status_code=403, detail='Migrations are disabled on this instance')
-    # require admin role
-    if not require_admin(user):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='admin role required')
 
     # minimal payload validation
     confirm = payload.get('confirm')
@@ -51,7 +48,15 @@ def trigger_migrations(payload: dict, user=Depends(auth_dependency)):
         password = os.getenv('DB_PASSWORD', 'postgres')
         database = os.getenv('DB_NAME', 'janusec')
         dsn = f"postgresql://{user_env}:{password}@{host}:{port}/{database}"
-    cmd = f"python {shlex.quote(script)} --db {shlex.quote(dsn)}"
+    cmd = [sys.executable, script]
+    child_env = dict(os.environ, APP_DB_DSN=dsn)
+
+    def safe_output(value):
+        text = str(value or '').replace(dsn, '[REDACTED_DSN]')
+        password_value = urlsplit(dsn).password
+        if password_value:
+            text = text.replace(password_value, '[REDACTED]').replace(unquote(password_value), '[REDACTED]')
+        return text
     # Best-effort write an audit row before running
     audit_id: Optional[int] = None
     conn = None
@@ -61,16 +66,16 @@ def trigger_migrations(payload: dict, user=Depends(auth_dependency)):
             if not dsn:
                 host = os.getenv('DB_HOST', 'localhost')
                 port = os.getenv('DB_PORT', '5432')
-                user = os.getenv('DB_USER', 'postgres')
+                db_user = os.getenv('DB_USER', 'postgres')
                 password = os.getenv('DB_PASSWORD', 'postgres')
                 database = os.getenv('DB_NAME', 'janusec')
-                dsn = f"postgresql://{user}:{password}@{host}:{port}/{database}"
+                dsn = f"postgresql://{db_user}:{password}@{host}:{port}/{database}"
             conn = psycopg2.connect(dsn)
             cur = conn.cursor()
-            env_snapshot = {k: os.getenv(k) for k in ['APP_DB_DSN','DB_HOST','DB_PORT','DB_USER','DB_NAME']}
+            env_snapshot = {k: os.getenv(k) for k in ['DB_HOST','DB_PORT','DB_USER','DB_NAME']}
             cur.execute(
                 "INSERT INTO migration_audit (invoked_by, env_snapshot, status) VALUES (%s, %s, %s) RETURNING id",
-                (getattr(user, 'sub', str(user)), Json(env_snapshot), 'started')
+                (getattr(user, 'subject', 'unknown'), Json(env_snapshot), 'started')
             )
             audit_id = cur.fetchone()[0]
             conn.commit()
@@ -84,7 +89,9 @@ def trigger_migrations(payload: dict, user=Depends(auth_dependency)):
         conn = None
 
     try:
-        proc = subprocess.run(cmd, shell=True, check=False, capture_output=True, text=True, timeout=300)
+        proc = subprocess.run(cmd, shell=False, env=child_env, check=False, capture_output=True, text=True, timeout=300)
+        proc.stdout = safe_output(proc.stdout)
+        proc.stderr = safe_output(proc.stderr)
     except Exception as e:
         # ensure we attempt to update audit record with failure
         if conn is None and psycopg2:
@@ -97,12 +104,12 @@ def trigger_migrations(payload: dict, user=Depends(auth_dependency)):
                 cur = conn.cursor()
                 cur.execute(
                     "UPDATE migration_audit SET finished_at=%s, status=%s, exit_code=%s, stderr=%s WHERE id=%s",
-                    (datetime.datetime.utcnow(), 'failed', -1, str(e), audit_id)
+                    (datetime.datetime.utcnow(), 'failed', -1, safe_output(e), audit_id)
                 )
                 conn.commit()
             except Exception:
                 pass
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Migration runner could not be started")
 
     # Update audit record with results (best-effort)
     try:
@@ -112,10 +119,10 @@ def trigger_migrations(payload: dict, user=Depends(auth_dependency)):
                 if not dsn:
                     host = os.getenv('DB_HOST', 'localhost')
                     port = os.getenv('DB_PORT', '5432')
-                    user = os.getenv('DB_USER', 'postgres')
+                    db_user = os.getenv('DB_USER', 'postgres')
                     password = os.getenv('DB_PASSWORD', 'postgres')
                     database = os.getenv('DB_NAME', 'janusec')
-                    dsn = f"postgresql://{user}:{password}@{host}:{port}/{database}"
+                    dsn = f"postgresql://{db_user}:{password}@{host}:{port}/{database}"
                 conn = psycopg2.connect(dsn)
             cur = conn.cursor()
             cur.execute(

@@ -78,3 +78,11 @@ valid report. A successful advisory job means the report was generated; it does
 not mean the source or dependency set has no vulnerabilities. Review those reports
 before any production deployment. The publication secret scan fails on unresolved
 findings and the selected trust suite fails on errors, failures or skips.
+
+The first real report (September 14) contained 4,108 Bandit findings, including
+38 rated high: 37 weak-hash construction sites and one shell-based migration
+runner. The migration runner has since been changed to an authenticated, scoped,
+non-shell invocation with credential-safe arguments/output. The hash sites include
+legacy protocol fingerprints and identifiers; they need compatibility-aware review,
+not a blanket algorithm substitution or an assertion that all are exploitable.
+The dependency audit on that run reported no advisories for its resolved set.

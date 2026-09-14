@@ -3,6 +3,7 @@
   "tests/api/test_connector_control_plane.py",
   "tests/api/test_live_lane_assessment.py",
   "tests/connectors/test_azure_connectors.py",
+  "tests/test_admin_migration_secrets.py",
   "tests/test_agent_behavior_and_oscal.py",
   "tests/test_async_model_runs.py",
   "tests/test_auth_tenant_binding.py",
