@@ -9,6 +9,7 @@ import json
 import math
 import sys
 import time
+import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -158,7 +159,12 @@ def main():
                 assert page.locator('#casePartitionSelector').input_value() == selected
                 result['historical_export_receipt_matches'] = True
                 page.set_viewport_size({'width': 390, 'height': 844})
-                assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+                result['mobile_layout'] = page.evaluate('''() => ({
+                    viewport: innerWidth,
+                    document_width: document.documentElement.scrollWidth,
+                    case_title_width: document.getElementById('caseTitle').scrollWidth
+                })''')
+                assert result['mobile_layout']['document_width'] <= result['mobile_layout']['viewport'], f"Mobile document overflow: {result['mobile_layout']}"
                 page.screenshot(path=str(args.output / f'{scenario.lower()}-mobile.png'), full_page=True)
                 result['mobile_no_horizontal_overflow'] = True
                 failed_truth = [item for assertions in result['truth']['details'].values() for item in assertions if not item['passed']]
@@ -169,6 +175,7 @@ def main():
             except Exception as exc:
                 result['passed'] = False
                 result['failure'] = f'{type(exc).__name__}: {exc}'
+                result['failure_traceback'] = traceback.format_exc()
                 page.screenshot(path=str(args.output / f'{scenario.lower()}-failure.png'), full_page=True)
             finally:
                 result['elapsed_seconds'] = round(time.perf_counter() - started, 2)

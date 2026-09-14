@@ -31,6 +31,9 @@ body[data-view="inboxView"] .case-only{display:none!important}
   .file-row{grid-template-columns:minmax(0,1fr) auto}.file-state{grid-column:1/-1}.upload-footer{display:grid}.upload-actions{display:grid;grid-template-columns:1fr 2fr}.pipeline-steps{grid-template-columns:1fr 1fr}.pipeline-steps li:last-child{grid-column:1/-1}.run-status{align-items:stretch;flex-direction:column}.run-status button{width:100%}
 }
 
+/* Long generated case identifiers must fit with platform-specific system fonts. */
+.case-header > div{min-width:0}.case-header h1{overflow-wrap:anywhere}
+
 /* Evidence-to-action plan: operational instructions first, framework tags second. */
 .action-boundary{display:grid;gap:4px;padding:13px 14px;border-left:3px solid var(--cyan);background:#0a191d}.action-boundary span,.action-boundary small{color:var(--muted)}
 .action-filters{display:flex;gap:6px;padding:12px 14px;overflow:auto;border-bottom:1px solid var(--line)}.action-filters button{white-space:nowrap}.action-filters button.active{border-color:var(--cyan);color:var(--cyan)}
