@@ -13,18 +13,23 @@
 
 ## Current publication hold
 
-The development preview is available for review in PR #1. Do not promote it to
-main while security findings remain unresolved. The initial CodeQL alert gate
-reported 315 new alerts (7 critical, 259 high, 49 medium), despite passing
-functional checks. Alert counts are not confirmed exploit counts. Fix and verify
-true positives; any false-positive resolution needs evidence for that data flow.
-Do not suppress rules or narrow the scan simply to obtain a green check.
+The development preview is available for review in PR #1. Main remains unchanged.
+Promotion requires resolved security gates and completion of the retained-copy
+removal process. A real connector pilot is still an operational release gate.
 
-Corrections under verification restrict scanner and webhook selections to
-operator-configured targets; real scans fail without demo fallback. HTML output
-fails closed, raw HTML-to-PDF input loses active/resource-bearing markup, and
-storage identifiers reject traversal and Windows aliases. Broad path handling,
-logging of sensitive data and remaining report surfaces still need review.
+The September 14 security continuation repaired storage containment, tenant
+mismatch handling, label ownership, credential-bearing audit records, integration
+encryption, callback authentication, response errors and unsafe text parsing.
+Connector transports disable redirects/proxies and reject unsafe schemes. Optional
+models require immutable revisions and safetensors; local pickle artifacts require
+an operator-owned exact-hash approval. See the README for changed configuration.
+
+CodeQL scans the full configured Python scope. False positives are reviewed per
+alert, with a reason; rules were not disabled to clear the gate. Bandit now blocks
+high-severity findings while retaining all lower-severity findings in its artifact.
+Remaining binding, detector-string, parameterized-SQL and approved-deserialization
+warnings need their documented context; a passing scanner job is not a security
+certification. Exact-commit results are available on PR #1.
 
 Real scanner targets require `JANUSEC_APPROVED_SCANNER_TARGETS`, a JSON array of
 exact approved CLI targets. Real notifications require
