@@ -216,6 +216,33 @@ def test_recovery_discards_only_interrupted_derived_rows(ingest_store):
     assert store._db().execute('SELECT count(*) FROM normalized_rows').fetchone()[0] == 1
 
 
+def test_recovery_backlog_waits_for_capacity_without_claiming_new_uploads(ingest_store, monkeypatch):
+    from src.core.ingest import assessment_worker as worker
+    store = ingest_store
+    monkeypatch.setattr(worker, '_INGEST_QUEUE', asyncio.Queue(maxsize=2))
+    monkeypatch.setattr(worker, '_ACTIVE_JOB_IDS', set())
+    monkeypatch.setattr(worker, '_RECOVERY_PENDING_IDS', set())
+    for index in range(3):
+        aid = f'recovery-{index}'
+        store.create_job(aid, org='pilot-a')
+        directory = Path(store.raw_dir_for(aid, tenant_id='pilot-a'))
+        capture = directory / 'events.csv'; capture.write_bytes(b'user\nalice\n')
+        store.register_file(aid, 'events.csv', str(capture), capture.stat().st_size)
+        store.persist_row_batch(aid, [{'row_index': 0, 'user': 'alice'}])
+    assert worker._recover_queued_jobs() == 2
+    pending = next(iter(worker._RECOVERY_PENDING_IDS))
+    assert store.get_job(pending)['status'] == 'queued'
+    assert store._db().execute('SELECT count(*) FROM normalized_rows WHERE assessment_id=?', [pending]).fetchone()[0] == 1
+    # A new HTTP upload may have a job row before its captures are registered.
+    store.create_job('new-upload-still-writing', org='pilot-a')
+    worker._INGEST_QUEUE.get_nowait(); worker._INGEST_QUEUE.task_done()
+    assert worker._recover_queued_jobs(pending_only=True) == 1
+    assert not worker._RECOVERY_PENDING_IDS
+    assert pending in worker._ACTIVE_JOB_IDS
+    assert store.get_job('new-upload-still-writing')['status'] == 'queued'
+    assert all(store.get_job(f'recovery-{i}')['status'] == 'queued' for i in range(3))
+
+
 def test_evidence_order_is_stable_for_equal_scores(ingest_store):
     store = ingest_store
     store.create_job('equal-scores', org='pilot-a')

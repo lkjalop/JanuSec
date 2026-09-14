@@ -110,6 +110,7 @@ _INGEST_JOB_TIMEOUT_S = float(os.getenv("JANUSEC_INGEST_JOB_TIMEOUT_S", "1800"))
 # Used to make enqueue_job() idempotent so that _recover_queued_jobs() and
 # the upload endpoint cannot enqueue the same job twice.
 _ACTIVE_JOB_IDS: set[str] = set()
+_RECOVERY_PENDING_IDS: set[str] = set()
 
 # ── Triage threshold — rows below this score are noise and excluded from
 #    clustering.  They remain in DuckDB and the final evidence_rows list but
@@ -3961,6 +3962,9 @@ async def _worker_loop() -> None:
     while True:
         assessment_id = None
         try:
+            # Refill only the backlog captured at startup, never an upload still
+            # writing its raw files in a concurrent request.
+            _recover_queued_jobs(pending_only=True)
             job = await _INGEST_QUEUE.get()
             if job is None:  # sentinel — shutdown signal
                 logger.info("ingest_worker: received shutdown sentinel")
@@ -4030,11 +4034,12 @@ async def _worker_loop() -> None:
             except Exception:
                 pass
 
-
 _worker_task: asyncio.Task | None = None
 
 
-def _recover_queued_jobs() -> int:
+def _recover_queued_jobs(*, pending_only: bool = False) -> int:
+    if pending_only and not _RECOVERY_PENDING_IDS:
+        return 0
     try:
         from src.core.ingest import store as _store
 
@@ -4043,15 +4048,25 @@ def _recover_queued_jobs() -> int:
         logger.debug("ingest_worker: queued job recovery lookup failed", exc_info=True)
         return 0
     recovered = 0
+    if not pending_only:
+        _RECOVERY_PENDING_IDS.update(
+            str(job['assessment_id']) for job in jobs if job.get('assessment_id')
+        )
     for job in jobs:
         aid = str(job.get("assessment_id") or "")
-        if not aid or aid in _ACTIVE_JOB_IDS:
+        if not aid or aid not in _RECOVERY_PENDING_IDS:
             continue
+        if aid in _ACTIVE_JOB_IDS:
+            _RECOVERY_PENDING_IDS.discard(aid)
+            continue
+        if _INGEST_QUEUE.full():
+            break  # Keep persisted jobs intact until the worker frees capacity.
         try:
             files = _store.raw_files_for(aid)
             if not files:
                 raise ValueError('no_registered_captures')
         except (ValueError, OSError):
+            _RECOVERY_PENDING_IDS.discard(aid)
             try:
                 _store.update_job(
                     aid, status="failed", stage="recovery", error="Recovery requires every registered raw capture with its original hash"
@@ -4063,6 +4078,7 @@ def _recover_queued_jobs() -> int:
             _store.reset_incomplete_job(aid)
             _store.update_job(aid, status="queued", stage="queued", stage_label="Recovered queued job")
             enqueue_job(aid, str(job.get("org") or "unknown"), files)
+            _RECOVERY_PENDING_IDS.discard(aid)
             recovered += 1
         except Exception:
             logger.debug("ingest_worker: failed to recover queued job %s", aid, exc_info=True)
