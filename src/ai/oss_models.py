@@ -1,4 +1,4 @@
-﻿"""Open-Source Security Models Integration.
+"""Open-Source Security Models Integration.
 
 Supports Hugging Face transformers (CPU by default) and optional Ollama models
 residing under D:\\ by default. Loading is lazy and failures degrade gracefully.
@@ -39,6 +39,7 @@ class OSSModelSpec:
     max_length: int = 512
     trust_remote_code: bool = False
     device_pref: str = 'auto'
+    revision: str | None = None
 
 
 class _OllamaClient:
@@ -134,7 +135,7 @@ class OpenSourceModelManager:
             OSSModelSpec('roberta_embed', 'embedding', 'sentence-transformers/all-MiniLM-L6-v2', 384),
             OSSModelSpec('roberta_cls', 'classification', 'roberta-base'),
             OSSModelSpec('deberta_cls', 'classification', 'microsoft/deberta-v3-base'),
-            OSSModelSpec('mistral_gen', 'generation', 'mistralai/Mistral-7B-Instruct-v0.2', 1024, True),
+            OSSModelSpec('mistral_gen', 'generation', 'mistralai/Mistral-7B-Instruct-v0.2', 1024, False),
         ]
         for spec in defaults:
             self.model_specs.setdefault(spec.name, spec)
@@ -173,6 +174,10 @@ class OpenSourceModelManager:
             return False
 
         try:
+            from src.security.model_revisions import model_revision
+            revision = model_revision(spec.model_id, spec.revision)
+            if spec.trust_remote_code:
+                raise ValueError('Remote model code execution is disabled')
             chosen_device = spec.device_pref.lower() if spec.device_pref else 'auto'
             if chosen_device == 'auto':
                 chosen_device = self.device_pref
@@ -183,14 +188,14 @@ class OpenSourceModelManager:
             pipeline_device = 0 if torch_device == 'cuda' else -1
 
             if spec.task == 'embedding':
-                tokenizer = AutoTokenizer.from_pretrained(spec.model_id, trust_remote_code=spec.trust_remote_code)
-                model = AutoModel.from_pretrained(spec.model_id, trust_remote_code=spec.trust_remote_code)
+                tokenizer = AutoTokenizer.from_pretrained(spec.model_id, trust_remote_code=False, revision=revision)
+                model = AutoModel.from_pretrained(spec.model_id, trust_remote_code=False, revision=revision, use_safetensors=True)
                 model = model.to(torch_device)
                 self.tokenizers[name] = tokenizer
                 self.models[name] = model
             elif spec.task == 'classification':
-                tokenizer = AutoTokenizer.from_pretrained(spec.model_id, trust_remote_code=spec.trust_remote_code)
-                model = AutoModelForSequenceClassification.from_pretrained(spec.model_id, trust_remote_code=spec.trust_remote_code)
+                tokenizer = AutoTokenizer.from_pretrained(spec.model_id, trust_remote_code=False, revision=revision)
+                model = AutoModelForSequenceClassification.from_pretrained(spec.model_id, trust_remote_code=False, revision=revision, use_safetensors=True)
                 model = model.to(torch_device)
                 self.tokenizers[name] = tokenizer
                 self.models[name] = model
@@ -198,8 +203,9 @@ class OpenSourceModelManager:
                 self.models[name] = pipeline(
                     'text-generation',
                     model=spec.model_id,
-                    trust_remote_code=spec.trust_remote_code,
+                    trust_remote_code=False, revision=revision,
                     device=pipeline_device,
+                    model_kwargs={'use_safetensors': True},
                 )
             else:
                 logger.error("Unknown task %s for model %s", spec.task, name)

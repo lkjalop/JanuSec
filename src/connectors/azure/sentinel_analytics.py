@@ -25,6 +25,7 @@ Env vars:
     SENTINEL_EVENT_HUB_NAMESPACE    — namespace for Automation trigger
 """
 from __future__ import annotations
+from src.security.http_transport import safe_urlopen
 
 import argparse
 import json
@@ -73,7 +74,7 @@ def _get_token() -> str:
             '?api-version=2018-02-01&resource=https://management.azure.com/'
         )
         request = _req.Request(url, headers={'Metadata': 'true'})
-        with _req.urlopen(request, timeout=5) as resp:  # noqa: S310
+        with safe_urlopen(request, timeout=5) as resp:  # noqa: S310
             return json.loads(resp.read()).get('access_token', '')
     except Exception as exc:
         logger.warning('sentinel_analytics: token fetch failed: %s', exc)
@@ -201,7 +202,7 @@ def _http(method: str, url: str, token: str, body: dict | None = None) -> dict:
         method=method,
     )
     try:
-        with _req.urlopen(request, timeout=30) as resp:  # noqa: S310
+        with safe_urlopen(request, timeout=30) as resp:  # noqa: S310
             raw = resp.read()
             return json.loads(raw) if raw else {}
     except Exception as exc:

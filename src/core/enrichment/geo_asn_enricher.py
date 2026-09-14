@@ -1,3 +1,4 @@
+from src.security.http_transport import safe_urlopen
 import os
 import json
 import socket
@@ -89,7 +90,7 @@ def enrich_ip(ip: str) -> Dict[str, Any]:
             if token:
                 url += f'?token={token}'
             import urllib.request as _ur
-            with _ur.urlopen(url, timeout=3) as fh:
+            with safe_urlopen(url, timeout=3) as fh:
                 data = json.load(fh)
                 if 'country' in data:
                     res['country_code'] = data.get('country')

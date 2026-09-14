@@ -5,6 +5,7 @@ used by the graph session builder. It's intentionally simple for prototype use
 and exposes simple pruning/decay hooks.
 """
 from __future__ import annotations
+from src.security.storage_paths import confined_path
 
 import threading
 import time
@@ -23,7 +24,8 @@ _suppression_templates: Dict[Tuple[str,str], float] = {}
 
 def _load_config(path: Optional[str] = None) -> None:
     global _suppression_templates
-    cfg_path = path or os.getenv('COOCCURRENCE_CONFIG_PATH', 'config/cooccurrence.yaml')
+    configured = os.getenv('COOCCURRENCE_CONFIG_PATH', 'config/cooccurrence.yaml')
+    cfg_path = confined_path(os.path.dirname(os.path.realpath(configured)), path or configured)
     try:
         if not os.path.exists(cfg_path):
             return

@@ -15,6 +15,7 @@ When credentials are absent the connector falls back to synthetic enrichment so
 callers and tests continue to work without crashing.
 """
 from __future__ import annotations
+from src.security.http_transport import safe_urlopen
 
 import asyncio
 import logging
@@ -54,7 +55,7 @@ def _get_graph_token(tenant_id: str, client_id: str, client_secret: str, scope: 
         url = f'{_LOGIN_BASE}/{tenant_id}/oauth2/v2.0/token'
         req = urllib.request.Request(url, data=body, method='POST',
                                      headers={'Content-Type': 'application/x-www-form-urlencoded'})
-        with urllib.request.urlopen(req, timeout=15) as resp:
+        with safe_urlopen(req, timeout=15) as resp:
             import json
             data = json.loads(resp.read())
         token = data.get('access_token')
@@ -77,7 +78,7 @@ def _graph_get(path: str, token: str) -> Optional[dict]:
             'Authorization': f'Bearer {token}',
             'Accept': 'application/json',
         })
-        with urllib.request.urlopen(req, timeout=20) as resp:
+        with safe_urlopen(req, timeout=20) as resp:
             return json.loads(resp.read())
     except Exception as exc:
         logger.debug('Purview Graph GET %s failed: %s', path, exc)

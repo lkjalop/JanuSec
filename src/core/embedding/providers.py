@@ -66,8 +66,8 @@ class MiniLMProvider:
         if self._loaded:
             return
         from transformers import AutoModel, AutoTokenizer  # type: ignore
-        self._tok = AutoTokenizer.from_pretrained('sentence-transformers/all-MiniLM-L6-v2')
-        self._model = AutoModel.from_pretrained('sentence-transformers/all-MiniLM-L6-v2')
+        self._tok = AutoTokenizer.from_pretrained('sentence-transformers/all-MiniLM-L6-v2', revision='1110a243fdf4706b3f48f1d95db1a4f5529b4d41', trust_remote_code=False)
+        self._model = AutoModel.from_pretrained('sentence-transformers/all-MiniLM-L6-v2', revision='1110a243fdf4706b3f48f1d95db1a4f5529b4d41', trust_remote_code=False, use_safetensors=True)
         self._loaded = True
     async def embed(self, text: str) -> list[float]:
         try:
@@ -93,8 +93,8 @@ class TinyBERTSecProvider:
         # Placeholder: using same MiniLM as stand-in unless security-tuned tiny model is downloaded
         # In production, point to a fine-tuned TinyBERT security model artifact.
         from transformers import AutoModel, AutoTokenizer  # type: ignore
-        self._tok = AutoTokenizer.from_pretrained('sentence-transformers/paraphrase-MiniLM-L3-v2')
-        self._model = AutoModel.from_pretrained('sentence-transformers/paraphrase-MiniLM-L3-v2')
+        self._tok = AutoTokenizer.from_pretrained('sentence-transformers/paraphrase-MiniLM-L3-v2', revision='4ca70771034acceecb2e72475f72050fcdde4ddc', trust_remote_code=False)
+        self._model = AutoModel.from_pretrained('sentence-transformers/paraphrase-MiniLM-L3-v2', revision='4ca70771034acceecb2e72475f72050fcdde4ddc', trust_remote_code=False, use_safetensors=True)
         self._loaded = True
     async def embed(self, text: str) -> list[float]:
         try:
@@ -118,8 +118,8 @@ class SecBERTProvider:
             return
         # Placeholder: reuse MiniLM pending security-specific checkpoint integration.
         from transformers import AutoModel, AutoTokenizer  # type: ignore
-        self._tok = AutoTokenizer.from_pretrained('sentence-transformers/all-MiniLM-L6-v2')
-        self._model = AutoModel.from_pretrained('sentence-transformers/all-MiniLM-L6-v2')
+        self._tok = AutoTokenizer.from_pretrained('sentence-transformers/all-MiniLM-L6-v2', revision='1110a243fdf4706b3f48f1d95db1a4f5529b4d41', trust_remote_code=False)
+        self._model = AutoModel.from_pretrained('sentence-transformers/all-MiniLM-L6-v2', revision='1110a243fdf4706b3f48f1d95db1a4f5529b4d41', trust_remote_code=False, use_safetensors=True)
         self._loaded = True
     async def embed(self, text: str) -> list[float]:
         try:

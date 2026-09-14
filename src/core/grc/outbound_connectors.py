@@ -1,6 +1,7 @@
 """Explicitly approved outbound connectors for GRC systems of record."""
 
 from __future__ import annotations
+from src.security.http_transport import safe_urlopen
 
 import json
 import os
@@ -37,7 +38,7 @@ def config_from_environment(target: str) -> GRCConnectorConfig:
 
 def _http_sender(config: GRCConnectorConfig, body: bytes, headers: dict[str, str]) -> tuple[int, dict[str, Any]]:
     request = urllib.request.Request(config.endpoint, data=body, headers=headers, method="POST")
-    with urllib.request.urlopen(request, timeout=config.timeout_seconds) as response:  # noqa: S310 - endpoint is explicit admin config
+    with safe_urlopen(request, timeout=config.timeout_seconds) as response:  # noqa: S310 - endpoint is explicit admin config
         raw = response.read().decode("utf-8", errors="replace")
         try:
             payload = json.loads(raw) if raw else {}

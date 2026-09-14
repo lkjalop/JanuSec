@@ -173,8 +173,8 @@ class DecisionPersistenceMixin:
             return self._embedding_tokenizer, self._embedding_model
         try:
             from transformers import AutoModel, AutoTokenizer  # type: ignore
-            self._embedding_tokenizer = AutoTokenizer.from_pretrained('sentence-transformers/all-MiniLM-L6-v2')
-            self._embedding_model = AutoModel.from_pretrained('sentence-transformers/all-MiniLM-L6-v2')
+            self._embedding_tokenizer = AutoTokenizer.from_pretrained('sentence-transformers/all-MiniLM-L6-v2', revision='1110a243fdf4706b3f48f1d95db1a4f5529b4d41', trust_remote_code=False)
+            self._embedding_model = AutoModel.from_pretrained('sentence-transformers/all-MiniLM-L6-v2', revision='1110a243fdf4706b3f48f1d95db1a4f5529b4d41', trust_remote_code=False, use_safetensors=True)
             return self._embedding_tokenizer, self._embedding_model
         except Exception:
             return None

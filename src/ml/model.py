@@ -3,6 +3,7 @@ Provides train, save, load, and predict helpers. If LightGBM is not
 installed, falls back to sklearn RandomForest for portability.
 """
 from __future__ import annotations
+from src.security.model_artifacts import load_approved_model
 import os
 import pickle
 from typing import Any, Dict, List
@@ -59,8 +60,7 @@ def save_model(model_bundle: Any, path: str):
 def load_model(path: str) -> Any:
     if not os.path.exists(path):
         raise FileNotFoundError(path)
-    with open(path, 'rb') as fh:
-        mb = pickle.load(fh)
+    mb = load_approved_model(path)
     # attempt to load a companion scaler if present next to model
     try:
         from src.ml.scaler import load_scaler

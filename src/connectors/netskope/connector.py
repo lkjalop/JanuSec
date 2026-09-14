@@ -18,6 +18,7 @@ Reference:
     https://docs.netskope.com/en/rest-api-v2-overview.html
 """
 from __future__ import annotations
+from src.security.http_transport import safe_urlopen
 
 import json
 import logging
@@ -79,7 +80,7 @@ class NetskopeConnector:
             },
         )
         try:
-            with urllib.request.urlopen(req, timeout=20) as resp:
+            with safe_urlopen(req, timeout=20) as resp:
                 return json.loads(resp.read())
         except Exception as exc:
             logger.debug('Netskope GET %s failed: %s', path, exc)

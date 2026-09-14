@@ -31,6 +31,7 @@ Env vars::
     SENTINEL_API_TOKEN         # override for demos/tests
 """
 from __future__ import annotations
+from src.security.http_transport import safe_urlopen
 
 import json
 import logging
@@ -130,7 +131,7 @@ class _TokenProvider:
         }).encode()
         req = urllib.request.Request(auth_url, data=body, method='POST')
         try:
-            with urllib.request.urlopen(req, timeout=15) as resp:
+            with safe_urlopen(req, timeout=15) as resp:
                 data = json.load(resp)
             return data['access_token'], time.time() + int(data.get('expires_in', 3600))
         except Exception as exc:
@@ -154,7 +155,7 @@ def _http(method: str, url: str, headers: Dict[str, str],
     data = json.dumps(body).encode() if body else None
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with safe_urlopen(req, timeout=30) as resp:
             return json.load(resp)
     except urllib.error.HTTPError as exc:
         content = exc.read().decode('utf-8', errors='replace')

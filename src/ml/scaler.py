@@ -1,5 +1,6 @@
 """Persist StandardScaler for feature normalization."""
 from __future__ import annotations
+from src.security.model_artifacts import load_approved_model
 import os, pickle
 from typing import Any, List, Dict
 
@@ -11,5 +12,4 @@ def save_scaler(scaler: Any, path: str):
 def load_scaler(path: str) -> Any:
     if not os.path.exists(path):
         raise FileNotFoundError(path)
-    with open(path, 'rb') as fh:
-        return pickle.load(fh)
+    return load_approved_model(path)

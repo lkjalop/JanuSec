@@ -294,11 +294,12 @@ def _build_threat_hunter_hypotheses(narrative: dict) -> list[dict]:
         for s in principals['service_accounts'][:2]:
             hypotheses.append({
                 'hypothesis': f'Federated service account {s} has been misused before',
+                'pivot_query_parameters': {'service_account': s},
                 'pivot_query_snowflake': (
                     f'SELECT START_TIME, USER_NAME, ROLE_NAME, CLIENT_IP, '
                     f'QUERY_TYPE, BYTES_SCANNED, ROWS_PRODUCED '
                     f'FROM SNOWFLAKE.ACCOUNT_USAGE.QUERY_HISTORY '
-                    f"WHERE USER_NAME = '{s}' "
+                    "WHERE USER_NAME = %(service_account)s "
                     f"AND START_TIME >= DATEADD(day, -90, CURRENT_TIMESTAMP())"
                 ),
                 'lookback_days': 90,

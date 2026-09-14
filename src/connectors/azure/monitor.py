@@ -17,6 +17,7 @@ AZURE_MONITOR_METRICS_ENABLED: '1' to pull resource metrics (default: '0')
 AZURE_CLIENT_ID / AZURE_CLIENT_SECRET / AZURE_TENANT_ID: Service principal auth
 """
 from __future__ import annotations
+from src.security.http_transport import safe_urlopen
 
 import json
 import logging
@@ -85,7 +86,7 @@ def _get_access_token(tenant_id: str, client_id: str, client_secret: str, resour
         'resource': resource,
     }).encode()
     req = urllib.request.Request(url, data=data, method='POST')
-    with urllib.request.urlopen(req, timeout=30) as resp:
+    with safe_urlopen(req, timeout=30) as resp:
         body = json.loads(resp.read())
     token = body.get('access_token')
     if not token:
@@ -205,7 +206,7 @@ class AzureMonitorConnector:
         body = json.dumps({'query': kql, 'timespan': timespan}).encode()
         headers = self._headers()
         req = urllib.request.Request(url, data=body, headers=headers, method='POST')
-        with urllib.request.urlopen(req, timeout=60) as resp:
+        with safe_urlopen(req, timeout=60) as resp:
             result = json.loads(resp.read())
         rows: List[Dict[str, Any]] = []
         for table in result.get('tables') or []:
@@ -266,7 +267,7 @@ class AzureMonitorConnector:
                 f"?api-version=2018-01-01&metricnames={quote(names)}&interval={interval}"
             )
             req = urllib.request.Request(url, headers={'Authorization': f'Bearer {token}'})
-            with urllib.request.urlopen(req, timeout=30) as resp:
+            with safe_urlopen(req, timeout=30) as resp:
                 result = json.loads(resp.read())
             return result
         except Exception as exc:

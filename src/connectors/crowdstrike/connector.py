@@ -13,6 +13,7 @@ CS_FALCON_MAX_PER_POLL  : Max detections per poll (default: 500)
 CS_FALCON_EVENTS_ENABLED: '1' to stream raw Falcon events via Event Streams API (default: '0')
 """
 from __future__ import annotations
+from src.security.http_transport import safe_urlopen
 
 import json
 import logging
@@ -82,7 +83,7 @@ class _FalconClient:
             headers={'Content-Type': 'application/x-www-form-urlencoded'},
             method='POST',
         )
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with safe_urlopen(req, timeout=30) as resp:
             body = json.loads(resp.read())
         self._token = body['access_token']
         self._token_expiry = time.time() + int(body.get('expires_in', 1800))
@@ -94,7 +95,7 @@ class _FalconClient:
         if params:
             url += '?' + urllib.parse.urlencode(params)
         req = urllib.request.Request(url, headers={'Authorization': f'Bearer {self._token}'})
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with safe_urlopen(req, timeout=30) as resp:
             return json.loads(resp.read())
 
     def post(self, path: str, body: dict) -> dict:
@@ -110,7 +111,7 @@ class _FalconClient:
             },
             method='POST',
         )
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with safe_urlopen(req, timeout=30) as resp:
             return json.loads(resp.read())
 
 

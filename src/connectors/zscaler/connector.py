@@ -19,6 +19,7 @@ Reference:
     https://help.zscaler.com/zia/api-getting-started
 """
 from __future__ import annotations
+from src.security.http_transport import safe_urlopen
 
 import hashlib
 import json
@@ -72,7 +73,7 @@ def _zia_session_login(base_url: str, username: str, password: str, api_key: str
             method='POST',
             headers={'Content-Type': 'application/json', 'Accept': 'application/json'},
         )
-        with urllib.request.urlopen(req, timeout=15) as resp:
+        with safe_urlopen(req, timeout=15) as resp:
             cookie = resp.getheader('Set-Cookie') or ''
             # Extract JSESSIONID=...;
             jsessionid = next(
@@ -100,7 +101,7 @@ def _zia_get(base_url: str, path: str, jsessionid: str) -> Optional[Any]:
                 'Accept': 'application/json',
             },
         )
-        with urllib.request.urlopen(req, timeout=20) as resp:
+        with safe_urlopen(req, timeout=20) as resp:
             return json.loads(resp.read())
     except Exception as exc:
         logger.debug('Zscaler GET %s failed: %s', path, exc)

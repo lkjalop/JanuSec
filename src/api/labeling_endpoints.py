@@ -125,7 +125,13 @@ async def edit_label(request: Request):
     except Exception:
         raise HTTPException(status_code=400, detail='missing_label_id')
     try:
-        from src.db.database import execute
+        from src.db.database import execute, fetch
+        tenant_id = resolve_tenant_id(request, payload.get('tenant_id'))
+        if not tenant_id:
+            raise HTTPException(status_code=400, detail='tenant_id_required')
+        owned = await fetch('SELECT id FROM decision_labels WHERE id=$1 AND tenant_id=$2', label_id, tenant_id)
+        if not owned:
+            raise HTTPException(status_code=404, detail='label_not_found')
         # best-effort update; only update provided fields
         sets = []
         params = []
@@ -138,8 +144,8 @@ async def edit_label(request: Request):
             sets.append(f"query_template=$%d" % idx); params.append(payload.get('query_template')); idx += 1
         if not sets:
             raise HTTPException(status_code=400, detail='no_fields')
-        sql = "UPDATE decision_labels SET " + ",".join(sets) + " WHERE id=$%d" % idx
-        params.append(label_id)
+        sql = "UPDATE decision_labels SET " + ",".join(sets) + " WHERE id=$%d AND tenant_id=$%d" % (idx, idx + 1)
+        params.extend([label_id, tenant_id])
         await execute(sql, *params)
         return {'ok': True}
     except HTTPException:

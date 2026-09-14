@@ -18,7 +18,7 @@ def ssrf_check(url: str) -> tuple[bool, str | None]:
     """
     try:
         p = urlparse(url)
-        if not p.scheme or not p.netloc:
+        if p.scheme.lower() not in {'https', 'http'} or not p.netloc or p.username or p.password:
             return False, 'bad_url'
         if p.scheme.lower() != 'https' and os.getenv('ALLOW_INSECURE_WEBHOOK_HTTP','0').lower() not in {'1','true','yes'}:
             return False, 'insecure_scheme'

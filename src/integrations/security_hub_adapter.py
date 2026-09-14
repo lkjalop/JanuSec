@@ -6,6 +6,7 @@ Configuration via env vars:
 - SECURITY_HUB_SQS_URL: optional local SQS queue to buffer findings
 """
 from __future__ import annotations
+from src.security.http_transport import safe_urlopen
 
 import json
 import time
@@ -151,7 +152,7 @@ class SecurityHubAdapter(ConnectorBase):
                     'x-tenant-id': tenant_id,
                 },
             )
-            with urllib.request.urlopen(req, timeout=15) as resp:
+            with safe_urlopen(req, timeout=15) as resp:
                 return resp.read()
 
         # idempotency key: tenant + timestamp + payload hash

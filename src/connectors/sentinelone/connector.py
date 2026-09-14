@@ -10,6 +10,7 @@ S1_SEVERITY_MIN     : Minimum severity: 'low', 'medium', 'high', 'critical' (def
 S1_MAX_PER_POLL     : Maximum threats per poll (default: 500)
 """
 from __future__ import annotations
+from src.security.http_transport import safe_urlopen
 
 import json
 import logging
@@ -61,7 +62,7 @@ class _S1Client:
         if params:
             url += '?' + urllib.parse.urlencode({k: v for k, v in params.items() if v is not None})
         req = urllib.request.Request(url, headers=self.headers)
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with safe_urlopen(req, timeout=30) as resp:
             return json.loads(resp.read())
 
 

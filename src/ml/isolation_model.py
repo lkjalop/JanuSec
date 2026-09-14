@@ -1,4 +1,6 @@
 from __future__ import annotations
+from src.security.model_artifacts import load_approved_model
+from src.security.storage_paths import confined_path
 
 import os
 import pickle
@@ -77,7 +79,7 @@ class IsolationWrapper:
         """Persist the underlying sklearn model to disk using pickle."""
         if not self.enabled or self._impl is None:
             return
-        p = Path(path)
+        p = Path(confined_path(os.path.dirname(os.path.realpath(self.DEFAULT_PATH)), path))
         p.parent.mkdir(parents=True, exist_ok=True)
         try:
             with p.open('wb') as f:
@@ -88,12 +90,11 @@ class IsolationWrapper:
 
     def load_model(self, path: Path | str) -> None:
         """Load a persisted model from disk."""
-        p = Path(path)
+        p = Path(confined_path(os.path.dirname(os.path.realpath(self.DEFAULT_PATH)), path))
         if not p.exists():
             return
         try:
-            with p.open('rb') as f:
-                self._impl = pickle.load(f)
+            self._impl = load_approved_model(p)
         except Exception:
             # ignore load errors
             pass

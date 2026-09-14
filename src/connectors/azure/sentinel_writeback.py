@@ -19,6 +19,7 @@ Env vars:
     SENTINEL_BASE_URL           — override for testing
 """
 from __future__ import annotations
+from src.security.http_transport import safe_urlopen
 
 import logging
 import os
@@ -99,7 +100,7 @@ def _get_token() -> str:
             '?api-version=2018-02-01&resource=https://management.azure.com/'
         )
         request = _req.Request(url, headers={'Metadata': 'true'})
-        with _req.urlopen(request, timeout=5) as resp:  # noqa: S310
+        with safe_urlopen(request, timeout=5) as resp:  # noqa: S310
             data = _json.loads(resp.read())
             return data.get('access_token', '')
     except Exception as exc:
@@ -206,7 +207,7 @@ class SentinelWriteback:
                 headers=self._headers(),
                 method='PATCH',
             )
-            with _req.urlopen(request, timeout=15) as resp:  # noqa: S310
+            with safe_urlopen(request, timeout=15) as resp:  # noqa: S310
                 result = json.loads(resp.read())
                 logger.info(
                     'sentinel_writeback: updated incident %s classification=%s',
@@ -257,7 +258,7 @@ class SentinelWriteback:
                 headers=self._headers(),
                 method='PUT',
             )
-            with _req.urlopen(request, timeout=15) as resp:  # noqa: S310
+            with safe_urlopen(request, timeout=15) as resp:  # noqa: S310
                 result = json.loads(resp.read())
                 logger.info('sentinel_writeback: added comment to incident %s', incident_id)
                 return result

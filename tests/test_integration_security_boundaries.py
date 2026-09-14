@@ -110,3 +110,74 @@ def test_repeated_unclosed_model_tags_preserve_text_without_backtracking():
     blocks, clean=extract_tag_blocks(text,'think')
     assert blocks==[] and clean==text
     assert extract_tag_blocks('before<THINKING>reason</THINKING>after','thinking',ignore_case=True)==(['reason'],'beforeafter')
+
+
+def test_model_revisions_reject_moving_tags():
+    from src.security.model_revisions import model_revision
+    assert len(model_revision('sentence-transformers/all-MiniLM-L6-v2')) == 40
+    with pytest.raises(ValueError):
+        model_revision('custom/model','main')
+    with pytest.raises(ValueError):
+        model_revision('unconfigured/model')
+
+
+def test_vendor_xml_rejects_entity_expansion():
+    from src.integrations.qualys_client import ET
+    from defusedxml.common import EntitiesForbidden
+    with pytest.raises(EntitiesForbidden):
+        ET.fromstring('<!DOCTYPE x [<!ENTITY e "expanded">]><x>&e;</x>')
+
+
+def test_model_artifact_requires_approval_and_detects_changed_bytes(tmp_path, monkeypatch):
+    import pickle
+    from src.security.model_artifacts import load_approved_model
+    artifact=tmp_path/'model.pkl'
+    artifact.write_bytes(pickle.dumps({'model':'test'}))
+    monkeypatch.delenv('JANUSEC_APPROVED_MODEL_SHA256', raising=False)
+    with pytest.raises(RuntimeError):
+        load_approved_model(artifact)
+    digest=hashlib.sha256(artifact.read_bytes()).hexdigest()
+    monkeypatch.setenv('JANUSEC_APPROVED_MODEL_SHA256',json.dumps({str(artifact):digest}))
+    assert load_approved_model(artifact)=={'model':'test'}
+    artifact.write_bytes(pickle.dumps({'model':'changed'}))
+    with pytest.raises(RuntimeError):
+        load_approved_model(artifact)
+
+
+def test_connector_transport_rejects_non_http_and_disables_redirects(monkeypatch):
+    from src.security import http_transport as module
+    called=[]
+    monkeypatch.setattr(module._OPENER,'open',lambda *args,**kwargs: called.append(args))
+    for url in ('file:///etc/passwd','ftp://example.com/file','https://user:secret@example.com'):
+        with pytest.raises(ValueError):
+            module.safe_urlopen(url,allow_private=True)
+    assert called==[]
+    assert module._NoRedirect().redirect_request(None,None,302,'redirect',{},'https://foreign.example') is None
+
+
+def test_connector_transport_enforces_public_policy(monkeypatch):
+    from src.security import http_transport as module
+    monkeypatch.setattr(module,'ssrf_check',lambda url:(False,'private'))
+    with pytest.raises(ValueError):
+        module.safe_urlopen('https://127.0.0.1/private')
+
+
+def test_label_edit_cannot_change_another_tenants_row(monkeypatch):
+    import sqlite3
+    from src.api.labeling_endpoints import edit_label
+    from src.db import database
+    db=sqlite3.connect(':memory:')
+    db.execute('CREATE TABLE decision_labels(id INTEGER, tenant_id TEXT, label TEXT)')
+    db.execute("INSERT INTO decision_labels VALUES(1,'foreign','original')")
+    async def fetch(sql,*args):
+        return [{'id':row[0]} for row in db.execute(sql,args).fetchall()]
+    async def execute(sql,*args): db.execute(sql,args)
+    monkeypatch.setattr(database,'fetch',fetch)
+    monkeypatch.setattr(database,'execute',execute)
+    async def body(): return {'label_id':1,'label':'changed'}
+    request=SimpleNamespace(json=body,headers={},state=SimpleNamespace(tenant_id='acme',auth=SimpleNamespace(tenant_id='acme')))
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(edit_label(request))
+    assert error.value.status_code == 404
+    assert db.execute('SELECT label FROM decision_labels').fetchone()[0]=='original'
+    db.close()

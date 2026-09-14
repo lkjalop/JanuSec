@@ -18,6 +18,7 @@ Env vars:
     IOC_FEED_TIMEOUT_SECS   — per-feed HTTP timeout (default 5)
 """
 from __future__ import annotations
+from src.security.http_transport import safe_urlopen
 
 import hashlib
 import logging
@@ -110,7 +111,7 @@ class AbuseCHMalwareFeed:
             else:
                 return None
             request = _req.Request(url, data=data, method='POST', headers={'Accept': 'application/json'})
-            with _req.urlopen(request, timeout=_FEED_TIMEOUT) as resp:  # noqa: S310
+            with safe_urlopen(request, timeout=_FEED_TIMEOUT) as resp:  # noqa: S310
                 body = _json.loads(resp.read())
             status = body.get('query_status') or body.get('url_status', '')
             if 'no_results' in status or 'not_found' in status:
@@ -143,7 +144,7 @@ class AbuseIPDBFeed:
                 'Key': self._API_KEY,
                 'Accept': 'application/json',
             })
-            with _req.urlopen(request, timeout=_FEED_TIMEOUT) as resp:  # noqa: S310
+            with safe_urlopen(request, timeout=_FEED_TIMEOUT) as resp:  # noqa: S310
                 body = _json.loads(resp.read())
             score = body.get('data', {}).get('abuseConfidenceScore', 0)
             if score < 25:
@@ -176,7 +177,7 @@ class GreyNoiseFeed:
             if self._API_KEY:
                 headers['key'] = self._API_KEY
             request = _req.Request(url, headers=headers)
-            with _req.urlopen(request, timeout=_FEED_TIMEOUT) as resp:  # noqa: S310
+            with safe_urlopen(request, timeout=_FEED_TIMEOUT) as resp:  # noqa: S310
                 body = _json.loads(resp.read())
             classification = body.get('classification', '')
             if classification != 'malicious':

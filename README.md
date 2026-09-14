@@ -57,11 +57,12 @@ Never reuse repository examples as credentials. See [Security](SECURITY.md).
 
 ## Verification
 
-The September 14 curated candidate passed **483 selected tests, with no skips**,
-using isolated runtime state on Windows and the existing repository virtualenv.
-A real-backend Chromium journey checked a BOM-prefixed negative upload, five tabs,
-historical receipt/export agreement, mobile layout and nine linked pages, with no
-recorded JavaScript or HTTP errors. GitHub CI is a separate verification environment.
+The release candidate is verified through `scripts/test_release.py` and
+`scripts/browser_verify_release.py`. The browser journey covers a BOM-prefixed
+negative upload, five investigation tabs, historical receipt/export agreement,
+mobile layout and nine linked pages. Exact-commit CI results are recorded in
+[PR #1](https://github.com/lkjalop/JanuSec/pull/1); a successful scanner execution
+alone does not mean its findings are resolved.
 
 - [Current verification summaries](docs/verification/2026-09-14-release/)
 - [Release roadmap](docs/RELEASE_ROADMAP.md)
@@ -82,3 +83,25 @@ from these tests. Test outcomes must identify their inputs and environment.
 The project retains its existing proprietary licensing designation. Public source
 availability does not grant an open-source license. See [LICENSE](LICENSE).
 Third-party components retain their respective licenses.
+
+## Security configuration for integrations and optional models
+
+Integration credentials require a durable `INTEGRATIONS_ENCRYPTION_KEY` from the
+secret provider. Missing or invalid encryption fails the save; plaintext and
+per-call ephemeral-key fallbacks are removed. Keep this key outside Git and
+preserve it across restarts. Existing encrypted configurations require their
+original key or credential re-entry. Webhooks require a configured signature
+secret; missing verification cannot record a result.
+
+Optional Hugging Face models use immutable revisions, disable remote Python code,
+and require safetensors weights. Custom models need a full revision hash.
+Legacy local pickle models are disabled unless their exact file and SHA256 are in
+the operator-owned `JANUSEC_APPROVED_MODEL_SHA256` JSON mapping. Review the artifact
+before approving it; a matching hash is not proof that arbitrary pickle code is safe.
+
+Uploaded telemetry cannot select arbitrary local attachment files. Dedicated
+offline operators may configure `JANUSEC_OFFLINE_ATTACHMENT_ROOT` and explicitly
+set `JANUSEC_OFFLINE_ATTACHMENT_READS=1`; do not enable those settings on a shared
+API deployment. Connector HTTP transports reject non-HTTP schemes and cross-host
+redirects, disable environment proxies, and apply the public-address policy.
+Internal dependency health probes use explicitly configured endpoints.

@@ -6,6 +6,7 @@ statistics so downstream modules (factor synthesis, UI) can reuse calibration
 data across restarts.
 """
 from __future__ import annotations
+from src.security.storage_paths import confined_path
 
 import json
 import os
@@ -436,19 +437,25 @@ class FactorQualityManager:
         if changed:
             self._mark_dirty()
 
-    def _load_calibration_config(self, path: str) -> None:
+    def _load_calibration_config(self, path: str) -> bool:
         """Apply calibration overrides from JSON config."""
         try:
-            data = json.loads(Path(path).read_text(encoding='utf-8'))
+            configured = os.getenv('FACTOR_CALIBRATION_CONFIG', 'config/factor_calibration.json')
+            safe_path = confined_path(os.path.dirname(os.path.realpath(configured)), path)
+            data = json.loads(Path(safe_path).read_text(encoding='utf-8'))
         except Exception:
-            return
-        self.apply_calibration_dict(data if isinstance(data, dict) else None)
+            return False
+        if not isinstance(data, dict):
+            return False
+        self.apply_calibration_dict(data)
+        return True
 
     def reload_calibration_config(self, path: str | None = None) -> bool:
         cfg_path = path or self._calibration_path
         if not cfg_path:
             return False
-        self._load_calibration_config(cfg_path)
+        if not self._load_calibration_config(cfg_path):
+            return False
         self._calibration_path = cfg_path
         self.persist(force=True)
         return True

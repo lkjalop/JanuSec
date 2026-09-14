@@ -25,6 +25,7 @@
   - Stores built session summaries in memory and optionally persists to SQLite via HopGraphPersistence for identity adjacency enrichment in future.
 """
 from __future__ import annotations
+from src.security.http_transport import safe_urlopen
 from src.security.storage_paths import storage_path, confined_path
 
 import os
@@ -719,7 +720,7 @@ def _check_dependency_status(force_refresh: bool = False) -> Dict[str, Any]:
         try:
             import urllib.request
             req = urllib.request.Request(hopgraph_health_url, method='GET')
-            with urllib.request.urlopen(req, timeout=0.75) as resp:
+            with safe_urlopen(req, timeout=0.75, allow_private=True) as resp:
                 hopgraph_status['health_endpoint_status'] = resp.status
                 hopgraph_status['health_endpoint_latency_ms'] = round(float(resp.headers.get('X-Response-Time-ms', 0.0) or 0.0), 3)
                 hopgraph_status['health_endpoint_cached'] = resp.headers.get('X-Health-Cached') == '1'
@@ -765,7 +766,7 @@ def _check_dependency_status(force_refresh: bool = False) -> Dict[str, Any]:
         try:
             import urllib.request
             req = urllib.request.Request(redis_health_url, method='GET')
-            with urllib.request.urlopen(req, timeout=0.75) as resp:
+            with safe_urlopen(req, timeout=0.75, allow_private=True) as resp:
                 redis_status['health_endpoint_status'] = resp.status
                 if resp.status < 400:
                     health_last_ok['redis'] = now
@@ -808,7 +809,7 @@ def _check_dependency_status(force_refresh: bool = False) -> Dict[str, Any]:
         try:
             import urllib.request
             req = urllib.request.Request(gcp_scc_health_url, method='GET')
-            with urllib.request.urlopen(req, timeout=0.75) as resp:
+            with safe_urlopen(req, timeout=0.75, allow_private=True) as resp:
                 gcp_scc_status['health_endpoint_status'] = resp.status
                 if resp.status < 400:
                     health_last_ok['gcp_scc'] = now
