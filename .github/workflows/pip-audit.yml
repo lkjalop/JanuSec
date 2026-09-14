@@ -22,13 +22,19 @@ jobs:
           python-version: '3.11'
       - name: Install pip-audit
         run: pip install pip-audit
-      - name: Run pip-audit
+      - name: Run pip-audit (advisory findings; tool errors fail)
         run: |
-          pip-audit -r requirements.txt -f sarif -o pip-audit.sarif || true
-      - name: Upload SARIF
+          set +e
+          pip-audit -r requirements.txt -f json -o pip-audit.json
+          scan_status=$?
+          set -e
+          test "$scan_status" -le 1
+          python -c "import json; json.load(open('pip-audit.json'))"
+          if [ "$scan_status" -eq 1 ]; then echo "::warning::pip-audit reported findings; review the artifact. This is not a clean security certification."; fi
+      - name: Upload findings
         if: always()
-        uses: github/codeql-action/upload-sarif@v3
+        uses: actions/upload-artifact@v4
         with:
-          sarif_file: pip-audit.sarif
-        continue-on-error: true
-
+          name: pip-audit-findings
+          path: pip-audit.json
+          if-no-files-found: error

@@ -69,3 +69,12 @@ Manual workflows in this revision:
 - `vault-integration.yml`
 - `verify-audit.yml`
 - `zap-baseline.yml`
+
+## Security reporting limitation
+
+Bandit and pip-audit are advisory finding reports. They now use supported JSON
+output, preserve the actual findings, and fail if the scanner cannot produce a
+valid report. A successful advisory job means the report was generated; it does
+not mean the source or dependency set has no vulnerabilities. Review those reports
+before any production deployment. The publication secret scan fails on unresolved
+findings and the selected trust suite fails on errors, failures or skips.

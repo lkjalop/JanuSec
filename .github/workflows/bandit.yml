@@ -22,16 +22,19 @@ jobs:
           python-version: '3.11'
       - name: Install Bandit
         run: pip install bandit
-      - name: Run Bandit (SARIF)
+      - name: Run Bandit (advisory findings; tool errors fail)
         run: |
-          if [ -f bandit.yaml ]; then
-            bandit -r . -c bandit.yaml -x tests,venv,.venv -f sarif -o bandit.sarif || true
-          else
-            bandit -r . -x tests,venv,.venv -f sarif -o bandit.sarif || true
-          fi
-      - name: Upload SARIF
+          set +e
+          bandit -r src -f json -o bandit.json
+          scan_status=$?
+          set -e
+          test "$scan_status" -le 1
+          python -c "import json; json.load(open('bandit.json'))"
+          if [ "$scan_status" -eq 1 ]; then echo "::warning::Bandit reported findings; review the artifact. This is not a clean security certification."; fi
+      - name: Upload findings
         if: always()
-        uses: github/codeql-action/upload-sarif@v3
+        uses: actions/upload-artifact@v4
         with:
-          sarif_file: bandit.sarif
-        continue-on-error: true
+          name: bandit-findings
+          path: bandit.json
+          if-no-files-found: error
