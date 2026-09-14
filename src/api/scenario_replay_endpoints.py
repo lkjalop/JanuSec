@@ -8,6 +8,7 @@ Line format: {"event": {...}, "gt": bool, "factors": [...], "tags": [...]} (tags
 Detection positive if any factors present (initial metric). Future: factor weighting.
 """
 from __future__ import annotations
+from src.security.storage_paths import storage_id, storage_path, confined_path
 
 import os, json, time
 from typing import Any, Dict, List
@@ -50,7 +51,7 @@ except Exception:
 
 @router.get('/scenario')
 async def replay_scenario(name: str = Query(..., description='Scenario name without extension')) -> Dict[str, Any]:  # type: ignore[misc]
-    path = os.path.join(SCENARIO_DIR, f'{name}.log')
+    path = storage_path(SCENARIO_DIR, f'{name}.log')
     if not os.path.isfile(path):
         raise HTTPException(status_code=404, detail='scenario_not_found')
     tp = fp = fn = tn = 0
@@ -101,7 +102,7 @@ async def upload_scenario(payload: ScenarioUploadPayload) -> Dict[str, Any]:  # 
     if not name:
         raise HTTPException(status_code=400, detail='missing_name')
     os.makedirs(SCENARIO_DIR, exist_ok=True)
-    path = os.path.join(SCENARIO_DIR, f'{name}.log')
+    path = storage_path(SCENARIO_DIR, f'{name}.log')
     mode = 'a' if (payload.append and os.path.exists(path)) else 'w'
     written = 0
     records: List[ScenarioRecord]
@@ -129,7 +130,7 @@ async def label_scenario(payload: ScenarioLabelPayload) -> Dict[str, Any]:  # ty
     name = (payload.name or '').strip()
     if not name:
         raise HTTPException(status_code=400, detail='missing_name')
-    path = os.path.join(SCENARIO_DIR, f'{name}.log')
+    path = storage_path(SCENARIO_DIR, f'{name}.log')
     if not os.path.isfile(path):
         raise HTTPException(status_code=404, detail='scenario_not_found')
     try:

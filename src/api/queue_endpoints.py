@@ -27,6 +27,7 @@ GET  /api/v1/queue/{assessment_id}/item/{item_id}
     Return a single queue item by ID including its full action history.
 """
 from __future__ import annotations
+from src.security.storage_paths import storage_id, storage_path, confined_path
 
 import logging
 import os
@@ -63,7 +64,7 @@ def _persist_queue_async(assessment_id: str, items: list[dict[str, Any]]) -> Non
         from src.api.persist_utils import atomic_write_json
         queue_dir = os.path.join('data', 'queues')
         os.makedirs(queue_dir, exist_ok=True)
-        path = os.path.join(queue_dir, f'queue_{assessment_id}.json')
+        path = storage_path(queue_dir, f'queue_{assessment_id}.json')
         atomic_write_json(path, {'assessment_id': assessment_id, 'items': items, 'updated_at': time.time()})
     except Exception as exc:
         logger.debug('queue persist skipped: %s', exc)
@@ -72,7 +73,7 @@ def _persist_queue_async(assessment_id: str, items: list[dict[str, Any]]) -> Non
 def _load_persisted_queue(assessment_id: str) -> list[dict[str, Any]] | None:
     try:
         import json
-        path = os.path.join('data', 'queues', f'queue_{assessment_id}.json')
+        path = storage_path(os.path.join('data', 'queues'), f'queue_{assessment_id}.json')
         if not os.path.exists(path):
             return None
         with open(path) as f:

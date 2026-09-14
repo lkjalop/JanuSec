@@ -1,6 +1,7 @@
 """Provider-neutral, replayable model harness with guarded tool execution."""
 
 from __future__ import annotations
+from src.security.storage_paths import storage_id, storage_path, confined_path
 
 import hashlib
 import json
@@ -68,8 +69,8 @@ class SessionLog:
 
     def _path(self, tenant_id: str, session_id: str) -> Path:
         def safe(value: str) -> str:
-            return "".join(ch for ch in value if ch.isalnum() or ch in "-_.")
-        path = self.root / safe(tenant_id) / f"{safe(session_id)}.jsonl"
+            return storage_id(value)
+        path = Path(storage_path(storage_path(self.root, safe(tenant_id)), f"{safe(session_id)}.jsonl"))
         path.parent.mkdir(parents=True, exist_ok=True)
         return path
 

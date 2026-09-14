@@ -1,4 +1,5 @@
 from __future__ import annotations
+from src.security.storage_paths import storage_id, storage_path, confined_path
 import os
 import time
 import json
@@ -31,7 +32,7 @@ def _default_scenario_payload(name: str) -> Dict[str, Any]:
 async def fetch_replay_scenario(name: str = Query(..., description='Scenario name'), include_events: bool = True):
     """Return precision/recall summary for a recorded replay scenario."""
     payload: Dict[str, Any] | None = None
-    scenario_path = os.path.join(REPLAYS_DIR, f'{name}.json')
+    scenario_path = storage_path(REPLAYS_DIR, f'{name}.json')
     if os.path.exists(scenario_path):
         try:
             with open(scenario_path, 'r', encoding='utf-8') as fh:
@@ -56,7 +57,7 @@ def _ensure_dir(p: str):
 def _write_status(session_id: str, payload: Dict[str, Any]):
     try:
         _ensure_dir(REPLAYS_DIR)
-        path = os.path.join(REPLAYS_DIR, session_id)
+        path = storage_path(REPLAYS_DIR, session_id)
         _ensure_dir(path)
         with open(os.path.join(path, 'meta.json'), 'w', encoding='utf-8') as fh:
             json.dump(payload, fh)
@@ -65,7 +66,7 @@ def _write_status(session_id: str, payload: Dict[str, Any]):
 
 def _read_status(session_id: str) -> Dict[str, Any] | None:
     try:
-        path = os.path.join(REPLAYS_DIR, session_id, 'meta.json')
+        path = storage_path(storage_path(REPLAYS_DIR, session_id), 'meta.json')
         with open(path, 'r', encoding='utf-8') as fh:
             return json.load(fh)
     except Exception:
@@ -167,7 +168,7 @@ async def _run_reprocess(session_id: str, payload: Dict[str, Any]):
         _write_status(session_id, done_meta)
         # Also write a compact diff summary file for easier retrieval by UI
         try:
-            out_dir = os.path.join(REPLAYS_DIR, session_id)
+            out_dir = storage_path(REPLAYS_DIR, session_id)
             Path(out_dir).mkdir(parents=True, exist_ok=True)
             summary_path = os.path.join(out_dir, 'diff_summary.json')
             with open(summary_path, 'w', encoding='utf8') as sf:

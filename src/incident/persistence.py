@@ -1,4 +1,5 @@
 from __future__ import annotations
+from src.security.storage_paths import storage_id, storage_path, confined_path
 
 import os
 import time
@@ -32,7 +33,7 @@ def _atomic_write(path: str, payload: Dict[str, Any]):
 
 def upsert_incident(payload: Dict[str, Any]) -> Dict[str, Any]:
     fp = incident_fingerprint(payload)
-    path = os.path.join(STORE_DIR, f'{fp}.json')
+    path = storage_path(STORE_DIR, f'{fp}.json')
     now = time.time()
     entry = {
         'fingerprint': fp,
@@ -59,7 +60,7 @@ def upsert_incident(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def load_incident(fingerprint: str) -> Dict[str, Any] | None:
-    path = os.path.join(STORE_DIR, f'{fingerprint}.json')
+    path = storage_path(STORE_DIR, f'{fingerprint}.json')
     if not os.path.exists(path):
         return None
     try:

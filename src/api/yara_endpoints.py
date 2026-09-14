@@ -1,4 +1,5 @@
 from __future__ import annotations
+from src.security.storage_paths import storage_id, storage_path, confined_path
 
 """
 Feature-gated YARA endpoints for rule management and sample scanning.
@@ -201,29 +202,17 @@ def _cap_bytes_limit(raw: bytes) -> bytes:
 
 
 def _resolve_scan_path(p: str) -> Path:
-    base = os.getenv("YARA_SAMPLES_DIR")
-    allow_abs = os.getenv("YARA_ALLOW_ABS_PATH", "0").lower() in {"1", "true", "yes"}
     if not p:
         raise HTTPException(status_code=400, detail="path_required")
+    base = Path(os.getenv("YARA_SAMPLES_DIR") or Path.cwd() / "samples")
     user_path = Path(p)
-    if user_path.is_absolute():
-        if not allow_abs:
-            raise HTTPException(status_code=400, detail="absolute_paths_disabled")
-        return user_path
-    # relative path -> resolve under base (or ./samples fallback)
-    base_dir = Path(base) if base else Path.cwd() / "samples"
+    allow_abs = os.getenv("YARA_ALLOW_ABS_PATH", "0").lower() in {"1", "true", "yes"}
+    if user_path.is_absolute() and not allow_abs:
+        raise HTTPException(status_code=400, detail="absolute_paths_disabled")
     try:
-        base_dir.mkdir(parents=True, exist_ok=True)
-    except Exception:
-        pass
-    resolved = (base_dir / user_path).resolve()
-    try:
-        base_resolved = base_dir.resolve()
-    except Exception:
-        base_resolved = base_dir
-    if str(resolved).startswith(str(base_resolved)):
-        return resolved
-    raise HTTPException(status_code=400, detail="path_outside_base")
+        return Path(confined_path(base, user_path if user_path.is_absolute() else base / user_path))
+    except ValueError:
+        raise HTTPException(status_code=400, detail="path_outside_base") from None
 
 
 def _maybe_apply_timeout(fn, *args, **kwargs):

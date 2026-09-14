@@ -1,6 +1,8 @@
 from __future__ import annotations
+from src.security.storage_paths import storage_id, storage_path, confined_path
 
 import json
+import hashlib
 import os
 import time
 from pathlib import Path
@@ -21,8 +23,8 @@ class ExplanationCache:
         self.dir.mkdir(parents=True, exist_ok=True)
 
     def _path(self, key: str) -> Path:
-        safe = key.replace('/', '_').replace(':', '_')
-        return self.dir / f"explain_{safe}.json"
+        safe = hashlib.sha256(key.encode('utf-8')).hexdigest()
+        return Path(storage_path(self.dir, f"explain_{safe}.json"))
 
     def set(self, key: str, payload: Dict[str, Any], ttl: int = 3600, meta: Optional[Dict[str, Any]] = None) -> None:
         obj = {

@@ -57,3 +57,37 @@ def test_assessment_loader_rejects_external_index_and_prefix_collision(tmp_path,
     assert module._load_assessment_from_disk('wanted', str(outside)) is None
     (root / 'wanted.json').write_text('{"assessment_id":"wanted","tenant_id":"acme"}')
     assert module._get_assessment_cached('wanted')['tenant_id'] == 'acme'
+
+
+def test_yara_rejects_sibling_and_absolute_escape(tmp_path, monkeypatch):
+    from src.api.yara_endpoints import _resolve_scan_path
+    base = tmp_path / 'samples'
+    base.mkdir()
+    outside = tmp_path / 'samples-private'
+    outside.mkdir()
+    monkeypatch.setenv('YARA_SAMPLES_DIR', str(base))
+    monkeypatch.setenv('YARA_ALLOW_ABS_PATH', '1')
+    for path in ('../samples-private/secret', str(outside / 'secret')):
+        with pytest.raises(HTTPException) as error:
+            _resolve_scan_path(path)
+        assert error.value.status_code == 400
+    assert _resolve_scan_path('sample.bin') == base / 'sample.bin'
+
+
+@pytest.mark.parametrize('tenant', ['..', '../acme', '..\\acme', 'a/b'])
+def test_agent_and_model_jobs_reject_tenant_path_aliases(tmp_path, tenant):
+    from src.core.agent_harness import SessionLog
+    from src.core.async_model_runs import AsyncModelRunStore
+    with pytest.raises(ValueError):
+        SessionLog(tmp_path / 'agents').read(tenant, 'session-1')
+    with pytest.raises(ValueError):
+        AsyncModelRunStore(tmp_path / 'models')._directory(tenant, 'assessment-1', 'job-1')
+
+
+def test_explanation_cache_keys_cannot_alias(tmp_path):
+    from src.core.cache.explanation_cache import ExplanationCache
+    cache = ExplanationCache(str(tmp_path))
+    cache.set('acme/session', {'owner': 'a'})
+    cache.set('acme:session', {'owner': 'b'})
+    assert cache.get('acme/session')['payload']['owner'] == 'a'
+    assert cache.get('acme:session')['payload']['owner'] == 'b'

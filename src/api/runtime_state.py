@@ -1,4 +1,5 @@
 from __future__ import annotations
+from src.security.storage_paths import storage_id, storage_path, confined_path
 
 import asyncio
 import os
@@ -429,7 +430,7 @@ def get_tenant_runtime(runtime: ServerRuntime | None = None, tenant_id: str | No
         # Load only persisted, tenant-scoped runtime summaries. Raw batch data
         # remains in memory/object storage and is never borrowed from global state.
         try:
-            tenant_file = Path(os.getenv('TENANT_PERSIST_DIR', 'data/tenants')) / tid / 'runtime.json'
+            tenant_file = Path(storage_path(storage_path(os.getenv('TENANT_PERSIST_DIR', 'data/tenants'), tid), 'runtime.json'))
             if tenant_file.exists():
                 with tenant_file.open('r', encoding='utf8') as fh:
                     data = json.load(fh)
@@ -457,7 +458,7 @@ def get_permission_graph(runtime: ServerRuntime | None = None, tenant_id: str | 
     if runtime is None:
         runtime = _RUNTIME
     # Choose tenant vs global path
-    tid = None if not tenant_id or str(tenant_id).lower() in {'global','none',''} else str(tenant_id)
+    tid = storage_id(str(tenant_id)) if tenant_id else None
     # store in top-level runtime.tenants_map to persist the object
     if tid is None:
         # global attachment
@@ -486,9 +487,9 @@ def get_permission_graph(runtime: ServerRuntime | None = None, tenant_id: str | 
         }
         runtime.tenants[tid] = tmap
     if 'permission_graph' not in tmap or tmap.get('permission_graph') is None:
-        base = Path(os.getenv('TENANT_PERSIST_DIR','data/tenants')) / tid
+        base = Path(storage_path(os.getenv('TENANT_PERSIST_DIR','data/tenants'), tid))
         base.mkdir(parents=True, exist_ok=True)
-        p = base / 'permission_graph.json'
+        p = Path(storage_path(base, 'permission_graph.json'))
         tmap['permission_graph'] = PermissionGraphStore(str(p))
     return tmap['permission_graph']
 
@@ -502,9 +503,9 @@ def persist_tenant_runtime(runtime: ServerRuntime | None = None, tenant_id: str 
         tmap = runtime.tenants.get(tid)
         if not tmap:
             return
-        base = Path(os.getenv('TENANT_PERSIST_DIR','data/tenants')) / tid
+        base = Path(storage_path(os.getenv('TENANT_PERSIST_DIR','data/tenants'), tid))
         base.mkdir(parents=True, exist_ok=True)
-        out = base / 'runtime.json'
+        out = Path(storage_path(base, 'runtime.json'))
         # Only persist a subset of fields
         to_save = {
             'ewma_history': tmap.get('ewma_history', {}),
@@ -677,7 +678,7 @@ def persist_session(record: dict) -> None:
         _ensure_session_dir()
         sid = record.get('session_id')
         if not sid: return
-        path = SESSION_DIR / f'{sid}.json'
+        path = Path(storage_path(SESSION_DIR, f'{sid}.json'))
         import json
         tmp = path.with_suffix('.tmp')
         with open(tmp,'w',encoding='utf8') as fh:

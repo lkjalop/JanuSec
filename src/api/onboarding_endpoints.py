@@ -1,3 +1,4 @@
+from src.security.storage_paths import storage_id, storage_path, confined_path
 from fastapi import APIRouter, HTTPException, Depends, Request
 from pydantic import BaseModel
 from typing import List, Dict
@@ -22,10 +23,10 @@ class OnboardingRequest(BaseModel):
 
 
 def _tenant_connectors_path(tenant_id: str) -> str:
-    safe = tenant_id.replace('..','').replace('/','_')
-    d = os.path.join(TENANT_DIR, safe)
+    safe = storage_id(tenant_id)
+    d = storage_path(TENANT_DIR, safe)
     os.makedirs(d, exist_ok=True)
-    return os.path.join(d, 'connectors.json')
+    return storage_path(d, 'connectors.json')
 
 
 @router.post('/configure')

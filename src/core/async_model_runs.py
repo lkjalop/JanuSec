@@ -1,6 +1,7 @@
 """Append-only state receipts for asynchronous model execution."""
 
 from __future__ import annotations
+from src.security.storage_paths import storage_id, storage_path, confined_path
 
 import hashlib
 import json
@@ -24,9 +25,7 @@ _TRANSITIONS = {
 
 
 def _part(value: str) -> str:
-    if not value or not _SAFE.fullmatch(value):
-        raise ValueError("invalid_model_job_path_component")
-    return value
+    return storage_id(value)
 
 
 def _hash(value: Any) -> str:
@@ -42,7 +41,7 @@ class AsyncModelRunStore:
         self.root = Path(root or os.getenv("MODEL_JOB_ROOT", "data/model-run-jobs")).resolve()
 
     def _directory(self, tenant_id: str, assessment_id: str, job_id: str) -> Path:
-        path = self.root / _part(tenant_id) / _part(assessment_id) / _part(job_id)
+        path = Path(storage_path(storage_path(storage_path(self.root, _part(tenant_id)), _part(assessment_id)), _part(job_id)))
         path.mkdir(parents=True, exist_ok=True)
         return path
 
@@ -86,7 +85,7 @@ class AsyncModelRunStore:
             "details": dict(details or {}),
         }
         receipt = {**content, "receipt_hash": _hash(content)}
-        path = directory / f"{sequence:04d}-{status}.json"
+        path = Path(storage_path(directory, f"{sequence:04d}-{status}.json"))
         with path.open("x", encoding="utf-8") as handle:
             json.dump(receipt, handle, indent=2, ensure_ascii=False, default=str)
         return self.load(tenant_id=tenant_id, assessment_id=assessment_id, job_id=job_id)

@@ -1,5 +1,6 @@
 """Alert query endpoints (recent/search) with shared ring state."""
 from __future__ import annotations
+from src.security.storage_paths import storage_id, storage_path, confined_path
 
 import asyncio
 import hashlib
@@ -135,7 +136,7 @@ def get_tenant_alert_path(tenant_id: str | None) -> str:
     base_path = _base_alert_log_path()
     if tenant_id:
         base_dir = os.path.dirname(base_path) or '.'
-        return os.path.join(base_dir, tenant_id, 'alerts.jsonl')
+        return storage_path(storage_path(base_dir, tenant_id), 'alerts.jsonl')
     return base_path
 PERSIST_BACKEND = os.getenv('PERSIST_BACKEND','jsonl').lower()  # jsonl|postgres|dual
 # By default include persisted alert history unless explicitly disabled. However,
@@ -285,7 +286,7 @@ async def alerts_recent(limit: int = 50, tenant_id: str | None = None, since: fl
             try:
                 if os.path.isdir(base_dir):
                     for entry in os.listdir(base_dir):
-                        t_path = os.path.join(base_dir, entry, 'alerts.jsonl')
+                        t_path = storage_path(storage_path(base_dir, entry), 'alerts.jsonl')
                         if os.path.isfile(t_path):
                             paths.append(t_path)
             except Exception:
@@ -572,7 +573,7 @@ async def alerts_search(host: str | None = None, verdict: str | None = None, min
             try:
                 if os.path.isdir(base_dir):
                     for entry in os.listdir(base_dir):
-                        t_path = os.path.join(base_dir, entry, 'alerts.jsonl')
+                        t_path = storage_path(storage_path(base_dir, entry), 'alerts.jsonl')
                         if os.path.isfile(t_path):
                             paths.append(t_path)
             except Exception:

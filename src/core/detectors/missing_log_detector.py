@@ -1,3 +1,4 @@
+from src.security.storage_paths import storage_id, storage_path, confined_path
 from typing import List, Dict
 from datetime import datetime, timedelta
 import logging, os, json
@@ -8,8 +9,8 @@ TENANT_DIR = os.getenv('TENANT_DATA_DIR','data/tenants')
 
 
 def _tenant_connectors_path(tenant_id: str) -> str:
-    safe = tenant_id.replace('..','').replace('/','_')
-    return os.path.join(TENANT_DIR, safe, 'connectors.json')
+    safe = storage_id(tenant_id)
+    return storage_path(storage_path(TENANT_DIR, safe), 'connectors.json')
 
 
 class TenantAwareMissingLogDetector:
