@@ -37,6 +37,7 @@ jobs:
           python scripts/run_preview.py server >tmp_preview/server.log 2>&1 &
           python -c "import time,urllib.request; time.sleep(15); urllib.request.urlopen('http://127.0.0.1:8081/',timeout=30).close()"
           python scripts/browser_verify_release.py
+          python scripts/verify_pilot_corpora.py --base-url http://127.0.0.1:8081 --output tmp_preview/browser/corpora
       - name: Preserve scoped test results
         if: always()
         uses: actions/upload-artifact@v4

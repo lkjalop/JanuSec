@@ -68,6 +68,20 @@ alone does not mean its findings are resolved.
 - [Release roadmap](docs/RELEASE_ROADMAP.md)
 - [CI scope and manual integration suites](docs/CI_SCOPE.md)
 - [File-store key rotation](docs/tenant_store_key_rotation.md)
+- [Customer demo guide](docs/DEMO_GUIDE.md)
+- [Full-corpus browser verification](docs/verification/2026-09-14-corpus-pilot/README.md)
+
+The Meridian, Santos and Vesper replay stores **167,022 synthetic records** and
+checks 31 explicit case assertions. Meridian has three labeled positive cases;
+Vesper has one; Santos currently has suppression coverage and no positive recall
+labels. Full uploads, case selection, evidence drilldown, recorded exports and
+mobile layouts were exercised through Chromium. These are scoped regression
+results, not a live customer pilot or a general detection-accuracy claim.
+
+This pass also fixed missing selected-case milestones, evidence IDs changing
+during enrichment, lost cumulative-transfer references, and malformed uploads
+being presented as complete. Older affected assessments require re-ingestion;
+their previously captured historical receipts are retained.
 
 Run the release trust checks in isolated state:
 

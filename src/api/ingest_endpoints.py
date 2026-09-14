@@ -495,6 +495,17 @@ def _case_view_model(assessment_id: str, tenant_id: str, job: dict, assessment: 
     if not isinstance(clusters, list):
         clusters = []
 
+    selected = assessment.get("_selected_case_partition")
+    if isinstance(selected, dict):
+        # Scope before phase grouping and action generation. Filtering evidence
+        # afterwards cannot remove sibling metadata merged into the same phase.
+        cluster_ids = {str(value) for value in selected.get("supporting_cluster_ids") or []}
+        cluster_ids.add(str(selected.get("case_id") or ""))
+        clusters = [
+            cluster for cluster in clusters if isinstance(cluster, dict)
+            and str(cluster.get("case_id") or cluster.get("cluster_id") or cluster.get("id") or "") in cluster_ids
+        ]
+
     from src.core.evidence_contract.projection_builder import evidence_id_for_row
     from src.core.evidence_contract.semantic_adapters import normalize_semantics
 
@@ -955,14 +966,14 @@ async def case_view(
 
 
 async def _case_partitions(assessment_id: str, tenant_id: str, assessment: dict) -> list[dict]:
-    from src.core.evidence_contract.case_partition import build_case_partitions
+    from src.core.evidence_contract.case_partition import CasePartition, build_case_partitions
     from src.core.evidence_contract.graph_projection import MAPPING_VERSION, NORMALIZER_VERSION
     from src.core.ingest import store as _store
 
     existing = assessment.get("case_partitions")
     if isinstance(existing, list) and existing and all(
         isinstance(item, dict)
-        and item.get("schema_version") == "janusec.case-partition/v4"
+        and item.get("schema_version") == CasePartition.schema_version
         and item.get("normalizer_version") == NORMALIZER_VERSION
         and item.get("mapping_version") == MAPPING_VERSION
         for item in existing

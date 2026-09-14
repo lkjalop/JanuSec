@@ -1122,6 +1122,11 @@ def _parse_file_to_store(
     do not block the event loop.  Returns the number of rows stored.
     """
     from src.core.ingest.file_parser import parse_file as _pf
+    from src.core.ingest.file_parser import validate_file_syntax
+    from src.core.evidence_contract.projection_builder import evidence_id_for_row
+    from src.core.evidence_contract.semantic_adapters import normalize_semantics
+
+    validate_file_syntax(path, filename)
 
     batch: list[dict] = []
     local_count = 0
@@ -1158,6 +1163,15 @@ def _parse_file_to_store(
                     norm.setdefault("external_recipient_domain", _fdom)
                     norm["triage_score"] = max(norm.get("triage_score") or 0.0, 0.65)
 
+            # Freeze the evidence reference before entity resolution or other
+            # enrichment mutates the normalized row. Caller-supplied references
+            # cannot nominate another assessment's evidence namespace.
+            canonical_input = normalize_semantics(dict(norm))
+            canonical_input.pop("evidence_id", None)
+            canonical_input.pop("row_id", None)
+            if norm.get("evidence_id"):
+                norm["source_evidence_id"] = norm["evidence_id"]
+            norm["evidence_id"] = evidence_id_for_row(assessment_id, row_offset + local_count, canonical_input)
             batch.append(norm)
             local_count += 1
             if len(batch) >= PARSE_BATCH_SIZE:
@@ -1165,6 +1179,7 @@ def _parse_file_to_store(
                 batch = []
     except Exception as exc:
         logger.warning("parse failed for %s in job %s: %s", filename, assessment_id, exc)
+        raise ValueError("telemetry_file_processing_failed") from None
     if batch:
         store.persist_row_batch(assessment_id, batch)
     return local_count

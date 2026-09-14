@@ -83,6 +83,17 @@ with sync_playwright() as pw:
     assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
     page.screenshot(path=str(OUT/'release-mobile.png'),full_page=True)
     page.set_viewport_size({'width':1600,'height':1000})
+    page.locator('#newButton').click()
+    page.locator('#fileInput').set_input_files({
+        'name': 'partial.ndjson', 'mimeType': 'application/x-ndjson',
+        'buffer': (json.dumps({'event_id': 'valid-negative', 'status': 'closed'}) + '\n{broken-json\n').encode('utf-8'),
+    })
+    page.locator('#uploadForm button[type=submit]').click()
+    expect(page.locator('#progressText')).to_contain_text('Assessment failed: invalid_ndjson_record_at_line_2', timeout=30000)
+    expect(page.locator('#startAssessmentButton')).to_be_enabled()
+    expect(page.locator('#caseView')).to_be_hidden()
+    result['malformed_upload_failed_visibly'] = True
+    page.screenshot(path=str(OUT/'release-malformed-input.png'), full_page=True)
     for name in ['integrations','metrics','sbom','compliance','csv_multi_analyzer','hunt_network','hunt_endpoint','multi_log_investigator','investigate']:
         response = page.goto(BASE + '/static/' + name + '.html', wait_until='domcontentloaded')
         page.wait_for_timeout(800)

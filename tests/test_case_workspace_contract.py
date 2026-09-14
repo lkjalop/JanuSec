@@ -26,6 +26,44 @@ def test_case_view_is_honest_and_does_not_invent_causal_edges() -> None:
     assert model["business_impact"] == []
 
 
+def test_selected_case_preserves_milestones_actions_and_excludes_sibling_phase_metadata() -> None:
+    from src.api.case_view_v2 import scope_case_view_to_partition
+    from src.core.evidence_contract.case_partition import build_case_partitions
+
+    rows = [
+        {"row_index": 42, "timestamp": "2026-08-18T00:00:00Z", "user": "alex"},
+        {"row_index": 99, "timestamp": "2026-08-17T00:00:00Z", "user": "sibling"},
+    ]
+    clusters = [
+        {"cluster_id": "case-alex", "verdict": "VALIDATED_BREACH", "row_refs": [42],
+         "phases": [{"phase_id": "powershell_staged_payload", "row_refs": [42], "mitre_techniques": ["T1059.001"]}],
+         "immediate_actions": [{"title": "Review Alex's endpoint", "priority": "high"}]},
+        {"cluster_id": "case-sibling", "verdict": "VALIDATED_BREACH", "row_refs": [99],
+         "phases": [{"phase_id": "powershell_staged_payload", "row_refs": [99], "mitre_techniques": ["T1003"]}],
+         "immediate_actions": [{"title": "Sibling-only action", "priority": "high"}]},
+    ]
+    partitions = build_case_partitions(
+        tenant_id="tenant-a", assessment_id="assessment-selected", rows=rows,
+        threat_cases=clusters, analysis_clusters=clusters,
+    )
+    partition = next(item for item in partitions if item["case_id"] == "case-alex")
+    model = _case_view_model(
+        "assessment-selected", "tenant-a",
+        {"status": "ready", "stage": "ready", "percent": 100, "row_count": 2},
+        {"all_rows": rows, "_derivation_rows": [rows[0]], "_selected_case_partition": partition,
+         "threat_cases": clusters},
+    )
+    scoped = scope_case_view_to_partition(model, partition)
+    milestones = scoped["attack_story"]["milestones"]
+    assert scoped["evidence"]["truncated"] is False
+    assert len(milestones) == 1
+    assert milestones[0]["evidence_ids"] == partition["evidence_ids"]
+    assert milestones[0]["mitre_techniques"] == ["T1059.001"]
+    assert [item["decision"] for item in scoped["immediate_decisions"]] == ["Review Alex's endpoint"]
+    assert scoped["action_plan"]["actions"], "Cited response actions must survive case scoping"
+    assert "Sibling-only" not in json.dumps(scoped)
+
+
 def test_case_view_uses_the_same_evidence_ids_as_partitions_and_projections() -> None:
     from src.core.evidence_contract.projection_builder import evidence_id_for_row
     from src.core.evidence_contract.semantic_adapters import normalize_semantics
@@ -250,4 +288,5 @@ def test_partition_scope_reports_missing_case_evidence_refs():
     }
     scoped = scope_case_view_to_partition(view, partition)
     assert scoped["posture"]["evidence_completeness"] == 0.5
+    assert scoped["evidence"]["truncated"] is True
     assert any("1 case evidence" in gap for gap in scoped["coverage_gaps"])

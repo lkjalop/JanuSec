@@ -246,6 +246,15 @@ def elevate_clusters(clusters, accum: ChronoAccum, chrono=None, *,
                         cl.setdefault("_exfil_destinations", {})[u] = rec
                         row_refs = sorted(accum.destination_row_refs.get((u, top_dst)) or set())
                         if row_refs:
+                            # The case boundary is frozen from cluster row_refs.
+                            # Retain every contributing transfer there as well as
+                            # on the aggregate phase, including low-triage rows.
+                            existing_refs = {
+                                int(value) for value in cl.get("row_refs") or []
+                                if str(value).lstrip("-").isdigit()
+                            }
+                            cl["row_refs"] = sorted(existing_refs | set(row_refs))
+                            cl["row_count"] = len(cl["row_refs"])
                             # Provider-neutral, directionally explicit milestone.  It
                             # is derived by a deterministic aggregate and retains the
                             # exact contributing rows; it is not an LLM assertion.

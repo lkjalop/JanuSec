@@ -81,6 +81,7 @@ def scope_case_view_to_partition(view: dict[str, Any], partition: dict[str, Any]
     evidence["rows"] = [item for item in evidence.get("rows") or [] if str(item.get("id")) in allowed]
     evidence["total"] = len(allowed)
     evidence["returned"] = len(evidence["rows"])
+    evidence["truncated"] = len(evidence["rows"]) < len(allowed)
     scoped["evidence"] = evidence
     # Rebase completeness to the selected immutable case partition. The base
     # assessment ratio compares a UI preview with every uploaded telemetry row,
@@ -457,7 +458,10 @@ def build_case_view_v2(base: dict[str, Any], assessment: dict[str, Any], rows: l
     from src.core.evidence_contract.projection_builder import evidence_id_for_row
     from src.core.evidence_contract.semantic_adapters import normalize_semantics
 
-    assessment_namespace = str((base.get("case") or {}).get("id") or "assessment")
+    # A selected case has its own display ID, but its source rows retain the
+    # assessment namespace used by custody, partitions and evidence packs.
+    case_meta = base.get("case") or {}
+    assessment_namespace = str(case_meta.get("assessment_id") or case_meta.get("id") or "assessment")
     row_map: dict[str, str] = {}
     row_by_ref: dict[str, dict[str, Any]] = {}
     for index, row in enumerate(rows):

@@ -29,6 +29,61 @@ _JSON_ARRAY_KEYS = (
 )
 
 
+def validate_file_syntax(path: str, filename: str | None = None) -> None:
+    """Validate a complete upload before a lenient parser can discard records.
+
+    Assessment ingestion is strict; legacy exploratory parser callers retain
+    their existing behavior. This pass uses bounded streaming where available.
+    Errors identify the format/line, never copy source contents into API errors.
+    """
+    ext = os.path.splitext(filename or path)[1].lower()
+    try:
+        if ext in {".ndjson", ".jsonl"}:
+            with open(path, encoding="utf-8-sig") as stream:
+                for line_number, line in enumerate(stream, 1):
+                    if not line.strip():
+                        continue
+                    try:
+                        value = json.loads(line)
+                        if not isinstance(value, (dict, list)) or (
+                            isinstance(value, list) and any(not isinstance(item, dict) for item in value)
+                        ):
+                            raise ValueError("record_must_be_object")
+                    except ValueError:
+                        raise ValueError(f"invalid_ndjson_record_at_line_{line_number}") from None
+        elif ext == ".json":
+            try:
+                import ijson
+            except ImportError:
+                with open(path, encoding="utf-8-sig") as stream:
+                    json.load(stream)
+            else:
+                with open(path, "rb") as stream:
+                    if stream.read(3) != b"\xef\xbb\xbf":
+                        stream.seek(0)
+                    for _ in ijson.parse(stream):
+                        pass
+        elif ext == ".csv":
+            with open(path, encoding="utf-8-sig", newline="") as stream:
+                reader = csv.reader(stream, strict=True)
+                header = next(reader, [])
+                if not header or len(header) != len(set(header)):
+                    raise ValueError("invalid_csv_header")
+                for row in reader:
+                    if row and len(row) != len(header):
+                        raise ValueError(f"invalid_csv_field_count_at_line_{reader.line_num}")
+        elif ext in {".xlsx", ".xlsm"}:
+            from openpyxl import load_workbook
+            workbook = load_workbook(path, read_only=True, data_only=True)
+            workbook.close()
+    except ValueError as exc:
+        if str(exc).startswith(("invalid_ndjson_record_", "invalid_csv_")):
+            raise
+        raise ValueError("invalid_telemetry_file_syntax") from None
+    except Exception:
+        raise ValueError("invalid_telemetry_file_syntax") from None
+
+
 def parse_file(path: str, filename: str | None = None) -> Iterator[dict]:
     """Detect file type and stream rows, yielding one dict per event.
 

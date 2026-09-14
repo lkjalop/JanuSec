@@ -44,6 +44,23 @@ Rewriting branch history does not remove those cached views or others' clones.
 
 ## Product work after the preview
 
+The next customer proof of concept is deliberately narrow: one tenant, approved
+read-only collection, a case with complete source references, and a reviewed
+next action. The full Meridian/Santos/Vesper replay and browser verification are
+documented in [the corpus report](verification/2026-09-14-corpus-pilot/README.md).
+Use [the demo guide](DEMO_GUIDE.md) for its observable acceptance criteria.
+
+The selected corpus cases currently show no qualified action-plan items or
+control impacts. Wiring one evidence-cited proposal into authenticated review
+and later provider verification is the next product step. Broad model, agent and
+catalog expansion should follow that customer workflow.
+
+Before handling real customer data, validate a deployment profile with measured
+memory/latency, tenant-bound production authentication, managed secrets and
+durable storage. The existing 1 GiB Helm limit is below the observed peak of a
+local corpus run. Exercise backup restoration across evidence, history, ingest
+state and checkpoints; completed-case restart tests do not prove that recovery.
+
 - Recover legacy ownership only from authoritative jobs or re-ingest; never guess.
 - Extend history capture and versioned model inputs. Earlier uncaptured derivations
   cannot be presented as reconstructed historical truth.

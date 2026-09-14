@@ -790,6 +790,7 @@
         state.activeUploadId = null;
         $("cancelAssessmentButton").classList.add("hidden");
         $("startAssessmentButton").disabled = false;
+        $("progressText").textContent = `Assessment ${p.status}: ${p.error || "No completed assessment was produced."}`;
         toast(p.error || p.status);
         return;
       }

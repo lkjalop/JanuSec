@@ -46,6 +46,7 @@
   "tests/test_ingest_upload_tenant_scope.py",
   "tests/test_iso_report_templates.py",
   "tests/test_json_bom_ingestion.py",
+  "tests/test_chrono_pipeline.py",
   "tests/test_model_evaluation.py",
   "tests/test_ms_graph_connector.py",
   "tests/test_narrator_robustness.py",

@@ -11,7 +11,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import expect, sync_playwright
 
 
 def main() -> int:
@@ -126,7 +126,7 @@ def main() -> int:
             )
             alternate_partition = next(value for value in partition_values if value != original_partition)
             page.locator("#casePartitionSelector").select_option(alternate_partition)
-            page.wait_for_timeout(1200)
+            expect(page.locator("#caseTitle")).to_have_text(alternate_partition, timeout=90000)
             result["partition_switch"] = {
                 "from": original_partition,
                 "to": alternate_partition,
@@ -134,7 +134,7 @@ def main() -> int:
                 "success": page.locator("#caseTitle").inner_text() == alternate_partition,
             }
             page.locator("#casePartitionSelector").select_option(original_partition)
-            page.wait_for_timeout(1200)
+            expect(page.locator("#caseTitle")).to_have_text(original_partition, timeout=90000)
         result["viewport"] = args.viewport
         layout = page.evaluate("() => ({viewportWidth: innerWidth, documentWidth: document.documentElement.scrollWidth})")
         result["layout"] = {**layout, "horizontal_overflow": layout["documentWidth"] > layout["viewportWidth"]}

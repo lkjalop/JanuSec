@@ -44,6 +44,15 @@ def test_cumulative_exfil_attaches_to_actor_cluster():
     assert phase["row_count"] == 30
     assert phase["derivation"] == "chronograph_destination_byte_accumulation"
     assert "cloud_object_exfiltration" in cluster["present_phase_ids"]
+    # Individually low-signal transfers must survive the case boundary, not
+    # merely appear in a phase whose references the UI will later reject.
+    from src.core.evidence_contract.case_partition import build_case_partitions
+    partition = build_case_partitions(
+        tenant_id="tenant-a", assessment_id="assessment-exfil", rows=rows,
+        threat_cases=[cluster], analysis_clusters=[],
+    )[0]
+    assert partition["row_refs"] == list(range(30))
+    assert len(partition["evidence_ids"]) == 30
 
 
 def test_below_floor_exfil_not_flagged():
