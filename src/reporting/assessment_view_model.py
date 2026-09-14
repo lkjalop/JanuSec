@@ -1,4 +1,5 @@
 from __future__ import annotations
+from src.security.domain_names import domain_host, host_matches
 
 import json
 import os
@@ -316,7 +317,7 @@ def _collect_infrastructure(assessment: dict[str, Any], clusters: list[dict[str,
 
     external_ips = [ip for ip in uniq(ips, 20) if _is_external_ip(ip)]
     internal_hosts = uniq(hosts, 8)
-    sharepoint_domains = [d for d in uniq(domains, 20) if "sharepoint.com" in d.lower()]
+    sharepoint_domains = [d for d in uniq(domains, 20) if host_matches(d, "sharepoint.com")]
     sg_ips = [ip for ip in uniq(alibaba_sg, 4) if _is_external_ip(ip)]
     cn_ips = [ip for ip in uniq(alibaba_cn, 4) if _is_external_ip(ip)]
     jurisdiction_summary = ""

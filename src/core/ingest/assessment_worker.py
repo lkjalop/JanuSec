@@ -16,6 +16,7 @@ worker restart can inspect incomplete jobs on startup.
 """
 
 from __future__ import annotations
+from src.security.domain_names import domain_host, host_matches
 
 import asyncio
 import datetime
@@ -932,7 +933,8 @@ def _score_async_ingest_row(raw: dict, normalized: dict) -> float:
             .strip()
             .lower()
         )
-        if _org_tenant and ".sharepoint.com" in _dst_h:
+        _dst_h = domain_host(_dst_h)
+        if _org_tenant and host_matches(_dst_h, "sharepoint.com"):
             _sp_prefix = _dst_h.split(".sharepoint.com")[0].rsplit(".", 1)[-1]
             if _sp_prefix and _sp_prefix != _org_tenant:
                 score = max(score, 0.55)

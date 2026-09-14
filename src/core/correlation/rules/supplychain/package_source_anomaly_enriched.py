@@ -1,4 +1,5 @@
 from __future__ import annotations
+from src.security.domain_names import domain_host, host_matches
 from typing import Dict, Any
 from ..registry import register_rule
 
@@ -8,7 +9,8 @@ def package_source_anomaly_enriched(event: Dict[str, Any]) -> bool:
     src = (event.get('package_source') or '').lower()
     ver = (event.get('package_version') or '').lower()
     score = 0.0
-    if src and ('internal' not in src) and ('pypi' not in src) and not src.startswith('https://trusted.registry'):
+    trusted = src in {'internal', 'pypi'} or (src.startswith('https://') and domain_host(src) in {'pypi.org', 'pypi.python.org', 'files.pythonhosted.org', 'trusted.registry'})
+    if src and not trusted:
         score += 0.4
     # weird versioning scheme can boost
     if ver and any(c.isalpha() for c in ver):

@@ -91,3 +91,19 @@ def test_explanation_cache_keys_cannot_alias(tmp_path):
     cache.set('acme:session', {'owner': 'b'})
     assert cache.get('acme/session')['payload']['owner'] == 'a'
     assert cache.get('acme:session')['payload']['owner'] == 'b'
+
+
+@pytest.mark.parametrize('value', ['https://trusted.registry.attacker.test/a', 'https://attacker.test/pypi', 'https://attacker.test/internal', 'https://trusted.registry@attacker.test/a'])
+def test_package_registry_lookalikes_are_not_trusted(value):
+    from src.core.correlation.rules.supplychain.package_source_anomaly_enriched import package_source_anomaly_enriched
+    event = {'package_source': value, 'package_version': '1.0-dev', 'package_name': 'fixture'}
+    assert package_source_anomaly_enriched(event) is True
+
+
+def test_domain_comparison_rejects_embedded_and_lookalike_hosts():
+    from src.security.domain_names import host_matches
+    assert host_matches('https://acme.sharepoint.com/sites/test', 'sharepoint.com')
+    assert not host_matches('https://acme.sharepoint.com.attacker.test/', 'sharepoint.com')
+    assert not host_matches('https://attacker.test/sharepoint.com', 'sharepoint.com')
+    assert not host_matches('https://sharepoint.com@attacker.test/', 'sharepoint.com')
+    assert not host_matches('evilsharepoint.com', 'sharepoint.com')

@@ -1,6 +1,8 @@
 from __future__ import annotations
+from src.security.domain_names import domain_host, host_matches
 
 from typing import Any, Dict, List
+import re
 
 from ..utils import cfg_get
 from .base import StageContext, StageResult, timed_stage
@@ -81,7 +83,9 @@ async def npm_stage(event: dict, ctx: StageContext) -> StageResult:
     if '.npmrc' in text_blob or 'npm_token' in text_blob or 'npm_' in text_blob:
         factors.append('supply_chain:npm_credential_access')
 
-    if 'api.github.com' in text_blob or 'github.com' in text_blob:
+    url_candidates = re.findall(r"https?://[^\s<>\"']+", text_blob)
+    url_candidates.extend(str(event.get(k) or '') for k in ('domain', 'dst_host', 'url', 'destination'))
+    if any(host_matches(url, 'github.com') for url in url_candidates):
         factors.append('supply_chain:github_repo_exfil')
 
     metadata = {

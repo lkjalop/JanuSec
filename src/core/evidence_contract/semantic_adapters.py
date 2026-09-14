@@ -5,6 +5,7 @@ every provider-native field in the returned row.
 """
 
 from __future__ import annotations
+from src.security.domain_names import domain_host, host_matches
 
 from typing import Any
 
@@ -72,7 +73,7 @@ def normalize_semantics(original: dict[str, Any]) -> dict[str, Any]:
         auth = proto.get("authenticationInfo") if isinstance(proto.get("authenticationInfo"), dict) else {}
         delegates = auth.get("serviceAccountDelegationInfo") if isinstance(auth.get("serviceAccountDelegationInfo"), list) else []
         row.setdefault("actor_id", _first(auth.get("principalEmail"), row.get("principalEmail")))
-        row.setdefault("actor_type", "service_account" if "gserviceaccount.com" in str(row.get("actor_id") or "") else "user")
+        row.setdefault("actor_type", "service_account" if host_matches(str(row.get("actor_id") or "").rpartition("@")[2], "gserviceaccount.com") else "user")
         row.setdefault("delegated_by", [
             _first(_nested(item, "firstPartyPrincipal", "principalEmail"), _nested(item, "principalSubject"))
             for item in delegates if isinstance(item, dict)
