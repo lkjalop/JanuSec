@@ -3,6 +3,7 @@ import os, json
 from fastapi import APIRouter, HTTPException, Request, Header
 from typing import Dict
 from .tenant_helpers import resolve_tenant_id
+from src.security.storage_paths import storage_path, storage_id
 
 router = APIRouter(prefix='/api/v1/mappings', tags=['mappings'])
 _mapping_dir = os.getenv('MAPPINGS_DIR','data/mappings')
@@ -22,15 +23,15 @@ def _allow_default_tenant_runtime() -> bool:
 
 
 def _tenant_dir(tenant: str) -> str:
-    safe = (tenant or 'default').replace('..','').replace('/','_')
-    d = os.path.join(_mapping_dir, safe)
+    safe = storage_id(tenant or 'default')
+    d = storage_path(_mapping_dir, safe)
     os.makedirs(d, exist_ok=True)
     return d
 
 def _path_for(name: str, tenant: str) -> str:
-    safe = name.replace('..','').replace('/','_').strip()
+    safe = storage_id(name)
     d = _tenant_dir(tenant)
-    return os.path.join(d, f"{safe}.json")
+    return storage_path(d, f"{safe}.json")
 
 @router.get('/')
 async def list_mappings(x_tenant_id: str | None = Header(None), request: Request = None):

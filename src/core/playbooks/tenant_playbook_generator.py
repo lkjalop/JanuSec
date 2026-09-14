@@ -1,4 +1,5 @@
 import os
+from src.security.storage_paths import storage_path
 import json
 from typing import Dict, Any, List
 
@@ -16,9 +17,9 @@ class TenantPlaybookGenerator:
         os.makedirs(self.base_dir, exist_ok=True)
 
     def _tenant_path(self, tenant: str) -> str:
-        td = os.path.join(self.base_dir, tenant)
+        td = storage_path(self.base_dir, tenant)
         os.makedirs(td, exist_ok=True)
-        return os.path.join(td, 'playbooks.json')
+        return storage_path(td, 'playbooks.json')
 
     def list_playbooks(self, tenant: str) -> List[Dict[str, Any]]:
         path = self._tenant_path(tenant)

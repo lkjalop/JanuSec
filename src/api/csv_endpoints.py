@@ -4,6 +4,7 @@ import asyncio
 import importlib
 import json
 import logging
+from src.security.storage_paths import storage_path
 import os
 import time
 from typing import Any, Dict, List
@@ -1590,7 +1591,7 @@ def _persist_backfill_job(assessment_id: str) -> None:
                 break
             except Exception:
                 time.sleep(0.01)
-        path = os.path.join(out_dir, f"{assessment_id}.json")
+        path = storage_path(out_dir, f"{assessment_id}.json")
         tmp_path = path + '.tmp'
         try:
             with open(tmp_path, 'w', encoding='utf-8') as fh:

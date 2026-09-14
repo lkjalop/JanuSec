@@ -3,6 +3,8 @@ from __future__ import annotations
 import ipaddress
 import json
 import os
+from src.security.storage_paths import storage_path, storage_id
+from src.api.tenant_helpers import resolve_tenant_id
 from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Request
 
@@ -21,17 +23,14 @@ _TIER_ORDER = ['crown_jewel', 'tier_1', 'tier_2', 'tier_3', 'not_sensitive']
 # ── Storage helpers ──────────────────────────────────────────────────────────
 
 def _cj_path(tenant_id: str) -> str:
-    safe = ''.join(c for c in tenant_id if c.isalnum() or c in ('-', '_'))[:64] or 'default'
-    return os.path.join(_DATA_DIR, f'crown_jewels_{safe}.json')
+    safe = storage_id(tenant_id)
+    return storage_path(_DATA_DIR, f'crown_jewels_{safe}.json')
 
 
 def _load_crown_jewels(tenant_id: str) -> dict:
     path = _cj_path(tenant_id)
     if os.path.exists(path):
         with open(path, encoding='utf-8') as f:
-            return json.load(f)
-    if os.path.exists(_DEFAULT_CJ):
-        with open(_DEFAULT_CJ, encoding='utf-8') as f:
             return json.load(f)
     return {s: {} for s in _ALL_SECTIONS}
 
@@ -101,9 +100,10 @@ def _ip_in_subnet(ip_str: str, subnets: dict) -> tuple[str, dict] | None:
 # ── Routes ───────────────────────────────────────────────────────────────────
 
 @router.get('/tenant/{tenant_id}/crown-jewels')
-async def get_crown_jewels(tenant_id: str) -> dict:
+async def get_crown_jewels(tenant_id: str, request: Request = None) -> dict:
     """Return the full crown jewels registry with computed effective_tier and review_badge
     annotations on each entry for display purposes."""
+    tenant_id = resolve_tenant_id(request, tenant_id)
     try:
         cj = _load_crown_jewels(tenant_id)
         for section in _ALL_SECTIONS:
@@ -127,6 +127,7 @@ async def patch_crown_jewels(tenant_id: str, request: Request) -> dict:
     Subnet keys must be CIDR notation (e.g. "10.0.4.0/24").
     Cloud account keys should be the account/subscription/project ID.
     """
+    tenant_id = resolve_tenant_id(request, tenant_id)
     try:
         body = await request.json()
     except Exception:
@@ -174,6 +175,7 @@ async def review_crown_jewel(
     The effective_tier field on the entry will reflect the override from this point forward,
     propagating into DREAD fragments, verdict gating, and notification trigger logic.
     """
+    tenant_id = resolve_tenant_id(request, tenant_id)
     if section not in _ALL_SECTIONS:
         raise HTTPException(
             status_code=400,
@@ -233,8 +235,9 @@ async def review_crown_jewel(
 
 
 @router.delete('/tenant/{tenant_id}/crown-jewels/{section}/{key}/review')
-async def clear_crown_jewel_review(tenant_id: str, section: str, key: str) -> dict:
+async def clear_crown_jewel_review(tenant_id: str, section: str, key: str, request: Request = None) -> dict:
     """Remove a human review override, reverting this entry to its auto-detected tier."""
+    tenant_id = resolve_tenant_id(request, tenant_id)
     if section not in _ALL_SECTIONS:
         raise HTTPException(status_code=400, detail=f'unknown section: {section}')
     current = _load_crown_jewels(tenant_id)
@@ -254,6 +257,7 @@ async def resolve_asset(
     account: str = '',
     asset: str = '',
     cloud_account: str = '',
+    request: Request = None,
 ) -> dict:
     """Resolve one or more identifiers to their effective tier.
 
@@ -265,6 +269,7 @@ async def resolve_asset(
     Returns a list of matches. An entry absent from the registry returns nothing
     (not a 404 — absence means untagged, not error).
     """
+    tenant_id = resolve_tenant_id(request, tenant_id)
     cj = _load_crown_jewels(tenant_id)
     results: list[dict] = []
 

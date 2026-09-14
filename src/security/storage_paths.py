@@ -18,7 +18,7 @@ def storage_path(root, filename: str) -> str:
     storage_id(filename)
     base = os.path.realpath(root)
     candidate = os.path.realpath(os.path.join(base, filename))
-    if os.path.commonpath([base, candidate]) != base:
+    if not candidate.startswith(base + os.sep):
         raise ValueError("Storage path escapes configured directory")
     return candidate
 
@@ -27,6 +27,6 @@ def confined_path(root, path) -> str:
     """Check an existing/indexed path against its operator-owned storage root."""
     base = os.path.realpath(root)
     candidate = os.path.realpath(path)
-    if os.path.commonpath([base, candidate]) != base or candidate == base:
+    if not candidate.startswith(base + os.sep):
         raise ValueError("Storage path escapes configured directory")
     return candidate

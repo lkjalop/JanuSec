@@ -2,25 +2,28 @@ import os
 import json
 import tempfile
 from fastapi.testclient import TestClient
-from src.api.app import create_app
+from fastapi import FastAPI
+from src.api.csv_mapping_endpoints import router
 
-app = create_app({'mode':'test'})
+app = FastAPI()
+app.include_router(router)
 client = TestClient(app)
 
 
-def test_missing_tenant_header_is_rejected():
+def test_missing_tenant_header_is_rejected(monkeypatch):
     # Ensure env defaults to strict mode for this test
-    os.environ.pop('MAPPINGS_ALLOW_DEFAULT_TENANT', None)
-    os.environ['MAPPINGS_ENFORCE_STRICT'] = '1'
+    monkeypatch.delenv('MAPPINGS_ALLOW_DEFAULT_TENANT', raising=False)
+    monkeypatch.setenv('MAPPINGS_ENFORCE_STRICT', '1')
     payload = { 'mapping': {'user':'u'}, 'rows': [{'u':'alice'}] }
     r = client.post('/api/v1/mappings/preview', json=payload)
     assert r.status_code == 400
     assert 'tenant' in r.json().get('detail','').lower()
 
 
-def test_preview_fallback_and_save_with_tenant(tmp_path):
+def test_preview_fallback_and_save_with_tenant(tmp_path, monkeypatch):
+    monkeypatch.setattr("src.api.csv_mapping_endpoints._mapping_dir", str(tmp_path))
     # allow default tenant for broader compatibility in this test
-    os.environ['MAPPINGS_ALLOW_DEFAULT_TENANT'] = '1'
+    monkeypatch.setenv('MAPPINGS_ALLOW_DEFAULT_TENANT', '1')
     # create a mapping and preview with tenant header
     mapping = { 'user': 'username', 'ip': 'src_ip' }
     rows = [ {'username':'bob','src_ip':'1.2.3.4'}, {'username':'eve','src_ip':'5.6.7.8'} ]

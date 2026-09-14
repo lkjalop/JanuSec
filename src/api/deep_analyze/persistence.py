@@ -14,6 +14,11 @@ import os
 import threading
 
 from src.api.persist_utils import atomic_write_json
+from src.security.storage_paths import storage_id, storage_path, confined_path
+
+def _assessment_root():
+    return os.getenv("SESSION_PERSIST_DIR") or os.path.join(os.getcwd(), "data", "assessments")
+
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +63,7 @@ class _BoundedDict(dict):
     def _flush_on_evict(key, value) -> None:
         try:
             if isinstance(value, dict) and value.get('persisted_path'):
-                atomic_write_json(value['persisted_path'], value)
+                atomic_write_json(confined_path(_assessment_root(), value['persisted_path']), value)
         except Exception:
             logger.debug('REPORT_STORE evict flush failed for %s', key)
 
@@ -80,12 +85,13 @@ def _persist_assessment_state(assessment_id: str, assessment: dict) -> None:
     path = assessment.get('persisted_path')
     if path:
         try:
-            atomic_write_json(path, assessment)
+            atomic_write_json(confined_path(_assessment_root(), path), assessment)
         except Exception as _exc:
             logger.debug('silent_swallow at %s:%d: %s', __file__, 36, _exc)
 
 
 def _get_assessment_cached(assessment_id: str) -> dict | None:
+    storage_id(assessment_id)
     assessment = REPORT_STORE.get(assessment_id)
     if assessment:
         return assessment
@@ -101,11 +107,11 @@ def _get_assessment_cached(assessment_id: str) -> dict | None:
         repo_root = os.getcwd()
         base = os.getenv('SESSION_PERSIST_DIR') or os.path.join(repo_root, 'data', 'assessments')
         index_dir = os.path.join(base, 'index')
-        idx_path = os.path.join(index_dir, f"{assessment_id}.path")
+        idx_path = storage_path(index_dir, f"{assessment_id}.path")
         if os.path.exists(idx_path):
             try:
                 with open(idx_path, 'r', encoding='utf-8') as fh:
-                    p = fh.read().strip()
+                    p = confined_path(base, fh.read().strip())
                 if p and os.path.exists(p):
                     with open(p, 'r', encoding='utf-8') as fh:
                         disk2 = json.load(fh)
@@ -116,8 +122,8 @@ def _get_assessment_cached(assessment_id: str) -> dict | None:
         if os.path.isdir(base):
             for root, _dirs, files in os.walk(base):
                 for f in files:
-                    if f.startswith(str(assessment_id)) and f.endswith('.json'):
-                        path = os.path.join(root, f)
+                    if f == f"{assessment_id}.json":
+                        path = confined_path(base, os.path.join(root, f))
                         try:
                             with open(path, 'r', encoding='utf-8') as fh:
                                 disk2 = json.load(fh)
@@ -134,7 +140,7 @@ def _get_assessment_cached(assessment_id: str) -> dict | None:
                     for f in files:
                         if not f.endswith('.json'):
                             continue
-                        path = os.path.join(root, f)
+                        path = confined_path(base, os.path.join(root, f))
                         try:
                             with open(path, 'r', encoding='utf-8') as fh:
                                 cand = json.load(fh)
@@ -156,16 +162,18 @@ def _write_assessment_index(assessment_id: str, persisted_path: str) -> None:
         base = os.getenv('SESSION_PERSIST_DIR') or os.path.join(repo_root, 'data', 'assessments')
         index_dir = os.path.join(base, 'index')
         os.makedirs(index_dir, exist_ok=True)
-        idx_path = os.path.join(index_dir, f"{assessment_id}.path")
+        idx_path = storage_path(index_dir, f"{assessment_id}.path")
         tmp = idx_path + '.tmp'
         with open(tmp, 'w', encoding='utf-8') as fh:
-            fh.write(persisted_path)
+            fh.write(confined_path(base, persisted_path))
         os.replace(tmp, idx_path)
     except Exception as _exc:
         logger.debug('silent_swallow at %s:%d: %s', __file__, 113, _exc)
 
 
 def _load_assessment_from_disk(assessment_id: str, preferred_path: str | None = None):
+    storage_id(assessment_id)
+    base = _assessment_root()
     candidates = []
     if preferred_path:
         candidates.append(preferred_path)
@@ -182,6 +190,10 @@ def _load_assessment_from_disk(assessment_id: str, preferred_path: str | None = 
     except Exception as _exc:
         logger.debug('silent_swallow at %s:%d: %s', __file__, 129, _exc)
     for path in candidates:
+        try:
+            path = confined_path(base, path)
+        except (ValueError, TypeError):
+            continue
         if not path:
             continue
         if os.path.exists(path):

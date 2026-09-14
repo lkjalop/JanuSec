@@ -7,6 +7,7 @@ from typing import Dict, Any
 
 from fastapi import APIRouter, HTTPException, Request, Header
 from .tenant_helpers import resolve_tenant_id
+from src.security.storage_paths import storage_path
 
 router = APIRouter(prefix='/api/v1/mappings', tags=['Mapping Templates'])
 
@@ -14,12 +15,12 @@ BASE_DIR = os.getenv('MAPPING_TEMPLATES_DIR', 'data/mappings')
 os.makedirs(BASE_DIR, exist_ok=True)
 
 def _tenant_dir(tenant: str) -> str:
-    p = os.path.join(BASE_DIR, tenant or 'default')
+    p = storage_path(BASE_DIR, tenant or 'default')
     os.makedirs(p, exist_ok=True)
     return p
 
 def _path(tenant: str, name: str) -> str:
-    return os.path.join(_tenant_dir(tenant), f'{name}.json')
+    return storage_path(_tenant_dir(tenant), f'{name}.json')
 
 @router.get('/list')
 async def list_templates(tenant_id: str | None = Header(None, alias='X-Tenant-ID'), request: Request = None) -> Dict[str, Any]:
@@ -28,7 +29,7 @@ async def list_templates(tenant_id: str | None = Header(None, alias='X-Tenant-ID
     out = []
     for fname in sorted(os.listdir(td)):
         if not fname.endswith('.json'): continue
-        path = os.path.join(td, fname)
+        path = storage_path(td, fname)
         try:
             stat = os.stat(path)
             out.append({'name': fname[:-5], 'size': stat.st_size, 'modified': stat.st_mtime})
@@ -60,7 +61,7 @@ async def save_template(name: str, payload: Dict[str, Any], request: Request, te
     path = _path(tenant, name)
     try:
         with open(path, 'w', encoding='utf-8') as f:
-            json.dump({'mapping': mapping, 'saved_at': time.time(), 'saved_by': request.headers.get('x-api-key')}, f, indent=2)
+            json.dump({'mapping': mapping, 'saved_at': time.time(), 'saved_by': getattr(getattr(request.state, 'auth', None), 'subject', None)}, f, indent=2)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f'save_error:{e}')
     return {'tenant': tenant, 'name': name, 'ok': True}
