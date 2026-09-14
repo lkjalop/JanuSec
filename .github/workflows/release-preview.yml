@@ -25,7 +25,9 @@ jobs:
       - name: Install runtime and test dependencies
         run: python -m pip install -r requirements.txt pytest-timeout
       - name: Run selected trust checks
-        run: python scripts/test_release.py
+        run: |
+          python scripts/check_workflows.py
+          python scripts/test_release.py
       - name: Install browser verification dependencies
         run: |
           python -m pip install 'playwright>=1.50,<2'

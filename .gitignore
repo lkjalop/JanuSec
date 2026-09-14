@@ -172,3 +172,10 @@ tfplan*
 *.tfstate*
 resumes/
 ~$*
+
+# Package support modules and formal regression fixtures are source, not scratch.
+!src/**/_*.py
+!tests/**/_*.py
+!tests/data/
+!tests/data/**
+!tests/fixtures/**/*.jsonl

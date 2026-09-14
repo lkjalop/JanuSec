@@ -51,6 +51,8 @@ def rotate_file_store(store: Path, backup: Path) -> dict:
         # Restore all original files, retaining marker if restoration fails.
         for p in [key_path, *paths]:
             shutil.copy2(backup / p.name, p)
+        for name in [*encrypted, "fernet.key"]:
+            (store / (name + ".rotation-new")).unlink(missing_ok=True)
         marker.unlink()
         raise
     marker.unlink()

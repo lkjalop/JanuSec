@@ -39,3 +39,27 @@ def test_interrupted_rotation_fails_closed(tmp_path, monkeypatch):
     (tmp_path / ".rotation-in-progress").touch()
     with pytest.raises(tenant_store.SecretBackendError):
         tenant_store.FileSecretBackend()
+
+
+def test_commit_failure_restores_complete_old_store(tmp_path, monkeypatch):
+    from src.integrations import fernet_rotation
+    store = tmp_path / "store"
+    store.mkdir()
+    key = Fernet.generate_key()
+    token = Fernet(key).encrypt(b"fixture")
+    (store / "fernet.key").write_bytes(key)
+    (store / "one.json.enc").write_bytes(token)
+    replace = fernet_rotation.os.replace
+
+    def fail_key_commit(source, destination):
+        if destination.name == "fernet.key":
+            raise OSError("simulated commit failure")
+        replace(source, destination)
+
+    monkeypatch.setattr(fernet_rotation.os, "replace", fail_key_commit)
+    with pytest.raises(OSError, match="simulated"):
+        rotate_file_store(store, tmp_path / "recovery")
+    assert (store / "fernet.key").read_bytes() == key
+    assert (store / "one.json.enc").read_bytes() == token
+    assert not (store / ".rotation-in-progress").exists()
+    assert not list(store.glob("*.rotation-new"))
