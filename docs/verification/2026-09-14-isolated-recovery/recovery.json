@@ -1,0 +1,49 @@
+{
+  "live_provider": false,
+  "fixture": "Vesper",
+  "mode": "crash-backup-restore",
+  "live_backup_rejected": true,
+  "interrupted_assessment": "assessment-1789385429-aba45110",
+  "interrupted_progress": {
+    "assessment_id": "assessment-1789385429-aba45110",
+    "status": "running",
+    "stage": "clustering",
+    "percent": 35,
+    "label": "Loading high-signal rows for clustering",
+    "row_count": 98750,
+    "cluster_count": 0,
+    "error": null
+  },
+  "sampled_peak_process_tree_rss_bytes": 390578176,
+  "partial_rows_before_crash_recovery": 98750,
+  "backup": {
+    "files": 48,
+    "bytes": 85875400,
+    "sha256": "6a0ef8c51dfe07f3ffa6508a6653d1c19814a4329c43528e3cbde6deca3b9a27",
+    "mode": "offline-encrypted-complete-state"
+  },
+  "restore": {
+    "files": 48,
+    "verified": true,
+    "mode": "new-directory-restore"
+  },
+  "restored_contents": {
+    "encrypted_secret_recovered": true,
+    "checkpoint_formats_recovered": 2,
+    "raw_captures_in_restored_root": 4,
+    "ledger_records": 76,
+    "physical_rows": 98750,
+    "distinct_row_indices": 98750
+  },
+  "recovered_records": 98750,
+  "completed_case_and_history_preserved": true,
+  "recovered_physical_storage": {
+    "encrypted_secret_recovered": true,
+    "checkpoint_formats_recovered": 2,
+    "raw_captures_in_restored_root": 4,
+    "ledger_records": 89,
+    "physical_rows": 98750,
+    "distinct_row_indices": 98750
+  },
+  "passed": true
+}

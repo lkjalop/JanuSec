@@ -223,22 +223,21 @@ async def upload_assessment(
                 )
             saved_names.add(safe_name)
             dest = os.path.join(raw_dir, safe_name)
-            content = await f.read()
-            total_bytes += len(content)
-            if total_bytes > _MAX_UPLOAD_BYTES:
-                raise HTTPException(
-                    status_code=413,
-                    detail=f"Upload exceeds limit ({_MAX_UPLOAD_BYTES // 1024 // 1024} MB)",
-                )
             # A raw capture is write-once within its assessment. Downstream
             # stages consume the registered SHA-256 rather than rewriting it.
             with open(dest, "xb") as fh:
-                fh.write(content)
+                size_bytes = 0
+                while content := await f.read(1024 * 1024):
+                    total_bytes += len(content)
+                    if total_bytes > _MAX_UPLOAD_BYTES:
+                        raise HTTPException(status_code=413, detail="Upload exceeds configured byte limit")
+                    fh.write(content)
+                    size_bytes += len(content)
             saved.append((dest, str(f.filename)))
             try:
-                _store.register_file(assessment_id, str(f.filename), dest, len(content))
+                _store.register_file(assessment_id, str(f.filename), dest, size_bytes)
             except Exception:
-                logger.debug("ingest upload: raw file registration failed for %s", f.filename, exc_info=True)
+                raise HTTPException(status_code=503, detail="Raw capture registration failed") from None
     except HTTPException as exc:
         _store.update_job(assessment_id, status="failed", stage="upload", percent=0, error=str(exc.detail))
         raise

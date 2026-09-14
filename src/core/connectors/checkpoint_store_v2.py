@@ -16,7 +16,7 @@ class CheckpointStoreV2:
         # In test mode prefer an ephemeral per-process directory to avoid
         # clobbering checkpoints between test runs. Honor explicit base_path
         # or CONNECTOR_CHECKPOINTS_PATH when provided.
-        env_path = os.getenv("CONNECTOR_CHECKPOINTS_PATH")
+        env_path = os.getenv("CONNECTOR_CHECKPOINTS_V2_DIR") or os.getenv("CONNECTOR_CHECKPOINTS_PATH")
         fast_test = os.getenv('FAST_TEST_MODE', '0').lower() in {'1', 'true', 'yes'} or 'PYTEST_CURRENT_TEST' in os.environ
         if base_path:
             self.base_path = base_path

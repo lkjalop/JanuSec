@@ -61,6 +61,12 @@ durable storage. The existing 1 GiB Helm limit is below the observed peak of a
 local corpus run. Exercise backup restoration across evidence, history, ingest
 state and checkpoints; completed-case restart tests do not prove that recovery.
 
+The [isolated operations profile](ISOLATED_PILOT_OPERATIONS.md) adds production
+authentication guards, complete encrypted offline backups and a controlled
+interrupted-upload recovery exercise. Use its scoped evidence for completed local
+checks. Customer TLS/access policy, off-host recovery, sustained load and a real
+provider remain separate gates; the Kubernetes example is not certified by this work.
+
 - Recover legacy ownership only from authoritative jobs or re-ingest; never guess.
 - Extend history capture and versioned model inputs. Earlier uncaptured derivations
   cannot be presented as reconstructed historical truth.

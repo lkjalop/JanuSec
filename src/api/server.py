@@ -1619,6 +1619,8 @@ from contextlib import asynccontextmanager
 @asynccontextmanager
 async def _lifespan(app):
     # Startup
+    from src.security.runtime_profile import is_live_environment, validate_live_auth_configuration
+    validate_live_auth_configuration()
     try:
         if os.getenv('USE_PLATFORM_DB','0').lower() in {'1','true','yes'} or os.getenv('APP_DB_DSN'):
             try:
@@ -1662,6 +1664,11 @@ async def _lifespan(app):
         LOGGER.exception('server lifespan: database initialization failed')
         if os.getenv('ENV','').lower() in {'staging', 'prod', 'production'} or os.getenv('APP_ENV','').lower() in {'staging', 'prod', 'production'}:
             raise
+    if is_live_environment():
+        # This compatibility lifespan replaces app.py's lifespan on the canonical
+        # server. Essential ingest recovery cannot depend on optional background jobs.
+        from src.core.ingest.assessment_worker import start_worker as start_ingest_worker
+        start_ingest_worker(app)
     if not _LITE_MODE:
         try:
             CLUSTERING.start()

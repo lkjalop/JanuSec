@@ -55,6 +55,12 @@ Production deployment requires explicit tenant-bound authentication, external
 secret management, dependency provisioning and a separately verified deployment.
 Never reuse repository examples as credentials. See [Security](SECURITY.md).
 
+An [isolated HTTPS qualification profile](docs/ISOLATED_PILOT_OPERATIONS.md) now
+provides fresh tenant-bound credentials, a single writer and complete encrypted
+offline backup/restore verification. It binds to loopback and keeps private state
+outside the checkout. Customer deployment, live collection and corrective-action
+proof remain explicit operational gates.
+
 ## Verification
 
 The release candidate is verified through `scripts/test_release.py` and

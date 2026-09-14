@@ -4045,19 +4045,22 @@ def _recover_queued_jobs() -> int:
     recovered = 0
     for job in jobs:
         aid = str(job.get("assessment_id") or "")
-        if not aid:
+        if not aid or aid in _ACTIVE_JOB_IDS:
             continue
-        files = _store.raw_files_for(aid)
-        files = [(path, name) for path, name in files if path and os.path.exists(path)]
-        if not files:
+        try:
+            files = _store.raw_files_for(aid)
+            if not files:
+                raise ValueError('no_registered_captures')
+        except (ValueError, OSError):
             try:
                 _store.update_job(
-                    aid, status="failed", stage="recovery", error="Queued job has no recoverable raw files"
+                    aid, status="failed", stage="recovery", error="Recovery requires every registered raw capture with its original hash"
                 )
             except Exception:
                 pass
             continue
         try:
+            _store.reset_incomplete_job(aid)
             _store.update_job(aid, status="queued", stage="queued", stage_label="Recovered queued job")
             enqueue_job(aid, str(job.get("org") or "unknown"), files)
             recovered += 1

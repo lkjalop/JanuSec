@@ -21,6 +21,7 @@ import time
 from typing import Any, Dict, List, Optional
 
 from fastapi import Depends, Header, HTTPException
+from src.security.runtime_profile import is_live_environment
 
 logger = logging.getLogger(__name__)
 
@@ -118,6 +119,8 @@ def _load_api_keys() -> dict[str, dict]:
 
 def _jwt_secret():
     # Prefer a dedicated test secret when present to enable CI-issued JWTs
+    if is_live_environment():
+        return os.getenv('JWT_SECRET')
     return os.getenv('JWT_SECRET') or os.getenv('JWT_TEST_SECRET')
 
 def _match_scopes(user_scopes: list[str], required: list[str]) -> bool:
@@ -176,7 +179,7 @@ async def auth_dependency(
     # Pytest-friendly fallback: some tests mutate API_KEYS_JSON in different modules.
     # When running under pytest, accept the canonical test key with expected scopes
     # to avoid cross-test ordering flakiness in full-suite runs.
-    if x_api_key and x_api_key not in (api_keys or {}):
+    if not is_live_environment() and x_api_key and x_api_key not in (api_keys or {}):
         # When running under pytest or with explicit test/demo env toggles,
         # accept common test keys and grant permissive scopes so tests that
         # depend on admin operations don't need real API key management.
@@ -206,6 +209,7 @@ async def auth_dependency(
             options = {
                 'verify_aud': bool(aud),
                 'verify_iss': bool(iss),
+                'require': ['exp', 'sub'] if is_live_environment() else [],
             }
             payload = jwt.decode(
                 token,
@@ -218,7 +222,7 @@ async def auth_dependency(
         except Exception:
             # In pytest contexts, allow a last-resort decode without audience/issuer verification
             # to avoid flakiness across environments.
-            if os.getenv('PYTEST_CURRENT_TEST'):
+            if os.getenv('PYTEST_CURRENT_TEST') and not is_live_environment():
                 try:
                     payload = jwt.decode(
                         token,
@@ -294,7 +298,7 @@ async def require_api_key(
     try:
         import sys as _sys
         running_pytest = bool(os.getenv('PYTEST_CURRENT_TEST')) or ('pytest' in _sys.modules)
-        if running_pytest and not (x_api_key or authorization):
+        if running_pytest and not is_live_environment() and not (x_api_key or authorization):
             return AuthContext(subject='pytest', scopes=['*'], credential_type='test')
     except Exception:
         pass

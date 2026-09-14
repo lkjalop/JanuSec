@@ -7,6 +7,7 @@
   "tests/test_agent_behavior_and_oscal.py",
   "tests/test_async_model_runs.py",
   "tests/test_auth_tenant_binding.py",
+  "tests/test_isolated_pilot.py",
   "tests/test_bitemporal_provenance.py",
   "tests/test_campaign_ip_merge_guard.py",
   "tests/test_campaign_object.py",

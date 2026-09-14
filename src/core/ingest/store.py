@@ -375,12 +375,51 @@ def register_file(assessment_id: str, filename: str, path: str, size_bytes: int)
 
 
 def raw_files_for(assessment_id: str) -> list[tuple[str, str]]:
+    """Resolve captures in the current state root and verify every registered file.
+
+    Stored absolute paths are historical metadata, not a dependency on the old
+    machine after restore. Ownership comes from the job, never from a guessed path.
+    """
+    job = get_job(assessment_id)
+    if not job or not job.get('org') or job['org'] == 'unknown':
+        raise ValueError('raw_capture_owner_required')
     with _lock:
         rows = _db().execute(
-            "SELECT path, filename FROM raw_files WHERE assessment_id = ? ORDER BY filename",
+            "SELECT path, filename, sha256, size_bytes FROM raw_files WHERE assessment_id = ? ORDER BY filename",
             [assessment_id],
         ).fetchall()
-    return [(str(path), str(filename)) for path, filename in rows]
+    result = []
+    directory = raw_dir_for(assessment_id, tenant_id=job['org'])
+    for old_path, filename, expected_hash, expected_size in rows:
+        name = str(old_path).replace('\\', '/').rsplit('/', 1)[-1]
+        if not name or name in {'.', '..'} or any(not (c.isalnum() or c in '._-') for c in name):
+            raise ValueError('invalid_raw_capture_filename')
+        candidate = os.path.realpath(os.path.join(directory, name))
+        if os.path.commonpath([directory, candidate]) != directory:
+            raise ValueError('raw_capture_outside_owned_directory')
+        if (not os.path.isfile(candidate) or not expected_hash
+                or os.path.getsize(candidate) != expected_size or _sha256_file(candidate) != expected_hash):
+            raise ValueError('raw_capture_missing_or_changed')
+        result.append((candidate, str(filename)))
+    return result
+
+
+def reset_incomplete_job(assessment_id: str) -> None:
+    """Rebuild interrupted derived rows exactly once; retain captures and ledger."""
+    with _lock:
+        conn = _db()
+        conn.execute('BEGIN TRANSACTION')
+        try:
+            row = conn.execute('SELECT status FROM assessment_jobs WHERE id = ?', [assessment_id]).fetchone()
+            if not row or row[0] not in {'queued', 'running'}:
+                raise ValueError('only_incomplete_jobs_may_be_rebuilt')
+            conn.execute('DELETE FROM normalized_rows WHERE assessment_id = ?', [assessment_id])
+            conn.execute('DELETE FROM cluster_snapshots WHERE assessment_id = ?', [assessment_id])
+            conn.execute('UPDATE assessment_jobs SET row_count=0, cluster_count=0 WHERE id=?', [assessment_id])
+            conn.execute('COMMIT')
+        except BaseException:
+            conn.execute('ROLLBACK')
+            raise
 
 
 def _sha256_file(path: str) -> str:
@@ -487,7 +526,7 @@ def load_rows(
     sql = (
         "SELECT row_json FROM ("
         "  SELECT row_json, triage_score, row_index, "
-        "         ROW_NUMBER() OVER (PARTITION BY row_index ORDER BY triage_score DESC) AS rn "
+        "         ROW_NUMBER() OVER (PARTITION BY row_index ORDER BY triage_score DESC, row_json ASC) AS rn "
         "  FROM normalized_rows "
         "  WHERE assessment_id = ? AND triage_score >= ? "
     )
@@ -496,7 +535,7 @@ def load_rows(
         placeholders = ", ".join(["?"] * len(row_indices))
         sql += f"AND row_index IN ({placeholders}) "
         params.extend(int(i) for i in row_indices)
-    sql += ") WHERE rn = 1 ORDER BY triage_score DESC "
+    sql += ") WHERE rn = 1 ORDER BY triage_score DESC, row_index ASC "
     if limit:
         sql += " LIMIT ?"
         params.append(limit)

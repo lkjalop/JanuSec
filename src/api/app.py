@@ -27,7 +27,7 @@ from pydantic import BaseModel
 from src.api.app_factory import build_fastapi_app
 from src.api.background_registry import background_status, get_background_manager
 from src.api.router_registry import ensure_add_event_handler, include_optional_router, include_router_specs
-from src.api.startup_checks import apply_config_profile, initialize_database, is_live_environment
+from src.api.startup_checks import apply_config_profile, initialize_database, is_live_environment, validate_live_auth_configuration
 
 
 def managed_startup_task(app: FastAPI, name: str, coro_factory: Callable[[], Awaitable[object]]):
@@ -932,10 +932,15 @@ async def lifespan(app: FastAPI):
         raise
     # Auto-apply configuration profile if CONFIG_PROFILE provided.
     apply_config_profile(logger)
+    validate_live_auth_configuration()
     # Initialize the primary DB pool during lifespan startup so staging/prod
     # does not depend on legacy startup event wiring that can be bypassed by
     # alternate app factories or test-oriented router flows.
     await initialize_database(logger)
+    if is_live_environment():
+        # Recovery is essential even when optional background integrations are disabled.
+        from src.core.ingest.assessment_worker import start_worker as start_ingest_worker
+        start_ingest_worker(app)
     # Attach hopgraph (prefer an already-injected instance on app for tests)
     try:
         hg = None
@@ -6093,7 +6098,7 @@ async def _api_key_enforcer(request: Request, call_next: Callable[[Request], Awa
         # unless the env explicitly requests it for a test. This keeps unit
         # tests deterministic without requiring every request to include keys.
         env_flag = os.getenv('STRICT_API_KEY_ENFORCEMENT', '0').lower() in {'1', 'true', 'yes'}
-        if env_flag and not (os.getenv('PLATFORM_LITE_INIT','0').lower() in {'1','true','yes'} or 'PYTEST_CURRENT_TEST' in os.environ):
+        if is_live_environment() or (env_flag and not (os.getenv('PLATFORM_LITE_INIT','0').lower() in {'1','true','yes'} or 'PYTEST_CURRENT_TEST' in os.environ)):
             strict_mode = True
         else:
             strict_mode = False
@@ -6104,7 +6109,9 @@ async def _api_key_enforcer(request: Request, call_next: Callable[[Request], Awa
     try:
         path = request.url.path or '/'
         # Quick allow for non-API or explicitly exempted paths
-        if not path.startswith(_API_KEY_PATH_PREFIX) or any(path.startswith(p) for p in _API_KEY_EXCEPT_PREFIXES) or any(c in path for c in _API_KEY_EXCEPT_CONTAINS):
+        if (not path.startswith(_API_KEY_PATH_PREFIX)
+                or any(path.startswith(p) for p in _API_KEY_EXCEPT_PREFIXES)
+                or (not is_live_environment() and any(c in path for c in _API_KEY_EXCEPT_CONTAINS))):
             return await call_next(request)
         # Validate via shared auth dependency (accepts x-api-key or Bearer JWT).
         # Also accept ?token= / ?api_key= for EventSource clients that cannot set headers.

@@ -4,12 +4,7 @@ from __future__ import annotations
 
 import os
 from typing import Any
-
-
-def is_live_environment() -> bool:
-    return os.getenv("ENV", "").lower() in {"staging", "prod", "production"} or os.getenv(
-        "APP_ENV", ""
-    ).lower() in {"staging", "prod", "production"}
+from src.security.runtime_profile import is_live_environment, validate_live_auth_configuration
 
 
 def apply_config_profile(logger: Any) -> None:

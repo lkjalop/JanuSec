@@ -91,6 +91,26 @@ def test_scoped_auth_tenant_is_used_for_job_and_queue(monkeypatch, tmp_path):
     assert captured["raw_tenant"] == "tenant-a"
 
 
+def test_upload_rejects_failed_raw_registration(monkeypatch, tmp_path):
+    captured = _stub_ingest(monkeypatch, tmp_path)
+    def fail(*args, **kwargs):
+        raise OSError('synthetic database failure')
+    monkeypatch.setattr(store, 'register_file', fail)
+    response = _upload(_client(auth_tenant='tenant-a', state_tenant='tenant-a'), org='tenant-a')
+    assert response.status_code == 503
+    assert response.json()['detail'] == 'Raw capture registration failed'
+    assert 'enqueued_org' not in captured
+
+
+def test_upload_byte_limit_prevents_enqueue(monkeypatch, tmp_path):
+    from src.api import ingest_endpoints
+    captured = _stub_ingest(monkeypatch, tmp_path)
+    monkeypatch.setattr(ingest_endpoints, '_MAX_UPLOAD_BYTES', 8)
+    response = _upload(_client(auth_tenant='tenant-a', state_tenant='tenant-a'), org='tenant-a')
+    assert response.status_code == 413
+    assert 'enqueued_org' not in captured
+
+
 def test_explicit_request_tenant_rejects_form_override(monkeypatch, tmp_path):
     captured = _stub_ingest(monkeypatch, tmp_path)
     response = _upload(

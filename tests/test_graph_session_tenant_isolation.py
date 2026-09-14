@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+import secrets
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -7,12 +10,16 @@ from src.api import graph_sessions
 from src.api.tenant_middleware import TenantMiddleware
 
 
-def _client(monkeypatch, tmp_path) -> TestClient:
+def _client(monkeypatch, tmp_path) -> tuple[TestClient, dict[str, str]]:
     monkeypatch.setenv("SESSION_PERSIST_DIR", str(tmp_path / "sessions"))
     monkeypatch.setenv("GRAPH_SESSION_SNAPSHOT_DIR", str(tmp_path / "snapshots"))
     monkeypatch.setenv("JANUSEC_RUNTIME_PROFILE", "production")
     monkeypatch.delenv("SYNTHETIC_EVIDENCE_ENABLED", raising=False)
     monkeypatch.setenv("TEST_HELPERS_ENABLED", "0")
+    keys = {tenant: secrets.token_urlsafe(48) for tenant in ('tenant-a', 'tenant-b')}
+    monkeypatch.setenv('API_KEYS_JSON', json.dumps([
+        {'key': key, 'tenant_id': tenant, 'scopes': ['*']} for tenant, key in keys.items()
+    ]))
     graph_sessions._SESSIONS.clear()
     graph_sessions._DISCOVERIES.clear()
 
@@ -35,13 +42,13 @@ def _client(monkeypatch, tmp_path) -> TestClient:
     app = FastAPI()
     app.add_middleware(TenantMiddleware)
     app.include_router(graph_sessions.router)
-    return TestClient(app)
+    return TestClient(app), keys
 
 
 def test_cached_graph_session_is_invisible_across_tenants(monkeypatch, tmp_path):
-    client = _client(monkeypatch, tmp_path)
-    tenant_a = {"X-Tenant-ID": "tenant-a"}
-    tenant_b = {"X-Tenant-ID": "tenant-b"}
+    client, keys = _client(monkeypatch, tmp_path)
+    tenant_a = {"X-Tenant-ID": "tenant-a", 'X-API-Key': keys['tenant-a']}
+    tenant_b = {"X-Tenant-ID": "tenant-b", 'X-API-Key': keys['tenant-b']}
 
     built = client.post(
         "/api/v1/graph/session/build",
