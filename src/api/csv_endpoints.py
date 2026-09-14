@@ -1748,7 +1748,7 @@ async def csv_deep_analyze_auto_backfill_force_cancel(assessment_id: str, auth=D
         _persist_backfill_job(assessment_id)
         # remove persisted file if present
         base = os.getenv('SESSION_PERSIST_DIR') or os.path.join(os.getcwd(), 'data', 'sessions')
-        path = os.path.join(base, 'backfill_jobs', f"{assessment_id}.json")
+        path = storage_path(os.path.join(base, 'backfill_jobs'), f"{assessment_id}.json")
         try:
             if os.path.exists(path): os.remove(path)
         except Exception as _exc:

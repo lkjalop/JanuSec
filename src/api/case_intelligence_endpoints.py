@@ -1,6 +1,7 @@
 """Provider discovery, immutable model runs, comparison, and GRC pack export."""
 
 from __future__ import annotations
+from src.security.storage_paths import storage_path, confined_path
 
 import asyncio
 import json
@@ -902,7 +903,7 @@ async def grc_action_pack(
         if not customer_profile_id or not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", customer_profile_id):
             raise HTTPException(422, "customer_profile_id_required")
         root = Path(os.getenv("JANUSEC_CUSTOMER_PROFILE_DIR", "config/customer_profiles")).resolve()
-        path = root / hashlib.sha256(tenant_id.encode()).hexdigest() / (customer_profile_id + ".json")
+        path = Path(storage_path(storage_path(root, hashlib.sha256(tenant_id.encode()).hexdigest()), customer_profile_id + ".json"))
         if not path.resolve().is_relative_to(root) or not path.is_file():
             raise HTTPException(404, "customer_profile_not_found")
         try:

@@ -6,6 +6,9 @@ Version: 1.0.0
 Implements secure API key management, PII redaction, role-based approvals, and audit logging.
 """
 
+from src.security.storage_paths import storage_path
+import uuid
+
 import base64
 import hashlib
 import json
@@ -97,11 +100,11 @@ class SecureConfigManager:
             'encrypted_key': base64.b64encode(encrypted_key).decode(),
             'created_at': datetime.utcnow().isoformat(),
             'metadata': metadata or {},
-            'key_hash': hashlib.sha256(api_key.encode()).hexdigest()[:8]  # For verification
+            'record_id': uuid.uuid4().hex  # Identify the encrypted record without hashing its secret
         }
         
         # Store in secure file
-        key_file = f"{self.vault_path}/{service_name}.json"
+        key_file = storage_path(self.vault_path, f"{service_name}.json")
         os.makedirs(os.path.dirname(key_file), exist_ok=True)
         
         with open(key_file, 'w') as f:
@@ -113,7 +116,7 @@ class SecureConfigManager:
     async def get_api_key(self, service_name: str) -> str | None:
         """Retrieve and decrypt API key"""
         
-        key_file = f"{self.vault_path}/{service_name}.json"
+        key_file = storage_path(self.vault_path, f"{service_name}.json")
         
         if not os.path.exists(key_file):
             self.logger.error(f"API key not found for {service_name}")
@@ -138,7 +141,7 @@ class SecureConfigManager:
         
         # Backup old key
         old_record = None
-        key_file = f"{self.vault_path}/{service_name}.json"
+        key_file = storage_path(self.vault_path, f"{service_name}.json")
         
         if os.path.exists(key_file):
             with open(key_file) as f:
@@ -152,7 +155,7 @@ class SecureConfigManager:
         # Store new key
         await self.store_api_key(service_name, new_api_key, {
             'rotated_at': datetime.utcnow().isoformat(),
-            'previous_key_hash': old_record.get('key_hash') if old_record else None
+            'previous_record_id': old_record.get('record_id') if old_record else None
         })
         
         self.logger.info(f"Rotated API key for {service_name}")

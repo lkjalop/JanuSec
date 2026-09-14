@@ -15,7 +15,7 @@ import time
 from typing import Dict, Optional
 
 import requests
-from src.security.storage_paths import storage_id, storage_path
+from src.security.storage_paths import storage_path, storage_id, storage_path
 from cryptography.fernet import Fernet
 
 logger = logging.getLogger(__name__)
@@ -235,7 +235,7 @@ class TenantStore:
         try:
             audit_dir = os.path.join(STORE_DIR, 'audit')
             os.makedirs(audit_dir, exist_ok=True)
-            audit_path = os.path.join(audit_dir, f"{tenant_id}.log")
+            audit_path = storage_path(audit_dir, f"{tenant_id}.log")
             entry = {
                 'ts': int(time.time()),
                 'tenant': tenant_id,
@@ -313,7 +313,7 @@ class TenantStore:
         try:
             audit_dir = os.path.join(STORE_DIR, 'audit')
             os.makedirs(audit_dir, exist_ok=True)
-            audit_path = os.path.join(audit_dir, f"{tenant_id}.log")
+            audit_path = storage_path(audit_dir, f"{tenant_id}.log")
             entry = {
                 'ts': int(time.time()),
                 'tenant': tenant_id,

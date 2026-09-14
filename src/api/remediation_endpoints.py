@@ -43,8 +43,8 @@ def _parse_path(path: str) -> List[str]:
     if not path:
         return []
     # Normalize arrows to '->'
-    raw = re.split(r"\s*(?:->|\|>|:)\s*", path.strip())
-    return [p for p in raw if p]
+    raw = re.split(r"->|\|>|:", path.strip())
+    return [p.strip() for p in raw if p.strip()]
 
 def _infer_node_type(node: str) -> str:
     n = node.lower()
@@ -53,7 +53,7 @@ def _infer_node_type(node: str) -> str:
         return 'email'
     if re.fullmatch(r"[0-9a-f]{32}|[0-9a-f]{40}|[0-9a-f]{64}", n):
         return 'file_hash'
-    if re.fullmatch(r"\d+\.\d+\.\d+\.\d+", n):
+    if re.fullmatch(r"[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}", n):
         return 'ip'
     if '.' in n and len(n) <= 64 and not n.startswith('session:'):
         return 'domain'

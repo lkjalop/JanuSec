@@ -3304,7 +3304,9 @@ IOC_ROW: [row number(s)]"""
 
 def _parse_threat_hunter_output(text: str) -> dict:
     import re as _re
-    text = _re.sub(r'<think>.*?</think>', '', text, flags=_re.DOTALL).strip()
+    from src.security.text_parsing import extract_tag_blocks
+    _, text = extract_tag_blocks(text, 'think')
+    text = text.strip()
     # Strip markdown code fences wrapping the whole output
     text = _re.sub(r'^```[a-z]*\n?', '', text).rstrip('`').strip()
 

@@ -1,4 +1,5 @@
 from __future__ import annotations
+from src.security.storage_paths import storage_path, confined_path
 
 from typing import Any, Dict, List
 import base64
@@ -244,10 +245,7 @@ async def compliance_summary(
       - Each observed event mapped to a STRIDE category contributes a weight by severity.
       - Verdict+confidence drive weight: critical=3, high=2, medium=1, low=0.5.
     """
-    try:
-        tenant_id = resolve_tenant_id(request, tenant_id)
-    except Exception:
-        pass
+    tenant_id = resolve_tenant_id(request, tenant_id)
     # Resolve the ONE canonical decision cache at call time (no `= {}` dual-instance fallback)
     from .runtime_state import get_decision_cache
     DECISION_CACHE = get_decision_cache()
@@ -590,10 +588,7 @@ async def assess_json(
     request: Request = None,
     auth=require_scopes('factors.search')
 ) -> JSONResponse:
-    try:
-        tenant_id = resolve_tenant_id(request, tenant_id or (payload.get('tenant_id') if isinstance(payload, dict) else None))
-    except Exception:
-        pass
+    tenant_id = resolve_tenant_id(request, tenant_id or (payload.get('tenant_id') if isinstance(payload, dict) else None))
     framework = str(payload.get('framework') or 'ISO27001')
     docs: List[dict] = []
     for d in payload.get('documents') or []:
@@ -698,10 +693,7 @@ async def assess_files(
     tenant_id: str | None = Header(None, alias='X-Tenant-ID'),
     request: Request = None,
 ) -> JSONResponse:
-    try:
-        tenant_id = resolve_tenant_id(request, tenant_id)
-    except Exception:
-        pass
+    tenant_id = resolve_tenant_id(request, tenant_id)
     if not files:
         raise HTTPException(status_code=400, detail='no_files')
     docs: List[dict] = []
@@ -850,10 +842,7 @@ async def compliance_report(
     tenant_id: str | None = Header(None, alias='X-Tenant-ID'),
     request: Request = None,
 ):
-    try:
-        tenant_id = resolve_tenant_id(request, tenant_id)
-    except Exception:
-        pass
+    tenant_id = resolve_tenant_id(request, tenant_id)
     t = _tenant_key(tenant_id)
     item = (_ASSESSMENT_CACHE.get(t) or {}).get(assessment_id)
     if not item:
@@ -1171,21 +1160,18 @@ async def upload_evidence(
     file: UploadFile = File(...),
     request: Request = None,
 ) -> dict[str, Any]:
-    try:
-        tenant_id = resolve_tenant_id(request, tenant_id)
-    except Exception:
-        pass
+    tenant_id = resolve_tenant_id(request, tenant_id)
     tid = _tenant_key(tenant_id)
     now = time.time()
     # Save file
     base_dir = os.getenv('COMPLIANCE_EVIDENCE_DIR', 'artifacts/compliance/evidence')
-    safe_cid = ''.join(ch for ch in control_id if ch.isalnum() or ch in '._-')
-    target_dir = os.path.join(base_dir, tid, safe_cid)
+    control_directory = hashlib.sha256(control_id.encode('utf-8')).hexdigest()
+    target_dir = storage_path(storage_path(base_dir, tid), control_directory)
     _mk_dirs(target_dir)
     content = await file.read()
     fname = file.filename or 'evidence.bin'
     stamp = int(now)
-    path = os.path.join(target_dir, f"{stamp}_{fname}")
+    path = storage_path(target_dir, f"{uuid.uuid4().hex}.bin")
     with open(path, 'wb') as f:
         f.write(content)
     sha = hashlib.sha256(content).hexdigest()
@@ -1219,10 +1205,7 @@ async def list_evidence(
     tenant_id: str | None = Header(None, alias='X-Tenant-ID'),
     request: Request = None,
 ) -> dict[str, Any]:
-    try:
-        tenant_id = resolve_tenant_id(request, tenant_id)
-    except Exception:
-        pass
+    tenant_id = resolve_tenant_id(request, tenant_id)
     tid = _tenant_key(tenant_id)
     idx_path = os.getenv('COMPLIANCE_EVIDENCE_INDEX', 'artifacts/compliance/evidence.idx.jsonl')
     items: list[dict[str, Any]] = []
@@ -1251,10 +1234,7 @@ async def audit_trail(
     tenant_id: str | None = Header(None, alias='X-Tenant-ID'),
     request: Request = None,
 ) -> dict[str, Any]:
-    try:
-        tenant_id = resolve_tenant_id(request, tenant_id)
-    except Exception:
-        pass
+    tenant_id = resolve_tenant_id(request, tenant_id)
     tid = _tenant_key(tenant_id)
     p = _audit_log_path()
     out: list[dict[str, Any]] = []
@@ -1283,10 +1263,7 @@ async def run_control_test(
     tenant_id: str | None = Header(None, alias='X-Tenant-ID'),
     request: Request = None,
 ) -> dict[str, Any]:
-    try:
-        tenant_id = resolve_tenant_id(request, tenant_id)
-    except Exception:
-        pass
+    tenant_id = resolve_tenant_id(request, tenant_id)
     tid = _tenant_key(tenant_id)
     try:
         from src.modules.compliance.control_tests import ControlTestRunner  # type: ignore
@@ -1331,10 +1308,7 @@ def _save_rems(data: dict[str, list[dict[str, Any]]]) -> None:
 
 @router.post('/remediation/create', summary='Create remediation plan for a control')
 async def remediation_create(payload: Dict[str, Any] = Body(...), tenant_id: str | None = Header(None, alias='X-Tenant-ID'), request: Request = None) -> dict[str, Any]:
-    try:
-        tenant_id = resolve_tenant_id(request, tenant_id)
-    except Exception:
-        pass
+    tenant_id = resolve_tenant_id(request, tenant_id)
     tid = _tenant_key(tenant_id)
     control_id = str(payload.get('control_id') or '').strip()
     if not control_id:
@@ -1363,10 +1337,7 @@ async def remediation_create(payload: Dict[str, Any] = Body(...), tenant_id: str
 
 @router.patch('/remediation/{rem_id}/status', summary='Update remediation status')
 async def remediation_status(rem_id: str, payload: Dict[str, Any] = Body(...), tenant_id: str | None = Header(None, alias='X-Tenant-ID'), request: Request = None) -> dict[str, Any]:
-    try:
-        tenant_id = resolve_tenant_id(request, tenant_id)
-    except Exception:
-        pass
+    tenant_id = resolve_tenant_id(request, tenant_id)
     tid = _tenant_key(tenant_id)
     db = _load_rems()
     items = db.get(tid, [])
@@ -1385,10 +1356,7 @@ async def remediation_status(rem_id: str, payload: Dict[str, Any] = Body(...), t
 
 @router.get('/remediation/list', summary='List remediations')
 async def remediation_list(status: str | None = Query(None), tenant_id: str | None = Header(None, alias='X-Tenant-ID'), request: Request = None) -> dict[str, Any]:
-    try:
-        tenant_id = resolve_tenant_id(request, tenant_id)
-    except Exception:
-        pass
+    tenant_id = resolve_tenant_id(request, tenant_id)
     tid = _tenant_key(tenant_id)
     db = _load_rems()
     items = db.get(tid, [])
@@ -1403,10 +1371,7 @@ async def compliance_graphml(
     tenant_id: str | None = Header(None, alias='X-Tenant-ID'),
     request: Request = None,
 ):
-    try:
-        tenant_id = resolve_tenant_id(request, tenant_id)
-    except Exception:
-        pass
+    tenant_id = resolve_tenant_id(request, tenant_id)
     t = _tenant_key(tenant_id)
     item = (_ASSESSMENT_CACHE.get(t) or {}).get(assessment_id)
     if not item:

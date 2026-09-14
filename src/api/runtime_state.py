@@ -810,7 +810,7 @@ def test_helper_enable_correlation_flags() -> bool:
 
 def load_session(session_id: str) -> dict | None:
     try:
-        path = SESSION_DIR / f'{session_id}.json'
+        path = Path(storage_path(SESSION_DIR, f'{session_id}.json'))
         if not path.exists(): return None
         # TTL check
         age = time.time() - path.stat().st_mtime

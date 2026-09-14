@@ -1464,7 +1464,7 @@ async def route_report(report_id: str, payload: dict, request: Request, persona:
         'recipients': recipients,
         'disclosure_level': int(disclosure_level),
         'note': note,
-        'sent_by': api_key,
+        'sent_by': getattr(getattr(request.state, 'auth', None), 'subject', 'authenticated'),
         'sent_at': int(time.time()),
     }
     # Persist via audit_repo if available
@@ -1478,7 +1478,7 @@ async def route_report(report_id: str, payload: dict, request: Request, persona:
             audit_dir.mkdir(parents=True, exist_ok=True)
             try:
                 import json
-                fname = audit_dir / f"audit_{report_id}_{int(time.time())}.json"
+                fname = Path(storage_path(audit_dir, f"audit_{report_id}_{int(time.time())}.json"))
                 fname.write_text(json.dumps(audit), encoding='utf-8')
             except Exception:
                 pass
@@ -1689,7 +1689,7 @@ async def capture_report_feedback(report_id: str, payload: dict, request: Reques
                 fb_dir = Path('reports') / 'feedback'
                 fb_dir.mkdir(parents=True, exist_ok=True)
                 import json
-                fp = fb_dir / f"feedback_{report_id}.jsonl"
+                fp = Path(storage_path(fb_dir, f"feedback_{report_id}.jsonl"))
                 fp.write_text(json.dumps({'report_id': report_id, 'row_id': row_id, 'accurate': bool(accurate), 'comment': comment, 'reviewer': reviewer, 'ts': int(time.time())}) + '\n', encoding='utf-8', append=False)
     except Exception:
         raise HTTPException(status_code=500, detail='feedback_store_failed')
@@ -1964,7 +1964,7 @@ async def ask_for_logs(report_id: str, payload: dict, request: Request):
             # fallback file
             ad = Path('reports') / 'audits'
             ad.mkdir(parents=True, exist_ok=True)
-            fname = ad / f"asklogs_{report_id}_{int(time.time())}.json"
+            fname = Path(storage_path(ad, f"asklogs_{report_id}_{int(time.time())}.json"))
             fname.write_text(json.dumps(audit), encoding='utf-8')
     except Exception:
         pass

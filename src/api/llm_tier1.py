@@ -65,11 +65,11 @@ def _parse_llm_json(text: str) -> Dict[str, Any] | None:
     # Strip markdown code fences
     cleaned = re.sub(r'```(?:json)?', '', text).strip()
     # Find first { ... } block
-    m = re.search(r'\{.*\}', cleaned, re.DOTALL)
-    if not m:
+    start, end = cleaned.find('{'), cleaned.rfind('}')
+    if start < 0 or end < start:
         return None
     try:
-        return json.loads(m.group(0))
+        return json.loads(cleaned[start:end + 1])
     except Exception:
         return None
 

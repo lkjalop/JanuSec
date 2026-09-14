@@ -1,3 +1,4 @@
+from src.security.storage_paths import storage_path, confined_path
 from fastapi import APIRouter, HTTPException
 import os
 import json
@@ -11,13 +12,13 @@ os.makedirs(PERSIST_DIR, exist_ok=True)
 
 
 def _persist_state(assessment_id: str, state: Dict[str, Any]):
-    path = os.path.join(PERSIST_DIR, f"{assessment_id}.json")
+    path = storage_path(PERSIST_DIR, f"{assessment_id}.json")
     with open(path, 'w', encoding='utf-8') as f:
         json.dump(state, f)
 
 
 def _load_state(assessment_id: str) -> Dict[str, Any]:
-    path = os.path.join(PERSIST_DIR, f"{assessment_id}.json")
+    path = storage_path(PERSIST_DIR, f"{assessment_id}.json")
     if not os.path.exists(path):
         return {}
     with open(path, 'r', encoding='utf-8') as f:

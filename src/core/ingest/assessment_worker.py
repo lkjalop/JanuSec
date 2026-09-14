@@ -16,6 +16,7 @@ worker restart can inspect incomplete jobs on startup.
 """
 
 from __future__ import annotations
+from src.security.storage_paths import storage_path, confined_path
 from src.security.domain_names import domain_host, host_matches
 
 import asyncio
@@ -3907,13 +3908,13 @@ def _persist_assessment_json(assessment_id: str, org: str, data: dict) -> str | 
         repo_root = os.getcwd()
         datepart = datetime.datetime.utcnow().strftime("%Y-%m-%d")
         base = os.getenv("SESSION_PERSIST_DIR") or os.path.join(repo_root, "data", "assessments")
-        dest = os.path.join(base, tenant_directory, datepart)
+        dest = storage_path(storage_path(base, tenant_directory), datepart)
         _assert_path_within(base, dest)
         os.makedirs(dest, exist_ok=True)
         # Resolve once more after mkdir so an existing symlink/junction cannot
         # redirect the write outside the configured assessment root.
         _assert_path_within(base, dest)
-        path = os.path.join(dest, f"{safe_assessment_id}.json")
+        path = storage_path(dest, f"{safe_assessment_id}.json")
         _assert_path_within(base, path)
         data["persisted_path"] = path
         tmp = path + ".tmp"

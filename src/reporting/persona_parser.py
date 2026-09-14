@@ -77,7 +77,7 @@ def _repair_json_like(text: str) -> str | None:
                 return m.group(0)
             return f'{m.group(1)}"{val}"{m.group(3)}'
 
-        s = re.sub(r'(:\s*)([A-Za-z][^,}\]\[\{"]*?)(\s*[,}\]])', _q_val, s)
+        s = re.sub(r'(:[ \t]{0,256})([A-Za-z][^,}\]\[\{"]{0,4096})([,}\]])', _q_val, s)
 
         # quote unquoted string elements inside scalar arrays: [evt_abc] -> ["evt_abc"]
         # (only arrays with no nested braces/brackets, so object arrays are left intact)

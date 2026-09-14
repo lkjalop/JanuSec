@@ -527,10 +527,10 @@ def _parse_json_from_text(text: str) -> Optional[Dict[str, Any]]:
     except Exception:
         pass
     # Try to find first { ... } block
-    match = re.search(r"\{.*\}", text, re.DOTALL)
-    if match:
+    start, end = text.find("{"), text.rfind("}")
+    if start >= 0 and end >= start:
         try:
-            return json.loads(match.group(0))
+            return json.loads(text[start:end + 1])
         except Exception:
             pass
     return None

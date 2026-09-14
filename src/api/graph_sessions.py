@@ -1033,7 +1033,7 @@ def _maybe_llm_summarize(narrative: str) -> str | None:
     try:
         # Placeholder heuristic: truncate and abstract counts.
         import re
-        batches = re.findall(r"(\d+) batches", narrative)
+        batches = re.findall(r"(?<!\d)(\d{1,20}) batches", narrative)
         btxt = f" across {batches[0]} batches" if batches else ''
         return f"Multi-source session{btxt} summarized: key overlaps + factors fused for confidence."[:160]
     except Exception:

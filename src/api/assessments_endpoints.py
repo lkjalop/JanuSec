@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from src.security.storage_paths import storage_path
+from src.api.tenant_helpers import resolve_tenant_id
+from src.api.report_endpoints import _load_persisted_assessment_report_data
+
 import os
 import json
 import time
@@ -13,19 +17,21 @@ router = APIRouter(prefix="/api/v1/assessments", tags=["assessments"])
 @require_roles('analyst','admin')
 async def save_assessment_metadata(request: Request):
     payload = await request.json()
-    org = (payload.get('org') or 'unknown').strip() or 'unknown'
+    org = resolve_tenant_id(request, payload.get('org'))
+    if not org:
+        raise HTTPException(status_code=400, detail='tenant_id_required')
     ts = int(payload.get('ts') or time.time())
     # Build path: data/assessments/{org}/{YYYYMMDD}/metadata_{ts}.json
     repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
     datepart = time.strftime('%Y%m%d', time.gmtime(ts))
-    dest_dir = os.path.join(repo_root, 'data', 'assessments', org, datepart)
+    dest_dir = storage_path(storage_path(os.path.join(repo_root, 'data', 'assessments'), org), datepart)
     try:
         os.makedirs(dest_dir, exist_ok=True)
-        fname = os.path.join(dest_dir, f'metadata_{ts}.json')
+        fname = storage_path(dest_dir, f'metadata_{ts}.json')
         with open(fname, 'w', encoding='utf-8') as fh:
             json.dump({'saved_at': time.time(), 'payload': payload}, fh, indent=2)
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f'failed to persist metadata: {exc}')
+        raise HTTPException(status_code=500, detail='metadata_persistence_failed')
     return {'ok': True, 'path': fname}
 
 
@@ -39,17 +45,10 @@ async def flag_for_retrain(report_id: str, request: Request):
     row_id = request.query_params.get('row_id') or request.query_params.get('row')
     if not row_id:
         raise HTTPException(status_code=400, detail='missing_row_id')
-    # locate report on disk
-    try:
-        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-        datepart = time.strftime('%Y%m%d', time.gmtime(time.time()))
-        path = os.path.join(repo_root, 'data', 'assessments', 'unknown', datepart, 'reports', f'{report_id}.json')
-        if not os.path.exists(path):
-            return {'detail': 'not_found'}
-        with open(path, 'r', encoding='utf-8') as fh:
-            obj = json.load(fh)
-    except Exception:
-        raise HTTPException(status_code=500, detail='read_failed')
+    tenant = resolve_tenant_id(request)
+    _, obj = _load_persisted_assessment_report_data(report_id, tenant)
+    if not obj:
+        raise HTTPException(status_code=404, detail='assessment_not_found')
     # find row
     rows = obj.get('per_row') or obj.get('rows') or []
     target = None
@@ -129,38 +128,17 @@ async def export_iocs(assessment_id: str, request: Request):
     """
     import uuid as _uuid
     fmt = (request.query_params.get('format') or 'json').lower()
-    # Locate assessment on disk
-    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-    assessment_obj: dict = {}
-    raw_rows: list[dict] = []
-    # Try data/assessments/*/*/reports/{id}.json first, then fallback paths
-    import glob as _glob
-    candidates = _glob.glob(
-        os.path.join(repo_root, 'data', 'assessments', '*', '*', 'reports', f'{assessment_id}.json')
-    )
-    if not candidates:
-        candidates = _glob.glob(
-            os.path.join(repo_root, 'data', 'assessments', '*', '*', f'{assessment_id}.json')
-        )
-    if not candidates:
+    tenant = resolve_tenant_id(request)
+    _, assessment_obj = _load_persisted_assessment_report_data(assessment_id, tenant)
+    if not assessment_obj:
         raise HTTPException(status_code=404, detail='assessment_not_found')
-    try:
-        with open(candidates[0], 'r', encoding='utf-8') as fh:
-            assessment_obj = json.load(fh)
-        raw_rows = (
-            assessment_obj.get('raw_rows')
-            or assessment_obj.get('per_row')
-            or assessment_obj.get('rows')
-            or []
-        )
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f'read_failed:{exc}')
+    raw_rows = assessment_obj.get('raw_rows') or assessment_obj.get('per_row') or assessment_obj.get('rows') or []
 
     try:
         from src.reporting.adapters.csv_adapter import _collect_iocs_from_rows
         iocs = _collect_iocs_from_rows(raw_rows)
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f'ioc_extraction_failed:{exc}')
+        raise HTTPException(status_code=500, detail='ioc_extraction_failed')
 
     generated_at = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
 

@@ -72,7 +72,7 @@ _SUPPLIER_PAYMENT_MARKERS = (
     "vendor details",
     "invoice attached",
 )
-_IOC_PATTERN = re.compile(r"(https?://[^\s]+|[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})", re.IGNORECASE)
+_IOC_PATTERN = re.compile(r"(https?://[^\s]+|[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,253}\.[A-Za-z]{2,63})", re.IGNORECASE)
 _TOKEN_PATTERN = re.compile(r"[a-zA-Z0-9_.:-]{3,}")
 _BENIGN_PATH_PATTERNS: dict[str, tuple[str, ...]] = {
     "windows_update": (

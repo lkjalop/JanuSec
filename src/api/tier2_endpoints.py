@@ -312,9 +312,9 @@ async def tier2_thinking(request: Request):
         else:
             # Strip out any <thinking>…</thinking> tags from the text if present
             import re as _re
-            think_pat = _re.compile(r'<thinking>(.*?)</thinking>', _re.DOTALL | _re.IGNORECASE)
-            found = think_pat.findall(base_text)
-            clean_text = think_pat.sub('', base_text).strip()
+            from src.security.text_parsing import extract_tag_blocks
+            found, clean_text = extract_tag_blocks(base_text, 'thinking', ignore_case=True)
+            clean_text = clean_text.strip()
             if found:
                 thinking_blocks = [{'type': 'thinking', 'content': t.strip(), 'turn': i+1} for i, t in enumerate(found)]
                 thinking_blocks.append({'type': 'text', 'content': clean_text, 'turn': len(found)+1})

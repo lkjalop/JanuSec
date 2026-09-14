@@ -366,8 +366,7 @@ async def delete_rule(name: str, auth=Depends(require_scopes("factors.search")))
     try:
         if os.getenv('YARA_MIRROR_RULE_FILES','1').lower() in {'1','true','yes'}:
             d = _rules_dir()
-            safe = name.replace('/', '_').replace('\\','_')
-            p = d / f"{safe}.yar"
+            p = Path(storage_path(d, f"{name}.yar"))
             if p.exists():
                 p.unlink()
     except Exception:

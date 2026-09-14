@@ -84,3 +84,29 @@ def test_expansion_cache_does_not_alias_identifiers(tmp_path, monkeypatch):
     from src.analysis import expand_engine
     monkeypatch.setattr(expand_engine,'EXPAND_CACHE_DIR',str(tmp_path))
     assert expand_engine.get_expand_cache_path('a/b','t') != expand_engine.get_expand_cache_path('a_b','t')
+
+
+def test_compliance_rejects_foreign_tenant_before_reading_or_writing():
+    from src.api import compliance_endpoints as module
+    request=SimpleNamespace(state=SimpleNamespace(tenant_id='acme',auth=SimpleNamespace(tenant_id='acme')),headers={})
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(module.remediation_list(status=None,tenant_id='foreign',request=request))
+    assert error.value.status_code == 403
+
+
+def test_legacy_ioc_export_requires_explicit_ownership(monkeypatch):
+    from src.api import assessments_endpoints as module
+    from src.api.deep_analyze.persistence import REPORT_STORE
+    monkeypatch.setitem(REPORT_STORE,'isolation-test',{'assessment_id':'isolation-test','org':'foreign','rows':[{'domain':'private.example'}]})
+    request=SimpleNamespace(state=SimpleNamespace(tenant_id='acme',auth=SimpleNamespace(tenant_id='acme')),headers={},query_params={})
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(module.export_iocs('isolation-test',request))
+    assert error.value.status_code == 404
+
+
+def test_repeated_unclosed_model_tags_preserve_text_without_backtracking():
+    from src.security.text_parsing import extract_tag_blocks
+    text='<think>' * 100000
+    blocks, clean=extract_tag_blocks(text,'think')
+    assert blocks==[] and clean==text
+    assert extract_tag_blocks('before<THINKING>reason</THINKING>after','thinking',ignore_case=True)==(['reason'],'beforeafter')

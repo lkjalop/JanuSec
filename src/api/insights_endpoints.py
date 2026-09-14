@@ -1,5 +1,6 @@
 """AI-powered insights generation endpoints."""
 from __future__ import annotations
+from src.security.storage_paths import storage_path, confined_path
 
 import logging
 import json
@@ -1095,7 +1096,7 @@ def _tier2_jobs_dir() -> str:
 def _persist_tier2_job(job_id: str) -> None:
     try:
         out = _tier2_jobs_dir()
-        path = os.path.join(out, f"{job_id}.json")
+        path = storage_path(out, f"{job_id}.json")
         with open(path + '.tmp', 'w', encoding='utf-8') as fh:
             fh.write(json.dumps(TIER2_JOBS.get(job_id) or {}))
         os.replace(path + '.tmp', path)

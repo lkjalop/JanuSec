@@ -158,7 +158,7 @@ def _extract_row_artifacts(rows: List[Dict[str, Any]]) -> List[str]:
         'executable_file', 'malware_name_indicator', 'suspicious_temp_path',
         'c2_port', 'external_connection', 'lateral_movement', 'credential_access',
     }
-    _EXE_RE = _re.compile(r'[\w\-\.]+\.(?:exe|dll|ps1|bat|vbs|js|sh|py)\b', _re.IGNORECASE)
+    _EXE_RE = _re.compile(r'(?<![\w.\-])[\w.\-]{1,255}\.(?:exe|dll|ps1|bat|vbs|js|sh|py)\b', _re.IGNORECASE)
     _IP_RE = _re.compile(r'\b(?:\d{1,3}\.){3}\d{1,3}\b')
     _PATH_RE = _re.compile(r'(?:[a-zA-Z]:\\|/)[^\s:*?"<>|]{4,80}')
 

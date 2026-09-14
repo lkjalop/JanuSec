@@ -1,4 +1,5 @@
 from __future__ import annotations
+from src.security.storage_paths import storage_path, confined_path
 import time
 import datetime
 import uuid
@@ -3545,9 +3546,9 @@ async def run_deep_analyze_pipeline(payload: dict) -> JSONResponse:
             datepart = datetime.datetime.utcnow().strftime('%Y-%m-%d')
             base = os.getenv('SESSION_PERSIST_DIR') or os.path.join(repo_root, 'data', 'assessments')
             orgdir = (org or 'unknown')
-            dest = os.path.join(base, orgdir, datepart)
+            dest = storage_path(storage_path(base, orgdir), datepart)
             os.makedirs(dest, exist_ok=True)
-            path = os.path.join(dest, f"{aid}.json")
+            path = storage_path(dest, f"{aid}.json")
             try:
                 data['persisted_path'] = path
             except Exception as _exc:
@@ -3900,12 +3901,12 @@ def _build_lite_assessment(payload: dict, persist: bool = True) -> dict:
         repo_root = os.getcwd()
         datepart = datetime.datetime.utcnow().strftime('%Y-%m-%d')
         base = os.getenv('SESSION_PERSIST_DIR') or os.path.join(repo_root, 'data', 'assessments')
-        dest = os.path.join(base, fallback['org'], datepart)
+        dest = storage_path(storage_path(base, fallback['org']), datepart)
         try:
             os.makedirs(dest, exist_ok=True)
         except Exception as _exc:
             logger.debug('silent_swallow at %s:%d: %s', __file__, 5543, _exc)
-        persisted_path = os.path.join(dest, f"{fallback_id}.json")
+        persisted_path = storage_path(dest, f"{fallback_id}.json")
         fallback['persisted_path'] = persisted_path
         try:
             atomic_write_json(persisted_path, fallback)
@@ -6357,7 +6358,7 @@ async def assessment_llm_verification(assessment_id: str):
         base_path = assessment.get('persisted_path')
         if base_path:
             parent = os.path.dirname(base_path)
-            out_path = os.path.join(parent, f"{assessment_id}-llm-verification.md")
+            out_path = storage_path(parent, f"{assessment_id}-llm-verification.md")
             with open(out_path+'.tmp','w',encoding='utf-8') as fh:
                 fh.write(markdown)
             os.replace(out_path+'.tmp', out_path)

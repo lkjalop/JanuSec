@@ -1,3 +1,4 @@
+from src.security.storage_paths import storage_path, confined_path
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 try:
@@ -224,7 +225,7 @@ def rotate_job_status(job_id: str, _auth: object = Depends(_admin_dep())):
                 raise HTTPException(status_code=404, detail='job_not_found')
         except Exception:
             # fs fallback
-            p = os.path.join('data', 'resign_jobs', f"{job_id}.status.json")
+            p = storage_path(os.path.join('data', 'resign_jobs'), f"{job_id}.status.json")
             if os.path.exists(p):
                 try:
                     with open(p, 'r', encoding='utf-8') as fh:
