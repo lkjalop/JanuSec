@@ -87,3 +87,19 @@ def test_public_report_upload_is_retired():
     with pytest.raises(HTTPException) as exc:
         upload_report(UploadReportPayload(filename='public.html', content='<script>active()</script>'))
     assert exc.value.status_code == 410
+
+
+def test_tier2_failure_does_not_return_exception_or_traceback(monkeypatch):
+    import json
+    from src.api import csv_endpoints
+    from src.analysis import auto_llm
+    marker = 'dummy-private-provider-detail'
+    class BrokenClient:
+        def summarize_row(self, row, context):
+            raise RuntimeError(marker)
+    monkeypatch.setattr(auto_llm, 'LLMAssessmentClient', BrokenClient)
+    monkeypatch.setattr(auto_llm, 'detect_domain_with_confidence', lambda row: ('generic', 1.0))
+    result = asyncio.run(csv_endpoints.csv_tier2_investigate({'row': {'event': 'fixture'}}, tenant_id='acme', api_key='devkey123'))
+    assert result['status'] == 'error'
+    assert result['traceback'] is None
+    assert marker not in json.dumps(result)

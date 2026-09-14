@@ -2136,7 +2136,7 @@ async def get_llm_cluster_summary(
         cold_start = any(k in err.lower() for k in ('connect', 'refused', 'timeout', 'ollama_session', 'ollama_override', 'remotedisconnected'))
         return {
             'cluster_id': cluster_id, 'assessment_id': assessment_id,
-            'llm_available': False, 'error': err,
+            'llm_available': False, 'error': 'summary_generation_failed',
             'cold_start_hint': (
                 'Ollama appears offline or still loading. Start Ollama, wait ~30s, then retry.'
                 if cold_start else None
@@ -2844,7 +2844,7 @@ async def entity_deepen(
         }
     except Exception as exc:
         logger.exception('entity-deepen failed: %s', exc)
-        return {'llm_available': False, 'error': str(exc)}
+        return {'llm_available': False, 'error': "operation_failed"}
 
 
 class _RefineRequest(BaseModel):
@@ -2984,7 +2984,7 @@ async def refine_persona_notes(
         }
     except Exception as exc:
         logger.exception('llm-refine failed: %s', exc)
-        return {'llm_available': False, 'error': str(exc)}
+        return {'llm_available': False, 'error': "operation_failed"}
 
 
 # ── Expand-step helpers ───────────────────────────────────────────────────────
@@ -3544,7 +3544,7 @@ async def expand_cluster_step(assessment_id: str, cluster_id: str, request: Requ
         return result
     except Exception as exc:
         logger.exception('expand-step failed: %s', exc)
-        return {'error': str(exc), 'questions': [], 'step_title': step_title}
+        return {'error': "operation_failed", 'questions': [], 'step_title': step_title}
 
 
 # ── Threat-model helpers ─────────────────────────────────────────────────────
@@ -4007,7 +4007,7 @@ async def run_threat_model(assessment_id: str, cluster_id: str, request: Request
         return result
     except Exception as exc:
         logger.exception('threat-model failed: %s', exc)
-        return {'error': str(exc), 'model_type': model_type}
+        return {'error': "operation_failed", 'model_type': model_type}
 
 
 # ── Investigation report save ─────────────────────────────────────────────────
@@ -4028,7 +4028,7 @@ async def save_investigation_report(assessment_id: str, cluster_id: str, request
         path_str = str(rep_path)
     except Exception as exc:
         saved = False
-        path_str = str(exc)
+        path_str = None
     return {'saved': saved, 'path': path_str, 'report': report}
 
 

@@ -1,4 +1,4 @@
-﻿"""Dispatch, sign-off, timeline, notes, IOC and repeat-entity endpoints.
+"""Dispatch, sign-off, timeline, notes, IOC and repeat-entity endpoints.
 
 Routes:
   POST /api/v1/assessments/{aid}/clusters/{cid}/persona-dispatch
@@ -473,7 +473,7 @@ async def generate_further_tasks(
                        assessment_id, cluster_id, exc)
         return JSONResponse({
             'status': 'llm_error',
-            'error': str(exc),
+            'error': "operation_failed",
             'further_tasks': [],
         })
 

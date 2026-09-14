@@ -1044,7 +1044,7 @@ async def execute_decision(request: Request) -> Dict[str, Any]:
     except HTTPException:
         raise
     except Exception as exc:
-        result = {'success': False, 'error': str(exc)}
+        result = {'success': False, 'error': "operation_failed"}
 
     # Audit trail
     audit_payload = {'event': 'decision_execute', 'actor': actor, 'action': action, 'args': args, 'dry_run': dry, 'ts': time.time(), 'result': result}

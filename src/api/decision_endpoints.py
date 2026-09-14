@@ -208,7 +208,7 @@ def execute_decision(req: ExecuteRequest, actor: Optional[str] = Header(None, al
         else:
             result = {'executed': True, 'note': 'no playbook found; manual action required'}
     except Exception as e:
-        result = {'executed': False, 'error': str(e)}
+        result = {'executed': False, 'error': "operation_failed"}
     dec['history'].append({'actor': actor, 'action': 'executed', 'payload': req.action_payload, 'result': result, 'ts': int(time.time())})
     audit['decisions'][req.gate_id] = dec
     _persist_audit(audit)

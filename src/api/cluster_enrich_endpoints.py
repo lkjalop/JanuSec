@@ -427,7 +427,7 @@ async def enrich_cluster(
         }
     except Exception as exc:
         logger.exception('LLM enrichment failed for cluster %s: %s', cluster_id, exc)
-        result['llm_error'] = str(exc)
+        result['llm_error'] = "operation_failed"
         err_lower = str(exc).lower()
         if 'connect' in err_lower or 'refused' in err_lower or 'timeout' in err_lower:
             provider_name = routing_info.get('provider', 'Ollama')

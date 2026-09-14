@@ -437,7 +437,7 @@ async def finops_cost_summary(tenant: str | None = Query(None)) -> dict[str, Any
             'forecast': forecast,
         }
     except Exception as e:
-        return {'overview': {}, 'daily': {}, 'forecast': {}, 'error': str(e)}
+        return {'overview': {}, 'daily': {}, 'forecast': {}, 'error': "operation_failed"}
 
 
 __all__ = ['router']

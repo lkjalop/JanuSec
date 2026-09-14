@@ -441,7 +441,7 @@ async def kev_refresh() -> dict[str, Any]:
         await ENRICHER.refresh_epss([])
         return {'ok': True}
     except Exception as exc:
-        return {'ok': False, 'error': str(exc)}
+        return {'ok': False, 'error': "operation_failed"}
 
 @router.get('/eu-ai-act/article-9', summary='EU AI Act Article 9 risk management report')
 async def eu_ai_act_article9() -> dict[str, Any]:
@@ -631,7 +631,7 @@ async def assess_json(
                 await client.post(str(url), json={'job_id': job_id, 'tenant_id': tenant_id, 'framework': framework, 'documents': docs})
         except Exception as e:
             _CMP_JOBS[job_id]['status'] = 'error'
-            _CMP_JOBS[job_id]['error'] = str(e)
+            _CMP_JOBS[job_id]['error'] = "operation_failed"
             raise HTTPException(status_code=502, detail='webhook_dispatch_failed')
         _cmp_assess_total.labels(mode='external').inc()
         return JSONResponse({'job_id': job_id, 'status': 'queued'}, status_code=202)
@@ -665,7 +665,7 @@ async def assess_json(
                 _append_audit(_tenant_key(tenant_id), 'created_assessment', {'framework': framework, 'files': filenames}, assessment_id=str(aid))
             except Exception as e:
                 _CMP_JOBS[job_id]['status'] = 'error'
-                _CMP_JOBS[job_id]['error'] = str(e)
+                _CMP_JOBS[job_id]['error'] = "operation_failed"
         try:
             asyncio.create_task(_run())
         except Exception:
@@ -760,7 +760,7 @@ async def assess_files(
                 await client.post(str(url), json={'job_id': job_id, 'tenant_id': tenant_id, 'framework': framework, 'documents': docs64})
         except Exception as e:
             _CMP_JOBS[job_id]['status'] = 'error'
-            _CMP_JOBS[job_id]['error'] = str(e)
+            _CMP_JOBS[job_id]['error'] = "operation_failed"
             raise HTTPException(status_code=502, detail='webhook_dispatch_failed')
         _cmp_assess_total.labels(mode='external').inc()
         return JSONResponse({'job_id': job_id, 'status': 'queued'}, status_code=202)
@@ -794,7 +794,7 @@ async def assess_files(
                 _append_audit(_tenant_key(tenant_id), 'created_assessment', {'framework': framework, 'files': filenames}, assessment_id=str(aid))
             except Exception as e:
                 _CMP_JOBS[job_id]['status'] = 'error'
-                _CMP_JOBS[job_id]['error'] = str(e)
+                _CMP_JOBS[job_id]['error'] = "operation_failed"
         try:
             asyncio.create_task(_run())
         except Exception:

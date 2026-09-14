@@ -41,7 +41,7 @@ async def import_csv(file: UploadFile = File(...), request: Request = None):
             await decision_labels_repo.insert_label(None, decision_id, label, tenant, None, None, evidence, query_template)
             inserted += 1
         except Exception as e:
-            errors.append({'row': i+1, 'error': str(e)})
+            errors.append({'row': i+1, 'error': "operation_failed"})
     return {'ok': True, 'inserted': inserted, 'errors': errors}
 
 

@@ -4872,7 +4872,7 @@ def manual_scenario_reload(request: Request) -> dict[str, Any]:
         watcher._do_reload()
         return {'status': 'reloaded', 'reload_count': watcher.reload_count, 'failure_count': watcher.failure_count}
     except Exception as exc:
-        return {'status': 'error', 'error': str(exc)}
+        return {'status': 'error', 'error': "operation_failed"}
 
 @app.get('/api/v1/metrics/self_test', summary='Validate presence of expected metrics names')  # type: ignore[misc]
 def metrics_self_test() -> dict[str, Any]:

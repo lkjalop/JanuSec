@@ -216,7 +216,7 @@ async def batch_label_decisions(payload: BatchDecisionPayload, x_api_key: str | 
                 pass
             item_res.update({'status':'ok','vote': vote, 'calibrated_weights': calibrated, 'factors': factors})
         except Exception as e:
-            item_res['status'] = 'error'; item_res['error'] = str(e)
+            item_res['status'] = 'error'; item_res['error'] = "operation_failed"
         results.append(item_res)
     # summary
     summary = {'total': len(results), 'ok': sum(1 for r in results if r.get('status')=='ok'), 'errors': sum(1 for r in results if r.get('status')!='ok')}

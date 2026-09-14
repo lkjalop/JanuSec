@@ -80,7 +80,7 @@ async def llm_probe() -> Dict[str, Any]:
         try:
             ok = client._probe_ollama()
         except Exception as exc:
-            return {"probed": False, "error": str(exc)}
+            return {"probed": False, "error": "operation_failed"}
     return {"probed": True, "reachable": ok}
 
 

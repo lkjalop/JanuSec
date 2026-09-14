@@ -261,7 +261,7 @@ async def ingest_ebpf_batch(payload: EbpfBatchRequest, request: Request) -> Dict
             _EBPF_EVENTS.append(ne)
             inserted += 1
         except Exception as exc:
-            errors.append({'index': idx, 'error': str(exc).split('\n', 1)[0]})
+            errors.append({'index': idx, 'error': "operation_failed"})
             continue
     # Trim
     if len(_EBPF_EVENTS) > _EBPF_MAX:

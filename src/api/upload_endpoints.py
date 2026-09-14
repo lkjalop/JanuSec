@@ -542,7 +542,7 @@ class CSVProcessor(FileProcessor):
                 'status': 'error',
                 'processor': self.processor_name,
                 'file_type': 'csv',
-                'error': str(e)
+                'error': "operation_failed"
             }
 
 class ExcelProcessor(FileProcessor):
@@ -746,7 +746,7 @@ class ExcelProcessor(FileProcessor):
                 'mitre_techniques': ['T1005'] if effective_data_rows > 100 else []
             }
         except Exception as e:
-            return {'status': 'error','processor': self.processor_name,'file_type': 'excel','error': str(e)}
+            return {'status': 'error','processor': self.processor_name,'file_type': 'excel','error': "operation_failed"}
 
 
 class ArchiveProcessor(FileProcessor):
@@ -1028,7 +1028,7 @@ class FileUploadManager:
             return {
                 'filename': file.filename,
                 'status': 'error',
-                'error': str(e),
+                'error': "operation_failed",
                 'processing_time_ms': (time.time() - start_time) * 1000
             }
 
@@ -1755,7 +1755,7 @@ async def upload_workbook_sheets(
             bio = BytesIO(content)
             wb = openpyxl.load_workbook(bio, read_only=True, data_only=True)
         except Exception as exc:
-            all_results.append({'filename': filename, 'status': 'error', 'error': str(exc)})
+            all_results.append({'filename': filename, 'status': 'error', 'error': "operation_failed"})
             continue
 
         try:
@@ -1775,7 +1775,7 @@ async def upload_workbook_sheets(
                 wb.close()
                 continue
         except Exception as exc:
-            all_results.append({'filename': filename, 'status': 'error', 'error': f'classification_failed: {exc}'})
+            all_results.append({'filename': filename, 'status': 'error', 'error': 'classification_failed'})
             try:
                 wb.close()
             except Exception:
@@ -1858,7 +1858,7 @@ async def upload_workbook_sheets(
                     'status': 'parsed',
                 })
             except Exception as sheet_exc:
-                sheet_summaries.append({'sheet': sheet_name, 'status': 'error', 'error': str(sheet_exc)})
+                sheet_summaries.append({'sheet': sheet_name, 'status': 'error', 'error': "operation_failed"})
 
         # ── Cross-sheet entity pivot detection ───────────────────────────────
         # A "pivot" is an entity value (IP, user, or host) that appears in

@@ -1076,7 +1076,7 @@ async def generate_report(req: Request, format: str = Query('html'), include_mod
             model_html = '<div style="padding:12px;background:#071021;color:#e6eef8;border-radius:6px"><h3>Model Executive Summary</h3><div>' + escape(str(model_text or '')) + '</div></div>'
             result['model_html'] = model_html
         except Exception as e:
-            result['model_summary'] = {'error': str(e)}
+            result['model_summary'] = {'error': "operation_failed"}
 
     # Sanitize HTML output to avoid XSS
     try:
@@ -1867,7 +1867,7 @@ async def post_prewarm_llm(req: Request):
         else:
             resp['status_code'] = r.status_code
     except Exception as e:
-        resp['error'] = str(e)
+        resp['error'] = "operation_failed"
     return JSONResponse(content=jsonable_encoder(resp))
 
 

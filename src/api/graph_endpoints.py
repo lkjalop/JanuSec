@@ -149,7 +149,7 @@ async def graph_health() -> Dict[str, Any]:
     except ImportError:
         return {'status': 'fallback', 'backend': 'synthetic'}
     except Exception as exc:
-        return {'status': 'unavailable', 'error': str(exc)}
+        return {'status': 'unavailable', 'error': "operation_failed"}
 
 
 def _ensure_dict(x):
@@ -507,7 +507,7 @@ def self_check() -> Dict:
                     except Exception:
                         tail.append({'raw': ln[:200].decode('utf8', errors='ignore')})
         except Exception as e:
-            tail = [{'error': str(e)}]
+            tail = [{'error': "operation_failed"}]
     info['wal_tail'] = tail
 
     # reproducibility hash: try to hash snapshot file
@@ -526,7 +526,7 @@ def self_check() -> Dict:
             info['snapshot_sha256'] = h.hexdigest()
         except Exception as e:
             info['snapshot_sha256'] = None
-            info['snapshot_error'] = str(e)
+            info['snapshot_error'] = "operation_failed"
     else:
         info['snapshot_sha256'] = None
 

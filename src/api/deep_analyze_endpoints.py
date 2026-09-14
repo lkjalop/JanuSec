@@ -942,7 +942,7 @@ async def _run_stage(stage: StageBase, ctx: dict) -> dict:
             logger.exception('Stage %s failed: %s', getattr(stage, 'name', 'unknown'), exc)
         except Exception as _exc:
             logger.debug('silent_swallow at %s:%d: %s', __file__, 905, _exc)
-        return {'stage': getattr(stage, 'name', 'unknown'), 'status': 'error', 'elapsed_ms': elapsed, 'result': {}, 'error': str(exc)}
+        return {'stage': getattr(stage, 'name', 'unknown'), 'status': 'error', 'elapsed_ms': elapsed, 'result': {}, 'error': "operation_failed"}
 
 
 def _should_include_missing_logs(row: dict, assessment: dict) -> bool:
@@ -2170,7 +2170,7 @@ async def _emit_offline_decision_record(assessment: dict, *, org: str) -> None:
 
 def _error_llm_row(normalized_row: dict, idx: int, exc: Exception) -> dict:
     """Build a minimal llm_row payload when generation fails."""
-    summary = f"LLM summary unavailable: {exc}"
+    summary = "LLM summary unavailable"
     now = int(time.time())
     return {
         'row_index': idx,
@@ -2182,7 +2182,7 @@ def _error_llm_row(normalized_row: dict, idx: int, exc: Exception) -> dict:
         'verdict': normalized_row.get('verdict') or normalized_row.get('decision') or '',
         'factors': list(normalized_row.get('factors') or []),
         'llm_summary': summary,
-        'llm_meta': {'error': str(exc)},
+        'llm_meta': {'error': "operation_failed"},
         'risk_level': {'label': 'Unknown', 'numeric': 0},
         'risk_label': 'Unknown',
         'recommendation': {},
@@ -3737,7 +3737,7 @@ async def run_deep_analyze_pipeline(payload: dict) -> JSONResponse:
             csv_deep_analyze_inflight.labels().set(0)
         except Exception as _exc:
             logger.debug('silent_swallow at %s:%d: %s', __file__, 5374, _exc)
-        return JSONResponse({'detail': 'worker_error', 'error': str(e)}, status_code=500)
+        return JSONResponse({'detail': 'worker_error', 'error': "operation_failed"}, status_code=500)
 
     try:
         csv_deep_analyze_inflight.labels().set(0)
@@ -4766,7 +4766,7 @@ async def verify_llm_decision_card(assessment_id: str, request: Request):
                     logger.debug('silent_swallow at %s:%d: %s', __file__, 6427, _exc)
             results.append({'evidence': details, 'verified': bool(verified)})
         except Exception as e:
-            results.append({'evidence': {}, 'verified': False, 'error': str(e)})
+            results.append({'evidence': {}, 'verified': False, 'error': "operation_failed"})
 
     verified_count = sum(1 for r in results if r.get('verified'))
     overall = 'unverified'
@@ -6082,7 +6082,7 @@ def _start_investigate_worker(app, interval_seconds: int = 3):
                     except Exception as e:
                         try:
                             rec['status'] = 'failed'
-                            rec['error'] = str(e)
+                            rec['error'] = "operation_failed"
                         except Exception as _exc:
                             logger.debug('silent_swallow at %s:%d: %s', __file__, 7748, _exc)
                 await asyncio.sleep(interval_seconds)

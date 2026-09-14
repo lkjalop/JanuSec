@@ -1763,9 +1763,9 @@ async def csv_deep_analyze_debug_error():
     try:
         if _deep_pipeline_import_error is None:
             return {'ok': True, 'error': None}
-        return {'ok': False, 'error': str(_deep_pipeline_import_error)}
+        return {'ok': False, 'error': 'pipeline_import_failed'}
     except Exception as e:
-        return {'ok': False, 'error': f'unexpected:{e}'}
+        return {'ok': False, 'error': 'unexpected_error'}
 
 
 @router.post('/tier2_investigate')
@@ -1784,7 +1784,7 @@ async def csv_tier2_investigate(payload: dict, tenant_id: str | None = Header(No
     try:
         from src.analysis.auto_llm import LLMAssessmentClient, detect_domain_with_confidence
     except Exception as exc:  # pragma: no cover
-        raise HTTPException(status_code=500, detail=f'client_unavailable:{exc}') from exc
+        raise HTTPException(status_code=500, detail='client_unavailable') from exc
 
     domain, confidence = detect_domain_with_confidence(row)
     gate_threshold = float(os.getenv('T2_DOMAIN_CONF_THRESHOLD', '0.45'))
@@ -1806,13 +1806,13 @@ async def csv_tier2_investigate(payload: dict, tenant_id: str | None = Header(No
     except Exception as exc:
         import traceback
         return {
-            'tier2_summary': f'Error generating Tier 2 summary: {exc}',
+            'tier2_summary': 'Tier 2 summary generation failed',
             'tier2_meta': {},
             'cost': 0.0,
             'model': model or os.getenv('T2_MODEL') or os.getenv('T1_MODEL') or 'unknown',
             'status': 'error',
-            'error': str(exc),
-            'traceback': traceback.format_exc(),
+            'error': "operation_failed",
+            'traceback': None,
         }
 
     summary_text = ''

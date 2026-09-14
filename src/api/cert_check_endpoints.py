@@ -68,7 +68,7 @@ async def pending_batches():
             pass
         return {'pending': 0}
     except Exception as e:
-        return {'pending': 0, 'error': str(e)}
+        return {'pending': 0, 'error': "operation_failed"}
 
 @router.get('/{fingerprint}')  # type: ignore[misc]
 async def get_cert_status(fingerprint: str):
