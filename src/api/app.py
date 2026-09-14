@@ -2608,7 +2608,7 @@ def _register_background_schedulers():
 
             async def _start_ipfix_listener():
                 try:
-                    host = os.getenv('IPFIX_LISTENER_HOST', '0.0.0.0')
+                    host = os.getenv('IPFIX_LISTENER_HOST', '127.0.0.1')
                     port = int(os.getenv('IPFIX_LISTENER_PORT', '4739') or 4739)
                     batch_size = int(os.getenv('IPFIX_BATCH_SIZE', '50') or 50)
                     batch_timeout = float(os.getenv('IPFIX_BATCH_TIMEOUT', '1.0') or 1.0)

@@ -100,7 +100,7 @@ class IPFIXProtocol(asyncio.DatagramProtocol):
             logger.exception('failed enqueuing datagram')
 
 
-async def start_ipfix_udp_listener(host: str = '0.0.0.0', port: int = 4739, batch_size: int = 50, batch_timeout: float = 1.0) -> tuple:
+async def start_ipfix_udp_listener(host: str = '127.0.0.1', port: int = 4739, batch_size: int = 50, batch_timeout: float = 1.0) -> tuple:
     """Start UDP listener and processing task. Returns (transport, protocol, task, queue).
 
     The returned `task` should be cancelled to stop processing; the transport
@@ -129,7 +129,7 @@ def start_listener_from_env() -> tuple | None:
     if not enabled:
         logger.info('IPFIX listener disabled by env')
         return None
-    host = os.environ.get('IPFIX_LISTENER_HOST', '0.0.0.0')
+    host = os.environ.get('IPFIX_LISTENER_HOST', '127.0.0.1')
     port = int(os.environ.get('IPFIX_LISTENER_PORT', '4739'))
     batch_size = int(os.environ.get('IPFIX_BATCH_SIZE', '50'))
     batch_timeout = float(os.environ.get('IPFIX_BATCH_TIMEOUT', '1.0'))

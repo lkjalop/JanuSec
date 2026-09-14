@@ -5,6 +5,8 @@ flow records. In production prefer a dedicated IPFIX collector; this adapter
 provides a convenient local alternative.
 """
 from __future__ import annotations
+from src.security.storage_paths import storage_path
+import hashlib
 
 from typing import Iterable, Dict
 import importlib
@@ -22,7 +24,7 @@ TEMPLATE_STORE.mkdir(parents=True, exist_ok=True)
 def _exporter_key(exporter: dict) -> str:
     ip = exporter.get('ip')
     port = exporter.get('port')
-    return f"{ip}_{port}"
+    return hashlib.sha256(json.dumps([ip, port], separators=(",", ":")).encode()).hexdigest()
 
 
 def merge_templates_for_exporter(exporter: dict, templates) -> dict:
@@ -34,7 +36,7 @@ def merge_templates_for_exporter(exporter: dict, templates) -> dict:
     if not exporter or not isinstance(exporter, dict):
         return {}
     key = _exporter_key(exporter)
-    path = TEMPLATE_STORE / f"{key}.json"
+    path = Path(storage_path(TEMPLATE_STORE, f"{key}.json"))
     now = time.time()
     existing = {'templates': {}}
     if path.exists():
@@ -83,7 +85,7 @@ def list_templates(exporter: dict | None = None):
     """List template registries. If exporter provided, return that registry."""
     if exporter:
         key = _exporter_key(exporter)
-        path = TEMPLATE_STORE / f"{key}.json"
+        path = Path(storage_path(TEMPLATE_STORE, f"{key}.json"))
         if path.exists():
             try:
                 return json.loads(path.read_text())

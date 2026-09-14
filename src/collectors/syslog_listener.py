@@ -127,7 +127,7 @@ class SyslogListener:
         bindings: List[ListenerBinding] = []
         for entry in listeners:
             protocol = (entry.get('protocol') or 'udp').lower()
-            host = entry.get('host') or '0.0.0.0'
+            host = entry.get('host') or '127.0.0.1'
             port = int(entry.get('port') or (6514 if protocol.endswith('tls') else 514))
             ctx = None
             if protocol == 'tcp_tls':
@@ -146,7 +146,7 @@ class SyslogListener:
                     protocol = 'tcp'
             bindings.append(ListenerBinding(protocol=protocol, host=host, port=port, ssl_context=ctx))
         if not bindings:
-            bindings.append(ListenerBinding(protocol='udp', host='0.0.0.0', port=514, ssl_context=None))
+            bindings.append(ListenerBinding(protocol='udp', host='127.0.0.1', port=514, ssl_context=None))
         return bindings
 
     async def start(self) -> bool:

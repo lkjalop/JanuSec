@@ -20,6 +20,13 @@ def test_ipfix_adapter_with_mock_pyfixbuf(monkeypatch):
             }
         ]
 
+    class FakeCollector:
+        def __init__(self): self.messages=[]
+        def addMsg(self, message): self.messages.append(message)
+        def __iter__(self):
+            assert self.messages == [b'fake-ipfix-bytes']
+            return iter(fake_decode(self.messages[0]))
+    fake.Collector = FakeCollector
     fake.decode = fake_decode
     # inject into sys.modules
     monkeypatch.setitem(sys.modules, 'pyfixbuf', fake)

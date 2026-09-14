@@ -16,11 +16,11 @@ CONFIG_PATH = Path(os.getenv('NETWORK_SOURCES_PATH', 'artifacts/config/syslog_so
 def _default_config() -> Dict[str, Any]:
     return {
         'syslog': {
-            'listeners': [{'host': '0.0.0.0', 'port': 514, 'protocol': 'udp'}],
+            'listeners': [{'host': '127.0.0.1', 'port': 514, 'protocol': 'udp'}],
             'sources': [{'tenant': 'default', 'cidrs': ['0.0.0.0/0'], 'connector_id': 'syslog_udp', 'eps_limit': 200, 'burst': 400}],
         },
         'netflow': {
-            'listeners': [{'host': '0.0.0.0', 'port': 2055}],
+            'listeners': [{'host': '127.0.0.1', 'port': 2055}],
             'sources': [{'tenant': 'default', 'cidrs': ['0.0.0.0/0'], 'connector_id': 'netflow', 'eps_limit': 1000, 'burst': 2000}],
         },
     }

@@ -84,7 +84,7 @@ class NetFlowListener:
         self.event_callback = event_callback
         self.health_callback = health_callback
         self._bucket_registry = BucketRegistry()
-        self._listeners = cfg.get('listeners') or [{'host': '0.0.0.0', 'port': 2055}]
+        self._listeners = cfg.get('listeners') or [{'host': '127.0.0.1', 'port': 2055}]
         self._transport: Optional[asyncio.BaseTransport] = None
         self._started = False
 
@@ -94,7 +94,7 @@ class NetFlowListener:
         loop = asyncio.get_running_loop()
         try:
             bind = self._listeners[0]
-            host = bind.get('host') or '0.0.0.0'
+            host = bind.get('host') or '127.0.0.1'
             port = int(bind.get('port') or 2055)
             transport, _ = await loop.create_datagram_endpoint(lambda: NetFlowDatagramProtocol(self), local_addr=(host, port))
             self._transport = transport

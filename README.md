@@ -105,3 +105,8 @@ set `JANUSEC_OFFLINE_ATTACHMENT_READS=1`; do not enable those settings on a shar
 API deployment. Connector HTTP transports reject non-HTTP schemes and cross-host
 redirects, disable environment proxies, and apply the public-address policy.
 Internal dependency health probes use explicitly configured endpoints.
+
+Optional syslog, NetFlow and IPFIX listeners default to loopback. Operators who
+need remote collection must explicitly configure the intended listener interface
+(`SYSLOG_LISTENER_HOST`, `IPFIX_LISTENER_HOST`, or the listener configuration),
+network access and transport authentication for that deployment.

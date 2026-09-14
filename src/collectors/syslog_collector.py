@@ -1,3 +1,4 @@
+import os
 import asyncio
 import logging
 try:
@@ -114,15 +115,15 @@ class SyslogCollector:
         if device_map_path:
             self.load_device_map(device_map_path)
         # UDP
-        listen = self.loop.create_datagram_endpoint(lambda: _UDPProtocol(self), local_addr=("0.0.0.0", udp_port))
+        listen = self.loop.create_datagram_endpoint(lambda: _UDPProtocol(self), local_addr=(os.getenv("SYSLOG_LISTENER_HOST", "127.0.0.1"), udp_port))
         self._udp_transport, _ = await listen
         logger.info("SyslogCollector listening UDP on %d", udp_port)
 
         # TCP
         if tls and tls_context:
-            server = await asyncio.start_server(self._handle_tcp, host="0.0.0.0", port=tcp_port, ssl=tls_context)
+            server = await asyncio.start_server(self._handle_tcp, host=os.getenv("SYSLOG_LISTENER_HOST", "127.0.0.1"), port=tcp_port, ssl=tls_context)
         else:
-            server = await asyncio.start_server(self._handle_tcp, host="0.0.0.0", port=tcp_port)
+            server = await asyncio.start_server(self._handle_tcp, host=os.getenv("SYSLOG_LISTENER_HOST", "127.0.0.1"), port=tcp_port)
         self._tcp_server = server
         logger.info("SyslogCollector listening TCP on %d (tls=%s)", tcp_port, bool(tls))
 
