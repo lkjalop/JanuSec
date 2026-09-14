@@ -47,3 +47,16 @@ def test_resolved_symlink_escape_is_denied(tmp_path):
         return
     with pytest.raises(ValueError):
         storage_path(root, 'linked')
+
+
+def test_report_store_rejects_external_persist_and_index_paths(tmp_path):
+    from src.core.storage.report_store import FileAdapter
+    root = tmp_path / 'reports'
+    store = FileAdapter(str(root))
+    outside = tmp_path / 'private.json'
+    outside.write_text('{"private": true}')
+    with pytest.raises(ValueError):
+        store.save('assessment-1', {'replacement': True}, persist_path=str(outside))
+    (root / 'index' / 'assessment-1.path').write_text(str(outside))
+    assert store.get('assessment-1') is None
+    assert outside.read_text() == '{"private": true}'

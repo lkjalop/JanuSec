@@ -21,3 +21,12 @@ def storage_path(root, filename: str) -> str:
     if os.path.commonpath([base, candidate]) != base:
         raise ValueError("Storage path escapes configured directory")
     return candidate
+
+
+def confined_path(root, path) -> str:
+    """Check an existing/indexed path against its operator-owned storage root."""
+    base = os.path.realpath(root)
+    candidate = os.path.realpath(path)
+    if os.path.commonpath([base, candidate]) != base or candidate == base:
+        raise ValueError("Storage path escapes configured directory")
+    return candidate

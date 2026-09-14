@@ -15,6 +15,7 @@ import os
 import threading
 import time
 import uuid
+from src.security.storage_paths import storage_path
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -81,7 +82,7 @@ def save_snapshot(
         available_formats=available_formats or ['json', 'html', 'csv'],
     )
     blob = { 'meta': asdict(meta), 'payload': payload }
-    p = _BASE / f"{rid}.json"
+    p = Path(storage_path(_BASE, f"{rid}.json"))
     with _LOCK:
         if not p.exists():
             try:
@@ -126,7 +127,7 @@ def list_snapshots(tenant_id: str | None = None, limit: int = 50) -> list[dict]:
 
 def _load_snapshot_blob(report_id: str) -> dict | None:
     _ensure_dir()
-    p = _BASE / f"{report_id}.json"
+    p = Path(storage_path(_BASE, f"{report_id}.json"))
     if not p.exists():
         return None
     try:

@@ -8,6 +8,7 @@ from fastapi import APIRouter, Request, Query, HTTPException, Depends
 from fastapi.responses import StreamingResponse, HTMLResponse, JSONResponse
 from src.reporting.comprehensive_report_generator import build_report_html
 from .tenant_helpers import resolve_tenant_id
+from src.security.storage_paths import storage_id, storage_path
 from src.security.auth import require_api_key
 
 from fastapi import APIRouter, Request, Query, HTTPException
@@ -417,6 +418,16 @@ def _build_html_payload(report: dict[str, Any], session_ids: list[str], recipien
     return payload
 
 
+def _report_owned_by(data: dict, tenant_id: str | None) -> bool:
+    if not tenant_id or not isinstance(data, dict):
+        return False
+    owners = [data[k] for k in ('org', 'tenant_id', 'tenant') if data.get(k) is not None]
+    meta = data.get('meta')
+    if isinstance(meta, dict):
+        owners.extend(meta[k] for k in ('tenant_id', 'tenant', 'org') if meta.get(k) is not None)
+    return bool(owners) and all(owner == tenant_id for owner in owners)
+
+
 def _load_persisted_assessment_report_data(assessment_id: str | None, tenant_id: str | None = None) -> tuple[str | None, dict]:
     """Read only snapshots with explicit, matching tenant ownership.
 
@@ -428,10 +439,7 @@ def _load_persisted_assessment_report_data(assessment_id: str | None, tenant_id:
     from src.api.deep_analyze.persistence import REPORT_STORE
 
     def owned(data):
-        if not isinstance(data, dict) or not tenant_id:
-            return False
-        owners = [data[k] for k in ("org", "tenant_id") if data.get(k) is not None]
-        return bool(owners) and all(owner == tenant_id for owner in owners)
+        return _report_owned_by(data, tenant_id)
 
     if assessment_id:
         cached = REPORT_STORE.get(assessment_id)
@@ -993,32 +1001,19 @@ async def generate_pdf_from_html_endpoint(req: Request):
 @router.post('/api/v1/report/generate')
 async def generate_report(req: Request, format: str = Query('html'), include_model: bool = Query(False), include_scenarios: bool = Query(False), persist: bool = Query(True)):
     payload = await req.json()
-    try:
-        resolve_tenant_id(req, payload.get('tenant_id') or payload.get('tenant'))
-    except Exception:
-        raise
+    tenant_id = resolve_tenant_id(req, payload.get('tenant_id') or payload.get('tenant'))
+    if not tenant_id:
+        raise HTTPException(status_code=400, detail='tenant_id_required')
+    payload['tenant_id'] = tenant_id
 
     # If assessment_id is supplied but rows/summary are absent, hydrate from the store.
     # This lets the frontend call /report/generate with just {"assessment_id": "..."} and
     # get a real data-backed report rather than a static template.
     _gen_aid = payload.get('assessment_id') or payload.get('session_id')
     if _gen_aid and not (payload.get('rows') or payload.get('summary')):
-        _gen_data: dict = {}
-        try:
-            from src.api.breach_endpoints import REPORT_STORE  # type: ignore
-            _gen_data = REPORT_STORE.get(_gen_aid) or {}
-        except Exception:
-            pass
-        if not _gen_data:
-            try:
-                from src.core.ingest import assessment_store  # type: ignore
-                _gen_data = assessment_store.get(_gen_aid) or {}
-            except Exception:
-                pass
-        if not _gen_data:
-            _, _gen_data = _load_persisted_assessment_report_data(
-                _gen_aid, payload.get('tenant_id') or payload.get('tenant')
-            )
+        _, _gen_data = _load_persisted_assessment_report_data(_gen_aid, tenant_id)
+        if not _report_owned_by(_gen_data, tenant_id):
+            raise HTTPException(status_code=404, detail='assessment_not_found')
         if _gen_data:
             payload.setdefault('rows', (
                 _gen_data.get('normalized_rows') or
@@ -1258,6 +1253,12 @@ def _load_snapshot_payload(
     elif tenant_hint:
         tenant_id = tenant_hint
 
+    try:
+        storage_id(report_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail='report_not_found') from None
+    if not tenant_id:
+        raise HTTPException(status_code=404, detail='report_not_found')
     meta = None
     payload = None
     if load_snapshot_meta is not None:
@@ -1266,7 +1267,7 @@ def _load_snapshot_payload(
         payload = load_snapshot(report_id)
 
     if not payload:
-        p = _SNAP_BASE / f"{report_id}.json"
+        p = Path(storage_path(_SNAP_BASE, f"{report_id}.json"))
         if p.exists():
             try:
                 data = json.loads(p.read_text(encoding='utf-8'))
@@ -1278,8 +1279,10 @@ def _load_snapshot_payload(
     if not payload:
         raise HTTPException(status_code=404, detail='report_not_found')
 
-    if tenant_id and meta and meta.get('tenant_id') and meta.get('tenant_id') != tenant_id:
-        raise HTTPException(status_code=403, detail='tenant_mismatch')
+    ownership = dict(payload) if isinstance(payload, dict) else {}
+    ownership['meta'] = meta or ownership.get('meta') or {}
+    if not _report_owned_by(ownership, tenant_id):
+        raise HTTPException(status_code=404, detail='report_not_found')
 
     return payload, tenant_id
 
@@ -1358,9 +1361,11 @@ async def reports_attention(request: Request, limit: int = Query(50)):
                 import json
                 data = json.loads(p.read_text(encoding='utf-8'))
                 meta = data.get('meta') if isinstance(data.get('meta'), dict) else {}
-                if tenant_id and meta.get('tenant_id') and meta.get('tenant_id') != tenant_id:
-                    continue
                 payload = data.get('payload')
+                ownership = dict(payload) if isinstance(payload, dict) else {}
+                ownership['meta'] = meta
+                if not _report_owned_by(ownership, tenant_id):
+                    continue
                 if payload:
                     snaps.append(payload)
             except Exception:

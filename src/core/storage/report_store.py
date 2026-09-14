@@ -3,6 +3,7 @@ import os
 import json
 import time
 import logging
+from src.security.storage_paths import storage_path, confined_path
 from typing import Any, Dict, Iterable, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -48,8 +49,7 @@ class FileAdapter(BaseAdapter):
         os.makedirs(self.index_dir, exist_ok=True)
 
     def _path_for(self, assessment_id: str) -> str:
-        safe = str(assessment_id)
-        return os.path.join(self.base, f"{safe}.json")
+        return storage_path(self.base, f"{assessment_id}.json")
 
     def get(self, assessment_id: str) -> Optional[Dict[str, Any]]:
         path = self._path_for(assessment_id)
@@ -61,11 +61,11 @@ class FileAdapter(BaseAdapter):
                 logger.exception('Failed reading assessment file %s', path)
                 return None
         # try index lookup
-        idx = os.path.join(self.index_dir, f"{assessment_id}.path")
+        idx = storage_path(self.index_dir, f"{assessment_id}.path")
         if os.path.exists(idx):
             try:
                 with open(idx, 'r', encoding='utf-8') as fh:
-                    p = fh.read().strip()
+                    p = confined_path(self.base, fh.read().strip())
                 if p and os.path.exists(p):
                     with open(p, 'r', encoding='utf-8') as fh:
                         return json.load(fh)
@@ -74,14 +74,14 @@ class FileAdapter(BaseAdapter):
         return None
 
     def save(self, assessment_id: str, payload: Dict[str, Any], persist_path: Optional[str] = None) -> None:
-        path = persist_path or self._path_for(assessment_id)
+        path = confined_path(self.base, persist_path) if persist_path else self._path_for(assessment_id)
         tmp = path + '.tmp'
         try:
             with open(tmp, 'w', encoding='utf-8') as fh:
                 json.dump(payload, fh, default=str)
             os.replace(tmp, path)
             # write index
-            idx = os.path.join(self.index_dir, f"{assessment_id}.path")
+            idx = storage_path(self.index_dir, f"{assessment_id}.path")
             ttmp = idx + '.tmp'
             with open(ttmp, 'w', encoding='utf-8') as fh:
                 fh.write(path)
@@ -103,7 +103,7 @@ class FileAdapter(BaseAdapter):
         except Exception:
             logger.exception('Failed deleting %s', path)
         try:
-            idx = os.path.join(self.index_dir, f"{assessment_id}.path")
+            idx = storage_path(self.index_dir, f"{assessment_id}.path")
             if os.path.exists(idx):
                 os.remove(idx)
         except Exception:
