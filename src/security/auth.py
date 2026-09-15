@@ -110,7 +110,8 @@ def _load_api_keys() -> dict[str, dict]:
                     # Optional per-tenant restriction: {"key": "...", "scopes": ["*"], "tenant_id": "acme"}
                     tenant_bind = entry.get('tenant_id') or entry.get('tenant') or None
                     if k:
-                        data[k] = {'scopes': sc, 'tenant_id': tenant_bind}
+                        data[k] = {'scopes': sc, 'tenant_id': tenant_bind,
+                                   'subject': entry.get('subject'), 'expires_at': entry.get('expires_at')}
             except Exception:
                 data = {}
         _API_KEYS = data
@@ -162,6 +163,14 @@ async def auth_dependency(
     api_keys = _load_api_keys()
     if x_api_key and x_api_key in api_keys:
         key_entry = api_keys[x_api_key]
+        expires_at = key_entry.get('expires_at')
+        if expires_at is not None:
+            try:
+                valid_expiry = float(expires_at) > time.time()
+            except (ValueError, TypeError):
+                valid_expiry = False
+            if not valid_expiry:
+                raise HTTPException(status_code=401, detail='expired_api_key')
         scopes = key_entry['scopes'] if isinstance(key_entry, dict) else key_entry
         key_tenant = key_entry.get('tenant_id') if isinstance(key_entry, dict) else None
         if key_tenant is not None:
@@ -171,7 +180,7 @@ async def auth_dependency(
         if not _match_scopes(scopes, required_scopes):
             raise HTTPException(status_code=403, detail='insufficient_scope')
         return AuthContext(
-            subject=f'api_key:{x_api_key[:4]}',
+            subject=key_entry.get('subject') or 'api_key',
             scopes=scopes,
             tenant_id=key_tenant,
             credential_type='api_key',

@@ -12,9 +12,12 @@ def main():
     parser.add_argument('--baseline', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--port', type=int, default=8443)
+    parser.add_argument('--credential', type=Path, help='Private named credential file instead of bootstrap access')
     args = parser.parse_args()
     values = json.loads((args.state / 'secrets.json').read_text(encoding='utf-8'))
     entry = json.loads(values['API_KEYS_JSON'])[0]
+    if args.credential:
+        entry = json.loads(args.credential.read_text(encoding='utf-8'))
     baseline = json.loads(args.baseline.read_text(encoding='utf-8'))
     base = f'https://127.0.0.1:{args.port}'
     result = {'errors': [], 'http_errors': [], 'tabs': [], 'mocked_routes': False,

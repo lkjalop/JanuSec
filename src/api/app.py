@@ -8526,11 +8526,8 @@ try:
         ('POST', '/api/v1/assessments/{assessment_id}/clusters/{cluster_id}/enrich'),
         ('POST', '/api/v1/assessments/{assessment_id}/investigate/build'),
     ]
-    _registered = {
-        (m, r.path)
-        for r in app.router.routes
-        for m in getattr(r, 'methods', {'GET'})
-    }
+    from src.api.router_registry import effective_http_routes
+    _registered = set(effective_http_routes(app.router.routes))
     _missing_routes = [(m, p) for (m, p) in _REQUIRED_ROUTES if (m, p) not in _registered]
     if _missing_routes:
         logger.error(
@@ -8545,7 +8542,7 @@ try:
         logger.info('ROUTE AUDIT OK — all %d critical routes registered.', len(_REQUIRED_ROUTES))
 except Exception:
     logger.exception('ROUTE AUDIT: audit itself threw')
-    _missing_routes = []
+    _missing_routes = [('AUDIT', 'route_inventory_unavailable')]
 
 # Strict-wiring gate (JANUSEC_STRICT_WIRING=1): fail fast in CI when a refactor
 # silently drops a critical route, instead of letting it become a runtime 404. Raised

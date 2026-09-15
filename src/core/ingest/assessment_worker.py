@@ -2714,7 +2714,7 @@ async def run_assessment_pipeline(
 
         _progress("reasoning", 78, "Building persona dispatch payloads")
         try:
-            _enrich_and_dispatch_personas(assessment, clusters, filtered_rows, org)
+            await asyncio.to_thread(_enrich_and_dispatch_personas, assessment, clusters, filtered_rows, org)
         except Exception as exc:
             logger.warning("persona dispatch stage failed for %s: %s", assessment_id, exc, exc_info=True)
 
@@ -2793,6 +2793,10 @@ async def run_assessment_pipeline(
                     try:
                         _hg.ingest_event(_hopgraph_event_from_row(_row_hg), source=f"assessment:{assessment_id}")
                         _hg_count += 1
+                        if _hg_count % 25 == 0:
+                            # Large synchronous graph batches must let API progress
+                            # requests and admission deadlines run between batches.
+                            await asyncio.sleep(0)
                     except Exception:
                         continue
                 _node_count = len(getattr(_hg, "nodes", {}) or {})

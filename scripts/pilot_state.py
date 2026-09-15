@@ -14,6 +14,7 @@ import os
 from pathlib import Path
 import secrets
 import sys
+import time
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -42,7 +43,9 @@ def initialize(state: Path, key_file: Path, tenant: str):
     key_file.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     private_write(key_file, secrets.token_bytes(32))
     values = {
-        'API_KEYS_JSON': json.dumps([{'key': secrets.token_urlsafe(48), 'tenant_id': tenant, 'scopes': ['*']}]),
+        'API_KEYS_JSON': json.dumps([{'key': secrets.token_urlsafe(48), 'tenant_id': tenant,
+                                    'subject': 'bootstrap-administrator', 'expires_at': int(time.time()) + 7 * 86400,
+                                    'scopes': ['*']}]),
         'JWT_SECRET': secrets.token_urlsafe(48), 'JWT_ISSUER': 'janusec-isolated-pilot',
         'JWT_AUDIENCE': 'janusec-isolated-pilot',
         'INTEGRATIONS_ENCRYPTION_KEY': Fernet.generate_key().decode('ascii'),
@@ -90,6 +93,7 @@ def configure(state: Path):
         'TENANT_DEFAULT': config['tenant_id'], 'DEFAULT_TENANT': config['tenant_id'],
         'LLM_PROVIDER': 'deterministic', 'LLM_SUMMARIES_ENABLED': '0',
         'LLM_ALLOW_LOCAL_DETERMINISTIC': '1', 'DISABLE_BACKGROUND_TASKS': '1',
+        'TEMPORAL_RAG_EMBED': 'off',
         'SKIP_ISMS_SCAN': '1', 'DISABLE_METRICS_AT_IMPORT': '1', 'DB_DISABLE_NETWORK_CONNECT': '1',
         'SESSION_CLEAN_INTERVAL_SECONDS': '0', 'CONNECTOR_AUTOPOLL_ENABLED': '0',
         'JANUSEC_INGEST_QUEUE_MAX': '2', 'JANUSEC_INGEST_JOB_TIMEOUT_S': '600',
@@ -98,6 +102,9 @@ def configure(state: Path):
         'ALLOWED_ORIGINS': 'https://127.0.0.1', 'LOG_LEVEL': 'WARNING',
     })
     paths = {
+        'PLAYBOOKS_DIR': 'data/playbooks', 'CLUSTER_ENRICH_DIR': 'data/cluster_enrich',
+        'ARTIFACTS_DIR': 'artifacts', 'ISMS_DB_PATH': 'data/isms_index.db',
+        'DISPATCH_AUDIT_DB': 'data/dispatch_audit.db', 'TENANT_QUOTA_DB': 'data/tenant_quotas.db',
         'DB_FALLBACK_PATH': 'data/platform.sqlite', 'JANUSEC_INGEST_DB': 'data/ingest.duckdb',
         'JANUSEC_RAW_DIR': 'data/raw', 'SESSION_PERSIST_DIR': 'data/sessions',
         'ASSESSMENTS_DIR': 'data/sessions', 'EWMA_HISTORY_PATH': 'data/ewma.json',
@@ -122,6 +129,8 @@ def main():
     parser.add_argument('--archive', type=Path)
     parser.add_argument('--tenant', default='pilot-customer')
     parser.add_argument('--port', type=int, default=8443)
+    parser.add_argument('--container-listen', action='store_true',
+                        help='Listen inside a container; publish its port to host loopback only')
     args = parser.parse_args()
     state = args.state.resolve()
     key_file = args.backup_key.resolve() if args.backup_key else None
@@ -139,10 +148,18 @@ def main():
     else:
         with state_lock(state):
             configure(state)
+            if args.container_listen and not Path('/.dockerenv').exists():
+                raise ValueError('container_listen_requires_a_container')
+            os.environ['ALLOWED_ORIGINS'] = f'https://127.0.0.1:{args.port}'
             import uvicorn
-            uvicorn.run('src.api.server:app', host='127.0.0.1', port=args.port,
+            from src.api.server import app
+            from src.security.pilot_boundary import PilotBoundary
+            from src.security.pilot_tls import tls_paths
+            cert, tls_key = tls_paths(state)
+            uvicorn.run(PilotBoundary(app, state),
+                        host='0.0.0.0' if args.container_listen else '127.0.0.1', port=args.port,
                         workers=1, proxy_headers=False, access_log=False, log_level='warning',
-                        ssl_certfile=str(state / 'tls-cert.pem'), ssl_keyfile=str(state / 'tls-key.pem'))
+                        ssl_certfile=str(cert), ssl_keyfile=str(tls_key))
         return
     print(json.dumps(result))
 

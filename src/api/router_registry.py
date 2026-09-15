@@ -8,6 +8,20 @@ from typing import Any
 from fastapi import FastAPI
 
 
+def effective_http_routes(routes):
+    """Expose prefixed HTTP routes on both flat and lazy-inclusion FastAPI versions."""
+    for route in routes:
+        candidates = getattr(route, 'effective_candidates', None)
+        if callable(candidates):
+            yield from effective_http_routes(candidates())
+            continue
+        effective = getattr(route, 'starlette_route', None) or route
+        path = getattr(effective, 'path', None)
+        for method in getattr(effective, 'methods', None) or ():
+            if path:
+                yield method, path
+
+
 def detect_route_collisions(app: FastAPI) -> dict[tuple[str, str], list[str]]:
     """Return every (method, path) registered on *app* more than once.
 

@@ -1,9 +1,11 @@
+# Unqualified deployment template. Select a verified release image and configure
+# customer secrets/storage before enabling ingress. See docs/PILOT_ACCESS_AND_RESOURCE_BOUNDARY.md.
 image:
   repository: ghcr.io/lkjalop/janusec-api
-  tag: "v0.1.0"
+  tag: "REPLACE_WITH_VERIFIED_RELEASE_TAG"
   pullPolicy: IfNotPresent
 
-replicaCount: 2
+replicaCount: 1
 
 service:
   type: ClusterIP
@@ -11,14 +13,14 @@ service:
 
 resources:
   requests:
-    cpu: 250m
-    memory: 512Mi
-  limits:
     cpu: 1000m
-    memory: 1Gi
+    memory: 4Gi
+  limits:
+    cpu: 2000m
+    memory: 4Gi
 
 ingress:
-  enabled: true
+  enabled: false
   className: nginx
   host: REPLACE_YOUR_HOSTNAME
   tls:
@@ -26,6 +28,14 @@ ingress:
     secretName: janusec-tls
 
 env:
+  - name: ENV
+    value: "production"
+  - name: APP_ENV
+    value: "production"
+  - name: JANUSEC_RUNTIME_PROFILE
+    value: "production"
+  - name: STRICT_API_KEY_ENFORCEMENT
+    value: "1"
   - name: ACCESS_LOG_SAMPLE_RATE
     value: "0.1"
   - name: EVENT_QUEUE_MAX

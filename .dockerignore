@@ -36,3 +36,14 @@ node_modules/
 
 # Misc
 .DS_Store
+
+# User evidence and runtime credentials must never enter build context.
+dump/
+tmp/
+tmp_*/
+data/
+src/data/
+.env.*
+*.key
+secrets.json
+tls-key.pem

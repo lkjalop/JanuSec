@@ -44,6 +44,12 @@ Rewriting branch history does not remove those cached views or others' clones.
 
 ## Product work after the preview
 
+The September 15 continuation adds named expiring pilot credentials, revocation,
+pre-parser admission limits, atomic certificate installation and a bounded non-root
+container profile. See [the operator guide](PILOT_ACCESS_AND_RESOURCE_BOUNDARY.md).
+This reduces deployment gaps; it does not close retained-copy removal, customer
+certificate trust, a hard storage quota, off-host restoration or live-source proof.
+
 The next customer proof of concept is deliberately narrow: one tenant, approved
 read-only collection, a case with complete source references, and a reviewed
 next action. The full Meridian/Santos/Vesper replay and browser verification are

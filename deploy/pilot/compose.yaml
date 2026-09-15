@@ -1,0 +1,27 @@
+services:
+  pilot:
+    build:
+      context: ../..
+      dockerfile: deploy/pilot/Dockerfile
+    image: janusec-isolated:qualification
+    ports:
+      - "127.0.0.1:8445:8443"
+    volumes:
+      - type: bind
+        source: ${JANUSEC_PILOT_STATE_DIR:?Set an absolute private runtime directory}
+        target: /state/runtime
+    mem_limit: 4g
+    memswap_limit: 4g
+    cpus: 2
+    pids_limit: 128
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=536870912
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: "no"

@@ -32,6 +32,12 @@ establish a control failure, a legal obligation, or a compliance opinion.
 
 ## Local development
 
+Named viewer/analyst credentials, offline rotation, certificate installation and
+the bounded container qualification profile are documented in
+[pilot access and resource boundaries](docs/PILOT_ACCESS_AND_RESOURCE_BOUNDARY.md).
+These controls apply to the pilot launcher; customer TLS trust, hard volume quotas,
+off-host recovery and a live connector still require separate proof.
+
 Use Python 3.11. Create a virtual environment and install the repository dependencies:
 
 ```powershell

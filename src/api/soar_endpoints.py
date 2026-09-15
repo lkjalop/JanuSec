@@ -32,7 +32,7 @@ except Exception:
 
 router = APIRouter(tags=["SOAR"])
 
-PLAYBOOKS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "playbooks")
+PLAYBOOKS_DIR = os.getenv('PLAYBOOKS_DIR') or os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "playbooks")
 os.makedirs(PLAYBOOKS_DIR, exist_ok=True)
 
 

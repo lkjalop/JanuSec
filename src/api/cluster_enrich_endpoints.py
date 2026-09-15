@@ -28,6 +28,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -71,7 +72,7 @@ def _try_warmup_ollama(overrides: dict | None = None) -> None:
         pass
 
 # ── Persistent cache ─────────────────────────────────────────────────────────
-_BASE = Path(__file__).resolve().parents[2] / 'src' / 'data' / 'cluster_enrich'
+_BASE = Path(os.environ['CLUSTER_ENRICH_DIR']) if os.getenv('CLUSTER_ENRICH_DIR') else Path(__file__).resolve().parents[2] / 'src' / 'data' / 'cluster_enrich'
 
 
 def _safe(s: str) -> str:
