@@ -1746,7 +1746,7 @@ async def run_assessment_pipeline(
             from src.core.ingest.threat_case_builder import build_threat_cases
 
             raw_clusters = list(assessment.get("correlation_clusters") or clusters or [])
-            layers = build_threat_cases(raw_clusters, filtered_rows)
+            layers = await asyncio.to_thread(build_threat_cases, raw_clusters, filtered_rows)
             assessment["raw_correlation_clusters"] = layers.get("raw_correlation_clusters") or raw_clusters
             assessment["analysis_clusters"] = layers.get("analysis_clusters") or raw_clusters
             assessment["threat_cases"] = layers.get("threat_cases") or []
@@ -1779,6 +1779,7 @@ async def run_assessment_pipeline(
                         pass
             _dread_ok = 0
             for _cl in clusters:
+                await asyncio.sleep(0)  # Keep API progress responsive between cluster enrichments.
                 if not _is_breach_cluster(_cl):
                     continue
                 _cl_rows = []
@@ -1835,6 +1836,7 @@ async def run_assessment_pipeline(
                         pass
             _ei_ok = 0
             for _cl in clusters:
+                await asyncio.sleep(0)  # Keep API progress responsive between cluster enrichments.
                 if not _is_breach_cluster(_cl):
                     continue
                 _cl_rows_ei = []
@@ -2075,6 +2077,7 @@ async def run_assessment_pipeline(
 
             _fx_count = 0
             for _cl in clusters:
+                await asyncio.sleep(0)  # Keep API progress responsive between cluster enrichments.
                 _cl_factor_set: set[str] = set(_cl.get("factor_tags") or [])
                 _campaign_factor_set: set[str] = set(_cl.get("_campaign_factor_tags") or [])
                 for _ref in _cl.get("row_refs") or []:
@@ -2158,6 +2161,7 @@ async def run_assessment_pipeline(
             _ep_count = 0
             _EP_CAP = 20
             for _cl in clusters:
+                await asyncio.sleep(0)  # Keep API progress responsive between cluster enrichments.
                 if _cl.get("evidence_preview"):
                     continue  # already populated upstream
                 # Collect all matching rows first, then rank
@@ -2370,7 +2374,7 @@ async def run_assessment_pipeline(
             try:
                 from src.core.ingest.threat_case_builder import build_threat_cases as _rebuild_threat_cases
 
-                _refreshed = _rebuild_threat_cases(clusters, filtered_rows)
+                _refreshed = await asyncio.to_thread(_rebuild_threat_cases, clusters, filtered_rows)
                 assessment["analysis_clusters"] = _refreshed.get("analysis_clusters") or clusters
                 assessment["threat_cases"] = _refreshed.get("threat_cases") or []
             except Exception as _presentation_exc:
@@ -2602,7 +2606,7 @@ async def run_assessment_pipeline(
             from src.core.evidence_contract.case_partition import build_case_partitions
             from src.core.evidence_contract.chronology import compile_partitioned_chronologies
 
-            assessment["case_partitions"] = build_case_partitions(
+            assessment["case_partitions"] = await asyncio.to_thread(build_case_partitions,
                 tenant_id=org,
                 assessment_id=assessment_id,
                 threat_cases=list(assessment.get("threat_cases") or []),
@@ -2612,13 +2616,13 @@ async def run_assessment_pipeline(
                 # full Chrono corpus so those exact refs survive into the case.
                 rows=list(_chrono_rows or filtered_rows),
             )
-            assessment["case_chronologies"] = compile_partitioned_chronologies(
+            assessment["case_chronologies"] = await asyncio.to_thread(compile_partitioned_chronologies,
                 tenant_id=org,
                 assessment_id=assessment_id,
                 rows=list(_chrono_rows or filtered_rows),
                 partitions=assessment["case_partitions"],
             )
-            assessment["campaign_accumulations"] = accumulate_low_and_slow(list(_chrono_rows or filtered_rows))
+            assessment["campaign_accumulations"] = await asyncio.to_thread(accumulate_low_and_slow, list(_chrono_rows or filtered_rows))
             logger.info(
                 "Stage 5m: froze %d case partitions, %d chronologies, and %d low-and-slow candidates for %s",
                 len(assessment["case_partitions"]),
@@ -3107,7 +3111,7 @@ async def run_assessment_pipeline(
         assessment["evidence_rows"] = evidence_preview
         assessment.pop("rows", None)
         assessment.pop("all_rows", None)
-        _persist_assessment_json(assessment_id, org, assessment)
+        await asyncio.to_thread(_persist_assessment_json, assessment_id, org, assessment)
 
         # Persist cluster snapshots to DuckDB
         try:
