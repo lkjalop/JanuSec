@@ -1337,9 +1337,9 @@ async def run_assessment_pipeline(
     """Full ingest pipeline for one assessment job.  Returns assessment_id."""
     from src.core.ingest import store as _store
 
-    def _progress(stage: str, pct: int, label: str) -> None:
+    async def _progress(stage: str, pct: int, label: str) -> None:
         try:
-            _store.update_job(
+            await asyncio.to_thread(_store.update_job,
                 assessment_id,
                 status="running",
                 stage=stage,
@@ -1352,11 +1352,11 @@ async def run_assessment_pipeline(
 
     try:
         # Guard: if the job was cancelled before we got here, bail out.
-        _pre_status = (_store.get_job(assessment_id) or {}).get("status", "")
+        _pre_status = (await asyncio.to_thread(_store.get_job, assessment_id) or {}).get("status", "")
         if _pre_status == "cancelled":
             logger.info("assessment pipeline skipped (cancelled): %s", assessment_id)
             return assessment_id
-        _store.update_job(assessment_id, status="running", stage="parsing", percent=0, stage_label="Parsing files")
+        await asyncio.to_thread(_store.update_job, assessment_id, status="running", stage="parsing", percent=0, stage_label="Parsing files")
 
         # Evidence Contract v1 boundary: raw bytes are content-addressed and the
         # capture invocation is receipted before any parser sees them.
@@ -1374,7 +1374,7 @@ async def run_assessment_pipeline(
 
         for file_idx, (path, filename) in enumerate(file_paths):
             file_pct = int(30 * (file_idx / max(len(file_paths), 1)))
-            _progress("parsing", file_pct, f"Parsing {filename}")
+            await _progress("parsing", file_pct, f"Parsing {filename}")
 
             # Classify the file lane before parsing so rows can carry provenance.
             file_lane = LANE_TELEMETRY_EVIDENCE
@@ -1413,20 +1413,20 @@ async def run_assessment_pipeline(
                 _store,
             )
             total_rows += file_rows
-            _progress("parsing", file_pct, f"Parsed {total_rows:,} rows ({filename})")
+            await _progress("parsing", file_pct, f"Parsed {total_rows:,} rows ({filename})")
 
-        _store.update_job(assessment_id, row_count=total_rows)
-        _progress("normalizing", 32, f"Stored {total_rows:,} rows — preparing clustering")
+        await asyncio.to_thread(_store.update_job, assessment_id, row_count=total_rows)
+        await _progress("normalizing", 32, f"Stored {total_rows:,} rows — preparing clustering")
 
         if total_rows == 0:
-            _store.update_job(assessment_id, status="failed", error="No rows parsed from uploaded files")
+            await asyncio.to_thread(_store.update_job, assessment_id, status="failed", error="No rows parsed from uploaded files")
             return assessment_id
 
         # ── Stage 2: load rows for clustering (triage pre-filter) ─────────────
         # Critical addition #1: only pass rows with triage_score >= threshold
         # to the O(n²) clustering engine.  Noise rows stay in the DB and appear
         # in the final evidence_rows list but don't participate in clustering.
-        _progress("clustering", 35, "Loading high-signal rows for clustering")
+        await _progress("clustering", 35, "Loading high-signal rows for clustering")
 
         filtered_rows = await asyncio.to_thread(
             _store.load_rows,
@@ -1554,7 +1554,7 @@ async def run_assessment_pipeline(
         except Exception as _exc2c:
             logger.debug("Stage 2c GeoIP/ASN enrichment failed for %s: %s", assessment_id, _exc2c)
 
-        _progress("clustering", 40, f"Clustering {len(filtered_rows):,} high-signal rows")
+        await _progress("clustering", 40, f"Clustering {len(filtered_rows):,} high-signal rows")
 
         # ── Stage 3: build assessment shell and run hydration ─────────────────
         source_counts = await asyncio.to_thread(_store.source_counts, assessment_id)
@@ -1633,7 +1633,7 @@ async def run_assessment_pipeline(
                 logger.warning("_hydrate_assessment_semantics failed for %s: %s", assessment_id, exc)
             raw_clusters = list(assessment.get("correlation_clusters") or [])
         else:
-            _progress("clustering", 55, "Building SQL pivot groups")
+            await _progress("clustering", 55, "Building SQL pivot groups")
             pivot_groups = await asyncio.to_thread(_store.entity_pivot_groups, assessment_id, TRIAGE_MIN_FOR_CLUSTER)
 
             # Keep raw pivot groups as audit inventory (one entry per shared entity).
@@ -1665,7 +1665,7 @@ async def run_assessment_pipeline(
                 # into no-user clusters. This is what lets the cumulative exfil attach to
                 # the actor (proven against the VESPER ground-truth gate).
                 await asyncio.to_thread(resolve_entities, filtered_rows)
-                _progress("clustering", 60, "Transitive campaign merge")
+                await _progress("clustering", 60, "Transitive campaign merge")
                 _diag: dict[str, Any] = {}
                 analysis_clusters = await asyncio.to_thread(
                     transitive_merge_clusters,
@@ -1715,12 +1715,12 @@ async def run_assessment_pipeline(
             assessment["correlation_clusters"] = raw_clusters
 
         clusters = raw_clusters
-        _store.update_job(assessment_id, cluster_count=len(clusters))
-        _progress("clustering", 65, f"Found {len(clusters)} correlation clusters")
+        await asyncio.to_thread(_store.update_job, assessment_id, cluster_count=len(clusters))
+        await _progress("clustering", 65, f"Found {len(clusters)} correlation clusters")
 
         # ── Stage 4: offline workbook merge ───────────────────────────────────
         if os.getenv("JANUSEC_ASYNC_LEGACY_HYDRATE", "0").lower() in {"1", "true", "yes"}:
-            _progress("reasoning", 68, "Running enrichment cases and offline merge")
+            await _progress("reasoning", 68, "Running enrichment cases and offline merge")
             try:
                 from src.api.deep_analyze_endpoints import _merge_offline_workbook_assessment
 
@@ -1752,8 +1752,8 @@ async def run_assessment_pipeline(
             assessment["threat_cases"] = layers.get("threat_cases") or []
             assessment["correlation_clusters"] = assessment["analysis_clusters"]
             clusters = assessment["analysis_clusters"]
-            _store.update_job(assessment_id, cluster_count=len(clusters))
-            _progress("clustering", 70, f"Classified {len(clusters)} analysis clusters")
+            await asyncio.to_thread(_store.update_job, assessment_id, cluster_count=len(clusters))
+            await _progress("clustering", 70, f"Classified {len(clusters)} analysis clusters")
         except Exception as exc:
             logger.warning("threat case layering failed for %s: %s", assessment_id, exc)
             clusters = assessment.get("correlation_clusters") or clusters
@@ -1815,7 +1815,7 @@ async def run_assessment_pipeline(
                     _dread_ok += 1
                 except Exception as _dread_err:
                     logger.debug("dread enrichment failed for cluster %s: %s", _cl.get("cluster_id"), _dread_err)
-            _progress("reasoning", 70, f"DREAD/SABSA enrichment complete ({_dread_ok} clusters)")
+            await _progress("reasoning", 70, f"DREAD/SABSA enrichment complete ({_dread_ok} clusters)")
         except Exception as exc:
             logger.warning("dread/sabsa enrichment stage failed for %s: %s", assessment_id, exc)
 
@@ -1861,7 +1861,7 @@ async def run_assessment_pipeline(
                         exc_info=True,
                     )
             logger.info("Stage 5c: enriched %d/%d clusters, lookup_size=%d", _ei_ok, len(clusters), len(_row_lookup_ei))
-            _progress("reasoning", 73, f"Cluster intelligence enrichments complete ({_ei_ok} clusters)")
+            await _progress("reasoning", 73, f"Cluster intelligence enrichments complete ({_ei_ok} clusters)")
         except Exception as exc:
             logger.warning("cluster intelligence enrichment stage failed for %s: %s", assessment_id, exc, exc_info=True)
 
@@ -2220,16 +2220,19 @@ async def run_assessment_pipeline(
             from src.ml.signal_aggregator import ASSESSMENT_ML_SIGNALS as _ml_agg
 
             _ml_agg.clear()
-            _ig_count = 0
             _ig_cap = int(os.getenv("JANUSEC_IDENTITY_GRAPH_CAP", "10000"))
-            for _row_ig in filtered_rows[:_ig_cap]:
-                if not isinstance(_row_ig, dict):
-                    continue
-                try:
-                    _ig.ingest_identity_event(_row_ig, aggregator=_ml_agg)
-                    _ig_count += 1
-                except Exception:
-                    continue
+            def ingest_identity_batch():
+                _ig_count = 0
+                for _row_ig in filtered_rows[:_ig_cap]:
+                    if not isinstance(_row_ig, dict):
+                        continue
+                    try:
+                        _ig.ingest_identity_event(_row_ig, aggregator=_ml_agg)
+                        _ig_count += 1
+                    except Exception:
+                        continue
+                return _ig_count
+            _ig_count = await asyncio.to_thread(ingest_identity_batch)
             logger.info(
                 "Stage 5g: ingested %d rows into IdentityGraph for %s " "(%d users tracked by ML aggregator)",
                 _ig_count,
@@ -2241,7 +2244,7 @@ async def run_assessment_pipeline(
             try:
                 from src.core.graph.global_identity_graph import flush_global_identity_graph
 
-                flush_global_identity_graph()
+                await asyncio.to_thread(flush_global_identity_graph)
                 logger.info("Stage 5g: identity graph flushed for %s", assessment_id)
             except Exception as _flush_exc:
                 logger.debug("Stage 5g: identity graph flush failed for %s: %s", assessment_id, _flush_exc)
@@ -2349,14 +2352,14 @@ async def run_assessment_pipeline(
             # the right user (the signal that stitches exfil to the campaign).
             from src.core.entity_resolver import resolve_entities as _resolve_entities
 
-            _resolve_entities(_chrono_rows)
+            await asyncio.to_thread(_resolve_entities, _chrono_rows)
             logger.info(
                 "Stage 5i: ChronoGraph over %d rows (vs %d clustered) for %s",
                 len(_chrono_rows),
                 len(filtered_rows),
                 assessment_id,
             )
-            _chrono_accum = _chrono_accumulate(_chrono_rows, _chrono)
+            _chrono_accum = await asyncio.to_thread(_chrono_accumulate, _chrono_rows, _chrono)
             _chrono_ref_ts = _chrono_accum.ref_ts
             logger.info("Stage 5i: ChronoGraph accumulated %d rows for %s", len(_chrono_rows), assessment_id)
         except Exception as exc:
@@ -2367,7 +2370,7 @@ async def run_assessment_pipeline(
             from src.core.chrono.sketch_store import CHRONO as _chrono_j
 
             if _chrono_accum is not None:
-                _chrono_elevate(clusters, _chrono_accum, _chrono_j)
+                await asyncio.to_thread(_chrono_elevate, clusters, _chrono_accum, _chrono_j)
             # Threat-case presentation was first built before ChronoGraph. Refresh
             # it from the elevated clusters so verdicts and roles cannot remain a
             # stale, over-promoted snapshot.
@@ -2643,7 +2646,7 @@ async def run_assessment_pipeline(
         # each in a bitemporal decision trace for audit replay.
         # NOTE: Runs AFTER 5g/5h/5i/5j so IdentityGraph and ChronoGraph are populated.
         if clusters:
-            _progress("reasoning", 76, "Generating grounded LLM narratives for top clusters")
+            await _progress("reasoning", 76, "Generating grounded LLM narratives for top clusters")
             # narrate_top_clusters self-budgets via the SAME env var (default 600s) and
             # degrades gracefully per-cluster. This outer asyncio.wait_for is only a safety
             # net against a total hang, so it MUST exceed the inner budget — otherwise it
@@ -2716,7 +2719,7 @@ async def run_assessment_pipeline(
         except Exception as exc:
             logger.debug("operator context stage skipped for %s: %s", assessment_id, exc)
 
-        _progress("reasoning", 78, "Building persona dispatch payloads")
+        await _progress("reasoning", 78, "Building persona dispatch payloads")
         try:
             await asyncio.to_thread(_enrich_and_dispatch_personas, assessment, clusters, filtered_rows, org)
         except Exception as exc:
@@ -2795,7 +2798,7 @@ async def run_assessment_pipeline(
                     if not isinstance(_row_hg, dict):
                         continue
                     try:
-                        _hg.ingest_event(_hopgraph_event_from_row(_row_hg), source=f"assessment:{assessment_id}")
+                        await asyncio.to_thread(_hg.ingest_event, _hopgraph_event_from_row(_row_hg), source=f"assessment:{assessment_id}")
                         _hg_count += 1
                         if _hg_count % 25 == 0:
                             # Large synchronous graph batches must let API progress
@@ -2822,7 +2825,7 @@ async def run_assessment_pipeline(
             logger.debug("HopGraph ingestion skipped for %s: %s", assessment_id, exc)
 
         # ── Stage 6: tier-1 prefill (top-10 cluster cards) ────────────────────
-        _progress("reasoning", 85, "Tier-1 prefill for cluster cards")
+        await _progress("reasoning", 85, "Tier-1 prefill for cluster cards")
         try:
             from src.api.deep_analyze_endpoints import _schedule_prefill_generation
 
@@ -3107,7 +3110,7 @@ async def run_assessment_pipeline(
             logger.warning("typed graph projection failed for %s: %s", assessment_id, exc)
 
         # ── Stage 7: persist final assessment JSON ─────────────────────────────
-        _progress("persisting", 92, "Saving assessment")
+        await _progress("persisting", 92, "Saving assessment")
         assessment["evidence_rows"] = evidence_preview
         assessment.pop("rows", None)
         assessment.pop("all_rows", None)
@@ -3119,7 +3122,7 @@ async def run_assessment_pipeline(
         except Exception:
             pass
 
-        _store.update_job(
+        await asyncio.to_thread(_store.update_job,
             assessment_id,
             status="ready",
             stage="ready",
@@ -3133,7 +3136,7 @@ async def run_assessment_pipeline(
         try:
             from src.core.ingest import store as _store
 
-            _store.update_job(assessment_id, status="failed", error=str(exc)[:500])
+            await asyncio.to_thread(_store.update_job, assessment_id, status="failed", error=str(exc)[:500])
         except Exception:
             pass
 
