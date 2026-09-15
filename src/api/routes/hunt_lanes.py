@@ -5,7 +5,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 
 from db.database import DatabaseNotAvailable, get_pool
-from src.repositories.hunt_lane_events_repo import HuntLaneEventsRepository
+from repositories.hunt_lane_events_repo import HuntLaneEventsRepository
 
 router = APIRouter()
 
@@ -20,9 +20,9 @@ async def _get_repository() -> HuntLaneEventsRepository:
 
 @router.get('/api/v1/hunt/lanes/events')
 async def list_hunt_lane_events(
-    lane: Optional[str] = Query(None, description='Optional lane filter'),
+    lane: str | None = Query(None, description='Optional lane filter'),
     limit: int = Query(100, ge=1, le=500),
-    tenant_id: Optional[str] = Header(default=None, alias='X-Tenant-ID'),
+    tenant_id: str | None = Header(default=None, alias='X-Tenant-ID'),
     repo: HuntLaneEventsRepository = Depends(_get_repository),
 ) -> dict:
     if repo.require_tenant and not tenant_id:

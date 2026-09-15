@@ -1,0 +1,29 @@
+name: CI Matrix (minimal vs full extras)
+
+# Environment-specific suite; see docs/CI_SCOPE.md.
+on:
+  workflow_dispatch:
+
+jobs:
+  test-matrix:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        extras: [minimal, full]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ "${{ matrix.extras }}" = "minimal" ]; then
+            pip install -e .
+          else
+            pip install -e .[analyzers]
+          fi
+      - name: Run tests
+        run: |
+          python -m pytest -q

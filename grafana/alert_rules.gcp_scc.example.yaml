@@ -1,0 +1,21 @@
+groups:
+- name: gcp-scc-ingest
+  rules:
+  - alert: GCPSCCPostureLagHigh
+    expr: histogram_quantile(0.9, sum(rate(posture_ingest_lag_seconds_bucket{source="gcp_scc"}[5m])) by (le,tenant)) > 300
+    for: 10m
+    labels: { severity: page }
+    annotations:
+      summary: "GCP SCC ingest lag p90 > 5m ({{ $labels.tenant }})"
+  - alert: GCPSCCPostureErrors
+    expr: rate(posture_ingest_errors_total{source="gcp_scc"}[5m]) > 0.05
+    for: 5m
+    labels: { severity: page }
+    annotations:
+      summary: "GCP SCC ingest error rate >5% ({{ $labels.tenant }})"
+  - alert: GCPSCCDLQGrowing
+    expr: increase(ingest_dlq_messages_total{source="gcp_scc"}[30m]) > 100
+    for: 30m
+    labels: { severity: ticket }
+    annotations:
+      summary: "GCP SCC DLQ growing ({{ $labels.tenant }})"

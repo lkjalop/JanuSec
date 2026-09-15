@@ -1,0 +1,571 @@
+"""Bitemporal analyst review endpoint (T3→T6).
+
+Implements the analyst review loop described in the platform readiness audit:
+  T3: Analyst submits labels (confirmed/benign/needs_investigation)
+  T4: Bitemporal delta computed (T1 verdict vs T3 label)
+  T5: Temporal RAG pattern retrieval fires
+  T6: Re-evaluation LLM pass with analyst delta + RAG context (FIRES ACTUAL LLM)
+
+POST /api/v1/assessments/{assessment_id}/analyst_review
+"""
+from __future__ import annotations
+
+import asyncio
+import hashlib
+import json
+import logging
+import os
+import time
+from typing import Any, Dict, Optional
+
+from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
+router = APIRouter(prefix='/api/v1/assessments', tags=['bitemporal'])
+
+
+class AnalystReviewRequest(BaseModel):
+    label: str = Field(
+        ...,
+        description='Analyst verdict: confirmed_malicious, benign, needs_investigation, false_positive',
+    )
+    notes: str = Field(default='', max_length=4000, description='Free-text analyst notes')
+    analyst: str = Field(default='analyst', max_length=128, description='Analyst identifier')
+    persona: str = Field(default='analyst', max_length=64, description='Persona for re-evaluation')
+
+
+VALID_LABELS = {'confirmed_malicious', 'benign', 'needs_investigation', 'false_positive'}
+
+
+def _custody_hash(data: dict) -> str:
+    canonical = json.dumps({k: data[k] for k in sorted(data) if k != 'custody_hash'}, sort_keys=True, separators=(',', ':'))
+    return hashlib.sha256(canonical.encode('utf-8')).hexdigest()
+
+
+def _get_assessment(request: Request, assessment_id: str) -> Optional[dict]:
+    """Retrieve an assessment from the in-memory REPORT_STORE."""
+    try:
+        from src.api.deep_analyze_endpoints import REPORT_STORE
+        return REPORT_STORE.get(assessment_id)
+    except Exception:
+        return None
+
+
+def _compute_bitemporal_delta(t1_verdict: dict, t3_label: str, t3_notes: str) -> dict:
+    """Compute the delta between T1 machine verdict and T3 analyst label (T4)."""
+    t1_label = (t1_verdict.get('verdict') or t1_verdict.get('action') or 'unknown').lower()
+    t1_confidence = float(t1_verdict.get('confidence') or t1_verdict.get('triage_score') or 0.0)
+
+    # Determine if the analyst reversed the machine verdict
+    machine_positive = t1_label in ('escalate', 'investigate', 'malicious', 'suspicious', 'confirmed_malicious')
+    analyst_positive = t3_label in ('confirmed_malicious', 'needs_investigation')
+
+    label_reversal = machine_positive != analyst_positive
+    verdict_escalated = not machine_positive and analyst_positive
+
+    return {
+        't1_verdict': t1_label,
+        't1_confidence': t1_confidence,
+        't3_label': t3_label,
+        'label_reversal': label_reversal,
+        'verdict_escalated': verdict_escalated,
+        'analyst_notes': t3_notes,
+        'delta_type': 'reversal' if label_reversal else 'confirmation',
+        'computed_at': time.time(),
+    }
+
+
+def _query_temporal_rag(assessment: dict, delta: dict, tenant: str = 'default') -> list[dict]:
+    """T5: Query Temporal RAG for similar historical patterns."""
+    try:
+        from src.ai.temporal_rag import TemporalRAGEngine
+        rag = TemporalRAGEngine()
+
+        # Build a query from the delta and assessment context
+        query_parts = []
+        if delta.get('t3_label'):
+            query_parts.append(f"analyst labeled as {delta['t3_label']}")
+        if delta.get('analyst_notes'):
+            query_parts.append(delta['analyst_notes'][:200])
+
+        # Pull entity info from the assessment
+        rows = assessment.get('rows') or []
+        for row in rows[:3]:
+            for field in ('host', 'user', 'process', 'sourceIPAddress', 'domain'):
+                val = row.get(field)
+                if val:
+                    query_parts.append(str(val))
+
+        query_text = ' '.join(query_parts)
+        if not query_text.strip():
+            return []
+
+        results = rag.query(query_text, tenant=tenant, top_k=5)
+        return results
+    except Exception as exc:
+        logger.debug("Temporal RAG query failed (graceful degradation): %s", exc)
+        return []
+
+
+def _build_reeval_prompt(assessment: dict, delta: dict, rag_patterns: list, persona: str) -> str:
+    """T6: Build re-evaluation prompt incorporating analyst delta + RAG patterns."""
+    lines = [
+        "BITEMPORAL RE-EVALUATION: An analyst has reviewed this assessment and provided a label.",
+        f"Original machine verdict: {delta.get('t1_verdict')} (confidence: {delta.get('t1_confidence', 0):.2f})",
+        f"Analyst label: {delta.get('t3_label')}",
+        f"Delta type: {delta.get('delta_type')}",
+    ]
+    if delta.get('label_reversal'):
+        lines.append("*** LABEL REVERSAL DETECTED — the analyst disagrees with the machine verdict. ***")
+        lines.append("Re-evaluate the evidence considering the analyst's perspective.")
+    if delta.get('analyst_notes'):
+        lines.append(f"Analyst notes: {delta['analyst_notes']}")
+    lines.append("")
+
+    if rag_patterns:
+        lines.append("TEMPORAL RAG — SIMILAR HISTORICAL PATTERNS:")
+        for i, pattern in enumerate(rag_patterns[:5], 1):
+            summary = pattern.get('description') or pattern.get('summary') or str(pattern)[:200]
+            lines.append(f"  {i}. {summary}")
+        lines.append("")
+
+    lines.append(f"Provide an updated assessment incorporating the analyst's input. Persona: {persona}.")
+    return '\n'.join(lines)
+
+
+async def _fire_t6_llm_reeval(
+    assessment: dict,
+    delta: dict,
+    rag_patterns: list,
+    reeval_prompt: str,
+    persona: str,
+) -> dict:
+    """T6: Actually invoke the LLM for re-evaluation and return the updated narrative.
+
+    Returns a dict with keys: llm_response, model_used, tokens_used, error.
+    Falls back gracefully — a failed LLM call never blocks the endpoint.
+    """
+    if os.getenv('LLM_MOCK', '0').lower() in {'1', 'true', 'yes'}:
+        return {
+            'llm_response': f'[mock] Bitemporal re-evaluation: analyst labelled {delta.get("t3_label")}. '
+                            f'Delta type: {delta.get("delta_type")}. '
+                            f'RAG patterns used: {len(rag_patterns)}.',
+            'model_used': 'mock',
+            'tokens_used': 0,
+            'error': None,
+        }
+    try:
+        from src.analysis.auto_llm import LLMAssessmentClient, build_tier2_prompt
+        client = LLMAssessmentClient()
+        # Build a synthetic row from the assessment so the generic prompt builder works
+        rows = assessment.get('rows') or [{}]
+        representative_row = rows[0] if rows else {}
+        context = {
+            'tier': 'tier2',
+            'persona': persona,
+            'reeval_delta': delta,
+            'rag_patterns': rag_patterns[:5],
+            'bitemporal_reeval': True,
+            'reeval_prompt_prefix': reeval_prompt,
+        }
+        result = client.summarize_row(representative_row, context)
+        return {
+            'llm_response': result.get('summary') or result.get('response') or str(result),
+            'model_used': result.get('model_used') or result.get('model') or 'unknown',
+            'tokens_used': result.get('tokens_used') or 0,
+            'error': None,
+        }
+    except Exception as exc:
+        logger.warning('T6 LLM re-eval failed (graceful degradation): %s', exc)
+        return {
+            'llm_response': None,
+            'model_used': None,
+            'tokens_used': 0,
+            'error': str(exc),
+        }
+
+
+@router.post('/{assessment_id}/analyst_review', summary='Submit analyst review (T3→T6 bitemporal)')
+async def analyst_review(assessment_id: str, payload: AnalystReviewRequest, request: Request) -> dict:
+    """Accept an analyst label, compute bitemporal delta, query RAG, trigger re-eval.
+
+    Writes T3, T4, T5, T6 custody entries to the chain-of-custody log.
+    Returns the delta, RAG results, and re-evaluation prompt.
+    """
+    if payload.label not in VALID_LABELS:
+        raise HTTPException(status_code=400, detail=f"invalid_label: must be one of {VALID_LABELS}")
+
+    assessment = _get_assessment(request, assessment_id)
+    if not assessment:
+        raise HTTPException(status_code=404, detail='assessment_not_found')
+
+    # Import custody helpers
+    try:
+        from src.repositories.audit_repo import append_audit, get_last_hash
+    except Exception:
+        append_audit = None  # type: ignore
+        get_last_hash = None  # type: ignore
+
+    tenant = assessment.get('tenant_id') or assessment.get('org') or 'default'
+    prev_hash = None
+    if get_last_hash:
+        prev_hash = await get_last_hash(assessment_id, tenant)
+
+    # --- T3: Record analyst label ---
+    t3_details = {
+        'label': payload.label,
+        'notes': payload.notes,
+        'analyst': payload.analyst,
+        'persona': payload.persona,
+    }
+    t3_hash = _custody_hash({'event_id': assessment_id, 'action': 'analyst_label', **t3_details, 'prev_hash': prev_hash})
+    if append_audit:
+        await append_audit(assessment_id, 'analyst_label', t3_details, t3_hash, prev_hash, tenant)
+
+    # --- T4: Compute bitemporal delta ---
+    t1_verdict = {
+        'verdict': assessment.get('verdict') or assessment.get('action'),
+        'confidence': assessment.get('confidence') or assessment.get('triage_score'),
+    }
+    delta = _compute_bitemporal_delta(t1_verdict, payload.label, payload.notes)
+    t4_hash = _custody_hash({'event_id': assessment_id, 'action': 'bitemporal_delta', **delta, 'prev_hash': t3_hash})
+    if append_audit:
+        await append_audit(assessment_id, 'bitemporal_delta', delta, t4_hash, t3_hash, tenant)
+
+    # --- T5: Query Temporal RAG (only if delta is a reversal or escalation) ---
+    rag_patterns: list = []
+    if delta.get('label_reversal') or delta.get('verdict_escalated'):
+        rag_patterns = _query_temporal_rag(assessment, delta, tenant=tenant)
+        t5_details = {'rag_results_count': len(rag_patterns), 'triggered_by': delta.get('delta_type')}
+        t5_hash = _custody_hash({'event_id': assessment_id, 'action': 'temporal_rag_query', **t5_details, 'prev_hash': t4_hash})
+        if append_audit:
+            await append_audit(assessment_id, 'temporal_rag_query', t5_details, t5_hash, t4_hash, tenant)
+    else:
+        t5_hash = t4_hash  # no RAG needed for confirmations
+
+    # --- T6: Build re-evaluation prompt ---
+    reeval_prompt = _build_reeval_prompt(assessment, delta, rag_patterns, payload.persona)
+    t6_details = {
+        'reeval_triggered': delta.get('label_reversal') or delta.get('verdict_escalated') or False,
+        'prompt_length': len(reeval_prompt),
+        'rag_patterns_used': len(rag_patterns),
+    }
+    t6_hash = _custody_hash({'event_id': assessment_id, 'action': 're_evaluation', **t6_details, 'prev_hash': t5_hash})
+    if append_audit:
+        await append_audit(assessment_id, 're_evaluation', t6_details, t6_hash, t5_hash, tenant)
+
+    # Update in-memory assessment with review data
+    assessment['analyst_review'] = {
+        'label': payload.label,
+        'notes': payload.notes,
+        'analyst': payload.analyst,
+        'delta': delta,
+        'rag_patterns_count': len(rag_patterns),
+        'reeval_triggered': t6_details['reeval_triggered'],
+        'reviewed_at': time.time(),
+        'version': (assessment.get('analyst_review', {}).get('version', 0) + 1),
+    }
+
+    # --- T6: Fire actual LLM re-evaluation (async, only on reversal/escalation) ---
+    t6_llm_result: dict = {}
+    if t6_details['reeval_triggered']:
+        t6_llm_result = await _fire_t6_llm_reeval(
+            assessment=assessment,
+            delta=delta,
+            rag_patterns=rag_patterns,
+            reeval_prompt=reeval_prompt,
+            persona=payload.persona,
+        )
+        assessment['analyst_review']['t6_llm_response'] = t6_llm_result.get('llm_response')
+        assessment['analyst_review']['t6_model_used'] = t6_llm_result.get('model_used')
+
+    # Publish SSE event for live UI update
+    try:
+        from src.api.deep_analyze_endpoints import publish_llm_event
+        publish_llm_event(assessment_id, {
+            'type': 'analyst_review',
+            'label': payload.label,
+            'delta_type': delta.get('delta_type'),
+            'version': assessment['analyst_review']['version'],
+        })
+    except Exception:
+        pass
+
+    # --- T7+T8: Pattern learning + weight feedback (non-blocking background) ---
+    asyncio.ensure_future(_run_t7_t8(tenant))
+
+    return {
+        'assessment_id': assessment_id,
+        'status': 'reviewed',
+        't3_label': payload.label,
+        't4_delta': delta,
+        't5_rag_patterns': len(rag_patterns),
+        't6_reeval_triggered': t6_details['reeval_triggered'],
+        't6_llm_response': t6_llm_result.get('llm_response'),
+        't6_model_used': t6_llm_result.get('model_used'),
+        't6_error': t6_llm_result.get('error'),
+        't7_t8_queued': True,
+        'reeval_prompt': reeval_prompt if t6_details['reeval_triggered'] else None,
+        'custody_chain': {
+            't3_hash': t3_hash,
+            't4_hash': t4_hash,
+            't5_hash': t5_hash,
+            't6_hash': t6_hash,
+        },
+        'version': assessment['analyst_review']['version'],
+    }
+
+
+
+# ---------------------------------------------------------------------------
+# T7: Pattern learning — aggregate adjudication history, derive candidate weights
+# T8: Weight update — persist and push candidates to in-memory orchestrator
+# These run fire-and-forget so they never block the analyst_review response.
+# ---------------------------------------------------------------------------
+
+async def _run_t7_pattern_learning(tenant: str) -> dict:
+    """T7: Run online trainer to generate candidate factor weights from feedback.
+
+    Returns {'candidate_count', 'candidates', 'error'}.
+    """
+    try:
+        from src.ml.online_trainer import generate_candidate_weights
+        candidates = await generate_candidate_weights(window='30 days', tenant_id=tenant or None)
+        return {'candidate_count': len(candidates), 'candidates': candidates, 'error': None}
+    except Exception as exc:
+        logger.warning('T7 pattern learning skipped: %s', exc)
+        return {'candidate_count': 0, 'candidates': {}, 'error': str(exc)}
+
+
+async def _run_t8_weight_update(candidates: dict, tenant: str) -> dict:
+    """T8: Persist candidate weights and push to in-memory orchestrator.
+
+    Returns {'updated', 'error'}.
+    """
+    if not candidates:
+        return {'updated': 0, 'error': None}
+    count = 0
+    try:
+        from src.repositories.factor_weights_repo import upsert_factor_weight
+        for factor, weight in candidates.items():
+            try:
+                await upsert_factor_weight(factor, float(weight), tenant_id=tenant or None)
+                count += 1
+            except Exception:
+                pass
+    except Exception as exc:
+        logger.warning('T8 DB persist skipped: %s', exc)
+
+    # Push updated weights into in-memory orchestrator if available
+    if candidates:
+        try:
+            from src.orchestrator.core import get_orchestrator  # type: ignore
+            orch = get_orchestrator()
+            if orch is not None:
+                orch.apply_factor_weights(candidates, source='t8_bitemporal')
+        except Exception:
+            pass  # orchestrator not initialised in this process — silently skip
+
+    return {'updated': count, 'error': None}
+
+
+async def _run_t7_t8(tenant: str) -> None:
+    """Background coroutine: T7 then T8. Errors are fully suppressed."""
+    try:
+        result = await _run_t7_pattern_learning(tenant)
+        if result['candidates']:
+            await _run_t8_weight_update(result['candidates'], tenant)
+            logger.info(
+                'T7/T8 complete — tenant=%s candidates=%d updated=%d',
+                tenant, result['candidate_count'], len(result['candidates']),
+            )
+    except Exception as exc:
+        logger.warning('T7/T8 background task error: %s', exc)
+
+
+# ---------------------------------------------------------------------------
+# Compliance PDF report endpoint
+# ---------------------------------------------------------------------------
+
+def _collect_factors(assessment: dict) -> list[str]:
+    """Extract all factor strings from an assessment object."""
+    factors: list[str] = []
+    for row in (assessment.get('rows') or []):
+        for f in row.get('factors') or []:
+            if isinstance(f, str) and f not in factors:
+                factors.append(f)
+    # Top-level factors list some assessments carry
+    for f in (assessment.get('factors') or []):
+        if isinstance(f, str) and f not in factors:
+            factors.append(f)
+    return factors
+
+
+def _build_compliance_html(
+    assessment: dict,
+    factors: list[str],
+    compliance_hits: dict,
+    mitre_techniques: set,
+) -> str:
+    """Build a styled HTML compliance report suitable for PDF conversion."""
+    from html import escape
+
+    aid = assessment.get('assessment_id') or assessment.get('id') or 'unknown'
+    verdict = assessment.get('verdict') or assessment.get('action') or 'unknown'
+    score = assessment.get('triage_score') or assessment.get('confidence') or 0
+    generated = time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime())
+
+    # Framework display names
+    fw_names = {
+        'cis': 'CIS Controls v8',
+        'nist_csf': 'NIST CSF 2.0',
+        'iso27001': 'ISO/IEC 27001:2022',
+        'soc2': 'SOC 2 Type II',
+        'pci_dss': 'PCI-DSS v4.0',
+        'hipaa': 'HIPAA Security Rule',
+        'gdpr': 'GDPR',
+        'nist_800_53': 'NIST 800-53',
+    }
+
+    STYLE = """
+    <style>
+      body{font-family:Arial,sans-serif;color:#1a202c;margin:32px 40px;background:#fff}
+      h1{font-size:20px;margin-bottom:4px}
+      h2{font-size:15px;margin-top:24px;margin-bottom:8px;border-bottom:1px solid #e2e8f0;padding-bottom:4px}
+      table{border-collapse:collapse;width:100%;font-size:12px}
+      th{background:#2d3748;color:#fff;padding:6px 10px;text-align:left}
+      td{border:1px solid #e2e8f0;padding:5px 10px;vertical-align:top}
+      .meta{font-size:12px;color:#718096;margin-bottom:20px}
+      .badge{display:inline-block;padding:2px 6px;border-radius:4px;font-size:11px;font-weight:600}
+      .high{background:#fed7d7;color:#c53030}
+      .medium{background:#fefcbf;color:#b7791f}
+      .low{background:#c6f6d5;color:#276749}
+      .mitre{font-family:monospace;background:#edf2f7;padding:1px 4px;border-radius:3px;font-size:11px}
+    </style>
+    """
+
+    rows_html = ''
+    for fw_key, controls in sorted(compliance_hits.items()):
+        if not controls:
+            continue
+        fw_label = escape(fw_names.get(fw_key, fw_key.upper()))
+        controls_str = ', '.join(escape(c) for c in controls[:20])
+        rows_html += f'<tr><td><strong>{fw_label}</strong></td><td>{controls_str}</td></tr>\n'
+
+    mitre_html = ''
+    if mitre_techniques:
+        mitre_html = '<h2>MITRE ATT&amp;CK Techniques</h2><p>' + \
+            ' '.join(f'<span class="mitre">{escape(t)}</span>' for t in sorted(mitre_techniques)) + \
+            '</p>'
+
+    factor_rows = ''.join(f'<tr><td><code>{escape(f)}</code></td></tr>' for f in factors[:80])
+    framework_table_body = rows_html if rows_html else '<tr><td colspan="2" style="color:#718096">No control mappings found for active factors.</td></tr>'
+
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Compliance Report — {escape(aid)}</title>{STYLE}</head>
+<body>
+<h1>Compliance &amp; Regulatory Impact Report</h1>
+<div class="meta">
+  Assessment ID: <strong>{escape(aid)}</strong> &nbsp;|&nbsp;
+  Verdict: <strong>{escape(str(verdict))}</strong> &nbsp;|&nbsp;
+  Score: <strong>{escape(str(score))}</strong> &nbsp;|&nbsp;
+  Generated: {generated}
+</div>
+
+<h2>Framework Control Mapping</h2>
+<table>
+  <thead><tr><th>Framework</th><th>Applicable Controls</th></tr></thead>
+  <tbody>
+{framework_table_body}
+  </tbody>
+</table>
+
+{mitre_html}
+
+<h2>Active Factors ({len(factors)})</h2>
+<table>
+  <thead><tr><th>Factor ID</th></tr></thead>
+  <tbody>{factor_rows}</tbody>
+</table>
+</body>
+</html>"""
+    return html
+
+
+@router.get(
+    '/{assessment_id}/compliance_report',
+    summary='Generate compliance & MITRE ATT&CK PDF report for an assessment',
+    response_description='PDF file (application/pdf) or HTML fallback',
+)
+async def get_compliance_report(
+    assessment_id: str,
+    request: Request,
+    format: str = 'pdf',
+) -> Any:
+    """Return a compliance report (PDF or HTML) mapping detected factors to:
+    CIS Controls, NIST CSF, ISO 27001, SOC 2, PCI-DSS, HIPAA, GDPR, NIST 800-53,
+    and MITRE ATT&CK techniques.
+    """
+    import io as _io
+    from fastapi.responses import StreamingResponse, HTMLResponse
+
+    assessment = _get_assessment(request, assessment_id)
+    if not assessment:
+        raise HTTPException(status_code=404, detail='assessment_not_found')
+
+    factors = _collect_factors(assessment)
+
+    try:
+        from src.core.mappings.factor_to_compliance import get_compliance_hits
+        compliance_hits = get_compliance_hits(factors)
+    except Exception:
+        compliance_hits = {}
+
+    try:
+        from src.artifact.technique_mapping import FACTOR_TO_MITRE
+        mitre_techniques: set = set()
+        for f in factors:
+            for t in FACTOR_TO_MITRE.get(f, []):
+                mitre_techniques.add(t)
+    except Exception:
+        mitre_techniques = set()
+
+    html = _build_compliance_html(assessment, factors, compliance_hits, mitre_techniques)
+
+    if format == 'html':
+        from fastapi.responses import HTMLResponse as _HR
+        return _HR(html)
+
+    # Attempt PDF conversion via export engine
+    try:
+        from src.reporting.export import export_pdf_bytes_from_html
+        pdf_bytes = export_pdf_bytes_from_html(html)
+        if pdf_bytes:
+            fname = f'compliance_{assessment_id[:16]}.pdf'
+            return StreamingResponse(
+                _io.BytesIO(pdf_bytes),
+                media_type='application/pdf',
+                headers={'Content-Disposition': f'attachment; filename="{fname}"'},
+            )
+    except Exception as exc:
+        logger.warning('PDF export engine failed (%s); returning HTML', exc)
+
+    # Fallback: return HTML as a downloadable file
+    from fastapi.responses import HTMLResponse as _HR
+    return _HR(html, headers={'Content-Disposition': f'attachment; filename="compliance_{assessment_id[:16]}.html"'})
+
+
+@router.get('/{assessment_id}/custody_chain', summary='Get custody chain for assessment')
+async def get_custody_chain(assessment_id: str, request: Request) -> dict:
+    """Return the full chain-of-custody entries for an assessment."""
+    try:
+        from src.repositories.audit_repo import _INMEM_CHAINS, _CHAIN_LOCK
+        with _CHAIN_LOCK:
+            chain = _INMEM_CHAINS.get(assessment_id)
+            if chain:
+                return {'assessment_id': assessment_id, 'entries': list(chain), 'count': len(chain)}
+    except Exception:
+        pass
+    return {'assessment_id': assessment_id, 'entries': [], 'count': 0}

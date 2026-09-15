@@ -20,17 +20,21 @@ File format example:
 }
 """
 from __future__ import annotations
-from typing import Dict, Any
-import os, json, threading, time
 
-_CACHE: Dict[str, Any] = {}
+import json
+import os
+import threading
+import time
+from typing import Any, Dict
+
+_CACHE: dict[str, Any] = {}
 _CACHE_MTIME: float | None = None
 _LOCK = threading.Lock()
 
 def _path() -> str:
     return os.getenv('TENANT_OVERRIDES_PATH','artifacts/config/tenant_overrides.json')
 
-def _load() -> Dict[str, Any]:
+def _load() -> dict[str, Any]:
     global _CACHE, _CACHE_MTIME
     path = _path()
     try:
@@ -43,7 +47,7 @@ def _load() -> Dict[str, Any]:
     if _CACHE_MTIME is not None and mtime == _CACHE_MTIME:
         return _CACHE
     try:
-        with open(path,'r',encoding='utf-8') as f:
+        with open(path,encoding='utf-8') as f:
             data = json.load(f)
             if isinstance(data, dict):
                 _CACHE = data
@@ -54,16 +58,16 @@ def _load() -> Dict[str, Any]:
     _CACHE_MTIME = mtime
     return _CACHE
 
-def list_overrides() -> Dict[str, Any]:
+def list_overrides() -> dict[str, Any]:
     with _LOCK:
         return _load().copy()
 
-def get_overrides(tenant: str) -> Dict[str, Any]:
+def get_overrides(tenant: str) -> dict[str, Any]:
     with _LOCK:
         data = _load()
         return data.get(tenant) or data.get('default') or {}
 
-def upsert_overrides(tenant: str, overrides: Dict[str, Any]):
+def upsert_overrides(tenant: str, overrides: dict[str, Any]):
     path = _path()
     with _LOCK:
         data = _load()

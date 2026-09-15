@@ -1,0 +1,4 @@
+event_id,timestamp,to,from,subject,body_hash,attachment_name,verdict,factors
+email-1,2025-11-08T07:59:55Z,alice@example.com,attacker@phish.example,"Urgent: Review invoice","h1234","invoice.exe",SUSPICIOUS,"email:attachment_exe,phishing_link"
+email-2,2025-11-08T08:05:10Z,bob@example.com,marketing@trusted.example,"Monthly newsletter","h5678","newsletter.pdf",PASS,"email:trusted_sender"
+email-3,2025-11-08T08:11:03Z,alice@example.com,attacker@phish.example,"Re: Your account","h9abc","secure_docs.zip",SUSPICIOUS,"email:attachment_zip,net:ip_fragment_evasion_pattern"

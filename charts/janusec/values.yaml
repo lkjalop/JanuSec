@@ -1,0 +1,203 @@
+image:
+  repository: ghcr.io/lkjalop/janusec-api
+  tag: latest
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+service:
+  type: ClusterIP
+  port: 8080
+
+metrics:
+  scrape: false
+  serviceMonitor:
+    enabled: false
+    additionalLabels: {}
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+podSecurityContext:
+  enabled: true
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  enabled: true
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+ingress:
+  enabled: true
+  className: nginx
+  host: janusec.example.com
+  tls:
+    enabled: true
+    secretName: janusec-tls
+
+env:
+  - name: ENABLE_CSV_UPLOAD
+    value: "true"
+  - name: DEFAULT_FRONTEND
+    value: "console"
+  - name: ALLOWED_ORIGINS
+    value: "https://janusec.example.com"
+  # - name: REDIS_URL
+  #   value: "redis://redis-ha:6379/0"  # when redisHa.enabled=true
+  # - name: DB_HOST
+  #   value: "pgbouncer"                 # when pgbouncer.enabled=true
+  # - name: DB_PORT
+  #   value: "6432"
+  # Retention + purge scheduler (defaults on; tune as needed)
+  - name: RETENTION_PURGE_INTERVAL_SECONDS
+    value: "3600"  # hourly purge
+  - name: RETENTION_EVENTS_DAYS
+    value: "30"
+  - name: RETENTION_ALERTS_DAYS
+    value: "60"
+  - name: RETENTION_DECISIONS_DAYS
+    value: "60"
+  - name: RETENTION_AUDIT_DAYS
+    value: "90"
+  # OTEL tracing toggle and endpoint (disabled by default)
+  - name: OTEL_TRACING_ENABLED
+    value: "0"
+  - name: OTEL_SERVICE_NAME
+    value: "janusec-api"
+  - name: OTEL_EXPORTER_OTLP_ENDPOINT
+    value: "http://jaeger-collector:4318"
+  - name: OTEL_EXPORTER_OTLP_PROTOCOL
+    value: "http/protobuf"  # or grpc
+  # Optional broader instrumentation toggles
+  - name: OTEL_INSTRUMENT_HTTPX
+    value: "0"
+  - name: OTEL_INSTRUMENT_ASYNCPG
+    value: "0"
+
+# Optionally load sensitive env vars from one or more Kubernetes Secrets
+# Example: create a secret with keys like API_KEYS_JSON, JWT_SECRET, ECLIPSE_XDR_SHARED_SECRET
+# kubectl create secret generic janusec-secrets --from-literal=API_KEYS_JSON='[{"key":"...","scopes":["*"]}]' --from-literal=JWT_SECRET='...' 
+envFromSecrets: []
+
+oauth2Proxy:
+  enabled: true
+  image: quay.io/oauth2-proxy/oauth2-proxy:v7.5.1
+  servicePort: 4180
+  cookieSecret: "REPLACE_WITH_32B_BASE64=="
+  provider: oidc
+  oidc:
+    issuerURL: "https://example.okta.com/oauth2/default"
+    clientID: "REPLACE_CLIENT_ID"
+    clientSecret: "REPLACE_CLIENT_SECRET"
+    scope: "openid email profile"
+  emailDomains:
+    - "*"
+  redirectURL: "https://janusec.example.com/oauth2/callback"
+
+hpa:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 75
+
+alerts:
+  prometheusRule:
+    enabled: false
+    additionalLabels: {}
+
+pdb:
+  enabled: true
+  minAvailable: 1
+
+networkPolicy:
+  enabled: true
+  ingress:
+    - from: []  # customize to allow only ingress-controller namespace/selectors
+      ports:
+        - port: 8080
+
+# Auto-wiring guards for chart-provided env injection
+autoWire:
+  redisUrl: true     # inject REDIS_URL when redisHa.enabled and not explicitly set in env
+  dbHostPort: true   # inject DB_HOST/DB_PORT when pgbouncer.enabled and not explicitly set in env
+
+# Optional: Redis HA (Sentinel) demo manifests
+redisHa:
+  enabled: false
+  image: redis:7.2
+  replicas: 3
+  auth:
+    enabled: false
+    password: ""  # set when enabled
+  resources: {}
+  service:
+    name: redis-ha
+    port: 6379
+  sentinel:
+    port: 26379
+  persistence:
+    enabled: false
+    size: 8Gi
+    storageClass: ""
+  # Optional explicit URL override
+  redisUrl: ""
+
+# Optional: PgBouncer sidecar/proxy for Postgres pooling
+pgbouncer:
+  enabled: false
+  image: bitnami/pgbouncer:1.23.1
+  service:
+    name: pgbouncer
+    port: 6432
+  config:
+    maxClientConn: 200
+    defaultPoolSize: 20
+    # Target Postgres instance (may point to managed DB)
+    dbHost: postgresql
+    dbPort: 5432
+    dbName: janusec
+    dbUser: janusec
+    dbPasswordSecret: ""  # name of Secret with key DB_PASSWORD
+  auth:
+    enabled: false
+    existingSecret: ""
+    password: ""  # if set and existingSecret empty, chart will create one
+
+# Optional: Jaeger all-in-one (dev/demo)
+jaeger:
+  enabled: false
+  image: jaegertracing/all-in-one:1.56
+  service:
+    queryPort: 16686
+    otlpHttp: 4318
+    otlpGrpc: 4317
+  persistence:
+    enabled: false
+    size: 5Gi
+    storageClass: ""
+  metrics:
+    serviceMonitor:
+      enabled: false
+
+# Optional: Vault Agent Injector annotations for the API pod
+vaultInjector:
+  enabled: false
+  # Example annotations map; customize for your Vault paths and templates
+  annotations: {}
+  #   vault.hashicorp.com/agent-inject: "true"
+  #   vault.hashicorp.com/role: "janusec-api"
+  #   vault.hashicorp.com/agent-inject-secret-config: "kv/data/janusec/api"
+  #   vault.hashicorp.com/agent-inject-template-config: |
+  #     {{- with secret "kv/data/janusec/api" -}}
+  #     export DB_PASSWORD="{{ .Data.data.DB_PASSWORD }}"
+  #     export API_KEYS_JSON='{{ .Data.data.API_KEYS_JSON }}'
+  #     {{- end -}}

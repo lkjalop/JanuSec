@@ -8,7 +8,11 @@ Strategy:
 Safe to import even if pgvector absent (silently no-op).
 """
 from __future__ import annotations
-import asyncio, math, logging
+
+import asyncio
+import logging
+import math
+
 from db.database import get_pool
 
 logger = logging.getLogger(__name__)

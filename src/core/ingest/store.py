@@ -1,0 +1,759 @@
+"""DuckDB-backed persistent store for async assessment ingest jobs.
+
+Tables:
+  assessment_jobs    — one row per upload job, tracks status/stage/progress
+  raw_files          — file metadata per job
+  normalized_rows    — parsed + normalized events, one row per event
+  cluster_snapshots  — final cluster objects after clustering completes
+
+All writes go through helpers that hold the DuckDB connection per-thread via
+a module-level lock; DuckDB in-process mode is single-writer.
+"""
+from __future__ import annotations
+
+import csv
+import hashlib
+import json
+import logging
+import os
+import re
+import shutil
+import threading
+import time
+import uuid
+from typing import Iterator
+
+logger = logging.getLogger(__name__)
+
+_DB_PATH = os.getenv("JANUSEC_INGEST_DB", os.path.join("data", "ingest", "assessments.duckdb"))
+_RAW_ROOT = os.getenv("JANUSEC_RAW_DIR", os.path.join("data", "raw"))
+_STORAGE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+_WINDOWS_RESERVED_COMPONENTS = {
+    "CON",
+    "PRN",
+    "AUX",
+    "NUL",
+    *(f"COM{i}" for i in range(1, 10)),
+    *(f"LPT{i}" for i in range(1, 10)),
+}
+
+_conn = None
+_lock = threading.Lock()
+
+
+def _db():
+    global _conn
+    if _conn is None:
+        try:
+            import duckdb
+        except ImportError as exc:
+            raise RuntimeError("duckdb not installed — run: pip install duckdb>=0.10.0") from exc
+        os.makedirs(os.path.dirname(os.path.abspath(_DB_PATH)), exist_ok=True)
+        try:
+            _conn = duckdb.connect(_DB_PATH)
+        except Exception as exc:
+            if not _recover_invalid_duckdb(exc):
+                raise
+            _conn = duckdb.connect(_DB_PATH)
+        _init_schema(_conn)
+    return _conn
+
+
+def _recover_invalid_duckdb(exc: Exception) -> bool:
+    """Quarantine an invalid DuckDB file so uploads can continue."""
+    msg = str(exc).lower()
+    if "not a valid duckdb database file" not in msg:
+        return False
+    if not os.path.exists(_DB_PATH):
+        return False
+    stamp = time.strftime("%Y%m%d%H%M%S", time.gmtime())
+    quarantine = f"{_DB_PATH}.invalid.{stamp}"
+    try:
+        shutil.move(_DB_PATH, quarantine)
+        wal_path = f"{_DB_PATH}.wal"
+        if os.path.exists(wal_path):
+            shutil.move(wal_path, f"{quarantine}.wal")
+        logger.error(
+            "Quarantined invalid DuckDB ingest store at %s; fresh store will be created at %s",
+            quarantine,
+            _DB_PATH,
+        )
+        return True
+    except OSError:
+        logger.exception("Failed to quarantine invalid DuckDB ingest store at %s", _DB_PATH)
+        return False
+
+
+def _init_schema(conn) -> None:
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS assessment_jobs (
+            id           TEXT PRIMARY KEY,
+            org          TEXT NOT NULL DEFAULT 'unknown',
+            status       TEXT NOT NULL DEFAULT 'queued',
+            stage        TEXT,
+            percent      INTEGER DEFAULT 0,
+            stage_label  TEXT,
+            error        TEXT,
+            row_count    INTEGER DEFAULT 0,
+            cluster_count INTEGER DEFAULT 0,
+            created_at   DOUBLE,
+            updated_at   DOUBLE
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS raw_files (
+            assessment_id TEXT NOT NULL,
+            filename      TEXT NOT NULL,
+            path          TEXT NOT NULL,
+            size_bytes    BIGINT,
+            sha256        TEXT
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS normalized_rows (
+            assessment_id TEXT    NOT NULL,
+            row_index     INTEGER NOT NULL,
+            source_file   TEXT,
+            source_type   TEXT,
+            timestamp     TEXT,
+            triage_score  DOUBLE  DEFAULT 0.3,
+            user_entity   TEXT,
+            src_ip        TEXT,
+            hostname      TEXT,
+            row_json      TEXT    NOT NULL
+        )
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_norm_assessment
+            ON normalized_rows(assessment_id)
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_norm_triage
+            ON normalized_rows(assessment_id, triage_score DESC)
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS cluster_snapshots (
+            assessment_id TEXT NOT NULL,
+            cluster_id    TEXT NOT NULL,
+            verdict       TEXT,
+            confidence    DOUBLE,
+            cluster_json  TEXT NOT NULL
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS investigation_sessions (
+            session_id       TEXT PRIMARY KEY,
+            tenant_id        TEXT NOT NULL DEFAULT 'default',
+            assessment_id    TEXT NOT NULL,
+            cluster_id       TEXT DEFAULT '',
+            status           TEXT NOT NULL DEFAULT 'running',
+            close_reason     TEXT DEFAULT '',
+            cycles_completed INTEGER DEFAULT 0,
+            events_json      TEXT NOT NULL DEFAULT '[]',
+            state_json       TEXT NOT NULL DEFAULT '{}',
+            created_at       DOUBLE,
+            updated_at       DOUBLE
+        )
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_inv_session_tenant
+            ON investigation_sessions(tenant_id, status)
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_inv_session_assessment
+            ON investigation_sessions(assessment_id)
+    """)
+
+
+# ── Job CRUD ──────────────────────────────────────────────────────────────────
+
+def create_job(assessment_id: str, org: str = "unknown") -> None:
+    with _lock:
+        _db().execute(
+            """
+            INSERT INTO assessment_jobs (id, org, status, stage, percent, stage_label,
+                                         row_count, cluster_count, created_at, updated_at)
+            VALUES (?, ?, 'queued', 'queued', 0, 'Queued', 0, 0, ?, ?)
+            """,
+            [assessment_id, org, time.time(), time.time()],
+        )
+
+
+def update_job(
+    assessment_id: str,
+    *,
+    status: str | None = None,
+    stage: str | None = None,
+    percent: int | None = None,
+    stage_label: str | None = None,
+    error: str | None = None,
+    row_count: int | None = None,
+    cluster_count: int | None = None,
+) -> None:
+    sets = ["updated_at = ?"]
+    params: list = [time.time()]
+    if status is not None:
+        sets.append("status = ?"); params.append(status)
+    if stage is not None:
+        sets.append("stage = ?"); params.append(stage)
+    if percent is not None:
+        sets.append("percent = ?"); params.append(percent)
+    if stage_label is not None:
+        sets.append("stage_label = ?"); params.append(stage_label)
+    if error is not None:
+        sets.append("error = ?"); params.append(error)
+    if row_count is not None:
+        sets.append("row_count = ?"); params.append(row_count)
+    if cluster_count is not None:
+        sets.append("cluster_count = ?"); params.append(cluster_count)
+    params.append(assessment_id)
+    with _lock:
+        _db().execute(f"UPDATE assessment_jobs SET {', '.join(sets)} WHERE id = ?", params)
+
+
+def get_job(assessment_id: str) -> dict | None:
+    with _lock:
+        rows = _db().execute(
+            "SELECT id, org, status, stage, percent, stage_label, error, "
+            "row_count, cluster_count, created_at, updated_at "
+            "FROM assessment_jobs WHERE id = ?",
+            [assessment_id],
+        ).fetchall()
+    if not rows:
+        return None
+    r = rows[0]
+    return {
+        "assessment_id": r[0], "org": r[1], "status": r[2],
+        "stage": r[3], "percent": r[4], "stage_label": r[5],
+        "error": r[6], "row_count": r[7], "cluster_count": r[8],
+        "created_at": r[9], "updated_at": r[10],
+    }
+
+
+# ── Investigation session persistence ─────────────────────────────────────────
+
+def create_investigation_session(
+    session_id: str,
+    tenant_id: str,
+    assessment_id: str,
+    cluster_id: str = "",
+) -> None:
+    with _lock:
+        db = _db()
+        existing = db.execute(
+            "SELECT session_id FROM investigation_sessions WHERE session_id = ?",
+            [session_id],
+        ).fetchone()
+        if existing:
+            return
+        db.execute(
+            """INSERT INTO investigation_sessions
+               (session_id, tenant_id, assessment_id, cluster_id, status,
+                events_json, state_json, created_at, updated_at)
+               VALUES (?, ?, ?, ?, 'running', '[]', '{}', ?, ?)""",
+            [session_id, tenant_id, assessment_id, cluster_id,
+             time.time(), time.time()],
+        )
+
+
+def append_investigation_event(session_id: str, event: dict) -> None:
+    """Append one event to the session's events_json array (append-only)."""
+    with _lock:
+        db = _db()
+        row = db.execute(
+            "SELECT events_json, cycles_completed FROM investigation_sessions "
+            "WHERE session_id = ?",
+            [session_id],
+        ).fetchone()
+        if not row:
+            return
+        try:
+            events = json.loads(row[0] or "[]")
+        except Exception:
+            events = []
+        events.append(event)
+        new_cycles = row[1] + (1 if event.get("type") == "cycle_complete" else 0)
+        db.execute(
+            "UPDATE investigation_sessions "
+            "SET events_json = ?, cycles_completed = ?, updated_at = ? "
+            "WHERE session_id = ?",
+            [json.dumps(events), new_cycles, time.time(), session_id],
+        )
+
+
+def get_investigation_session(session_id: str) -> dict | None:
+    with _lock:
+        row = _db().execute(
+            "SELECT session_id, tenant_id, assessment_id, cluster_id, status, "
+            "close_reason, cycles_completed, events_json, state_json, "
+            "created_at, updated_at "
+            "FROM investigation_sessions WHERE session_id = ?",
+            [session_id],
+        ).fetchone()
+    if not row:
+        return None
+    return {
+        "session_id": row[0], "tenant_id": row[1], "assessment_id": row[2],
+        "cluster_id": row[3], "status": row[4], "close_reason": row[5],
+        "cycles_completed": row[6], "events": json.loads(row[7] or "[]"),
+        "state": json.loads(row[8] or "{}"), "created_at": row[9],
+        "updated_at": row[10],
+    }
+
+
+def update_investigation_state(
+    session_id: str,
+    *,
+    state: dict,
+    status: str | None = None,
+    close_reason: str | None = None,
+) -> None:
+    sets = ["state_json = ?", "updated_at = ?"]
+    params: list = [json.dumps(state), time.time()]
+    if status is not None:
+        sets.append("status = ?"); params.append(status)
+    if close_reason is not None:
+        sets.append("close_reason = ?"); params.append(close_reason)
+    params.append(session_id)
+    with _lock:
+        _db().execute(
+            f"UPDATE investigation_sessions SET {', '.join(sets)} WHERE session_id = ?",
+            params,
+        )
+
+
+def list_investigation_sessions(tenant_id: str, limit: int = 50) -> list[dict]:
+    with _lock:
+        rows = _db().execute(
+            "SELECT session_id, assessment_id, cluster_id, status, close_reason, "
+            "cycles_completed, created_at, updated_at "
+            "FROM investigation_sessions WHERE tenant_id = ? "
+            "ORDER BY created_at DESC LIMIT ?",
+            [tenant_id, limit],
+        ).fetchall()
+    return [
+        {
+            "session_id": r[0], "assessment_id": r[1], "cluster_id": r[2],
+            "status": r[3], "close_reason": r[4], "cycles_completed": r[5],
+            "created_at": r[6], "updated_at": r[7],
+        }
+        for r in rows
+    ]
+
+
+def list_recoverable_jobs(limit: int = 100) -> list[dict]:
+    with _lock:
+        rows = _db().execute(
+            "SELECT id, org, status, stage, percent, stage_label, error, "
+            "row_count, cluster_count, created_at, updated_at "
+            "FROM assessment_jobs WHERE status IN ('queued', 'running') "
+            "ORDER BY created_at ASC LIMIT ?",
+            [limit],
+        ).fetchall()
+    return [
+        {
+            "assessment_id": r[0], "org": r[1], "status": r[2],
+            "stage": r[3], "percent": r[4], "stage_label": r[5],
+            "error": r[6], "row_count": r[7], "cluster_count": r[8],
+            "created_at": r[9], "updated_at": r[10],
+        }
+        for r in rows
+    ]
+
+
+# ── File registration ─────────────────────────────────────────────────────────
+
+def register_file(assessment_id: str, filename: str, path: str, size_bytes: int) -> str:
+    sha = _sha256_file(path)
+    with _lock:
+        _db().execute(
+            "INSERT INTO raw_files (assessment_id, filename, path, size_bytes, sha256) "
+            "VALUES (?, ?, ?, ?, ?)",
+            [assessment_id, filename, path, size_bytes, sha],
+        )
+    return sha
+
+
+def raw_files_for(assessment_id: str) -> list[tuple[str, str]]:
+    """Resolve captures in the current state root and verify every registered file.
+
+    Stored absolute paths are historical metadata, not a dependency on the old
+    machine after restore. Ownership comes from the job, never from a guessed path.
+    """
+    job = get_job(assessment_id)
+    if not job or not job.get('org') or job['org'] == 'unknown':
+        raise ValueError('raw_capture_owner_required')
+    with _lock:
+        rows = _db().execute(
+            "SELECT path, filename, sha256, size_bytes FROM raw_files WHERE assessment_id = ? ORDER BY filename",
+            [assessment_id],
+        ).fetchall()
+    result = []
+    directory = raw_dir_for(assessment_id, tenant_id=job['org'])
+    for old_path, filename, expected_hash, expected_size in rows:
+        name = str(old_path).replace('\\', '/').rsplit('/', 1)[-1]
+        if not name or name in {'.', '..'} or any(not (c.isalnum() or c in '._-') for c in name):
+            raise ValueError('invalid_raw_capture_filename')
+        candidate = os.path.realpath(os.path.join(directory, name))
+        if os.path.commonpath([directory, candidate]) != directory:
+            raise ValueError('raw_capture_outside_owned_directory')
+        if (not os.path.isfile(candidate) or not expected_hash
+                or os.path.getsize(candidate) != expected_size or _sha256_file(candidate) != expected_hash):
+            raise ValueError('raw_capture_missing_or_changed')
+        result.append((candidate, str(filename)))
+    return result
+
+
+def reset_incomplete_job(assessment_id: str) -> None:
+    """Rebuild interrupted derived rows exactly once; retain captures and ledger."""
+    with _lock:
+        conn = _db()
+        conn.execute('BEGIN TRANSACTION')
+        try:
+            row = conn.execute('SELECT status FROM assessment_jobs WHERE id = ?', [assessment_id]).fetchone()
+            if not row or row[0] not in {'queued', 'running'}:
+                raise ValueError('only_incomplete_jobs_may_be_rebuilt')
+            conn.execute('DELETE FROM normalized_rows WHERE assessment_id = ?', [assessment_id])
+            conn.execute('DELETE FROM cluster_snapshots WHERE assessment_id = ?', [assessment_id])
+            conn.execute('UPDATE assessment_jobs SET row_count=0, cluster_count=0 WHERE id=?', [assessment_id])
+            conn.execute('COMMIT')
+        except BaseException:
+            conn.execute('ROLLBACK')
+            raise
+
+
+def _sha256_file(path: str) -> str:
+    h = hashlib.sha256()
+    try:
+        with open(path, "rb") as fh:
+            for chunk in iter(lambda: fh.read(65536), b""):
+                h.update(chunk)
+    except OSError:
+        return ""
+    return h.hexdigest()
+
+
+# ── Row persistence ───────────────────────────────────────────────────────────
+
+def persist_row_batch(assessment_id: str, rows: list[dict]) -> None:
+    """Insert a batch of normalized rows into DuckDB."""
+    if not rows:
+        return
+    records = []
+    for r in rows:
+        records.append((
+            assessment_id,
+            int(r.get("row_index") or 0),
+            str(r.get("_source") or r.get("source_file") or ""),
+            str(r.get("_source_type") or r.get("source_type") or ""),
+            str(r.get("timestamp") or ""),
+            float(r.get("triage_score") or 0.3),
+            str(r.get("user") or r.get("actor") or r.get("user_entity") or ""),
+            str(r.get("src_ip") or ""),
+            str(r.get("hostname") or r.get("host") or ""),
+            json.dumps(r, default=str),
+        ))
+    with _lock:
+        conn = _db()
+        try:
+            import pandas as pd
+            df = pd.DataFrame.from_records(records, columns=[
+                "assessment_id", "row_index", "source_file", "source_type",
+                "timestamp", "triage_score", "user_entity", "src_ip",
+                "hostname", "row_json",
+            ])
+            conn.register("_janusec_ingest_batch", df)
+            conn.execute(
+                "INSERT INTO normalized_rows "
+                "SELECT assessment_id, row_index, source_file, source_type, "
+                "timestamp, triage_score, user_entity, src_ip, hostname, row_json "
+                "FROM _janusec_ingest_batch"
+            )
+            conn.unregister("_janusec_ingest_batch")
+        except ImportError:
+            tmp_path = os.path.join(
+                os.path.dirname(os.path.abspath(_DB_PATH)),
+                f"batch_{uuid.uuid4().hex}.tsv",
+            )
+            try:
+                with open(tmp_path, "w", encoding="utf-8", newline="") as fh:
+                    writer = csv.writer(fh, delimiter="\t", quoting=csv.QUOTE_MINIMAL)
+                    writer.writerows(records)
+                safe_path = tmp_path.replace("\\", "/").replace("'", "''")
+                conn.execute(
+                    "COPY normalized_rows "
+                    "(assessment_id, row_index, source_file, source_type, timestamp, "
+                    f"triage_score, user_entity, src_ip, hostname, row_json) FROM '{safe_path}' "
+                    "(DELIMITER '\t', QUOTE '\"', ESCAPE '\"')"
+                )
+            except Exception:
+                raise
+            finally:
+                try:
+                    os.remove(tmp_path)
+                except OSError:
+                    pass
+        except Exception:
+            try:
+                conn.unregister("_janusec_ingest_batch")
+            except Exception:
+                pass
+            raise
+
+
+def count_rows(assessment_id: str) -> int:
+    with _lock:
+        r = _db().execute(
+            "SELECT COUNT(DISTINCT row_index) FROM normalized_rows WHERE assessment_id = ?",
+            [assessment_id],
+        ).fetchone()
+    return int(r[0]) if r else 0
+
+
+def load_rows(
+    assessment_id: str,
+    *,
+    min_triage: float = 0.0,
+    limit: int | None = None,
+    offset: int = 0,
+    row_indices: list[int] | None = None,
+) -> list[dict]:
+    """Load rows from DuckDB back into Python dicts.
+
+    Critical addition #1 (triage pre-filter): callers pass min_triage to
+    exclude noise rows from the clustering stage, avoiding O(n²) blowup.
+    """
+    sql = (
+        "SELECT row_json FROM ("
+        "  SELECT row_json, triage_score, row_index, "
+        "         ROW_NUMBER() OVER (PARTITION BY row_index ORDER BY triage_score DESC, row_json ASC) AS rn "
+        "  FROM normalized_rows "
+        "  WHERE assessment_id = ? AND triage_score >= ? "
+    )
+    params: list = [assessment_id, min_triage]
+    if row_indices:
+        placeholders = ", ".join(["?"] * len(row_indices))
+        sql += f"AND row_index IN ({placeholders}) "
+        params.extend(int(i) for i in row_indices)
+    sql += ") WHERE rn = 1 ORDER BY triage_score DESC, row_index ASC "
+    if limit:
+        sql += " LIMIT ?"
+        params.append(limit)
+        if offset:
+            sql += " OFFSET ?"
+            params.append(offset)
+    with _lock:
+        rows_raw = _db().execute(sql, params).fetchall()
+    result = []
+    for (rj,) in rows_raw:
+        try:
+            result.append(json.loads(rj))
+        except Exception:
+            pass
+    return result
+
+
+def load_all_rows(assessment_id: str) -> list[dict]:
+    """Load every row regardless of triage score (for full assessment object)."""
+    return load_rows(assessment_id, min_triage=0.0)
+
+
+def count_evidence_rows(
+    assessment_id: str,
+    *,
+    min_triage: float = 0.0,
+    row_indices: list[int] | None = None,
+) -> int:
+    sql = (
+        "SELECT COUNT(DISTINCT row_index) FROM normalized_rows "
+        "WHERE assessment_id = ? AND triage_score >= ? "
+    )
+    params: list = [assessment_id, min_triage]
+    if row_indices:
+        placeholders = ", ".join(["?"] * len(row_indices))
+        sql += f"AND row_index IN ({placeholders}) "
+        params.extend(int(i) for i in row_indices)
+    with _lock:
+        r = _db().execute(sql, params).fetchone()
+    return int(r[0]) if r else 0
+
+
+def source_counts(assessment_id: str) -> dict[str, int]:
+    with _lock:
+        rows = _db().execute(
+            "SELECT COALESCE(source_file, ''), COUNT(DISTINCT row_index) "
+            "FROM normalized_rows WHERE assessment_id = ? "
+            "GROUP BY source_file ORDER BY COUNT(DISTINCT row_index) DESC",
+            [assessment_id],
+        ).fetchall()
+    return {str(src or "unknown"): int(count) for src, count in rows}
+
+
+def diagnostic_counts(assessment_id: str, min_triage: float = 0.0) -> dict:
+    """Count rows missing key projected columns — used to detect stale stored rows.
+
+    A row is considered stale when all three canonical pivot fields are empty,
+    which indicates it was stored before the normalizer produced them (e.g.
+    before the device_id→hostname and user_name→user fallbacks were added).
+    """
+    with _lock:
+        conn = _db()
+        total = conn.execute(
+            "SELECT COUNT(*) FROM normalized_rows WHERE assessment_id = ? AND triage_score >= ?",
+            [assessment_id, min_triage],
+        ).fetchone()[0] or 0
+        missing_user = conn.execute(
+            "SELECT COUNT(*) FROM normalized_rows WHERE assessment_id = ? AND triage_score >= ? AND (user_entity IS NULL OR user_entity = '')",
+            [assessment_id, min_triage],
+        ).fetchone()[0] or 0
+        missing_ip = conn.execute(
+            "SELECT COUNT(*) FROM normalized_rows WHERE assessment_id = ? AND triage_score >= ? AND (src_ip IS NULL OR src_ip = '')",
+            [assessment_id, min_triage],
+        ).fetchone()[0] or 0
+        missing_host = conn.execute(
+            "SELECT COUNT(*) FROM normalized_rows WHERE assessment_id = ? AND triage_score >= ? AND (hostname IS NULL OR hostname = '')",
+            [assessment_id, min_triage],
+        ).fetchone()[0] or 0
+        all_missing = conn.execute(
+            "SELECT COUNT(*) FROM normalized_rows WHERE assessment_id = ? AND triage_score >= ? AND (user_entity IS NULL OR user_entity = '') AND (src_ip IS NULL OR src_ip = '') AND (hostname IS NULL OR hostname = '')",
+            [assessment_id, min_triage],
+        ).fetchone()[0] or 0
+    return {
+        "total_rows": int(total),
+        "missing_user_entity": int(missing_user),
+        "missing_src_ip": int(missing_ip),
+        "missing_hostname": int(missing_host),
+        "all_pivot_fields_empty": int(all_missing),
+        "stale_pct": round(int(all_missing) / max(int(total), 1) * 100, 1),
+    }
+
+
+# Critical addition #4: SQL entity-grouping query to pre-build pivot buckets.
+# This groups rows by shared entity (user, IP, host) entirely in DuckDB before
+# Python pair evaluation — the Python loop then only sees pre-formed groups.
+
+def entity_pivot_groups(assessment_id: str, min_triage: float = 0.15) -> dict[str, list[int]]:
+    """Return {pivot_key: [row_index, ...]} groups via DuckDB, capped per entity.
+
+    By doing the grouping in SQL we avoid loading all rows into Python just to
+    build the inverted index — DuckDB scans 44K rows in ~50ms.
+    """
+    with _lock:
+        conn = _db()
+        # User pivots
+        user_rows = conn.execute(
+            """
+            SELECT user_entity, row_index
+            FROM normalized_rows
+            WHERE assessment_id = ? AND triage_score >= ?
+              AND user_entity IS NOT NULL AND user_entity != ''
+            ORDER BY triage_score DESC
+            """,
+            [assessment_id, min_triage],
+        ).fetchall()
+        ip_rows = conn.execute(
+            """
+            SELECT src_ip, row_index
+            FROM normalized_rows
+            WHERE assessment_id = ? AND triage_score >= ?
+              AND src_ip IS NOT NULL AND src_ip != ''
+            ORDER BY triage_score DESC
+            """,
+            [assessment_id, min_triage],
+        ).fetchall()
+        host_rows = conn.execute(
+            """
+            SELECT hostname, row_index
+            FROM normalized_rows
+            WHERE assessment_id = ? AND triage_score >= ?
+              AND hostname IS NOT NULL AND hostname != ''
+            ORDER BY triage_score DESC
+            """,
+            [assessment_id, min_triage],
+        ).fetchall()
+
+    pivot: dict[str, list[int]] = {}
+    _CAP = 200
+    for entity, row_idx in user_rows:
+        k = f"user:{entity.lower()}"
+        pivot.setdefault(k, [])
+        if len(pivot[k]) < _CAP:
+            pivot[k].append(row_idx)
+    for ip, row_idx in ip_rows:
+        k = f"ip:{ip}"
+        pivot.setdefault(k, [])
+        if len(pivot[k]) < _CAP:
+            pivot[k].append(row_idx)
+    for host, row_idx in host_rows:
+        k = f"host:{host.lower()}"
+        pivot.setdefault(k, [])
+        if len(pivot[k]) < _CAP:
+            pivot[k].append(row_idx)
+
+    return {k: v for k, v in pivot.items() if len(v) >= 2}
+
+
+# ── Cluster persistence ───────────────────────────────────────────────────────
+
+def persist_clusters(assessment_id: str, clusters: list[dict]) -> None:
+    if not clusters:
+        return
+    records = [
+        (
+            assessment_id,
+            str(c.get("cluster_id") or ""),
+            str(c.get("verdict") or c.get("final_verdict") or ""),
+            float(c.get("confidence") or 0.0),
+            json.dumps(c, default=str),
+        )
+        for c in clusters
+    ]
+    with _lock:
+        _db().executemany(
+            "INSERT INTO cluster_snapshots "
+            "(assessment_id, cluster_id, verdict, confidence, cluster_json) "
+            "VALUES (?, ?, ?, ?, ?)",
+            records,
+        )
+
+
+# ── Raw file storage ──────────────────────────────────────────────────────────
+
+def _storage_id(value: str, *, label: str) -> str:
+    candidate = str(value or "").strip()
+    if (
+        not _STORAGE_ID_RE.fullmatch(candidate)
+        or candidate in {".", ".."}
+        or candidate.endswith(".")
+        or candidate.split(".", 1)[0].upper() in _WINDOWS_RESERVED_COMPONENTS
+    ):
+        raise ValueError(f"invalid_{label}")
+    return candidate
+
+
+def _tenant_directory_key(tenant_id: str) -> str:
+    """Avoid case-fold aliases while preserving existing lowercase paths."""
+
+    canonical = tenant_id.casefold()
+    if tenant_id == canonical:
+        return tenant_id
+    digest = hashlib.sha256(tenant_id.encode("utf-8")).hexdigest()[:12]
+    return f"{canonical}--{digest}"
+
+
+def raw_dir_for(assessment_id: str, tenant_id: str | None = None) -> str:
+    """Create a contained raw-upload directory, partitioned by tenant when set."""
+
+    assessment = _storage_id(assessment_id, label="assessment_id")
+    components = [assessment]
+    if tenant_id is not None:
+        tenant = _storage_id(tenant_id, label="tenant_id")
+        components.insert(0, _tenant_directory_key(tenant))
+
+    root = os.path.realpath(os.path.abspath(_RAW_ROOT))
+    os.makedirs(root, exist_ok=True)
+    path = os.path.realpath(os.path.join(root, *components))
+    if os.path.commonpath([root, path]) != root:
+        raise ValueError("raw_path_outside_root")
+    os.makedirs(path, exist_ok=True)
+    return path

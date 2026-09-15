@@ -1,0 +1,25 @@
+version: '3.8'
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+
+  # Example collector runner for local dev; assumes virtualenv is activated
+  collector:
+    build:
+      context: .
+      dockerfile: Dockerfile.collector
+    image: janusec-collector:local
+    volumes:
+      - .:/app:cached
+      - ./config:/app/config:ro
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - SYSLOG_UDP_PORT=5140
+      - SYSLOG_TCP_PORT=5141
+      - DEVICE_MAP_PATH=/app/config/exporter_device_map.yml
+      - RATE_LIMIT_CONFIG=/app/config/collector_rate_limits.yml
+    depends_on:
+      - redis

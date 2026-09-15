@@ -1,0 +1,13 @@
+{
+  "registry_version": "2026-09-12.2",
+  "factors": 345,
+  "unmapped": 1,
+  "citation_status_counts": {
+    "catalog_not_loaded": 848,
+    "active": 456,
+    "withdrawn": 5
+  },
+  "quarantined": [
+    "SA-12"
+  ]
+}

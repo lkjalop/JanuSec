@@ -1,0 +1,6 @@
+{
+  "subject": "Re-authorize application access",
+  "from": "security@accounts.google.com",
+  "links": [{"url":"https://accounts.google.com/signin?redirect_uri=https://malicious.example","domain":"accounts.google.com"}],
+  "indicators": {"domain_mismatch": true, "brand_mismatch": true}
+}

@@ -1,0 +1,47 @@
+[
+  {
+    "name": "private_backup_delete_ransomware",
+    "event": {
+      "tenant_id": "tenant-private-preview",
+      "uri": "/api/v1/backup/delete",
+      "method": "POST",
+      "auth_user": "svc-maint",
+      "file_count": 1500
+    },
+    "expected": {
+      "factors_contains": ["api:ransomware_api_activity"]
+    }
+  },
+  {
+    "name": "private_business_flow_anomaly",
+    "event": {
+      "tenant_id": "tenant-private-preview",
+      "uri": "/api/v1/payouts/bulk",
+      "method": "POST",
+      "auth_user": "private-finance",
+      "business_flow": "payout",
+      "transaction_amount": 520000,
+      "risk_score": 0.87,
+      "geo_anomaly": true
+    },
+    "expected": {
+      "factors_contains": ["api:business_flow_anomaly"]
+    }
+  },
+  {
+    "name": "private_supply_chain_modification",
+    "event": {
+      "tenant_id": "tenant-private-preview",
+      "uri": "/api/v1/registry/packages/pre-release",
+      "method": "POST",
+      "auth_user": "private-cicd",
+      "supply_chain_stage": "deploy",
+      "auth_context": {
+        "scopes": ["supply_chain:deploy"]
+      }
+    },
+    "expected": {
+      "factors_contains": ["api:supply_chain_pipeline_modification"]
+    }
+  }
+]

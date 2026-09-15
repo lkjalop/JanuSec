@@ -1,0 +1,91 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Precision Widget</title>
+  <style>body{font-family:Arial;background:#0f1724;color:#e6eef8;padding:16px}table{width:100%;border-collapse:collapse}th,td{padding:8px;border-bottom:1px solid #233}h1{font-size:16px}</style>
+</head>
+<body>
+  <h1>Rule Precision (last 7 days)</h1>
+  <div>
+    <label>Rule ID: <input id="rule" placeholder="optional"/></label>
+    <button id="load">Load</button>
+  </div>
+  <div id="out"></div>
+
+  <script>
+  async function load(){
+    const r = document.getElementById('rule').value || '';
+    const q = r ? ('?rule_id='+encodeURIComponent(r)+'&days=14') : '?days=14';
+    const res = await fetch('/api/v1/precision/daily'+q);
+    const json = await res.json();
+    const rows = json.rows || [];
+    let html = '<table><tr><th>day</th><th>rule</th><th>variant</th><th>tp</th><th>fp</th></tr>';
+    for(const r of rows){ html += `<tr><td>${new Date(r.day*1000).toISOString().slice(0,10)}</td><td>${r.rule_id}</td><td>${r.ab_variant || 'control'}</td><td>${r.tp}</td><td>${r.fp}</td></tr>` }
+    html += '</table>';
+    document.getElementById('out').innerHTML = html;
+  }
+  document.getElementById('load').addEventListener('click', load);
+  window.onload = load;
+  </script>
+</body>
+</html>
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Precision Widget</title>
+  <style>
+    body{background:#0f1724;color:#e6eef8;font-family:Inter,Arial,sans-serif;padding:18px}
+    .card{background:#0b1220;padding:12px;border-radius:8px}
+    table{width:100%;border-collapse:collapse;margin-top:12px}
+    th,td{padding:6px;border-bottom:1px solid #192031}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h3>Rule Precision (daily)</h3>
+    <label>Rule: <input id="rule" placeholder="corr_office_macro_ps" /></label>
+    <button id="refresh">Refresh</button>
+    <canvas id="chart" width="800" height="200" style="margin-top:12px;background:#07101b;border-radius:6px"></canvas>
+    <table id="tab"><thead><tr><th>Day</th><th>Variant</th><th>TP</th><th>FP</th><th>Precision</th></tr></thead><tbody></tbody></table>
+  </div>
+  <script>
+    async function fetchDaily(rule){
+      const q = new URL('/api/v1/precision/daily', location.origin);
+      if(rule) q.searchParams.set('rule_id', rule);
+      q.searchParams.set('days', '14');
+      const r = await fetch(q);
+      if(!r.ok) throw new Error('fetch failed');
+      return await r.json();
+    }
+    function renderTable(rows){
+      const tb = document.querySelector('#tab tbody'); tb.innerHTML='';
+      for(const r of rows){
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${new Date(r.day*1000).toISOString().slice(0,10)}</td><td>${r.ab_variant||'control'}</td><td>${r.tp}</td><td>${r.fp}</td><td>${(r.tp+r.fp? (r.tp/(r.tp+r.fp)).toFixed(2):'N/A')}</td>`;
+        tb.appendChild(tr);
+      }
+    }
+    function drawChart(rows){
+      const cvs = document.getElementById('chart');
+      const ctx = cvs.getContext('2d'); ctx.clearRect(0,0,cvs.width,cvs.height);
+      // simple bars: precision per row
+      const w = cvs.width, h = cvs.height; const pad=20; const barW = Math.max(6, (w-2*pad)/Math.max(1,rows.length));
+      rows.slice().reverse().forEach((r,i)=>{
+        const x = pad + i*barW; const prec = r.tp/(r.tp+r.fp||1) || 0; const y = h - pad - (prec*(h-2*pad));
+        ctx.fillStyle = '#2dd4bf'; ctx.fillRect(x, y, barW-2, h-pad-y);
+      });
+    }
+    document.getElementById('refresh').addEventListener('click', async ()=>{
+      const rule = document.getElementById('rule').value.trim();
+      try{
+        const j = await fetchDaily(rule);
+        const rows = j.rows || [];
+        renderTable(rows);
+        drawChart(rows);
+      }catch(e){alert(e)}
+    });
+  </script>
+</body>
+</html>

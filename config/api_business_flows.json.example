@@ -1,0 +1,14 @@
+[
+  {
+    "name": "payout_flow",
+    "path_prefix": "/api/v1/payouts",
+    "methods": ["POST"],
+    "required_scopes": ["payments:write"]
+  },
+  {
+    "name": "transfer_flow",
+    "path_prefix": "/api/v1/transfers",
+    "methods": ["POST"],
+    "required_scopes": ["transfers:approve"]
+  }
+]

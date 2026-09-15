@@ -1,0 +1,22 @@
+/* Responsive breakpoints */
+@media (max-width: 1280px) {
+  #contentWrapper { padding: var(--space-3); }
+}
+@media (max-width: 1024px) {
+  .panel, .card { padding: var(--space-3); }
+  #topBar { height:44px; }
+}
+@media (max-width: 900px) {
+  .badge-row { gap: var(--space-1); }
+}
+@media (max-width: 768px) {
+  body.with-topbar #contentWrapper { padding-top:60px; }
+  #topBar .brand { font-size: var(--font-size-sm); }
+  #topBar select { font-size: var(--font-size-xs); }
+  .panel, .card { padding: var(--space-2); }
+  #toastContainer { width:260px; top:12px; right:12px; }
+}
+@media (max-width: 600px) {
+  #contentWrapper { padding: var(--space-2); }
+  .pill { font-size: 10px; padding: 3px 6px; }
+}

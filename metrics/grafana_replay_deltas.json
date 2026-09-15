@@ -1,0 +1,25 @@
+{
+  "title": "Replay Confidence Delta Overview",
+  "panels": [
+    {
+      "type": "graph",
+      "title": "Replay Confidence Delta Histogram (Approx)",
+      "targets": [
+        {"expr": "histogram_quantile(0.5, sum(rate(replay_deltas_processed_total[5m])) by (le))"}
+      ],
+      "datasource": "Prometheus",
+      "id": 1
+    },
+    {
+      "type": "stat",
+      "title": "Replay Deltas Processed 5m",
+      "targets": [
+        {"expr": "sum(increase(replay_deltas_processed_total[5m]))"}
+      ],
+      "id": 2,
+      "datasource": "Prometheus"
+    }
+  ],
+  "schemaVersion": 39,
+  "version": 1
+}

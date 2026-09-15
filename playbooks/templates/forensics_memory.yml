@@ -1,0 +1,94 @@
+id: forensics_memory
+title: Memory Acquisition Playbook
+summary: >
+  Use this runbook whenever injected code, credential theft, or unknown processes
+  are suspected. Capture volatile evidence before remediation so analysts can
+  compare RAM artifacts with Sysmon/ETW telemetry.
+artifacts:
+  - key: memory_dump
+    description: Raw memory image captured with WinPMem (Windows) or AVML/LiME (Linux)
+  - key: pslist
+    description: Volatility pslist output saved to JSON/CSV for process lineage
+  - key: dlllist
+    description: Volatility dlllist output showing modules loaded for suspicious PIDs
+  - key: malfind
+    description: Volatility malfind dump of injected code regions and extracted PE files
+  - key: etw_sysmon
+    description: ETW/Sysmon process/network events aligned with memory timeline
+steps:
+  - name: Authorize & Prepare
+    desc: >
+      Notify the incident commander, document host, time, and toolset. Ensure
+      you have an external disk or network share with enough space for the dump.
+    checks:
+      - Capture photos/screenshots of logged-in users and open consoles
+      - Record hostname, IP, OS build, and suspected processes
+  - name: Acquire Windows Memory
+    desc: >
+      Run WinPMem or Belkasoft RAM Capturer with administrative privileges. Write
+      dumps to encrypted removable media.
+    commands:
+      - tool: WinPMem
+        command: "winpmem.exe --format raw --output E:\\evidence\\{host}_memory.raw"
+        notes: Run as SYSTEM; disable antivirus tamper protection temporarily if needed
+      - tool: Belkasoft RAM Capturer
+        command: "ramcapturer.exe /drive E:"
+        notes: Generates AFF4 dump suitable for Volatility 3
+  - name: Acquire Linux Memory
+    desc: >
+      Use AVML or LiME to capture physical memory. Store dumps on a mounted
+      evidence drive with read/write verification.
+    commands:
+      - tool: AVML
+        command: "sudo avml /mnt/evidence/{host}.lime --compress"
+        notes: Requires kernel support for userfaultfd; run inside screen/tmux
+      - tool: LiME
+        command: "sudo insmod lime.ko path=/mnt/evidence/{host}.lime format=lime"
+        notes: Ensure module compiled for current kernel
+  - name: Register Dump with Memory Pipeline
+    desc: >
+      Upload the dump to the secure memory pipeline for analysis. Provide case ID,
+      host, and acquisition details.
+    commands:
+      - tool: Memory pipeline upload
+        command: >
+          curl -H "x-api-key: ${API_KEY}" -F "dump=@{host}_memory.raw"
+          -F "host={host}" -F "case={case_id}"
+          https://{api_host}/api/v1/forensics/memory/upload
+        notes: Pipeline handles encryption at rest and TTL cleanup
+  - name: Volatility 3 Triage
+    desc: >
+      Execute pslist, psxview, dlllist, malfind, netscan, and handles plugins.
+      Export JSON or CSV for each plugin.
+    commands:
+      - tool: Volatility pslist
+        command: "vol.py -f {host}_memory.raw windows.pslist --output=json --output-file pslist.json"
+      - tool: Volatility malfind
+        command: "vol.py -f {host}_memory.raw windows.malfind --dump --output-file malfind_dump"
+      - tool: Volatility dlllist
+        command: "vol.py -f {host}_memory.raw windows.dlllist --output=json --output-file dlllist.json"
+  - name: Extract Suspicious Artifacts
+    desc: >
+      Dump suspicious processes, injected DLLs, and sections flagged by malfind.
+      Hash artifacts and store them alongside the case evidence.
+    commands:
+      - tool: Volatility procdump
+        command: "vol.py -f {host}_memory.raw windows.dumpfiles -p {pid} --dump-dir dumps/"
+      - tool: Sigcheck
+        command: "sigcheck64.exe -accepteula -h dumps\\*.exe"
+  - name: Correlate with Sysmon/ETW
+    desc: >
+      Align Volatility timestamps with Sysmon Event 1/3 and ETW traces. Confirm
+      parent-child chains, network beacons, and other context.
+    commands:
+      - tool: Sysmon export
+        command: >
+          wevtutil qe "Microsoft-Windows-Sysmon/Operational"
+          /q:"*[System[(EventID=1 or EventID=3)]]"
+          /f:text /c:2000
+      - tool: ETW trace
+        command: "logman start mem_trace -p \"Microsoft-Windows-Kernel-Process\" -ets"
+notes:
+  - Always checksum dumps before and after transfer (e.g., sha256sum)
+  - Store dumps and outputs in encrypted storage with documented chain of custody
+  - Update case tracking with artifact IDs from the memory pipeline

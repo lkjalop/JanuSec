@@ -1,0 +1,38 @@
+{
+  "schema_version": "janusec.case-evidence-view/v2",
+  "case": {"id":"fixture-case","tenant_id":"fixture-tenant","status":"ready","stage":"complete","percent":100},
+  "posture": {"breach_status":"confirmed","evidence_confidence":0.82,"evidence_completeness":0.75,"impact":"high","urgency":"review_required"},
+  "breach_summary": {"headline":"Compromised identity crossed endpoint and cloud boundaries","what_happened":"A suspicious identity session was followed by endpoint execution and cloud data access.","supporting_evidence_ids":["e-1","e-2"],"coverage_gaps":["Token revocation state not supplied."],"status":"supported","generated_by":"assessment_pipeline"},
+  "claims": [{"id":"claim-1","type":"inferred","title":"Cross-domain compromise","confidence":0.82,"supporting_evidence_ids":["e-1","e-2"],"contradicting_evidence_ids":[],"status":"VALIDATED_BREACH"}],
+  "evidence": {"rows":[{"id":"e-1","source":"email","occurred_at":"2026-08-18T01:00:00Z","known_at":"2026-08-18T01:00:05Z","severity":"high","summary":"Suspicious OAuth consent","raw":{}},{"id":"e-2","source":"endpoint_sysmon","occurred_at":"2026-08-18T01:12:00Z","known_at":"2026-08-18T01:12:03Z","severity":"high","summary":"Encoded PowerShell","raw":{}}],"returned":2,"total":2,"truncated":false},
+  "graph": {"nodes":[],"edges":[],"excluded_edges":[],"edge_policy":"typed_backend_edges_only"},
+  "timeline": [{"id":"e-1","occurred_at":"2026-08-18T01:00:00Z","label":"Suspicious OAuth consent","source":"email"}],
+  "retrieval_trace": [],
+  "coverage_gaps": ["Token revocation state not supplied."],
+  "analyst": {"decisions":[],"approved_actions":[]},
+  "execution": {"dag":null,"receipts":[],"legacy_stage":"complete"},
+  "report_context": {"report_id":"report-fixture-case","generated_at":"2026-08-18T02:00:00Z","evidence_pack_hash":"fixture-hash","review_status":"unreviewed"},
+  "model_execution": {"mode":"local_preferred","provider":"ollama","model":"qwen3.6:14b","external_data_transfer":false,"immutable":true,"fallback_applied":false},
+  "source_domains": [{"domain":"email","row_count":1},{"domain":"endpoint_sysmon","row_count":1}],
+  "attack_story": {"entry_vector":{"title":"OAuth consent"},"propagation_path":[],"persistence":[],"impact_mechanism":[],"blast_radius":{},"milestones":[{"id":"m-1","phase":"entry","title":"Suspicious OAuth consent","occurred_at":"2026-08-18T01:00:00Z","status":"observed","summary":"Consent event observed.","evidence_ids":["e-1"],"mitre_techniques":["T1528"],"source_domains":["email"]}]},
+  "business_impact": [{"id":"svc-1","name":"Customer identity","status":"confirmed","criticality":"high","impact":"Identity session exposed.","affected_assets":[],"evidence_ids":["e-1"],"mapping_source":"analyst"}],
+  "authorization_paths": [{"id":"auth-1","principal":"alex@example.test","action":"grant consent","resource":"application","outcome":"success","roles":[],"policies":[],"conditions":{},"status":"observed","evidence_ids":["e-1"]}],
+  "containment": [{"object":"OAuth application","status":"pending","verification":"Revocation receipt required"}],
+  "immediate_decisions": [{"id":"d-1","decision":"Revoke active credentials","priority":"P0","rationale":"Limit continuing access.","owner_role":"IAM owner","approval_status":"pending","evidence_ids":["e-1"]}],
+  "hypotheses": [],
+  "control_impacts": [{"id":"iso27001:A.5.17","framework":"iso27001","control_id":"A.5.17","title":"Authentication information","assertion_status":"possible_control_weakness","basis":"Suspicious session use","supporting_evidence_ids":["e-1"],"contradicting_evidence_ids":[],"missing_evidence":["Current policy export"],"reviewer_status":"unreviewed"}],
+  "corrective_actions": [{"priority":"P1","action":"Review OAuth consent policy","owner_role":"IAM owner","status":"pending","verification":"Approved policy export"}],
+  "action_plan": {
+    "schema_version":"janusec.case-action-plan/v1","case_id":"fixture-case","content_hash":"fixture-action-plan-hash",
+    "governance_boundary":"Models may propose actions. Authenticated humans approve execution, control conclusions, and closure.",
+    "decisions_required":[],
+    "actions":[{
+      "id":"action-1","horizon":"now","action_type":"containment","title":"Revoke active credentials",
+      "exact_action":"Revoke active credentials for the cited identity session.","why":"Limit continuing access.",
+      "owner_role":"IAM owner","accountable_approver_role":"incident_commander","priority":"critical","due_within":"4 hours",
+      "status":"pending","recommendation_status":"required_response","supporting_evidence_ids":["e-1"],
+      "verification_procedure":"Confirm revocation in the authoritative identity provider.",
+      "required_closure_evidence":["Provider-native revocation receipt","Independent session retest"]
+    }]
+  }
+}

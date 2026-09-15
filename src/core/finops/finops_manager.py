@@ -12,10 +12,14 @@ Future extensions:
 - ML-based forecasting
 """
 from __future__ import annotations
-import time, math, threading
+
+import math
+import threading
+import time
 from collections import defaultdict, deque
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Dict, Any, Callable, Tuple
+from typing import Any, Dict, Tuple
 
 try:
     from prometheus_client import Counter, Gauge
@@ -30,7 +34,7 @@ class CostEvent:
     component: str
     units: float
     cost_units: float
-    meta: Dict[str, Any]
+    meta: dict[str, Any]
 
 class FinOpsManager:
     def __init__(self):
@@ -38,12 +42,12 @@ class FinOpsManager:
         # Raw events (recent window only for memory safety)
         self._recent: deque[CostEvent] = deque(maxlen=50000)
         # Hourly rollup: {(tenant,component,hour_epoch)->cost_units}
-        self._hourly: Dict[Tuple[str,str,int], float] = defaultdict(float)
+        self._hourly: dict[tuple[str,str,int], float] = defaultdict(float)
         # Daily rollup: {(tenant,component,day_epoch)->cost_units}
-        self._daily: Dict[Tuple[str,str,int], float] = defaultdict(float)
+        self._daily: dict[tuple[str,str,int], float] = defaultdict(float)
         # Estimation tracking
-        self._estimates: Dict[str, Tuple[float,float]] = {}  # id -> (est, actual)
-        self._estimate_history: deque[Tuple[str,float,float,float]] = deque(maxlen=200)  # (id, est, actual, ts)
+        self._estimates: dict[str, tuple[float,float]] = {}  # id -> (est, actual)
+        self._estimate_history: deque[tuple[str,float,float,float]] = deque(maxlen=200)  # (id, est, actual, ts)
         self._init_metrics()
 
     def _init_metrics(self):
@@ -62,7 +66,7 @@ class FinOpsManager:
                 pass
         self.__class__._init = True
 
-    def ingest(self, tenant: str, component: str, cost_units: float, units: float, meta: Dict[str,Any] | None = None):
+    def ingest(self, tenant: str, component: str, cost_units: float, units: float, meta: dict[str,Any] | None = None):
         now = time.time()
         evt = CostEvent(now, tenant, component, units, cost_units, meta or {})
         hour_epoch = int(now // 3600 * 3600)
@@ -89,21 +93,21 @@ class FinOpsManager:
                 try: self.__class__.c_estimation.labels(status=status).inc()
                 except Exception: pass
 
-    def hourly_summary(self, tenant: str | None = None) -> Dict[str, Any]:
+    def hourly_summary(self, tenant: str | None = None) -> dict[str, Any]:
         now = time.time()
         cut = now - 3600*24
         with self._lock:
             rows = [((t,c,h),v) for (t,c,h),v in self._hourly.items() if h >= int(cut //3600 *3600) and (tenant is None or t==tenant)]
         return {'hours': [ {'tenant':t,'component':c,'hour':h,'cost_units':v} for (t,c,h),v in sorted(rows)]}
 
-    def daily_summary(self, tenant: str | None = None) -> Dict[str, Any]:
+    def daily_summary(self, tenant: str | None = None) -> dict[str, Any]:
         now = time.time()
         cut = now - 86400*30
         with self._lock:
             rows = [((t,c,d),v) for (t,c,d),v in self._daily.items() if d >= int(cut //86400 *86400) and (tenant is None or t==tenant)]
         return {'days': [ {'tenant':t,'component':c,'day':d,'cost_units':v} for (t,c,d),v in sorted(rows)]}
 
-    def forecast_month(self, tenant: str) -> Dict[str, Any]:
+    def forecast_month(self, tenant: str) -> dict[str, Any]:
         # Simple: average daily over last N days * days_in_month
         ds = self.daily_summary(tenant)['days']
         if not ds:
@@ -115,7 +119,7 @@ class FinOpsManager:
         forecast = avg * 30
         return {'tenant':tenant,'forecast_units':round(forecast,2),'basis_days':len(last),'avg_daily':round(avg,2)}
 
-    def accuracy_history(self, limit: int = 30) -> Dict[str, Any]:
+    def accuracy_history(self, limit: int = 30) -> dict[str, Any]:
         with self._lock:
             rows = list(self._estimate_history)[-limit:]
         out = []
@@ -134,7 +138,7 @@ def get_finops_manager() -> FinOpsManager:
         _finops_singleton = FinOpsManager()
         # Lazy import to avoid circular dependency
         try:
-            from src.core.metrics.cost_ledger import register_cost_subscriber  # type: ignore
+            from core.metrics.cost_ledger import register_cost_subscriber  # type: ignore
             def _cb(evt: dict):
                 tenant = evt.get('tenant','default')
                 component = evt.get('component','inference')

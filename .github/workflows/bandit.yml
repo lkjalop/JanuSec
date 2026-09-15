@@ -1,0 +1,40 @@
+name: Security - Bandit
+
+on:
+  push:
+    paths:
+      - '**/*.py'
+      - 'bandit.yaml'
+      - '.github/workflows/bandit.yml'
+  pull_request:
+    paths:
+      - '**/*.py'
+      - 'bandit.yaml'
+      - '.github/workflows/bandit.yml'
+
+jobs:
+  bandit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install Bandit
+        run: pip install bandit
+      - name: Run Bandit (high severity gate; remaining findings retained)
+        run: |
+          set +e
+          bandit -r src -f json -o bandit.json
+          scan_status=$?
+          set -e
+          test "$scan_status" -le 1
+          python -c "import json; r=json.load(open('bandit.json')); high=[x for x in r['results'] if x['issue_severity']=='HIGH']; print(f'High-severity findings: {len(high)}'); assert not high, 'High-severity Bandit findings block release'"
+          if [ "$scan_status" -eq 1 ]; then echo "::warning::Bandit reported findings; review the artifact. This is not a clean security certification."; fi
+      - name: Upload findings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bandit-findings
+          path: bandit.json
+          if-no-files-found: error

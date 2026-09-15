@@ -1,0 +1,71 @@
+# Unqualified deployment template. Select a verified release image and configure
+# customer secrets/storage before enabling ingress. See docs/PILOT_ACCESS_AND_RESOURCE_BOUNDARY.md.
+image:
+  repository: ghcr.io/lkjalop/janusec-api
+  tag: "REPLACE_WITH_VERIFIED_RELEASE_TAG"
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+service:
+  type: ClusterIP
+  port: 8080
+
+resources:
+  requests:
+    cpu: 1000m
+    memory: 4Gi
+  limits:
+    cpu: 2000m
+    memory: 4Gi
+
+ingress:
+  enabled: false
+  className: nginx
+  host: REPLACE_YOUR_HOSTNAME
+  tls:
+    enabled: true
+    secretName: janusec-tls
+
+env:
+  - name: ENV
+    value: "production"
+  - name: APP_ENV
+    value: "production"
+  - name: JANUSEC_RUNTIME_PROFILE
+    value: "production"
+  - name: STRICT_API_KEY_ENFORCEMENT
+    value: "1"
+  - name: ACCESS_LOG_SAMPLE_RATE
+    value: "0.1"
+  - name: EVENT_QUEUE_MAX
+    value: "5000"
+  - name: ENABLE_CSV_UPLOAD
+    value: "true"
+  - name: DEFAULT_FRONTEND
+    value: "console"
+  - name: ALLOWED_ORIGINS
+    value: "https://REPLACE_YOUR_HOSTNAME"
+
+# Optionally mount secrets containing sensitive env vars (API_KEYS_JSON, JWT_SECRET, DB creds, webhook secrets)
+envFromSecrets: []
+
+oauth2Proxy:
+  enabled: true
+  image: quay.io/oauth2-proxy/oauth2-proxy:v7.5.1
+  servicePort: 4180
+  provider: oidc
+  emailDomains: ["*"]
+  oidc:
+    issuerURL: REPLACE_ISSUER_URL
+    clientID: REPLACE_CLIENT_ID
+    clientSecret: REPLACE_CLIENT_SECRET
+    scope: "openid email profile"
+  cookieSecret: REPLACE_BASE64_32B
+  redirectURL: https://REPLACE_YOUR_HOSTNAME/oauth2/callback
+
+hpa:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 70

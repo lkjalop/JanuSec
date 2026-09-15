@@ -1,7 +1,9 @@
 """Repository for aggregated factor weights derived from feedback."""
 from __future__ import annotations
-from typing import Dict, Any
-from db.database import fetch, execute, with_retry
+
+from typing import Any, Dict
+
+from db.database import execute, fetch, with_retry
 
 UPSERT = """
 INSERT INTO factor_weights (factor, weight, last_updated, tenant_id)
@@ -21,7 +23,7 @@ async def upsert_factor_weight(factor: str, weight: float, tenant_id: str | None
         return await execute(UPSERT, factor, weight, tenant_id)
     return await with_retry(_do)
 
-async def load_weights(tenant_id: str | None = None) -> Dict[str,float]:
+async def load_weights(tenant_id: str | None = None) -> dict[str,float]:
     rows = await fetch(SELECT_ALL, tenant_id)
     return {r['factor']: r['weight'] for r in rows}
 

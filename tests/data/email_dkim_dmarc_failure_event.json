@@ -1,0 +1,9 @@
+{
+  "message_id": "mid-002",
+  "from_address": "finance@partner.co",
+  "spf_result": "pass",
+  "dkim_result": "fail",
+  "dmarc_result": "fail",
+  "subject": "Invoice attached",
+  "body": "Please find the invoice attached."
+}

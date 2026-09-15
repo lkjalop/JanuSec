@@ -3,8 +3,9 @@
 Generates sbom:* factors from vulnerability aggregates with bounded confidence influence.
 """
 from __future__ import annotations
+
 import time
-from typing import Dict, Any, List
+from typing import Any, Dict, List
 
 try:
     from prometheus_client import Counter, Gauge
@@ -35,7 +36,7 @@ class SBOMVulnMapper:
     async def shutdown(self):
         return
 
-    def map_event(self, tenant: str, component_key: str, existing_factors: List[str]) -> Dict[str, Any]:
+    def map_event(self, tenant: str, component_key: str, existing_factors: list[str]) -> dict[str, Any]:
         from repositories.sbom_vuln_agg_repo import get_aggregate
         agg = get_aggregate(tenant, component_key)
         if not agg:
@@ -45,8 +46,9 @@ class SBOMVulnMapper:
         high = sc.get('high',0)
         med = sc.get('medium',0)
         low = sc.get('low',0)
-        factors: List[str] = []
-        pos_deltas: Dict[str,float] = {}
+        cvss_max = float(getattr(agg, 'cvss_max', 0.0) or 0.0)
+        factors: list[str] = []
+        pos_deltas: dict[str,float] = {}
         # Factor rules
         if crit > 0:
             factors.append('sbom:cve_critical'); pos_deltas['sbom:cve_critical']=0.08
@@ -61,6 +63,21 @@ class SBOMVulnMapper:
         # Supply chain drift (if existing factor present)
         if 'component_hash_drift' in existing_factors:
             factors.append('sbom:supply_chain_drift'); pos_deltas['sbom:supply_chain_drift']=0.04
+        # High CVSS presence (from max observed)
+        try:
+            if cvss_max >= 9.0:
+                if 'vuln:cvss_ge_9' not in factors:
+                    factors.append('vuln:cvss_ge_9')
+                # Small additive signal; respects overall cap below
+                pos_deltas['vuln:cvss_ge_9'] = max(pos_deltas.get('vuln:cvss_ge_9', 0.0), 0.03)
+        except Exception:
+            pass
+        # Emit a non-scoring factor carrying cvss_max for SSE timelines/visibility
+        try:
+            if cvss_max and cvss_max > 0:
+                factors.append(f'vuln:cvss_max:{cvss_max:.1f}')
+        except Exception:
+            pass
         # Cap scaling
         total = sum(pos_deltas.values())
         if total > self.cap and total > 0:
@@ -76,13 +93,27 @@ class SBOMVulnMapper:
             # metrics
             try:
                 if hasattr(self.__class__,'factor_counter'):
-                    self.__class__.factor_counter.labels(factor=f).inc()  # type: ignore
+                    try:
+                        from src.api.metrics_tenant_helper import emit_labels_with_guard
+                        from src.api.server import get_server_runtime_state as _get_rt
+                        labels = emit_labels_with_guard(_get_rt(None), {'factor': f}, None)
+                        self.__class__.factor_counter.labels(**labels).inc()
+                    except Exception:
+                        try: self.__class__.factor_counter.labels(factor=f).inc()  # type: ignore
+                        except Exception: pass
             except Exception: pass
         # density gauge
         high_density_ratio = (high + crit) / max(1, (crit+high+med+low))
         try:
             if hasattr(self.__class__,'density_gauge'):
-                self.__class__.density_gauge.labels(component_key=component_key).set(high_density_ratio)  # type: ignore
+                try:
+                    from src.api.metrics_tenant_helper import emit_labels_with_guard
+                    from src.api.server import get_server_runtime_state as _get_rt
+                    labels = emit_labels_with_guard(_get_rt(None), {'component_key': component_key}, None)
+                    self.__class__.density_gauge.labels(**labels).set(high_density_ratio)
+                except Exception:
+                    try: self.__class__.density_gauge.labels(component_key=component_key).set(high_density_ratio)  # type: ignore
+                    except Exception: pass
         except Exception: pass
         return {
             'factors': factors,
@@ -91,6 +122,7 @@ class SBOMVulnMapper:
                 'severity_counts': sc,
                 'age_days': round(age_days,1),
                 'scaled_deltas': scaled,
-                'density_ratio': round(high_density_ratio,4)
+                'density_ratio': round(high_density_ratio,4),
+                'cvss_max': cvss_max,
             }
         }

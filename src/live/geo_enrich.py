@@ -5,19 +5,21 @@ fake ASN and country codes based on hashing the IP (sufficient for heuristic
 rarity / outbound context classification in MVP).
 """
 from __future__ import annotations
-import hashlib, os
+
+import hashlib
+import os
 from typing import Dict
 
 _PROVIDER = os.getenv('GEO_PROVIDER','stub').lower()
 
-def _stub(ip: str) -> Dict[str,str]:
+def _stub(ip: str) -> dict[str,str]:
     h = hashlib.sha256(ip.encode()).digest()
     asn = 10000 + (h[0] % 5000)
     country = chr(65 + (h[1] % 26)) + chr(65 + (h[2] % 26))
     return {'asn': f'AS{asn}', 'country': country}
 
 _MM_READER = None
-def _maxmind(ip: str) -> Dict[str,str]:
+def _maxmind(ip: str) -> dict[str,str]:
     global _MM_READER
     db_path = os.getenv('MAXMIND_DB_PATH','GeoLite2-City.mmdb')
     if _MM_READER is None:
@@ -47,7 +49,7 @@ def _maxmind(ip: str) -> Dict[str,str]:
         pass
     return {'asn': asn, 'country': country}
 
-def enrich(ip: str | None) -> Dict[str,str]:
+def enrich(ip: str | None) -> dict[str,str]:
     if not ip:
         return {}
     if _PROVIDER == 'maxmind':

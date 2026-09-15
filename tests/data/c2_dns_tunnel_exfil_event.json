@@ -1,0 +1,7 @@
+{
+  "event_id": "evt-c2-dns-1",
+  "host": "host-104",
+  "timestamp": "2025-10-12T13:03:00Z",
+  "dns_tunnel_detected": true,
+  "high_entropy_queries": true
+}

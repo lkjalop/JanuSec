@@ -8,32 +8,39 @@ from collections import deque
 from typing import Any, Deque, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
-
+# Default fallback max
 _FALLBACK_MAX = max(1, int(os.getenv('HUNT_LANE_FALLBACK_MAX', '512')))
-_INMEM_BUFFER: Deque[Dict[str, Any]] = deque(maxlen=_FALLBACK_MAX)
-
-
-def _push_fallback(entry: Dict[str, Any]) -> None:
-    _INMEM_BUFFER.appendleft(entry)
-
-
-def _fallback_rows(tenant_id: Optional[str], lane: Optional[str], limit: int) -> List[Dict[str, Any]]:
-    results: List[Dict[str, Any]] = []
-    for item in _INMEM_BUFFER:
-        if tenant_id and item.get('tenant_id') != tenant_id:
-            continue
-        if lane and item.get('lane') != lane:
-            continue
-        results.append(dict(item))
-        if len(results) >= limit:
-            break
-    return results
+# Use a shared in-memory module so different import aliasing during tests
+# still refer to the same underlying buffer (avoids duplicate module objects
+# seeing different deques).
+try:
+    from src.repositories.shared_inmemory import push_hunt_event as _push_fallback, get_hunt_events as _fallback_rows, reset_hunt_events as _reset_hunt
+except Exception:
+    try:
+        from repositories.shared_inmemory import push_hunt_event as _push_fallback, get_hunt_events as _fallback_rows, reset_hunt_events as _reset_hunt  # type: ignore
+    except Exception:
+        # Last-resort internal deque
+        _FALLBACK_MAX = max(1, int(os.getenv('HUNT_LANE_FALLBACK_MAX', '512')))
+        _INMEM_BUFFER: deque[dict[str, Any]] = deque(maxlen=_FALLBACK_MAX)
+        def _push_fallback(entry: dict[str, Any]) -> None:
+            _INMEM_BUFFER.appendleft(entry)
+        def _fallback_rows(tenant_id: str | None, lane: str | None, limit: int) -> list[dict[str, Any]]:
+            results: list[dict[str, Any]] = []
+            for item in _INMEM_BUFFER:
+                if tenant_id and item.get('tenant_id') != tenant_id:
+                    continue
+                if lane and item.get('lane') != lane:
+                    continue
+                results.append(dict(item))
+                if len(results) >= limit:
+                    break
+            return results
 
 
 class HuntLaneEventsRepository:
     """Persist hunt lane emissions with optional in-memory fallback for tests."""
 
-    def __init__(self, pool: Any | None, *, fallback_enabled: Optional[bool] = None) -> None:
+    def __init__(self, pool: Any | None, *, fallback_enabled: bool | None = None) -> None:
         self.pool = pool
         self.require_tenant = True
         if fallback_enabled is None:
@@ -46,16 +53,22 @@ class HuntLaneEventsRepository:
 
     @classmethod
     def reset_fallback(cls) -> None:
-        _INMEM_BUFFER.clear()
+        try:
+            _reset_hunt()
+        except Exception:
+            try:
+                _INMEM_BUFFER.clear()
+            except Exception:
+                pass
 
     async def record(
         self,
-        tenant_id: Optional[str],
+        tenant_id: str | None,
         event_id: str,
         lane: str,
-        factors: List[str],
+        factors: list[str],
         latency_ms: float,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         if self.require_tenant and not tenant_id:
             raise ValueError('tenant_id required for hunt lane persistence')
 
@@ -98,18 +111,18 @@ class HuntLaneEventsRepository:
 
     async def recent(
         self,
-        tenant_id: Optional[str],
-        lane: Optional[str] = None,
+        tenant_id: str | None,
+        lane: str | None = None,
         limit: int = 100,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         if self.require_tenant and not tenant_id:
             raise ValueError('tenant_id required for recent hunt lane events')
 
         limit = max(1, min(limit, _FALLBACK_MAX))
 
         if self._has_acquire(self.pool):
-            clauses: List[str] = []
-            params: List[Any] = []
+            clauses: list[str] = []
+            params: list[Any] = []
             idx = 1
             if tenant_id:
                 clauses.append(f"tenant_id=${idx}")

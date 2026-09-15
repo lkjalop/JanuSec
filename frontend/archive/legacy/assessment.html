@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JanuSec — Assessment</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:#0f172a; color:#e2e8f0;
+         font:15px/1.6 -apple-system,Segoe UI,Roboto,sans-serif; padding:28px; }
+  header { display:flex; align-items:baseline; gap:14px; margin-bottom:6px; }
+  h1 { font-size:22px; margin:0; }
+  .aid { color:#94a3b8; font-size:13px; }
+  .tabs { display:flex; gap:10px; margin:20px 0 22px; }
+  .tab { background:#1e293b; color:#cbd5e1; border:1px solid #334155; border-radius:8px;
+         padding:12px 20px; text-decoration:none; font-weight:600; }
+  .tab.primary { background:#1d4ed8; border-color:#1d4ed8; color:#fff; }
+  .tab:hover { border-color:#60a5fa; }
+  .exec { background:#0b1220; border:2px solid #334155; border-radius:12px; padding:20px 24px; }
+  .es-head { font-weight:700; font-size:16px; color:#fbbf24; margin-bottom:12px; }
+  .es-p { margin:0 0 12px; } .es-p:last-child { margin-bottom:0; }
+  .es-n { color:#60a5fa; font-weight:700; margin-right:8px; }
+  .muted { color:#94a3b8; }
+  .err { color:#f87171; }
+  .actions { display:flex; gap:12px; flex-wrap:wrap; align-items:center; margin:0 0 22px; }
+  .btn { background:#059669; color:#fff; border:1px solid #059669; border-radius:8px;
+         padding:10px 18px; text-decoration:none; font-weight:600; font-size:14px; }
+  .btn.secondary { background:transparent; color:#a7f3d0; border-color:#334155; }
+  .btn:hover { filter:brightness(1.12); }
+  .demo-banner { background:#422006; color:#fde68a; border:1px solid #b45309;
+         border-radius:8px; padding:8px 14px; font-size:13px; margin:6px 0 14px; }
+  code { background:#1e293b; padding:1px 5px; border-radius:4px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>JanuSec — Breach Assessment</h1>
+  <span class="aid" id="aid"></span>
+</header>
+
+<div class="demo-banner" id="demo-banner" hidden>
+  Showing the built-in <strong>demo-vesper</strong> assessment — append
+  <code>?assessment=&lt;id&gt;</code> to view your own.
+</div>
+
+<nav class="tabs">
+  <a class="tab primary" id="tab-summary" href="#">Summary</a>
+  <a class="tab" id="tab-invest" href="#">Investigation</a>
+  <a class="tab" id="tab-control" href="#">Control Assurance</a>
+</nav>
+
+<div class="actions">
+  <a class="btn" id="dl-report" href="#" target="_blank" rel="noopener">⤓ Download audit report (ISO 19011/27035/27001 — PDF-ready)</a>
+  <a class="btn secondary" id="dl-csv" href="#">Nonconformity register (CSV)</a>
+</div>
+
+<section class="exec" id="exec">
+  <div class="muted">Loading executive summary…</div>
+</section>
+
+<script>
+  // Two-surface landing: exec summary front-and-centre, with Investigation (breach
+  // reconstruction) and Control Assurance (GRC audit pack) as the two surfaces.
+  const params = new URLSearchParams(location.search);
+  // `aid` is the natural short param (what the seeder prints); keep the older
+  // `assessment`/`id` aliases. With none supplied, fall back to the built-in demo
+  // so the bare URL is a working, zero-config artifact.
+  const aidParam = params.get('assessment') || params.get('id') || params.get('aid') || '';
+  const isDemo = !aidParam;
+  const aid = aidParam || 'demo-vesper';
+  const key = params.get('key') || '';
+  const keyq = key ? ('?key=' + encodeURIComponent(key)) : '';
+  const api = p => '/api/v1/assessments/' + encodeURIComponent(aid) + p + keyq;
+
+  if (isDemo) document.getElementById('demo-banner').hidden = false;
+  document.getElementById('aid').textContent = 'Assessment ' + aid + (isDemo ? ' (demo)' : '');
+  document.getElementById('tab-invest').href = 'investigation.html?aid=' + encodeURIComponent(aid) + (key ? '&key=' + encodeURIComponent(key) : '');
+  document.getElementById('tab-control').href = api('/audit-pack.html');
+  document.getElementById('dl-report').href = api('/report.html');
+  document.getElementById('dl-csv').href = api('/audit-pack.csv');
+
+  const exec = document.getElementById('exec');
+  function esc(s){ return String(s==null?'':s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+
+  const headers = key ? { 'X-API-Key': key } : {};
+  fetch(api('/summary'), { headers })
+    .then(r => r.ok ? r.json() : Promise.reject(r.status))
+    .then(es => {
+      const paras = (es.paragraphs || []).map((p,i) =>
+        '<p class="es-p"><span class="es-n">¶' + (i+1) + '</span>' + esc(p) + '</p>').join('');
+      exec.innerHTML = '<div class="es-head">' + esc(es.headline || 'Executive summary') + '</div>' +
+        (paras || '<div class="muted">No breach finding to summarise.</div>');
+    })
+    .catch(status => {
+      exec.innerHTML = status === 401
+        ? '<div class="err">Authorisation required — append <code>?key=&lt;api-key&gt;</code> (not needed in demo/lite mode).</div>'
+        : '<div class="muted">No summary available for this assessment (status ' + esc(status) + ').</div>';
+    });
+</script>
+</body>
+</html>

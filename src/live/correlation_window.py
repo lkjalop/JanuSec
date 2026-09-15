@@ -4,20 +4,22 @@ Maintains per-key (host, user, dest_ip) recent events with timestamps
 in memory. Used for sequence-based rule expansions (future beacons, burst rates).
 """
 from __future__ import annotations
+
+import os
+import threading
 import time
-from collections import deque, defaultdict
-from typing import Deque, Dict, Any, Tuple, List
-import os, threading
+from collections import defaultdict, deque
+from typing import Any, Deque, Dict, List, Tuple
 
 _MAX_EVENTS = int(os.getenv('CORR_WINDOW_MAX_EVENTS','5000'))
 _TTL_SECONDS = int(os.getenv('CORR_WINDOW_TTL_SECONDS','900'))  # 15m
 _lock = threading.Lock()
-_by_host: Dict[str, Deque[Tuple[float,dict]]] = defaultdict(lambda: deque())
-_by_user: Dict[str, Deque[Tuple[float,dict]]] = defaultdict(lambda: deque())
-_by_dest: Dict[str, Deque[Tuple[float,dict]]] = defaultdict(lambda: deque())
+_by_host: dict[str, deque[tuple[float,dict]]] = defaultdict(lambda: deque())
+_by_user: dict[str, deque[tuple[float,dict]]] = defaultdict(lambda: deque())
+_by_dest: dict[str, deque[tuple[float,dict]]] = defaultdict(lambda: deque())
 _total = 0
 
-def _prune(q: Deque[Tuple[float,dict]], now: float):
+def _prune(q: deque[tuple[float,dict]], now: float):
     while q and (now - q[0][0]) > _TTL_SECONDS:
         q.popleft()
 
@@ -43,7 +45,7 @@ def add(ev: dict):
                     if not dq:
                         coll.pop(k, None)
 
-def recent_for_host(host: str, limit: int = 50) -> List[dict]:
+def recent_for_host(host: str, limit: int = 50) -> list[dict]:
     with _lock:
         q = _by_host.get(host)
         if not q: return []

@@ -7,10 +7,14 @@ severity rollup snapshot. Falls back gracefully if data partial.
 Intended for: /metrics/snapshot endpoint & Slack pilot reporting.
 """
 from __future__ import annotations
-from typing import Dict, Any, List, Tuple
-import time, os, math
 
-def _decision_iter(decisions: List[Dict[str, Any]], tenant: str | None, window_seconds: int):
+import math
+import os
+import time
+from typing import Any, Dict, List, Tuple
+
+
+def _decision_iter(decisions: list[dict[str, Any]], tenant: str | None, window_seconds: int):
     if not decisions:
         return []
     now = time.time()
@@ -28,12 +32,12 @@ def _decision_iter(decisions: List[Dict[str, Any]], tenant: str | None, window_s
             continue
     return out
 
-def aggregate(decisions: List[Dict[str, Any]], escalations: List[Dict[str, Any]], severity_roll: Dict[str, Any], tenant: str | None, window_seconds: int) -> Dict[str, Any]:
+def aggregate(decisions: list[dict[str, Any]], escalations: list[dict[str, Any]], severity_roll: dict[str, Any], tenant: str | None, window_seconds: int) -> dict[str, Any]:
     sample = _decision_iter(decisions, tenant, window_seconds)
     total = len(sample)
     counts = {k:0 for k in ('allow','block','sim_block','escalate')}
-    reason_counts: Dict[str,int] = {}
-    severity_vals: List[float] = []
+    reason_counts: dict[str,int] = {}
+    severity_vals: list[float] = []
     for d in sample:
         dec = d.get('decision') or d.get('verdict')
         if dec in counts:
@@ -78,7 +82,7 @@ def aggregate(decisions: List[Dict[str, Any]], escalations: List[Dict[str, Any]]
     }
     return base
 
-def format_slack(snapshot: Dict[str, Any]) -> str:
+def format_slack(snapshot: dict[str, Any]) -> str:
     c = snapshot.get('counts',{})
     sev = snapshot.get('severity_distribution',{})
     esc = snapshot.get('escalations',{})

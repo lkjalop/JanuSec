@@ -1,0 +1,20 @@
+title = "JanuSec publication scan"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "fernet-key-literal"
+description = "Literal Fernet encryption key"
+regex = '''(?i)(?:fernet|encryption|master)[_-]?key[\s"':=]+([A-Za-z0-9_-]{43}=)'''
+secretGroup = 1
+
+[[rules]]
+id = "generic-api-key"
+[[rules.allowlists]]
+description = "Synthetic audit UserKey identifiers, not authentication tokens"
+condition = "AND"
+paths = ['''tests/fixtures/telemetry_corpora/(Meridian|Santos|Vesper)/[^/]+\.(json|ndjson)$''']
+regexTarget = "match"
+# Gitleaks may split a record at a scan-fragment boundary.
+regexes = ['''^UserKey"\s*:\s*"[a-f0-9]{1,20}"?$''']

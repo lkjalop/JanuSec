@@ -4,10 +4,13 @@ Lightweight module to track cost & usage metrics for AI/model inference paths.
 This is an in-memory implementation; future iterations may persist to a DB.
 """
 from __future__ import annotations
-import time
-from typing import Dict, Any
-from dataclasses import dataclass, asdict
+
 import threading
+import time
+from dataclasses import asdict, dataclass
+import json
+from pathlib import Path
+from typing import Any, Dict
 
 try:
     from prometheus_client import Counter, Histogram
@@ -36,6 +39,9 @@ def register_cost_subscriber(cb):  # simple subscription (FinOps, etc.)
 class CostLedger:
     def __init__(self):
         self.records: list[InferenceRecord] = []
+        # lightweight budget store for tenants and named entries
+        self._budgets: dict[str, float] = {}
+        self._snapshot_path = Path('artifacts/metrics/cost_ledger.jsonl')
         if Counter and Histogram and not hasattr(self.__class__, '_init'):
             try:
                 self.__class__.inference_calls = Counter('inference_calls_total','Inference calls', ['tier','path','cached','success'])
@@ -45,7 +51,7 @@ class CostLedger:
             except Exception:
                 pass
 
-    def record(self, tier: str, path: str, start: float, tokens: int = 0, cached: bool = False, success: bool = True):
+    def record(self, tier: str, path: str, start: float, tokens: int = 0, cached: bool = False, success: bool = True, tenant: str | None = None):
         latency_ms = (time.perf_counter() - start) * 1000.0
         rec = InferenceRecord(tier=tier, path=path, latency_ms=latency_ms, tokens=tokens, cached=cached, success=success, timestamp=time.time())
         with _lock:
@@ -53,6 +59,13 @@ class CostLedger:
             # truncate to last 10k
             if len(self.records) > 10000:
                 self.records = self.records[-5000:]
+            # append snapshot best-effort
+            try:
+                self._snapshot_path.parent.mkdir(parents=True, exist_ok=True)
+                with self._snapshot_path.open('a', encoding='utf-8') as fh:
+                    fh.write(json.dumps(asdict(rec)) + '\n')
+            except Exception:
+                pass
         if hasattr(self.__class__, 'inference_calls'):
             try:
                 self.__class__.inference_calls.labels(tier=tier, path=path, cached=str(cached), success=str(success)).inc()
@@ -64,7 +77,7 @@ class CostLedger:
         # Notify subscribers (FinOps). Basic cost modeling: treat tokens or call as unit cost basis
         evt = {
             'timestamp': rec.timestamp,
-            'tenant': rec.meta.get('tenant','default') if isinstance(rec := rec, InferenceRecord) else 'default',
+            'tenant': tenant or 'default',
             'component': 'inference',
             'units': rec.tokens or 1,
             'cost_units': (rec.tokens or 1) * 0.001,  # placeholder conversion
@@ -79,8 +92,8 @@ class CostLedger:
             except Exception:
                 continue
 
-    def summary(self) -> Dict[str, Any]:
-        agg: Dict[str, Dict[str, Any]] = {}
+    def summary(self) -> dict[str, Any]:
+        agg: dict[str, dict[str, Any]] = {}
         with _lock:
             for r in self.records:
                 key = (r.tier, r.path)
@@ -111,6 +124,93 @@ class CostLedger:
             })
         return { 'inference_summary': report }
 
+    def token_bins(self, edges: list[int] | None = None) -> dict[str, Any]:
+        """Compute token usage histogram bins from recorded inference calls.
+
+        Edges define upper bounds for bins (e.g., [1000, 5000, 20000]).
+        Returns a dict with 'edges', 'bins' (list of {range, count}), and 'total'.
+        """
+        try:
+            if edges is None:
+                import os as _os
+                raw = _os.getenv('TOKEN_BIN_EDGES', '')
+                parts = [p.strip() for p in raw.split(',') if p.strip()]
+                edges = []
+                for p in parts:
+                    try:
+                        edges.append(int(p))
+                    except Exception:
+                        continue
+                if not edges:
+                    edges = [1000, 5000, 20000]
+            edges = sorted([int(e) for e in edges if isinstance(e, (int, float))])
+        except Exception:
+            edges = [1000, 5000, 20000]
+        # Prepare bins
+        bounds: list[tuple[int, int | None]] = []
+        prev = 0
+        for e in edges:
+            bounds.append((prev, int(e)))
+            prev = int(e)
+        bounds.append((prev, None))  # final open-ended bin
+        labels: list[str] = []
+        for lo, hi in bounds:
+            if hi is None:
+                labels.append(f">= {lo}")
+            else:
+                labels.append(f"{lo}-{hi-1}")
+        counts = [0 for _ in bounds]
+        total = 0
+        with _lock:
+            for r in self.records:
+                t = int(r.tokens or 0)
+                total += 1
+                # find bin
+                placed = False
+                for idx, (lo, hi) in enumerate(bounds):
+                    if hi is None:
+                        if t >= lo:
+                            counts[idx] += 1
+                            placed = True
+                            break
+                    else:
+                        if lo <= t < hi:
+                            counts[idx] += 1
+                            placed = True
+                            break
+                if not placed:
+                    # if negative or unexpected, count in first bin
+                    counts[0] += 1
+        return {
+            'edges': edges,
+            'bins': [{'range': labels[i], 'count': counts[i]} for i in range(len(bounds))],
+            'total': total
+        }
+
+    def load_snapshot(self, max_rows: int = 20000) -> int:
+        """Load prior records from snapshot file for restart resilience."""
+        try:
+            p = self._snapshot_path
+            if not p.exists():
+                return 0
+            lines = p.read_text(encoding='utf-8').splitlines()
+            count = 0
+            with _lock:
+                for line in lines[-max_rows:]:
+                    try:
+                        j = json.loads(line)
+                        rec = InferenceRecord(
+                            tier=j.get('tier','unknown'), path=j.get('path','unknown'), latency_ms=float(j.get('latency_ms') or 0.0),
+                            tokens=int(j.get('tokens') or 0), cached=bool(j.get('cached')), success=bool(j.get('success')), timestamp=float(j.get('timestamp') or time.time())
+                        )
+                        self.records.append(rec)
+                        count += 1
+                    except Exception:
+                        continue
+            return count
+        except Exception:
+            return 0
+
 # Singleton accessor
 _cost_ledger: CostLedger | None = None
 
@@ -119,3 +219,32 @@ def get_cost_ledger() -> CostLedger:
     if _cost_ledger is None:
         _cost_ledger = CostLedger()
     return _cost_ledger
+
+    # Backwards-compatible cost helpers for simple key/value budgets
+    def set_budget(self, key: str, value: float):
+        try:
+            with _lock:
+                self._budgets[key] = float(value)
+        except Exception:
+            pass
+
+    def get_budget(self, key: str) -> float:
+        try:
+            with _lock:
+                return float(self._budgets.get(key, 0.0))
+        except Exception:
+            return 0.0
+
+    def add_cost(self, key: str, amount: float):
+        try:
+            with _lock:
+                self._budgets[key] = self._budgets.get(key, 0.0) + float(amount)
+        except Exception:
+            pass
+
+    def get_cost(self, key: str) -> float:
+        return self.get_budget(key)
+
+    @classmethod
+    def get_instance(cls) -> 'CostLedger':
+        return get_cost_ledger()

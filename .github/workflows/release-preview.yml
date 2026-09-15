@@ -1,0 +1,52 @@
+name: Preview trust checks
+on:
+  push:
+    branches: [main, 'release/**']
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Scan publication source
+        run: |
+          curl --fail --silent --show-error --location -o /tmp/gitleaks.tar.gz https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz
+          echo '551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  /tmp/gitleaks.tar.gz' | sha256sum --check
+          tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+          /tmp/gitleaks dir . --redact=100
+          python scripts/check_release_paths.py
+      - name: Install runtime and test dependencies
+        run: python -m pip install -r requirements.txt pytest-timeout
+      - name: Run selected trust checks
+        run: |
+          python scripts/check_workflows.py
+          python scripts/test_release.py
+      - name: Install browser verification dependencies
+        run: |
+          python -m pip install 'playwright>=1.50,<2'
+          python -m playwright install --with-deps chromium
+      - name: Verify the real backend in Chromium
+        run: |
+          python scripts/run_preview.py server >tmp_preview/server.log 2>&1 &
+          python -c "import time,urllib.request; time.sleep(15); urllib.request.urlopen('http://127.0.0.1:8081/',timeout=30).close()"
+          python scripts/browser_verify_release.py
+          python scripts/verify_pilot_corpora.py --base-url http://127.0.0.1:8081 --output tmp_preview/browser/corpora
+      - name: Preserve scoped test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: preview-test-results
+          path: tmp_preview/release-tests.xml
+      - name: Preserve browser results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: preview-browser-results
+          path: tmp_preview/browser/

@@ -6,18 +6,22 @@ Version: 1.0.0
 Implements secure API key management, PII redaction, role-based approvals, and audit logging.
 """
 
-import os
-import json
+from src.security.storage_paths import storage_path
+import uuid
+
+import base64
 import hashlib
+import json
 import logging
-from typing import Dict, Any, List, Optional
-from datetime import datetime, timedelta
-from dataclasses import dataclass, asdict
+import os
 import re
+from dataclasses import asdict, dataclass
+from datetime import datetime, timedelta
+from typing import Any, Dict, List, Optional
+
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-import base64
 
 
 @dataclass
@@ -27,7 +31,7 @@ class AuditEvent:
     user_id: str
     action: str
     resource: str
-    details: Dict[str, Any]
+    details: dict[str, Any]
     source_ip: str
     user_agent: str
     success: bool
@@ -41,7 +45,7 @@ class ApprovalRequest:
     action_type: str
     description: str
     requester: str
-    approver_roles: List[str]
+    approver_roles: list[str]
     auto_approved: bool
     approval_reason: str
     created_at: str
@@ -84,7 +88,7 @@ class SecureConfigManager:
             
             return key
     
-    async def store_api_key(self, service_name: str, api_key: str, metadata: Dict[str, Any] = None):
+    async def store_api_key(self, service_name: str, api_key: str, metadata: dict[str, Any] = None):
         """Securely store API key with metadata"""
         
         # Encrypt the API key
@@ -96,11 +100,11 @@ class SecureConfigManager:
             'encrypted_key': base64.b64encode(encrypted_key).decode(),
             'created_at': datetime.utcnow().isoformat(),
             'metadata': metadata or {},
-            'key_hash': hashlib.sha256(api_key.encode()).hexdigest()[:8]  # For verification
+            'record_id': uuid.uuid4().hex  # Identify the encrypted record without hashing its secret
         }
         
         # Store in secure file
-        key_file = f"{self.vault_path}/{service_name}.json"
+        key_file = storage_path(self.vault_path, f"{service_name}.json")
         os.makedirs(os.path.dirname(key_file), exist_ok=True)
         
         with open(key_file, 'w') as f:
@@ -109,17 +113,17 @@ class SecureConfigManager:
         
         self.logger.info(f"Stored API key for {service_name}")
     
-    async def get_api_key(self, service_name: str) -> Optional[str]:
+    async def get_api_key(self, service_name: str) -> str | None:
         """Retrieve and decrypt API key"""
         
-        key_file = f"{self.vault_path}/{service_name}.json"
+        key_file = storage_path(self.vault_path, f"{service_name}.json")
         
         if not os.path.exists(key_file):
             self.logger.error(f"API key not found for {service_name}")
             return None
         
         try:
-            with open(key_file, 'r') as f:
+            with open(key_file) as f:
                 record = json.load(f)
             
             # Decrypt the API key
@@ -137,10 +141,10 @@ class SecureConfigManager:
         
         # Backup old key
         old_record = None
-        key_file = f"{self.vault_path}/{service_name}.json"
+        key_file = storage_path(self.vault_path, f"{service_name}.json")
         
         if os.path.exists(key_file):
-            with open(key_file, 'r') as f:
+            with open(key_file) as f:
                 old_record = json.load(f)
             
             # Create backup
@@ -151,7 +155,7 @@ class SecureConfigManager:
         # Store new key
         await self.store_api_key(service_name, new_api_key, {
             'rotated_at': datetime.utcnow().isoformat(),
-            'previous_key_hash': old_record.get('key_hash') if old_record else None
+            'previous_record_id': old_record.get('record_id') if old_record else None
         })
         
         self.logger.info(f"Rotated API key for {service_name}")
@@ -176,8 +180,24 @@ class PIIRedactionEngine:
         }
         self.logger = logging.getLogger(__name__)
         self.metrics = metrics  # expected to provide async record_redaction(count)
+        # Optional ML-based PII using Microsoft Presidio (guarded by flag)
+        self._ml_enabled = (os.getenv('ENABLE_PRESIDIO_PII','0').lower() in {'1','true','yes'})
+        self._analyzer = None
+        self._anonymizer = None
+        if self._ml_enabled:
+            try:
+                from presidio_analyzer import AnalyzerEngine  # type: ignore
+                from presidio_anonymizer import AnonymizerEngine  # type: ignore
+                self._analyzer = AnalyzerEngine()
+                self._anonymizer = AnonymizerEngine()
+                self.logger.info("Presidio PII detection enabled (ML)")
+            except Exception as e:
+                self._ml_enabled = False
+                self._analyzer = None
+                self._anonymizer = None
+                self.logger.warning(f"Presidio unavailable, using regex-only redaction: {e}")
     
-    async def redact_for_external_ai(self, data: Dict[str, Any]) -> Dict[str, Any]:
+    async def redact_for_external_ai(self, data: dict[str, Any]) -> dict[str, Any]:
         """Redact PII from data before sending to external AI services"""
         
         redacted_data = self._deep_copy_dict(data)
@@ -222,6 +242,21 @@ class PIIRedactionEngine:
         """Redact PII patterns from text"""
         redacted_text = text
         redaction_count = 0
+        # ML pass (if available)
+        if getattr(self, '_ml_enabled', False) and getattr(self, '_analyzer', None) and getattr(self, '_anonymizer', None):
+            try:
+                results = self._analyzer.analyze(text=text, language='en')  # type: ignore[attr-defined]
+                if results:
+                    ops = { r.entity_type: { 'type': 'replace', 'new_value': f"[REDACTED_{r.entity_type}]" } for r in results }
+                    redacted_text = self._anonymizer.anonymize(  # type: ignore[attr-defined]
+                        text=text,
+                        analyzer_results=results,
+                        operators=ops
+                    ).text
+                    redaction_count += len(results)
+            except Exception:
+                # Degrade gracefully to regex-only
+                pass
         
         for pii_type, pattern in self.pii_patterns.items():
             matches = pattern.findall(redacted_text)
@@ -250,7 +285,7 @@ class PIIRedactionEngine:
         
         return redacted
     
-    def _deep_copy_dict(self, data: Dict[str, Any]) -> Dict[str, Any]:
+    def _deep_copy_dict(self, data: dict[str, Any]) -> dict[str, Any]:
         """Deep copy dictionary to avoid modifying original"""
         import copy
         return copy.deepcopy(data)
@@ -286,7 +321,7 @@ class RoleBasedApprovalSystem:
         self.logger = logging.getLogger(__name__)
     
     async def request_approval(self, action_type: str, description: str, requester: str, 
-                             context: Dict[str, Any]) -> str:
+                             context: dict[str, Any]) -> str:
         """Request approval for a sensitive action"""
         
         risk_level = self.action_risk_levels.get(action_type, 'medium_risk')
@@ -352,7 +387,7 @@ class RoleBasedApprovalSystem:
         
         return True
     
-    def _check_auto_approval(self, action_type: str, context: Dict[str, Any]) -> bool:
+    def _check_auto_approval(self, action_type: str, context: dict[str, Any]) -> bool:
         """Check if action can be auto-approved based on context"""
         
         # Auto-approve low-risk actions with high confidence
@@ -404,7 +439,7 @@ class ComprehensiveAuditLogger:
         self.sensitive_logger.setLevel(logging.INFO)
     
     async def log_event_processing(self, event_id: str, user_id: str, action: str, 
-                                 result: Dict[str, Any], source_ip: str = None):
+                                 result: dict[str, Any], source_ip: str = None):
         """Log event processing decisions"""
         
         audit_event = AuditEvent(
@@ -456,7 +491,7 @@ class ComprehensiveAuditLogger:
         
         await self._write_audit_event(audit_event, sensitive=True)
     
-    async def log_playbook_execution(self, playbook_id: str, event_id: str, actions: List[Dict],
+    async def log_playbook_execution(self, playbook_id: str, event_id: str, actions: list[dict],
                                    user_id: str, approval_id: str = None):
         """Log SOAR playbook execution with all actions"""
         
@@ -514,7 +549,7 @@ class ComprehensiveAuditLogger:
         else:
             self.audit_logger.info(audit_json)
     
-    async def search_audit_logs(self, query: Dict[str, Any], limit: int = 100) -> List[Dict]:
+    async def search_audit_logs(self, query: dict[str, Any], limit: int = 100) -> list[dict]:
         """Search audit logs (simplified implementation)"""
         # In production, this would use proper log aggregation (ELK, Splunk, etc.)
         matching_events = []
@@ -547,8 +582,8 @@ class SecurityControlsManager:
         
         self.logger.info("Security controls initialized successfully")
     
-    async def process_event_with_security(self, event: Dict[str, Any], user_id: str, 
-                                        source_ip: str = None) -> Dict[str, Any]:
+    async def process_event_with_security(self, event: dict[str, Any], user_id: str, 
+                                        source_ip: str = None) -> dict[str, Any]:
         """Process event with full security controls"""
         
         event_id = event.get('id', 'unknown')
@@ -584,7 +619,7 @@ async def demo_security_controls():
     # Demo 1: API key management
     await security_mgr.config_manager.store_api_key('eclipse_xdr', 'xdr_api_key_12345')
     api_key = await security_mgr.config_manager.get_api_key('eclipse_xdr')
-    print(f"Retrieved API key: {api_key[:8]}...")
+    print('API key retrieval succeeded:', bool(api_key))
     
     # Demo 2: PII redaction
     sensitive_event = {

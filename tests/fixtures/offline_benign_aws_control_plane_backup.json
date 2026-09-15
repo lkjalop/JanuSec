@@ -1,0 +1,27 @@
+[
+  {
+    "eventTime": "2026-03-22T01:40:00Z",
+    "eventName": "CreateSnapshot",
+    "eventSource": "ec2.amazonaws.com",
+    "sourceIPAddress": "10.0.1.25",
+    "recipientAccountId": "123456789012",
+    "userIdentity": { "arn": "arn:aws:iam::123456789012:role/backup-service" },
+    "host": "backup-node-01",
+    "approved_change": true,
+    "change_ticket": "CAB-BACKUP-44",
+    "known_backup_activity": true,
+    "maintenance_window": true
+  },
+  {
+    "start": "2026-03-22T01:41:00Z",
+    "srcaddr": "10.0.1.25",
+    "dstaddr": "52.95.110.12",
+    "dstport": 443,
+    "action": "ACCEPT",
+    "bytes": 16384,
+    "host": "backup-node-01",
+    "approved_change": true,
+    "change_ticket": "CAB-BACKUP-44",
+    "known_backup_activity": true
+  }
+]

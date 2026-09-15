@@ -8,13 +8,14 @@ Validates platform performance, accuracy, and reliability before production depl
 """
 
 import asyncio
-import json
-import time
-import random
 import hashlib
-from typing import Dict, List, Any
+import json
+import random
+import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, Dict, List
+
 import numpy as np
 
 
@@ -23,10 +24,10 @@ class TestScenario:
     """Test scenario with expected outcome"""
     name: str
     description: str
-    events: List[Dict[str, Any]]
+    events: list[dict[str, Any]]
     expected_verdict: str
     expected_confidence_range: tuple
-    expected_factors: List[str]
+    expected_factors: list[str]
     max_processing_time_ms: float
     category: str  # 'benign', 'malicious', 'apt', 'false_positive'
 
@@ -38,7 +39,7 @@ class TestResult:
     success: bool
     actual_verdict: str
     actual_confidence: float
-    actual_factors: List[str]
+    actual_factors: list[str]
     processing_time_ms: float
     error_message: str = None
 
@@ -54,7 +55,7 @@ class SyntheticTestSuite:
         self.results = []
         self.performance_metrics = {}
         
-    def generate_test_scenarios(self) -> List[TestScenario]:
+    def generate_test_scenarios(self) -> list[TestScenario]:
         """Generate comprehensive test scenarios covering all threat types"""
         
         scenarios = []
@@ -246,7 +247,7 @@ class SyntheticTestSuite:
         self.test_scenarios = scenarios
         return scenarios
     
-    async def run_comprehensive_test(self) -> Dict[str, Any]:
+    async def run_comprehensive_test(self) -> dict[str, Any]:
         """Run comprehensive test suite and generate detailed report"""
         
         print("🧪 Starting Comprehensive Platform Testing...")
@@ -381,7 +382,7 @@ class SyntheticTestSuite:
         
         return True
     
-    async def _generate_test_report(self, results_by_category: Dict[str, List[TestResult]]) -> Dict[str, Any]:
+    async def _generate_test_report(self, results_by_category: dict[str, list[TestResult]]) -> dict[str, Any]:
         """Generate comprehensive test report"""
         
         all_results = []
@@ -432,7 +433,7 @@ class SyntheticTestSuite:
             }
         }
     
-    async def _save_test_results(self, report: Dict[str, Any]):
+    async def _save_test_results(self, report: dict[str, Any]):
         """Save test results to file"""
         
         # Create results directory
@@ -481,7 +482,7 @@ class LoadTestFramework:
         self.test_duration_seconds = 60
         self.concurrent_connections = 100
     
-    async def run_load_test(self) -> Dict[str, Any]:
+    async def run_load_test(self) -> dict[str, Any]:
         """Run load test to validate performance claims"""
         
         print("🚀 Starting Load Test...")

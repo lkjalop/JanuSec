@@ -1,0 +1,8 @@
+{
+  "from": "alerts@trusted.com",
+  "to": "analyst@acme.com",
+  "subject": "Signed notice",
+  "raw": {
+    "raw_rfc822": "DKIM-Signature: v=1; a=rsa-sha256; d=trusted.com; s=sel1;\r\nFrom: Alerts <alerts@trusted.com>\r\nTo: Analyst <analyst@acme.com>\r\nSubject: Signed notice\r\n\r\nBody"
+  }
+}

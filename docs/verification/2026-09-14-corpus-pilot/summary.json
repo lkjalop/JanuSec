@@ -1,0 +1,482 @@
+{
+  "date": "2026-09-14",
+  "environment": "local loopback deterministic preview; real Chromium; synthetic corpora",
+  "corpora": [
+    {
+      "scenario": "Meridian",
+      "input_receipts": [
+        {
+          "path": "Meridian/janusec_cloud_identity_v2.json",
+          "sha256": "57d41489ef421175fd80364f6ea5ce414de40d26ce0f89a478187e0852fb37ec",
+          "bytes": 2185587
+        },
+        {
+          "path": "Meridian/janusec_email_exchange_v2.ndjson",
+          "sha256": "0ab60bf7e3c0cbed4978f23b7aa553219468a70d22801f0fb7d553da9cf8d45c",
+          "bytes": 1672936
+        },
+        {
+          "path": "Meridian/janusec_email_gmail_v2.ndjson",
+          "sha256": "7de8fab4c0b3a2c709dc3c027d14f304964dc5fa8d1239e4b340e8a9ee6b6175",
+          "bytes": 1710682
+        },
+        {
+          "path": "Meridian/janusec_endpoint_k8s_v2.ndjson",
+          "sha256": "ecb3f0c370534980df10c227822eaa2ea0264ef438b286d624dd945d99c12149",
+          "bytes": 4340802
+        },
+        {
+          "path": "Meridian/janusec_network_v2.csv",
+          "sha256": "ae413a0668a2fc2924c27f94413dcc932090f1e3d3fc27aa99ce83c35e44cfa9",
+          "bytes": 1507394
+        }
+      ],
+      "stored_rows": 24438,
+      "active_cases": 3,
+      "truth": {
+        "metric_scope": "assessment_input",
+        "must_detect": 1.0,
+        "must_separate": 1.0,
+        "must_suppress": 1.0,
+        "role_attribution": 1.0,
+        "details": {
+          "must_detect": [
+            {
+              "id": "supplier_account_endpoint_chain",
+              "passed": true
+            },
+            {
+              "id": "novabridge_access_and_forwarding",
+              "passed": true
+            },
+            {
+              "id": "public_s3_crawler",
+              "passed": true
+            }
+          ],
+          "must_separate": [
+            {
+              "id": "three_independent_meridian_cases",
+              "passed": true
+            }
+          ],
+          "must_suppress": [
+            {
+              "entity": "info",
+              "passed": true
+            },
+            {
+              "entity": "lisa.petrov",
+              "passed": true
+            },
+            {
+              "entity": "sarah.chen",
+              "passed": true
+            },
+            {
+              "entity": "david.nguyen",
+              "passed": true
+            },
+            {
+              "entity": "ben.fitzgerald",
+              "passed": true
+            },
+            {
+              "entity": "chloe.park",
+              "passed": true
+            },
+            {
+              "entity": "hui.tan",
+              "passed": true
+            },
+            {
+              "entity": "alice.morrison",
+              "passed": true
+            },
+            {
+              "entity": "michael.okonkwo",
+              "passed": true
+            },
+            {
+              "entity": "raymond.lim",
+              "passed": true
+            },
+            {
+              "entity": "daniel.wright",
+              "passed": true
+            },
+            {
+              "entity": "emma.thornton",
+              "passed": true
+            }
+          ],
+          "role_assertions": [
+            {
+              "entity": "james.hargreaves",
+              "role": "actor",
+              "passed": true
+            },
+            {
+              "entity": "wei.zhang",
+              "role": "actor",
+              "passed": true
+            },
+            {
+              "entity": "mig-lt-0100",
+              "role": "victim",
+              "passed": true
+            }
+          ]
+        }
+      },
+      "selected_case_evidence": {
+        "returned": 54,
+        "total": 54,
+        "truncated": false
+      },
+      "milestone_count": 3,
+      "milestone_evidence_counts": {
+        "bastion_rdp_lateral": 42,
+        "powershell_staged_payload": 2,
+        "c2_dns_beacon": 1
+      },
+      "actions": 0,
+      "qualified_controls": 0,
+      "upload_to_ready_seconds": 41.06,
+      "full_journey_seconds": 44.33,
+      "tabs": [
+        {
+          "tab": "Causal graph",
+          "count": "93 nodes \u00b7 134 edges"
+        },
+        {
+          "tab": "Detailed timeline",
+          "count": "45"
+        },
+        {
+          "tab": "Retrieval trace",
+          "count": "0 pack(s)"
+        },
+        {
+          "tab": "Action plan",
+          "count": "0 of 0 actions"
+        },
+        {
+          "tab": "Evidence",
+          "count": "54 / 54"
+        }
+      ],
+      "evidence_drilldown": true,
+      "historical_export_receipt_matches": true,
+      "mobile_no_horizontal_overflow": true,
+      "restart_partition_hashes_equal": true,
+      "javascript_errors": 0,
+      "http_errors": 0,
+      "passed": true
+    },
+    {
+      "scenario": "Santos",
+      "input_receipts": [
+        {
+          "path": "Santos/janusec_cloud_identity_v1.json",
+          "sha256": "c6572a9fb0d4eb65a34163904d6506cd7135042982af61d37e1ef1a916515693",
+          "bytes": 6735395
+        },
+        {
+          "path": "Santos/janusec_endpoint_k8s_v1.ndjson",
+          "sha256": "ac71c1750b5a803e78ad8207caecab73bfa91a75d2be04acd6dd58346a28e9eb",
+          "bytes": 7280110
+        },
+        {
+          "path": "Santos/janusec_network_v1.csv",
+          "sha256": "58812110759b099b72a219670c2115feca2e9c0dfea3a50409121ef5cb0d8561",
+          "bytes": 3627229
+        }
+      ],
+      "stored_rows": 43834,
+      "active_cases": 6,
+      "truth": {
+        "metric_scope": "assessment_input",
+        "must_detect": null,
+        "must_separate": null,
+        "must_suppress": 1.0,
+        "role_attribution": null,
+        "details": {
+          "must_detect": [],
+          "must_separate": [],
+          "must_suppress": [
+            {
+              "entity": "pentest-readonly-feb2026",
+              "passed": true
+            }
+          ],
+          "role_assertions": []
+        }
+      },
+      "selected_case_evidence": {
+        "returned": 66,
+        "total": 66,
+        "truncated": false
+      },
+      "milestone_count": 5,
+      "milestone_evidence_counts": {
+        "mfa_fatigue": 1,
+        "secret_access": 1,
+        "data_exfiltration_rclone": 6,
+        "identity_ip_anomaly": 5,
+        "pentest_escalation": 1
+      },
+      "actions": 0,
+      "qualified_controls": 0,
+      "upload_to_ready_seconds": 39.76,
+      "full_journey_seconds": 43.3,
+      "tabs": [
+        {
+          "tab": "Causal graph",
+          "count": "49 nodes \u00b7 54 edges"
+        },
+        {
+          "tab": "Detailed timeline",
+          "count": "22"
+        },
+        {
+          "tab": "Retrieval trace",
+          "count": "0 pack(s)"
+        },
+        {
+          "tab": "Action plan",
+          "count": "0 of 0 actions"
+        },
+        {
+          "tab": "Evidence",
+          "count": "66 / 66"
+        }
+      ],
+      "evidence_drilldown": true,
+      "historical_export_receipt_matches": true,
+      "mobile_no_horizontal_overflow": true,
+      "restart_partition_hashes_equal": true,
+      "javascript_errors": 0,
+      "http_errors": 0,
+      "passed": true
+    },
+    {
+      "scenario": "Vesper",
+      "input_receipts": [
+        {
+          "path": "Vesper/janusec_cloud_identity_v3.json",
+          "sha256": "e623ab555ed1714d726efbbba69c877809389e050cca93dcc78580f08be4eb4e",
+          "bytes": 1291032
+        },
+        {
+          "path": "Vesper/janusec_endpoint_lolbins_v3.ndjson",
+          "sha256": "0868600dc25cee230cca61994363ee0214de13abc0d0102843511f5f33bec5f2",
+          "bytes": 7394208
+        },
+        {
+          "path": "Vesper/janusec_identity_kerberos_v3.ndjson",
+          "sha256": "22ae80df71ca47dd5d2b2a411a9917cda95358d3afcca5a14ae1e21afdded9a8",
+          "bytes": 2876146
+        },
+        {
+          "path": "Vesper/janusec_network_v3.csv",
+          "sha256": "59e8d2a7e06d85e992c9e4edcd90fb6b47d70b7ca42fc4ef9941d24bd43652da",
+          "bytes": 10230100
+        }
+      ],
+      "stored_rows": 98750,
+      "active_cases": 1,
+      "truth": {
+        "metric_scope": "assessment_input",
+        "must_detect": 1.0,
+        "must_separate": null,
+        "must_suppress": 1.0,
+        "role_attribution": 1.0,
+        "details": {
+          "must_detect": [
+            {
+              "id": null,
+              "passed": true
+            }
+          ],
+          "must_separate": [],
+          "must_suppress": [
+            {
+              "entity": "anna.kowalski",
+              "passed": true
+            },
+            {
+              "entity": "svc_jenkins",
+              "passed": true
+            },
+            {
+              "entity": "david.okafor",
+              "passed": true
+            },
+            {
+              "entity": "priya.shah",
+              "passed": true
+            },
+            {
+              "entity": "sarah.lin",
+              "passed": true
+            },
+            {
+              "entity": "svc_sql",
+              "passed": true
+            },
+            {
+              "entity": "svc_backup",
+              "passed": true
+            }
+          ],
+          "role_assertions": [
+            {
+              "entity": "martin.chen",
+              "role": "actor",
+              "passed": true
+            },
+            {
+              "entity": "svc_sql",
+              "role": "target",
+              "passed": true
+            },
+            {
+              "entity": "svc_backup",
+              "role": "target",
+              "passed": true
+            }
+          ]
+        }
+      },
+      "selected_case_evidence": {
+        "returned": 445,
+        "total": 445,
+        "truncated": false
+      },
+      "milestone_count": 7,
+      "milestone_evidence_counts": {
+        "oauth_device_code": 1,
+        "kerberoasting": 1,
+        "identity_ip_anomaly": 1,
+        "powershell_staged_payload": 10,
+        "wmi_dcom_lateral": 14,
+        "kerberos_ticket_forgery": 8,
+        "cloud_object_exfiltration": 34
+      },
+      "actions": 0,
+      "qualified_controls": 0,
+      "upload_to_ready_seconds": 81.57,
+      "full_journey_seconds": 86.74,
+      "tabs": [
+        {
+          "tab": "Causal graph",
+          "count": "310 nodes \u00b7 324 edges"
+        },
+        {
+          "tab": "Detailed timeline",
+          "count": "445"
+        },
+        {
+          "tab": "Retrieval trace",
+          "count": "0 pack(s)"
+        },
+        {
+          "tab": "Action plan",
+          "count": "0 of 0 actions"
+        },
+        {
+          "tab": "Evidence",
+          "count": "445 / 445"
+        }
+      ],
+      "evidence_drilldown": true,
+      "historical_export_receipt_matches": true,
+      "mobile_no_horizontal_overflow": true,
+      "restart_partition_hashes_equal": true,
+      "javascript_errors": 0,
+      "http_errors": 0,
+      "passed": true
+    }
+  ],
+  "total_rows": 167022,
+  "negative_and_navigation": {
+    "malformed_upload_failed_visibly": true,
+    "negative_input_preserved": true,
+    "pages": [
+      {
+        "name": "integrations",
+        "status": 200
+      },
+      {
+        "name": "metrics",
+        "status": 200
+      },
+      {
+        "name": "sbom",
+        "status": 200
+      },
+      {
+        "name": "compliance",
+        "status": 200
+      },
+      {
+        "name": "csv_multi_analyzer",
+        "status": 200
+      },
+      {
+        "name": "hunt_network",
+        "status": 200
+      },
+      {
+        "name": "hunt_endpoint",
+        "status": 200
+      },
+      {
+        "name": "multi_log_investigator",
+        "status": 200
+      },
+      {
+        "name": "investigate",
+        "status": 200
+      }
+    ],
+    "javascript_errors": 0,
+    "http_errors": 0
+  },
+  "model_workflow": {
+    "provider": "deterministic",
+    "completed": true,
+    "external_transfer": false,
+    "retrieval_outcome": "abstain_no_evidence_delta",
+    "model_quality_certified": false
+  },
+  "limitations": [
+    "Synthetic acceptance only; Santos has no positive labels",
+    "No live provider or customer correction",
+    "No qualified actions or control impacts in the selected corpus cases",
+    "No production load or backup restoration certification",
+    "Retained GitHub copy cleanup pending"
+  ],
+  "selected_pytest": {
+    "tests": 587,
+    "failures": 0,
+    "errors": 0,
+    "skips": 0
+  },
+  "tested_source_sha256": {
+    "config/release_test_files.json": "6fd194501f5c590475202275e003fe400d05fed7726a6133d28855b07991a567",
+    "frontend/static/js/case-workspace.js": "e7d5fd04bc966dd1b8902c3af3de75c4b4ce28e9405a7caca621338179609d1f",
+    "scripts/browser_acceptance_case_workspace.py": "3eb6e82e351027d4b4c8edf91bcd747590af09c01e787cc8b0a9508a24067e09",
+    "scripts/browser_verify_release.py": "1519f45a0bdbaf954ddd2c2f1a03955ba2bc2df83b40bcb4b3134e415ca48da0",
+    "src/api/case_view_v2.py": "ff7d70cb996563b02d72f093d42a29a59c72d3c1338d0b385756aa63552abf37",
+    "src/api/ingest_endpoints.py": "2801fc5fe462137d4a2de08e254e54e5442ac0ee75f477331c417e3b3c3d373f",
+    "src/core/chrono/pipeline.py": "278da02a5050543a8c910a7ea07aa44afdbfcf93b218eb24a71e3d13f0199178",
+    "src/core/ingest/assessment_worker.py": "670af0699acddfeecfac805cd363d553223de7e3283fd485e501ee6878e9ae80",
+    "src/core/ingest/file_parser.py": "cafe66833075b015a7b35305aea883763282cbda79f20c05504465fa85d1d322",
+    "tests/test_case_workspace_contract.py": "bb1817df1c4363597b0d7fd7c396e2b04816caabe8cf34cec52deb94dbba26b8",
+    "tests/test_chrono_pipeline.py": "a3024bae3a05dc2cfa1ee1691767e3405469516152918c2b27b1c6d43ea4c772",
+    "tests/test_json_bom_ingestion.py": "a83eb874c61fa90fcd95a94a14d2f681248dbf5199c9b6399af0aff27dce625d",
+    "scripts/verify_pilot_corpora.py": "58eb328e625e4dfc9472a90d8c9ca45233819d2f823eea486d1f7ba6fdac890f"
+  }
+}

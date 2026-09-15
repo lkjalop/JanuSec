@@ -1,0 +1,5 @@
+{
+  "parent_process": "WINWORD.EXE",
+  "child_process": "powershell.exe",
+  "network_outbound_domains": ["evil.example"]
+}

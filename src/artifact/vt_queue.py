@@ -1,6 +1,11 @@
 from __future__ import annotations
-from typing import Optional, Dict, Any
-import threading, queue, time, os, json
+
+import json
+import os
+import queue
+import threading
+import time
+from typing import Any, Dict, Optional
 
 try:
     import httpx
@@ -64,11 +69,11 @@ class VTQueue:
         self.api_key = os.getenv('VT_API_KEY','')
         self.in_q: queue.Queue = queue.Queue()
         self.out_q: queue.Queue = queue.Queue()
-        self.worker: Optional[VTWorker] = None
+        self.worker: VTWorker | None = None
         if self.enabled:
             self.worker = VTWorker(self.api_key, self.in_q, self.out_q)
             self.worker.start()
-        self.cache: Dict[str, Dict[str,Any]] = {}
+        self.cache: dict[str, dict[str,Any]] = {}
 
     def submit(self, sha256: str):
         if not self.enabled: return
@@ -86,5 +91,5 @@ class VTQueue:
             drained.append(item)
         return drained
 
-    def get(self, sha256: str) -> Optional[Dict[str,Any]]:
+    def get(self, sha256: str) -> dict[str, Any] | None:
         return self.cache.get(sha256)

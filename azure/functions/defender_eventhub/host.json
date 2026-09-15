@@ -1,0 +1,27 @@
+{
+  "version": "2.0",
+  "extensions": {
+    "eventHubs": {
+      "maxBatchSize": 200,
+      "prefetchCount": 300,
+      "batchCheckpointFrequency": 1
+    }
+  },
+  "healthMonitor": {
+    "enabled": true,
+    "healthCheckInterval": "00:00:30",
+    "healthCheckWindow": "00:05:00",
+    "healthCheckThreshold": 6
+  },
+  "concurrency": {
+    "dynamicConcurrencyEnabled": true
+  },
+  "logging": {
+    "applicationInsights": {
+      "samplingSettings": {
+        "isEnabled": true,
+        "maxTelemetryItemsPerSecond" : 5
+      }
+    }
+  }
+}

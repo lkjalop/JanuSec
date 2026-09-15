@@ -1,0 +1,113 @@
+{
+  "profile": "isolated-production-auth",
+  "live_provider": false,
+  "tls_certificate_verified": true,
+  "checks": {
+    "missing_key": 401,
+    "public_development_key": 401,
+    "wrong_key": 401,
+    "configured_key": 200,
+    "admin_and_integration_auth_required": true,
+    "expired_jwt": 401,
+    "foreign_evidence": 404,
+    "tenant_header_override": 403
+  },
+  "assessment_id": "assessment-1789383927-966f066e",
+  "case_hashes": {
+    "analysis-8-powershell_staged_payload-47": "54e5bac89cf9ec32003e3635ce408d9a7a980a5b4507af86f6b855bc18b3554b",
+    "analysis-53": "652f64db809e3b300210d3f169339b6f6f3320ae8010b1428e3254f3ed0c4723",
+    "case-unclassified-telemetry": "2cff94692850353fa47be6959c1c396fdeb5857573f133853ec632d5b6a42e68"
+  },
+  "truth": {
+    "metric_scope": "assessment_input",
+    "must_detect": 1.0,
+    "must_separate": null,
+    "must_suppress": 1.0,
+    "role_attribution": 1.0,
+    "details": {
+      "must_detect": [
+        {
+          "id": null,
+          "passed": true
+        }
+      ],
+      "must_separate": [],
+      "must_suppress": [
+        {
+          "entity": "anna.kowalski",
+          "passed": true
+        },
+        {
+          "entity": "svc_jenkins",
+          "passed": true
+        },
+        {
+          "entity": "david.okafor",
+          "passed": true
+        },
+        {
+          "entity": "priya.shah",
+          "passed": true
+        },
+        {
+          "entity": "sarah.lin",
+          "passed": true
+        },
+        {
+          "entity": "svc_sql",
+          "passed": true
+        },
+        {
+          "entity": "svc_backup",
+          "passed": true
+        }
+      ],
+      "role_assertions": [
+        {
+          "entity": "martin.chen",
+          "role": "actor",
+          "passed": true
+        },
+        {
+          "entity": "svc_sql",
+          "role": "target",
+          "passed": true
+        },
+        {
+          "entity": "svc_backup",
+          "role": "target",
+          "passed": true
+        }
+      ]
+    }
+  },
+  "selected_case": "analysis-8-powershell_staged_payload-47",
+  "evidence_hash": "3ec4f9189296454fc1f7ff563bcbe51911bf8db80c82956677c97a2ffe427568",
+  "evidence_hash_algorithm": "canonical-rows-by-id/v1",
+  "historical_receipt": {
+    "schema_version": "janusec.case-view-history/v1",
+    "tenant_id": "pilot-customer",
+    "assessment_id": "assessment-1789383927-966f066e",
+    "case_id": "analysis-8-powershell_staged_payload-47",
+    "recorded_at": "2026-09-14T11:32:24.796875+00:00",
+    "input_hash": "d7cb235211c3b831d0250a31eeb96020781757fdfbb96e49d1adf205f8c25eef",
+    "view_hash": "07058b625b23ac994e93a141933b0f44dd1e8d011b1ecd0c297997a2226eb4fd",
+    "receipt_hash": "e3bd84a8ee423c0fbae9b6478aebf7bcfee3aa049e6d6cb23c76a10ed26dfdbf"
+  },
+  "evidence_window": {
+    "returned": 445,
+    "total": 445,
+    "truncated": false
+  },
+  "restored_historical_receipt_matches": true,
+  "bounded_read_load": {
+    "clients": 4,
+    "requests": 40,
+    "errors": 0,
+    "p50_seconds": 0.82,
+    "p95_seconds": 0.99,
+    "max_seconds": 1.016,
+    "soak_certification": false
+  },
+  "passed": true
+}

@@ -5,7 +5,13 @@ This module is intentionally lightweight; real provider adapters should be
 placed under providers/ with a consistent async interface.
 """
 from __future__ import annotations
-import os, json, time, asyncio, math, hashlib
+
+import asyncio
+import hashlib
+import json
+import math
+import os
+import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Protocol
 
@@ -25,21 +31,21 @@ class ProviderResult:
     tokens: int
     cost_units: float
     latency_s: float
-    error: Optional[str] = None
+    error: str | None = None
 
 class ModelProvider(Protocol):
     name: str
-    async def generate(self, prompt: str, context: Dict[str, Any]) -> ProviderResult: ...
+    async def generate(self, prompt: str, context: dict[str, Any]) -> ProviderResult: ...
 
 # ---------------- Chain Loader -----------------
 
-def load_chain() -> List[ProviderTier]:
+def load_chain() -> list[ProviderTier]:
     raw = os.getenv('MODEL_ESCALATION_CHAIN_JSON')
     if not raw:
         return []
     try:
         data = json.loads(raw)
-        out: List[ProviderTier] = []
+        out: list[ProviderTier] = []
         for d in data:
             out.append(ProviderTier(
                 tier=int(d.get('tier',0)),
@@ -55,7 +61,7 @@ def load_chain() -> List[ProviderTier]:
 
 # ---------------- Provider Registry (Stubs) -----------------
 
-async def call_provider(tier: ProviderTier, prompt: str, context: Dict[str, Any]) -> ProviderResult:
+async def call_provider(tier: ProviderTier, prompt: str, context: dict[str, Any]) -> ProviderResult:
     start = time.time()
     # Placeholder logic – integrate real adapters (ollama/openai/anthropic) later.
     await asyncio.sleep(min(0.05, tier.timeout_s/100))
@@ -95,12 +101,12 @@ PER_ITEM_BUDGET = float(os.getenv('ESCALATION_PER_ITEM_BUDGET','1.0'))
 @dataclass
 class EscalationResult:
     final_confidence: float
-    trace: List[Dict[str, Any]]
+    trace: list[dict[str, Any]]
     status: str  # accepted|none|partial|budget_exceeded|all_failed
 
 # triggers() expects obs like artifact observation dict
 
-def triggers(obs: Dict[str, Any], base_conf: float, base_risk: float, escalate_thr: float, block_thr: float) -> bool:
+def triggers(obs: dict[str, Any], base_conf: float, base_risk: float, escalate_thr: float, block_thr: float) -> bool:
     if base_risk < escalate_thr or base_risk >= block_thr:
         return False
     if base_conf >= CONF_MIN and (obs.get('ambiguity') or 0) <= 0.4:
@@ -109,14 +115,14 @@ def triggers(obs: Dict[str, Any], base_conf: float, base_risk: float, escalate_t
     catalyst = any(f.startswith(('rare_','corr_','multi_factor','lane_')) for f in factors)
     return catalyst or base_conf < CONF_MIN
 
-async def escalate(obs: Dict[str, Any], base_conf: float, base_risk: float, escalate_thr: float, block_thr: float) -> EscalationResult:
+async def escalate(obs: dict[str, Any], base_conf: float, base_risk: float, escalate_thr: float, block_thr: float) -> EscalationResult:
     if not triggers(obs, base_conf, base_risk, escalate_thr, block_thr):
         return EscalationResult(base_conf, [], 'none')
     chain = load_chain()
     if not chain:
         return EscalationResult(base_conf, [], 'none')
     cumulative = 0.0
-    trace: List[Dict[str, Any]] = []
+    trace: list[dict[str, Any]] = []
     budget_used = 0.0
     # Lazy metric creation
     try:  # pragma: no cover - metrics optional
@@ -204,7 +210,7 @@ async def escalate(obs: Dict[str, Any], base_conf: float, base_risk: float, esca
 
 # ---------------- Prompt Builder -----------------
 
-def build_prompt(obs: Dict[str, Any], current_conf: float, risk: float) -> str:
+def build_prompt(obs: dict[str, Any], current_conf: float, risk: float) -> str:
     factors = ', '.join((obs.get('factors') or [])[:12])
     return (
         f"Artifact risk context: risk={risk:.2f} current_conf={current_conf:.2f}\n"

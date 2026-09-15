@@ -1,0 +1,33 @@
+{
+  "host": "win-mem-host",
+  "platform": "windows",
+  "volatility": {
+    "windows.pslist": [
+      {"ImageFileName": "lsass.exe", "PID": 520, "path": "C:\\\\Windows\\\\System32\\\\lsass.exe"}
+    ],
+    "windows.dlllist": [
+      {"BaseDllName": "advapi32.dll", "PID": 520}
+    ],
+    "windows.malfind": [
+      {"PID": 520, "Process": "lsass.exe", "Protection": "PAGE_EXECUTE_READWRITE"}
+    ],
+    "windows.netscan": [
+      {"Process": "lsass.exe", "ForeignAddr": "198.51.100.10:443", "Info": "svc"}
+    ]
+  },
+  "rekall": {
+    "pslist": [
+      {"ImageFileName": "lsass.exe", "PID": 520}
+    ],
+    "dlllist": [
+      {"BaseDllName": "kernelbase.dll", "PID": 520}
+    ]
+  },
+  "sandbox": {
+    "status": "submitted",
+    "submissions": [
+      {"adapter": "joe", "verdict": "malicious", "family": "credential_theft"},
+      {"adapter": "anyrun", "verdict": "processing"}
+    ]
+  }
+}

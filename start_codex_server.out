@@ -1,0 +1,457 @@
+[env] Loaded settings from D:\AI\Threat_thy_sniffer\.env
+==================================================
+Starting JanuSec Platform
+==================================================
+
+Server: http://0.0.0.0:8080
+Console: http://0.0.0.0:8080/console
+CSV Upload: http://0.0.0.0:8080/api/v1/csv/upload-page
+API Docs: http://0.0.0.0:8080/docs
+
+Press Ctrl+C to stop
+==================================================
+{"ts":"2025-12-05T12:15:06.559960Z","level":"INFO","logger":"src.api.app","msg":"PLATFORM_LITE_INIT active: skipping initialize_platform_components heavy init"}
+{"ts":"2025-12-05T12:15:06.651272Z","level":"INFO","logger":"src.api.app","msg":"register_core_routers called (full=True)"}
+{"ts":"2025-12-05T12:15:06.672248Z","level":"INFO","logger":"src.api.app","msg":"Included decisions_router into app (lite)"}
+{"ts":"2025-12-05T12:15:06.675244Z","level":"INFO","logger":"src.api.app","msg":"Included hopgraph_stream_router into app"}
+{"ts":"2025-12-05T12:15:06.676952Z","level":"INFO","logger":"src.api.app","msg":"Included config_router into app (lite)"}
+{"ts":"2025-12-05T12:15:06.677950Z","level":"INFO","logger":"src.api.app","msg":"Included assessments_router into app (lite)"}
+{"ts":"2025-12-05T12:15:06.680951Z","level":"INFO","logger":"src.api.app","msg":"Included report_router into app (lite)"}
+{"ts":"2025-12-05T12:15:06.689994Z","level":"INFO","logger":"src.api.app","msg":"Included tier2_router into app (lite)"}
+{"ts":"2025-12-05T12:15:06.750139Z","level":"INFO","logger":"src.api.app","msg":"Included integrations_router into app (lite)"}
+{"ts":"2025-12-05T12:15:06.769881Z","level":"INFO","logger":"src.api.app","msg":"Included intel_router into app (lite)"}
+{"ts":"2025-12-05T12:15:06.792087Z","level":"INFO","logger":"src.api.app","msg":"Included deep_analyze_router into app (lite)"}
+{"ts":"2025-12-05T12:15:06.796086Z","level":"INFO","logger":"src.api.app","msg":"Included endpoint_malware router (lite)"}
+{"ts":"2025-12-05T12:15:06.811599Z","level":"INFO","logger":"src.api.app","msg":"Included router decisions"}
+{"ts":"2025-12-05T12:15:06.815667Z","level":"INFO","logger":"src.api.app","msg":"Included router hopgraph_stream"}
+{"ts":"2025-12-05T12:15:06.820929Z","level":"INFO","logger":"src.api.app","msg":"Included router risk"}
+{"ts":"2025-12-05T12:15:06.825924Z","level":"INFO","logger":"src.api.app","msg":"Included router temporal"}
+{"ts":"2025-12-05T12:15:06.890201Z","level":"INFO","logger":"src.api.app","msg":"Included router upload"}
+{"ts":"2025-12-05T12:15:06.893200Z","level":"INFO","logger":"src.api.app","msg":"Included router stream_ingest"}
+{"ts":"2025-12-05T12:15:06.937365Z","level":"INFO","logger":"src.api.app","msg":"Included router csv"}
+{"ts":"2025-12-05T12:15:06.951652Z","level":"INFO","logger":"src.api.app","msg":"Included router soar"}
+{"ts":"2025-12-05T12:15:06.972384Z","level":"INFO","logger":"src.api.app","msg":"Included router dashboard"}
+{"ts":"2025-12-05T12:15:07.027615Z","level":"INFO","logger":"src.api.app","msg":"Included router integrations"}
+{"ts":"2025-12-05T12:15:07.045764Z","level":"INFO","logger":"src.api.app","msg":"Included router metrics_status"}
+{"ts":"2025-12-05T12:15:07.050776Z","level":"INFO","logger":"src.api.app","msg":"Included router custody"}
+{"ts":"2025-12-05T12:15:07.135457Z","level":"INFO","logger":"src.api.app","msg":"Included router artifact"}
+{"ts":"2025-12-05T12:15:07.143663Z","level":"INFO","logger":"src.api.app","msg":"Included router nlp"}
+{"ts":"2025-12-05T12:15:07.152674Z","level":"INFO","logger":"src.api.app","msg":"Included router sbom"}
+{"ts":"2025-12-05T12:15:07.152674Z","level":"INFO","logger":"src.api.app","msg":"Included router ebpf"}
+{"ts":"2025-12-05T12:15:07.166514Z","level":"INFO","logger":"src.api.app","msg":"Included router identity_reporting"}
+{"ts":"2025-12-05T12:15:07.273961Z","level":"INFO","logger":"src.api.app","msg":"Included router compliance"}
+{"ts":"2025-12-05T12:15:07.277140Z","level":"INFO","logger":"src.api.app","msg":"Included router report"}
+{"ts":"2025-12-05T12:15:07.285163Z","level":"INFO","logger":"src.api.app","msg":"Included router automations"}
+{"ts":"2025-12-05T12:15:07.306743Z","level":"INFO","logger":"src.api.app","msg":"Included router feedback"}
+{"ts":"2025-12-05T12:15:07.306743Z","level":"INFO","logger":"src.api.app","msg":"Included router dev"}
+{"ts":"2025-12-05T12:15:07.314813Z","level":"INFO","logger":"src.api.app","msg":"Included router admin_rules"}
+{"ts":"2025-12-05T12:15:07.322849Z","level":"INFO","logger":"src.api.app","msg":"Included router decision_feedback"}
+{"ts":"2025-12-05T12:15:07.324041Z","level":"INFO","logger":"src.api.app","msg":"Included router factors"}
+{"ts":"2025-12-05T12:15:07.335804Z","level":"INFO","logger":"src.api.app","msg":"Included router suppression_admin"}
+{"ts":"2025-12-05T12:15:07.347673Z","level":"INFO","logger":"src.api.app","msg":"Included router unified_ingest"}
+{"ts":"2025-12-05T12:15:07.357026Z","level":"INFO","logger":"src.api.app","msg":"Included router risk_config_admin"}
+{"ts":"2025-12-05T12:15:07.361514Z","level":"INFO","logger":"src.api.app","msg":"Included router scenario_replay"}
+{"ts":"2025-12-05T12:15:07.362525Z","level":"INFO","logger":"src.api.app","msg":"Included router network_ingest"}
+{"ts":"2025-12-05T12:15:07.364293Z","level":"INFO","logger":"src.api.app","msg":"Included router cloud_ingest"}
+{"ts":"2025-12-05T12:15:07.365294Z","level":"INFO","logger":"src.api.app","msg":"Included router app_ingest"}
+{"ts":"2025-12-05T12:15:07.366295Z","level":"INFO","logger":"src.api.app","msg":"Included router identity_ingest"}
+{"ts":"2025-12-05T12:15:07.367292Z","level":"INFO","logger":"src.api.app","msg":"Included router decision_confidence"}
+{"ts":"2025-12-05T12:15:07.367292Z","level":"INFO","logger":"src.api.app","msg":"Included router node_factors"}
+{"ts":"2025-12-05T12:15:07.373175Z","level":"INFO","logger":"src.api.app","msg":"Included router emitted_factors"}
+{"ts":"2025-12-05T12:15:07.399269Z","level":"INFO","logger":"src.api.app","msg":"Included router graph_session"}
+{"ts":"2025-12-05T12:15:07.402654Z","level":"INFO","logger":"src.api.app","msg":"Included router suggestions"}
+{"ts":"2025-12-05T12:15:07.402654Z","level":"INFO","logger":"src.api.app","msg":"Included router config"}
+{"ts":"2025-12-05T12:15:07.402654Z","level":"INFO","logger":"src.api.app","msg":"Included router assessments"}
+{"ts":"2025-12-05T12:15:07.417409Z","level":"INFO","logger":"src.api.app","msg":"Included router tier2"}
+{"ts":"2025-12-05T12:15:07.433932Z","level":"INFO","logger":"src.api.app","msg":"Included router playbooks"}
+{"ts":"2025-12-05T12:15:07.449563Z","level":"INFO","logger":"src.api.app","msg":"Included router identity_hopgraph_facade"}
+{"ts":"2025-12-05T12:15:07.454582Z","level":"INFO","logger":"src.api.app","msg":"Included router cooccurrence_admin"}
+{"ts":"2025-12-05T12:15:07.462710Z","level":"INFO","logger":"src.api.app","msg":"Included router endpoint_malware"}
+{"ts":"2025-12-05T12:15:07.484592Z","level":"INFO","logger":"src.api.app","msg":"Included router isms"}
+{"ts":"2025-12-05T12:15:07.484592Z","level":"INFO","logger":"src.api.app","msg":"Included SLO metrics router"}
+{"ts":"2025-12-05T12:15:43.521881Z","level":"INFO","logger":"src.api.app","msg":"Route inventory audit: 323 routes, 12 allowlisted, 323 extras"}
+{"ts":"2025-12-05T12:15:43.521881Z","level":"WARNING","logger":"src.api.app","msg":"Routes not in allowlist (first 25): /api/v1/actions/audit POST, /api/v1/admin/autogen/toggle POST, /api/v1/admin/cooccurrence/pruner/start POST, /api/v1/admin/cooccurrence/pruner/status GET, /api/v1/admin/cooccurrence/pruner/stop POST, /api/v1/admin/rules GET, /api/v1/admin/rules POST, /api/v1/admin/rules/reset POST, /api/v1/admin/scoring/weights POST, /api/v1/admin/suppression/ GET, /api/v1/admin/suppression/reload POST, /api/v1/admin/suppression/set POST, /api/v1/ai/force_external POST, /api/v1/analysis/session/start POST, /api/v1/analysis/session/{session_id}/cancel POST, /api/v1/analysis/session/{session_id}/status GET, /api/v1/api_keys/audit GET, /api/v1/api_keys/rotate POST, /api/v1/api_security/ingest POST, /api/v1/api_security/summary GET, /api/v1/app/ingest POST, /api/v1/artifacts/analyze_batch POST, /api/v1/artifacts/list GET, /api/v1/assessments/admin/consume_retrain POST, /api/v1/assessments/assessments/{assessment_id}/evidence/{cache_key} GET"}
+{"ts":"2025-12-05T12:15:43.526947Z","level":"INFO","logger":"src.api.app","msg":"Mounting React frontend at /react from D:\\AI\\Threat_thy_sniffer\\frontend\\react\\dist"}
+{"ts":"2025-12-05T12:15:43.527944Z","level":"INFO","logger":"src.api.app","msg":"Mounting SPA frontend at /spa from D:\\AI\\Threat_thy_sniffer\\frontend\\spa"}
+{"ts":"2025-12-05T12:15:43.703470Z","level":"INFO","logger":"src.api.app","msg":"Included unified ingestion controller router"}
+{"ts":"2025-12-05T12:15:44.999740Z","level":"INFO","logger":"src.tasks.llm_feedback_job","msg":"Registered LLM feedback scheduler (interval=86400)"}
+{"ts":"2025-12-05T12:15:44.999740Z","level":"INFO","logger":"src.embedding.scheduler","msg":"Registered embedding scheduler (interval=300)"}
+{"ts":"2025-12-05T12:15:45.014491Z","level":"INFO","logger":"api.app","msg":"PLATFORM_LITE_INIT active: skipping initialize_platform_components heavy init"}
+{"ts":"2025-12-05T12:15:45.055411Z","level":"INFO","logger":"api.app","msg":"register_core_routers called (full=True)"}
+{"ts":"2025-12-05T12:15:45.082037Z","level":"INFO","logger":"api.app","msg":"Included decisions_router into app (lite)"}
+{"ts":"2025-12-05T12:15:45.086546Z","level":"INFO","logger":"api.app","msg":"Included hopgraph_stream_router into app"}
+{"ts":"2025-12-05T12:15:45.087749Z","level":"INFO","logger":"api.app","msg":"Included config_router into app (lite)"}
+{"ts":"2025-12-05T12:15:45.088780Z","level":"INFO","logger":"api.app","msg":"Included assessments_router into app (lite)"}
+{"ts":"2025-12-05T12:15:45.093412Z","level":"INFO","logger":"api.app","msg":"Included report_router into app (lite)"}
+{"ts":"2025-12-05T12:15:45.102721Z","level":"INFO","logger":"api.app","msg":"Included tier2_router into app (lite)"}
+{"ts":"2025-12-05T12:15:45.175953Z","level":"INFO","logger":"api.app","msg":"Included integrations_router into app (lite)"}
+{"ts":"2025-12-05T12:15:45.189751Z","level":"INFO","logger":"api.app","msg":"Included intel_router into app (lite)"}
+{"ts":"2025-12-05T12:15:45.221993Z","level":"INFO","logger":"api.app","msg":"Included deep_analyze_router into app (lite)"}
+{"ts":"2025-12-05T12:15:45.227200Z","level":"INFO","logger":"api.app","msg":"Included endpoint_malware router (lite)"}
+{"ts":"2025-12-05T12:15:45.239462Z","level":"INFO","logger":"api.app","msg":"Included router decisions"}
+{"ts":"2025-12-05T12:15:45.242647Z","level":"INFO","logger":"api.app","msg":"Included router hopgraph_stream"}
+{"ts":"2025-12-05T12:15:45.246740Z","level":"INFO","logger":"api.app","msg":"Included router risk"}
+{"ts":"2025-12-05T12:15:45.257178Z","level":"INFO","logger":"api.app","msg":"Included router temporal"}
+{"ts":"2025-12-05T12:15:45.282448Z","level":"INFO","logger":"api.app","msg":"Included router upload"}
+{"ts":"2025-12-05T12:15:45.282448Z","level":"INFO","logger":"api.app","msg":"Included router stream_ingest"}
+{"ts":"2025-12-05T12:15:45.327991Z","level":"INFO","logger":"api.app","msg":"Included router csv"}
+{"ts":"2025-12-05T12:15:45.338607Z","level":"INFO","logger":"api.app","msg":"Included router soar"}
+{"ts":"2025-12-05T12:15:45.349768Z","level":"INFO","logger":"api.app","msg":"Included router dashboard"}
+{"ts":"2025-12-05T12:15:45.414213Z","level":"INFO","logger":"api.app","msg":"Included router integrations"}
+{"ts":"2025-12-05T12:15:45.431175Z","level":"INFO","logger":"api.app","msg":"Included router metrics_status"}
+{"ts":"2025-12-05T12:15:45.439788Z","level":"INFO","logger":"api.app","msg":"Included router custody"}
+{"ts":"2025-12-05T12:15:45.446784Z","level":"INFO","logger":"api.app","msg":"Included router artifact"}
+{"ts":"2025-12-05T12:15:45.450043Z","level":"INFO","logger":"api.app","msg":"Included router nlp"}
+{"ts":"2025-12-05T12:15:45.460456Z","level":"INFO","logger":"api.app","msg":"Included router sbom"}
+{"ts":"2025-12-05T12:15:45.465015Z","level":"INFO","logger":"api.app","msg":"Included router ebpf"}
+{"ts":"2025-12-05T12:15:45.469543Z","level":"INFO","logger":"api.app","msg":"Included router identity_reporting"}
+{"ts":"2025-12-05T12:15:45.588040Z","level":"INFO","logger":"api.app","msg":"Included router compliance"}
+{"ts":"2025-12-05T12:15:45.588040Z","level":"INFO","logger":"api.app","msg":"Included router report"}
+{"ts":"2025-12-05T12:15:45.599369Z","level":"INFO","logger":"api.app","msg":"Included router automations"}
+{"ts":"2025-12-05T12:15:45.621424Z","level":"INFO","logger":"api.app","msg":"Included router feedback"}
+{"ts":"2025-12-05T12:15:45.627989Z","level":"INFO","logger":"api.app","msg":"Included router dev"}
+{"ts":"2025-12-05T12:15:45.632170Z","level":"INFO","logger":"api.app","msg":"Included router admin_rules"}
+{"ts":"2025-12-05T12:15:45.632170Z","level":"INFO","logger":"api.app","msg":"Included router decision_feedback"}
+{"ts":"2025-12-05T12:15:45.632170Z","level":"INFO","logger":"api.app","msg":"Included router factors"}
+{"ts":"2025-12-05T12:15:45.648861Z","level":"INFO","logger":"api.app","msg":"Included router suppression_admin"}
+{"ts":"2025-12-05T12:15:45.659557Z","level":"INFO","logger":"api.app","msg":"Included router unified_ingest"}
+{"ts":"2025-12-05T12:15:45.667812Z","level":"INFO","logger":"api.app","msg":"Included router risk_config_admin"}
+{"ts":"2025-12-05T12:15:45.675922Z","level":"INFO","logger":"api.app","msg":"Included router scenario_replay"}
+{"ts":"2025-12-05T12:15:45.677925Z","level":"INFO","logger":"api.app","msg":"Included router network_ingest"}
+{"ts":"2025-12-05T12:15:45.678946Z","level":"INFO","logger":"api.app","msg":"Included router cloud_ingest"}
+{"ts":"2025-12-05T12:15:45.681069Z","level":"INFO","logger":"api.app","msg":"Included router app_ingest"}
+{"ts":"2025-12-05T12:15:45.682941Z","level":"INFO","logger":"api.app","msg":"Included router identity_ingest"}
+{"ts":"2025-12-05T12:15:45.684144Z","level":"INFO","logger":"api.app","msg":"Included router decision_confidence"}
+{"ts":"2025-12-05T12:15:45.684144Z","level":"INFO","logger":"api.app","msg":"Included router node_factors"}
+{"ts":"2025-12-05T12:15:45.688291Z","level":"INFO","logger":"api.app","msg":"Included router emitted_factors"}
+{"ts":"2025-12-05T12:15:45.711997Z","level":"INFO","logger":"api.app","msg":"Included router graph_session"}
+{"ts":"2025-12-05T12:15:45.719825Z","level":"INFO","logger":"api.app","msg":"Included router suggestions"}
+{"ts":"2025-12-05T12:15:45.721826Z","level":"INFO","logger":"api.app","msg":"Included router config"}
+{"ts":"2025-12-05T12:15:45.722825Z","level":"INFO","logger":"api.app","msg":"Included router assessments"}
+{"ts":"2025-12-05T12:15:45.735791Z","level":"INFO","logger":"api.app","msg":"Included router tier2"}
+{"ts":"2025-12-05T12:15:45.747361Z","level":"INFO","logger":"api.app","msg":"Included router playbooks"}
+{"ts":"2025-12-05T12:15:45.756607Z","level":"INFO","logger":"api.app","msg":"Included router identity_hopgraph_facade"}
+{"ts":"2025-12-05T12:15:45.764798Z","level":"INFO","logger":"api.app","msg":"Included router cooccurrence_admin"}
+{"ts":"2025-12-05T12:15:45.768578Z","level":"INFO","logger":"api.app","msg":"Included router endpoint_malware"}
+{"ts":"2025-12-05T12:15:45.786159Z","level":"INFO","logger":"api.app","msg":"Included router isms"}
+{"ts":"2025-12-05T12:15:45.789895Z","level":"INFO","logger":"api.app","msg":"Included SLO metrics router"}
+{"ts":"2025-12-05T12:15:45.843605Z","level":"INFO","logger":"api.app","msg":"Route inventory audit: 323 routes, 12 allowlisted, 323 extras"}
+{"ts":"2025-12-05T12:15:45.845610Z","level":"WARNING","logger":"api.app","msg":"Routes not in allowlist (first 25): /api/v1/actions/audit POST, /api/v1/admin/autogen/toggle POST, /api/v1/admin/cooccurrence/pruner/start POST, /api/v1/admin/cooccurrence/pruner/status GET, /api/v1/admin/cooccurrence/pruner/stop POST, /api/v1/admin/rules GET, /api/v1/admin/rules POST, /api/v1/admin/rules/reset POST, /api/v1/admin/scoring/weights POST, /api/v1/admin/suppression/ GET, /api/v1/admin/suppression/reload POST, /api/v1/admin/suppression/set POST, /api/v1/ai/force_external POST, /api/v1/analysis/session/start POST, /api/v1/analysis/session/{session_id}/cancel POST, /api/v1/analysis/session/{session_id}/status GET, /api/v1/api_keys/audit GET, /api/v1/api_keys/rotate POST, /api/v1/api_security/ingest POST, /api/v1/api_security/summary GET, /api/v1/app/ingest POST, /api/v1/artifacts/analyze_batch POST, /api/v1/artifacts/list GET, /api/v1/assessments/admin/consume_retrain POST, /api/v1/assessments/assessments/{assessment_id}/evidence/{cache_key} GET"}
+{"ts":"2025-12-05T12:15:45.847141Z","level":"INFO","logger":"api.app","msg":"Mounting React frontend at /react from D:\\AI\\Threat_thy_sniffer\\frontend\\react\\dist"}
+{"ts":"2025-12-05T12:15:45.848144Z","level":"INFO","logger":"api.app","msg":"Mounting SPA frontend at /spa from D:\\AI\\Threat_thy_sniffer\\frontend\\spa"}
+{"ts":"2025-12-05T12:15:46.056662Z","level":"INFO","logger":"api.app","msg":"Included unified ingestion controller router"}
+[startup] reload=False (source: --no-reload flag)  log_level=info
+{"ts":"2025-12-05T12:15:48.147038Z","level":"INFO","logger":"webhook_guard","msg":"WebhookGuardMiddleware using DB at :memory:"}
+{"ts":"2025-12-05T12:16:48.606319Z","level":"INFO","logger":"src.api.app","msg":"Serving LIVE Console frontend at root","correlation_id":"req-1764937008601","tenant_id":"default"}
+INFO:     127.0.0.1:59304 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59329 - "POST /api/v1/incidents HTTP/1.1" 200 OK
+{"ts":"2025-12-05T12:17:40.831849Z","level":"WARNING","logger":"webhook_guard","msg":"missing webhook headers path=/api/v1/webhooks/test vendor=generic","correlation_id":"req-1764937060831","tenant_id":"default"}
+{"ts":"2025-12-05T12:17:40.832835Z","level":"INFO","logger":"audit","msg":"{\"ts\":1764937060.832836,\"event\":\"webhook_missing_headers\",\"path\":\"/api/v1/webhooks/test\",\"vendor\":\"generic\"}","correlation_id":"req-1764937060831","tenant_id":"default"}
+INFO:     127.0.0.1:59361 - "POST /api/v1/webhooks/test HTTP/1.1" 400 Bad Request
+INFO:     127.0.0.1:59379 - "POST /api/v1/webhooks/test HTTP/1.1" 200 OK
+{"ts":"2025-12-05T12:18:55.678080Z","level":"INFO","logger":"src.api.upload_endpoints","msg":"Processing 1 uploaded file(s) for tenant: None","correlation_id":"req-1764937135672","tenant_id":"default"}
+{"ts":"2025-12-05T12:18:55.678080Z","level":"INFO","logger":"src.api.upload_endpoints","msg":"Processing log file: button_smoke_log.txt","correlation_id":"req-1764937135672","tenant_id":"default"}
+INFO:     127.0.0.1:59477 - "POST /api/v1/upload/files HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59561 - "GET /api/v1/report/ingestion?format=html&include_model=true&include_scenarios=true HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59578 - "GET /api/v1/llm/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60005 - "GET /api/v1/llm/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55951 - "GET /static/csv_analyzer.html HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:55951 - "GET /static/js/theme.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:55951 - "GET /static/js/threat_ranking.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:55951 - "GET /static/js/dread_utils.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:55951 - "GET /api/v1/llm/cost_estimate?lines=25 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55953 - "GET /static/js/parse_tabular.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:55951 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55953 - "GET /static/js/csv_ingest_shared.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:55951 - "GET /static/js/csv_analyzer.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55951 - "GET /api/v1/assessments/assessment-1764754917-0f48ad11/llm/progress HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:55953 - "GET /api/v1/llm/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55957 - "GET /favicon.ico HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:55959 - "GET /api/v1/assessments/assessment-1764754917-0f48ad11/llm/progress HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:55958 - "POST /api/v1/csv/ingest_rows HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55958 - "POST /api/v1/csv/deep_analyze HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55958 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55958 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55958 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55958 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55958 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55958 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55960 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55960 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55960 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55960 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55960 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc HTTP/1.1" 200 OK
+{"ts":"2025-12-05T21:35:50.263104Z","level":"WARNING","logger":"src.integrations.llm_client","msg":"LLM generate attempt 0 failed: HTTPConnectionPool(host='127.0.0.1', port=11434): Read timed out. (read timeout=10.0)"}
+INFO:     127.0.0.1:55960 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55960 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55960 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55960 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55960 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55960 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55960 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55960 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55960 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55960 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc HTTP/1.1" 200 OK
+{"ts":"2025-12-05T21:36:00.876281Z","level":"WARNING","logger":"src.integrations.llm_client","msg":"LLM generate attempt 1 failed: HTTPConnectionPool(host='127.0.0.1', port=11434): Read timed out. (read timeout=10.0)"}
+INFO:     127.0.0.1:55960 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55960 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55960 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55960 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55960 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55960 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55960 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55960 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55960 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55960 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55960 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc HTTP/1.1" 200 OK
+{"ts":"2025-12-05T21:36:11.941071Z","level":"WARNING","logger":"src.integrations.llm_client","msg":"LLM generate attempt 2 failed: HTTPConnectionPool(host='127.0.0.1', port=11434): Read timed out. (read timeout=10.0)"}
+INFO:     127.0.0.1:55960 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc HTTP/1.1" 200 OK
+[DeepAnalyzeWorker] persisting assessment to D:\AI\Threat_thy_sniffer\data\sessions\local\2025-12-05
+INFO:     127.0.0.1:55960 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55960 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/rows HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55960 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55960 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56018 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56019 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56019 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56019 - "GET /static/graph_explain.html?node=process%3Aunknown HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56019 - "GET /api/v1/graph/explain?node=process%3Aunknown HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56030 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56030 - "POST /api/v1/insights/generate HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56046 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56046 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56047 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56061 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56061 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56062 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56077 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56077 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56079 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56100 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56100 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56101 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56125 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56125 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56126 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56136 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56136 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56137 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56160 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56160 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56161 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56177 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56177 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56178 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56207 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56207 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56208 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56215 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56215 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56216 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56256 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56256 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56262 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56263 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56263 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56304 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56305 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56310 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56339 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56340 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56352 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56388 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56389 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56390 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56466 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56526 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56527 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56528 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56599 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56637 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56638 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56639 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56706 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56767 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56768 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56769 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56822 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56910 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56911 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56912 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56964 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57011 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57012 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57013 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57051 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57132 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57133 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57134 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57175 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57175 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57175 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57186 - "POST /api/v1/insights/generate HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57186 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57186 - "GET /static/csv_deep_analysis.html HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57186 - "POST /api/v1/graph/attack_reconstruction HTTP/1.1" 200 OK
+{"ts":"2025-12-05T21:57:49.286856Z","level":"WARNING","logger":"src.integrations.llm_client","msg":"LLM generate attempt 0 failed: HTTPConnectionPool(host='127.0.0.1', port=11434): Read timed out. (read timeout=10.0)","correlation_id":"req-1764971858861","tenant_id":"default"}
+{"ts":"2025-12-05T21:57:59.811419Z","level":"WARNING","logger":"src.integrations.llm_client","msg":"LLM generate attempt 1 failed: HTTPConnectionPool(host='127.0.0.1', port=11434): Read timed out. (read timeout=10.0)","correlation_id":"req-1764971858861","tenant_id":"default"}
+{"ts":"2025-12-05T21:58:10.848173Z","level":"WARNING","logger":"src.integrations.llm_client","msg":"LLM generate attempt 2 failed: HTTPConnectionPool(host='127.0.0.1', port=11434): Read timed out. (read timeout=10.0)","correlation_id":"req-1764971858861","tenant_id":"default"}
+INFO:     127.0.0.1:57187 - "POST /api/v1/csv/tier2_investigate HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57198 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57199 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57198 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57198 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57198 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57275 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57276 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57276 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57290 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57291 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57291 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57307 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57308 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57308 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57316 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57339 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57340 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57341 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57384 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57385 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57386 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57406 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57407 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57408 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58613 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58614 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58615 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58615 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58660 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58660 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58725 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58725 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58725 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58780 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58780 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58886 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59028 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59029 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59030 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59155 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59156 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59158 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59158 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59250 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59250 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59349 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59349 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59519 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59519 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59692 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59693 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59694 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59694 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60036 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60037 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60038 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60038 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60157 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60157 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60226 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60226 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60285 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60285 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60355 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60355 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60409 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60409 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60474 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60474 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60575 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60575 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60652 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60652 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60672 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60673 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60673 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60692 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60748 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60749 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60750 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60827 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60828 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60829 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60912 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60913 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60914 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60914 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61007 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61007 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61108 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61108 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61256 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61256 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61385 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61385 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61448 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61448 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61574 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61574 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61644 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61644 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61720 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61720 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61790 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61790 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61862 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61862 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61918 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61918 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62010 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62010 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62109 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62109 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62206 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62206 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62260 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62260 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62283 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62343 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62344 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62345 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62385 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62386 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62387 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62467 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62468 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62583 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62584 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62585 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62585 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62651 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62651 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62727 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62727 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62774 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62869 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62925 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62926 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62927 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62971 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63019 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63020 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63021 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63062 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63124 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63125 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63126 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63187 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63219 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63220 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63221 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63221 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63249 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63249 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63258 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63314 - "GET /api/v1/metrics/llm_costs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63315 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63316 - "GET /api/v1/assessments/assessment-1764970538-26a6c2cc/llm/progress HTTP/1.1" 200 OK

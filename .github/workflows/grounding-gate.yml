@@ -1,0 +1,40 @@
+name: Grounding gate
+
+# Fast, per-PR enforcement of the flagship claim: no fabricated entity or MITRE code
+# ships. These are DETERMINISTIC (no LLM/Ollama needed) and dataset-independent, so
+# they run on any GitHub runner and also guard against dataset overfitting.
+
+# Environment-specific suite; see docs/CI_SCOPE.md.
+on:
+  workflow_dispatch:
+
+jobs:
+  grounding:
+    runs-on: ubuntu-latest
+    env:
+      PLATFORM_LITE_INIT: '1'
+      FAST_TEST_MODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Grounding + evidence-integrity + GRC invariants
+        run: |
+          python -m pytest -p no:cacheprovider -o addopts="" -q \
+            tests/test_grounding_invariant.py \
+            tests/test_entity_constraints.py \
+            tests/test_evidence_integrity.py \
+            tests/test_describe_trust_fixes.py \
+            tests/test_grc_dread.py \
+            tests/test_grc_nonconformity.py \
+            tests/test_grc_finding_summary.py \
+            tests/test_grc_control_gaps.py \
+            tests/test_grc_auth.py \
+            tests/test_evidence_drilldown.py \
+            tests/test_bitemporal_provenance.py \
+            tests/test_phase_registry_coverage.py

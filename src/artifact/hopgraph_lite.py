@@ -1,7 +1,12 @@
 from __future__ import annotations
-from typing import Dict, Set, Tuple, Any, List
-import time, threading, math
+
+import math
+import threading
+import time
+from typing import Any, Dict, List, Set, Tuple
+
 from .models import ArtifactObservation
+
 
 class HopGraphLite:
     def __init__(self, retention_seconds: int = 86400, benign_stable_ratio: float = 0.9, malicious_density_threshold: float = 0.25):
@@ -9,13 +14,13 @@ class HopGraphLite:
         self.benign_stable_ratio = benign_stable_ratio
         self.malicious_density_threshold = malicious_density_threshold
         self._lock = threading.RLock()
-        self.hash_history: Dict[str, Dict[str, int]] = {}
-        self.hash_last_seen: Dict[str, float] = {}
-        self.cluster_hist: Dict[str, Dict[str, int]] = {}
-        self.host_artifacts_window: Dict[str, List[Tuple[float,str]]] = {}
+        self.hash_history: dict[str, dict[str, int]] = {}
+        self.hash_last_seen: dict[str, float] = {}
+        self.cluster_hist: dict[str, dict[str, int]] = {}
+        self.host_artifacts_window: dict[str, list[tuple[float,str]]] = {}
         # Name prevalence + host spread tracking
-        self.name_hosts: Dict[str, Dict[str, float]] = {}  # name -> host -> last_seen_ts
-        self.name_total: Dict[str, int] = {}  # observation counts
+        self.name_hosts: dict[str, dict[str, float]] = {}  # name -> host -> last_seen_ts
+        self.name_total: dict[str, int] = {}  # observation counts
         self.window_recent_seconds = 1800  # for rapid propagation heuristic
         # Persistence
         self._persist_path = 'dump/artifact_prevalence.json'
@@ -58,9 +63,9 @@ class HopGraphLite:
                 self.evict()
                 self._persist_async()
 
-    def context(self, obs: ArtifactObservation, recent_window: int = 1800, propagation_threshold: int = 5) -> Dict[str, Any]:
+    def context(self, obs: ArtifactObservation, recent_window: int = 1800, propagation_threshold: int = 5) -> dict[str, Any]:
         now = time.time()
-        ctx: Dict[str, Any] = {}
+        ctx: dict[str, Any] = {}
         with self._lock:
             hist = self.hash_history.get(obs.artifact_id, {})
             total = sum(hist.values())
@@ -98,9 +103,10 @@ class HopGraphLite:
         if self._loaded:
             return
         try:
-            import json, os
+            import json
+            import os
             if os.path.exists(self._persist_path):
-                with open(self._persist_path,'r',encoding='utf-8') as f:
+                with open(self._persist_path,encoding='utf-8') as f:
                     data = json.load(f)
                 self.name_hosts = {k:{hk:float(ts) for hk,ts in v.items()} for k,v in data.get('name_hosts',{}).items()}
                 self.name_total = {k:int(v) for k,v in data.get('name_total',{}).items()}
@@ -113,7 +119,8 @@ class HopGraphLite:
         import threading
         def _do():
             try:
-                import json, os
+                import json
+                import os
                 os.makedirs('dump', exist_ok=True)
                 snap = {
                     'name_hosts': self.name_hosts,

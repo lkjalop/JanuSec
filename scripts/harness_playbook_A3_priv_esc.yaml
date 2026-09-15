@@ -1,0 +1,32 @@
+id: A3_privilege_escalation
+version: 1
+scenario: "Abnormal service account login followed by privileged process chain"
+tenant: demo
+stages:
+  - t: 0s
+    event_type: auth
+    id: a3-auth-1
+    user: svc-maint
+    src_host: hostD
+    dst_host: hostD
+    outcome: success
+  - t: 10s
+    event_type: proc
+    id: a3-proc-1
+    host: hostD
+    parent: services.exe
+    child: powershell.exe
+    cmd: "powershell -nop -enc <redacted>"
+  - t: 24s
+    event_type: proc
+    id: a3-proc-2
+    host: hostD
+    parent: powershell.exe
+    child: reg.exe
+    cmd: "reg add HKLM\\Software\\TempKey /v stealth /t REG_SZ /d hidden"
+labels:
+  expected_factors:
+    - lane_proc_parent_chain
+  optional_correlation: []
+sla:
+  first_detection_within: 35s

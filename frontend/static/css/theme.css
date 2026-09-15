@@ -1,0 +1,46 @@
+/* Shared Dark Theme Tokens (extracted from LIVE console)
+   Usage: include via <link rel="stylesheet" href="/static/css/theme.css"> at top of static pages.
+   Keep this file minimal: only token declarations & foundational resets. */
+:root {
+  /* Core Background Layers */
+  --bg-primary: #0B0E14;
+  --bg-secondary: #141A24;
+  --bg-tertiary: #1D2531;
+  --bg-hover: #222C39;
+  --bg-elevated: #202A37;
+
+  /* Borders & Outlines */
+  --border: #2C3746;
+  --border-soft: #1B222C;
+  --focus-ring: #4A90E7;
+
+  /* Text Roles */
+  --text-primary: #E8EBF0;
+  --text-secondary: #C2CBD6;
+  --text-muted: #93A0B1;
+  --text-inverse: #0B0E14;
+
+  /* Accent & Interactive */
+  --accent: #4A63E7;
+  --accent-hover: #5C74F2;
+  --accent-subtle: #233155;
+  --accent-gradient: linear-gradient(135deg,#4A63E7,#6D5CF2 60%);
+
+  /* Semantic / Severity */
+  --critical: #E54848;
+  --high: #FF8A3C;
+  --medium: #E0C446;
+  --low: #3FA860;
+  --safe: #2DB67C;
+  --info: #4DA6FF;
+
+  /* Radii & Spacing */
+  --radius-xs: 3px; --radius-sm: 4px; --radius: 6px; --radius-lg: 10px;
+  --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-5: 20px; --space-6: 24px; --space-7: 32px;
+}
+
+html, body { background: var(--bg-primary); color: var(--text-primary); font-family: Inter, "Segoe UI", system-ui, -apple-system, Arial, sans-serif; }
+body { margin:0; }
+::selection { background: var(--accent); color:#fff; }
+* { box-sizing: border-box; }
+*:focus-visible { outline:2px solid var(--focus-ring); outline-offset:2px; border-radius: var(--radius-sm); }

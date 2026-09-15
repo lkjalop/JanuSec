@@ -9,17 +9,18 @@ Not thread safe for multi-process; single FastAPI process usage is assumed.
 """
 from __future__ import annotations
 
-from collections import deque
-from typing import Deque, Dict, Any, List, Iterable
 import os
 import threading
+from collections import deque
+from collections.abc import Iterable
+from typing import Any, Deque, Dict, List
 
 _BUFFER_MAX = int(os.getenv('EVENT_BUFFER_MAX', '10000'))
-_buffer: Deque[Dict[str, Any]] = deque(maxlen=_BUFFER_MAX)
+_buffer: deque[dict[str, Any]] = deque(maxlen=_BUFFER_MAX)
 _lock = threading.Lock()
 
 
-def add_events(events: Iterable[Dict[str, Any]]) -> int:
+def add_events(events: Iterable[dict[str, Any]]) -> int:
     count = 0
     with _lock:
         for ev in events:
@@ -28,7 +29,7 @@ def add_events(events: Iterable[Dict[str, Any]]) -> int:
     return count
 
 
-def snapshot(limit: int = 1000) -> List[Dict[str, Any]]:
+def snapshot(limit: int = 1000) -> list[dict[str, Any]]:
     if limit <= 0:
         limit = 1
     with _lock:

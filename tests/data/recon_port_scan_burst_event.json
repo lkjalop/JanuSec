@@ -1,0 +1,6 @@
+{
+  "scan_rate": 42,
+  "unique_ports": 25,
+  "unique_hosts": 30,
+  "src_ip": "10.0.0.5"
+}

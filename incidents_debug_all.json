@@ -1,0 +1,13 @@
+{
+  "src.api.server": {
+    "module_id": "0x28607f13240",
+    "store_id": "0x2862dee4080",
+    "count": 1,
+    "sample": [
+      [
+        "inc-1768041115796",
+        true
+      ]
+    ]
+  }
+}

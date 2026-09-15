@@ -1,0 +1,14 @@
+{
+  "scope": "four synthetic cases; not a production benchmark",
+  "results": 8,
+  "models": {
+    "llama3.2:3b": {
+      "correct": 3,
+      "total": 4
+    },
+    "qwen3.5:9b-q4_K_M": {
+      "correct": 4,
+      "total": 4
+    }
+  }
+}

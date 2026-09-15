@@ -1,0 +1,17 @@
+{
+  "errors": [],
+  "http_errors": [],
+  "tabs": [
+    "Causal graph",
+    "Detailed timeline",
+    "Retrieval trace",
+    "Action plan",
+    "Evidence"
+  ],
+  "mocked_routes": false,
+  "browser_certificate_exception": "generated localhost certificate only; API TLS verified separately",
+  "evidence_drilldown": true,
+  "authenticated_export": true,
+  "mobile_and_reload": true,
+  "passed": true
+}

@@ -1,0 +1,14 @@
+[
+  {
+    "row_index": 0,
+    "sheet": "AWSGuardDuty",
+    "id": "gd-info-1001",
+    "type": "Recon:EC2/PortProbeUnprotectedPort",
+    "severity": 2.1,
+    "accountId": "123456789012",
+    "region": "ap-southeast-2",
+    "service": {"eventFirstSeen": "2026-03-20T04:00:00Z"},
+    "approved_change": true,
+    "change_ticket": "OPS-2026-1200"
+  }
+]

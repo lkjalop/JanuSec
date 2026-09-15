@@ -11,8 +11,10 @@ legacy/global. New writes use provided tenant string; empty string coerced
 to NULL.
 """
 from __future__ import annotations
-from fastapi import Request, Header, Depends
+
 import os
+
+from fastapi import Depends, Header, Request
 
 TENANT_ENV_DEFAULT = os.getenv('TENANT_DEFAULT', 'default')
 

@@ -1,0 +1,8 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>JanusSec migration</title></head>
+<body><p>Opening the JanusSec case workspace…</p><script>
+  const p = new URLSearchParams(location.search);
+  const assessment = p.get('assessment') || p.get('assessment_id') || p.get('aid');
+  const target = assessment ? `/?assessment=${encodeURIComponent(assessment)}` : '/';
+  location.replace(target);
+</script></body></html>

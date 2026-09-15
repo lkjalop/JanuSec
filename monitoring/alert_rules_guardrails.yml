@@ -1,0 +1,31 @@
+groups:
+  - name: janusec-guardrails
+    interval: 30s
+    rules:
+      - alert: HighSSRFMBlocks
+        expr: rate(webhook_ssrf_blocks_total[5m]) > 0.1
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Elevated SSRF blocks detected"
+          description: "Egress guard blocked requests >0.1/s over 5m window."
+
+      - alert: TenantRateLimitDrops
+        expr: rate(tenant_rate_limit_drops[5m]) > 1
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Rate limit drops per tenant"
+          description: "Per-tenant rate limiting is dropping requests; investigate abuse or adjust limits."
+
+      - alert: UploadErrorsSpike
+        expr: increase(upload_errors_total[10m]) > 10
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Upload errors spike"
+          description: "Upload pipeline reporting frequent errors in the last 10 minutes."
+

@@ -1,0 +1,194 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8"/>
+    <title>JanuSec Sidepanel</title>
+    <style>
+      :root{--bg:#0b0d10;--surface:#12161b;--border:#1e242c;--text:#e8eef5;--muted:#aab6c5;--accent:#2ecc71}
+      body{font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin:0;padding:0;background:var(--bg);color:var(--text)}
+      header{padding:10px 16px;background:var(--surface);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px}
+      .dot{width:10px;height:10px;border-radius:50%;background:#888}
+      .dot.live{background:var(--accent);box-shadow:0 0 10px var(--accent)}
+      .tabs{margin-left:auto;display:flex;gap:8px}
+      .tab{font-size:12px;padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:#0f1318;color:#cfd7e3;cursor:pointer}
+      .tab.active{background:#16202a;color:#fff}
+      main{height:calc(100vh - 48px)}
+      .view{display:none;height:100%}
+      .view.active{display:flex}
+      #list{flex:1;overflow:auto;padding:12px}
+      .item{border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:10px;background:var(--surface)}
+      .meta{font-size:12px;color:var(--muted)}
+      .factors{font-size:12px;margin-top:6px;color:#d3dde8}
+      .pill{display:inline-block;border:1px solid #334; background:#0f1318;padding:2px 6px;margin:2px;border-radius:6px}
+      .panel{flex:1;display:flex;flex-direction:column}
+      .row{display:flex;gap:12px;padding:12px}
+      .card{flex:1;border:1px solid var(--border);border-radius:8px;background:var(--surface);padding:10px;min-height:120px}
+      .card h4{margin:0 0 8px 0;font-size:13px}
+      .input{background:#0f1318;border:1px solid var(--border);color:var(--text);padding:6px 8px;border-radius:6px;font-size:12px}
+      pre{background:#0f1318;border:1px solid var(--border);border-radius:6px;color:#cfd7e3;padding:10px;overflow:auto;height:60vh}
+      iframe{border:1px solid var(--border);border-radius:8px;background:#0f1318}
+    </style>
+  </head>
+  <body>
+    <header>
+      <div id="status" class="dot"></div>
+      <div>Console</div>
+      <div class="tabs">
+        <button class="tab active" id="tab-live" onclick="show('live')">Live</button>
+        <button class="tab" id="tab-dash" onclick="show('dash')">Dashboards</button>
+        <button class="tab" id="tab-metrics" onclick="show('metrics')">Metrics</button>
+        <button class="tab" id="tab-notify" onclick="show('notify')">Notify</button>
+      </div>
+    </header>
+    <main>
+      <!-- Live decisions -->
+      <div id="view-live" class="view active">
+        <div id="list" class="panel"></div>
+      </div>
+      <!-- Grafana dashboards -->
+      <div id="view-dash" class="view">
+        <div class="panel">
+          <div class="row">
+            <div class="card">
+              <h4>Grafana Base URL</h4>
+              <div>
+                <input id="grafanaUrl" class="input" placeholder="http://localhost:3000" style="width:70%"/>
+                <input id="dashboardPath" class="input" placeholder="/d/janusec-main" style="width:28%"/>
+                <button class="tab" onclick="loadGrafana()">Load</button>
+              </div>
+              <div style="font-size:12px;color:var(--muted);margin-top:6px">Set your Grafana base (with auth in browser session) and a dashboard path (UID).
+              Examples: /d/janusec-main or /d-solo/<uid>?panelId=2&refresh=10s</div>
+            </div>
+          </div>
+          <div class="row">
+            <iframe id="grafanaFrame" title="Grafana" width="100%" height="620" src="about:blank"></iframe>
+          </div>
+        </div>
+      </div>
+      <!-- Prometheus metrics viewer -->
+      <div id="view-metrics" class="view">
+        <div class="panel">
+          <div class="row">
+            <div class="card">
+              <h4>Prometheus Metrics (/metrics)</h4>
+              <div>
+                <input id="metricFilter" class="input" placeholder="filter (e.g., pipeline_)" style="width:70%"/>
+                <button class="tab" onclick="fetchMetrics()">Refresh</button>
+              </div>
+            </div>
+          </div>
+          <div class="row">
+            <pre id="metricsOut">Loading...</pre>
+          </div>
+        </div>
+      </div>
+      <!-- Notifications quick actions -->
+      <div id="view-notify" class="view">
+        <div class="panel">
+          <div class="row">
+            <div class="card">
+              <h4>Send Demo Notifications (SOAR)</h4>
+              <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                <input id="notifyMsg" class="input" placeholder="Message" style="flex:1"/>
+                <button class="tab" onclick="sendNotify('slack')">Slack</button>
+                <button class="tab" onclick="sendNotify('teams')">Teams</button>
+                <button class="tab" onclick="sendNotify('whatsapp')">WhatsApp</button>
+                <button class="tab" onclick="sendNotify('email')">Email</button>
+                <span style="font-size:12px;color:var(--muted)">Uses /api/v1/soar/execute (dry-run by default)</span>
+              </div>
+              <div id="notifyResult" style="margin-top:8px;font-size:12px;color:var(--muted)"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+    <script>
+      // tab switching
+      function show(name){
+        for (const id of ['live','dash','metrics','notify']){
+          document.getElementById('view-'+id).classList.toggle('active', id===name);
+          document.getElementById('tab-'+id).classList.toggle('active', id===name);
+        }
+      }
+
+      const status = document.getElementById('status');
+      const list = document.getElementById('list');
+      function addItem(obj){
+        const div = document.createElement('div');
+        div.className = 'item';
+        const id = obj.event_id || obj.id || '(no id)';
+        const conf = typeof obj.confidence === 'number' ? obj.confidence.toFixed(3) : '-';
+        const ver = obj.verdict || obj.decision || '-';
+        const ts = new Date().toLocaleTimeString();
+        div.innerHTML = `<div class="meta">${ts} • <strong>${id}</strong> • ${ver} • conf ${conf}</div>`;
+        const fac = obj.factors || obj.factors_truncated || [];
+        if(Array.isArray(fac) && fac.length){
+          const f = document.createElement('div'); f.className = 'factors';
+          f.innerHTML = fac.slice(0,10).map(x=>`<span class="pill">${(x+'').replace(/[<>]/g,'')}</span>`).join('');
+          div.appendChild(f);
+        }
+        list.insertBefore(div, list.firstChild);
+        while(list.children.length>100){ list.removeChild(list.lastChild); }
+      }
+      let es;
+      function connect(){
+        es = new EventSource('/api/v1/stream/decisions');
+        es.onopen = ()=> status.classList.add('live');
+        es.onerror = ()=> status.classList.remove('live');
+        es.onmessage = (ev)=>{
+          try{ const obj = JSON.parse(ev.data); addItem(obj); }catch(e){}
+        };
+      }
+      connect();
+
+      // Grafana support
+      function loadGrafana(){
+        const base = (localStorage.getItem('grafanaUrl') || document.getElementById('grafanaUrl').value || (window.GRAFANA_URL||'http://localhost:3000')).replace(/\/$/, '');
+        const path = (localStorage.getItem('grafanaPath') || document.getElementById('dashboardPath').value || '/d/janusec-main?refresh=10s');
+        localStorage.setItem('grafanaUrl', base); localStorage.setItem('grafanaPath', path);
+        const url = base + path;
+        document.getElementById('grafanaFrame').src = url;
+      }
+      (function initGrafanaInputs(){
+        const g = localStorage.getItem('grafanaUrl') || (window.GRAFANA_URL||'');
+        const p = localStorage.getItem('grafanaPath') || '';
+        if (g) document.getElementById('grafanaUrl').value = g;
+        if (p) document.getElementById('dashboardPath').value = p;
+        // Auto-load defaults on first open when nothing set
+        if (!g && !p) {
+          document.getElementById('grafanaUrl').value = (window.GRAFANA_URL||'http://localhost:3000');
+          document.getElementById('dashboardPath').value = '/d/janusec-main?refresh=10s';
+          loadGrafana();
+        }
+      })();
+
+      // Prometheus viewer
+      async function fetchMetrics(){
+        try{
+          const r = await fetch('/metrics');
+          const txt = await r.text();
+          const filt = (document.getElementById('metricFilter').value||'').trim();
+          const lines = txt.split('\n');
+          const out = !filt ? lines : lines.filter(l=> l.includes(filt));
+          document.getElementById('metricsOut').textContent = out.join('\n');
+        }catch(e){ document.getElementById('metricsOut').textContent = 'Failed to load /metrics'; }
+      }
+      fetchMetrics();
+
+      // SOAR notifications (demo)
+      async function sendNotify(channel){
+        const msg = (document.getElementById('notifyMsg').value||'JanuSec demo notification');
+        const steps = [];
+        // Prefer slack action when selected, otherwise fall back to a generic tag to avoid failures in demo
+        if (channel==='slack') steps.push({ type:'slack_notify', message: msg });
+        else steps.push({ type:'tag_event', tag: `notify:${channel}`, note: msg });
+        const body = { name:`notify_${channel}`, dry_run:true, steps };
+        try{
+          const r = await fetch('/api/v1/soar/execute', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+          const res = await r.json();
+          document.getElementById('notifyResult').textContent = `OK: ${JSON.stringify(res)}`;
+        }catch(e){ document.getElementById('notifyResult').textContent = 'Failed to invoke SOAR'; }
+      }
+    </script>
+  </body>
+  </html>

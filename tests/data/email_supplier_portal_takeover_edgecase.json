@@ -1,0 +1,19 @@
+{
+  "subject": "FYI",
+  "from": "notice@notify-vendor.net",
+  "indicators": {
+    "login_link_present": true,
+    "brand_mismatch": true,
+    "reply_to_mismatch": true,
+    "urgency_language": true
+  },
+  "links": [
+    {"type": "link", "url": "https://vendor-verify.net/login", "domain": "vendor-verify.net"}
+  ],
+  "attachments": [],
+  "thread_context": {
+    "reply_chain": [
+      {"from_domain": "trusted-vendor.com", "reply_to_domain": "trusted-vendor.com"}
+    ]
+  }
+}

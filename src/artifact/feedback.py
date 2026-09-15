@@ -1,6 +1,11 @@
 from __future__ import annotations
-from typing import Dict, Any, Optional
-import threading, json, os, time
+
+import json
+import os
+import threading
+import time
+from typing import Any, Dict, Optional
+
 from .models import Verdict
 
 FEEDBACK_PATH = os.path.join('dump','artifact_feedback.json')
@@ -8,13 +13,13 @@ FEEDBACK_PATH = os.path.join('dump','artifact_feedback.json')
 class FeedbackStore:
     def __init__(self):
         self._lock = threading.RLock()
-        self.overrides: Dict[str, Dict[str,Any]] = {}
+        self.overrides: dict[str, dict[str,Any]] = {}
         self._load()
 
     def _load(self):
         if os.path.exists(FEEDBACK_PATH):
             try:
-                with open(FEEDBACK_PATH,'r',encoding='utf-8') as fh:
+                with open(FEEDBACK_PATH,encoding='utf-8') as fh:
                     self.overrides = json.load(fh)
             except Exception:
                 self.overrides = {}
@@ -31,5 +36,5 @@ class FeedbackStore:
             self.overrides[artifact_id] = {'verdict': verdict, 'comment': comment, 'ts': time.time()}
             self._persist()
 
-    def get(self, artifact_id: str) -> Optional[Dict[str,Any]]:
+    def get(self, artifact_id: str) -> dict[str, Any] | None:
         return self.overrides.get(artifact_id)

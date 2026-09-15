@@ -1,0 +1,40 @@
+name: Security - pip-audit
+
+on:
+  push:
+    paths:
+      - 'requirements*.txt'
+      - '.github/workflows/pip-audit.yml'
+  pull_request:
+    paths:
+      - 'requirements*.txt'
+      - '.github/workflows/pip-audit.yml'
+  schedule:
+    - cron: '0 6 * * 1'  # Weekly Monday 06:00 UTC
+
+jobs:
+  pip-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install pip-audit
+        run: pip install pip-audit
+      - name: Run pip-audit (advisory findings; tool errors fail)
+        run: |
+          set +e
+          pip-audit -r requirements.txt -f json -o pip-audit.json
+          scan_status=$?
+          set -e
+          test "$scan_status" -le 1
+          python -c "import json; json.load(open('pip-audit.json'))"
+          if [ "$scan_status" -eq 1 ]; then echo "::warning::pip-audit reported findings; review the artifact. This is not a clean security certification."; fi
+      - name: Upload findings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pip-audit-findings
+          path: pip-audit.json
+          if-no-files-found: error

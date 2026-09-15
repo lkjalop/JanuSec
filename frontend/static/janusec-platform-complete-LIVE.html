@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>JanusSec Case Workspace</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%2353d5c5'/%3E%3Ctext x='16' y='22' text-anchor='middle' font-family='Arial' font-weight='700' font-size='18' fill='%23061111'%3EJ%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/css/case-workspace.css?v=20260820-p1">
+</head>
+<body>
+  <a class="skip" href="#workspace">Skip to case workspace</a>
+  <div class="shell">
+    <aside class="rail" aria-label="Primary navigation">
+      <div class="brand"><span class="brand-mark">J</span><span>JanusSec</span></div>
+      <nav>
+        <button class="nav-item active" data-view="cases">Cases</button>
+        <button class="nav-item" data-view="new">New assessment</button>
+        <a class="nav-item" href="/static/integrations.html">Integrations</a>
+        <a class="nav-item" href="/static/metrics.html">System health</a>
+      </nav>
+      <div class="rail-foot"><span class="status-dot"></span><span id="apiState">API checking</span></div>
+    </aside>
+
+    <main id="workspace">
+      <header class="case-header">
+        <div>
+          <p class="eyebrow" id="tenantLabel">TENANT / CASE</p>
+          <h1 id="caseTitle">Case workspace</h1>
+          <p class="muted" id="caseMeta">Select an assessment to inspect its evidence.</p>
+        </div>
+        <div class="header-actions">
+          <label class="case-only">As known at <input id="knownAt" type="datetime-local" step="0.001" aria-label="Knowledge time"></label>
+          <label id="casePartitionLabel" class="case-only hidden">Investigation scope <select id="casePartitionSelector" aria-label="Case partition"></select></label>
+          <label class="case-only">Reasoner <select id="modelSelector" aria-label="Model provider"><option value="deterministic|janusec-rules">Deterministic only</option></select></label>
+          <button id="runModelButton" class="secondary case-only">Run model</button>
+          <button id="compareModelsButton" class="secondary case-only">Compare</button>
+          <button id="exportGrcButton" class="secondary case-only">Export GRC pack</button>
+          <button id="refreshButton" class="secondary case-only">Refresh</button>
+          <button id="newButton" class="new-assessment-action">New assessment</button>
+        </div>
+      </header>
+
+      <section id="inboxView" class="view-panel">
+        <div class="section-head"><div><p class="eyebrow">ASSESSMENT RUNS</p><h2>Case inbox</h2></div><p class="muted">One queue for uploads, replay, streams, and connectors.</p></div>
+        <div id="caseList" class="case-list" aria-live="polite"></div>
+      </section>
+
+      <section id="newView" class="view-panel hidden">
+        <div class="ingest-intro">
+          <p class="eyebrow">NEW ASSESSMENT RUN</p>
+          <h2>Build a defensible breach assessment</h2>
+          <p class="muted">Add related telemetry from the same investigation window. JanusSec preserves every source, separates cases, and reports contradictions and missing coverage.</p>
+        </div>
+        <div class="upload-layout">
+          <section class="upload-card" aria-labelledby="uploadHeading">
+            <div class="upload-card-head">
+              <div><p class="eyebrow">1 · ADD EVIDENCE</p><h2 id="uploadHeading">Telemetry and context files</h2></div>
+              <span class="pill">Up to 20 files · 500 MB total</span>
+            </div>
+            <form id="uploadForm">
+              <label class="drop-zone" id="dropZone" for="fileInput" tabindex="0">
+                <span class="drop-icon" aria-hidden="true">↓</span>
+                <strong>Drop files here or browse</strong>
+                <span class="desktop-hint">Combine cloud, identity, email, endpoint, network and management-plane evidence.</span>
+                <span class="mobile-hint">Choose files from this device.</span>
+                <span class="supported-formats">CSV · JSON · JSONL · NDJSON · XLSX · XLSM</span>
+              </label>
+              <input id="fileInput" name="files" type="file" accept=".csv,.json,.jsonl,.ndjson,.xlsx,.xlsm" multiple>
+              <div id="uploadPreflight" class="upload-preflight" aria-live="polite">
+                <div class="empty-upload"><strong>No files selected</strong><span>Add two or more telemetry domains when possible; filenames and content are inspected after capture.</span></div>
+              </div>
+              <div class="upload-footer">
+                <div id="fileSummary" class="muted">Nothing will be uploaded until you start the assessment.</div>
+                <div class="upload-actions"><button id="clearFilesButton" class="secondary hidden" type="button">Clear</button><button id="startAssessmentButton" type="submit" disabled>Start assessment</button></div>
+              </div>
+            </form>
+            <div id="uploadProgress" class="pipeline-progress hidden" aria-live="polite">
+              <div class="progress"><div id="progressBar"></div><span id="progressText"></span></div>
+              <ol id="pipelineSteps" class="pipeline-steps">
+                <li data-stage="upload">Immutable capture</li><li data-stage="parsing">Parse</li><li data-stage="normalizing">Normalize</li><li data-stage="reasoning">Partition and reconstruct</li><li data-stage="ready">Ready for review</li>
+              </ol>
+              <div class="run-status"><span id="assessmentRunId" class="muted"></span><button id="cancelAssessmentButton" class="secondary" type="button">Cancel run</button></div>
+            </div>
+          </section>
+          <aside class="ingest-guide" aria-label="What JanusSec does with uploaded evidence">
+            <p class="eyebrow">WHAT YOU GET</p>
+            <h2>One case workspace, with proof</h2>
+            <ol>
+              <li><strong>Custody first</strong><span>Hashes, tenant ownership and capture receipts before parsing.</span></li>
+              <li><strong>Separate investigations</strong><span>Actor, victim, target, instrument, destination and service roles remain explicit.</span></li>
+              <li><strong>Reconstruct the breach</strong><span>Entry, movement, persistence and data access shown as confirmed, suspected, denied or unknown.</span></li>
+              <li><strong>Expose what is missing</strong><span>Contradictions, clock uncertainty and sensor gaps stay visible.</span></li>
+              <li><strong>Prepare decisions</strong><span>Immediate actions and a GRC pack share the same cited evidence model.</span></li>
+            </ol>
+            <div class="trust-note"><strong>Evidence boundary</strong><span>Prior cases and threat intelligence provide context only. Models cannot create evidence or authorize containment.</span></div>
+            <div class="tenant-target"><span>Uploading to tenant</span><strong id="uploadTenant">default</strong></div>
+          </aside>
+        </div>
+      </section>
+
+      <section id="caseView" class="hidden">
+        <div id="posture" class="posture-grid"></div>
+        <section id="assuranceProof" class="assurance-proof" aria-label="Assessment proof and freshness"></section>
+        <div class="summary-layout">
+          <article id="breachSummary" class="breach-summary"></article>
+          <section class="summary-card"><div class="summary-card-head"><p class="eyebrow">THREE IMMEDIATE DECISIONS</p></div><div id="immediateDecisions"></div></section>
+        </div>
+        <section class="summary-card attack-card"><div class="summary-card-head"><div><p class="eyebrow">ATTACK STORY</p><h2>Entry to impact</h2></div><span class="muted">Select a milestone for technical evidence</span></div><div id="attackStory" class="attack-story"></div></section>
+        <div class="summary-columns">
+          <section class="summary-card"><p class="eyebrow">BUSINESS SERVICES</p><div id="businessImpact"></div></section>
+          <section class="summary-card"><p class="eyebrow">CONTAINMENT</p><div id="containment"></div></section>
+          <section class="summary-card"><p class="eyebrow">CONTROL IMPACT</p><div id="controlImpact"></div></section>
+        </div>
+        <div class="gap-banner hidden" id="gapBanner"></div>
+        <div class="tabs" role="tablist" aria-label="Case views">
+          <button role="tab" aria-selected="true" data-tab="claims">Evidence</button>
+          <button role="tab" aria-selected="false" data-tab="graph">Causal graph</button>
+          <button role="tab" aria-selected="false" data-tab="timeline">Detailed timeline</button>
+          <button role="tab" aria-selected="false" data-tab="retrieval">Retrieval trace</button>
+          <button role="tab" aria-selected="false" data-tab="actions">Action plan</button>
+        </div>
+        <div class="tri-pane">
+          <section class="pane list-pane" aria-label="Claims"><div class="pane-title"><h2>Claims</h2><span id="claimCount"></span></div><div id="claimList"></div></section>
+          <section class="pane stage-pane" aria-live="polite"><div class="pane-title"><h2 id="stageTitle">Evidence</h2><span id="resultCount"></span></div><div id="stageContent"></div></section>
+          <aside class="pane inspector" aria-label="Selected item details"><div class="pane-title"><h2>Inspector</h2></div><div id="inspectorContent" class="empty">Select a claim, evidence row, node, or event.</div></aside>
+        </div>
+      </section>
+    </main>
+  </div>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <script src="/static/js/case-workspace.js?v=20260822-grc1" defer></script>
+</body>
+</html>

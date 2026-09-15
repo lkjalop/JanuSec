@@ -1,0 +1,38 @@
+name: Pilot image security
+on:
+  pull_request:
+  push:
+    branches: [main, release/2026-09-14-evidence-preview]
+  schedule:
+    - cron: '25 6 * * 1'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  image-security:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build actual pilot image
+        run: docker build -f deploy/pilot/Dockerfile -t janusec-pilot:scan .
+      - name: Scan all severities, including unfixed findings
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: janusec-pilot:scan
+          scanners: vuln
+          format: json
+          output: pilot-image-vulnerabilities.json
+          severity: UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL
+          ignore-unfixed: false
+          exit-code: '0'
+      - name: Reject critical and fixable high findings
+        run: python scripts/check_image_vulnerabilities.py pilot-image-vulnerabilities.json
+      - name: Retain complete findings even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pilot-image-vulnerabilities
+          path: pilot-image-vulnerabilities.json
+          if-no-files-found: error

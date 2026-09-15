@@ -1,8 +1,11 @@
 from __future__ import annotations
+
+import hashlib
+import time
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import List, Dict, Any, Optional
-import time, hashlib
+from typing import Any, Dict, List, Optional, TypedDict
+
 
 class ArtifactType(str, Enum):
     EXECUTABLE = "executable"
@@ -44,39 +47,56 @@ class Factor:
     weight: float
     description: str = ""
 
+class GraphContext(TypedDict, total=False):
+    """Structured graph enrichment context stored on ArtifactObservation.graph_context."""
+    session_id: str
+    row_id: str
+    hotspots: List[Dict[str, Any]]
+    mapping_stats: Dict[str, Any]
+    mapping_semantics_score: float
+    domain_diversity_score: float
+    confidence_breakdown: Dict[str, Any]
+    key_factors: List[str]
+    verdict: str | None
+    confidence: float | None
+    domains_present: List[str]
+    narrative: str | None
+    source: str | None
+
+
 @dataclass
 class ArtifactObservation:
     artifact_id: str
-    sha256: Optional[str]
+    sha256: str | None
     artifact_type: ArtifactType
-    host: Optional[str]
-    path: Optional[str]
+    host: str | None
+    path: str | None
     name: str
-    size: Optional[int] = None
+    size: int | None = None
     first_seen: float = field(default_factory=lambda: time.time())
     last_seen: float = field(default_factory=lambda: time.time())
-    raw: Dict[str, Any] = field(default_factory=dict)
-    factors: List[str] = field(default_factory=list)
-    factor_details: Dict[str, Dict[str, Any]] = field(default_factory=dict)
-    embedding: Optional[List[float]] = None
-    cluster_id: Optional[str] = None
-    cluster_stats: Optional[Dict[str, Any]] = None
-    graph_context: Optional[Dict[str, Any]] = None
-    reputation: Optional[Dict[str, Any]] = None
-    risk_components: List[Dict[str, Any]] = field(default_factory=list)
+    raw: dict[str, Any] = field(default_factory=dict)
+    factors: list[str] = field(default_factory=list)
+    factor_details: dict[str, dict[str, Any]] = field(default_factory=dict)
+    embedding: list[float] | None = None
+    cluster_id: str | None = None
+    cluster_stats: dict[str, Any] | None = None
+    graph_context: GraphContext | None = None
+    reputation: dict[str, Any] | None = None
+    risk_components: list[dict[str, Any]] = field(default_factory=list)
     base_risk: float = 0.0
     final_risk: float = 0.0
     verdict: Verdict = Verdict.UNKNOWN
-    mitre: List[str] = field(default_factory=list)
-    narrative: Optional[str] = None
+    mitre: list[str] = field(default_factory=list)
+    narrative: str | None = None
     overrides_applied: bool = False
     # Newly added enriched fields
-    rarity: Optional[str] = None            # RARE | EMERGING | COMMON
-    host_count: Optional[int] = None        # distinct hosts recently observed (heuristic)
-    factor_contributions: List[Dict[str,Any]] = field(default_factory=list)  # detailed per-factor deltas
+    rarity: str | None = None            # RARE | EMERGING | COMMON
+    host_count: int | None = None        # distinct hosts recently observed (heuristic)
+    factor_contributions: list[dict[str,Any]] = field(default_factory=list)  # detailed per-factor deltas
     # Confidence / ambiguity (heuristic) added for analyst triage transparency
-    risk_confidence: Optional[float] = None   # 0..1 higher => more certain
-    ambiguity: Optional[float] = None         # 0..1 higher => more ambiguous
+    risk_confidence: float | None = None   # 0..1 higher => more certain
+    ambiguity: float | None = None         # 0..1 higher => more ambiguous
 
 VERDICT_THRESHOLDS = {
     "GOOD": 0.20,

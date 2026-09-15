@@ -1,0 +1,10 @@
+title: Large SMB Transfer Correlation
+description: Correlates KAPE detection with large SMB transfers to identify possible exfil.
+severity: medium
+fields:
+  - event_type
+  - bytes_transferred
+  - kape_detected
+condition: |
+  event_type == 'smb_transfer' and bytes_transferred > 100000000 and kape_detected == True
+action: alert

@@ -1,0 +1,9 @@
+{
+  "event_id": "evt-fs-enc-001",
+  "file_write_pattern": "*.encrypted",
+  "mass_rename_count": 120,
+  "suspicious_process": "ransomware_exec.exe"
+  , "mass_rename_ext": true,
+  "vss_delete": true,
+  "ransom_note_created": true
+}

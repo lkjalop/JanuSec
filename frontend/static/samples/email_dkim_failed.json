@@ -1,0 +1,9 @@
+{
+  "from": "fraud@evil.com",
+  "to": "analyst@acme.com",
+  "subject": "Payment instruction",
+  "raw": {
+    "raw_rfc822": "DKIM-Signature: v=1; a=rsa-sha256; d=evil.com; s=selX;\r\nFrom: Fraud <fraud@evil.com>\r\nTo: Analyst <analyst@acme.com>\r\nSubject: Payment instruction\r\n\r\nPlease wire funds",
+    "authentication_results": "spf=fail dkim=fail dmarc=fail"
+  }
+}

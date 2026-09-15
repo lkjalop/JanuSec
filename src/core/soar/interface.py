@@ -4,28 +4,29 @@ Defines abstraction for future integration with external XDR/SOAR platforms.
 Phase 1: No-op / logging implementations to demonstrate extension points.
 """
 from __future__ import annotations
-from typing import Protocol, Any, Dict, Optional
+
 import logging
+from typing import Any, Dict, Optional, Protocol
 
 logger = logging.getLogger(__name__)
 
 class SOARClient(Protocol):
-    async def create_alert(self, title: str, severity: str, details: Dict[str, Any]) -> Dict[str, Any]: ...
-    async def enrich_case(self, case_id: str, enrichment: Dict[str, Any]) -> Dict[str, Any]: ...
-    async def execute_action(self, action: str, target: str, params: Dict[str, Any]) -> Dict[str, Any]: ...
+    async def create_alert(self, title: str, severity: str, details: dict[str, Any]) -> dict[str, Any]: ...
+    async def enrich_case(self, case_id: str, enrichment: dict[str, Any]) -> dict[str, Any]: ...
+    async def execute_action(self, action: str, target: str, params: dict[str, Any]) -> dict[str, Any]: ...
 
 class NoOpSOARClient:
-    async def create_alert(self, title: str, severity: str, details: Dict[str, Any]) -> Dict[str, Any]:
+    async def create_alert(self, title: str, severity: str, details: dict[str, Any]) -> dict[str, Any]:
         logger.info(f"[SOAR:NOOP] create_alert title={title} severity={severity}")
         return {"status":"noop","title":title}
-    async def enrich_case(self, case_id: str, enrichment: Dict[str, Any]) -> Dict[str, Any]:
+    async def enrich_case(self, case_id: str, enrichment: dict[str, Any]) -> dict[str, Any]:
         logger.info(f"[SOAR:NOOP] enrich_case case_id={case_id}")
         return {"status":"noop","case_id":case_id}
-    async def execute_action(self, action: str, target: str, params: Dict[str, Any]) -> Dict[str, Any]:
+    async def execute_action(self, action: str, target: str, params: dict[str, Any]) -> dict[str, Any]:
         logger.info(f"[SOAR:NOOP] execute_action action={action} target={target}")
         return {"status":"noop","action":action}
 
-_soar_client: Optional[SOARClient] = None
+_soar_client: SOARClient | None = None
 
 def get_soar_client() -> SOARClient:
     global _soar_client

@@ -1,0 +1,7 @@
+Run demo collector CLI:
+
+python -m src.collectors.cli --collector demo_collector --status crashed --send
+
+PowerShell quick demo (on Windows):
+
+powershell -File scripts/setup_demo_collector.ps1 -Base 'http://localhost:8080' -CollectorId 'demo_collector'

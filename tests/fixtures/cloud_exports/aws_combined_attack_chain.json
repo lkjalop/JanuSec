@@ -1,0 +1,41 @@
+[
+  {
+    "eventTime": "2026-03-20T01:35:00Z",
+    "eventSource": "iam.amazonaws.com",
+    "eventName": "CreateAccessKey",
+    "sourceIPAddress": "203.0.113.5",
+    "userIdentity": {"arn": "arn:aws:iam::123456789012:user/Alice"},
+    "awsRegion": "ap-southeast-2"
+  },
+  {
+    "configurationItemCaptureTime": "2026-03-20T01:37:00Z",
+    "resourceType": "AWS::IAM::User",
+    "resourceId": "Alice",
+    "configurationItemStatus": "ResourceDiscovered",
+    "complianceType": "NON_COMPLIANT",
+    "accountId": "123456789012"
+  },
+  {
+    "id": "gd-2001",
+    "type": "CredentialAccess:IAMUser/AnomalousBehavior",
+    "severity": 7.8,
+    "accountId": "123456789012",
+    "region": "ap-southeast-2",
+    "service": {"eventFirstSeen": "2026-03-20T01:40:00Z"}
+  },
+  {
+    "Id": "arn:aws:securityhub:ap-southeast-2::finding/example",
+    "Severity": {"Label": "HIGH"},
+    "Title": "Unusual console login after IAM change",
+    "UpdatedAt": "2026-03-20T01:45:00Z",
+    "Resources": [{"Type": "AwsIamUser", "Id": "arn:aws:iam::123456789012:user/Alice"}]
+  },
+  {
+    "start": "2026-03-20T01:46:00Z",
+    "srcaddr": "10.0.1.12",
+    "dstaddr": "198.51.100.88",
+    "dstport": 443,
+    "action": "ACCEPT",
+    "bytes": 40960
+  }
+]

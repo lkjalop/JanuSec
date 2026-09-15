@@ -1,21 +1,33 @@
 from __future__ import annotations
-from typing import List, Dict, Any
+
 import asyncio
-import time
-from .models import ArtifactObservation, map_risk_to_verdict, Verdict
 import os
-from .normalizers import normalize
-from .factors import run_all, FACTOR_WEIGHTS
+import time
+from typing import Any, Dict, List
+
+from core.hunt.model_escalation.engine import CONF_TARGET, escalate as escalation_run, load_chain
+
+from .cost_tracker import record_artifacts, record_embedding, record_reputation
 from .embedding import EmbeddingProvider, SimpleClusterManager
-from .hopgraph_lite import HopGraphLite
-from .risk import synthesize
-from .cost_tracker import record_embedding, record_artifacts, record_reputation
-from .metrics import artifact_ingest_total, artifact_factor_total, artifact_verdict_total, artifact_risk_score, artifact_processing_latency, artifact_rare_prevalence_total, artifact_ambiguity_band_total
-from .technique_mapping import apply_mapping
-from .llm_refine import LLMRefiner
-from .vt_queue import VTQueue
+from .factors import FACTOR_WEIGHTS, run_all
 from .feedback import FeedbackStore
-from core.hunt.model_escalation.engine import escalate as escalation_run, load_chain, CONF_TARGET
+from .hopgraph_lite import HopGraphLite
+from .llm_refine import LLMRefiner
+from .metrics import (
+    artifact_ambiguity_band_total,
+    artifact_factor_total,
+    artifact_ingest_total,
+    artifact_processing_latency,
+    artifact_rare_prevalence_total,
+    artifact_risk_score,
+    artifact_verdict_total,
+)
+from .models import ArtifactObservation, Verdict, map_risk_to_verdict
+from .normalizers import normalize
+from .risk import synthesize
+from .technique_mapping import apply_mapping
+from .vt_queue import VTQueue
+
 
 class ArtifactPipeline:
     def __init__(self, enable_embeddings: bool = True):
@@ -37,9 +49,9 @@ class ArtifactPipeline:
         except Exception:
             pass
 
-    def process_batch(self, raw_items: List[Dict[str,Any]], batch_meta: Dict[str,Any] | None = None):
+    def process_batch(self, raw_items: list[dict[str,Any]], batch_meta: dict[str,Any] | None = None):
         start = time.time()
-        stage_timings: Dict[str,float] = {}
+        stage_timings: dict[str,float] = {}
         def _stage(name: str):
             class _Ctx:
                 def __enter__(self_inner):
@@ -47,8 +59,8 @@ class ArtifactPipeline:
                 def __exit__(self_inner, exc_type, exc, tb):
                     stage_timings[name] = (time.time()-self_inner.t0)
             return _Ctx()
-        artifacts: List[ArtifactObservation] = []
-        texts: List[str] = []
+        artifacts: list[ArtifactObservation] = []
+        texts: list[str] = []
         with _stage('normalize'):
             for r in raw_items:
                 obs = normalize(r)
@@ -62,7 +74,7 @@ class ArtifactPipeline:
                 vectors = self.embedder.embed_texts(texts)
                 elapsed_ms = (time.time() - t0) * 1000.0
                 record_embedding(len(texts), elapsed_ms)
-                for obs, vec in zip(artifacts, vectors):
+                for obs, vec in zip(artifacts, vectors, strict=False):
                     obs.embedding = vec
                     cid = self.cluster_mgr.assign(vec)
                     obs.cluster_id = cid
@@ -84,7 +96,7 @@ class ArtifactPipeline:
                     obs.rarity = 'COMMON'
         # factor extraction + base risk
         with _stage('factors_and_risk'):
-            for obs, raw in zip(artifacts, raw_items):
+            for obs, raw in zip(artifacts, raw_items, strict=False):
                 run_all(obs, raw)
                 for f in obs.factors:
                     artifact_factor_total.labels(factor=f).inc()
@@ -180,7 +192,7 @@ class ArtifactPipeline:
         # Post-enrichment pass: if any ambiguous artifacts got VT result, recompute reputation factors and adjust risk
         if vt_results:
             vt_map = {r.get('sha256'): r for r in vt_results if r.get('sha256')}
-            from .factors import extract_reputation, compute_weighted_base
+            from .factors import compute_weighted_base, extract_reputation
             changed = 0
             for obs in artifacts:
                 if obs.sha256 and obs.sha256 in vt_map and self._ambiguous(obs):
@@ -240,7 +252,7 @@ class ArtifactPipeline:
             return False
         return self.llm.enabled and (self.ambiguity_lower <= fr <= self.ambiguity_upper)
 
-    def _embedding_text(self, obs: ArtifactObservation, raw: Dict[str,Any]) -> str:
+    def _embedding_text(self, obs: ArtifactObservation, raw: dict[str,Any]) -> str:
         parts = [obs.artifact_type.value, obs.name or '', raw.get('command_line','') or '']
         if raw.get('macro_autoexec'): parts.append('macro_autoexec')
         return ' '.join(parts)

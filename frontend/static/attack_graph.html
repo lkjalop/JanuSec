@@ -1,0 +1,413 @@
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Attack Graph Reconstruction (HopGraph)</title>
+<style>
+body{background:#0B0E14;color:#E8EBF0;font-family:Inter,Segoe UI,sans-serif;margin:0;padding:0}
+.wrap{max-width:1250px;margin:20px auto;padding:14px}
+.btn{padding:8px 14px;background:#1C2230;border:1px solid #2A3142;border-radius:6px;color:#E8EBF0;cursor:pointer;font-size:13px}
+.btn:hover{background:#223042}
+.card{background:#151922;border:1px solid #2A3142;border-radius:8px;margin-bottom:16px;padding:14px}
+.row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+.small{font-size:11px;color:#A8B2C3}
+svg{width:100%;height:520px;background:#10141C;border:1px solid #2A3142;border-radius:8px}
+.node{cursor:pointer}
+.label{font-size:11px;fill:#E8EBF0;font-family:Consolas,monospace}
+.badge{display:inline-block;padding:4px 8px;border-radius:999px;background:#1C2230;border:1px solid #2A3142;font-size:11px;margin:2px 4px 2px 0}
+.phase{background:#233155;border-color:#233155}
+.domain-email{background:#4A63E7}
+.domain-remote{background:#FF8A3C;color:#0B0E14}
+.domain-iam{background:#C779D0}
+.domain-network{background:#4DA6FF;color:#0B0E14}
+.domain-endpoint{background:#3FA860;color:#0B0E14}
+.domain-data{background:#E0C446;color:#0B0E14}
+.domain-api{background:#E54848}
+.domain-cloud{background:#666DFF}
+.code{font-family:Consolas,monospace;font-size:11px}
+@media(max-width:960px){svg{height:640px}}
+</style>
+<!-- D3: local vendor takes precedence; CDN fallback for online environments.
+     For air-gapped deployments run: python scripts/vendor_d3.py -->
+<script>
+(function(){
+  var local='/static/js/d3.v7.min.js', cdn='https://d3js.org/d3.v7.min.js';
+  var s=document.createElement('script');
+  s.src=local;
+  s.onerror=function(){var f=document.createElement('script');f.src=cdn;document.head.appendChild(f);};
+  document.head.appendChild(s);
+})();
+</script>
+</head>
+<body>
+<div class="wrap">
+  <div class="row">
+    <a class="btn" href="/static/janusec-platform-complete-LIVE.html">← Console</a>
+    <button class="btn" id="btnBuildDemo">Build Demo Session</button>
+    <button class="btn" id="btnAdaptive">Adaptive EWMA</button>
+    <button class="btn" id="btnExplain">Explain Graph</button>
+  </div>
+  <h2 style="margin:10px 0 4px">Attack Graph Reconstruction (HopGraph)</h2>
+  <div class="small">Lightweight visualization of correlated multi-domain events. Demo builds a session via /api/v1/graph/session/build and renders domain-phase hops (email → endpoint → network → data exfil). Explanation blends MITRE, STRIDE and DREAD weighting stubs.</div>
+  <div class="card">
+    <h3 style="margin:0 0 6px">Graph</h3>
+    <svg id="graphSvg" viewBox="0 0 1200 520"></svg>
+    <div id="metricsBar" style="margin-top:10px;font-size:12px;color:#A8B2C3"></div>
+  </div>
+  <div class="card">
+    <h3 style="margin:0 0 6px">HopGraph Presets & Overlay</h3>
+    <div class="row" style="margin-bottom:8px">
+      <label class="small">Preset</label>
+      <select id="presetSelect" style="padding:6px 10px;border-radius:6px;background:#0B0E14;color:#E8EBF0;border:1px solid #2A3142;"></select>
+      <button class="btn" id="btnRunPreset">Run Preset</button>
+    </div>
+    <div id="presetSummary" class="small">Presets not loaded yet.</div>
+    <pre id="presetNodes" class="code" style="margin-top:8px;max-height:160px;overflow:auto;background:#10141C;padding:8px;border:1px solid #2A3142;border-radius:6px;"></pre>
+    <div class="small" style="margin-top:10px">Overlay Snapshot</div>
+    <div id="overlaySummary" class="small" style="margin-top:4px">No overlay data yet.</div>
+  </div>
+  <div class="card">
+    <h3 style="margin:0 0 6px">Session Summary</h3>
+    <div id="sessionSummary" class="small">No session yet.</div>
+    <pre id="rawSession" class="code" style="margin-top:8px; max-height:220px; overflow:auto; background:#10141C; padding:8px; border:1px solid #2A3142; border-radius:6px"></pre>
+    <div class="small" style="margin-top:10px">Saved Sessions (TTL aware)</div>
+    <div id="sessionList" class="small" style="margin-top:4px"></div>
+    <div style="margin-top:8px" class="small">Session Controls: <button class="btn" id="btnRefreshSessions">Refresh</button> <button class="btn" id="btnClearExpired">Clear Expired</button></div>
+  </div>
+  <div class="card">
+    <h3 style="margin:0 0 6px">Explanation</h3>
+    <div id="explainPanel" class="small">Click "Explain Graph" to generate an AI-style narrative using threat modeling layers (heuristic stub).</div>
+    <pre id="rawExplain" class="code" style="margin-top:8px; max-height:200px; overflow:auto; background:#10141C; padding:8px; border:1px solid #2A3142; border-radius:6px"></pre>
+    <div class="small" style="margin-top:10px">Adaptive EWMA Alpha Curve</div>
+    <div style="display:flex;gap:8px;align-items:center;margin-top:6px">
+      <label class="small">EWMA Alpha:</label>
+      <input id="alphaSlider" type="range" min="0" max="1" step="0.01" value="0.6" style="flex:1" />
+      <input id="alphaValue" type="number" min="0" max="1" step="0.01" value="0.6" style="width:70px;background:#0B0E14;color:#E8EBF0;border:1px solid #2A3142;padding:6px;border-radius:6px" />
+    </div>
+    <pre id="alphaCurve" class="code" style="margin-top:6px; max-height:160px; overflow:auto; background:#10141C; padding:6px; border:1px solid #2A3142; border-radius:6px"></pre>
+    <div style="margin-top:8px" class="small">Replay Controls: <select id="replaySelect" style="margin-left:8px"></select> <button class="btn" id="btnReplay">Replay</button></div>
+  </div>
+</div>
+<script defer src="/static/js/hopgraph_stream_overlay.js"></script>
+<script>
+function H(){ try{ return {'x-api-key': localStorage.getItem('apiKey')||'devkey123'} }catch(_){ return {'x-api-key':'devkey123'} } }
+let _session = null; let _adaptive = false;
+// Demo nodes & phases (will be overridden if backend returns correlation summary with factors)
+const PHASES = ['Initial Access','Execution','Persistence','Privilege Esc','Defense Evasion','Lateral Movement','Exfiltration'];
+const DOMAIN_ORDER = ['email','remote','iam','network','endpoint','data','api','cloud'];
+function buildDemoPayload(){
+  return {
+    session_ids: ['demo-email','demo-endpoint','demo-network'],
+    correlate: true,
+    ewma: true,
+    mapping: { user:'user', host:'host', sha256:'file_hash' },
+    // omit alpha when adaptive toggle on
+    ...( _adaptive ? {} : { ewma_alpha: Number((document.getElementById('alphaValue')||{value:0.6}).value) } )
+  };
+}
+async function buildSession(){
+  try{
+    const payload = buildDemoPayload();
+    const r = await (window.safeFetch || fetch)('/api/v1/graph/session/build', { method:'POST', headers: { 'Content-Type':'application/json', ...H() }, body: JSON.stringify(payload) });
+    const j = await r.json(); if(!r.ok){ sessionSummary.textContent = 'Error building session: '+(j.detail||r.status); return; }
+    _session = j; renderSession(j);
+  }catch(e){ sessionSummary.textContent='Session error'; }
+}
+function renderSession(j){
+  const sdiv = document.getElementById('sessionSummary');
+  sdiv.textContent = `Correlation pairs: ${(Object.keys(j.correlation||{}).length)} • Alpha: ${j.ewma_alpha} • Factors: ${(j.factors||[]).length}`;
+  document.getElementById('rawSession').textContent = JSON.stringify(j,null,2);
+  drawGraph(j);
+  // Metrics bar
+  try{
+    const dd = j.domain_diversity_score; const ms = j.mapping_semantics_score; const conf = j.confidence; const verdict = j.verdict;
+    document.getElementById('metricsBar').textContent = `Verdict: ${verdict} • Confidence ${conf} • Domain Diversity ${dd} • Mapping Semantics ${ms}`;
+  }catch(_){ }
+  renderOverlay(j.hopgraph_overlay);
+  loadSessionList();
+}
+function nodeColor(domain){
+  switch(domain){
+    case 'email': return '#4A63E7';
+    case 'remote': return '#FF8A3C';
+    case 'iam': return '#C779D0';
+    case 'network': return '#4DA6FF';
+    case 'endpoint': return '#3FA860';
+    case 'data': return '#E0C446';
+    case 'api': return '#E54848';
+    case 'cloud': return '#666DFF';
+    default: return '#999';
+  }
+}
+function drawGraph(j){
+  const svgEl = document.getElementById('graphSvg');
+  while(svgEl.firstChild) svgEl.removeChild(svgEl.firstChild);
+  const W = 1200, H = 520;
+
+  // Build nodes from actual correlation data; fall back to demo domains
+  const corr = j.correlation || {};
+  const corrKeys = Object.keys(corr).filter(k => k && DOMAIN_ORDER.includes(k));
+  const activeIds = corrKeys.length >= 2 ? corrKeys : ['email','endpoint','network','data'];
+  const maxCount = activeIds.reduce((m,k) => Math.max(m, corr[k]||1), 1);
+
+  const nodes = activeIds.map(id => ({
+    id,
+    count: corr[id] || 1,
+    r: 24 + Math.round(22 * Math.sqrt((corr[id]||1) / maxCount)),
+  }));
+
+  // Build edges: use hopgraph overlay if available, else connect domains in DOMAIN_ORDER sequence
+  let links = [];
+  const hopEdges = (j.hopgraph_overlay && j.hopgraph_overlay.snapshot && j.hopgraph_overlay.snapshot.edges) || [];
+  if (hopEdges.length > 0) {
+    hopEdges.forEach(e => {
+      const s = e.from || e.source, t = e.to || e.target;
+      if (activeIds.includes(s) && activeIds.includes(t)) {
+        links.push({ source: s, target: t, weight: e.count || 1 });
+      }
+    });
+  }
+  if (links.length === 0) {
+    // Sequential connection following DOMAIN_ORDER through active domains
+    const ordered = DOMAIN_ORDER.filter(d => activeIds.includes(d));
+    ordered.slice(1).forEach((d, i) => links.push({ source: ordered[i], target: d, weight: corr[ordered[i]] || 1 }));
+  }
+  const maxWeight = links.reduce((m, l) => Math.max(m, l.weight), 1);
+
+  // Add arrow marker
+  const svg = d3.select(svgEl);
+  svg.append('defs').append('marker')
+    .attr('id','hopArrow').attr('viewBox','0 0 10 10').attr('refX',8).attr('refY',5)
+    .attr('markerWidth',6).attr('markerHeight',6).attr('orient','auto')
+    .append('path').attr('d','M0 0 L10 5 L0 10 Z').attr('fill','#4A63E7').attr('opacity',0.8);
+
+  // D3 force simulation
+  const sim = d3.forceSimulation(nodes)
+    .force('link', d3.forceLink(links).id(d => d.id).distance(d => 160 + 60*(1 - d.weight/maxWeight)).strength(0.8))
+    .force('charge', d3.forceManyBody().strength(-600))
+    .force('center', d3.forceCenter(W/2, H/2))
+    .force('collide', d3.forceCollide().radius(d => d.r + 18))
+    .force('x', d3.forceX(W/2).strength(0.04))
+    .force('y', d3.forceY(H/2).strength(0.06));
+
+  // Edges
+  const link = svg.append('g').selectAll('line').data(links).enter().append('line')
+    .attr('stroke','#2A3142')
+    .attr('stroke-width', d => 1.5 + 3.5 * (d.weight / maxWeight))
+    .attr('stroke-opacity', 0.85)
+    .attr('marker-end','url(#hopArrow)');
+
+  // Edge weight labels
+  const edgeLabel = svg.append('g').selectAll('text').data(links).enter().append('text')
+    .attr('text-anchor','middle').attr('fill','#6B7A9A').attr('font-size','9px')
+    .attr('font-family','Consolas,monospace')
+    .text(d => d.weight > 1 ? d.weight + ' hops' : '');
+
+  // Node groups
+  const node = svg.append('g').selectAll('g').data(nodes).enter().append('g')
+    .attr('class','node')
+    .call(d3.drag()
+      .on('start', (event,d) => { if(!event.active) sim.alphaTarget(0.3).restart(); d.fx=d.x; d.fy=d.y; })
+      .on('drag',  (event,d) => { d.fx=event.x; d.fy=event.y; })
+      .on('end',   (event,d) => { if(!event.active) sim.alphaTarget(0); d.fx=null; d.fy=null; })
+    );
+
+  node.append('circle')
+    .attr('r', d => d.r)
+    .attr('fill', d => nodeColor(d.id))
+    .attr('stroke','#0B0E14').attr('stroke-width',2);
+
+  node.append('text')
+    .attr('text-anchor','middle').attr('dy','0.35em')
+    .attr('class','label').attr('font-size','11px')
+    .text(d => d.id);
+
+  // Event count badge below node
+  node.append('text')
+    .attr('text-anchor','middle').attr('dy', d => d.r + 14)
+    .attr('fill','#A8B2C3').attr('font-size','9px').attr('font-family','Consolas,monospace')
+    .text(d => d.count > 1 ? d.count + ' evts' : '');
+
+  // MITRE phase labels above node (map domain → closest MITRE phase)
+  const _phaseMap = { email:'Initial Access', endpoint:'Execution', iam:'Credential Access',
+    network:'Lateral Movement', data:'Exfiltration', api:'Command & Control',
+    cloud:'Persistence', remote:'Initial Access' };
+  node.append('text')
+    .attr('text-anchor','middle').attr('dy', d => -(d.r + 10))
+    .attr('fill','#8892A4').attr('font-size','8.5px').attr('font-family','Consolas,monospace')
+    .text(d => _phaseMap[d.id] || '');
+
+  sim.on('tick', () => {
+    const pad = 50;
+    nodes.forEach(d => {
+      d.x = Math.max(pad + d.r, Math.min(W - pad - d.r, d.x));
+      d.y = Math.max(pad + d.r, Math.min(H - pad - d.r, d.y));
+    });
+    link
+      .attr('x1', d => d.source.x).attr('y1', d => d.source.y)
+      .attr('x2', d => { const dx=d.target.x-d.source.x, dy=d.target.y-d.source.y, dist=Math.sqrt(dx*dx+dy*dy)||1; return d.target.x - (dx/dist)*d.target.r; })
+      .attr('y2', d => { const dx=d.target.x-d.source.x, dy=d.target.y-d.source.y, dist=Math.sqrt(dx*dx+dy*dy)||1; return d.target.y - (dy/dist)*d.target.r; });
+    edgeLabel
+      .attr('x', d => (d.source.x + d.target.x)/2)
+      .attr('y', d => (d.source.y + d.target.y)/2 - 6);
+    node.attr('transform', d => `translate(${d.x},${d.y})`);
+  });
+}
+function explainGraph(){
+  if(!_session){ document.getElementById('explainPanel').textContent='Build a session first.'; return; }
+  // Heuristic explanation using session factors
+  const f = _session.factors||[]; const dread = (f.filter(x=>/dread:/.test(x)).length); const kev = f.some(x=>/vuln:kev_listed/.test(x));
+  const narrative = [
+    'Attack progression follows multi-domain path: email → endpoint → network → data exfil.',
+    'Correlated artifacts aggregated via HopGraph; EWMA alpha '+_session.ewma_alpha+'.',
+    'Framework overlays: MITRE Initial Access (T1566 phishing assumed), Execution (T1059), Lateral hints, Exfiltration (T1041 surrogate).',
+    'STRIDE dimensions represented: Tampering (macro payload), Information Disclosure (data node), Repudiation minimal.',
+    'DREAD score proxy (factor count heuristic): '+ dread +' high-impact indicators.',
+    kev ? 'KEV listed vulnerability increases exploitability and urgency.' : 'No KEV-listed vulns surfaced in this path.',
+    'Recommended playbooks: (1) Email quarantine & user reset, (2) Endpoint isolate & forensic capture, (3) Network egress block for IOC domains, (4) Data access review & revoke risky tokens.',
+    'Confidence derived from overlap density '+Object.keys(_session.correlation||{}).length+' and factor entropy '+(f.length)+'.'
+  ].join('\n');
+  document.getElementById('explainPanel').textContent='Narrative generated.';
+  document.getElementById('rawExplain').textContent=narrative;
+}
+async function loadSessionList(){
+  try{
+    const r = await (window.safeFetch || fetch)('/api/v1/graph/session/list', { headers: H() });
+    const j = await r.json();
+    if(!r.ok){ return; }
+    const el = document.getElementById('sessionList');
+    el.innerHTML = '';
+    (j.sessions||[]).forEach(s=>{
+      const div = document.createElement('div');
+      div.textContent = `${s.session_id} • ${s.verdict} • conf ${s.confidence} • age ${s.age_seconds}s` + (s.expired? ' • expired':'');
+      el.appendChild(div);
+    });
+    // populate replay select
+    try{
+      const sel = document.getElementById('replaySelect'); sel.innerHTML = '';
+      (j.sessions||[]).forEach(s=>{ const opt = document.createElement('option'); opt.value = s.session_id; opt.textContent = `${s.session_id} • ${s.verdict} • ${s.age_seconds}s` + (s.expired? ' • expired':'' ); sel.appendChild(opt); });
+    }catch(e){ }
+  }catch(e){ }
+}
+function renderOverlay(overlay){
+  const el = document.getElementById('overlaySummary');
+  if(!el) return;
+  if(!overlay || !overlay.snapshot){
+    el.textContent = 'No overlay data yet.';
+    return;
+  }
+  try{
+    const snap = overlay.snapshot || {};
+    const nodes = snap.node_count || (snap.nodes ? snap.nodes.length : 0);
+    const edges = snap.edge_count || (snap.edges ? snap.edges.length : 0);
+    const supply = overlay.supply_chain_nodes || 0;
+    const binary = overlay.binary_nodes || 0;
+    const infra = overlay.infrastructure_nodes || 0;
+    const recent = (snap.nodes || []).slice(0,6).map(n => `${n.type}:${n.label}`).join(', ');
+    el.textContent = `Nodes ${nodes} | Edges ${edges} | Supply-chain ${supply} | Binary ${binary} | Infra ${infra}` + (recent ? ` | Recent: ${recent}` : '');
+  }catch(e){
+    el.textContent = 'Overlay unavailable.';
+  }
+}
+async function loadPresets(){
+  const sel = document.getElementById('presetSelect');
+  if(!sel) return;
+  sel.innerHTML = '<option value="">Loading presets...</option>';
+  try{
+    const r = await (window.safeFetch || fetch)('/api/v1/graph/session/presets', { headers: H() });
+    const j = await r.json();
+    if(!r.ok){ sel.innerHTML = '<option value="">Preset load failed</option>'; return; }
+    const presets = j.presets || [];
+    sel.innerHTML = '';
+    if(!presets.length){
+      sel.innerHTML = '<option value="">No presets available</option>';
+      document.getElementById('presetSummary').textContent = 'Backend did not return any preset definitions.';
+      return;
+    }
+    presets.forEach((p, idx)=>{
+      const opt = document.createElement('option');
+      opt.value = p.name || `preset-${idx}`;
+      opt.textContent = p.title ? `${p.title} (${p.name})` : (p.name || `preset-${idx}`);
+      opt.dataset.description = p.description || '';
+      sel.appendChild(opt);
+    });
+    const summary = document.getElementById('presetSummary');
+    summary.textContent = (presets[0].description || 'Select a preset to view its description.');
+    sel.onchange = ()=>{
+      const chosen = sel.options[sel.selectedIndex];
+      document.getElementById('presetSummary').textContent = chosen?.dataset?.description || 'Select a preset to view its description.';
+    };
+  }catch(e){
+    sel.innerHTML = '<option value="">Preset load error</option>';
+    document.getElementById('presetSummary').textContent = 'Unable to load preset list.';
+  }
+}
+async function runPreset(){
+  const sel = document.getElementById('presetSelect');
+  const summary = document.getElementById('presetSummary');
+  const pre = document.getElementById('presetNodes');
+  if(!sel || !sel.value){
+    summary.textContent = 'Select a preset first.';
+    return;
+  }
+  summary.textContent = 'Running preset...';
+  pre.textContent = '';
+  try{
+    const r = await (window.safeFetch || fetch)(`/api/v1/graph/session/presets/${encodeURIComponent(sel.value)}`, { headers: H() });
+    const j = await r.json();
+    if(!r.ok){
+      summary.textContent = 'Preset failed: '+(j.detail || r.status);
+      return;
+    }
+    const matchCount = j.summary && typeof j.summary.match_count !== 'undefined' ? `Matches ${j.summary.match_count}` : '';
+    summary.textContent = `${(j.summary && j.summary.description) || 'Preset result'} ${matchCount}`.trim();
+    pre.textContent = JSON.stringify({ nodes: (j.nodes || []).slice(0, 20), edges: (j.edges || []).slice(0, 20) }, null, 2);
+  }catch(e){
+    summary.textContent = 'Preset error: '+(e.message || e);
+  }
+}
+// Session controls
+document.getElementById('btnRefreshSessions').onclick = loadSessionList;
+document.getElementById('btnClearExpired').onclick = async ()=>{
+  try{
+    const r = await (window.safeFetch || fetch)('/api/v1/graph/session/cleanup?expired=true', { method: 'POST', headers: H() });
+    const j = await r.json();
+    loadSessionList();
+    alert('Cleanup completed: '+(j.removed||0)+' removed');
+  }catch(e){ alert('Cleanup failed'); }
+};
+
+// EWMA slider wiring
+try{
+  const alphaSlider = document.getElementById('alphaSlider'); const alphaValue = document.getElementById('alphaValue');
+  alphaSlider.oninput = ()=>{ alphaValue.value = alphaSlider.value; };
+  alphaValue.onchange = ()=>{ alphaSlider.value = alphaValue.value; };
+}catch(e){}
+
+// Replay button
+document.getElementById('btnReplay').onclick = async ()=>{
+  const sel = document.getElementById('replaySelect'); if(!sel || !sel.value){ alert('Select a session to replay'); return; }
+  try{
+    const r = await (window.safeFetch || fetch)('/api/v1/graph/session/'+encodeURIComponent(sel.value), { headers: H() });
+    const j = await r.json(); if(!r.ok){ alert('Replay failed'); return; }
+    _session = j.summary || j;
+    renderSession(_session);
+    alert('Replayed: '+sel.value);
+  }catch(e){ alert('Replay error'); }
+};
+async function loadAlphaCurve(){
+  try{
+    const r = await (window.safeFetch || fetch)('/api/v1/graph/session/alpha_curve', { headers: H() });
+    const j = await r.json();
+    if(!r.ok) return;
+    document.getElementById('alphaCurve').textContent = JSON.stringify(j.curve||[], null, 2);
+  }catch(e){ }
+}
+// Wire buttons
+ document.getElementById('btnBuildDemo').onclick = buildSession;
+ document.getElementById('btnAdaptive').onclick = ()=>{ _adaptive=!_adaptive; document.getElementById('btnAdaptive').textContent = _adaptive? 'Adaptive ON':'Adaptive EWMA'; };
+ document.getElementById('btnExplain').onclick = explainGraph;
+ document.getElementById('btnRunPreset').onclick = runPreset;
+ // Initial draw (empty baseline)
+ drawGraph({});
+ loadAlphaCurve();
+ loadPresets();
+</script>
+</body></html>

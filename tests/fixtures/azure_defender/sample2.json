@@ -1,0 +1,9 @@
+{
+  "name": "policy-123",
+  "type": "PublicBucket",
+  "properties": {
+    "resourceId": "/subscriptions/1111/resourceGroups/rg1/providers/Microsoft.Storage/storageAccounts/sa1",
+    "severity": "Medium",
+    "timeGenerated": "2024-05-02T01:02:03Z"
+  }
+}

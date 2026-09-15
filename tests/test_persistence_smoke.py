@@ -1,8 +1,10 @@
 import asyncio
-import pytest
 from types import SimpleNamespace
 
+import pytest
+
 from main import SecurityOrchestrator
+
 
 class DummyRepoCalls:
     def __init__(self):
@@ -17,27 +19,28 @@ calls = DummyRepoCalls()
 async def fake_upsert_event(event):
     calls.events += 1
 
-async def fake_upsert_decision(event_id, decision):
+async def fake_upsert_decision(event_id, decision, tenant_id=None):
     calls.decisions += 1
 
-async def fake_insert_alert(event_id, verdict, confidence, severity, factors, playbook_result):
+async def fake_insert_alert(event_id, verdict, confidence, severity, factors, playbook_result, tenant_id=None):
     calls.alerts += 1
 
-async def fake_append_audit(event_id, action, details, custody_hash, prev_hash):
+async def fake_append_audit(event_id, action, details, custody_hash, prev_hash, tenant_id=None):
     calls.audits += 1
 
 @pytest.mark.asyncio
 async def test_persistence_smoke(monkeypatch):
-    import repositories.events_repo as events_repo
-    import repositories.decisions_repo as decisions_repo
     import repositories.alerts_repo as alerts_repo
     import repositories.audit_repo as audit_repo
+    import repositories.decisions_repo as decisions_repo
+    import repositories.events_repo as events_repo
 
     monkeypatch.setattr(events_repo, 'upsert_event', fake_upsert_event)
     monkeypatch.setattr(decisions_repo, 'upsert_decision', fake_upsert_decision)
     monkeypatch.setattr(alerts_repo, 'insert_alert', fake_insert_alert)
     monkeypatch.setattr(audit_repo, 'append_audit', fake_append_audit)
-    monkeypatch.setattr(audit_repo, 'get_last_hash', lambda event_id: None)
+    monkeypatch.setattr(audit_repo, 'get_last_hash', lambda event_id, tenant_id=None: None)
+    monkeypatch.setenv('FAST_TEST_MODE', '0')
 
     orch = SecurityOrchestrator()
     await orch.initialize()

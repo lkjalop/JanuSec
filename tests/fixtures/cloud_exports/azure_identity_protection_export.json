@@ -1,0 +1,9 @@
+[
+  {
+    "detectedDateTime": "2026-03-20T01:17:00Z",
+    "userPrincipalName": "alice@contoso.com",
+    "riskType": "anomalousToken",
+    "riskLevel": "high",
+    "riskEventType": "tokenAnomaly"
+  }
+]

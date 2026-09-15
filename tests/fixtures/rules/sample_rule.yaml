@@ -1,0 +1,12 @@
+id: sample-001
+version: '1.0'
+name: Detect Suspicious Message
+description: Rule that matches when message contains the word 'suspicious'
+severity: medium
+score: 0.5
+mitre:
+  - T1566
+conditions:
+  - type: contains
+    path: message
+    value: suspicious

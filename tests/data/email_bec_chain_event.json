@@ -1,0 +1,15 @@
+{
+  "message_id": "mid-006",
+  "thread_context": {
+    "participants": ["ceo@example.com", "finance@example.com"],
+    "recent_actions": ["request_wire_transfer", "follow_up"]
+  },
+  "attachments": [
+    { "filename": "invoice.pdf" },
+    { "filename": "payment_instructions.docm" }
+  ],
+  "indicators": {
+    "urgency_language": true,
+    "reply_to_mismatch": true
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "thresholds": [
+    {"max": 3.9, "label": "LOW", "score": 20},
+    {"max": 6.9, "label": "MEDIUM", "score": 40},
+    {"max": 8.9, "label": "HIGH", "score": 65},
+    {"max": 10.0, "label": "CRITICAL", "score": 85}
+  ],
+  "reference": "https://www.first.org/cvss/v3.1/specification-document"
+}

@@ -1,0 +1,41 @@
+================================================================================
+TIER 1 QUICK TRIAGE SUMMARY - Ollama llama3:8b
+================================================================================
+
+Artifact: snippingtool.exe
+Path: c:\windows\system32\snippingtool.exe
+SHA256: 23aff8e637c0c70c9e7ecb6008ee74ad68f65b29b7a5db9628045b65a7d5f41c
+Verdict: SUSPICIOUS
+DREAD: 7/10
+Domain: ENDPOINT (confidence: 0.85)
+Factors: unsigned_binary, low_av_detection, suspicious_path
+
+Generation time: 38.2 seconds (Ollama CPU mode)
+Cost: $0.0000 (local Ollama - no API charges)
+
+--------------------------------------------------------------------------------
+TIER 1 SUMMARY (6 sentences - Quick Triage):
+--------------------------------------------------------------------------------
+
+SUSPICIOUS activity detected for snippingtool.exe on c:\windows\system32.
+This Windows Snipping Tool executable has been flagged with 1 out of 78 AV
+detections, suggesting potential modification or tampering. The binary exhibits
+unsigned_binary and low_av_detection signals, which commonly indicate either a
+compromised legitimate tool or an attacker masquerading as a trusted Windows
+utility. Immediate action recommended: isolate the host, capture process tree
+and command line arguments, and validate the file hash against Microsoft's
+official repository. Collect Sysmon Event IDs 1, 10, and 13 from the past hour
+to establish execution context. Escalate to Tier 2 for deep investigation if
+corroborating telemetry (outbound connections to non-Microsoft IPs, credential
+access attempts, or parent process anomalies) is discovered.
+
+--------------------------------------------------------------------------------
+NEXT STEPS:
+--------------------------------------------------------------------------------
+
+1. Click [T2: Investigate] to generate full 60-147 line deep analysis
+2. Review process tree and command line in forensic timeline
+3. Check for lateral movement or persistence mechanisms
+4. Validate with threat intelligence feeds (VirusTotal, AlienVault OTX)
+
+================================================================================

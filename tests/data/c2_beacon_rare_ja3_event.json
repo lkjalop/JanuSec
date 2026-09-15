@@ -1,0 +1,7 @@
+{
+  "id": "evt-c2-1",
+  "host": "host-f",
+  "user": "frank",
+  "net:beacon_periodic": true,
+  "ja3_rare": true
+}

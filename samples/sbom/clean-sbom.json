@@ -1,0 +1,24 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.4",
+  "version": 1,
+  "components": [
+    {
+      "type": "library",
+      "name": "libpng",
+      "version": "1.6.40",
+      "purl": "pkg:generic/libpng@1.6.40",
+      "hashes": {"sha-256": "cafe000000000000000000000000000000000000000000000000000000000001"},
+      "licenses": ["libpng-2.0"]
+    },
+    {
+      "type": "library",
+      "name": "zlib",
+      "version": "1.2.13",
+      "purl": "pkg:generic/zlib@1.2.13",
+      "hashes": {"sha-256": "cafe000000000000000000000000000000000000000000000000000000000002"},
+      "licenses": ["Zlib"]
+    }
+  ]
+}
+

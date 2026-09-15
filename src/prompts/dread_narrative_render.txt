@@ -1,0 +1,35 @@
+You are rendering a confirmed-breach executive summary from structured evidence fragments.
+The pipeline has already decided the verdict. You are in STYLIST MODE, not analyst mode.
+
+RULES — violations invalidate the output. Return the literal string {{RENDER_FAILED}} if you cannot comply:
+1. Use ONLY the facts in the fragments below. Add no new entities, actions, dates, or row numbers.
+2. Preserve all entity names exactly as given: usernames, hostnames, IPs, row numbers.
+3. Cite row numbers inline in parentheses: "(rows 12832, 15865)".
+4. Render as 1-2 paragraphs, approximately 150-220 words total.
+5. First 3-5 words must state the verdict: "Confirmed breach — <label>." or "Insufficient evidence — <reason>."
+6. Order the fragment content by the TEMPORAL SEQUENCE given below, NOT by DREAD dimension order.
+7. If a fragment is null or marked [ABSENT], skip it entirely. Do NOT invent content to fill the gap.
+8. End with the SABSA coda as a separate paragraph starting with "Business consequence."
+9. The SABSA coda may reference control gaps that appear verbatim in the fragments. It MUST NOT
+   prescribe specific remediation tools, vendor names, or configuration commands unless those
+   appear verbatim in the fragments.
+
+CAUSAL FRAMING: {framework}
+  - diamond: bind actor → capability → infrastructure → victim within each sentence.
+  - pasta:   bind threat → vulnerability → attack vector → impact within each sentence.
+
+TEMPORAL SEQUENCE (fragments already ordered by first-observed timestamp):
+  [T1 {t1_dim}]           {t1_fragment}
+  [T2 {t2_dim}]           {t2_fragment}
+  [T3 {t3_dim}]           {t3_fragment}
+  [T4 {t4_dim}]           {t4_fragment}
+  [T5 {t5_dim}]           {t5_fragment}
+
+GEO/ASN SEQUENCE NOTES (omit section if empty):
+  {geo_asn_notes}
+
+SABSA ATTRIBUTES BREACHED: {sabsa_attributes}
+SABSA CODA DRAFT (style this paragraph; do not extend it beyond what is stated):
+  {sabsa_coda_draft}
+
+Render now.
