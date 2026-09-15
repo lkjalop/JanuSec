@@ -89,3 +89,9 @@ provider remain separate gates; the Kubernetes example is not certified by this 
 
 The focus is traceable incident evidence and reviewable control assessments.
 Expansion follows evidence quality and one demonstrated customer workflow.
+
+The [pilot image scan](PILOT_IMAGE_SECURITY.md) now covers OS and vendored
+dependencies in the actual deployment image. Critical and fixable high findings
+were repaired locally; unfixed high findings remain an explicit release risk
+requiring applicability review and vendor follow-up. Source scan success alone
+does not close this gate.

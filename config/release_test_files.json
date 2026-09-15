@@ -9,6 +9,7 @@
   "tests/test_auth_tenant_binding.py",
   "tests/test_isolated_pilot.py",
   "tests/test_pilot_boundary.py",
+  "tests/test_image_vulnerability_gate.py",
   "tests/test_bitemporal_provenance.py",
   "tests/test_campaign_ip_merge_guard.py",
   "tests/test_campaign_object.py",
