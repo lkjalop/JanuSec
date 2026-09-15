@@ -38,3 +38,7 @@ No setuid/setgid files were returned by a runtime filesystem check.
 This is local isolated validation. Retained GitHub history cleanup, real-source
 continuity, customer TLS, a hard persistent-volume quota, sustained ingestion and
 off-host recovery remain open. See [access and resource limits](PILOT_ACCESS_AND_RESOURCE_BOUNDARY.md).
+
+Follow-up: [runtime applicability review and monitoring](PILOT_VULNERABILITY_APPLICABILITY.md)
+records absent components, privilege prerequisites and remaining uncertainties for
+all eight high IDs. It does not suppress or relabel the raw scan findings.

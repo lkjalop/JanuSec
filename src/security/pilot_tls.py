@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import secrets
 import ssl
+from urllib.parse import urlsplit
 
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization
@@ -23,6 +24,36 @@ def tls_paths(state: Path):
     if not root.resolve().is_relative_to(state.resolve()):
         raise ValueError('tls_path_escape')
     return root / 'cert.pem', root / 'key.pem'
+
+
+def runtime_tls(state: Path, port: int, public_origin: str | None = None):
+    """Revalidate active TLS and bind CORS to the actual HTTPS browser origin."""
+    cert, key = tls_paths(state)
+    certificate = x509.load_pem_x509_certificate(cert.read_bytes())
+    now = datetime.now(timezone.utc)
+    if not certificate.not_valid_before_utc <= now < certificate.not_valid_after_utc:
+        raise ValueError('certificate_not_current')
+    pointer = state / 'tls.json'
+    hostname = json.loads(pointer.read_text(encoding='utf-8'))['hostname'] if pointer.exists() else '127.0.0.1'
+    default_host = f'[{hostname}]' if ':' in hostname else hostname
+    origin = public_origin or f'https://{default_host}:{port}'
+    parsed = urlsplit(origin)
+    if (parsed.scheme != 'https' or not parsed.hostname or parsed.username is not None
+            or parsed.password is not None or parsed.path or parsed.query or parsed.fragment
+            or any(c.isspace() for c in origin) or ',' in origin):
+        raise ValueError('invalid_public_origin')
+    # Access port to reject malformed/non-numeric and out-of-range values.
+    origin_port = parsed.port
+    if origin_port == 0:
+        raise ValueError('invalid_public_origin')
+    san = certificate.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
+    try:
+        matched = ipaddress.ip_address(parsed.hostname) in san.get_values_for_type(x509.IPAddress)
+    except ValueError:
+        matched = parsed.hostname.lower() in [name.lower() for name in san.get_values_for_type(x509.DNSName)]
+    if not matched:
+        raise ValueError('certificate_hostname_mismatch')
+    return cert, key, origin
 
 
 def install(state: Path, cert_path: Path, key_path: Path, hostname: str, *, local_test=False):

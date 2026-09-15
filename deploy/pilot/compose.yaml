@@ -4,6 +4,7 @@ services:
       context: ../..
       dockerfile: deploy/pilot/Dockerfile
     image: janusec-isolated:qualification
+    command: ["serve", "--state", "/state/runtime", "--container-listen", "--public-origin", "${JANUSEC_PILOT_PUBLIC_ORIGIN:-https://127.0.0.1:8445}"]
     ports:
       - "127.0.0.1:8445:8443"
     volumes:

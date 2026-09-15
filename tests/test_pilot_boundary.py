@@ -164,3 +164,38 @@ def test_route_audit_handles_prefixed_lazy_and_flat_routers():
     assert list(effective_http_routes([wrapper])) == [('GET', '/prefixed')]
     lazy_api = SimpleNamespace(path='/api/prefixed', methods={'POST'}, starlette_route=None)
     assert list(effective_http_routes([lazy_api])) == [('POST', '/api/prefixed')]
+
+
+def test_runtime_tls_origin_and_expiry(tmp_path, monkeypatch):
+    from scripts.pilot_state import initialize
+    from src.security import pilot_tls
+    from datetime import datetime, timezone, timedelta
+    state = tmp_path / 'state'
+    initialize(state, tmp_path / 'recovery.key', 'pilot-a')
+    assert pilot_tls.runtime_tls(state, 8443, 'https://localhost:8445')[2] == 'https://localhost:8445'
+    pilot_tls.install(state, state / 'tls-cert.pem', state / 'tls-key.pem', 'localhost', local_test=True)
+    assert pilot_tls.runtime_tls(state, 8443)[2] == 'https://localhost:8443'
+    for origin in ['http://localhost:8445', 'https://localhost/path', 'https://user@localhost',
+                   'https://localhost:0', 'https://localhost,evil.test', 'https://localhost?x=1']:
+        with pytest.raises(ValueError): pilot_tls.runtime_tls(state, 8443, origin)
+    with pytest.raises(ValueError, match='hostname_mismatch'):
+        pilot_tls.runtime_tls(state, 8443, 'https://customer.example.test')
+    future = datetime.now(timezone.utc) + timedelta(days=365)
+    class Future:
+        @staticmethod
+        def now(tz): return future
+    monkeypatch.setattr(pilot_tls, 'datetime', Future)
+    with pytest.raises(ValueError, match='certificate_not_current'):
+        pilot_tls.runtime_tls(state, 8443)
+
+
+def test_monitor_reports_local_certificate_and_storage_warnings(tmp_path):
+    from scripts.pilot_state import initialize
+    from scripts.pilot_health import snapshot
+    state = tmp_path / 'state'
+    initialize(state, tmp_path / 'recovery.key', 'pilot-a')
+    result = snapshot(state, state_budget=1)
+    assert set(result['alerts']) >= {'certificate_expiring', 'state_budget_80_percent'}
+    assert result['hard_quota_verified'] is False
+    assert result['service_availability_checked'] is False
+    assert 'key' not in result

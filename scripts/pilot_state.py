@@ -129,6 +129,7 @@ def main():
     parser.add_argument('--archive', type=Path)
     parser.add_argument('--tenant', default='pilot-customer')
     parser.add_argument('--port', type=int, default=8443)
+    parser.add_argument('--public-origin', help='Exact HTTPS browser origin, including a nonstandard published port')
     parser.add_argument('--container-listen', action='store_true',
                         help='Listen inside a container; publish its port to host loopback only')
     args = parser.parse_args()
@@ -150,12 +151,12 @@ def main():
             configure(state)
             if args.container_listen and not Path('/.dockerenv').exists():
                 raise ValueError('container_listen_requires_a_container')
-            os.environ['ALLOWED_ORIGINS'] = f'https://127.0.0.1:{args.port}'
+            from src.security.pilot_tls import runtime_tls
+            cert, tls_key, origin = runtime_tls(state, args.port, args.public_origin)
+            os.environ['ALLOWED_ORIGINS'] = origin
             import uvicorn
             from src.api.server import app
             from src.security.pilot_boundary import PilotBoundary
-            from src.security.pilot_tls import tls_paths
-            cert, tls_key = tls_paths(state)
             uvicorn.run(PilotBoundary(app, state),
                         host='0.0.0.0' if args.container_listen else '127.0.0.1', port=args.port,
                         workers=1, proxy_headers=False, access_log=False, log_level='warning',
